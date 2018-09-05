@@ -187,9 +187,14 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       }
       return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim), nullptr};
 
-    } else if (node->matches("aten::cat(Tensor[] tensors, int dim, int pad, Scalar pad_value) -> Tensor", /*const=*/attr::dim)) {
+    } else if (
+        node->matches(
+            "aten::cat(Tensor[] tensors, int dim, int pad, Scalar pad_value) -> Tensor",
+            /*const=*/{attr::dim, attr::pad, attr::pad_value})) {
       int dim = *node->get<int64_t>(attr::dim);
-      auto tensor_inputs = inputs; tensor_inputs.pop_back();
+      int pad = *node->get<int64_t>(attr::pad);
+      auto tensor_inputs = inputs;
+      tensor_inputs.pop_back();
       const auto& first_sizes = tensor_inputs.at(0).sizes();
       const auto has_first_sizes = [&first_sizes](SymbolicVariable var) {
         return var.sizes() == first_sizes;
@@ -197,7 +202,8 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
 
       // NB: this is a specialization for the common case where all inputs are
       // of equal sizes. We can use a single split operation to handle that.
-      if (std::all_of(tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes)) {
+      if (std::all_of(
+              tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes) && !pad) {
         auto tensor_grads = grads.at(0).chunk(tensor_inputs.size(), dim);
         tensor_grads.push_back(nullptr); // for attr::dim
         return tensor_grads;
@@ -206,7 +212,21 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         auto grad = grads.at(0);
         std::vector<SymbolicVariable> tensor_grads;
         for (auto input : tensor_inputs) {
-          tensor_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
+          if (pad) {
+            int64_t ndim = input.sizes().size();
+            for (int64_t i = 0; i < ndim; ++i) {
+              auto result = grad;
+              if (i == dim) {
+                result = result.narrow(dim, offset, input.sizes()[dim]);
+              } else {
+                result = result.narrow(dim, 0, input.sizes()[i]);
+              }
+              tensor_grads.push_back(result);
+            }
+          } else {
+            tensor_grads.push_back(
+                grad.narrow(dim, offset, input.sizes()[dim]));
+          }
           offset += input.sizes()[dim];
         }
         tensor_grads.push_back(nullptr); // for attr::dim

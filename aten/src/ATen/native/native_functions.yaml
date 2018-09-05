@@ -283,17 +283,9 @@
 
 - func: broadcast_tensors(TensorList tensors) -> TensorList
 
-<<<<<<< HEAD
-- func: cat(TensorList tensors, int64_t dim=0, bool pad=false, int64_t pad_value=0) -> Tensor
-
-- func: cat_out(Tensor result, TensorList tensors, int64_t dim=0, bool pad=false, int64_t pad_value=0) -> Tensor
-=======
 - func: cat(TensorList tensors, int64_t dim=0, bool pad=false, Scalar pad_value=0) -> Tensor
-  variants: function
 
 - func: cat_out(Tensor result, TensorList tensors, int64_t dim=0, bool pad=false, Scalar pad_value=0) -> Tensor
-  variants: function
->>>>>>> Cat Padding
 
 - func: ceil(Tensor self) -> Tensor
   variants: function, method

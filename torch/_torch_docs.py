@@ -739,8 +739,13 @@ add_docstr(torch.cat,
 cat(seq, dim=0, pad=False, pad_value=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
-All tensors must either have the same shape (except in the concatenating
-dimension) or be empty. Otherwise, :attr:`pad` must be set true to force cat.
+Empty tensors will be ignored.
+If padding is set to false, all tensors must have the same shape
+(except in the concatenating dimension).
+If padding is set to true, all tensors do not need to have the same shape
+(except in the concatenating dimension). Except the concatenating dimension,
+every dimension of every input tensor will be expanded to the largest size of
+this dimension owned by attr:`seq` tensors through padding :attr:`pad_value`.
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`.
@@ -753,7 +758,7 @@ Args:
         cat dimension.
     dim (int, optional): the dimension over which the tensors are concatenated
     pad (bool, optional): add paddings to expand input tensors to same shape
-        except in the concatenating dimension
+        except in the concatenating dimension (see introduction above).
     pad_value (bool, optional): the value used in padding
     out (Tensor, optional): the output tensor
 
@@ -775,14 +780,8 @@ Example::
              -1.0969, -0.4614],
             [-0.1034, -0.5790,  0.1497, -0.1034, -0.5790,  0.1497, -0.1034,
              -0.5790,  0.1497]])
-    >>> x = torch.ones(2, 3, device='cpu')
-    >>> y = torch.zeros(1, 4, device='cpu')
-    >>> torch.cat([x, y], dim=0, pad=True, pad_value=0.5)
-    tensor([[1.0000, 1.0000, 1.0000, 0.5000],
-            [1.0000, 1.0000, 1.0000, 0.5000],
-            [0.0000, 0.0000, 0.0000, 0.0000]])
-    >>> x = torch.ones(2, 3, device='cuda')
-    >>> y = torch.zeros(1, 4, device='cuda')
+    >>> x = torch.ones(2, 3)
+    >>> y = torch.zeros(1, 4)
     >>> torch.cat([x, y], dim=0, pad=True, pad_value=0.5)
     tensor([[1.0000, 1.0000, 1.0000, 0.5000],
             [1.0000, 1.0000, 1.0000, 0.5000],

@@ -221,6 +221,8 @@ void PropagateCatShape(Node * cat_node) {
       return false;
     }
     if (!node->is_constant(attr::dim)) return false;
+    if (!node->is_constant(attr::pad)) return false;
+    if (!node->is_constant(attr::pad_value)) return false;
     std::vector<int64_t> sizes = input_types[0]->sizes();
     const int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
     const int64_t ndim = sizes.size();
@@ -234,7 +236,7 @@ void PropagateCatShape(Node * cat_node) {
       if (sizes.size() != tp_sizes.size())
         return false;
       for (int64_t i = 0; i < ndim; ++i) {
-        if (sizes[i] != tp_sizes[i] && i != dim) {
+        if (sizes[i] != tp_sizes[i] && i != dim && !node->get<int64_t>(attr::pad).value()) {
           return false;
         }
       }
@@ -334,6 +336,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     default:
       break; // fall-through
   }
+
   if (node->matches("aten::cat(Tensor[] tensors, int dim, int pad, Scalar pad_value) -> Tensor")) {
     return PropagateCatShape(node);
   }
