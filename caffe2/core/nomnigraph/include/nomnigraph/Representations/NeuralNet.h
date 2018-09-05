@@ -481,7 +481,7 @@ NNNodeMatchCriteria matchOp(
     const std::function<bool(const NodeType&)> predicate,
     const std::string& debugString = "matchOpWithPredicate") {
   return NNNodeMatchCriteria(
-      [&predicate](NNGraph::NodeRef nodeRef) {
+      [predicate](NNGraph::NodeRef nodeRef) {
         NOM_REQUIRE_OR_RET_FALSE(is<NodeType>(nodeRef));
         NodeType* node = get<NodeType>(nodeRef);
         return predicate(*node);
