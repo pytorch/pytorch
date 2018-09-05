@@ -1615,6 +1615,9 @@
     CPU: _tanh_out_cpu
     CUDA: _tanh_out_cuda
 
+- func: tensordot(Tensor self, Tensor other, IntList dims_self, IntList dims_other) -> Tensor
+  variants: function
+
 - func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: function, method
 
@@ -2064,3 +2067,10 @@
 - func: rnn_tanh_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
 
 - func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+
+# PackedSequence utilities
+- func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
+
+- func: _pack_padded_sequence_backward(Tensor grad, IntList input_size, Tensor batch_sizes, bool batch_first) -> Tensor
+
+- func: _pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, int64_t total_length) -> (Tensor, Tensor)
