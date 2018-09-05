@@ -42,8 +42,10 @@
 #include "cudnn.h"
 #endif
 
+#ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include "torch/csrc/distributed/c10d/c10d.h"
+#endif
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -521,9 +523,9 @@ static PyObject* initModule() {
 #endif
 #ifdef USE_DISTRIBUTED
   THPUtils_addPyMethodDefs(methods, THDPModule_methods());
-#endif
 #ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
+#endif
 #endif
 
 #if PY_MAJOR_VERSION == 2
