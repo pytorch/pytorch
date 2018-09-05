@@ -403,7 +403,7 @@ class CAFFE2_API CUDAStaticContext final : public BaseStaticContext {
   }
 
   void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(GetDeviceType());
+    device->set_device_type(TypeToProto(GetDeviceType()));
     device->set_cuda_gpu_id(GetGPUIDForPointer(data));
   }
 

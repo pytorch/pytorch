@@ -27,7 +27,7 @@ class MKLContext : public BaseContext {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), MKLDNN);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_MKLDNN);
   }
 
   ~MKLContext() override {}
