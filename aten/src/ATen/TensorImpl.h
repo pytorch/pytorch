@@ -3,7 +3,7 @@
 #include <atomic>
 #include <memory>
 
-#include "ATen/core/Storage.h"
+#include "ATen/Storage.h"
 #include "ATen/core/optional.h"
 #include "ATen/core/TensorTypeId.h"
 #include "ATen/core/TensorTypeIdRegistration.h"

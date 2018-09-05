@@ -5,7 +5,7 @@
 #include "ATen/core/Scalar.h"
 #include "ATen/Type.h"
 #include "ATen/Tensor.h"
-#include "ATen/core/Storage.h"
+#include "ATen/Storage.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Deprecated.h"
 #include "ATen/NativeFunctions.h"
