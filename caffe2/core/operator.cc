@@ -72,8 +72,8 @@ PerOpEnginePrefType& g_per_op_engine_pref() {
 }
 
 GlobalEnginePrefType& g_global_engine_pref() {
-  static auto* g_global_engine_pref_ = new GlobalEnginePrefType{
-      {DeviceType::CUDA, {"CUDNN"}}, {DeviceType::HIP, {"MIOPEN"}}};
+  static auto* g_global_engine_pref_ =
+      new GlobalEnginePrefType{{CUDA, {"CUDNN"}}, {HIP, {"MIOPEN"}}};
   return *g_global_engine_pref_;
 }
 
@@ -321,21 +321,21 @@ CAFFE_DEFINE_REGISTRY(
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CPU, CPUOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CUDA, CUDAOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
     HIPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::HIP, HIPOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
     GradientRegistry,

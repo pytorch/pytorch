@@ -222,18 +222,17 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (size() > 0) {
       if (storage_.dtype().copy()) {
         CAFFE_ENFORCE(
-            GetDeviceType() == DeviceType::CPU,
+            GetDeviceType() == CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         CAFFE_ENFORCE(
-            src.GetDeviceType() == DeviceType::CPU,
+            src.GetDeviceType() == CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         storage_.dtype().copy()(src.raw_data(), raw_mutable_data(), size());
       } else {
         // We'll need to use a non-CPU context to perform the copy if
         // one of the context is not CPU since only non-CPU context
         // knows how to copy between CPU and that context
-        if (src.GetDeviceType() != DeviceType::CPU ||
-            GetDeviceType() == DeviceType::CPU) {
+        if (src.GetDeviceType() != CPU || GetDeviceType() == CPU) {
           if (!context) {
             src.CreateContext()->CopyBytesToDevice(
                 nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());

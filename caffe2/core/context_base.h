@@ -86,7 +86,7 @@ class CAFFE2_API BaseContext {
       const void* src,
       void* dst,
       DeviceType type) {
-    if (type == DeviceType::CPU) {
+    if (type == CPU) {
       CopyBytesToCPU(nbytes, src, dst);
     } else if (type == GetDevicetype()) {
       CopyBytesSameDevice(nbytes, src, dst);
