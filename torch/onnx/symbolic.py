@@ -716,6 +716,11 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         return res
 
 
+@parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
+def instance_norm(g, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
+    return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
+
+
 @parse_args('v', 'i', 'i', 'i')
 def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
@@ -1020,22 +1025,6 @@ def repeat(g, self, repeats):
         if diff_dims > 0:
             self = view(g, self, [1] * diff_dims + sizes)
     return g.op("Tile", self, repeats)
-
-
-def instance_norm(g, input, **kwargs):
-    input_type = input.type().scalarType()
-    weight = kwargs.get("weight", None)
-    bias = kwargs.get("bias", None)
-    eps = kwargs.get("eps", 1e-5)
-    if weight is None:
-        weight = g.constant(1.0, [input.type().sizes()[1]], input_type)
-    else:
-        weight = g.op('Constant', value_t=weight)
-    if bias is None:
-        bias = g.constant(0.0, [input.type().sizes()[1]], input_type)
-    else:
-        bias = g.op('Constant', value_t=bias)
-    return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
