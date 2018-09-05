@@ -83,7 +83,7 @@ TEST(OperatorTest, RegistryWorks) {
   // as it needs to instantiate an Event object with CUDAContext. Thus we will
   // guard this test below.
   if (HasCudaRuntime()) {
-    op_def.mutable_device_option()->set_device_type(CUDA);
+    op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
     op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
   }
@@ -93,7 +93,7 @@ TEST(OperatorTest, RegistryWrongDevice) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_type("JustTypeCPUOnly");
-  op_def.mutable_device_option()->set_device_type(CUDA);
+  op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
   try {
     CreateOperator(op_def, &ws);
     LOG(FATAL) << "No exception was thrown";
@@ -333,7 +333,7 @@ REGISTER_GRADIENT(Foo, GetFooGradient);
 TEST(OperatorGradientRegistryTest, GradientSimple) {
   Argument arg = MakeArgument<int>("arg", 1);
   DeviceOption option;
-  option.set_device_type(CPU);
+  option.set_device_type(PROTO_CPU);
   OperatorDef def = CreateOperatorDef(
       "Foo", "", std::vector<string>{"in"}, std::vector<string>{"out"},
       std::vector<Argument>{arg}, option, "DUMMY_ENGINE");
@@ -351,7 +351,7 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
   EXPECT_EQ(grad_op.output(0), "in_grad");
   // Checks the engine, device option and arguments.
   EXPECT_EQ(grad_op.engine(), "DUMMY_ENGINE");
-  EXPECT_EQ(grad_op.device_option().device_type(), CPU);
+  EXPECT_EQ(grad_op.device_option().device_type(), PROTO_CPU);
   EXPECT_EQ(grad_op.arg_size(), 1);
   EXPECT_EQ(grad_op.arg(0).SerializeAsString(),
             MakeArgument<int>("arg", 1).SerializeAsString());
@@ -405,7 +405,8 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   SetGlobalEnginePref({});
 
   // Invalid device type
-  ASSERT_THROW(SetGlobalEnginePref({{8888, {"FOO"}}}), EnforceNotMet);
+  // This check is no longer necessary with the enum class
+  // ASSERT_THROW(SetGlobalEnginePref({{8888, {"FOO"}}}), EnforceNotMet);
 }
 
 TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePref) {

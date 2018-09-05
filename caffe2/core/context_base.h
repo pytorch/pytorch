@@ -37,7 +37,7 @@ class CAFFE2_API BaseStaticContext {
    * current context and the a data pointer
    */
   virtual void ExtractDeviceOption(DeviceOption* device, const void* /*data*/) {
-    device->set_device_type(GetDeviceType());
+    device->set_device_type(TypeToProto(GetDeviceType()));
   }
 };
 
@@ -86,7 +86,7 @@ class CAFFE2_API BaseContext {
       const void* src,
       void* dst,
       DeviceType type) {
-    if (type == CPU) {
+    if (type == DeviceType::CPU) {
       CopyBytesToCPU(nbytes, src, dst);
     } else if (type == GetDevicetype()) {
       CopyBytesSameDevice(nbytes, src, dst);
@@ -169,22 +169,21 @@ class CAFFE2_API BaseContext {
   }
 };
 
-CAFFE2_API std::array<BaseStaticContext*, COMPILE_TIME_MAX_DEVICE_TYPES>&
-GetStaticContexts();
-CAFFE2_API void set_static_context(int d, BaseStaticContext* ptr);
-CAFFE2_API BaseStaticContext* get_static_context(int d);
+using StaticContextMap = CaffeMap<DeviceType, BaseStaticContext*>;
+CAFFE2_API StaticContextMap& GetStaticContexts();
+CAFFE2_API void set_static_context(DeviceType t, BaseStaticContext* ptr);
+CAFFE2_API BaseStaticContext* get_static_context(DeviceType t);
 
-template <int d>
+template <DeviceType t>
 struct StaticContextFunctionRegisterer {
   explicit StaticContextFunctionRegisterer(BaseStaticContext* ptr) {
-    static_assert(d < COMPILE_TIME_MAX_DEVICE_TYPES, "");
-    set_static_context(d, ptr);
+    set_static_context(t, ptr);
   }
 };
 
-#define REGISTER_STATIC_CONTEXT(d, f)                                \
+#define REGISTER_STATIC_CONTEXT(t, f)                                \
   namespace {                                                        \
-  static StaticContextFunctionRegisterer<d> g_static_context_##d(f); \
+  static StaticContextFunctionRegisterer<t> g_static_context_##d(f); \
   }
 
 } // namespace caffe2

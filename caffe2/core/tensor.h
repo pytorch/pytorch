@@ -97,12 +97,12 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   // and immediately discard it in Resize() since
   // reset_tensor will be true and FreeMemory will be called,
   // we might want to avoid creating Storage twice?
-  explicit TensorImpl(const vector<TIndex>& dims, DeviceType device_type)
+  explicit TensorImpl(const vector<TIndex>& dims, at::DeviceType device_type)
       : storage_(device_type) {
     Resize(dims);
   }
 
-  explicit TensorImpl(const vector<int>& dims, DeviceType device_type)
+  explicit TensorImpl(const vector<int>& dims, at::DeviceType device_type)
       : storage_(device_type) {
     Resize(dims);
   }
@@ -113,16 +113,16 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(
       const TensorImpl& src,
       BaseContext* context_for_copy,
-      DeviceType device_type)
+      at::DeviceType device_type)
       : storage_(device_type) {
     CopyFrom(src, context_for_copy);
   }
 
   /**
-   * @brief: Create a Tensor of DeviceType `type` and initialize it with
+   * @brief: Create a Tensor of at::DeviceType `type` and initialize it with
    * src Tensor
    */
-  TensorImpl(const TensorImpl& src, DeviceType device_type)
+  TensorImpl(const TensorImpl& src, at::DeviceType device_type)
       : storage_(device_type) {
     CopyFrom(src);
   }
@@ -192,7 +192,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return GetStaticContext()->CreateContext();
   }
 
-  DeviceType GetDeviceType() const {
+  at::DeviceType GetDeviceType() const {
     return storage_.device_type();
   }
 
@@ -222,17 +222,18 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (size() > 0) {
       if (storage_.dtype().copy()) {
         CAFFE_ENFORCE(
-            GetDeviceType() == CPU,
+            GetDeviceType() == DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         CAFFE_ENFORCE(
-            src.GetDeviceType() == CPU,
+            src.GetDeviceType() == DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         storage_.dtype().copy()(src.raw_data(), raw_mutable_data(), size());
       } else {
         // We'll need to use a non-CPU context to perform the copy if
         // one of the context is not CPU since only non-CPU context
         // knows how to copy between CPU and that context
-        if (src.GetDeviceType() != CPU || GetDeviceType() == CPU) {
+        if (src.GetDeviceType() != DeviceType::CPU ||
+            GetDeviceType() == DeviceType::CPU) {
           if (!context) {
             src.CreateContext()->CopyBytesToDevice(
                 nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());

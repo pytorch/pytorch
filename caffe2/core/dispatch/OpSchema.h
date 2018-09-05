@@ -23,9 +23,9 @@ using is_tensor_arg = std::
 
 inline DeviceTypeId to_device_type_id(caffe2::DeviceType device_type) {
   switch (device_type) {
-    case caffe2::CPU:
+    case caffe2::DeviceType::CPU:
       return DeviceTypeId::CPU;
-    case caffe2::CUDA:
+    case caffe2::DeviceType::CUDA:
       return DeviceTypeId::CUDA;
     default:
       return DeviceTypeId::UNDEFINED;
