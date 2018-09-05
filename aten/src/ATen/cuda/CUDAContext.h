@@ -54,6 +54,8 @@ AT_API CUDAStream getCurrentCUDAStream(int64_t device = -1);
 AT_API void setCurrentCUDAStream(CUDAStream stream);
 AT_API void uncheckedSetCurrentCUDAStream(CUDAStream stream);
 
+AT_API Allocator* getCUDADeviceAllocator();
+
 /* Handles */
 #ifndef __HIP_PLATFORM_HCC__
   AT_API cusparseHandle_t getCurrentCUDASparseHandle();
