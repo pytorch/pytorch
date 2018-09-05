@@ -27,7 +27,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 #include <mkl.h>

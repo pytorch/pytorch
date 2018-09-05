@@ -18,9 +18,7 @@
 #include "ATen/core/TensorOptions.h"
 
 #include <array>
-#include <cstddef>
 #include <functional>
-#include <limits>
 #include <memory>
 
 // To solve the conflict of s_addr in inaddr.h
