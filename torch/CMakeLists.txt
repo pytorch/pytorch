@@ -26,7 +26,7 @@ if(NOT TORCH_INSTALL_BIN_DIR)
 endif()
 
 if(NOT TORCH_INSTALL_INCLUDE_DIR)
-  set(TORCH_INSTALL_INCLUDE_DIR include/libtorch)
+  set(TORCH_INSTALL_INCLUDE_DIR include)
 endif()
 
 if(NOT TORCH_INSTALL_LIB_DIR)
@@ -286,8 +286,7 @@ if (MSVC)
   target_link_libraries(torch onnx onnx_library)
 endif()
 
-target_link_libraries(torch
-  caffe2_library)
+target_link_libraries(torch caffe2_library)
 
 find_package(OpenMP)
 if(OPENMP_FOUND)
@@ -394,6 +393,8 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
+install(FILES "${TORCH_SRC_DIR}/op.h"
+        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 install(TARGETS torch
   RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
@@ -471,3 +472,7 @@ configure_file(
     ${TORCH_ROOT}/cmake/TorchConfig.cmake.in
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
     @ONLY)
+install(FILES
+    ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
+    ${PROJECT_BINARY_DIR}/TorchConfig.cmake
+    DESTINATION share/cmake/Torch)

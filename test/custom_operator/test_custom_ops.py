@@ -5,12 +5,12 @@ import unittest
 
 import torch
 
-from model import Model
+from model import Model, get_custom_op_library_path
 
 
 class TestCustomOperators(unittest.TestCase):
     def setUp(self):
-        self.library_path = os.path.abspath('build/libcustom_ops.so')
+        self.library_path = get_custom_op_library_path()
         torch.ops.load_library(self.library_path)
 
     def test_custom_library_is_loaded(self):

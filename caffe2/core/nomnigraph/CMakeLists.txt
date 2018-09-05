@@ -12,10 +12,9 @@ add_dependencies(nomnigraph Caffe2_PROTO)
 target_include_directories(nomnigraph PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS nomnigraph)
-set(Caffe2_PUBLIC_DEPENDENCY_LIBS ${Caffe2_PUBLIC_DEPENDENCY_LIBS} PARENT_SCOPE)
+list(APPEND Caffe2_DEPENDENCY_LIBS nomnigraph)
+set(Caffe2_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS} PARENT_SCOPE)
 
-install(TARGETS nomnigraph EXPORT Caffe2Targets DESTINATION lib)
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/include
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
