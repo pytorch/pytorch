@@ -2,7 +2,6 @@
 
 #include <ATen/core/context_base.h>
 #include "caffe2/core/event.h"
-#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 using at::BaseContext;

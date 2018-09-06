@@ -9,10 +9,10 @@
 #include <ATen/core/DeviceType.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/UniqueVoidPtr.h>
+#include <ATen/core/typeid.h>
 
 namespace caffe2 {
 class Event;
-class TypeMeta;
 class DeviceOption;
 
 } // namespace caffe2
@@ -147,19 +147,40 @@ class AT_CORE_API BaseContext {
       const caffe2::TypeMeta& meta,
       size_t n,
       const void* src,
-      void* dst);
+      void* dst) {
+    if (meta.copy()) {
+      EnforceMetaCopyOK();
+      meta.copy()(src, dst, n);
+    } else {
+      CopyBytesSameDevice(n * meta.itemsize(), src, dst);
+    }
+  }
 
   void CopyItemsFromCPU(
       const caffe2::TypeMeta& meta,
       size_t n,
       const void* src,
-      void* dst);
+      void* dst) {
+    if (meta.copy()) {
+      EnforceMetaCopyOK();
+      meta.copy()(src, dst, n);
+    } else {
+      CopyBytesFromCPU(n * meta.itemsize(), src, dst);
+    }
+  }
 
   void CopyItemsToCPU(
       const caffe2::TypeMeta& meta,
       size_t n,
       const void* src,
-      void* dst);
+      void* dst) {
+    if (meta.copy()) {
+      EnforceMetaCopyOK();
+      meta.copy()(src, dst, n);
+    } else {
+      CopyBytesToCPU(n * meta.itemsize(), src, dst);
+    }
+  }
 };
 
 } // namespace at
