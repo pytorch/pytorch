@@ -178,14 +178,15 @@ class TestPooling(hu.HypothesisTestCase):
         if 'MaxPool' not in op_type:
             self.assertGradientChecks(gc, op, [X], 0, [0], threshold=0.001)
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
+    @unittest.skipIf(not workspace.has_gpu_support and 
+                      not workspace.has_hip_support, "No GPU support")
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),
            size=st.integers(7, 9),
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
-           **hu.gcs_gpu_only)
+           **hu.gcs_gpu_or_hip_only)
     def test_pooling_with_index(self, stride, pad, kernel, size,
                                 input_channels, batch_size, gc, dc):
         assume(pad < kernel)
@@ -209,12 +210,14 @@ class TestPooling(hu.HypothesisTestCase):
 
     @given(sz=st.integers(1, 20),
            batch_size=st.integers(1, 4),
-           engine=st.sampled_from(["", "CUDNN"]),
+           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN"]),
            op_type=st.sampled_from(["AveragePool", "AveragePool2D"]),
            **hu.gcs)
     @settings(max_examples=3, timeout=10)
     def test_global_avg_pool_nchw(self, op_type, sz, batch_size, engine, gc, dc):
         ''' Special test to stress the fast path of NCHW average pool '''
+        if engine == 'MIOPEN':
+            assume(sz<16) #miopen has limit on kernel size of 16
         op = core.CreateOperator(
             op_type,
             ["X"],
@@ -233,7 +236,7 @@ class TestPooling(hu.HypothesisTestCase):
 
     @given(sz=st.integers(1, 20),
            batch_size=st.integers(1, 4),
-           engine=st.sampled_from(["", "CUDNN"]),
+           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN"]),
            op_type=st.sampled_from(["MaxPool", "MaxPool2D"]),
            **hu.gcs)
     @settings(max_examples=3, timeout=10)
@@ -241,7 +244,10 @@ class TestPooling(hu.HypothesisTestCase):
                                   batch_size, engine, gc, dc):
         ''' Special test to stress the fast path of NCHW max pool '''
         # CuDNN 5 does not support deterministic max pooling.
-        assume(workspace.GetCuDNNVersion() >= 6000 or engine != "CUDNN")
+        if engine == 'MIOPEN':
+            assume(sz<16)
+        if not workspace.has_hip_support:
+            assume(workspace.GetCuDNNVersion() >= 6000 or engine != "CUDNN")
         op = core.CreateOperator(
             op_type,
             ["X"],
@@ -270,12 +276,14 @@ class TestPooling(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            op_type=st.sampled_from(["MaxPool", "AveragePool", "LpPool",
                                    "MaxPool2D", "AveragePool2D"]),
-           engine=st.sampled_from(["", "CUDNN"]),
+           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN"]),
            **hu.gcs)
     def test_pooling(self, stride, pad, kernel, size,
                      input_channels, batch_size,
                      order, op_type, engine, gc, dc):
         assume(pad < kernel)
+        if engine == 'MIOPEN':
+            assume(op_type != "LpPool" and order == "NCHW")
         op = core.CreateOperator(
             op_type,
             ["X"],
@@ -300,7 +308,7 @@ class TestPooling(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            op_type=st.sampled_from(["MaxPool", "AveragePool", "LpPool"]),
-           engine=st.sampled_from(["", "CUDNN"]),
+           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN"]),
            **hu.gcs)
     def test_global_pooling(self, size, input_channels, batch_size,
                             order, op_type, engine, gc, dc):
