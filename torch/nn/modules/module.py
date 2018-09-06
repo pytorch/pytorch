@@ -156,7 +156,7 @@ class Module(object):
         else:
             self._parameters[name] = param
 
-    def add_module(self, name, module):
+    def add_module(self, name, module, index=-1):
         r"""Adds a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
@@ -178,7 +178,17 @@ class Module(object):
             raise KeyError("module name can't contain \".\"")
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
-        self._modules[name] = module
+        # Add child module at arbitary position of the current module
+        # user do not need specify the position if they add child module 
+        # like before.
+        if index == -1:
+            self._modules[name] = module
+        else:
+            temp_key = list(self._modules.keys())
+            temp_val = list(self._modules.values())
+            temp_key.insert(index, name)
+            temp_val.insert(index, module)
+            self._modules = OrderedDict({k: v for k, v in zip(temp_key, temp_val)})
 
     def _apply(self, fn):
         for module in self.children():
