@@ -1640,12 +1640,12 @@ class TestJit(JitTestCase):
                 getattr(test, mode)()
 
                 input = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
-                            torch.randn(20, 100, 35, 45)
+                    torch.randn(20, 100, 35, 45)
 
                 traced = torch.jit.trace(test, (input,))
                 imported = self.getExportImportCopy(traced)
                 x = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
-                        torch.randn(20, 100, 35, 45)
+                    torch.randn(20, 100, 35, 45)
                 self.assertEqual(traced(x), imported(x))
 
     def test_export_rnn(self):
@@ -1663,12 +1663,10 @@ class TestJit(JitTestCase):
 
             test = RNNTest()
 
-            traced = torch.jit.trace(test,
-                (torch.randn(5, 3, 10), torch.LongTensor([3, 2, 1]), torch.randn(2, 3, 20)))
+            traced = torch.jit.trace(test, (torch.randn(5, 3, 10), torch.LongTensor([3, 2, 1]), torch.randn(2, 3, 20)))
             imported = self.getExportImportCopy(traced)
             x, lengths, h0 = torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20)
             self.assertEqual(traced(x, lengths, h0), imported(x, lengths, h0))
-
 
     def test_export_lstm(self):
         class LSTMTest(torch.nn.Module):
@@ -1685,8 +1683,9 @@ class TestJit(JitTestCase):
 
         test = LSTMTest()
 
-        traced = torch.jit.trace(test,
-            (torch.randn(5, 3, 10), torch.LongTensor([3, 2, 1]), (torch.randn(2, 3, 20), torch.randn(2, 3, 20))))
+        traced = torch.jit.trace(test, (torch.randn(5, 3, 10),
+                                        torch.LongTensor([3, 2, 1]),
+                                        (torch.randn(2, 3, 20), torch.randn(2, 3, 20))))
         imported = self.getExportImportCopy(traced)
         x, lengths, h0, c0 = \
             torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
