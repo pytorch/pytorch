@@ -28,8 +28,6 @@ class PackedSequence(PackedSequence_):
             information about the batch size at each sequence step
 
     """
-
-
     def __new__(cls, data, batch_sizes=None):
         # PackedSequence used to only have __init__(self, data, batch_sizes)
         # without a __new__ like this. So to preserve BC for calling in keyword
@@ -112,7 +110,6 @@ class PackedSequence(PackedSequence_):
         r"""Returns true if `self.data` stored on a gpu"""
         return self.data.is_cuda
 
-
     def last_step_indices(self):
         """A helper function for :func:`last_step_tensor`.
         The returned indices is used to select the last step of a :class:`PackedSequence` object.
@@ -131,7 +128,6 @@ class PackedSequence(PackedSequence_):
                 for j in range(batch_size - self.batch_sizes[i + 1]):
                     indices.append(sum_batch_size - 1 - j)
         return indices[::-1]
-
 
     def last_step_tensor(self):
         """Extract the last step of each sequence of a :class:`PackedSequence` object.
