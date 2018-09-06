@@ -7147,12 +7147,12 @@ class TestTorch(TestCase):
 
     def test_tensor_hash(self):
         a = torch.randn(5, 5)
-        with self.assertRaisesRegex(TypeError, "unhashable type"):
+        with self.assertRaisesRegex(TypeError, "Tensors are not hashable"):
             hash(a)
 
     def test_parameter_hash(self):
         a = torch.nn.Parameter(torch.randn(5, 5))
-        with self.assertRaisesRegex(TypeError, "unhashable type"):
+        with self.assertRaisesRegex(TypeError, "Tensors are not hashable"):
             hash(a)
 
     def test_pickle(self):
