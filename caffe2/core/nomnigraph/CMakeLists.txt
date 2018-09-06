@@ -1,6 +1,6 @@
 # ---[ CPU files.
 file(GLOB_RECURSE NOMNI_SRCS *.cc)
-file(GLOB_RECURSE NOMNI_TEST_SRCS *test.cc)
+file(GLOB_RECURSE NOMNI_TEST_SRCS *Test.cc)
 exclude(NOMNI_SRCS "${NOMNI_SRCS}" "${NOMNI_TEST_SRCS}")
 
 # TODO(orionr): The nomnigraph source should likely just be included
