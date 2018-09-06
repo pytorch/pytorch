@@ -1,7 +1,7 @@
 #pragma once
 
 #include "torch/csrc/python_headers.h"
-#include <stdint.h>
+#include <cstdint>
 #include <stdexcept>
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/tensor_numpy.h"
