@@ -9,10 +9,15 @@
 namespace torch {
 namespace jit {
 
-/// Compiles Python JIT code into a graph that can be executed.
+/// Compiles script code into an executable graph.
+///
+/// Takes a string containing functions in script syntax and compiles them into
+/// a module (graph). The returned module provides a `run_method` function
+/// that may be used to invoke the compiled functions.
 ///
 /// For example:
-/// @code
+/// \rst
+/// .. code-block::
 ///   auto module = torch::jit::compile(R"JIT(
 ///     def relu_script(a, b):
 ///       return torch.relu(a + b)
@@ -23,11 +28,7 @@ namespace jit {
 ///       return a
 ///   )JIT");
 ///   IValue output = module->run_method("relu_script", a, b);
-/// @endcode
-///
-/// @param source A string containing functions containing script code to
-/// compile
-/// @return A module containing the compiled functions
+/// \endrst
 std::shared_ptr<script::Module> compile(const std::string& source);
 
 } // namespace jit

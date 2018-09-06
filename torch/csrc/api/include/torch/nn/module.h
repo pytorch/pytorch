@@ -28,7 +28,6 @@ namespace nn {
 ///
 /// \rst
 /// .. note::
-///
 ///   The design and implementation of this class is largely based on the Python
 ///   API. You may want to consult [its
 ///   documentation](https://pytorch.org/docs/master/nn.html#torch.nn.Module)
@@ -219,13 +218,12 @@ class Module {
   /// This method is useful when calling `apply()` on a `ModuleCursor`.
   /// \rst
   /// .. code-block:: cpp
-  ///
-  /// void initialize_weights(nn::Module& module) {
-  ///   torch::NoGradGuard no_grad;
-  ///   if (auto* linear = module.as<nn::Linear>()) {
-  ///     linear->weight.normal_(0.0, 0.02);
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
   ///   }
-  /// }
   ///
   /// MyModule module;
   /// module->modules().apply(initialize_weights);
@@ -239,12 +237,12 @@ class Module {
   /// \rst
   /// .. code-block:: cpp
   ///
-  /// void initialize_weights(nn::Module& module) {
-  ///   torch::NoGradGuard no_grad;
-  ///   if (auto* linear = module.as<nn::Linear>()) {
-  ///     linear->weight.normal_(0.0, 0.02);
+  ///   void initialize_weights(nn::Module& module) {
+  ///     torch::NoGradGuard no_grad;
+  ///     if (auto* linear = module.as<nn::Linear>()) {
+  ///       linear->weight.normal_(0.0, 0.02);
+  ///     }
   ///   }
-  /// }
   ///
   /// MyModule module;
   /// module->modules().apply(initialize_weights);
@@ -263,9 +261,9 @@ class Module {
   ///
   /// \rst
   /// .. code-block: cpp
-  /// MyModule::MyModule() {
-  ///   weight_ = register_parameter("weight", torch::randn({A, B}));
-  /// }
+  ///   MyModule::MyModule() {
+  ///     weight_ = register_parameter("weight", torch::randn({A, B}));
+  ///   }
   /// \endrst
   Tensor& register_parameter(
       std::string name,
@@ -280,9 +278,9 @@ class Module {
   ///
   /// \rst
   /// .. code-block: cpp
-  /// MyModule::MyModule() {
-  ///   mean_ = register_buffer("mean", torch::empty({num_features_}));
-  /// }
+  ///   MyModule::MyModule() {
+  ///     mean_ = register_buffer("mean", torch::empty({num_features_}));
+  ///   }
   /// \endrst
   Tensor& register_buffer(std::string name, Tensor tensor);
 
@@ -293,9 +291,9 @@ class Module {
   ///
   /// \rst
   /// .. code-block: cpp
-  /// MyModule::MyModule() {
-  ///   submodule_ = register_module("linear", torch::nn::Linear(3, 4));
-  /// }
+  ///   MyModule::MyModule() {
+  ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
+  ///   }
   /// \endrst
   template <typename ModuleType>
   std::shared_ptr<ModuleType> register_module(
@@ -311,9 +309,9 @@ class Module {
   ///
   /// \rst
   /// .. code-block: cpp
-  /// MyModule::MyModule() {
-  ///   submodule_ = register_module("linear", torch::nn::Linear(3, 4));
-  /// }
+  ///   MyModule::MyModule() {
+  ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
+  ///   }
   /// \endrst
   template <typename ModuleType>
   std::shared_ptr<ModuleType> register_module(
