@@ -206,6 +206,12 @@ class DistributedDataParallel(Module):
         return attrs
 
     def __setstate__(self, state):
+        # This is done to ensure proper functioning for states saved prior to the removal of __hash__
+        # for tensors / parameters
+        if 'bucket_map' in state.keys():
+            for p in state['bucket_map'].keys():
+                state[id(p)] = state.pop(p)
+
         super(DistributedDataParallel, self).__setstate__(state)
         if dist._backend == dist.dist_backend.NCCL:
             self._register_nccl_grad_hook()
