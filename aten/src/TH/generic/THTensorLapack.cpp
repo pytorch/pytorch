@@ -405,14 +405,14 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
   c10::raw::intrusive_ptr::decref(work);
 }
 
-void THTensor_(gesvd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* jobz)
+void THTensor_(gesdd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* jobz)
 {
   THTensor *ra_ = THTensor_(new)();
-  THTensor_(gesvd2)(ru_, rs_, rv_,  ra_, a, jobz);
+  THTensor_(gesdd2)(ru_, rs_, rv_,  ra_, a, jobz);
   c10::raw::intrusive_ptr::decref(ra_);
 }
 
-void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a, const char* jobz)
+void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a, const char* jobz)
 {
   if (a == NULL) a = ra_;
   THArgCheck(a->dim() == 2, 1, "A should be 2 dimensional");
