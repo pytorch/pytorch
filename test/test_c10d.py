@@ -623,7 +623,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         # Use all available devices on every process here (data is small, so should be fine).
-        devices = list(range(torch.cuda.device_count()))
+        devices = gpus_for_rank(self.world_size)[self.rank]
         target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
         parameter_data = [target]
         parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
@@ -649,7 +649,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
-        devices = list(range(torch.cuda.device_count()))
+        devices = gpus_for_rank(self.world_size)[self.rank]
         target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
         parameter_data = [target]
         parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
