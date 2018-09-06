@@ -17,6 +17,9 @@ from caffe2.python import core, test_util, workspace
 if workspace.has_gpu_support:
     DEVICES = [caffe2_pb2.CPU, caffe2_pb2.CUDA]
     max_gpuid = workspace.NumCudaDevices() - 1
+elif workspace.has_hip_support:
+    DEVICES = [caffe2_pb2.CPU, caffe2_pb2.HIP]
+    max_gpuid = workspace.NumHipDevices() - 1
 else:
     DEVICES = [caffe2_pb2.CPU]
     max_gpuid = 0
@@ -42,10 +45,19 @@ class TestLoadSaveBase(test_util.TestCase):
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
         arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
                   for T in dtypes]
-        src_device_option = core.DeviceOption(
-            src_device_type, src_gpu_id)
-        dst_device_option = core.DeviceOption(
-            dst_device_type, dst_gpu_id)
+        if src_device_type == caffe2_pb2.HIP:
+            src_device_option = core.DeviceOption(
+                src_device_type, hip_gpu_id=src_gpu_id)
+        else:
+            src_device_option = core.DeviceOption(
+                src_device_type, src_gpu_id)
+
+        if dst_device_type == caffe2_pb2.HIP:
+            dst_device_option = core.DeviceOption(
+                dst_device_type, hip_gpu_id=dst_gpu_id)
+        else:
+            dst_device_option = core.DeviceOption(
+                dst_device_type, dst_gpu_id)
 
         for i, arr in enumerate(arrays):
             self.assertTrue(workspace.FeedBlob(str(i), arr, src_device_option))
@@ -90,6 +102,9 @@ class TestLoadSaveBase(test_util.TestCase):
                                      device_type)
                     if device_type == caffe2_pb2.CUDA:
                         self.assertEqual(proto.tensor.device_detail.cuda_gpu_id,
+                                         gpu_id)
+                    if device_type == caffe2_pb2.HIP:
+                        self.assertEqual(proto.tensor.device_detail.hip_gpu_id,
                                          gpu_id)
 
             blobs = [str(i) for i in range(len(arrays))]
