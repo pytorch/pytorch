@@ -1,3 +1,4 @@
+#pragma once
 #include <memory>
 
 #include <ATen/core/Macros.h>

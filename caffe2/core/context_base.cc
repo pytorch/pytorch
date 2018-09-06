@@ -20,3 +20,51 @@ BaseStaticContext* get_static_context(DeviceType t) {
 }
 
 } // namespace caffe2
+
+namespace at {
+void BaseStaticContext::ExtractDeviceOption(
+    caffe2::DeviceOption* device,
+    const void* /*data*/) {
+  device->set_device_type(caffe2::TypeToProto(GetDeviceType()));
+}
+
+inline void BaseContext::CopyItemsSameDevice(
+    const caffe2::TypeMeta& meta,
+    size_t n,
+    const void* src,
+    void* dst) {
+  if (meta.copy()) {
+    EnforceMetaCopyOK();
+    meta.copy()(src, dst, n);
+  } else {
+    CopyBytesSameDevice(n * meta.itemsize(), src, dst);
+  }
+}
+
+inline void BaseContext::CopyItemsFromCPU(
+    const caffe2::TypeMeta& meta,
+    size_t n,
+    const void* src,
+    void* dst) {
+  if (meta.copy()) {
+    EnforceMetaCopyOK();
+    meta.copy()(src, dst, n);
+  } else {
+    CopyBytesFromCPU(n * meta.itemsize(), src, dst);
+  }
+}
+
+inline void BaseContext::CopyItemsToCPU(
+    const caffe2::TypeMeta& meta,
+    size_t n,
+    const void* src,
+    void* dst) {
+  if (meta.copy()) {
+    EnforceMetaCopyOK();
+    meta.copy()(src, dst, n);
+  } else {
+    CopyBytesToCPU(n * meta.itemsize(), src, dst);
+  }
+}
+
+} // namespace at
