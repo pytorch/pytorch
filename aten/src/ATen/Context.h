@@ -8,8 +8,9 @@
 #include "ATen/Utils.h"
 #include "ATen/core/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/detail/VariableHooksInterface.h"
+#include "ATen/core/VariableHooksInterface.h"
 #include "ATen/detail/ComplexHooksInterface.h"
+#include "ATen/core/LegacyTypeDispatch.h"
 
 // This is temporary
 #include "ATen/core/ATenCoreTest.h"
@@ -24,43 +25,25 @@ class AT_API Context {
 public:
   Context();
   Type* getNonVariableTypeRaw(Backend p, ScalarType s) {
-    return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
+    return globalLegacyTypeDispatch().getNonVariableTypeRaw(p, s);
   }
   Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
-    if (p != Backend::Undefined) {
-      initCUDAIfNeeded(backendToDeviceType(p));
-      initComplexIfNeeded(s);
-    }
-    auto type = getNonVariableTypeRaw(p, s);
-
-    if(!type) {
-      // there is only a single Undefined Type.
-      if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        return getNonVariableTypeRaw(Backend::Undefined, ScalarType::Undefined);
-      }
-    }
-
-    return type;
+    return globalLegacyTypeDispatch().getNonVariableTypeOpt(p, s);
   }
   Type & getNonVariableType(Backend p, ScalarType s) {
-    auto* type = getNonVariableTypeOpt(p, s);
-    if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
-    return *type;
+    return globalLegacyTypeDispatch().getNonVariableType(p, s);
   }
   Type & getVariableType(Backend p, ScalarType s) {
-    auto& baseType = getNonVariableType(p, s);
-    return detail::getVariableHooks().getVariableTypeFromBaseType(baseType);
+    return globalLegacyTypeDispatch().getVariableType(p, s);
   }
-  Type & getMaybeVariableType(Backend p, ScalarType s, bool is_variable) {
-    if (is_variable) {
-      return getVariableType(p, s);
-    } else {
-      return getNonVariableType(p, s);
-    }
+  Type & getType(Backend p, ScalarType s, bool is_variable) {
+    return globalLegacyTypeDispatch().getType(p, s, is_variable);
   }
+  // The passed in Type must be delete'able
+  // TODO: Just make it take a unique_ptr
   void registerType(Backend b, ScalarType s, Type* t) {
-    type_registry[static_cast<int>(b)][static_cast<int>(s)].reset(t);
-    detail::getVariableHooks().registerVariableTypeFor(this, b, s);
+    globalLegacyTypeDispatch().registerType(b, s,
+      LegacyTypeDispatch::TypeUniquePtr{t, LegacyTypeDeleter([](Type* p) { delete p; }) });
   }
 
   Generator & defaultGenerator(DeviceType device_type) {
@@ -127,11 +110,6 @@ public:
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
-  // NB: type_registry has nullptr for all CUDA backends until
-  // CUDA initialization has occurred
-  std::unique_ptr<Type> type_registry
-    [static_cast<int>(Backend::NumOptions)]
-    [static_cast<int>(ScalarType::NumOptions)];
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
       lazyInitCUDA();
@@ -150,8 +128,6 @@ private:
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   friend struct Type;
-  friend void register_cpu_types(Context * context);
-  friend void register_cuda_types(Context * context);
 };
 
 AT_API Context & globalContext();
@@ -174,8 +150,8 @@ static inline Type& getNonVariableType(DeviceType p, ScalarType s) {
   return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
 }
 
-AT_API Type& getMaybeVariableType(TensorOptions options);
-AT_API Type& getMaybeVariableType(const TensorImpl*);
+AT_API Type& getType(TensorOptions options);
+AT_API Type& getType(const TensorImpl*);
 
 AT_API Allocator* getCPUAllocator();
 
