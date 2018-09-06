@@ -66,9 +66,9 @@ class TestReductionOps(hu.HypothesisTestCase):
            **hu.gcs)
     def test_elementwise_sqrsum(self, n, dtype, gc, dc):
         if dtype == np.float16:
-            # fp16 is only supported with CUDA
-            assume(gc.device_type == caffe2_pb2.CUDA)
-            dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
+            # fp16 is only supported with CUDA/HIP
+            assume(gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP})
+            dc = [d for d in dc if d.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}]
 
         X = np.random.rand(n).astype(dtype)
 
