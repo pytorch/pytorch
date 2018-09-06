@@ -7495,7 +7495,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_batch_norm',
 
     # aten op has additional cudnn argument
-    'test_nn_group_norm',
     'test_nn_nll_loss',
     'test_nn_unfold',
     'test_nn_max_unpool2d',
@@ -7924,6 +7923,78 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
 ])
 
 
+def add_autograd_test(
+    postfix,
+    fn_creator,
+    run_magic_methods,
+    exclude_list,
+    name,
+    self_size,
+    new_args,
+    test_name,
+    output_process_fn,
+    skipTestIf,
+    kwargs,
+):
+    def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
+                output_process_fn=output_process_fn):
+        def check(name):
+            is_magic_method = name[:2] == '__' and name[-2:] == '__'
+            is_inplace = name[-1] == "_" and not is_magic_method
+            self_variable = create_input((self_size,))[0][0]
+            # FixMe: run grad checks on inplace self
+            if is_inplace:
+                self_variable.requires_grad = False
+            # need to record this because methods can change the size (e.g. unsqueeze)
+            args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
+            self_tensor = deepcopy(self_variable.data)
+            args_tensor = deepcopy(unpack_variables(args_variable))
+            output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+
+            def fn(*inputs, **kwargs):
+                output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                return output_process_fn(output)
+
+            check_types = test_name not in EXCLUDE_TYPE_CHECK
+
+            if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
+                if run_magic_methods or not is_magic_method:
+                    check_against_reference(
+                        self,
+                        fn_creator(fn, name, "method", output_process_fn),
+                        fn,
+                        (self_variable,) + args_variable,
+                        kwargs_variable,
+                    )
+
+            # functional interface tests
+            if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                def fn(*inputs, **kwargs):
+                    output = getattr(torch, name)(*inputs, **kwargs)
+                    return output_process_fn(output)
+
+                f_args_variable = (self_variable,) + args_variable
+                f_args_tensor = (self_tensor,) + args_tensor
+
+                if not is_inplace:
+                    check_against_reference(
+                        self,
+                        fn_creator(fn, name, "functional", output_process_fn),
+                        fn,
+                        f_args_variable,
+                        kwargs_variable,
+                    )
+
+        check(name)
+        inplace_name = name + '_'
+        # can't broadcast inplace to left hand side
+        broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
+        if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
+            check(inplace_name)
+
+    post_add_test(test_name + postfix, skipTestIf, do_test)
+
+
 def add_test(
         name,
         self_size,
@@ -7937,74 +8008,44 @@ def add_test(
     if variant_name != '':
         basic_test_name += '_' + variant_name
 
+    def script_fn_creator(fn, name, type, output_process_fn):
+        return create_script_fn(name, type, output_process_fn)
+
+    def traced_fn_creator(fn, name, type, output_process_fn):
+        return create_traced_fn(fn)
+
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
         new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
         test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
         new_args = tuple(new_args)
 
-        # for-loop bodies don't define scopes, so we have to save the variables
-        # we want to close over in some way
-        def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
-                    output_process_fn=output_process_fn):
-            def check(name):
-                is_magic_method = name[:2] == '__' and name[-2:] == '__'
-                is_inplace = name[-1] == "_" and not is_magic_method
-                self_variable = create_input((self_size,))[0][0]
-                # FixMe: run grad checks on inplace self
-                if is_inplace:
-                    self_variable.requires_grad = False
-                # need to record this because methods can change the size (e.g. unsqueeze)
-                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
-                self_tensor = deepcopy(self_variable.data)
-                args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
-
-                def fn(*inputs, **kwargs):
-                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
-                    return output_process_fn(output)
-
-                check_types = test_name not in EXCLUDE_TYPE_CHECK
-
-                if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
-                    if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(self, fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable,
-                                                check_types=check_types)
-
-                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                        check_against_reference(self,
-                                                create_script_fn(self, name, 'method', output_process_fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable,
-                                                check_types=check_types)
-
-                # functional interface tests
-                if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
-                    def fn(*inputs, **kwargs):
-                        output = getattr(torch, name)(*inputs, **kwargs)
-                        return output_process_fn(output)
-
-                    f_args_variable = (self_variable,) + args_variable
-                    f_args_tensor = (self_tensor,) + args_tensor
-
-                    if not is_inplace and test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(self, fn), fn,
-                                                f_args_variable, kwargs_variable, check_types=check_types)
-
-                    if not is_inplace and test_name not in EXCLUDE_SCRIPT:
-                        check_against_reference(self,
-                                                create_script_fn(self, name, 'functional', output_process_fn),
-                                                fn, f_args_variable, kwargs_variable,
-                                                check_types=check_types)
-
-            check(name)
-            inplace_name = name + '_'
-            # can't broadcast inplace to left hand side
-            broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-            if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
-                check(inplace_name)
-
-        post_add_test(test_name, skipTestIf, do_test)
+        add_autograd_test(
+            "_traced",
+            traced_fn_creator,
+            True,
+            EXCLUDE_TRACED,
+            name,
+            self_size,
+            new_args,
+            test_name,
+            output_process_fn,
+            skipTestIf,
+            kwargs,
+        )
+        add_autograd_test(
+            "_script",
+            script_fn_creator,
+            False,
+            EXCLUDE_SCRIPT,
+            name,
+            deepcopy(self_size),
+            new_args,
+            test_name,
+            output_process_fn,
+            skipTestIf,
+            kwargs,
+        )
 
 
 def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
@@ -8030,10 +8071,19 @@ def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
 
+<<<<<<< HEAD
         if test_name not in EXCLUDE_SCRIPT:
             check_against_reference(self,
                                     create_script_fn(self, name, 'nn_functional', output_process_fn),
                                     fn, f_args_variable, kwargs_variable)
+=======
+        check_against_reference(self,
+                                create_script_fn(name, 'nn_functional', output_process_fn),
+                                fn, f_args_variable, kwargs_variable)
+
+    if test_name in EXCLUDE_SCRIPT:
+        do_test = unittest.expectedFailure(do_test)
+>>>>>>> Mark failing tests as expected failures
 
     post_add_test(test_name, skipTestIf, do_test)
 
