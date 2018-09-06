@@ -89,7 +89,6 @@ option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
 option(USE_LMDB "Use LMDB" ON)
 option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
-option(USE_MPI "Use MPI" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
 option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
@@ -117,6 +116,9 @@ option(USE_MKLDNN "Use MKLDNN" OFF)
 option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
 option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
+cmake_dependent_option(
+    USE_MPI "Use MPI" ON
+    "USE_DISTRIBUTED" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)

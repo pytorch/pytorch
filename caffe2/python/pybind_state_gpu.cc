@@ -121,7 +121,7 @@ void addCUDAObjectMethods(py::module& m) {
           [](DLPackWrapper<CUDAContext>* t) -> py::object {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                CUDA,
+                PROTO_CUDA,
                 "Expected CUDA device option for CUDA tensor");
 
             return t->data();
@@ -132,7 +132,7 @@ void addCUDAObjectMethods(py::module& m) {
           [](DLPackWrapper<CUDAContext>* t, py::object obj) {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                CUDA,
+                PROTO_CUDA,
                 "Expected CUDA device option for CUDA tensor");
             t->feed(obj);
           },

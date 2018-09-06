@@ -5,14 +5,18 @@
 #include <ATen/core/ScalarType.h>
 #include <ATen/core/TensorOptions.h>
 #include <ATen/core/optional.h>
+#include <ATen/core/Macros.h>
 
 namespace at {
+
+#if !AT_MOBILE
 
 /// A wrapper over a thread local TensorOptions instance.
 struct DefaultTensorOptions {
   /// Returns the current thread local default options.
   /// Defined in OptionsGuard.cpp because we can't use optional in headers, due
   /// to Windows and other compilers.
+  /// TODO: The inability to use optional in headers is no longer true
   AT_API static TensorOptions& get();
 
  private:
@@ -27,6 +31,9 @@ struct DefaultTensorOptions {
 /// RAII guard that stores the current default options upon construction, sets
 /// the current default options to the ones given to its constructor, and
 /// finally resets the options back to the original ones in the destructor.
+///
+/// You should NOT use OptionsGuard for internal code in ATen; it is reserved
+/// for end users.
 struct OptionsGuard {
   /// Stores the current default options and sets them to the given ones.
   explicit OptionsGuard(const TensorOptions& options)
@@ -50,5 +57,15 @@ struct OptionsGuard {
   /// this object.
   TensorOptions original_;
 };
+
+#else // AT_MOBILE
+
+struct DefaultTensorOptions {
+  AT_API static const TensorOptions& get();
+private:
+  static TensorOptions options_(/* use DefaultTensorOptions */ false);
+}
+
+#endif
 
 } // namespace at
