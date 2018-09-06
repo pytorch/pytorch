@@ -1587,9 +1587,9 @@ weak_intrusive_ptr<T> make_weak_only(Args&&... args) {
   auto intrusive = make_intrusive<T>(std::forward<Args>(args)...);
   return weak_intrusive_ptr<T>(intrusive);
 }
-template <class T>
-weak_intrusive_ptr<T> make_invalid_weak() {
-  return weak_intrusive_ptr<T>(intrusive_ptr<T>());
+template <class T, class NullType = c10::detail::intrusive_target_default_null_type<T>>
+weak_intrusive_ptr<T, NullType> make_invalid_weak() {
+  return weak_intrusive_ptr<T, NullType>(intrusive_ptr<T, NullType>());
 }
 } // namespace
 
@@ -1821,6 +1821,17 @@ TEST(
 
 TEST(
     WeakIntrusivePtrTest,
+    givenNullPtr_whenMoveAssigningToDifferentNullptr_thenHasNewNullptr) {
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType2> obj2 = make_invalid_weak<SomeClass, NullType2>();
+  obj2 = std::move(obj1);
+  EXPECT_NE(NullType1::singleton(), NullType2::singleton());
+  EXPECT_TRUE(obj1.expired());
+  EXPECT_TRUE(obj2.expired());
+}
+
+TEST(
+    WeakIntrusivePtrTest,
     givenValidPtr_whenCopyAssigning_thenPointsToSameObject) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> obj2 = make_weak_intrusive<SomeClass>();
@@ -1999,6 +2010,17 @@ TEST(
 
 TEST(
     WeakIntrusivePtrTest,
+    givenNullPtr_whenCopyAssigningToDifferentNullptr_thenHasNewNullptr) {
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType2> obj2 = make_invalid_weak<SomeClass, NullType2>();
+  obj2 = obj1;
+  EXPECT_NE(NullType1::singleton(), NullType2::singleton());
+  EXPECT_TRUE(obj1.expired());
+  EXPECT_TRUE(obj2.expired());
+}
+
+TEST(
+    WeakIntrusivePtrTest,
     givenPtr_whenMoveConstructing_thenPointsToSameObject) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   SomeClass* obj1ptr = obj1.weak.lock().get();
@@ -2083,6 +2105,16 @@ TEST(
 
 TEST(
     WeakIntrusivePtrTest,
+    givenNullPtr_whenMoveConstructingToDifferentNullptr_thenHasNewNullptr) {
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType2> obj2 = std::move(obj1);
+  EXPECT_NE(NullType1::singleton(), NullType2::singleton());
+  EXPECT_TRUE(obj1.expired());
+  EXPECT_TRUE(obj2.expired());
+}
+
+TEST(
+    WeakIntrusivePtrTest,
     givenPtr_whenCopyConstructing_thenPointsToSameObject) {
   IntrusiveAndWeak<SomeClass> obj1 = make_weak_intrusive<SomeClass>();
   SomeClass* obj1ptr = obj1.weak.lock().get();
@@ -2161,6 +2193,16 @@ TEST(
     givenPtr_whenCopyConstructingToBaseClassFromWeakOnlyPtr_thenNewInstanceInvalid) {
   weak_intrusive_ptr<SomeChildClass> obj1 = make_weak_only<SomeChildClass>(2);
   weak_intrusive_ptr<SomeBaseClass> obj2 = obj1;
+  EXPECT_TRUE(obj2.expired());
+}
+
+TEST(
+    WeakIntrusivePtrTest,
+    givenNullPtr_whenCopyConstructingToDifferentNullptr_thenHasNewNullptr) {
+  weak_intrusive_ptr<SomeClass, NullType1> obj1 = make_invalid_weak<SomeClass, NullType1>();
+  weak_intrusive_ptr<SomeClass, NullType2> obj2 = obj1;
+  EXPECT_NE(NullType1::singleton(), NullType2::singleton());
+  EXPECT_TRUE(obj1.expired());
   EXPECT_TRUE(obj2.expired());
 }
 
