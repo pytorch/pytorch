@@ -38,6 +38,16 @@ def _cudnn_supports(
     return True
 
 
+def _miopen_supports(
+        dilation=False,
+        nhwc=False,
+):
+    """Return True if MIOPEN supports this configuration."""
+    if nhwc or dilation:
+        return False
+    return True
+
+
 def _cudnn_convolution_algo_count(direction):
     try:
         if direction == "fwd":
@@ -191,7 +201,7 @@ class TestConvolution(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            group=st.integers(1, 2),
            order=st.sampled_from(["NCHW", "NHWC"]),
-           engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
+           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN", "MKLDNN"]),
            use_bias=st.booleans(),
            force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
            force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
@@ -212,6 +222,10 @@ class TestConvolution(hu.HypothesisTestCase):
             assume(_cudnn_supports(dilation=(dilation > 1),
                                    nhwc=(order == 'NHWC'),
                                    backward=True))
+
+        if engine == 'MIOPEN':
+            assume(_miopen_supports(dilation=(dilation > 1),
+                                   nhwc=(order == 'NHWC')))
 
         assume(engine != "MKLDNN" or use_bias is True)
 
@@ -457,8 +471,12 @@ class TestConvolution(hu.HypothesisTestCase):
 
         for order in ["NCHW", "NHWC"]:
             engine_list = ['']
-            if _cudnn_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
-                engine_list.append('CUDNN')
+            if workspace.has_hip_support:
+                if _miopen_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
+                    engine_list.append('MIOPEN')
+            else:
+                if _cudnn_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
+                    engine_list.append('CUDNN')
 
             for engine in engine_list:
                 op = core.CreateOperator(
