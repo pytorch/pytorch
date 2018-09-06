@@ -26,7 +26,12 @@ class CudnnSpatialBNOp final : public SpatialBNOp<CUDAContext> {
     }
     epsilon_ = std::max(epsilon_, CUDNN_BN_MIN_EPSILON);
 #if CUDNN_VERSION_MIN(7,0,0)
-    mode_ = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+    // TODO(T31829456): The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
+    // introduced in CuDNN 7 for performance optimization, but it results in
+    // accuracy losses in convolution models such as ResNeXt-101 and
+    // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
+    // for now
+    mode_ = CUDNN_BATCHNORM_SPATIAL;
 #else
     mode_ = CUDNN_BATCHNORM_SPATIAL;
 #endif
@@ -65,7 +70,12 @@ class CudnnSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
     }
     epsilon_ = std::max(epsilon_, CUDNN_BN_MIN_EPSILON);
 #if CUDNN_VERSION_MIN(7,0,0)
-    mode_ = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+    // TODO(T31829456): The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
+    // introduced in CuDNN 7 for performance optimization, but it results in
+    // accuracy losses in convolution models such as ResNeXt-101 and
+    // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
+    // for now
+    mode_ = CUDNN_BATCHNORM_SPATIAL;
 #else
     mode_ = CUDNN_BATCHNORM_SPATIAL;
 #endif
