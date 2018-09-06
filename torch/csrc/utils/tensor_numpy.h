@@ -10,4 +10,6 @@ at::Tensor tensor_from_numpy(PyObject* obj);
 
 at::ScalarType numpy_dtype_to_aten(int dtype);
 
+bool is_numpy_scalar(PyObject* obj);
+
 }} // namespace torch::utils

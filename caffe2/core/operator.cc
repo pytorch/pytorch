@@ -72,8 +72,8 @@ PerOpEnginePrefType& g_per_op_engine_pref() {
 }
 
 GlobalEnginePrefType& g_global_engine_pref() {
-  static auto* g_global_engine_pref_ = new GlobalEnginePrefType{
-      {DeviceType::CUDA, {"CUDNN"}}, {DeviceType::HIP, {"MIOPEN"}}};
+  static auto* g_global_engine_pref_ =
+      new GlobalEnginePrefType{{CUDA, {"CUDNN"}}, {HIP, {"MIOPEN"}}};
   return *g_global_engine_pref_;
 }
 
@@ -81,7 +81,8 @@ unique_ptr<OperatorBase> TryCreateC2Operator(
     const string& key,
     const OperatorDef& operator_def,
     Workspace* ws) {
-  const auto& type = operator_def.device_option().device_type();
+  const auto& type_proto = operator_def.device_option().device_type();
+  const auto& type = ProtoToType(static_cast<DeviceTypeProto>(type_proto));
   CAFFE_ENFORCE(
       gDeviceTypeRegistry()->count(type),
       "Device type ",
@@ -123,7 +124,9 @@ unique_ptr<OperatorBase> _CreateOperator(
     Workspace* ws) {
   static StaticLinkingProtector g_protector;
   const auto& op_type = operator_def.type();
-  const auto& device_type = operator_def.device_option().device_type();
+  const auto& device_type_proto = operator_def.device_option().device_type();
+  const auto& device_type =
+      ProtoToType(static_cast<DeviceTypeProto>(device_type_proto));
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // first, check with OpSchema if the operator is legal.
@@ -267,9 +270,11 @@ void SetEnginePref(
 
 void SetOpEnginePref(
     const std::string& op_type,
-    const CaffeMap<int, EnginePrefType>& op_pref) {
+    const CaffeMap<DeviceType, EnginePrefType>& op_pref) {
   for (const auto& device_pref_pair : op_pref) {
-    const auto& device_type = device_pref_pair.first;
+    const auto& device_type_proto = device_pref_pair.first;
+    const auto& device_type =
+        ProtoToType(static_cast<DeviceTypeProto>(device_type_proto));
     CAFFE_ENFORCE(
         gDeviceTypeRegistry()->count(device_type),
         "Device type ",
@@ -306,8 +311,8 @@ unique_ptr<OperatorBase> CreateOperator(
   }
 }
 
-std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry() {
-  static std::map<int32_t, OperatorRegistry*> g_device_type_registry;
+std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
+  static std::map<DeviceType, OperatorRegistry*> g_device_type_registry;
   return &g_device_type_registry;
 }
 
@@ -316,21 +321,21 @@ CAFFE_DEFINE_REGISTRY(
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CPU, CPUOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::CUDA, CUDAOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
     HIPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::HIP, HIPOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
 
 CAFFE_DEFINE_REGISTRY(
     GradientRegistry,
@@ -642,11 +647,11 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
           &_capacity,
           &blob_device);
 
-      if (blob_device.device_type() == CUDA &&
+      if (blob_device.device_type() == PROTO_CUDA &&
           blob_device.cuda_gpu_id() != op_device.cuda_gpu_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
-      }
-      else if (blob_device.device_type() == HIP &&
+      } else if (
+          blob_device.device_type() == PROTO_HIP &&
           blob_device.hip_gpu_id() != op_device.hip_gpu_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
       }

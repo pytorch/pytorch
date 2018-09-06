@@ -61,6 +61,9 @@ CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$PREFIX")
 mkdir -p build
 cd build
 cmake "${CMAKE_ARGS[@]}"  $CONDA_CMAKE_ARGS $PYTHON_ARGS ..
-make VERBOSE=1 "-j$(nproc)"
+if [ -z "$MAX_JOBS" ]; then
+  MAX_JOBS=$(nproc)
+fi
+make VERBOSE=1 "-j${MAX_JOBS}"
 
 make install/fast

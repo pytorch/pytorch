@@ -11,9 +11,26 @@ from caffe2.python.layers.layers import (
 )
 from future.utils import viewitems
 import numpy as np
+from collections import defaultdict
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+def get_concatenated_feature_to_index(blobs_to_concat):
+    concat_feature_to_index = defaultdict(list)
+    start_pos = 0
+    for scalar in blobs_to_concat:
+        num_dims = scalar.dtype.shape[0]
+        if hasattr(scalar, 'metadata') \
+            and hasattr(scalar.metadata, 'feature_specs') \
+            and hasattr(scalar.metadata.feature_specs, 'feature_to_index') \
+                and isinstance(scalar.metadata.feature_specs.feature_to_index, dict):  # noqa B950
+            for k, v in scalar.metadata.feature_specs.feature_to_index.items():
+                concat_feature_to_index[k].extend([start_pos + vi for vi in v])
+        start_pos += num_dims
+    return dict(concat_feature_to_index) if concat_feature_to_index.keys() else None
+
 
 class Concat(ModelLayer):
     """
@@ -94,6 +111,19 @@ class Concat(ModelLayer):
         self.output_schema = schema.Scalar(
             (np.float32, output_dims),
             self.get_next_blob_reference('output'))
+
+        record_to_concat = input_record.fields.values()
+        concated_feature_to_index = get_concatenated_feature_to_index(
+            record_to_concat
+        )
+        if concated_feature_to_index:
+            metadata = schema.Metadata(
+                feature_specs=schema.FeatureSpec(
+                    feature_to_index=concated_feature_to_index
+                )
+            )
+            self.output_schema.set_metadata(metadata)
+
 
     def add_ops(self, net):
         net.Concat(
