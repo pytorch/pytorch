@@ -2588,6 +2588,8 @@ a")
         self.assertEqual(s + s + s, foo(s))
 
     def test_inf(self):
+        import math
+
         @torch.jit.script
         def foo(a):
             return a < math.inf
