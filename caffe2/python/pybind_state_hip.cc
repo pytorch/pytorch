@@ -13,10 +13,10 @@
 namespace caffe2 {
 namespace python {
 
-REGISTER_HIP_OPERATOR(Python, GPUFallbackOp<PythonOp<CPUContext, false>>);
+REGISTER_HIP_OPERATOR(Python, GPUFallbackOp);
 REGISTER_HIP_OPERATOR(
     PythonGradient,
-    GPUFallbackOp<PythonGradientOp<CPUContext, false>>);
+    GPUFallbackOp);
 
 REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
 REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
@@ -53,7 +53,7 @@ void addHIPObjectMethods(py::module& m) {
           [](DLPackWrapper<HIPContext>* t) -> py::object {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                HIP,
+                PROTO_HIP,
                 "Expected HIP device option for HIP tensor");
 
             return t->data();
@@ -64,7 +64,7 @@ void addHIPObjectMethods(py::module& m) {
           [](DLPackWrapper<HIPContext>* t, py::object obj) {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                HIP,
+                PROTO_HIP,
                 "Expected HIP device option for HIP tensor");
             t->feed(obj);
           },

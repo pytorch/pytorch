@@ -283,7 +283,7 @@
   self: grad
 
 - name: gather(Tensor self, int64_t dim, Tensor index)
-  self: at::zeros(self.sizes(), grad.type()).scatter_add_(dim, index, grad)
+  self: at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad)
 
 - name: ge_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -356,7 +356,7 @@
   value: grad.index_select(dim, index).sum()
 
 - name: index_select(Tensor self, int64_t dim, Tensor index)
-  self: at::zeros(self.sizes(), grad.type()).index_add_(dim, index, grad)
+  self: at::zeros(self.sizes(), grad.options()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
   self: -at::mm(result.t(), at::mm(grad, result.t()))
@@ -521,14 +521,14 @@
   self: zeros_like(grad)
 
 - name: normal(Tensor mean, double std, Generator generator)
-  mean: at::zeros(mean.sizes(), grad.type())
+  mean: at::zeros(mean.sizes(), grad.options())
 
 - name: normal(double mean, Tensor std, Generator generator)
-  std: at::zeros(std.sizes(), grad.type())
+  std: at::zeros(std.sizes(), grad.options())
 
 - name: normal(Tensor mean, Tensor std, Generator generator)
-  mean: at::zeros(mean.sizes(), grad.type())
-  std: at::zeros(std.sizes(), grad.type())
+  mean: at::zeros(mean.sizes(), grad.options())
+  std: at::zeros(std.sizes(), grad.options())
 
 - name: orgqr(Tensor self, Tensor input2)
   self: not_implemented("orgqr")
@@ -1269,3 +1269,7 @@
 
 - name: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor input_bias, Tensor hidden_bias)
   input_gates, hidden_gates, hx, input_bias, hidden_bias: _thnn_fused_gru_cell_backward(grad, result1, input_bias.defined())
+
+# PackedSequence helpers
+- name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first)
+  input: _pack_padded_sequence_backward(grad, input.sizes(), result1, batch_first)

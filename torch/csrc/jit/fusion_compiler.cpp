@@ -177,6 +177,10 @@ struct TensorInfo {
   IndexType sizes[N];
   IndexType strides[N];
 };
+template<typename T>
+struct TensorInfo<T, 0> {
+  T * data;
+};
 )");
 
 // We rewrite the code for philox RNG from curand as nvrtc couldn't resolve the
@@ -735,7 +739,9 @@ void compressContiguous(
     c_strides[compressed_dims] = strides[cur-1];
     compressed_dims++;
   }
-  JIT_ASSERT(!cont.back() || strides.back() == 1);
+  if (ndim > 0) {
+    JIT_ASSERT(!cont.back() || strides.back() == 1);
+  }
 }
 
 } // anonymous namespace

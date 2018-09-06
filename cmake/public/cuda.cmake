@@ -178,7 +178,7 @@ add_library(caffe2::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt)
 else()
     set_property(
         TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES

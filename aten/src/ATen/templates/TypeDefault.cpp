@@ -6,7 +6,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Storage.h"
+#include "ATen/core/Storage.h"
 #include "ATen/Tensor.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
@@ -78,6 +78,34 @@ Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocato
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
   return tensor(storage, 0, sizes, strides);
 }
+
+Storage TypeDefault::storage(bool resizable) const {
+  return Storage(scalarType(), 0, allocator(), resizable);
+}
+Storage TypeDefault::storage(size_t size, bool resizable) const {
+  return Storage(scalarType(), size, allocator(), resizable);
+}
+Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
+    return Storage(
+      scalarType(),
+      InefficientStdFunctionContext::makeDataPtr(data, deleter, getDeviceFromPtr(data)),
+      size,
+      deleter);
+}
+Storage TypeDefault::storageWithAllocator(int64_t size, Allocator* allocator) const {
+    return Storage(scalarType(), size, allocator);
+}
+Tensor TypeDefault::unsafeTensorFromTH(void * th_pointer, bool retain) const {
+  return Tensor(static_cast<TensorImpl*>(th_pointer), retain);
+}
+Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+  if (retain && th_pointer) {
+    c10::raw::intrusive_ptr::incref(static_cast<StorageImpl*>(th_pointer));
+  }
+  return Storage(static_cast<StorageImpl*>(th_pointer));
+}
+
+
 Tensor TypeDefault::scalarTensor(Scalar s) const {
   return tensor({}).fill_(s);
 }

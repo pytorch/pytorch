@@ -11,6 +11,13 @@ string(
   content
   "${content}")
 
+string(
+  REPLACE
+  "PROTOBUF_CONSTEXPR"
+  ""
+  content
+  "${content}")
+
 foreach(ns ${NAMESPACES})
   # Insert "const ::std::string& GetEmptyStringAlreadyInited();" within
   # the namespace and make sure we only do it once in the file. Unfortunately

@@ -341,6 +341,10 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   }
 }
 
+void TCPStore::wait(const std::vector<std::string>& keys) {
+  wait(keys, timeout_);
+}
+
 void TCPStore::wait(
     const std::vector<std::string>& keys,
     const std::chrono::milliseconds& timeout) {

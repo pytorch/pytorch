@@ -885,9 +885,14 @@ struct GraphFuser {
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
+  // NYI on Windows
+  #ifndef _WIN32
+
   GraphFuser(graph->block()).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
+
+  #endif
 }
 
 }}

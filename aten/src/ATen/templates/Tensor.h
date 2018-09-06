@@ -7,7 +7,7 @@
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Storage.h"
+#include "ATen/core/Storage.h"
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/core/optional.h"
@@ -52,9 +52,9 @@ struct AT_API Tensor {
     }
   }
   Tensor(const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& ptr)
-      : tensor_impl_(std::move(ptr)) {}
-  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
       : tensor_impl_(ptr) {}
+  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
+      : tensor_impl_(std::move(ptr)) {}
 
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;

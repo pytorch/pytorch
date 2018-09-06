@@ -16,10 +16,9 @@ AsyncPollingNet::AsyncPollingNet(
     task_timers_[task_id] = caffe2::make_unique<Timer>();
   }
 
-  stats_.reserve(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
-  for (auto device_idx = 0;
-       device_idx < DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES;
-       ++device_idx) {
+  auto MAX_DEVICE_TYPES = DeviceTypeProto::PROTO_COMPILE_TIME_MAX_DEVICE_TYPES;
+  stats_.reserve(MAX_DEVICE_TYPES);
+  for (auto device_idx = 0; device_idx < MAX_DEVICE_TYPES; ++device_idx) {
     stats_.emplace_back(
         "async_net/stats/" + net_def->name() + "/" +
         caffe2::DeviceTypeName(device_idx));
@@ -38,7 +37,7 @@ bool AsyncPollingNet::DoRunAsync() {
   Timer timer;
   bool success = pollAndSchedule();
   if (FLAGS_caffe2_dag_net_collect_stats) {
-    CAFFE_EVENT(stats_[CPU], poll_time_ms, timer.MilliSeconds());
+    CAFFE_EVENT(stats_[PROTO_CPU], poll_time_ms, timer.MilliSeconds());
   }
   if (!success) {
     finalizeEvents();
@@ -133,7 +132,7 @@ bool AsyncPollingNet::pollAndSchedule() {
     }
     if (FLAGS_caffe2_dag_net_collect_stats) {
       CAFFE_EVENT(
-          stats_[CPU], poll_status_update_time_us, timer.MicroSeconds());
+          stats_[PROTO_CPU], poll_status_update_time_us, timer.MicroSeconds());
     }
 
     std::unordered_set<int> visited_children;
