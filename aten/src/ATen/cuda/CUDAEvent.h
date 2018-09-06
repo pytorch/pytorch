@@ -33,10 +33,12 @@ struct AT_CUDA_API CUDAEvent {
   // Note: event destruction done on creating device to avoid creating a 
   // CUDA context on other devices.
   ~CUDAEvent() { 
-    if (is_created_) {
-      at::DeviceGuard device_guard{(int)device_};
-      cudaEventDestroy(event_);
-    }
+    try {
+      if (is_created_) {
+        at::DeviceGuard device_guard{(int)device_};
+        cudaEventDestroy(event_);
+      }
+    } catch (...) { /* No throw */ }
   }
 
   CUDAEvent(const CUDAEvent&) = delete;
