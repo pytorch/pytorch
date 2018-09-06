@@ -2591,7 +2591,7 @@ a")
         @torch.jit.script
         def foo(a):
             return a < math.inf
-        s = Variable(torch.rand(1))
+        s = torch.rand(1)
         self.assertTrue(foo(s))
 
     def test_add(self):
