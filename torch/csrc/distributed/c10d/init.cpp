@@ -97,8 +97,22 @@ PyObject* c10d_init(PyObject* _unused) {
               &::c10d::Store::add,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "set_timeout",
+              &::c10d::Store::setTimeout,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "wait",
-              &::c10d::Store::wait,
+              [](::c10d::Store& store, const std::vector<std::string>& keys) {
+                store.wait(keys);
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "wait",
+              [](::c10d::Store& store,
+                 const std::vector<std::string>& keys,
+                 const std::chrono::milliseconds& timeout) {
+                store.wait(keys, timeout);
+              },
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)

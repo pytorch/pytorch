@@ -4,6 +4,7 @@ import multiprocessing
 import sys
 import tempfile
 import unittest
+from datetime import timedelta
 
 from functools import wraps
 from collections import namedtuple
@@ -98,7 +99,9 @@ class FileStoreTest(TestCase, StoreTestBase):
         self.file.close()
 
     def _create_store(self):
-        return c10d.FileStore(self.file.name)
+        store = c10d.FileStore(self.file.name)
+        store.set_timeout(timedelta(seconds=300))
+        return store
 
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
@@ -106,6 +109,7 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
         self.file = tempfile.NamedTemporaryFile()
         self.filestore = c10d.FileStore(self.file.name)
         self.prefix = "test_prefix"
+        self.filestore.set_timeout(timedelta(seconds=300))
 
     def tearDown(self):
         self.file.close()
@@ -118,7 +122,9 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         addr = 'localhost'
         port = common.find_free_port()
-        return c10d.TCPStore(addr, port, True)
+        store = c10d.TCPStore(addr, port, True)
+        store.set_timeout(timedelta(seconds=300))
+        return store
 
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
@@ -127,6 +133,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
         port = common.find_free_port()
         self.tcpstore = c10d.TCPStore(addr, port, True)
         self.prefix = "test_prefix"
+        self.tcpstore.set_timeout(timedelta(seconds=300))
 
     def _create_store(self):
         return c10d.PrefixStore(self.prefix, self.tcpstore)
