@@ -20,7 +20,7 @@ TensorOptions& DefaultTensorOptions::get() {
 TensorOptions DefaultTensorOptions::options_(/*use_thread_local_default_options=*/false);
 
 const TensorOptions& DefaultTensorOptions::get() {
-  return *options_;
+  return options_;
 }
 
 #endif
