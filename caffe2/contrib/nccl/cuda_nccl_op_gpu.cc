@@ -68,6 +68,47 @@ class NCCLAllreduceOp final : public Operator<CUDAContext> {
     }
   }
 
+  static std::vector<TensorShape> ShapeInference(
+      const OperatorDef& def,
+      const std::vector<TensorShape>& in) {
+    auto n_outputs = def.output_size();
+    CAFFE_ENFORCE(
+        n_outputs == 1 || n_outputs == in.size(),
+        "NCCLAllreduce only supports N-1 or N-N reductions");
+
+    for (auto i = 0; i < in.size(); i++) {
+      CAFFE_ENFORCE(
+          in[0].dims_size() == in[i].dims_size(),
+          "NCCLAllreduce requires inputs of same dimension");
+      for (auto j = 0; j < in[0].dims_size(); j++) {
+        CAFFE_ENFORCE(
+            in[0].dims(j) == in[i].dims(j),
+            "NCCLAllreduce requires inputs to be of same shape");
+      }
+    }
+
+    std::vector<TensorShape> out(n_outputs);
+    for (auto i = 0; i < out.size(); i++) {
+      out[i] = in[0];
+    }
+    return out;
+  }
+
+  static struct OpSchema::Cost CostInference(
+      const OperatorDef& def,
+      const vector<TensorShape>& inputs) {
+    CAFFE_ENFORCE_GE(inputs.size(), 1, "Conv requires at least 1 input");
+    const TensorShape X0 = inputs[0];
+    const auto nElem = nElemFromDim(inputs[0]);
+
+    struct OpSchema::Cost c;
+    c.flops = (inputs.size() - 1) * nElem;
+    c.bytes_read = inputs.size() * nElem;
+    c.bytes_written = def.output_size() * nElem;
+    c.params_bytes = 0;
+    return c;
+  }
+
  protected:
 };
 
@@ -173,6 +214,8 @@ REGISTER_CUDA_OPERATOR(NCCLAllreduce, NCCLAllreduceOp);
 OPERATOR_SCHEMA(NCCLAllreduce)
     .NumInputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
     .NumOutputs(1, CAFFE2_COMPILE_TIME_MAX_GPUS)
+    .CostInferenceFunction(NCCLAllreduceOp::CostInference)
+    .TensorInferenceFunction(NCCLAllreduceOp::ShapeInference)
     .IdenticalTypeAndShape()
     .InputsCanCrossDevices()
     .AllowOneToOneInplace()

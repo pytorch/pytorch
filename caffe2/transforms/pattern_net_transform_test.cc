@@ -250,19 +250,19 @@ TEST(PatternNetTransformTest, TestDeviceOptionMatching) {
 
   NetDef pdef;
   auto op = AddOp(&pdef, "DummyOp1", {"in"}, {"out"});
-  op->mutable_device_option()->set_device_type(CPU);
+  op->mutable_device_option()->set_device_type(PROTO_CPU);
 
   NetDef rdef;
   op = AddOp(&rdef, "DummyOp1", {"in"}, {"out"});
-  op->mutable_device_option()->set_device_type(CUDA);
+  op->mutable_device_option()->set_device_type(PROTO_CUDA);
 
   NetDef netdef;
   op = AddOp(&netdef, "DummyOp1", {"in"}, {"mid"});
-  op->mutable_device_option()->set_device_type(CPU);
+  op->mutable_device_option()->set_device_type(PROTO_CPU);
   op = AddOp(&netdef, "DummyOp1", {"mid"}, {"mid"}); // should not match
-  op->mutable_device_option()->set_device_type(CUDA);
+  op->mutable_device_option()->set_device_type(PROTO_CUDA);
   op = AddOp(&netdef, "DummyOp1", {"mid"}, {"out"});
-  op->mutable_device_option()->set_device_type(CPU);
+  op->mutable_device_option()->set_device_type(PROTO_CPU);
 
   PatternNetTransform t(pdef, rdef);
   transform::Graph g(netdef);
@@ -272,7 +272,7 @@ TEST(PatternNetTransformTest, TestDeviceOptionMatching) {
   NetDef transformed_net = t.ApplyTo(netdef);
   for (const auto& opdef : transformed_net.op()) {
     EXPECT_TRUE(opdef.has_device_option());
-    EXPECT_EQ(opdef.device_option().device_type(), CUDA);
+    EXPECT_EQ(opdef.device_option().device_type(), PROTO_CUDA);
   }
 }
 
