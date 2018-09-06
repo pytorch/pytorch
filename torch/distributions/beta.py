@@ -37,10 +37,7 @@ class Beta(ExponentialFamily):
         super(Beta, self).__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, instance=None):
-        if not instance and type(self).__init__ is not Beta.__init__:
-            raise NotImplementedError("Subclasses that define a custom __init__ method "
-                                      "must also define a custom .expand() method")
-        new = self.__new__(type(self)) if not instance else instance
+        new = self._get_checked_instance(Beta, instance)
         batch_shape = torch.Size(batch_shape)
         new._dirichlet = self._dirichlet.expand(batch_shape)
         super(Beta, new).__init__(batch_shape, validate_args=False)

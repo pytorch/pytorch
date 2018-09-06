@@ -47,10 +47,7 @@ class LogitRelaxedBernoulli(Distribution):
         super(LogitRelaxedBernoulli, self).__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, instance=None):
-        if not instance and type(self).__init__ is not LogitRelaxedBernoulli.__init__:
-            raise NotImplementedError("Subclasses that define a custom __init__ method "
-                                      "must also define a custom .expand() method")
-        new = self.__new__(type(self)) if not instance else instance
+        new = self._get_checked_instance(LogitRelaxedBernoulli, instance)
         batch_shape = torch.Size(batch_shape)
         new.temperature = self.temperature
         if 'probs' in self.__dict__:
@@ -122,10 +119,7 @@ class RelaxedBernoulli(TransformedDistribution):
                                                validate_args=validate_args)
 
     def expand(self, batch_shape, instance=None):
-        if not instance and type(self).__init__ is not RelaxedBernoulli.__init__:
-            raise NotImplementedError("Subclasses that define a custom __init__ method "
-                                      "must also define a custom .expand() method")
-        new = self.__new__(type(self)) if not instance else instance
+        new = self._get_checked_instance(RelaxedBernoulli, instance)
         base_dist = self.base_dist.expand(batch_shape)
         super(RelaxedBernoulli, new).__init__(base_dist, SigmoidTransform(), validate_args=False)
         new._validate_args = self._validate_args

@@ -249,6 +249,13 @@ class Distribution(object):
         if not self.support.check(value).all():
             raise ValueError('The value argument must be within the support')
 
+    def _get_checked_instance(self, cls, instance=None):
+        if instance is None and self.__init__.__func__ is not cls.__init__.__func__:
+            raise NotImplementedError("Subclass {} of {} that defines a custom __init__ method "
+                                      "must also define a custom .expand() method.".
+                                      format(self.__class__.__name__, cls.__name__))
+        return self.__new__(cls) if not instance else instance
+
     def __repr__(self):
         param_names = [k for k, _ in self.arg_constraints.items() if k in self.__dict__]
         args_string = ', '.join(['{}: {}'.format(p, self.__dict__[p]

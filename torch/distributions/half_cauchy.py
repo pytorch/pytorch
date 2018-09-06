@@ -34,10 +34,7 @@ class HalfCauchy(TransformedDistribution):
                                          validate_args=validate_args)
 
     def expand(self, batch_shape, instance=None):
-        if not instance and type(self).__init__ is not HalfCauchy.__init__:
-            raise NotImplementedError("Subclasses that define a custom __init__ method "
-                                      "must also define a custom .expand() method")
-        new = self.__new__(type(self)) if not instance else instance
+        new = self._get_checked_instance(HalfCauchy, instance)
         batch_shape = torch.Size(batch_shape)
         base_dist = self.base_dist.expand(batch_shape)
         super(HalfCauchy, new).__init__(base_dist, AbsTransform(), validate_args=False)
