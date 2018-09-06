@@ -64,13 +64,14 @@ at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
     return nullptr;
   }
   at::Backend backend = get_backend(is_cuda, is_sparse);
-  return &at::getType(backend, attype_names.at(name));
+  return &at::getNonVariableType(backend, attype_names.at(name));
 }
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
-  auto attype = at::globalContext().getTypeOpt(
-      deviceTypeToBackend(storage.device_type()), storage.scalar_type());
+  auto attype = at::globalContext().getNonVariableTypeOpt(
+      deviceTypeToBackend(storage.device_type()),
+      at::dataTypeToScalarType(storage.dtype()));
   auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {
     return it->second;
@@ -96,9 +97,9 @@ void registerLayoutObject(THPLayout *layout, at::Backend backend) {
   layout_registry[static_cast<int>(backend)] = layout;
 }
 
-at::Type& getType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
+at::Type& getVariableType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
   const at::Backend backend = get_backend(device.type() == at::Device::Type::CUDA, layout.layout == at::Layout::Sparse);
-  auto baseType = at::globalContext().getTypeOpt(backend, scalarType);
+  auto baseType = at::globalContext().getNonVariableTypeOpt(backend, scalarType);
   if (!baseType) {
     std::ostringstream oss;
     oss << "Error attempting to use dtype " << getDtype(scalarType)->name << " with layout " << layout.name
@@ -108,7 +109,7 @@ at::Type& getType(at::ScalarType scalarType, const THPLayout& layout, const at::
     }
     throw std::runtime_error(oss.str());
   }
-  return *torch::autograd::VariableType::getType(*baseType);
+  return *torch::autograd::VariableType::getVariableTypeFromBaseType(*baseType);
 }
 
 THPDtype* getDtype(at::ScalarType scalarType) {

@@ -229,12 +229,6 @@ struct TORCH_API Variable : public at::Tensor {
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  /// Compares this `Variable` to another `Variable` (or `Tensor`) via
-  /// pointer-equality.
-  bool is_same(const Variable& other) const noexcept {
-    return this->pImpl == other.pImpl;
-  }
-
   void set_name(const std::string& name);
   const std::string& name() const noexcept;
 
@@ -259,8 +253,8 @@ struct TORCH_API Variable : public at::Tensor {
 //                            Variable::Impl
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct Variable::Impl : public at::TensorImpl {
-  TORCH_API explicit Impl(
+struct TORCH_API Variable::Impl : public at::TensorImpl {
+  explicit Impl(
       at::Tensor data,
       bool requires_grad = false,
       Edge gradient_edge = Edge());
@@ -279,10 +273,8 @@ struct Variable::Impl : public at::TensorImpl {
   void set_storage_offset(int64_t storage_offset) override;
 
   int64_t dim() const override;
-  const at::Storage& storage() override;
+  const at::Storage& storage() const override;
   int64_t storage_offset() const override;
-
-  static const char* typeString();
 
   std::shared_ptr<Function> get_grad_accumulator();
   virtual std::shared_ptr<Function>& get_grad_fn() {
@@ -373,7 +365,7 @@ struct Variable::Impl : public at::TensorImpl {
 /// same version_counter. The grad_fn field of the Variable may become stale
 /// due to in-place modifications of the shared data. Accesses should go
 /// through get_grad_fn(). All other fields are always valid.
-struct Variable::ViewImpl : public Variable::Impl {
+struct TORCH_API Variable::ViewImpl : public Variable::Impl {
   ViewImpl(Variable base, at::Tensor data, Edge gradient_edge);
 
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
@@ -413,9 +405,8 @@ inline Variable make_variable_view(
     at::Tensor data,
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
-    auto impl = new Variable::ViewImpl(
-        std::move(base), std::move(data), std::move(gradient_edge));
-    return Variable(impl, /*retain=*/false);
+    return Variable(c10::make_intrusive<Variable::ViewImpl>(
+            std::move(base), std::move(data), std::move(gradient_edge)).release(), false);
   }
   return Variable();
 }
@@ -425,8 +416,7 @@ inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto impl = new Variable::Impl(data, requires_grad);
-    return Variable(impl, /*retain=*/false);
+    return Variable(c10::make_intrusive<Variable::Impl>(data, requires_grad).release(), false);
   }
   return Variable();
 }
@@ -436,8 +426,7 @@ inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    auto impl = new Variable::Impl(data, false, std::move(gradient_edge));
-    return Variable(impl, /*retain=*/false);
+    return Variable(c10::make_intrusive<Variable::Impl>(data, false, std::move(gradient_edge)).release(), false);
   }
   return Variable();
 }
@@ -583,6 +572,6 @@ inline Variable::Variable(Variable::Impl* self, bool retain)
 
 inline Variable::Impl* Variable::get() const {
   AT_CHECK(defined(), "Called Variable::get() on an undefined Variable");
-  return static_cast<Variable::Impl*>(pImpl);
+  return static_cast<Variable::Impl*>(tensor_impl_.get());
 }
 }} // namespace torch::autograd

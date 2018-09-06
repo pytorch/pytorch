@@ -22,10 +22,10 @@
 namespace caffe2 {
 namespace python {
 
-REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp<PythonOp<CPUContext, false>>);
+REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(
     PythonGradient,
-    GPUFallbackOp<PythonGradientOp<CPUContext, false>>);
+    GPUFallbackOp);
 
 REGISTER_CUDA_OPERATOR(PythonDLPack, PythonOp<CUDAContext, true>);
 REGISTER_CUDA_OPERATOR(
@@ -121,7 +121,7 @@ void addCUDAObjectMethods(py::module& m) {
           [](DLPackWrapper<CUDAContext>* t) -> py::object {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                CUDA,
+                PROTO_CUDA,
                 "Expected CUDA device option for CUDA tensor");
 
             return t->data();
@@ -132,7 +132,7 @@ void addCUDAObjectMethods(py::module& m) {
           [](DLPackWrapper<CUDAContext>* t, py::object obj) {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                CUDA,
+                PROTO_CUDA,
                 "Expected CUDA device option for CUDA tensor");
             t->feed(obj);
           },

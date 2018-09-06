@@ -112,10 +112,16 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
   "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
   "${TOOLS_PATH}/autograd/templates/variable_factories.h"
-  "${TOOLS_PATH}/autograd/gen_autograd.py"
-  "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
-  "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/autograd/deprecated.yaml"
   "${TOOLS_PATH}/autograd/derivatives.yaml"
+  "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
+  "${TOOLS_PATH}/autograd/gen_autograd.py"
+  "${TOOLS_PATH}/autograd/gen_python_functions.py"
+  "${TOOLS_PATH}/autograd/gen_variable_factories.py"
+  "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/autograd/load_derivatives.py"
+  "${TOOLS_PATH}/autograd/nested_dict.py"
+  "${TOOLS_PATH}/autograd/utils.py"
   "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
@@ -155,8 +161,9 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
@@ -229,6 +236,7 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     )
 
 endif()
@@ -453,6 +461,7 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/static.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
     ${TORCH_API_TEST_DIR}/tensor.cpp
+    ${TORCH_API_TEST_DIR}/jit.cpp
     # Temporary until ATen tests are built with Caffe2
     ${TORCH_API_TEST_DIR}/tensor_options.cpp
     ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp

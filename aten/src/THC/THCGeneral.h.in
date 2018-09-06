@@ -22,7 +22,7 @@
 #endif
 
 #ifdef _WIN32
-# if defined(ATen_cuda_EXPORTS) || defined(caffe2_gpu_EXPORTS) || defined(CAFFE2_BUILD_MAIN_LIB)
+# if defined(ATen_cuda_EXPORTS) || defined(caffe2_gpu_EXPORTS) || defined(CAFFE2_CUDA_BUILD_MAIN_LIB)
 #  define THC_API THC_EXTERNC __declspec(dllexport)
 #  define THC_CLASS __declspec(dllexport)
 # else
@@ -81,13 +81,12 @@ THC_API void THCMagma_init(THCState *state);
 THC_API int THCState_getNumDevices(THCState* state);
 
 /* Stream API */
+THC_API void THCState_setStream(THCState *state, THCStream* stream);
+THC_API void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream);
+
 THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
 THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
-
 THC_API THCStream* THCState_getStream(THCState *state);
-THC_API void THCState_setStream(THCState *state, THCStream* stream);
-THC_API THCStream* THCState_getStreamOnDevice(THCState* state, int device);
-THC_API void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream);
 
 /* BLAS and sparse handles */
 THC_API cublasHandle_t THCState_getCurrentBlasHandle(THCState *state);

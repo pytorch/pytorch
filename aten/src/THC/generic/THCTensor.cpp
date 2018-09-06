@@ -50,7 +50,7 @@ int64_t THCTensor_(strideLegacyNoScalars)(THCState *state, const THCTensor *self
   return THTensor_strideLegacyNoScalars(self, dim);
 }
 
-real *THCTensor_(data)(THCState *state, const THCTensor *self)
+scalar_t *THCTensor_(data)(THCState *state, const THCTensor *self)
 {
   if(THTensor_getStoragePtr(self))
     return (THCStorage_(data)(state, THTensor_getStoragePtr(self))+self->storage_offset());
@@ -63,13 +63,13 @@ real *THCTensor_(data)(THCState *state, const THCTensor *self)
 /* Empty init */
 THCTensor *THCTensor_(new)(THCState *state)
 {
-  return new THCTensor(THCStorage_(new)(state), at::CUDATensorId(), false);
+  return c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(THCStorage_(new)(state), at::CUDATensorId(), false).release();
 }
 
 /* Pointer-copy init */
 THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 {
-  THCTensor *self = new THCTensor(THCStorage_(new)(state), at::CUDATensorId(), false);
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(THCStorage_(new)(state), at::CUDATensorId(), false).release();
   THCTensor_(setStorageNd)(state,
                            self,
                            THTensor_getStoragePtr(tensor),
@@ -85,7 +85,7 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
   if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
-  THCTensor *self = new THCTensor(THCStorage_(new)(state), at::CUDATensorId(), false);
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(THCStorage_(new)(state), at::CUDATensorId(), false).release();
   THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
 
@@ -354,7 +354,7 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
     self->set_size(d, self->size(d+1));
     self->set_stride(d, self->stride(d+1));
   }
-  self->resize_dim(self->dim() - 1);
+  self->resize_dim((unsigned int)(self->dim() - 1));
 }
 
 void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int dimension1, int dimension2)
@@ -524,56 +524,56 @@ void THCTensor_(resizeNd)(THCState *state, THCTensor *self, int nDimension, cons
   THCTensor_resizeNd(state, self, nDimension, size, stride);
 }
 
-void THCTensor_(set1d)(THCState *state, THCTensor *tensor, int64_t x0, real value)
+void THCTensor_(set1d)(THCState *state, THCTensor *tensor, int64_t x0, scalar_t value)
 {
   THArgCheck(THTensor_nDimensionLegacyNoScalars(tensor) == 1, 1, "tensor must have one dimension");
   THArgCheck( (x0 >= 0) && (x0 < THTensor_sizeLegacyNoScalars(tensor, 0)), 2, "out of range");
   THCStorage_(set)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*THTensor_strideLegacyNoScalars(tensor, 0), value);
 }
 
-real THCTensor_(get1d)(THCState *state, const THCTensor *tensor, int64_t x0)
+scalar_t THCTensor_(get1d)(THCState *state, const THCTensor *tensor, int64_t x0)
 {
   THArgCheck(THTensor_nDimensionLegacyNoScalars(tensor) == 1, 1, "tensor must have one dimension");
   THArgCheck( (x0 >= 0) && (x0 < THTensor_sizeLegacyNoScalars(tensor, 0)), 2, "out of range");
   return THCStorage_(get)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*THTensor_strideLegacyNoScalars(tensor, 0));
 }
 
-void THCTensor_(set2d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, real value)
+void THCTensor_(set2d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, scalar_t value)
 {
   THArgCheck(tensor->dim() == 2, 1, "tensor must have two dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)), 2, "out of range");
   THCStorage_(set)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1), value);
 }
 
-real THCTensor_(get2d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1)
+scalar_t THCTensor_(get2d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1)
 {
   THArgCheck(tensor->dim() == 2, 1, "tensor must have two dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)), 2, "out of range");
   return THCStorage_(get)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1));
 }
 
-void THCTensor_(set3d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, real value)
+void THCTensor_(set3d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, scalar_t value)
 {
   THArgCheck(tensor->dim() == 3, 1, "tensor must have three dimensions");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)) && (x2 >= 0) && (x2 < tensor->size(2)), 2, "out of range");
   THCStorage_(set)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1)+x2*tensor->stride(2), value);
 }
 
-real THCTensor_(get3d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2)
+scalar_t THCTensor_(get3d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2)
 {
   THArgCheck(tensor->dim() == 3, 1, "tensor must have three dimensions");
   THArgCheck( (x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)) && (x2 >= 0) && (x2 < tensor->size(2)), 2, "out of range");
   return THCStorage_(get)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1)+x2*tensor->stride(2));
 }
 
-void THCTensor_(set4d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3, real value)
+void THCTensor_(set4d)(THCState *state, THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3, scalar_t value)
 {
   THArgCheck(tensor->dim() == 4, 1, "tensor must have four dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)) && (x2 >= 0) && (x2 < tensor->size(2)) && (x3 >= 0) && (x3 < tensor->size(3)), 2, "out of range");
   THCStorage_(set)(state, THTensor_getStoragePtr(tensor), tensor->storage_offset()+x0*tensor->stride(0)+x1*tensor->stride(1)+x2*tensor->stride(2)+x3*tensor->stride(3), value);
 }
 
-real THCTensor_(get4d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3)
+scalar_t THCTensor_(get4d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3)
 {
   THArgCheck(tensor->dim() == 4, 1, "tensor must have four dimensions");
   THArgCheck((x0 >= 0) && (x0 < tensor->size(0)) && (x1 >= 0) && (x1 < tensor->size(1)) && (x2 >= 0) && (x2 < tensor->size(2)) && (x3 >= 0) && (x3 < tensor->size(3)), 2, "out of range");

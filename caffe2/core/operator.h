@@ -19,7 +19,7 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -370,7 +370,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
  public:
-  static constexpr int kNoNetPositionSet = -1;
+  static const int kNoNetPositionSet = -1;
 
  private:
   Workspace* operator_ws_;
@@ -447,7 +447,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 // run on different devices. You should then implement the RunOnDevice()
 // function.
 template <class Context>
-class CAFFE2_API Operator : public OperatorBase {
+class Operator : public OperatorBase {
  public:
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
@@ -799,12 +799,12 @@ typedef Registry<
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
     Workspace*>* (*RegistryFunction)();
-CAFFE2_API std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry();
+CAFFE2_API std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry();
 
 struct CAFFE2_API DeviceTypeRegisterer {
-  explicit DeviceTypeRegisterer(int32_t type, RegistryFunction func) {
+  explicit DeviceTypeRegisterer(DeviceType type, RegistryFunction func) {
     if (gDeviceTypeRegistry()->count(type)) {
-      std::cerr << "Device type " << type
+      std::cerr << "Device type " << DeviceTypeName(type)
                 << "registered twice. This should not happen. Did you have "
                    "duplicated numbers assigned to different devices?";
       std::exit(1);
@@ -835,7 +835,7 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR(name, ...)                           \
-  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();      \
+  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();\
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
   }                                                                \
@@ -854,7 +854,7 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR(name, ...)                           \
-  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
   }                                                                 \
@@ -879,7 +879,7 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR(name, ...)                           \
-  extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
   }                                                                 \
@@ -960,9 +960,9 @@ CAFFE2_API const std::string OpRegistryKey(
 using EnginePrefType = std::vector<std::string>;
 // {device_type -> {operator_name -> EnginePrefType}}
 using PerOpEnginePrefType =
-    CaffeMap<int, CaffeMap<std::string, EnginePrefType>>;
+    CaffeMap<DeviceType, CaffeMap<std::string, EnginePrefType>>;
 // {device_type -> EnginePrefType}
-using GlobalEnginePrefType = CaffeMap<int, EnginePrefType>;
+using GlobalEnginePrefType = CaffeMap<DeviceType, EnginePrefType>;
 CAFFE2_API void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref);
 CAFFE2_API void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref);
 CAFFE2_API void SetEnginePref(
@@ -970,7 +970,7 @@ CAFFE2_API void SetEnginePref(
     const GlobalEnginePrefType& global_engine_pref);
 CAFFE2_API void SetOpEnginePref(
     const std::string& op_type,
-    const CaffeMap<int, EnginePrefType>& op_pref);
+    const CaffeMap<DeviceType, EnginePrefType>& op_pref);
 
 CAFFE2_API TensorShape GetTensorShapeOfBlob(const Blob* b);
 

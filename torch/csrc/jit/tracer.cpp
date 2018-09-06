@@ -21,7 +21,9 @@ namespace detail {
 
 template<typename T>
 void genericAddInput(Node *n, T value) {
-  n->addInput(n->owningGraph()->insertConstant(value));
+  Value *v = n->owningGraph()->insertConstant(value);
+  recordSourceLocation(v->node());
+  n->addInput(v);
 }
 
 void badArgType() {
@@ -46,6 +48,16 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
   n->addInput(list_node->output());
 }
 
+void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
+  // [TensorOptions in script] - update this when you change how we schematize TensorOptions
+  detail::genericAddInput(n, static_cast<int64_t>(options.dtype()));
+  detail::genericAddInput(n, static_cast<int64_t>(options.layout()));
+  std::vector<int64_t> device = {
+      static_cast<int64_t>(options.device().type()),
+      static_cast<int64_t>(options.device().index())};
+  detail::genericAddInput(n, std::move(device));
+}
+
 void addInputs(Node *n, const char * name, at::IntList value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   std::vector<Value*> info = ArgumentStash::hasIntList(name) ?
@@ -56,6 +68,7 @@ void addInputs(Node *n, const char * name, at::IntList value) {
   for (size_t i = 0; i < info.size(); ++i) {
     if (info[i] != nullptr) continue;
     info[i] = g->insertConstant(value[i]);
+    recordSourceLocation(info[i]->node());
   }
   for (jit::Value* v : info) {
     if (*v->type() != *jit::IntType::get()) {
@@ -71,6 +84,25 @@ void addInputs(Node *n, const char * name, const ArrayRef<double>& value) {
   AT_ERROR("Tracing float lists currently not supported!");
 }
 
+void addOutput(Node* node, const at::Tensor& output) {
+  Value * value = node->addOutput();
+  if (output.defined()) {
+    value->inferTypeFrom(output);
+    setValueTrace(autograd::as_variable_ref(output), value);
+  }
+}
+
+void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
+  Value * value = node->addOutput()->setType(ListType::ofTensors());
+  Graph * graph = node->owningGraph();
+  Node * unpack_node = graph->appendNode(graph->create(prim::ListUnpack, {value}, outputs.size()));
+  for (size_t i = 0; i < outputs.size(); ++i) {
+    Value * output_val = unpack_node->outputs()[i];
+    output_val->inferTypeFrom(outputs[i]);
+    setValueTrace(outputs[i], output_val);
+  }
+}
+
 const std::shared_ptr<TracingState>& getTracingState() {
   return detail::tracing_state;
 }
@@ -84,26 +116,17 @@ TracingState::TracingState()
 
 TracingState::~TracingState() = default;
 
-void postRecordTrace(Node* node,
-                     at::ArrayRef<Variable> outputs) {
-  for (size_t i = 0; i < outputs.size(); i++) {
-    auto & output = outputs[i];
-    Value * value = node->addOutput();
-    if (output.defined()) {
-      value->inferTypeFrom(output.data());
-      setValueTrace(output, value);
-    }
-  }
-}
-
 autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto & tracing_state = getTracingState();
   auto & graph = tracing_state->graph;
 
-  auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
+  auto size_var = autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
   auto* value = getValueTrace(var);
   WithInsertPoint ipoint { graph->block() };
-  auto* node = graph->insertNode(graph->create(aten::size, {value, graph->insertConstant(dim)}));
+  auto dim_val = graph->insertConstant(dim);
+  recordSourceLocation(dim_val->node());
+  auto* node = graph->insertNode(graph->create(aten::size, {value, dim_val}));
+  recordSourceLocation(node);
   node->output()->setType(jit::IntType::get());
 
   auto ten =
@@ -144,6 +167,33 @@ void recordSourceLocation(Node* n) {
 }
 void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
+}
+
+void defaultWarn(const std::string& str) { AT_WARN(str); }
+std::atomic<warn_fn_type> warn_callback { defaultWarn };
+
+void _do_warn(const char * _reason) {
+  std::string reason { _reason };
+  std::ostringstream s;
+  s << std::string(reason);
+  s << " might cause the trace to be incorrect. We can't record the data flow of "
+       " Python values, which means the trace might not generalize to other inputs.";
+  warn_callback.load()(s.str());
+}
+
+void setWarn(warn_fn_type fn) {
+  warn_callback.store(fn);
+}
+
+void ensureUnique(const char * name, const at::Tensor& tensor) {
+  auto aliases = tensor.storage().use_count();
+  if (aliases > 1) {
+    std::stringstream ss;
+    ss << "There are " << aliases
+       << " live references to the tensor being modified when tracing in-place operator "
+       << name << " which ";
+    warn(ss.str().c_str());
+  }
 }
 
 }}}

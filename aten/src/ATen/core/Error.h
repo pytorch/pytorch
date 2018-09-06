@@ -19,7 +19,7 @@ namespace at {
 namespace detail {
 
 // Obtains the base name from a full path.
-std::string StripBasename(const std::string& full_path);
+AT_CORE_API std::string StripBasename(const std::string& full_path);
 
 inline std::ostream& _str(std::ostream& ss) {
   return ss;
@@ -56,7 +56,7 @@ inline std::string str(const char* c_str) {
 }
 
 /// Represents a location in source code (for debugging).
-struct SourceLocation {
+struct AT_CORE_API SourceLocation {
   const char* function;
   const char* file;
   uint32_t line;

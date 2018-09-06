@@ -64,6 +64,15 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
+# sccache will fail for CUDA builds if all cores are used for compiling
+if [ -z "$MAX_JOBS" ]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
+    MAX_JOBS=`expr $(nproc) - 1`
+  else
+    MAX_JOBS=$(nproc)
+  fi
+fi
+
 report_compile_cache_stats() {
   if [[ -n "${SCCACHE}" ]]; then
     "$SCCACHE" --show-stats
@@ -184,13 +193,6 @@ if [[ -x "$(command -v cmake3)" ]]; then
 else
     CMAKE_BINARY=cmake
 fi
-# sccache will fail for CUDA builds if all cores are used for compiling
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
-  MAX_JOBS=`expr $(nproc) - 1`
-else
-  MAX_JOBS=$(nproc)
-fi
-
 
 ###############################################################################
 # Configure and make
@@ -218,13 +220,21 @@ if [[ -z "$INTEGRATED" ]]; then
 
 else
 
+  # sccache will be stuck if  all cores are used for compiling
+  # see https://github.com/pytorch/pytorch/pull/7361
+  if [[ -n "${SCCACHE}" ]]; then
+    export MAX_JOBS=`expr $(nproc) - 1`
+  fi
+
   FULL_CAFFE2=1 python setup.py install --user
-  # TODO: I'm not sure why this is necessary
+
+  # This is to save test binaries for testing
   cp -r torch/lib/tmp_install $INSTALL_PREFIX
 
-fi
+  ls $INSTALL_PREFIX
 
-report_compile_cache_stats
+  report_compile_cache_stats
+fi
 
 
 ###############################################################################

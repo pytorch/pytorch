@@ -148,7 +148,7 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const 
     if(!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size()) {
+    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->numel()) {
       THCStorage_resize(state, THTensor_getStoragePtr(self), totalSize+self->storage_offset());
     }
   }
@@ -189,10 +189,10 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = THTensor_getStoragePtr(self)->scalar_type();
+    auto scalar_type = at::dataTypeToScalarType(THTensor_getStoragePtr(self)->dtype());
 
     if (storage) {
-      storage->_raw_incref();
+      c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     } else {
       THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, scalar_type));
@@ -227,7 +227,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
       self->set_size(d, self->size(d+1));
       self->set_stride(d, self->stride(d+1));
     }
-    self->resize_dim(self->dim() - 1);
+    self->resize_dim((unsigned int)(self->dim() - 1));
   }
 }
 
@@ -273,8 +273,9 @@ ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self) {
   }
 }
 
+// NB: It is INVALID to call this on an UndefinedTensor
 void THCTensor_retain(THCState *state, THCTensor *self) {
-  self->retain();
+  c10::raw::intrusive_ptr::incref(self);
 }
 
 void THCTensor_free(THCState *state, THCTensor *self) {

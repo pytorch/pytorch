@@ -144,8 +144,6 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
 
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
-
   virtual std::string kind() const override {
     std::stringstream ss;
     ss << "python value of type '" << typeString(self) << "'";
@@ -165,42 +163,6 @@ protected:
   py::object self;
 };
 
-// A Python value respresenting a custom op namespace object, like
-// `torch.ops.my_namespace`. When accessing an attribute, it is assumed that it
-// is the function under that custom op namespace we want to call, and a
-// `BuiltinFunction` value is returned for it.
-struct VISIBILITY_HIDDEN CustomOpNamespaceValue : public PythonValue {
-  explicit CustomOpNamespaceValue(py::object obj)
-      : PythonValue(std::move(obj)) {}
-
-  std::shared_ptr<SugaredValue> attr(
-      SourceRange loc,
-      Method& m,
-      const std::string& field) override {
-    py::object member = getattr(loc, field);
-    const auto op_namespace = py::cast<std::string>(self.attr("name"));
-    // The symbol name is the op namespace + the op (function) name, which is
-    // being accessed as the `field` here.
-    auto symbol = Symbol::fromQualString(op_namespace + "::" + field);
-    return std::make_shared<BuiltinFunction>(
-        std::move(symbol), at::nullopt);
-  }
-};
-
-// The `torch.ops` value. All it does is create `CustomOpNamespaceValue`
-// objects when accessing attributes under it, e.g. `torch.ops.my_namespace`.
-struct VISIBILITY_HIDDEN CustomOpsValue : public PythonValue {
-  explicit CustomOpsValue(py::object obj) : PythonValue(std::move(obj)) {}
-
-  std::shared_ptr<SugaredValue> attr(
-      SourceRange loc,
-      Method& m,
-      const std::string& field) override {
-    py::object member = getattr(loc, field);
-    return std::make_shared<CustomOpNamespaceValue>(member);
-  }
-};
-
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
   explicit PythonModuleValue(py::object mod) : PythonValue(mod) {}
 
@@ -209,37 +171,16 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
       Method& m,
       const std::string& field) override {
     py::object member = getattr(loc, field);
-    return toSugaredValue(member, m, loc);
+    // note: is_constant = true because we consider that global properties
+    // on modules like math.pi or torch.float to be constants
+    // eventhough it is possible, though rare, for someone to mutate them
+    return toSugaredValue(member, m, loc, /*is_constant=*/true);
   }
 };
-
-struct VISIBILITY_HIDDEN BuiltinPythonModuleValue : public PythonModuleValue {
-  explicit BuiltinPythonModuleValue(py::object mod) : PythonModuleValue(mod) {}
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-    // We support calling functions and using type/layout/device constants
-    // on the torch builtin modules
-    py::object member = getattr(loc, field);
-    if (py::isinstance<py::function>(member)) {
-      return std::make_shared<BuiltinFunction>(
-          Symbol::aten(field), at::nullopt);
-    } else if (field == "ops") {
-      return std::make_shared<CustomOpsValue>(member);
-    }
-    return toSugaredValue(member, m, loc, /*is_constant =*/true);
-  }
-};
-
-bool isBuiltinModule(py::object obj) {
-  // XXX: these can't be static, or they will be destructed after the Python interpreter
-  // exits and that generally sounds like a bad idea
-  py::object torch = py::module::import("torch");
-  py::object functional = py::module::import("torch.nn.functional");
-  return obj.is(torch) || obj.is(functional);
-}
 
 struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   explicit ConstantPythonTupleValue(py::object tup) : PythonValue(tup) {}
-  std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     result.reserve(tup.size());
@@ -249,15 +190,6 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
     return result;
   }
 };
-
-std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, const std::string& field) {
-  // We generally don't want to allow traversing arbitrary Python objects, but we
-  // make an exception for traversing modules because we want to be access
-  // torch, torch.nn.functional, and the functions they expose.
-  py::object member = getattr(loc, field);
-
-  return toSugaredValue(member, m, loc);
-}
 
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
@@ -321,10 +253,10 @@ struct ModuleValue : public SugaredValue {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override {
     py::object py_module = py::cast(module);
     if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
-      return SugaredValue::asTuple(loc, m);
+      return SugaredValue::asTuple(loc, m, size_hint);
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(py::handle module : py_module) {
       py::object obj = py::reinterpret_borrow<py::object>(module);
@@ -391,11 +323,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
-    if (isBuiltinModule(obj)) {
-      return std::make_shared<BuiltinPythonModuleValue>(obj);
-    } else {
-      return std::make_shared<PythonModuleValue>(obj);
-    }
+    return std::make_shared<PythonModuleValue>(obj);
+  }
+  py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
+  if (!builtin_name.is_none()) {
+    return std::make_shared<BuiltinFunction>(
+        Symbol::fromQualString(py::str(builtin_name)), at::nullopt);
   }
   return std::make_shared<PythonValue>(obj);
 }
@@ -552,11 +485,11 @@ void initJitScriptBindings(PyObject* module) {
           auto graph = tracer::createGraphByTracing(func, inputs, input_tuple.size());
           self.create_method(name, std::move(graph), std::move(parameters));
       })
-      .def("graph_for", [](Module& self, py::args args) {
+      .def("graph_for", [](Module& self, py::args args, py::kwargs kwargs) {
         if (self.find_method("forward")) {
           Method & m = self.get_method("forward");
           return m.graph_for(
-              evilDeprecatedBadCreateStackDoNotUse(args, m.graph()->inputs()));
+              createStackForSchema(m.getSchema(), std::move(args), std::move(kwargs)));
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       })
@@ -567,14 +500,14 @@ void initJitScriptBindings(PyObject* module) {
         }
         throw std::runtime_error("Attempted to call get_debug_state on a Module without a compiled forward()");
       })
-      .def("forward", [](Module& self, py::args args) {
+      .def("forward", [](Module& self, py::args args, py::kwargs kwargs) {
         // We implement this in C++ to avoid incurring the pybind11 dispatch
         // overhead twice: once to call into the method lookup for "forward"
         // and once to actually invoke the method.
         //
         // There is a thin wrapper on top of this method in the C++ version of
         // ScriptModule.
-        return invokeScriptMethodFromPython(self.get_method("forward"), args);
+        return invokeScriptMethodFromPython(self.get_method("forward"), std::move(args), std::move(kwargs));
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -588,14 +521,14 @@ void initJitScriptBindings(PyObject* module) {
     .def("propagate_shapes", &Method::propagate_shapes)
     .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
     .def("params", &Method::params)
-    .def("graph_for", [](Method& self, py::args args) {
-      return self.graph_for(evilDeprecatedBadCreateStackDoNotUse(args, self.graph()->inputs()));
+    .def("graph_for", [](Method& self, py::args args, py::kwargs kwargs) {
+      return self.graph_for(createStackForSchema(self.getSchema(), std::move(args), std::move(kwargs)));
     })
     .def("forward_schema", [](Method &self, Def &def, bool is_method) {
       auto schema = extractSchemaFromDef(def, is_method);
       self.setSchema(schema);
     })
-    .def("pretty_print_schema", &Method::prettyPrintSchema);
+    .def("pretty_print_schema", &Method::pretty_print_schema);
 
   m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
     return compileFunction(def, pythonResolver(rcb));

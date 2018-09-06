@@ -16,7 +16,7 @@ static void AddConstInput(
     const string& name,
     Workspace* ws) {
   DeviceOption option;
-  option.set_device_type(CUDA);
+  option.set_device_type(PROTO_CUDA);
   CUDAContext context(option);
   Blob* blob = ws->CreateBlob(name);
   auto* tensor = blob->GetMutableTensor(CUDA);
@@ -37,7 +37,7 @@ TEST(UtilityOpGPUTest, testReshapeWithScalar) {
   def.add_output("XNew");
   def.add_output("OldShape");
   def.add_arg()->CopyFrom(MakeArgument("shape", vector<int64_t>{1}));
-  def.mutable_device_option()->set_device_type(CUDA);
+  def.mutable_device_option()->set_device_type(PROTO_CUDA);
   AddConstInput(vector<TIndex>(), 3.14, "X", &ws);
   // execute the op
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));

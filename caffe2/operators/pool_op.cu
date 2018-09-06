@@ -1667,6 +1667,7 @@ bool PoolGradientOp<float, CUDAContext, MaxPool>::RunOnDeviceWithOrderNHWC() {
               stride_h(),
               pad_t(),
               dX->template mutable_data<float>());
+      break;
     case 2:
       MaxPool2DBackwardNHWC<float>
           <<<CAFFE_GET_BLOCKS(X.size()),

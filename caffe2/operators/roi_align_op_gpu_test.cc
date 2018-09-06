@@ -136,7 +136,8 @@ void CreateAndRun(
     def.add_input("X");
     def.add_input("R");
     def.add_output("Y");
-    def.mutable_device_option()->set_device_type(GetDeviceType<Context>());
+    def.mutable_device_option()->set_device_type(
+        TypeToProto(GetDeviceType<Context>()));
     def.add_arg()->CopyFrom(MakeArgument("spatial_scale", 1.0f / 16.0f));
     def.add_arg()->CopyFrom(MakeArgument("pooled_h", 6));
     def.add_arg()->CopyFrom(MakeArgument("pooled_w", 8));
@@ -151,7 +152,7 @@ void CreateAndRun(
     def_roialign.add_input("R");
     def_roialign.add_output("Y_NHWC");
     def_roialign.mutable_device_option()->set_device_type(
-        GetDeviceType<Context>());
+        TypeToProto(GetDeviceType<Context>()));
     def_roialign.add_arg()->CopyFrom(
         MakeArgument("spatial_scale", 1.0f / 16.0f));
     def_roialign.add_arg()->CopyFrom(MakeArgument("pooled_h", 6));
@@ -164,14 +165,16 @@ void CreateAndRun(
     def_x.set_type("NCHW2NHWC");
     def_x.add_input("X");
     def_x.add_output("X_NHWC");
-    def_x.mutable_device_option()->set_device_type(GetDeviceType<Context>());
+    def_x.mutable_device_option()->set_device_type(
+        TypeToProto(GetDeviceType<Context>()));
 
     OperatorDef def_y;
     def_y.set_name("test_y");
     def_y.set_type("NHWC2NCHW");
     def_y.add_input("Y_NHWC");
     def_y.add_output("Y");
-    def_y.mutable_device_option()->set_device_type(GetDeviceType<Context>());
+    def_y.mutable_device_option()->set_device_type(
+        TypeToProto(GetDeviceType<Context>()));
 
     ops.push_back(CreateOperator(def_x, &ws));
     ops.push_back(CreateOperator(def_roialign, &ws));

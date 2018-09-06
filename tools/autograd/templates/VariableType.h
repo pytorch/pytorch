@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 
+#include <ATen/TypeDefault.h>
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstdint> // for size_t
@@ -30,35 +32,32 @@ using at::optional;
 
 void register_variable_type_for(at::Type* baseType);
 
-struct TORCH_API VariableType final : public at::Type {
+struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::Type* baseType);
-  virtual at::ScalarType scalarType() const override;
-  virtual at::Backend backend() const override;
-  virtual bool is_cuda() const override;
-  virtual bool is_sparse() const override;
-  virtual bool is_distributed() const override;
-  virtual Storage storage(bool resizable = false) const override;
-  virtual Storage storage(size_t size, bool resizable = false) const override;
-  virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
-  virtual Storage storageWithAllocator(int64_t size, at::Allocator* allocator) const override;
-  virtual std::unique_ptr<at::Generator> generator() const override;
-  virtual const char * toString() const override;
-  virtual at::TypeID ID() const override;
-  virtual size_t elementSizeInBytes() const override;
-  virtual at::Type & toBackend(at::Backend b) const override;
-  virtual at::Type & toScalarType(at::ScalarType s) const override;
-  static const char * typeString();
-  virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
-  virtual at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
+  at::ScalarType scalarType() const override;
+  at::Backend backend() const override;
+  at::Allocator* allocator() const override;
+  at::Device getDeviceFromPtr(void * data) const override;
+  Storage storage(bool resizable = false) const override;
+  Storage storage(size_t size, bool resizable = false) const override;
+  Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
+  Storage storageWithAllocator(int64_t size, at::Allocator* allocator) const override;
+  std::unique_ptr<at::Generator> generator() const override;
+  const char * toString() const override;
+  at::TypeID ID() const override;
+  size_t elementSizeInBytes() const override;
+  at::Type & toBackend(at::Backend b) const override;
+  at::Type & toScalarType(at::ScalarType s) const override;
+  Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
+  at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
-  static at::Type* getType(const at::Type& baseType);
-  static at::Type* getType(const at::Tensor& tensor);
+  static at::Type* getVariableTypeFromBaseType(const at::Type& baseType);
   static bool isVariableType(const at::Type& type);
   static std::vector<at::Type*> allCUDATypes();
   static std::vector<at::Type*> allCPUTypes();
 
-  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
-  virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
+  Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
+  Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
   ${type_derived_method_declarations}
 
 private:

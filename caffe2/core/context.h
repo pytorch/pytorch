@@ -11,7 +11,7 @@
 #include "caffe2/core/event.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 #include "ATen/core/ATenCoreTest.h"
 #include "ATen/core/ArrayRef.h"
@@ -48,7 +48,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), CPU);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_CPU);
   }
 
   ~CPUContext() noexcept override {}

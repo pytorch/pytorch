@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 #include "ATen/Tensor.h"
 #include "ATen/Type.h"
 
@@ -9,7 +9,12 @@
 
 namespace at {
 
-
+inline Tensor & Tensor::operator=(Tensor const & rhs) && {
+  return copy_(rhs);
+}
+inline Tensor & Tensor::operator=(Tensor && rhs) && {
+  return copy_(rhs);
+}
 inline Tensor & Tensor::operator=(Scalar v) && {
   return fill_(v);
 }
@@ -42,9 +47,8 @@ inline Tensor& Tensor::operator/=(Scalar other) {
 }
 inline Tensor Tensor::operator[](Scalar index) const {
   AT_CHECK(
-      index.local().isIntegral(),
-      "Can only index tensors with integral scalars (got ",
-      index.toTensor().type().toString(), ")");
+      index.isIntegral(),
+      "Can only index tensors with integral scalars");
   return select(0, index.toLong());
 }
 inline Tensor Tensor::operator[](Tensor index) const {

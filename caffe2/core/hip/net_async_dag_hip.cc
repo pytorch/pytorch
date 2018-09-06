@@ -24,7 +24,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 #include "caffe2/core/hip/context_hip.h"
@@ -88,20 +88,18 @@ AsyncDAGNet::AsyncDAGNet(const std::shared_ptr<const NetDef>& net_def, Workspace
 int AsyncDAGNet::stream(const DeviceOption& device_option)
 {
     int stream_id = 0;
-    if(device_option.device_type() == HIP)
-    {
-        int gpu_id = device_option.hip_gpu_id();
-        CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
-        if((unsigned)gpu_id >= stream_counters_.size())
-        {
-            stream_counters_.resize(gpu_id + 1, 0);
-        }
-        do
-        {
-            stream_id = stream_counters_[gpu_id]++;
-            stream_counters_[gpu_id] %= FLAGS_caffe2_streams_per_gpu;
-        } while(FLAGS_caffe2_net_async_check_stream_status &&
-                !HIPContext::IsStreamFree(device_option, stream_id));
+    if (device_option.device_type() == PROTO_HIP) {
+      int gpu_id = device_option.hip_gpu_id();
+      CAFFE_ENFORCE_GE(
+          gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
+      if ((unsigned)gpu_id >= stream_counters_.size()) {
+        stream_counters_.resize(gpu_id + 1, 0);
+      }
+      do {
+        stream_id = stream_counters_[gpu_id]++;
+        stream_counters_[gpu_id] %= FLAGS_caffe2_streams_per_gpu;
+      } while (FLAGS_caffe2_net_async_check_stream_status &&
+               !HIPContext::IsStreamFree(device_option, stream_id));
     }
     return stream_id;
 }

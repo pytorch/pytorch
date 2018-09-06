@@ -920,6 +920,15 @@
 - func: is_sparse(Tensor self) -> bool
   device_guard: false
 
+- func: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+
+- func: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
+  variants: function
+  dispatch:
+    CPU: kl_div_backward_cpu
+    CUDA: kl_div_backward_cuda
+
 - func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
 
 - func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
@@ -1227,6 +1236,15 @@
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
 
+- func: pdist(Tensor self, double p=2) -> Tensor
+  variants: function
+
+- func: _pdist_forward(Tensor self, double p=2) -> Tensor
+  variants: function
+
+- func: _pdist_backward(Tensor grad, Tensor self, double p, Tensor pdist) -> Tensor
+  variants: function
+
 - func: permute(Tensor self, IntList dims) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
@@ -1476,6 +1494,10 @@
     CPU: _sinh_out_cpu
     CUDA: _sinh_out_cuda
 
+- func: detach(Tensor self) -> Tensor
+
+- func: detach_(Tensor self) -> Tensor
+
 - func: size(Tensor self, int64_t dim) -> int64_t
   device_guard: false
 
@@ -1699,6 +1721,9 @@
     CPU: _tanh_out_cpu
     CUDA: _tanh_out_cuda
 
+- func: tensordot(Tensor self, Tensor other, IntList dims_self, IntList dims_other) -> Tensor
+  variants: function
+
 - func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
@@ -1738,6 +1763,11 @@
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
+
+- func: _unique_dim(Tensor self, int64_t dim, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _unique_dim_cpu
+    CUDA: _unique_dim_cuda
 
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function
@@ -1978,9 +2008,9 @@
     SparseCUDA: sparse_resize_
 
 - func: sparse_resize_and_clear_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
-  variants: method  
-  dispatch: 
-    SparseCPU: sparse_resize_and_clear_ 
+  variants: method
+  dispatch:
+    SparseCPU: sparse_resize_and_clear_
     SparseCUDA: sparse_resize_and_clear_
 
 
@@ -2180,4 +2210,14 @@
   variants: function
 
 - func: rnn_relu_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih={}, Tensor? b_hh={}) -> Tensor
+  variants: function
+
+# PackedSequence utilities
+- func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
+  variants: function
+
+- func: _pack_padded_sequence_backward(Tensor grad, IntList input_size, Tensor batch_sizes, bool batch_first) -> Tensor
+  variants: function
+
+- func: _pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, int64_t total_length) -> (Tensor, Tensor)
   variants: function

@@ -9,7 +9,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 CAFFE2_DECLARE_bool(caffe2_workspace_stack_debug);
 

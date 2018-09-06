@@ -210,8 +210,8 @@ inline at::Tensor PythonArgs::tensor(int i) {
       throw TypeError("expected Tensor as argument %d, but got %s", i,
           Py_TYPE(obj)->tp_name);
     }
-    auto tensor = scalar.toTensor();
-    tensor.get()->set_wrapped_number(true);
+    auto tensor = scalar_to_tensor(scalar);
+    tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
     return autograd::make_variable(tensor);
   }
   return reinterpret_cast<THPVariable*>(obj)->cdata;

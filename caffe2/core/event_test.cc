@@ -6,7 +6,7 @@ namespace caffe2 {
 
 TEST(EventCPUTest, EventBasics) {
   DeviceOption device_option;
-  device_option.set_device_type(CPU);
+  device_option.set_device_type(PROTO_CPU);
   Event event(device_option);
   CPUContext context;
 

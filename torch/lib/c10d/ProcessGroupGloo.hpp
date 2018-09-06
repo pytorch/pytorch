@@ -276,6 +276,8 @@ class ProcessGroupGloo : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> barrier() override;
 
+  std::unordered_map<int, int> getGroupRank() override;
+
  protected:
   using KeyType = AlgorithmKey;
   using EntryType = std::unique_ptr<AlgorithmEntry>;

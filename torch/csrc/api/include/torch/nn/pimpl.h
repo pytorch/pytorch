@@ -12,7 +12,7 @@ namespace detail {
 /// This class exists  only to do SFINAE on abstract types `T` that are really
 /// `ModuleHolder<ModuleType>`, because there's no good way to say that `T` is a
 /// `ModuleHolder` over some unknown type `ModuleType`. With this, you can do
-/// enable_if_t<is_base_of<ModuleHolderIndicator, T>::value>::type.
+/// `enable_if_t<is_base_of_v<ModuleHolderIndicator, T>>`.
 struct ModuleHolderIndicator {};
 
 template <typename T>
@@ -155,31 +155,31 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 } // namespace nn
 } // namespace torch
 
-#define TORCH_ARG(T, name)                          \
-  auto name(const T& new_##name)->decltype(*this) { \
-    this->name##_ = new_##name;                     \
-    return *this;                                   \
-  }                                                 \
-  auto name(T&& new_##name)->decltype(*this) {      \
-    this->name##_ = std::move(new_##name);          \
-    return *this;                                   \
-  }                                                 \
-  const T& name() const noexcept {                  \
-    return this->name##_;                           \
-  }                                                 \
-  T name##_
+#define TORCH_ARG(T, name)                                       \
+  auto name(const T& new_##name)->decltype(*this) { /* NOLINT */ \
+    this->name##_ = new_##name;                                  \
+    return *this;                                                \
+  }                                                              \
+  auto name(T&& new_##name)->decltype(*this) { /* NOLINT */      \
+    this->name##_ = std::move(new_##name);                       \
+    return *this;                                                \
+  }                                                              \
+  const T& name() const noexcept { /* NOLINT */                  \
+    return this->name##_;                                        \
+  }                                                              \
+  T name##_ /* NOLINT */
 
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
 /// wrapper over a `std::shared_ptr<Impl>`.
-#define TORCH_MODULE_IMPL(Name, Impl)                            \
-  class Name : public torch::nn::ModuleHolder<Impl> {            \
-   public:                                                       \
-    using torch::nn::ModuleHolder<Impl>::ModuleHolder;           \
-    Name(const Name&) = default;                                 \
-    Name(Name&&) = default;                                      \
-    Name(Name& other) : Name(static_cast<const Name&>(other)) {} \
-    Name& operator=(const Name&) = default;                      \
-    Name& operator=(Name&&) = default;                           \
+#define TORCH_MODULE_IMPL(Name, Impl)                                         \
+  class Name : public torch::nn::ModuleHolder<Impl> { /* NOLINT */            \
+   public:                                                                    \
+    using torch::nn::ModuleHolder<Impl>::ModuleHolder;                        \
+    Name(const Name&) = default; /* NOLINT */                                 \
+    Name(Name&&) = default; /* NOLINT */                                      \
+    Name(Name& other) : Name(static_cast<const Name&>(other)) {} /* NOLINT */ \
+    Name& operator=(const Name&) = default; /* NOLINT */                      \
+    Name& operator=(Name&&) = default; /* NOLINT */                           \
   }
 
 /// Like `TORCH_MODULE_IMPL`, but defaults the `Impl` name to `<Name>Impl`.

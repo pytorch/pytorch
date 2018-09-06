@@ -13,6 +13,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const override;
   std::unique_ptr<Generator> initCUDAGenerator(Context*) const override;
   bool hasCUDA() const override;
+  bool hasMAGMA() const override;
   bool hasCuDNN() const override;
   int64_t current_device() const override;
   Allocator* getPinnedMemoryAllocator() const override;

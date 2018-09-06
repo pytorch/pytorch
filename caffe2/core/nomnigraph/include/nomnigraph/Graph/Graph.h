@@ -1,9 +1,5 @@
 //===- nomnigraph/Graph/Graph.h - Basic graph implementation ----*- C++ -*-===//
 //
-// TODO Licensing.
-//
-//===----------------------------------------------------------------------===//
-//
 // This file defines a basic graph API for generic and flexible use with
 // graph algorithms.
 //
@@ -12,6 +8,7 @@
 #ifndef NOM_GRAPH_GRAPH_H
 #define NOM_GRAPH_GRAPH_H
 
+#include "caffe2/core/common.h"
 #include "nomnigraph/Support/Common.h"
 
 #include <algorithm>
@@ -87,6 +84,9 @@ class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
   }
   /// \brief Create an empty node.
   explicit Node() : StorageType<T>() {}
+  Node(Node&&) = default;
+  Node(const Node&) = delete;
+  Node& operator=(const Node&) = delete;
 
   /// \brief Adds an edge by reference to known in-edges.
   /// \p e A reference to an edge that will be added as an in-edge.
@@ -244,27 +244,8 @@ class Graph {
     return createNodeInternal(Node<T, U...>());
   }
 
-  void importNode(NodeRef node, Graph<T, U...>& otherGraph) {
-    for (auto it = nodes_.begin(); it != nodes_.end(); ++it) {
-      if (&(*it) == node) {
-        std::list<Node<T, U...>>& otherNodes = otherGraph.nodes_;
-        otherNodes.splice(otherNodes.end(), nodes_, it, ++it);
-        otherGraph.nodeRefs_.insert(node);
-        break;
-      }
-    }
-  }
-
-  void importEdge(EdgeRef edge, Graph<T, U...>& otherGraph) {
-    std::list<Edge<T, U...>>& otherEdges = otherGraph.edges_;
-    for (auto it = edges_.begin(); it != edges_.end(); ++it) {
-      if (&(*it) == edge) {
-        otherEdges.splice(otherEdges.end(), edges_, it, ++it);
-        break;
-      }
-    }
-  }
-
+  // Swap two nodes.
+  // Any edge V -> N1 becomes V -> N2, and N1 -> V becomes N2 -> V.
   void swapNodes(NodeRef n1, NodeRef n2) {
     // First rectify the edges
     for (auto& inEdge : n1->getInEdges()) {
@@ -291,34 +272,14 @@ class Graph {
     n2->setInEdges(n1InEdges);
   }
 
-  /// \brief Replace a node in the graph with a generic
-  /// set of nodes.
+  /// \brief Replace a node in the graph with another node.
   /// \note The node replaced simply has its edges cut, but it not
   /// deleted from the graph.  Call Graph::deleteNode to delete it.
-  /// \p old A node to be replaced in the graph.
-  /// \p newTail The node that inherit the old node's in-edges
-  /// \p newHead (optional) The node that inherit the old node's out-edges
-  void replaceNode(
-      const NodeRef& old,
-      const NodeRef& newTail,
-      const NodeRef& newHead_ = nullptr) {
-    // If no newHead is specified, make the tail the head as well.
-    // We are effectively replacing the node with one node in this case.
-    const NodeRef newHead = newHead_ ? newHead_ : newTail;
-    const auto inEdges = old->getInEdges();
-    const auto outEdges = old->getOutEdges();
-
-    for (const auto& inEdge : inEdges) {
-      inEdge->setHead(newTail);
-      old->removeInEdge(inEdge);
-      newTail->addInEdge(inEdge);
-    }
-
-    for (const auto& outEdge : outEdges) {
-      outEdge->setTail(newHead);
-      old->removeOutEdge(outEdge);
-      newTail->addOutEdge(outEdge);
-    }
+  /// \p oldNode A node to be replaced in the graph.
+  /// \p newNode The node that inherit the old node's in-edges and out-edges.
+  void replaceNode(const NodeRef& oldNode, const NodeRef& newNode) {
+    replaceInEdges(oldNode, newNode);
+    replaceOutEdges(oldNode, newNode);
   }
 
   // All out-edges oldNode -> V will be replaced with newNode -> V
@@ -357,36 +318,46 @@ class Graph {
     return e;
   }
 
-  /// \brief Get a reference to the edge between two nodes if it exists.
-  /// note: will fail assertion if the edge does not exist.
-  EdgeRef getEdge(NodeRef tail, NodeRef head) const {
+  /// \brief Get a reference to the edge between two nodes if it exists. Returns
+  /// nullptr if the edge does not exist.
+  EdgeRef getEdgeIfExists(NodeRef tail, NodeRef head) const {
     for (auto& inEdge : head->getInEdges()) {
       if (inEdge->tail() == tail) {
         return inEdge;
       }
     }
-    assert(0 && "Edge doesn't exist.");
     return nullptr;
+  }
+
+  /// \brief Returns true if there is an edge between the given two nodes.
+  bool hasEdge(NodeRef tail, NodeRef head) const {
+    return getEdgeIfExists(tail, head);
+  }
+
+  /// \brief Get a reference to the edge between two nodes if it exists.
+  /// note: will fail assertion if the edge does not exist.
+  EdgeRef getEdge(NodeRef tail, NodeRef head) const {
+    auto result = getEdgeIfExists(tail, head);
+    assert(result && "Edge doesn't exist.");
+    return result;
   }
 
   /// \brief Deletes a node from the graph.
   /// \param n A reference to the node.
-  /// \param deleteEdges (optional) Whether or not to delete the edges
-  /// related to the node.
-  void deleteNode(NodeRef n, bool deleteEdges = true) {
+  void deleteNode(NodeRef n) {
     if (!hasNode(n)) {
       return;
     }
-    if (deleteEdges) {
-      auto inEdges = n->inEdges_;
-      for (auto& edge : inEdges) {
-        deleteEdge(edge);
-      }
-      auto outEdges = n->outEdges_;
-      for (auto& edge : outEdges) {
-        deleteEdge(edge);
-      }
+
+    auto inEdges = n->inEdges_;
+    for (auto& edge : inEdges) {
+      deleteEdge(edge);
     }
+    auto outEdges = n->outEdges_;
+    for (auto& edge : outEdges) {
+      deleteEdge(edge);
+    }
+
     for (auto i = nodes_.begin(); i != nodes_.end(); ++i) {
       if (&*i == n) {
         nodeRefs_.erase(n);
@@ -397,11 +368,9 @@ class Graph {
   }
 
   // Delete all nodes in the set.
-  void deleteNodes(
-      const std::unordered_set<NodeRef>& nodes,
-      bool deleteEdges = true) {
+  void deleteNodes(const std::unordered_set<NodeRef>& nodes) {
     for (auto node : nodes) {
-      deleteNode(node, deleteEdges);
+      deleteNode(node);
     }
   }
 
@@ -411,11 +380,9 @@ class Graph {
 
   /// \brief Deletes a edge from the graph.
   /// \p e A reference to the edge.
-  void deleteEdge(EdgeRef e, bool removeRef = true) {
-    if (removeRef) {
-      e->tail_->removeOutEdge(e);
-      e->head_->removeInEdge(e);
-    }
+  void deleteEdge(EdgeRef e) {
+    e->tail_->removeOutEdge(e);
+    e->head_->removeInEdge(e);
     for (auto i = edges_.begin(); i != edges_.end(); ++i) {
       if (&*i == e) {
         edges_.erase(i);

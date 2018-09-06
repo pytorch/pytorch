@@ -16,6 +16,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -627,7 +628,7 @@ Caffe2Ops Caffe2Backend::CreateGather(
     BuildOperator(c2_op, "BatchGather", inputs, outputs);
   } else {
     CAFFE_THROW(
-        "Caffe2 only supports Gather with axis being 1 or 2, ",
+        "Caffe2 only supports Gather with axis being 0 or 1, ",
         "whereas axis is ",
         axis);
   }
@@ -707,7 +708,8 @@ Caffe2Ops Caffe2Backend::CreateGemm(
           input_b_vi_iter->second.type().tensor_type().shape();
       int input_b_last_dim_index = (trans_b) ? 0 : 1;
       // If b's last dim is not 1, skip FC.
-      if (input_b_shape.dim(input_b_last_dim_index).dim_value() != 1) {
+      if (input_b_shape.dim_size() <= input_b_last_dim_index ||
+          input_b_shape.dim(input_b_last_dim_index).dim_value() != 1) {
         return false;
       }
     }
@@ -843,7 +845,7 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   auto pos = args.find("starts");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
-      starts_vals.add_ints(i);
+      starts_vals.add_ints(i < 0 ? i - 1 : i);
     }
     args.erase(pos);
   }
@@ -853,7 +855,11 @@ Caffe2Ops Caffe2Backend::CreateSlice(
   pos = args.find("ends");
   if (pos != args.end()) {
     for (auto i : pos->second->ints()) {
-      ends_vals.add_ints(i < 0 ? i - 1 : i);
+      if (i == std::numeric_limits<int64_t>::max()) {
+        ends_vals.add_ints(-1);
+      } else {
+        ends_vals.add_ints(i < 0 ? i - 1 : i);
+      }
     }
     args.erase(pos);
   }

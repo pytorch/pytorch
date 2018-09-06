@@ -110,7 +110,7 @@ RegisterOperators reg({
           return [](Stack& stack) {
             at::Scalar s;
             pop(stack, s);
-            push(stack, autograd::make_variable(s.toTensor()));
+            push(stack, autograd::make_variable(at::scalar_to_tensor(s)));
             return 0;
           };
         }),
@@ -136,6 +136,14 @@ RegisterOperators reg({
         }),
     Operator(
         prim::Undefined,
+        [](Node* node) {
+          return [](Stack& stack) {
+            stack.push_back(at::Tensor());
+            return 0;
+          };
+        }),
+    Operator(
+        prim::NoneGenerator,
         [](Node* node) {
           return [](Stack& stack) {
             stack.push_back(at::Tensor());
@@ -269,6 +277,72 @@ RegisterOperators reg({
             push(stack, Tuple::create(std::move(elems)));
             return 0;
           };
+        }),
+    Operator(
+        prim::ConstantChunk,
+        [](Node* node) {
+          int64_t chunks = node->i(attr::chunks);
+          int64_t dim = node->i(attr::dim);
+          auto outputs_used = fmap(node->outputs(), [](Value *v) { return v->uses().size() > 0; });
+          return [=](Stack& stack) {
+            autograd::profiler::RecordFunction record("chunk");
+            at::Tensor t;
+            pop(stack, t);
+            auto result = at::chunk(t, chunks, dim);
+            stack.insert(stack.end(), std::make_move_iterator(result.begin()),
+                                      std::make_move_iterator(result.end()));
+            // NB: Chunk can sometimes return a smaller number of outputs.
+            int64_t num_results = result.size();
+            if (num_results != chunks) {
+              if (num_results > chunks) {
+                JIT_ASSERTM(num_results == chunks,
+                            "Expected chunk to return ", chunks, " outputs, but got ", num_results);
+              }
+              for (int64_t i = num_results; i < chunks; ++i) {
+                AT_CHECK(!outputs_used[i],
+                         "Expected chunk to return at least ", chunks, " outputs, but got only ", num_results);
+                // We know that the output is unused, so it's ok to push anything on the stack.
+                stack.emplace_back();
+              }
+            }
+            return 0;
+          };
+        }),
+    Operator(
+        prim::ListUnpack,
+        [](Node* node) -> Operation {
+          size_t num_outputs = node->outputs().size();
+          ListTypePtr lt = node->input()->type()->expect<ListType>();
+          if (lt->getElementType() == IntType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toIntList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else if (lt->getElementType() == FloatType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toDoubleList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else if (lt->getElementType() == DynamicType::get()) {
+            return [=](Stack& stack) {
+              auto ilist = pop(stack);
+              const auto & list = ilist.toTensorList()->elements();
+              AT_CHECK(list.size() == num_outputs,
+                       "Expected ", num_outputs, " elements in a list but found ", list.size());
+              stack.insert(stack.end(), list.begin(), list.end());
+              return 0;
+            };
+          } else {
+            AT_ERROR("Unsupported list type: ", lt->getElementType()->str());
+          }
         }),
     Operator(
         prim::ListConstruct,
@@ -542,8 +616,31 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)
     DEFINE_BINARY_OP(aten::mul, a * b)
-    DEFINE_BINARY_OP(aten::div, a / b)
     DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b)))
+
+    // TODO: Support python floordiv (//)
+    // Right now aten::floordiv is only used by loop unrolling
+    DEFINE_INT_OP(aten::floordiv, a / b)
+
+    // NB: This is the python truediv operation
+    Operator("aten::div(int a, int b) -> float",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            int64_t a, b;
+            pop(stack, a, b);
+            push(stack, static_cast<double>(a) / static_cast<double>(b));
+            return 0;
+          };
+        }),
+    Operator("aten::div(float a, float b) -> float",
+        [](Node* node) {
+          return [=](Stack& stack) {
+            double a, b;
+            pop(stack, a, b);
+            push(stack, a / b);
+            return 0;
+          };
+        }),
 
     DEFINE_COMPARISON_OP(aten::ne, a != b)
     DEFINE_COMPARISON_OP(aten::eq, a == b)

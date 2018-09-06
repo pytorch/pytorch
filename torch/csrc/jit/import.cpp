@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/operator.h"
 
 #include <ATen/ATen.h>
 
@@ -205,7 +206,7 @@ class ModuleDecoder : DecoderBase {
       const std::string fullname);
 
   PyTorchFileReader file_reader_;
-  std::unordered_map<uint64_t, std::shared_ptr<at::Tensor>> storage_map_;
+  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
   std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
@@ -223,11 +224,19 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   if (kind == "DynamicType") {
     return DynamicType::get();
   } else if (kind == "TensorType") {
-    // TODO: Don't use DynamicType here
-    return DynamicType::get();
+    auto dims = shape_proto.dim_size();
+    return TensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, dims);
   } else if (kind == "CompleteTensorType") {
-    // TODO: Don't use DynamicType here
-    return DynamicType::get();
+    // first half of the dims are sizes and the second half are strides
+    auto total = shape_proto.dim_size();
+    std::vector<int64_t> sizes, strides;
+    for (int i = 0; i < total / 2; i++) {
+      sizes.push_back(shape_proto.dim(i).dim_value());
+    }
+    for (int i = total / 2; i < total; i++) {
+      strides.push_back(shape_proto.dim(i).dim_value());
+    }
+    return CompleteTensorType::create(onnxTypeToATenType(tensortype_proto.elem_type()), -1, sizes, strides);
   } else if (kind == "TupleType") {
     std::vector<TypePtr> elems;
     for (auto &subkind : shape_proto.dim()) {
@@ -298,21 +307,22 @@ at::Tensor ModuleDecoder::buildTensorCommon(
   std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
 
   // Find or create the storage
-  at::Tensor *storage_tensor;
   auto storage_it = storage_map_.find(record_number);
   if (storage_it == storage_map_.end()) {
-    auto storage = std::make_shared<at::Tensor>(at::CPU(type).tensor());
-    auto record = file_reader_.getRecordWithKey(record_number);
-    storage->resize_({ static_cast<int64_t>(std::get<1>(record)) });
-    std::memcpy(storage->storage().data(), std::get<0>(record).get(), std::get<1>(record));
+    at::DataPtr storage_ptr;
+    int64_t size;
+    std::tie(storage_ptr, size) = file_reader_.getRecordWithKey(record_number);
+    auto storage = std::make_shared<at::Storage>(
+      at::CPU(type).scalarType(),
+      std::move(storage_ptr),
+      size,
+      nullptr);
     storage_map_.insert(std::make_pair(record_number, storage));
-    storage_tensor = storage.get();
-  } else {
-    storage_tensor = storage_it->second.get();
+    return at::CPU(type).tensor(*storage, storage_offset, dims, strides);
   }
 
-  return at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
-      storage_tensor->storage(), storage_offset, dims, strides);
+  auto storage = storage_it->second.get();
+  return at::CPU(type).tensor(*storage, storage_offset, dims, strides);
 }
 
 // Given a full name of a parameter or method,
@@ -369,7 +379,13 @@ ModuleDecoder::ModuleDecoder(
     }
 
     auto graph = buildGraph(node_proto.attribute(0).g());
+    // has_domain field has a string iff the method was optimized
+    parent_module->set_optimized(node_proto.has_domain());
     parent_module->create_method(name, graph, member_inputs);
+    // We store the schema in the docstring so we can parse the schema and
+    // assign it to the method.
+    auto schema = parseSchema(node_proto.doc_string());
+    parent_module->get_method(name).setSchema(std::move(schema));
   }
 }
 
