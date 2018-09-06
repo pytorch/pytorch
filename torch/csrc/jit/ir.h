@@ -150,6 +150,7 @@ public:
     }
     Scope* parent = this->parent_;
     while (!parent->isRoot()) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       out = std::string(parent->name_.toUnqualString()) + separator + out;
       parent = parent->parent_;
     }
@@ -181,7 +182,7 @@ private:
   std::string unique_name_;
   TypePtr type_;
 public:
-  Value* setType(const TypePtr type);
+  Value* setType(TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
     setType(CompleteTensorType::create(output));
   }
@@ -368,7 +369,7 @@ public:
   }
   bool hasUses() const {
     for(auto o : outputs()) {
-      if(o->uses().size() > 0)
+      if(!o->uses().empty())
         return true;
     }
     return false;
@@ -890,7 +891,7 @@ public:
   Graph(std::shared_ptr<Scope> scope_root)
   : next_unique_(0)
   , new_node_stage_(0)
-  , scope_root_(scope_root)
+  , scope_root_(std::move(scope_root))
   , current_scope_(scope_root_.get())
   , block_(new Block(this, nullptr))
   , insert_before_(return_node()) {}
@@ -1261,7 +1262,7 @@ inline Node::Node(Graph * graph_, NodeKind kind_) :
 
 inline void Node::eraseOutput(size_t i) {
   JIT_ASSERT(i < outputs_.size());
-  JIT_ASSERT(outputs_[i]->uses().size() == 0);
+  JIT_ASSERT(outputs_[i]->uses().empty());
   schema_ = nullptr;
   Value * n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
@@ -1286,9 +1287,9 @@ inline void Node::eraseBlock(size_t i) {
 }
 
 inline void Node::destroy() {
-  while(outputs().size() > 0)
+  while(!outputs().empty())
     eraseOutput(outputs().size() - 1);
-  while(blocks().size() > 0)
+  while(!blocks().empty())
     eraseBlock(blocks().size() - 1);
   removeAllInputs();
   if(inBlockList())
@@ -1422,13 +1423,13 @@ inline Node* Graph::createPythonOp(
 }
 
 inline graph_node_list_iterator Node::iterator() {
-  return graph_node_list_iterator(this, 0);
+  return {this, 0};
 }
 inline graph_node_list_iterator Node::reverseIterator() {
   return iterator().reverse();
 }
 inline const_graph_node_list_iterator Node::iterator() const {
-  return const_graph_node_list_iterator(this, 0);
+  return {this, 0};
 }
 inline const_graph_node_list_iterator Node::reverseIterator() const {
   return iterator().reverse();
