@@ -90,10 +90,10 @@ class DistributedDataParallel(Module):
         :meth:`forward` method.
 
     Args:
-        module: module to be parallelized
-        device_ids: CUDA devices (default: all devices)
-        output_device: device location of output (default: device_ids[0])
-        broadcast_buffers: flag that enables syncing (broadcasting) buffers of
+        module (Module): module to be parallelized
+        device_ids (list of int or torch.device): CUDA devices (default: all devices)
+        output_device (int or torch.device): device location of output (default: device_ids[0])
+        broadcast_buffers (bool): flag that enables syncing (broadcasting) buffers of
                            the module at beginning of the forward function.
                            (default: True)
         process_group: the c10d process group to be used for distributed data
