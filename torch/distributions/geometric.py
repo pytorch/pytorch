@@ -49,8 +49,8 @@ class Geometric(Distribution):
         if not instance and type(self).__init__ is not Geometric.__init__:
             raise NotImplementedError("Subclasses that define a custom __init__ method "
                                       "must also define a custom .expand() method")
-        batch_shape = torch.Size(batch_shape)
         new = self.__new__(type(self)) if not instance else instance
+        batch_shape = torch.Size(batch_shape)
         if 'probs' in self.__dict__:
             new.probs = self.probs.expand(batch_shape)
         else:

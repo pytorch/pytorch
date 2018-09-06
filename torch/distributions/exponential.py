@@ -45,8 +45,8 @@ class Exponential(ExponentialFamily):
         if not instance and type(self).__init__ is not Exponential.__init__:
             raise NotImplementedError("Subclasses that define a custom __init__ method "
                                       "must also define a custom .expand() method")
-        batch_shape = torch.Size(batch_shape)
         new = self.__new__(type(self)) if not instance else instance
+        batch_shape = torch.Size(batch_shape)
         new.rate = self.rate.expand(batch_shape)
         super(Exponential, new).__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args

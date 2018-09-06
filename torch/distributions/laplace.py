@@ -47,8 +47,8 @@ class Laplace(Distribution):
         if not instance and type(self).__init__ is not Laplace.__init__:
             raise NotImplementedError("Subclasses that define a custom __init__ method "
                                       "must also define a custom .expand() method")
-        batch_shape = torch.Size(batch_shape)
         new = self.__new__(type(self)) if not instance else instance
+        batch_shape = torch.Size(batch_shape)
         new.loc = self.loc.expand(batch_shape)
         new.scale = self.scale.expand(batch_shape)
         super(Laplace, new).__init__(batch_shape, validate_args=False)

@@ -126,7 +126,7 @@ class LowRankMultivariateNormal(Distribution):
         new.loc = self.loc.expand(loc_shape)
         new.cov_diag = self.cov_diag.expand(loc_shape)
         new.cov_factor = self.cov_factor.expand(loc_shape + self.cov_factor.shape[-1:])
-        new._capacitance_tril = self._capacitance_tril
+        new._capacitance_tril = self._capacitance_tril.expand(batch_shape + self._capacitance_tril.shape[-2:])
         super(LowRankMultivariateNormal, new).__init__(batch_shape,
                                                        self.event_shape,
                                                        validate_args=False)
