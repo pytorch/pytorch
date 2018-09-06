@@ -48,7 +48,7 @@ class Normal(ExponentialFamily):
             batch_shape = self.loc.size()
         super(Normal, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Normal)
         new.loc = self.loc.expand(batch_shape)

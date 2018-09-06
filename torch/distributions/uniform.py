@@ -50,7 +50,7 @@ class Uniform(Distribution):
         if self._validate_args and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Uniform)
         new.low = self.low.expand(batch_shape)

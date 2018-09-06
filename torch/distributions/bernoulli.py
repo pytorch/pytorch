@@ -46,7 +46,7 @@ class Bernoulli(ExponentialFamily):
             batch_shape = self._param.size()
         super(Bernoulli, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Bernoulli)
         if 'probs' in self.__dict__:

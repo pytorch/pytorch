@@ -36,7 +36,7 @@ class Weibull(TransformedDistribution):
                                       self._transforms,
                                       validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Weibull)
         new.scale = self.scale.expand(batch_shape)

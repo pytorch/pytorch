@@ -48,7 +48,7 @@ class Gamma(ExponentialFamily):
             batch_shape = self.concentration.size()
         super(Gamma, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Gamma)
         new.concentration = self.concentration.expand(batch_shape)

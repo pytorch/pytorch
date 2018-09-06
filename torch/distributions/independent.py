@@ -46,7 +46,7 @@ class Independent(Distribution):
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
         super(Independent, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Independent)
         new.base_dist = self.base_dist.expand(batch_shape +

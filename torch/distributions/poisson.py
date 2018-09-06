@@ -43,7 +43,7 @@ class Poisson(ExponentialFamily):
             batch_shape = self.rate.size()
         super(Poisson, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Poisson)
         new.rate = self.rate.expand(batch_shape)

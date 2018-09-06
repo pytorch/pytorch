@@ -22,7 +22,7 @@ class Chi2(Gamma):
     def __init__(self, df, validate_args=None):
         super(Chi2, self).__init__(0.5 * df, 0.5, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         return super(Chi2, self).expand(batch_shape)
 
     @property

@@ -51,7 +51,7 @@ class Binomial(Distribution):
             batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Binomial)
         new.total_count = self.total_count.expand(batch_shape)

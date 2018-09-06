@@ -33,7 +33,7 @@ class HalfNormal(TransformedDistribution):
         super(HalfNormal, self).__init__(self._base_dist, AbsTransform(),
                                          validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         new = self.__new__(HalfNormal)
         new._base_dist = self._base_dist.expand(batch_shape)
         super(HalfNormal, new).__init__(new._base_dist, AbsTransform(), validate_args=False)

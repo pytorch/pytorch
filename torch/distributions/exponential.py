@@ -41,7 +41,7 @@ class Exponential(ExponentialFamily):
         batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()
         super(Exponential, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Exponential)
         new.rate = self.rate.expand(batch_shape)

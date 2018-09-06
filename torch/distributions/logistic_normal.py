@@ -39,7 +39,7 @@ class LogisticNormal(TransformedDistribution):
         # Adjust event shape since StickBreakingTransform adds 1 dimension
         self._event_shape = torch.Size([s + 1 for s in self._event_shape])
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         new = self.__new__(LogisticNormal)
         new._base_dist = self._base_dist.expand(batch_shape + self._base_dist.batch_shape[-1:])
         super(LogisticNormal, new).__init__(new._base_dist,

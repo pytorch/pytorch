@@ -37,7 +37,7 @@ class FisherSnedecor(Distribution):
             batch_shape = self.df1.size()
         super(FisherSnedecor, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(FisherSnedecor)
         new.df1 = self.df1.expand(batch_shape)

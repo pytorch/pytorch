@@ -58,7 +58,7 @@ class Multinomial(Distribution):
         event_shape = self._categorical.param_shape[-1:]
         super(Multinomial, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Multinomial)
         new.total_count = self.total_count

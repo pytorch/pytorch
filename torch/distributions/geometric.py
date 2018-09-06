@@ -45,7 +45,7 @@ class Geometric(Distribution):
             batch_shape = probs_or_logits.size()
         super(Geometric, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Geometric)
         if 'probs' in self.__dict__:

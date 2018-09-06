@@ -46,7 +46,7 @@ class LogitRelaxedBernoulli(Distribution):
             batch_shape = self._param.size()
         super(LogitRelaxedBernoulli, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(LogitRelaxedBernoulli)
         new.temperature = self.temperature

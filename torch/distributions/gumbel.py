@@ -38,7 +38,7 @@ class Gumbel(TransformedDistribution):
                             ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
         super(Gumbel, self).__init__(self._base_dist, self._transforms, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         new = self.__new__(Gumbel)
         new._base_dist = self._base_dist.expand(batch_shape)
         new._transforms = self._transforms

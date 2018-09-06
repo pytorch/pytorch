@@ -58,7 +58,7 @@ class Dirichlet(ExponentialFamily):
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
         super(Dirichlet, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Dirichlet)
         new.concentration = self.concentration.expand(batch_shape + self.event_shape)

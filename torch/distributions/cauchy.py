@@ -36,7 +36,7 @@ class Cauchy(Distribution):
             batch_shape = self.loc.size()
         super(Cauchy, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape=torch.Size()):
+    def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
         new = self.__new__(Cauchy)
         new.loc = self.loc.expand(batch_shape)
