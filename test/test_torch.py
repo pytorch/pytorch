@@ -3636,6 +3636,7 @@ class TestTorch(TestCase):
 
     @skipIfNoLapack
     def test_gesv(self):
+        # test input/output tensors when transpose is contiguous
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -3657,6 +3658,13 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
+        # test input/output tensors when transpose is non-contiguous
+        # need 5x3 sol_, 5x5 lu_ for output, providing wrong size
+        sol_ = torch.randn(3,2)
+        lu_ = torch.randn(2,2)
+        torch.gesv(b, a, out=(sol_, lu_))
+        self.assertLessEqual(b.dist(torch.mm(a, sol_)), 1e-12)
+
         # test reuse
         res1 = torch.gesv(b, a)[0]
         ta = torch.Tensor()
@@ -3665,6 +3673,24 @@ class TestTorch(TestCase):
         self.assertEqual(res1, tb)
         torch.gesv(b, a, out=(tb, ta))[0]
         self.assertEqual(res1, tb)
+
+        # test non-contiguous input and output tensors
+        if not TEST_NUMPY:
+          return
+        import numpy
+        from numpy.linalg import solve
+        A = torch.randn(8, 8)
+        b = torch.randn(16, 16)
+        A_before = A.clone()
+        sol_exp = torch.Tensor(solve(A[::2, ::2].cpu().numpy(), b[::4, ::4].cpu().numpy()))
+        torch.gesv(b[::4, ::4], A[::2, ::2], out=(b[::4, ::4], A[::2, ::2]))
+        self.assertEqual(b[::4, ::4].data, sol_exp)
+
+        for i in range(A.size(0)):
+          for j in range(A.size(1)):
+            if i % 2 != 0 or j % 2 != 0:
+              # other elements should be unchanged
+              self.assertEqual(A[i][j], A_before[i][j])
 
     @staticmethod
     def _test_gesv_batched(self, cast):
