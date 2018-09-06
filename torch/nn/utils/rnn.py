@@ -137,7 +137,7 @@ class PackedSequence(PackedSequence_):
         Returns:
             Variable containing the last step of each sequence in the batch.
         """
-        indices =torch.LongTensor(self.last_step_indices())
+        indices = torch.LongTensor(self.last_step_indices())
         if self.data.data.is_cuda:
             indices = indices.cuda(self.data.data.get_device())
         last_step = self.data.index_select(0, indices)
