@@ -186,7 +186,7 @@ class CWrapPlugin(object):
         """
         pass
 
-    def process_full_file(self, code):
+    def process_full_file(self, code, template_path):
         """Used to modify the code for the entire output file.
 
         The last thing any plugin can do. Code contains the results of wrapping
@@ -212,7 +212,7 @@ class CWrapPlugin(object):
 
         '(PyObject*)Py_TYPE(PyTuple_GET_ITEM(args, 1)) == THPTensorClass'
 
-        This function can be overriden to support modifying this check string.
+        This function can be overridden to support modifying this check string.
         For example, if an argument can be null, we might want to check and see
         if the type is Py_None, as well.
 
@@ -420,7 +420,7 @@ class CWrapPlugin(object):
         return template
 
 
-from .StandaloneExtension import StandaloneExtension
+from .NNExtension import NNExtension
 from .NullableArguments import NullableArguments
 from .OptionalArguments import OptionalArguments
 from .ArgcountChecker import ArgcountChecker
@@ -432,4 +432,3 @@ from .GILRelease import GILRelease
 from .AutoGPU import AutoGPU
 from .CuDNNPlugin import CuDNNPlugin
 from .WrapDim import WrapDim
-from .Broadcast import Broadcast

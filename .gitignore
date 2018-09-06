@@ -1,45 +1,126 @@
-build/
-dist/
-torch.egg-info/
-*/**/__pycache__
-torch/version.py
-torch/csrc/generic/TensorMethods.cpp
-torch/lib/*.so*
-torch/lib/*.a*
-torch/lib/*.dll*
-torch/lib/*.lib
-torch/lib/*.dylib*
-torch/lib/*.h
-torch/lib/build
-torch/lib/tmp_install
-torch/lib/include
-torch/lib/torch_shm_manager
-torch/csrc/jit/generated/*
-torch/csrc/autograd/generated/*
-torch/csrc/cudnn/cuDNN.cpp
-torch/csrc/nn/THNN.cwrap
-torch/csrc/nn/THNN.cpp
-torch/csrc/nn/THCUNN.cwrap
-torch/csrc/nn/THCUNN.cpp
-torch/csrc/nn/THNN_generic.cwrap
-torch/csrc/nn/THNN_generic.cpp
-torch/csrc/nn/THNN_generic.h
-torch/csrc/generated
-docs/src/**/*
-test/data/legacy_modules.t7
-test/data/gpu_tensors.pt
-test/htmlcov
-test/.coverage
+# READ THIS BEFORE YOU REFACTOR ME
+#
+# setup.py uses the list of patterns in this file to decide
+# what to delete, but it's not 100% sound.  So, for example,
+# if you delete aten/build/ because it's redundant with build/,
+# aten/build/ will stop being cleaned.  So be careful when
+# refactoring this file!
+
+## PyTorch
+
+.mypy_cache
 */*.pyc
+*/*.so*
+*/**/__pycache__
+*/**/*.dylib*
 */**/*.pyc
+*/**/*.pyd
+*/**/*.so*
 */**/**/*.pyc
 */**/**/**/*.pyc
 */**/**/**/**/*.pyc
-*/*.so*
-*/**/*.so*
-*/**/*.dylib*
+aten/build/
+aten/src/ATen/Config.h
+aten/src/ATen/cuda/CUDAConfig.h
+build/
+dist/
+docs/src/**/*
+docs/cpp/xml/
+docs/cpp/html/
+docs/cpp/api/
+test/.coverage
+test/cpp/api/mnist
+test/data/gpu_tensors.pt
+test/data/legacy_modules.t7
 test/data/legacy_serialized.pt
 test/data/linear.pt
+test/htmlcov
+third_party/build/
+tools/shared/_utils_internal.py
+torch.egg-info/
+torch/csrc/autograd/generated/*
+torch/csrc/cudnn/cuDNN.cpp
+torch/csrc/generated
+torch/csrc/generic/TensorMethods.cpp
+torch/csrc/jit/generated/*
+torch/csrc/nn/THCUNN.cpp
+torch/csrc/nn/THCUNN.cwrap
+torch/csrc/nn/THNN_generic.cpp
+torch/csrc/nn/THNN_generic.cwrap
+torch/csrc/nn/THNN_generic.h
+torch/csrc/nn/THNN.cpp
+torch/csrc/nn/THNN.cwrap
+torch/lib/*.a*
+torch/lib/*.dll*
+torch/lib/*.exe*
+torch/lib/*.dylib*
+torch/lib/*.h
+torch/lib/*.lib
+torch/lib/*.so*
+torch/lib/build
+torch/lib/cmake
+torch/lib/include
+torch/lib/pkgconfig
+torch/lib/protoc
+torch/lib/tmp_install
+torch/lib/torch_shm_manager
+torch/lib/python*
+torch/version.py
+
+# IPython notebook checkpoints
+.ipynb_checkpoints
+
+# Editor temporaries
+*.swn
+*.swo
+*.swp
+*.swm
+*~
+
+# macOS dir files
+.DS_Store
+
+# Symbolic files
+tools/shared/cwrap_common.py
+
+# Ninja files
+.ninja_deps
+.ninja_log
+compile_commands.json
+*.egg-info/
+docs/source/scripts/activation_images/
+
+## General
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.cuo
+*.obj
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Compiled protocol buffers
+*.pb.h
+*.pb.cc
+*_pb2.py
+
+# Compiled python
+*.pyc
+*.pyd
+
+# Compiled MATLAB
+*.mex*
 
 # IPython notebook checkpoints
 .ipynb_checkpoints
@@ -50,9 +131,75 @@ test/data/linear.pt
 *.swp
 *~
 
-# macOS dir files
+# Sublime Text settings
+*.sublime-workspace
+*.sublime-project
+
+# Eclipse Project settings
+*.*project
+.settings
+
+# QtCreator files
+*.user
+
+# PyCharm files
+.idea
+
+# OSX dir files
 .DS_Store
 
-# Ninja files
-.ninja_deps
-.ninja_log
+## Caffe2
+
+# build, distribute, and bins (+ python proto bindings)
+build
+build_host_protoc
+build_android
+build_ios
+/build_*
+.build_debug/*
+.build_release/*
+distribute/*
+*.testbin
+*.bin
+cmake_build
+.cmake_build
+gen
+.setuptools-cmake-build
+.pytest_cache
+aten/build/*
+
+# Bram
+plsdontbreak
+
+# Generated documentation
+docs/_site
+docs/gathered
+_site
+doxygen
+docs/dev
+
+# LevelDB files
+*.sst
+*.ldb
+LOCK
+LOG*
+CURRENT
+MANIFEST-*
+
+# generated version file
+caffe2/version.py
+
+# setup.py intermediates
+.eggs
+caffe2.egg-info
+
+# Atom/Watchman required file
+.watchmanconfig
+
+# BEGIN NOT-CLEAN-FILES (setup.py handles this marker. Do not change.)
+#
+# Below files are not deleted by "setup.py clean".
+
+# Visual Studio Code files
+.vscode
+.vs

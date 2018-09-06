@@ -18,7 +18,7 @@ class L1Cost(Criterion):
             input,
             self.output_tensor
         )
-        self.output = self.output_tensor[0]
+        self.output = self.output_tensor[0].item()
         return self.output
 
     def updateGradInput(self, input, target=None):

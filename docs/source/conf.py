@@ -17,9 +17,12 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
+import os
 # import sys
-# sys.path.insert(0, os.path.abspath('.'))
+
+# source code directory, relative to this file, for sphinx-autobuild
+# sys.path.insert(0, os.path.abspath('../..'))
+
 import torch
 try:
     import torchvision
@@ -27,6 +30,8 @@ except ImportError:
     import warnings
     warnings.warn('unable to load "torchvision" package')
 import sphinx_rtd_theme
+
+RELEASE = os.environ.get('RELEASE', False)
 
 
 # -- General configuration ------------------------------------------------
@@ -45,15 +50,46 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
     'sphinx.ext.coverage',
-    'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
+    'sphinxcontrib.katex',
 ]
+
+# katex (mathjax replacement) macros
+#
+#
+
+katex_macros = r'''
+"\\op": "\\operatorname{{#1}}",
+"\\i": "\\mathrm{i}",
+"\\e": "\\mathrm{e}^{#1}",
+"\\w": "\\omega",
+"\\vec": "\\mathbf{#1}",
+"\\x": "\\vec{x}",
+"\\d": "\\operatorname{d}\\!{}",
+"\\dirac": "\\operatorname{\\delta}\\left(#1\\right)",
+"\\scalarprod": "\\left\\langle#1,#2\\right\\rangle",
+'''
+
+# katex options
+#
+#
+
+katex_options = r'''
+delimiters : [
+   {left: "$$", right: "$$", display: true},
+   {left: "\\(", right: "\\)", display: true},
+   {left: "\\[", right: "\\]", display: true}
+],
+strict : false
+'''
 
 napoleon_use_ivar = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
+if RELEASE:
+    templates_path = ['_templates-stable']
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -66,7 +102,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2017, Torch Contributors'
+copyright = '2018, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -98,37 +134,54 @@ pygments_style = 'sphinx'
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = True
 
+# Disable docstring inheritance
+autodoc_inherit_docstrings = False
+
+
+# -- katex javascript in header
+#
+#    def setup(app):
+#    app.add_javascript("https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.js")
+
 
 # -- Options for HTML output ----------------------------------------------
-
+#
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
+#
+#
 html_theme = 'sphinx_rtd_theme'
 html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
 #
 html_theme_options = {
+    'canonical_url': 'https://pytorch.org/docs/stable/',
     'collapse_navigation': False,
     'display_version': True,
     'logo_only': True,
 }
 
-html_logo = '_static/img/pytorch-logo-dark.svg'
+html_logo = '_static/img/pytorch-logo-dark-unstable.png'
+if RELEASE:
+    html_logo = '_static/img/pytorch-logo-dark.svg'
+
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+html_static_path = ['_static', '_images']
 
-# html_style_path = 'css/pytorch_theme.css'
+html_style_path = 'css/pytorch_theme.css'
 html_context = {
     'css_files': [
         'https://fonts.googleapis.com/css?family=Lato',
-        '_static/css/pytorch_theme.css'
+        '_static/css/pytorch_theme.css',
+        'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css',
     ],
 }
 

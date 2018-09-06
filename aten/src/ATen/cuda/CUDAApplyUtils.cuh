@@ -1,7 +1,9 @@
 #pragma once
 
-#include "detail/IndexUtils.cuh"
-#include "ATen/Check.h"
+#include "ATen/cuda/detail/IndexUtils.cuh"
+#include "ATen/TensorUtils.h"
+#include "THC/THCAtomics.cuh"
+#include "ATen/cuda/CUDAContext.h"
 
 //
 // This file contains pointwise operation functions and kernels that
@@ -148,8 +150,7 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
     const IndexType bOffset =
       detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b);
 
-    bool earlyExit = false;
-    op(a.data[aOffset], b.data[bOffset], earlyExit);
+    op(a.data[aOffset], b.data[bOffset]);
   }
 }
 
@@ -236,13 +237,10 @@ __host__ __device__ __forceinline__ T ATenCeilDiv(T a, T b) {
   return (a + b - 1) / b;
 }
 
-inline bool getApplyGrid(uint64_t totalElements, dim3& grid) {
-  int curDevice = -1;
-  cudaGetDevice(&curDevice);
+inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) {
   if (curDevice == -1) return false;
-
   uint64_t numBlocks = ATenCeilDiv(totalElements, static_cast<uint64_t>(AT_APPLY_THREADS_PER_BLOCK));
-  uint64_t maxGridX = at::globalContext().getCurrentDeviceProperties()->maxGridSize[0];
+  uint64_t maxGridX = at::cuda::getDeviceProperties(curDevice)->maxGridSize[0];
   if (numBlocks > maxGridX)
       numBlocks = maxGridX;
   grid = dim3(numBlocks);
@@ -286,28 +284,26 @@ bool CUDA_tensor_apply2(at::Tensor a,
   const dim3 block = getApplyBlock();
 
   dim3 grid;
-  if (!getApplyGrid(totalElements, grid)) {
+  int64_t curDevice = current_device();
+  if (curDevice == -1) return false;
+  if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
 
-  // If tensor args have overlapping indices and are read/write, then
-  // we must expand the tensor to a contiguous form first, since
-  // otherwise there are conflicting writes. Upon copying back to the
-  // non-contiguous form, there will be conflicting writes, but at
-  // least with copy, one of the updaters will win atomically. This is
-  // a sketchy property of the old system as well (writing into all
-  // indices of a tensor with overlapping indices should probably be
-  // an error, since it is unclear which one should win), but we will
-  // preserve this last-writer-wins (in arbitrary copy order) behavior.
+  /*
+  Expands readable/writable tensors whose indices may be "overlapped."
+  This ensures that each element of the tensor is operated on once and only
+  once.
+  */
   Tensor oldA;
   Tensor oldB;
 
-  if (aType == TensorArgType::ReadWrite && detail::overlappingIndices(a)) {
+  if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
     // Must perform in contiguous space
     oldA = a;
     a = a.contiguous();
   }
-  if (bType == TensorArgType::ReadWrite && detail::overlappingIndices(b)) {
+  if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
     // Must perform in contiguous space
     oldB = b;
     b = b.contiguous();
@@ -327,46 +323,36 @@ bool CUDA_tensor_apply2(at::Tensor a,
                         scalar1,                                        \
                         scalar2,                                        \
                         TYPE, A, B>                                     \
-   <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(    \
+   <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(    \
        aInfo, bInfo, (TYPE) totalElements, op);
 
-#define HANDLE_B_CASE(TYPE, A, B)               \
-  {                                             \
-    if (bInfo.isContiguous()) {                 \
-      HANDLE_CASE(TYPE, A, -2);                 \
-    } else {                                    \
-      switch (B) {                              \
-        case 1:                                 \
-        HANDLE_CASE(TYPE, A, 1);                \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_CASE(TYPE, A, 2);                \
-        break;                                  \
-        default:                                \
-        HANDLE_CASE(TYPE, A, -1);               \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_B_CASE(TYPE, A, B) {         \
+  switch (B) {                              \
+    case 1:                                 \
+      HANDLE_CASE(TYPE, A, 1);              \
+      break;                                \
+    case 2:                                 \
+      HANDLE_CASE(TYPE, A, 2);              \
+      break;                                \
+    default:                                \
+      HANDLE_CASE(TYPE, A, -1);             \
+      break;                                \
+  }                                         \
+}                                           
 
-#define HANDLE_A_CASE(TYPE, A, B)               \
-  {                                             \
-    if (aInfo.isContiguous()) {                 \
-      HANDLE_B_CASE(TYPE, -2, B);               \
-    } else {                                    \
-      switch (A) {                              \
-        case 1:                                 \
-        HANDLE_B_CASE(TYPE, 1, B);              \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_B_CASE(TYPE, 2, B);              \
-        break;                                  \
-        default:                                \
-        HANDLE_B_CASE(TYPE, -1, B);             \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_A_CASE(TYPE, A, B) {         \
+  switch (A) {                              \
+    case 1:                                 \
+      HANDLE_B_CASE(TYPE, 1, B);            \
+      break;                                \
+    case 2:                                 \
+      HANDLE_B_CASE(TYPE, 2, B);            \
+      break;                                \
+    default:                                \
+      HANDLE_B_CASE(TYPE, -1, B);           \
+      break;                                \
+  }                                         \
+}
 
   if (detail::canUse32BitIndexMath(a) &&
       detail::canUse32BitIndexMath(b)) {
@@ -380,7 +366,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
     bInfo.collapseDims();
 #if CUDA_VERSION < 9000
     if (!(aInfo.isContiguous() && bInfo.isContiguous()))
-        grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+        grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
@@ -394,25 +380,26 @@ bool CUDA_tensor_apply2(at::Tensor a,
     aInfo.collapseDims();
     bInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
-    if (aInfo.isContiguous() && bInfo.isContiguous()) {
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
+    if (aInfo.dims == 1 && bInfo.dims == 1) {
       kernelPointwiseApply2<Op,
                             scalar1,
                             scalar2,
-                          uint64_t, -2, -2>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+                          uint64_t, 1, 1>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
            aInfo, bInfo, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
-      grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
       kernelPointwiseApply2<Op,
                             scalar1,
                             scalar2,
                             uint64_t, -1, -1>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
            aInfo, bInfo, (uint64_t) totalElements, op);
     }
   }
@@ -479,34 +466,32 @@ bool CUDA_tensor_apply3(at::Tensor a,
   const dim3 block = getApplyBlock();
 
   dim3 grid;
-  if (!getApplyGrid(totalElements, grid)) {
+  int64_t curDevice = current_device();
+  if (curDevice == -1) return false;
+  if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
 
-  // If tensor args have overlapping indices and are read/write, then
-  // we must expand the tensor to a contiguous form first, since
-  // otherwise there are conflicting writes. Upon copying back to the
-  // non-contiguous form, there will be conflicting writes, but at
-  // least with copy, one of the updaters will win atomically. This is
-  // a sketchy property of the old system as well (writing into all
-  // indices of a tensor with overlapping indices should probably be
-  // an error, since it is unclear which one should win), but we will
-  // preserve this last-writer-wins (in arbitrary copy order) behavior.
+  /*
+  Expands readable/writable tensors whose indices may be "overlapped."
+  This ensures that each element of the tensor is operated on once and only
+  once.
+  */
   Tensor oldA;
   Tensor oldB;
   Tensor oldC;
 
-  if (aType == TensorArgType::ReadWrite && detail::overlappingIndices(a)) {
+  if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
     // Must perform in contiguous space
     oldA = a;
     a = a.contiguous();
   }
-  if (bType == TensorArgType::ReadWrite && detail::overlappingIndices(b)) {
+  if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
     // Must perform in contiguous space
     oldB = b;
     b = b.contiguous();
   }
-  if (cType == TensorArgType::ReadWrite && detail::overlappingIndices(c)) {
+  if (cType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(c)) {
     // Must perform in contiguous space
     oldC = c;
     c = c.contiguous();
@@ -518,65 +503,50 @@ bool CUDA_tensor_apply3(at::Tensor a,
                         scalar2,                                        \
                         scalar3,                                        \
                         TYPE, A, B, C>                                  \
-    <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(   \
+    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(   \
       aInfo, bInfo, cInfo, (TYPE) totalElements, op);
 
-#define HANDLE_C_CASE(TYPE, A, B, C)            \
-  {                                             \
-    if (cInfo.isContiguous()) {                 \
-      HANDLE_CASE(TYPE, A, B, -2);              \
-    } else {                                    \
-      switch (C) {                              \
-        case 1:                                 \
-        HANDLE_CASE(TYPE, A, B, 1);             \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_CASE(TYPE, A, B, 2);             \
-        break;                                  \
-        default:                                \
-        HANDLE_CASE(TYPE, A, B, -1);            \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_C_CASE(TYPE, A, B, C) {      \
+  switch (C) {                              \
+    case 1:                                 \
+      HANDLE_CASE(TYPE, A, B, 1);           \
+      break;                                \
+    case 2:                                 \
+      HANDLE_CASE(TYPE, A, B, 2);           \
+      break;                                \
+    default:                                \
+      HANDLE_CASE(TYPE, A, B, -1);          \
+      break;                                \
+  }                                         \
+}
 
-#define HANDLE_B_CASE(TYPE, A, B, C)            \
-  {                                             \
-    if (bInfo.isContiguous()) {                 \
-      HANDLE_C_CASE(TYPE, A, -2, C);            \
-    } else {                                    \
-      switch (B) {                              \
-        case 1:                                 \
-        HANDLE_C_CASE(TYPE, A, 1, C);           \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_C_CASE(TYPE, A, 2, C);           \
-        break;                                  \
-        default:                                \
-        HANDLE_C_CASE(TYPE, A, -1, C);          \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_B_CASE(TYPE, A, B, C) {      \
+  switch (B) {                              \
+    case 1:                                 \
+      HANDLE_C_CASE(TYPE, A, 1, C);         \
+      break;                                \
+    case 2:                                 \
+      HANDLE_C_CASE(TYPE, A, 2, C);         \
+      break;                                \
+    default:                                \
+      HANDLE_C_CASE(TYPE, A, -1, C);        \
+      break;                                \
+  }                                         \
+}
 
-#define HANDLE_A_CASE(TYPE, A, B, C)            \
-  {                                             \
-    if (aInfo.isContiguous()) {                 \
-      HANDLE_B_CASE(TYPE, -2, B, C);            \
-    } else {                                    \
-      switch (A) {                              \
-        case 1:                                 \
-        HANDLE_B_CASE(TYPE, 1, B, C);           \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_B_CASE(TYPE, 2, B, C);           \
-        break;                                  \
-        default:                                \
-        HANDLE_B_CASE(TYPE, -1, B, C);          \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_A_CASE(TYPE, A, B, C) {      \
+  switch (A) {                              \
+    case 1:                                 \
+      HANDLE_B_CASE(TYPE, 1, B, C);         \
+      break;                                \
+    case 2:                                 \
+      HANDLE_B_CASE(TYPE, 2, B, C);         \
+      break;                                \
+    default:                                \
+      HANDLE_B_CASE(TYPE, -1, B, C);        \
+      break;                                \
+  }                                         \
+}
 
   if (detail::canUse32BitIndexMath(a) &&
       detail::canUse32BitIndexMath(b) &&
@@ -597,7 +567,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
 
 #if CUDA_VERSION < 9000
     if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()))
-      grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
@@ -615,20 +585,21 @@ bool CUDA_tensor_apply3(at::Tensor a,
     bInfo.collapseDims();
     cInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
-    if (aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()) {
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
+    if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
       kernelPointwiseApply3<Op,
                             scalar1,
                             scalar2,
                             scalar3,
-                            uint64_t, -2, -2, -2>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+                            uint64_t, 1, 1, 1>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
-  grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
 	kernelPointwiseApply3<Op,
@@ -636,7 +607,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
                         scalar2,
                         scalar3,
                         uint64_t, -1, -1, -1>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
     }
   }
@@ -716,40 +687,38 @@ bool CUDA_tensor_apply4(at::Tensor a,
   const dim3 block = getApplyBlock();
 
   dim3 grid;
-  if (!getApplyGrid(totalElements, grid)) {
+  int64_t curDevice = current_device();
+  if (curDevice == -1) return false;
+  if (!getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
 
-  // If tensor args have overlapping indices and are read/write, then
-  // we must expand the tensor to a contiguous form first, since
-  // otherwise there are conflicting writes. Upon copying back to the
-  // non-contiguous form, there will be conflicting writes, but at
-  // least with copy, one of the updaters will win atomically. This is
-  // a sketchy property of the old system as well (writing into all
-  // indices of a tensor with overlapping indices should probably be
-  // an error, since it is unclear which one should win), but we will
-  // preserve this last-writer-wins (in arbitrary copy order) behavior.
+  /*
+  Expands readable/writable tensors whose indices may be "overlapped."
+  This ensures that each element of the tensor is operated on once and only
+  once.
+  */
   Tensor oldA;
   Tensor oldB;
   Tensor oldC;
   Tensor oldD;
 
-  if (aType == TensorArgType::ReadWrite && detail::overlappingIndices(a)) {
+  if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
     // Must perform in contiguous space
     oldA = a;
     a = a.contiguous();
   }
-  if (bType == TensorArgType::ReadWrite && detail::overlappingIndices(b)) {
+  if (bType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(b)) {
     // Must perform in contiguous space
     oldB = b;
     b = b.contiguous();
   }
-  if (cType == TensorArgType::ReadWrite && detail::overlappingIndices(c)) {
+  if (cType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(c)) {
     // Must perform in contiguous space
     oldC = c;
     c = c.contiguous();
   }
-  if (dType == TensorArgType::ReadWrite && detail::overlappingIndices(c)) {
+  if (dType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(c)) {
     // Must perform in contiguous space
     oldD = d;
     d = d.contiguous();
@@ -762,84 +731,64 @@ bool CUDA_tensor_apply4(at::Tensor a,
                         scalar3,                                        \
                         scalar4,                                        \
                         TYPE, A, B, C, D>                               \
-    <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(   \
+    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(   \
     aInfo, bInfo, cInfo, dInfo, (TYPE) totalElements, op);
 
-#define HANDLE_D_CASE(TYPE, A, B, C, D)         \
-  {                                             \
-    if (dInfo.isContiguous()) {                 \
-      HANDLE_CASE(TYPE, A, B, C, -2);           \
-    } else {                                    \
-      switch (D) {                              \
-        case 1:                                 \
-        HANDLE_CASE(TYPE, A, B, C, 1);          \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_CASE(TYPE, A, B, C, 2);          \
-        break;                                  \
-        default:                                \
-        HANDLE_CASE(TYPE, A, B, C, -1);         \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_D_CASE(TYPE, A, B, C, D) {       \
+  switch (D) {                                  \
+    case 1:                                     \
+      HANDLE_CASE(TYPE, A, B, C, 1);            \
+      break;                                    \
+    case 2:                                     \
+      HANDLE_CASE(TYPE, A, B, C, 2);            \
+      break;                                    \
+    default:                                    \
+      HANDLE_CASE(TYPE, A, B, C, -1);           \
+      break;                                    \
+  }                                             \
+}
 
-#define HANDLE_C_CASE(TYPE, A, B, C, D)         \
-  {                                             \
-    if (cInfo.isContiguous()) {                 \
-      HANDLE_D_CASE(TYPE, A, B, -2, D);         \
-    } else {                                    \
-      switch (C) {                              \
-        case 1:                                 \
-        HANDLE_D_CASE(TYPE, A, B, 1, D);        \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_D_CASE(TYPE, A, B, 2, D);        \
-        break;                                  \
-        default:                                \
-        HANDLE_D_CASE(TYPE, A, B, -1, D);       \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_C_CASE(TYPE, A, B, C, D) {       \
+  switch (C) {                                  \
+    case 1:                                     \
+      HANDLE_D_CASE(TYPE, A, B, 1, D);          \
+      break;                                    \
+    case 2:                                     \
+      HANDLE_D_CASE(TYPE, A, B, 2, D);          \
+      break;                                    \
+    default:                                    \
+      HANDLE_D_CASE(TYPE, A, B, -1, D);         \
+      break;                                    \
+  }                                             \
+}
 
-#define HANDLE_B_CASE(TYPE, A, B, C, D)         \
-  {                                             \
-    if (bInfo.isContiguous()) {                 \
-      HANDLE_C_CASE(TYPE, A, -2, C, D);         \
-    } else {                                    \
-      switch (B) {                              \
-        case 1:                                 \
-        HANDLE_C_CASE(TYPE, A, 1, C, D);        \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_C_CASE(TYPE, A, 2, C, D);        \
-        break;                                  \
-        default:                                \
-        HANDLE_C_CASE(TYPE, A, -1, C, D);       \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_B_CASE(TYPE, A, B, C, D) {       \
+  switch (B) {                                  \
+    case 1:                                     \
+      HANDLE_C_CASE(TYPE, A, 1, C, D);          \
+      break;                                    \
+    case 2:                                     \
+      HANDLE_C_CASE(TYPE, A, 2, C, D);          \
+      break;                                    \
+    default:                                    \
+      HANDLE_C_CASE(TYPE, A, -1, C, D);         \
+      break;                                    \
+  }                                             \
+}
 
-#define HANDLE_A_CASE(TYPE, A, B, C, D)         \
-  {                                             \
-    if (aInfo.isContiguous()) {                 \
-      HANDLE_B_CASE(TYPE, -2, B, C, D);         \
-    } else {                                    \
-      switch (A) {                              \
-        case 1:                                 \
-        HANDLE_B_CASE(TYPE, 1, B, C, D);        \
-        break;                                  \
-        case 2:                                 \
-        HANDLE_B_CASE(TYPE, 2, B, C, D);        \
-        break;                                  \
-        default:                                \
-        HANDLE_B_CASE(TYPE, -1, B, C, D);       \
-        break;                                  \
-      }                                         \
-    }                                           \
-  }
+#define HANDLE_A_CASE(TYPE, A, B, C, D) {       \
+  switch (A) {                                  \
+    case 1:                                     \
+      HANDLE_B_CASE(TYPE, 1, B, C, D);          \
+      break;                                    \
+    case 2:                                     \
+      HANDLE_B_CASE(TYPE, 2, B, C, D);          \
+      break;                                    \
+    default:                                    \
+      HANDLE_B_CASE(TYPE, -1, B, C, D);         \
+      break;                                    \
+  }                                             \
+}
 
   if (detail::canUse32BitIndexMath(a) &&
       detail::canUse32BitIndexMath(b) &&
@@ -865,7 +814,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
 
 #if CUDA_VERSION < 9000
     if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous() && dInfo.isContiguous()))
-      grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims, dInfo.dims);
   } else {
@@ -887,21 +836,22 @@ bool CUDA_tensor_apply4(at::Tensor a,
     cInfo.collapseDims();
     dInfo.collapseDims();
 
-    // For large tensors, we only compile the completely contiguous
-    // version and the completely generic version, to reduce
-    // compilation time.
-    if (aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous() && dInfo.isContiguous()) {
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time. 
+    */
+    if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1 && dInfo.dims == 1) {
       kernelPointwiseApply4<Op,
                             scalar1,
                             scalar2,
                             scalar3,
                             scalar4,
-                            uint64_t, -2, -2, -2, -2>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+                            uint64_t, 1, 1, 1, 1>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           aInfo, bInfo, cInfo, dInfo, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
-  grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
 	kernelPointwiseApply4<Op,
@@ -910,7 +860,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
                         scalar3,
                         scalar4,
                         uint64_t, -1, -1, -1, -1>
-        <<<grid, block, 0, at::globalContext().getCurrentCUDAStream()>>>(
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           aInfo, bInfo, cInfo, dInfo, (uint64_t) totalElements, op);
     }
   }

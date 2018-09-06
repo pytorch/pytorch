@@ -1,21 +1,29 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
-#include "DynamicTypes.h"
-#include "PythonTypes.h"
-#include "THP.h"
-#include "Exceptions.h"
+#include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/Layout.h"
+#include "torch/csrc/PythonTypes.h"
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/utils/cuda_enabled.h"
 
-#include <vector>
+#include <ATen/ATen.h>
+
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <THC/THC.h>
-#include <THCS/THCS.h>
 #endif
 
 namespace torch {
-
-static std::unordered_map<std::string, at::ScalarType> attype_names = {
+namespace {
+const std::unordered_map<std::string, at::ScalarType> attype_names = {
   {"Float", at::kFloat},
   {"Double", at::kDouble},
   {"Half", at::kHalf},
@@ -26,43 +34,51 @@ static std::unordered_map<std::string, at::ScalarType> attype_names = {
   {"Long", at::kLong},
 };
 
-static std::unordered_map<PyTypeObject*, at::Type*> pytype_to_attype;
-static std::unordered_map<at::Type*, PyTypeObject*> attype_to_pytype;
-static std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
-static std::unordered_map<PyTypeObject*, at::Type*> py_storage_type_to_attype;
+std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
+std::unordered_map<PyTypeObject*, at::Type*> py_storage_type_to_attype;
 
-static at::Backend get_backend(bool is_cuda, bool is_sparse) {
+THPDtype* dtype_registry
+  [static_cast<int>(at::ScalarType::NumOptions)] = {};
+
+THPLayout* layout_registry
+  [static_cast<int>(at::Backend::NumOptions)] = {};
+
+at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
     if (is_sparse){
-      return at::kSparseCUDA;
+      return at::Backend::SparseCUDA;
     } else {
-      return at::kCUDA;
+      return at::Backend::CUDA;
     }
   } else {
     if (is_sparse){
-      return at::kSparseCPU;
+      return at::Backend::SparseCPU;
     } else {
-      return at::kCPU;
+      return at::Backend::CPU;
     }
   }
 }
 
-static at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
+at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse) {
   if (is_sparse && name == "Half") {
     return nullptr;
   }
   at::Backend backend = get_backend(is_cuda, is_sparse);
-  return &at::getType(backend, attype_names.at(name));
+  return &at::getNonVariableType(backend, attype_names.at(name));
 }
 
-void registerPyTypeObject(PyTypeObject *pytype, const std::string& name, bool is_cuda, bool is_sparse)
+PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
-  auto attype = get_type(name, is_cuda, is_sparse);
-  if (attype) {
-    pytype_to_attype[pytype] = attype;
-    attype_to_pytype[attype] = pytype;
+  auto attype = at::globalContext().getNonVariableTypeOpt(
+      deviceTypeToBackend(storage.device_type()),
+      at::dataTypeToScalarType(storage.dtype()));
+  auto it = attype_to_py_storage_type.find(attype);
+  if (it != attype_to_py_storage_type.end()) {
+    return it->second;
   }
+  throw std::invalid_argument("unsupported Storage type");
 }
+} // namespace
 
 void registerStoragePyTypeObject(PyTypeObject *pytype, const std::string& name, bool is_cuda, bool is_sparse)
 {
@@ -73,48 +89,47 @@ void registerStoragePyTypeObject(PyTypeObject *pytype, const std::string& name, 
   }
 }
 
-PyTypeObject* getPyTypeObject(const at::Tensor& tensor)
-{
-  if(!tensor.defined())
-    throw std::invalid_argument("trying to get type of undefined at::Tensor");
-  if(attype_to_pytype.count(&tensor.type()) == 0)
-    throw std::invalid_argument("unsupported Tensor type.");
-  return attype_to_pytype.at(&tensor.type());
+void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType) {
+  dtype_registry[static_cast<int>(scalarType)] = dtype;
 }
 
-PyTypeObject* getPyTypeObject(const at::Storage& storage)
-{
-  auto it = attype_to_py_storage_type.find(&storage.type());
-  if (it != attype_to_py_storage_type.end()) {
-    return it->second;
-  }
-  throw std::invalid_argument("unsupported Storage type");
+void registerLayoutObject(THPLayout *layout, at::Backend backend) {
+  layout_registry[static_cast<int>(backend)] = layout;
 }
 
-at::Type& getATenType(PyTypeObject* type)
-{
-  auto it = pytype_to_attype.find(type);
-  if (it != pytype_to_attype.end()) {
-    return *it->second;
+at::Type& getVariableType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
+  const at::Backend backend = get_backend(device.type() == at::Device::Type::CUDA, layout.layout == at::Layout::Sparse);
+  auto baseType = at::globalContext().getNonVariableTypeOpt(backend, scalarType);
+  if (!baseType) {
+    std::ostringstream oss;
+    oss << "Error attempting to use dtype " << getDtype(scalarType)->name << " with layout " << layout.name
+        << " and device type " << device.type() << ".";
+    if (device.type() == at::Device::Type::CUDA && !torch::utils::cuda_enabled()) {
+      oss << "  Torch not compiled with CUDA enabled." << std::endl;
+    }
+    throw std::runtime_error(oss.str());
   }
-  throw std::invalid_argument("unsupported Python type");
+  return *torch::autograd::VariableType::getVariableTypeFromBaseType(*baseType);
 }
 
-at::Tensor createTensor(PyObject *data)
-{
-  auto tensor_type = pytype_to_attype.at(Py_TYPE(data));
-  auto tensor = ((THPVoidTensor *)data)->cdata;
-  return tensor_type->unsafeTensorFromTH(tensor, true); // Calls retain on underlying TH Tensor
-}
-PyObject* createPyObject(const at::Tensor& tensor)
-{
-  auto type = getPyTypeObject(tensor);
-  PyObject *obj = type->tp_alloc(type, 0);
-  if (obj) {
-    // Retain underlying TH Tensor
-    ((THPVoidTensor*)obj)->cdata = (THVoidTensor *)tensor.unsafeGetTH(true);
+THPDtype* getDtype(at::ScalarType scalarType) {
+  auto dtype = dtype_registry[static_cast<int>(scalarType)];
+  if (!dtype) {
+    throw std::invalid_argument("unsupported scalarType");
   }
-  return obj;
+  return dtype;
+}
+
+THPLayout* getLayout(at::Backend backend) {
+  auto layout = layout_registry[static_cast<int>(backend)];
+  if (!layout) {
+    throw std::invalid_argument("unsupported at::Backend");
+  }
+  return layout;
+}
+
+at::Device::Type getDeviceType(const at::Type& type) {
+  return type.is_cuda() ? at::Device::Type::CUDA : at::Device::Type::CPU;
 }
 
 PyObject* createPyObject(const at::Storage& storage)
@@ -122,16 +137,15 @@ PyObject* createPyObject(const at::Storage& storage)
   auto type = getPyTypeObject(storage);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj) throw python_error();
-  ((THPVoidStorage*)obj.get())->cdata = (THVoidStorage *)storage.unsafeGetTH(true);
+  ((THPVoidStorage*)obj.get())->cdata = (THVoidStorage *)at::Storage(/* copy */ storage).unsafeReleaseStorageImpl();
   return obj.release();
 }
 
 bool isStorage(PyObject* obj)
 {
-  auto it = py_storage_type_to_attype.find(Py_TYPE(obj));
-  return it != py_storage_type_to_attype.end();
+  return py_storage_type_to_attype.count(Py_TYPE(obj));
 }
-std::unique_ptr<at::Storage> createStorage(PyObject* obj)
+at::Storage createStorage(PyObject* obj)
 {
   auto it = py_storage_type_to_attype.find(Py_TYPE(obj));
   if (it == py_storage_type_to_attype.end()) {

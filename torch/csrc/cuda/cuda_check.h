@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <nvrtc.h>

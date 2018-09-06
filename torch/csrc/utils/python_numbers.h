@@ -1,8 +1,11 @@
 #pragma once
 
-#include <Python.h>
-#include <stdint.h>
+#include "torch/csrc/python_headers.h"
+#include <cstdint>
 #include <stdexcept>
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/tensor_numpy.h"
+#include "torch/csrc/jit/tracer.h"
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
@@ -45,27 +48,55 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 }
 
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
-  if (PyLong_Check(obj)) {
-    int overflow;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (overflow != 0) {
-      throw std::runtime_error("Overflow when unpacking long");
+  int overflow;
+  long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (overflow != 0) {
+    throw std::runtime_error("Overflow when unpacking long");
+  }
+  return (int64_t)value;
+}
+
+inline bool THPUtils_checkIndex(PyObject *obj) {
+  if (PyBool_Check(obj)) {
+    return false;
+  }
+  if (THPUtils_checkLong(obj)) {
+    return true;
+  }
+  torch::jit::tracer::NoWarn no_warn_guard;
+  auto index = THPObjectPtr(PyNumber_Index(obj));
+  if (!index) {
+    PyErr_Clear();
+    return false;
+  }
+  return true;
+}
+
+inline int64_t THPUtils_unpackIndex(PyObject* obj) {
+  if (!THPUtils_checkLong(obj)) {
+    auto index = THPObjectPtr(PyNumber_Index(obj));
+    if (index == nullptr) {
+      throw python_error();
     }
-    return (int64_t)value;
+    obj = index.get();
   }
-#if PY_MAJOR_VERSION == 2
-  if (PyInt_Check(obj)) {
-    return PyInt_AS_LONG(obj);
-  }
-#endif
-  throw std::runtime_error("Could not unpack long");
+  return THPUtils_unpackLong(obj);
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {
-#if PY_MAJOR_VERSION == 2
-  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj);
+  bool is_numpy_scalar;
+#ifdef USE_NUMPY
+  is_numpy_scalar = torch::utils::is_numpy_scalar(obj);
 #else
-  return PyFloat_Check(obj) || PyLong_Check(obj);
+  is_numpy_scalar = false;
+#endif
+#if PY_MAJOR_VERSION == 2
+  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj) || is_numpy_scalar;
+#else
+  return PyFloat_Check(obj) || PyLong_Check(obj) || is_numpy_scalar;
 #endif
 }
 
@@ -89,5 +120,9 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
     return (double)PyInt_AS_LONG(obj);
   }
 #endif
-  throw std::runtime_error("Could not unpack double");
+  double value = PyFloat_AsDouble(obj);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  return value;
 }

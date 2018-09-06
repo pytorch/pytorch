@@ -31,19 +31,14 @@ void THNN_(LookupTableBag_updateOutput)(
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
-  THLongStorage *outputSize = THLongStorage_newWithSize(2);
-  outputSize->data[0] = numBags;
-  outputSize->data[1] = stride;
-  THCTensor_(resize)(state, output, outputSize, NULL);
+  std::vector<int64_t> outputSize = {numBags, stride};
+  THCTensor_(resize)(state, output, outputSize, {});
   THCTensor_(zero)(state, output);
-  THCIndexTensor_(resize)(state, offset2bag, inputSize, NULL);
-  THLongStorage_free(inputSize);
-  THLongStorage_free(outputSize);
+  THCIndexTensor_(resize)(state, offset2bag, input->sizes(), {});
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
-  cunn_LookupTableBag_updateOutputKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTableBag_updateOutputKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     THCIndexTensor_(data)(state, input),
     THCIndexTensor_(data)(state, offsets),
     THCTensor_(data)(state, weight),
@@ -74,7 +69,7 @@ void THNN_(LookupTableBag_accGradParameters)(
 	   THCIndexTensor *bag_size,
            accreal scale_)
 {
-  real scale = ScalarConvert<accreal, real>::to(scale_);
+  scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight, offset2bag, sortedIndices, origIndices);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   if (!(THCIndexTensor_(isContiguous)(state, input) &&
@@ -88,8 +83,8 @@ void THNN_(LookupTableBag_accGradParameters)(
     bag_size_data = THCIndexTensor_(data)(state, bag_size);
   }
 
-  int nDim = THCIndexTensor_(nDimension)(state, input);
-  if (THCIndexTensor_(nDimension)(state, input) != 1 && THCIndexTensor_(nDimension)(state, input) != 2) {
+  int nDim = THCIndexTensor_(nDimensionLegacyAll)(state, input);
+  if (THCIndexTensor_(nDimensionLegacyAll)(state, input) != 1 && THCIndexTensor_(nDimensionLegacyAll)(state, input) != 2) {
     THCDescBuff s1 = THCIndexTensor_(sizeDesc)(state, input);
     THError("input must be a vector or matrix, but is of shape: %s", s1.str);
   }
@@ -99,10 +94,8 @@ void THNN_(LookupTableBag_accGradParameters)(
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
-  THCIndexTensor_(resize)(state, sortedIndices, inputSize, NULL);
-  THCIndexTensor_(resize)(state, origIndices, inputSize, NULL);
-  THLongStorage_free(inputSize);
+  THCIndexTensor_(resize)(state, sortedIndices, input->sizes(), {});
+  THCIndexTensor_(resize)(state, origIndices, input->sizes(), {});
 
   // Sort the inputs into sorted with the corresponding indices; we
   // don't need a stable or multidimensional sort, so just use Thrust
@@ -179,7 +172,7 @@ void THNN_(LookupTableBag_accGradParameters)(
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
-  cunn_LookupTableBag_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTableBag_accGradParametersKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     sortedIndices_data,
     origIndices_data,
     THCTensor_(data)(state, gradOutput),

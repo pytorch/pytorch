@@ -1,11 +1,11 @@
-#include <Python.h>
 #include "ir.h"
 
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/autograd/function.h"
 
-#include "pybind11/pybind11.h"
+#include "torch/csrc/jit/operator.h"
+#include "torch/csrc/autograd/function.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/jit/script/compiler.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -16,24 +16,13 @@
 #include <algorithm>
 #include <string>
 
-namespace py = pybind11;
-
 namespace torch { namespace jit {
+
+// Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
+constexpr Symbol PythonOp::Kind;
 
 constexpr int max_tensor_display_size = 10;
 
-std::string getPythonName(const PyObject* obj, bool is_legacy) {
-  AutoGIL gil;
-  if (is_legacy) {
-    return std::string(obj->ob_type->tp_name);
-  } else {
-    // NB: hypothetically __name__ could mutate the Python
-    // object in a externally visible way. Please don't!
-    auto wobj = const_cast<PyObject*>(obj);
-    THPObjectPtr name{PyObject_GetAttrString(wobj, "__name__")};
-    return THPUtils_unpackString(name.get());
-  }
-}
 void printValueRef(std::ostream & out, const Value * n) {
   out << "%" << n->uniqueName();
 }
@@ -54,57 +43,11 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
   }
   return out;
 }
-std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
-  AutoGIL gil;
-  auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
-  if (py::isinstance<py::tuple>(pyobj)) {
-    // This special-case for printing tuples handles a problem where
-    // str((2L, 3L)) outputs "(2L, 3L)" in Python 2 but "(2, 3)"
-    // in Python 3.  In order to suppress the L-suffix, we must
-    // manually print the string ourselves, calling str() on the
-    // sub-elements.
-    //
-    // This is a fairly fragile fix (What if you have nested tuples
-    // in tuples? What if you have dictionaries?) but it seems to hit
-    // the cases that are triggered in practice in onnx-pytorch.  Revisit
-    // this code if this is not the case.
-    //
-    // By the way, one non-solution for this problem is to monkeypatch
-    // tuple.__str__; this doesn't work because Python doesn't allow
-    // monkeypatching methods of built-in types.
-    auto pytuple = pyobj.cast<py::tuple>();
-    out << "(";
-    size_t i = 0;
-    for (auto& o : pytuple) {
-      if (i > 0) {
-        out << ", ";
-      }
-      THPObjectPtr str(py::str(o).release().ptr());
-      out << THPUtils_unpackString(str.get());
-      i++;
-    }
-    if (i == 1) {
-      out << ",";
-    }
-    out << ")";
-    return out;
-  } else {
-    return out << THPUtils_unpackString(py::str(pyobj).ptr());
-  }
-}
-
-std::string PythonOp::name() const {
-  return getPythonName(pyobj.get(),is_legacy);
-}
-
-std::string CppOp::name() const {
-  return fn->name();
-}
 
 struct const_value_list_with_types {
-  const std::vector<const Value*>& values;
+  const ArrayRef<const Value*> values;
   bool use_newlines;
-  const_value_list_with_types(const std::vector<const Value*>& values, bool use_newlines = false)
+  const_value_list_with_types(ArrayRef<const Value*> values, bool use_newlines = false)
     : values(values), use_newlines(use_newlines) {}
 };
 std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
@@ -125,10 +68,7 @@ std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
     }
     printValueRef(out, n);
     out << " : ";
-    if(n->hasType())
-      out << *n->type();
-    else
-      out << "UNKNOWN_TYPE";
+    out << *n->type();
   }
   return out;
 }
@@ -143,14 +83,34 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   }
   out << "]";
 }
-void printAttributes(std::ostream & out, const Node * n) {
+
+std::string escapeString(std::string s) {
+  std::vector<char> search = {'\n', '\t', '\v'};
+  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
+  for (size_t i = 0; i < search.size(); i++) {
+    size_t pos = s.find(search[i]);
+    while(pos != std::string::npos) {
+      s.replace(pos, 1, replace[i]);
+      pos = s.find(search[i], pos + 1);
+    }
+  }
+  return s;
+}
+
+void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
   auto names = n->attributeNames();
   int i = 0;
   for(auto name : names) {
+    if (ignore_subgraph && name == attr::Subgraph)
+      continue;
     if(i++ > 0)
       out << ", ";
-    out << symbolToString(name) <<"=";
+    // TODO: debugging mode to see the qualifier.  We definitely
+    // don't want to print the qualifier since it should always
+    // be attribute, but you might be able to track down a weird
+    // bug by printing it out.
+    out << name.toUnqualString() <<"=";
     switch(n->kindOf(name)) {
       case AttributeKind::f:
         out << n->f(name);
@@ -165,7 +125,7 @@ void printAttributes(std::ostream & out, const Node * n) {
         printPrimList(out,n->is(name));
         break;
       case AttributeKind::s:
-        out << n->s(name);
+        out << escapeString(n->s(name));
         break;
       case AttributeKind::ss:
         printPrimList(out,n->ss(name));
@@ -175,12 +135,12 @@ void printAttributes(std::ostream & out, const Node * n) {
           at::Tensor t = n->t(name);
           // 1-elem tensors are usually boxed scalars, so print them like it
           if (t.numel() == 1) {
-            auto scalar = at::Scalar(t.view({})).local();
+            auto scalar_tensor = t.view({})._local_scalar();
             out << "{";
-            if (scalar.isFloatingPoint()) {
-              out << scalar.toDouble();
+            if (scalar_tensor.isFloatingPoint()) {
+              out << scalar_tensor.toDouble();
             } else {
-              out << scalar.toLong();
+              out << scalar_tensor.toLong();
             }
             out << "}";
           } else if (t.numel() <= max_tensor_display_size) {
@@ -210,33 +170,31 @@ void printAttributes(std::ostream & out, const Node * n) {
   out << "]";
 }
 
-std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const Node*> * groups) {
+static std::ostream & indent(std::ostream & out, size_t level) {
+  for(size_t i = 0; i < level; ++i)
+    out << "  ";
+  return out;
+}
+
+std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::vector<const Node*> * groups) {
   auto outputs = n->outputs();
-  out << const_value_list_with_types(outputs);
+  indent(out, level) << const_value_list_with_types(outputs);
   out << " = ";
   IR_IFM_CONST(n,PythonOp)
     out << "^" << value->name();
-    out << "(";
-    int i = 0;
-    for (auto& scalar : value->scalar_args) {
-      if (i++ > 0)
-        out << ", ";
-      printPyObject(out, scalar);
-    }
-    out << ")";
-  IR_ELSEIF(FusionGroup)
-    if(groups) {
-      out << "fusion_group_" << groups->size();
-      groups->push_back(value);
-    } else {
-      out << "fusion_group[" << *n->g(kSubgraph) << "]";
-    }
-  IR_ELSEIFM_CONST(CppOp)
-    out << "CppOp[" << value->name() << "]";
+    value->writeScalars(out);
   IR_ELSE()
-    out << symbolToString(n->kind());
-    if(n->hasAttributes()) {
-      printAttributes(out,n);
+    if(n->hasAttribute(attr::Subgraph) && groups) {
+      out << n->kind().toQualString() << "_" << groups->size();
+      if (n->numAttributes() > 1 && n->kind() != prim::DifferentiableGraph) {
+        printAttributes(out, n, /*ignore_subgraph=*/true);
+      }
+      groups->push_back(n);
+    } else {
+      out << n->kind().toQualString();
+      if(n->hasAttributes()) {
+        printAttributes(out,n);
+      }
     }
   IR_END()
   out << "(" << n->inputs() << ")";
@@ -248,11 +206,20 @@ std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const No
     out << ", ";
     out << "scope: " << scopeName << "\n";
   }
+  for(size_t i = 0; i < n->blocks().size(); ++i) {
+    auto b = n->blocks()[i];
+    indent(out, level + 1) << "block" << i << "(" << const_value_list_with_types(b->inputs(), false) << ") {\n";
+    for(auto n : b->nodes()) {
+      printNode(out, level + 2, n, groups);
+    }
+    indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
+    indent(out, level + 1) << "}\n";
+  }
   return out;
 }
 
 std::ostream& operator<<(std::ostream & out, const Node & n) {
-  return printNode(out, &n, nullptr);
+  return printNode(out, 0, &n, nullptr);
 }
 
 std::ostream& operator<<(std::ostream & out, const Graph & g) {
@@ -264,13 +231,12 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
       out << "  ---------------- stage " << n->stage() << " ----------------\n";
       prev_stage = n->stage();
     }
-    out << "  ";
-    printNode(out, n, &groups);
+    printNode(out, 1, n, &groups);
   }
   out << "  return (" << g.outputs() << ");\n}\n";
   size_t i = 0;
   for(auto fg : groups) {
-    out << "with fusion_group_" <<i++ << " = " << *fg->g(kSubgraph);
+    out << "with " << fg->kind().toQualString() << "_" <<i++ << " = " << *fg->g(attr::Subgraph);
   }
   /*
   // Uncomment this to debug all_nodes issues
@@ -289,14 +255,12 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(v->hasType()) {
-      if(TensorType* type = v->type()->cast<TensorType>()) {
-        if(!has_device) {
-          has_device = true;
-          device = type->device();
-        } else {
-          JIT_ASSERT(device == type->device());
-        }
+    if(CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
+      if(!has_device) {
+        has_device = true;
+        device = type->device();
+      } else {
+        JIT_ASSERT(device == type->device());
       }
     }
   };
@@ -337,10 +301,6 @@ void Node::lint() const {
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
-      // Handle invariant
-      if (i != inputs_.size() - 1) {
-        JIT_ASSERT(!input->hasType() || input->type()->kind() != TypeKind::HandleType);
-      }
       i++;
     }
   }
@@ -369,7 +329,7 @@ void Node::lint() const {
   IR_ELSEIF(Param)
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIFM_CONST(PythonOp)
-    std::size_t n_scalars = 0, n_tensors = 0;
+    size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
       if (c == 's') {
         n_scalars++;
@@ -382,15 +342,13 @@ void Node::lint() const {
     }
     JIT_ASSERT(n_scalars == value->scalar_args.size());
     JIT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIFM_CONST(CppOp)
-    // TODO: add invariants
   IR_ELSEIF(Eval)
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
   IR_ELSEIF(FusionGroup)
     checkSameDevice(value);
     // TODO: Typecheck the parameters
-    value->g(kSubgraph)->lint();
+    value->g(attr::Subgraph)->lint();
   IR_END()
 
 }
@@ -411,88 +369,129 @@ void Graph::lint() const {
   // - uniques in all_nodes are unique
   // - every use will occur later in the topsort
 
-  std::unordered_set<const Value*> in_scope;
-  std::unordered_set<const Node*> node_in_scope;
-  std::unordered_set<size_t> seen_uniques;
-  std::unordered_map<const Node*, int64_t> anticipated_uses;
-  auto check_value = [&](const Value* v) {
-    auto b = in_scope.insert(v);
-    JIT_ASSERT(b.second);  // insertion took place
-    auto b2 = seen_uniques.insert(v->unique());
-    JIT_ASSERT(b2.second);  // insertion took place
-    JIT_ASSERT(v->unique() < next_unique_);
-
-    for (auto use : v->uses()) {
-      JIT_ASSERT(node_in_scope.count(use.user) == 0);
-      JIT_ASSERT(all_nodes.count(use.user) == 1);
-      anticipated_uses[use.user]++;  // int default constructs to 0
+  struct LintScope {
+    LintScope() = default;
+    LintScope(std::unique_ptr<LintScope> parent)
+    : parent(std::move(parent)) {}
+    bool contains(const Value * v) {
+      return values.count(v) > 0 || (parent && parent->contains(v));
     }
+    bool contains(const Node * n) {
+      return nodes.count(n) > 0 || (parent && parent->contains(n));
+    }
+    void insert(const Value * v) {
+      JIT_ASSERT(!contains(v));
+      values.insert(v);
+    }
+    void insert(const Node * n) {
+      JIT_ASSERT(!contains(n));
+      nodes.insert(n);
+    }
+    std::unique_ptr<LintScope> parent;
+  private:
+    std::unordered_set<const Value*> values;
+    std::unordered_set<const Node*> nodes;
   };
-  auto check_node = [&](const Node* n) {
-    for (auto input : n->inputs_) {
-      if (in_scope.count(input) != 1) {
-        JIT_ASSERTM(0, "%%%d not in scope", input->unique());
+  // Struct enables mutual recursion in linting methods.
+  // Putting it inside Graph::lint enables access to private Graph members
+  struct LintImpl {
+    LintImpl(const Graph & g)
+    : g(g)
+    , scope(new LintScope())
+    , all_nodes_set(ALL_OF(g.all_nodes)) {} // NB: all_nodes is *unordered*
+    const Graph & g;
+    std::unique_ptr<LintScope> scope;
+    std::unordered_set<size_t> seen_uniques;
+    std::unordered_map<const Node*, int64_t> anticipated_uses;
+    node_set all_nodes_set;
+    node_set sum_set;
+
+    void check_value(const Value* v) {
+      scope->insert(v);
+      auto b2 = seen_uniques.insert(v->unique());
+      JIT_ASSERT(b2.second);  // insertion took place
+      JIT_ASSERT(v->unique() < g.next_unique_);
+
+      for (auto use : v->uses()) {
+        JIT_ASSERT(!scope->contains(use.user));
+        JIT_ASSERT(g.all_nodes.count(use.user) == 1);
+        anticipated_uses[use.user]++;  // int default constructs to 0
       }
     }
-    JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
-    anticipated_uses[n] = -1;  // we saw the anticipated user!
-    auto node_inserted = node_in_scope.insert(n);
-    JIT_ASSERT(node_inserted.second);  // insertion took place
-    size_t i = 0;
-    for(auto o : n->outputs()) {
-      JIT_ASSERT(o->node() == n);
-      JIT_ASSERT(i++ == o->offset_);
-      check_value(o);
+    void check_node(const Node* n) {
+      for (auto input : n->inputs_) {
+        if (!scope->contains(input)) {
+          JIT_ASSERTM(0, input->unique(), " not in scope");
+        }
+      }
+      JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
+      anticipated_uses[n] = -1;  // we saw the anticipated user!
+      scope->insert(n);
+      for(auto block : n->blocks()) {
+        std::unique_ptr<LintScope> new_scope(new LintScope(std::move(scope)));
+        scope = std::move(new_scope);
+        check_block(block);
+        scope = std::move(scope->parent);
+      }
+      size_t i = 0;
+      for(auto o : n->outputs()) {
+        JIT_ASSERT(o->node() == n);
+        JIT_ASSERT(i++ == o->offset_);
+        check_value(o);
+      }
+      n->lint();
     }
-    n->lint();
+    void check_block(const Block *b) {
+      for (auto input : b->inputs()) {
+        check_value(input);
+        JIT_ASSERT(input->node()->kind_ == prim::Param);
+      }
+
+      for (auto n : b->nodes()) {
+        JIT_ASSERT(n->kind_ != prim::Param);
+        JIT_ASSERT(n->kind_ != prim::Return);
+        check_node(n);
+      }
+
+      JIT_ASSERT(b->output_->kind() == prim::Return);
+      check_node(b->output_);
+
+      // all_nodes
+      // - inputs_, output_ and nodes_ are all included in all_nodes
+      // - all_nodes does not contain dead nodes??? (likely to be temporarily
+      // suspended).  Weaker: all_nodes contains all inputs and returns
+      // - only one return node???
+
+      node_set nodes_set(ALL_OF(b->nodes()));
+      node_set inputs_set {b->input_};
+      node_set output_set {b->output_};
+      // TODO: Make a more type safe std::includes wrapper which disallows use on
+      // non-ordered containers
+      JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
+      JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(inputs_set)));
+      JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(output_set)));
+
+      sum_set.insert(ALL_OF(nodes_set));
+      sum_set.insert(ALL_OF(inputs_set));
+      sum_set.insert(ALL_OF(output_set));
+    }
+    void check_graph() {
+      node_set all_nodes_set(ALL_OF(g.all_nodes)); // NB: all_nodes is *unordered*
+
+      check_block(g.block_);
+      for (auto kv : anticipated_uses) {
+        JIT_ASSERT(kv.second == -1);
+      }
+      // graph->stage() should be equal to max(node.stage for node in graph->nodes())
+      if (g.nodes().begin() == g.nodes().end()) {
+        JIT_ASSERT(g.stage() == 0);
+      } else {
+        JIT_ASSERT(g.stage() == g.nodes().rbegin()->stage());
+      }
+      JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
+    }
   };
-
-  for (auto input : inputs()) {
-    check_value(input);
-    JIT_ASSERT(input->node()->kind_ == kParam);
-  }
-
-  for (auto n : nodes()) {
-    JIT_ASSERT(n->kind_ != kParam);
-    JIT_ASSERT(n->kind_ != kReturn);
-    check_node(n);
-  }
-
-  JIT_ASSERT(output_->kind() == kReturn);
-  check_node(output_);
-
-  for (auto kv : anticipated_uses) {
-    JIT_ASSERT(kv.second == -1);
-  }
-
-  // all_nodes
-  // - inputs_, output_ and nodes_ are all included in all_nodes
-  // - all_nodes does not contain dead nodes??? (likely to be temporarily
-  // suspended).  Weaker: all_nodes contains all inputs and returns
-  // - only one return node???
-
-  node_set all_nodes_set(ALL_OF(all_nodes)); // NB: all_nodes is *unordered*
-  node_set nodes_set(ALL_OF(nodes()));
-  node_set inputs_set {input_};
-  node_set output_set{output_};
-  // TODO: Make a more type safe std::includes wrapper which disallows use on
-  // non-ordered containers
-  JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
-  JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(inputs_set)));
-  JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(output_set)));
-
-  node_set sum_set;
-  sum_set.insert(ALL_OF(nodes_set));
-  sum_set.insert(ALL_OF(inputs_set));
-  sum_set.insert(ALL_OF(output_set));
-  JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
-
-  // graph->stage() should be equal to max(node.stage for node in graph->nodes())
-  if (begin() == end()) {
-    JIT_ASSERT(stage() == 0);
-  } else {
-    JIT_ASSERT(stage() == rbegin()->stage());
-  }
+  LintImpl(*this).check_graph();
 }
 
 void Graph::dump() const {
@@ -503,19 +502,192 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
+void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
+  std::unordered_map<Value*, Value*> local_map;
+  auto env = [&](Value * v) {
+    auto it = local_map.find(v);
+    if(it != local_map.end())
+      return it->second;
+    return value_map(v);
+  };
 
-void PythonOp::cloneFrom(Node * other_) {
-  Node::cloneFrom(other_);
-  auto other = other_->cast<PythonOp>();
-  this->cconv = other->cconv;
-  this->is_legacy = other->is_legacy;
-  Py_INCREF(other->pyobj.get());
-  this->pyobj = THPObjectPtr(other->pyobj.get());
-  this->var_flags = other->var_flags;
-  for(auto & sa : other->scalar_args) {
-    Py_INCREF(sa.get());
-    this->scalar_args.emplace_back(sa.get());
+  auto graph = owningGraph();
+  for(auto input : src->inputs()) {
+    local_map[input] = this->addInput()->copyMetadata(input)->setStage(input->stage());
+    graph->setStage(std::max(graph->stage(), input->stage()));
+  }
+  for(auto node : src->nodes()) {
+    auto new_node = this->appendNode(graph->createClone(node, env));
+    new_node->setStage(node->stage());
+    graph->setStage(std::max(graph->stage(), node->stage()));
+    for(size_t i = 0; i < node->outputs().size(); ++i) {
+      auto oo = node->outputs()[i];
+      auto no = new_node->outputs()[i];
+      local_map[oo] = no;
+      no->copyMetadata(oo);
+      no->setStage(oo->stage());
+    }
+  }
+  for(auto output : src->outputs()) {
+    this->registerOutput(env(output));
   }
 }
 
-}}
+std::shared_ptr<Graph> Graph::copy() {
+  auto new_g = std::make_shared<Graph>();
+  auto env = [](Value *) -> Value* {
+    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
+  };
+  new_g->block()->cloneFrom(this->block(), env);
+  return new_g;
+}
+
+Value* Value::setUniqueName(const std::string & name) {
+  if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
+    throw std::runtime_error("names may not be integers: " + name);
+  }
+
+  auto & names = node()->owningGraph()->unique_names_;
+
+  // clear any old name from the map
+  if(hasUniqueName()) {
+    names.erase(unique_name_);
+    unique_name_ = "";
+  }
+
+  // allow "" to clear the uniquename
+  if(name == "")
+    return this;
+
+  // if someone else has this name, then rename the other value
+  auto old_owner_of_name = names.find(name);
+  if(old_owner_of_name != names.end()) {
+    size_t suffix = 1;
+    std::string name_base = name;
+    auto last_dot_pos = name.find_last_of('.');
+    if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
+      if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
+        suffix = std::stoll(name.substr(last_dot_pos + 1));
+        name_base = name.substr(0, last_dot_pos);
+      }
+    }
+    std::string replacement_name;
+    do {
+      std::stringstream ss;
+      ss << name_base << "." << suffix++;
+      replacement_name = ss.str();
+    } while(names.count(replacement_name) > 0);
+    old_owner_of_name->second->setUniqueName(replacement_name);
+  }
+
+  names[name] = this;
+  unique_name_ = name;
+  return this;
+}
+
+size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
+  auto name_str = name.toUnqualString();
+  for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
+    const Argument* arg = &the_schema.arguments[i];
+    if (arg->name == name_str) {
+      return i;
+    }
+  }
+  throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
+}
+
+at::optional<IValue> Node::get(Symbol name) const {
+  return toIValue(namedInput(name));
+}
+
+Value* Node::namedInput(Symbol name) const {
+  return input(findArgument(schema(), name));
+}
+
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) const {
+  if (!sig(signature_literal).matches(this)) return false;
+  for (Symbol s : const_inputs) {
+    if (!is_constant(s)) return false;
+  }
+  return true;
+}
+
+void Node::dump() const {
+  std::cout << *this << "\n";
+}
+
+void Node::findSchema() const {
+  schema_ = &getOperatorFor(this).schema();
+}
+
+namespace {
+
+const OperatorSet& nondeterminstic_aten_ops() {
+  static OperatorSet nondeterministic_ops = {
+    "aten::dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
+    "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
+    "aten::_th_bernoulli(Tensor self, *, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self) -> Tensor",
+    "aten::bernoulli(Tensor self, Tensor p, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, Generator generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
+    "aten::poisson(Tensor self, Generator generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::rand_like(Tensor self) -> Tensor",
+    "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint(int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint(int low, int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int high) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high) -> Tensor",
+    "aten::randint_like(Tensor self, int high, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randn(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randn_like(Tensor self) -> Tensor",
+    "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randperm(int n, *, int dtype, int layout, int[] device) -> Tensor"
+  };
+  return nondeterministic_ops;
+}
+
+}  // namespace
+
+bool Node::isNondeterministic() const {
+  if (nondeterminstic_aten_ops().find(this) == nullptr) {
+    return false;
+  }
+  // Dropout with train = False is deterministic
+  if (matches("aten::dropout(Tensor input, float p, int train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
+    return false;
+  }
+  return true;
+}
+
+inline const SourceRange& fakeRange() {
+  static SourceRange range(std::make_shared<std::string>("<internally-created-node>"), 0, 1);
+  return range;
+}
+
+Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
+  return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
+}
+
+PythonOp* defaultAllocPythonOp(Graph*g) {
+  throw std::runtime_error("Trying to allocate a Python object without python bindings loaded");
+}
+std::atomic<decltype(&defaultAllocPythonOp)> alloc_python_op;
+
+// patched in when python bindings are loaded
+PythonOp* allocPythonOp(Graph* g) {
+  return alloc_python_op.load()(g);
+}
+void setAllocPythonOp(PythonOp* (*v)(Graph* g)) {
+  alloc_python_op.store(v);
+}
+
+}} // namespace torch::jit

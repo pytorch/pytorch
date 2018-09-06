@@ -15,16 +15,16 @@ static inline void THNN_(TemporalMaxPooling_shapeCheck)(
 
   int dimS = 0; // sequence dimension
   int dimF = 1; // feature dimension
-  int ndims = input->nDimension;
+  int ndims = input->dim();
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
     dimF = 2;
   }
 
-  niframe = input->size[dimS];
-  framesize = input->size[dimF];
+  niframe = input->size(dimS);
+  framesize = input->size(dimF);
   noframe = (niframe - kW) / dW + 1;
 
   THArgCheck(kW > 0, 5,
@@ -32,11 +32,11 @@ static inline void THNN_(TemporalMaxPooling_shapeCheck)(
   THArgCheck(dW > 0, 6,
              "stride should be greater than zero, but got dW: %d", dW);
 
-  THNN_ARGCHECK(input->nDimension == 2 || input->nDimension == 3, 2, input,
-                  "2D or 3D (batch mode) tensor expected for input, but got: %s");
-  THArgCheck(input->size[dimS] >= kW, 2,
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
+                "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
+  THArgCheck(input->size(dimS) >= kW, 2,
              "input sequence smaller than kernel size. Got: %d, Expected: %d",
-             input->size[dimS], kW);
+             input->size(dimS), kW);
 
   if (gradOutput != NULL) {
     THNN_CHECK_DIM_SIZE(gradOutput, ndims, dimS, noframe);
@@ -60,8 +60,8 @@ void THNN_(TemporalMaxPooling_updateOutput)(
   int64_t framesize;
   int64_t noframe;
 
-  real *input_data;
-  real *output_data;
+  scalar_t *input_data;
+  scalar_t *output_data;
   THIndex_t *indices_data;
 
   int64_t t, y;
@@ -71,21 +71,21 @@ void THNN_(TemporalMaxPooling_updateOutput)(
 
   THNN_(TemporalMaxPooling_shapeCheck)(state, input, NULL, NULL, kW, dW);
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
     dimF = 2;
   }
 
   /* sizes */
-  niframe = input->size[dimS];
-  framesize = input->size[dimF];
+  niframe = input->size(dimS);
+  framesize = input->size(dimF);
   noframe = (niframe - kW) / dW + 1;
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);
 
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
     /* resize output */
     THTensor_(resize2d)(output, noframe, framesize);
@@ -94,25 +94,25 @@ void THNN_(TemporalMaxPooling_updateOutput)(
     THIndexTensor_(resize2d)(indices, noframe, framesize);
 
     /* get raw pointers */
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
     indices_data = THIndexTensor_(data)(indices);
 
     for(t = 0; t < noframe; t++)
     {
-      real *ip = input_data + t*framesize*dW;
-      real *op = output_data + t*framesize;
+      scalar_t *ip = input_data + t*framesize*dW;
+      scalar_t *op = output_data + t*framesize;
       THIndex_t *xp = indices_data + t*framesize;
 #pragma omp parallel for private(y)
       for(y = 0; y < framesize; y++)
       {
         /* compute local max: */
         int64_t maxindex = -1;
-        real maxval = -THInf;
+        scalar_t maxval = -THInf;
         int64_t x;
         for(x = 0; x < kW; x++)
         {
-          real val = ip[x*framesize+y];
+          scalar_t val = ip[x*framesize+y];
           if (val > maxval)
           {
             maxval = val;
@@ -122,14 +122,14 @@ void THNN_(TemporalMaxPooling_updateOutput)(
 
         /* set output to local max */
         op[y] = maxval;
-        xp[y] = (real)maxindex;
+        xp[y] = (scalar_t)maxindex;
       }
     }
   }
   else
   {
     /* number of batch frames */
-    int64_t nbframe = input->size[0];
+    int64_t nbframe = input->size(0);
     int64_t i;
 
     /* resize output */
@@ -139,20 +139,20 @@ void THNN_(TemporalMaxPooling_updateOutput)(
     THIndexTensor_(resize3d)(indices, nbframe, noframe, framesize);
 
     /* get raw pointers */
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
     indices_data = THIndexTensor_(data)(indices);
 
     for(i = 0; i < nbframe; i++)
     {
-      real *inputSample_data = input_data + i*niframe*framesize;
-      real *outputSample_data = output_data + i*noframe*framesize;
+      scalar_t *inputSample_data = input_data + i*niframe*framesize;
+      scalar_t *outputSample_data = output_data + i*noframe*framesize;
       THIndex_t *indicesSample_data = indices_data + i*noframe*framesize;
 
       for(t = 0; t < noframe; t++)
       {
-        real *ip = inputSample_data + t*framesize*dW;
-        real *op = outputSample_data + t*framesize;
+        scalar_t *ip = inputSample_data + t*framesize*dW;
+        scalar_t *op = outputSample_data + t*framesize;
         THIndex_t *xp = indicesSample_data + t*framesize;
 
 #pragma omp parallel for private(y)
@@ -160,11 +160,11 @@ void THNN_(TemporalMaxPooling_updateOutput)(
         {
           /* compute local max: */
           int64_t maxindex = -1;
-          real maxval = -THInf;
+          scalar_t maxval = -THInf;
           int64_t x;
           for(x = 0; x < kW; x++)
           {
-            real val = ip[x*framesize+y];
+            scalar_t val = ip[x*framesize+y];
             if (val > maxval)
             {
               maxval = val;
@@ -174,14 +174,14 @@ void THNN_(TemporalMaxPooling_updateOutput)(
 
           /* set output to local max */
           op[y] = maxval;
-          xp[y] = (real)maxindex;
+          xp[y] = (scalar_t)maxindex;
         }
       }
     }
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 
 }
 
@@ -198,8 +198,8 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   int noframe;
   int64_t framesize;
 
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
   THIndex_t *indices_data;
 
   int64_t t, y;
@@ -215,27 +215,27 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   int dimS = 0; // sequence dimension
   int dimF = 1; // feature dimension
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
     dimF = 2;
   }
   /* sizes */
-  niframe = input->size[dimS];
-  noframe = gradOutput->size[dimS];
-  framesize = gradOutput->size[dimF];
+  niframe = input->size(dimS);
+  noframe = gradOutput->size(dimS);
+  framesize = gradOutput->size(dimF);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<scalar_t>();
+  gradOutput_data = gradOutput->data<scalar_t>();
   indices_data = THIndexTensor_(data)(indices);
 
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
     for(t = 0; t < noframe; t++)
     {
-      real *gip = gradInput_data + t*framesize*dW;
-      real *gop = gradOutput_data + t*framesize;
+      scalar_t *gip = gradInput_data + t*framesize*dW;
+      scalar_t *gop = gradOutput_data + t*framesize;
       THIndex_t *xp = indices_data + t*framesize;
 #pragma omp parallel for private(y)
       for(y = 0; y < framesize; y++)
@@ -250,19 +250,19 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   else
   {
     /* number of batch frames */
-    int64_t nbframe = input->size[0];
+    int64_t nbframe = input->size(0);
     int64_t i;
 
     for(i = 0; i < nbframe; i++)
     {
-      real *gradInputSample_data = gradInput_data + i*niframe*framesize;
-      real *gradOutputSample_data = gradOutput_data + i*noframe*framesize;
+      scalar_t *gradInputSample_data = gradInput_data + i*niframe*framesize;
+      scalar_t *gradOutputSample_data = gradOutput_data + i*noframe*framesize;
       THIndex_t *indicesSample_data = indices_data + i*noframe*framesize;
 
       for(t = 0; t < noframe; t++)
       {
-        real *gip = gradInputSample_data + t*framesize*dW;
-        real *gop = gradOutputSample_data + t*framesize;
+        scalar_t *gip = gradInputSample_data + t*framesize*dW;
+        scalar_t *gop = gradOutputSample_data + t*framesize;
         THIndex_t *xp = indicesSample_data + t*framesize;
 #pragma omp parallel for private(y)
         for(y = 0; y < framesize; y++)
@@ -277,7 +277,7 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

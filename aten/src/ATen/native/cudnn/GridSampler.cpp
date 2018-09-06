@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -26,8 +27,9 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
+#include <ATen/cuda/Exceptions.h>
 
-#include <ATen/Check.h>
+#include <ATen/TensorUtils.h>
 
 // TODO: descriptor checking
 
@@ -86,11 +88,11 @@ Tensor cudnn_grid_sampler_forward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
-  CUDNN_CHECK(cudnnSpatialTfSamplerForward(
-      handle, desc.desc,
-      &one, idesc.desc, input->data_ptr(),
+  AT_CUDNN_CHECK(cudnnSpatialTfSamplerForward(
+      handle, desc.desc(),
+      &one, idesc.desc(), input->data_ptr(),
       grid->data_ptr(),
-      &zero, odesc.desc, output_t.data_ptr()
+      &zero, odesc.desc(), output_t.data_ptr()
   ));
 
   return output_t;
@@ -128,11 +130,11 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
-  CUDNN_CHECK(cudnnSpatialTfSamplerBackward(
-    handle, desc.desc,
-    &one, idesc.desc, input->data_ptr(),
-    &zero, gdesc.desc, grad_input_t.data_ptr(),
-    &one, odesc.desc, grad_output->data_ptr(),
+  AT_CUDNN_CHECK(cudnnSpatialTfSamplerBackward(
+    handle, desc.desc(),
+    &one, idesc.desc(), input->data_ptr(),
+    &zero, gdesc.desc(), grad_input_t.data_ptr(),
+    &one, odesc.desc(), grad_output->data_ptr(),
     // intruigingly, the outputs don't need descriptors
     grid->data_ptr(),
     &zero, grad_grid_t.data_ptr()

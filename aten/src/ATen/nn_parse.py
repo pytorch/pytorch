@@ -66,7 +66,7 @@ def output_arguments(thnn_function):
     def is_output_arg(arg_name, func_name):
         if arg_name == 'output' and 'updateOutput' in cname:
             return True
-        if name in {'gradInput', 'gradWeight', 'gradBias'}:
+        if name in {'gradInput', 'gradWeight', 'gradBias', 'gradGrid'}:
             return True
         if arg_name == 'indices' and 'updateOutput' in cname and 'Unpool' not in cname:
             # indices is an output argument in pooling and an input in unpooling
@@ -215,7 +215,7 @@ def unique_args(argslist):
     return result
 
 
-def function_info(name, arguments, cimpls, buffers, backends, inplace):
+def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_check):
     """
     cimpls contains information use to call into THNN:
         cname: THNN function name
@@ -231,6 +231,7 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace):
         'buffers': buffers,
         'backends': backends,
         'cimpls': cimpls,
+        'scalar_check': scalar_check,
         'variants': ['function'],
     }
 
@@ -247,7 +248,7 @@ def base_declaration(func, thnn_function, backends, inplace=False):
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
 
-    return function_info(name, arguments, None, buffers, backends, inplace)
+    return function_info(name, arguments, None, buffers, backends, inplace, func.get('scalar_check'))
 
 
 def forward_declaration(base, thnn_function, inplace=False):
@@ -268,7 +269,12 @@ def forward_declaration(base, thnn_function, inplace=False):
     arguments = remove_unused_args(arguments, thnn_args)
     cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
 
-    return function_info(name, arguments, [cimpl], [], base['backends'], inplace)
+    scalar_check = base['scalar_check']
+    if scalar_check is not None:
+        output_arg_names = [arg['name'] for arg in arguments if arg.get('output', False)]
+        scalar_check = {k: v for (k, v) in scalar_check.items() if k in output_arg_names}
+
+    return function_info(name, arguments, [cimpl], [], base['backends'], inplace, scalar_check)
 
 
 def backward_declaration(base, thnn_functions):
@@ -280,18 +286,22 @@ def backward_declaration(base, thnn_functions):
                   if arg['name'] != 'inplace']
     arguments += base['buffers']
 
+    if 'upsample' in base['name']:
+        # Add input_size as parameter to upsample backwards functions
+        # Note that input_size is 4-dim for upsample_xxx2d
+        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
+        input_size_arg = {'type': 'IntList', 'name': 'input_size', 'size': size}
+        for output_size_idx, arg in enumerate(arguments):
+            if arg['name'] == 'output_size':
+                break
+        arguments.insert(output_size_idx + 1, input_size_arg)
+
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:
         if 'output' in arg:
             del arg['output']
 
     arguments += unique_args([output_arguments(f) for f in thnn_functions])
-
-    if 'upsample' in base['name']:
-        # Add input_size as parameter to upsample backwards functions
-        # Note that input_size is 4-dim for upsample_xxx2d
-        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
-        arguments.append({'type': 'IntList', 'name': 'input_size', 'size': size})
 
     def initialize_output_arg(arg):
         # the mask array<bool, N> specifies which return values to compute
@@ -308,10 +318,14 @@ def backward_declaration(base, thnn_functions):
             arg['zero'] = True
 
     is_batch_norm_backward = '_backward' in thnn_functions[0].name
+    grad_params = []
     if len(thnn_functions) > 1 or is_batch_norm_backward:
         for arg in arguments:
             if arg.get('output', False):
                 initialize_output_arg(arg)
+            if 'Tensor' in arg['type'] and arg['name'].startswith('grad_') and \
+                    'input' not in arg['name'] and 'output' not in arg['name']:
+                grad_params.append(arg['name'])
 
     thnn_args = [get_thnn_args(f, arguments, False) for f in thnn_functions]
     arguments = remove_unused_args(arguments, unique_args(thnn_args))
@@ -322,7 +336,7 @@ def backward_declaration(base, thnn_functions):
         if '_updateGradInput' in func.name:
             return 'grad_input_'
         if '_accGradParameters' in func.name:
-            return 'grad_weight_'
+            return ' || '.join(p + '_' for p in grad_params)
         return None
 
     for func, args in zip(thnn_functions, thnn_args):
@@ -331,7 +345,23 @@ def backward_declaration(base, thnn_functions):
             cimpl['condition'] = get_condition(func)
         cimpls.append(cimpl)
 
-    return function_info(name, arguments, cimpls, [], base['backends'], False)
+    output_args = [arg for arg in arguments if arg.get('output', False)]
+    scalar_check_arg = base['scalar_check'] if base['scalar_check'] is not None else dict()
+    scalar_check = {k: v for (k, v) in scalar_check_arg.items() if k in [a['name'] for a in output_args]}
+    for arg in output_args:
+        # resize automatically sets scalar_check
+        if scalar_check.get(arg['name']) is not None or arg.get('resize', False):
+            pass
+        else:
+            base_name = arg['name'][len('grad_'):] if arg['name'] != 'grad_input' else 'self'
+            if base_name in [a['name'] for a in arguments]:
+                scalar_check[arg['name']] = base_name + '_->dim() == 0'
+            else:
+                raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "
+                                  "does not exist.  Please explicitly specify scalar_check."
+                                  .format(arg['name'], name, base_name)))
+
+    return function_info(name, arguments, cimpls, [], base['backends'], False, scalar_check)
 
 
 def parse_nn_yaml(filename):

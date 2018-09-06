@@ -67,14 +67,24 @@ def version():
     return __cudnn_version
 
 
+CUDNN_TENSOR_TYPES = {
+    'torch.cuda.HalfTensor',
+    'torch.cuda.FloatTensor',
+    'torch.cuda.DoubleTensor',
+}
+
+
+def is_available():
+    r"""Returns a bool indicating if CUDNN is currently available."""
+    return torch._C.has_cudnn
+
+
 def is_acceptable(tensor):
     if not torch._C._get_cudnn_enabled():
         return False
-    if not (isinstance(tensor, torch.cuda.HalfTensor) or
-            isinstance(tensor, torch.cuda.FloatTensor) or
-            isinstance(tensor, torch.cuda.DoubleTensor)):
+    if tensor.type() not in CUDNN_TENSOR_TYPES:
         return False
-    if not torch._C.has_cudnn:
+    if not is_available():
         warnings.warn(
             "PyTorch was compiled without cuDNN support. To use cuDNN, rebuild "
             "PyTorch making sure the library is visible to the build system.")

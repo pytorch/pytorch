@@ -101,7 +101,7 @@ class LBFGS(Optimizer):
 
         # evaluate initial f(x) and df/dx
         orig_loss = closure()
-        loss = orig_loss.data[0]
+        loss = float(orig_loss)
         current_evals = 1
         state['func_evals'] += 1
 
@@ -109,9 +109,9 @@ class LBFGS(Optimizer):
         abs_grad_sum = flat_grad.abs().sum()
 
         if abs_grad_sum <= tolerance_grad:
-            return loss
+            return orig_loss
 
-        # variables cached in state (for tracing)
+        # tensors cached in state (for tracing)
         d = state.get('d')
         t = state.get('t')
         old_dirs = state.get('old_dirs')
@@ -148,8 +148,8 @@ class LBFGS(Optimizer):
                         old_stps.pop(0)
 
                     # store new direction/step
-                    old_dirs.append(s)
-                    old_stps.append(y)
+                    old_dirs.append(y)
+                    old_stps.append(s)
 
                     # update scale of initial Hessian approximation
                     H_diag = ys / y.dot(y)  # (y*y)
@@ -165,20 +165,20 @@ class LBFGS(Optimizer):
                 al = state['al']
 
                 for i in range(num_old):
-                    ro[i] = 1. / old_stps[i].dot(old_dirs[i])
+                    ro[i] = 1. / old_dirs[i].dot(old_stps[i])
 
                 # iteration in L-BFGS loop collapsed to use just one buffer
                 q = flat_grad.neg()
                 for i in range(num_old - 1, -1, -1):
-                    al[i] = old_dirs[i].dot(q) * ro[i]
-                    q.add_(-al[i], old_stps[i])
+                    al[i] = old_stps[i].dot(q) * ro[i]
+                    q.add_(-al[i], old_dirs[i])
 
                 # multiply by initial Hessian
                 # r/d is the final direction
                 d = r = torch.mul(q, H_diag)
                 for i in range(num_old):
-                    be_i = old_stps[i].dot(r) * ro[i]
-                    r.add_(al[i] - be_i, old_dirs[i])
+                    be_i = old_dirs[i].dot(r) * ro[i]
+                    r.add_(al[i] - be_i, old_stps[i])
 
             if prev_flat_grad is None:
                 prev_flat_grad = flat_grad.clone()
@@ -210,7 +210,7 @@ class LBFGS(Optimizer):
                     # re-evaluate function only if not in last iteration
                     # the reason we do this: in a stochastic setting,
                     # no use to re-evaluate that function here
-                    loss = closure().data[0]
+                    loss = float(closure())
                     flat_grad = self._gather_flat_grad()
                     abs_grad_sum = flat_grad.abs().sum()
                     ls_func_evals = 1

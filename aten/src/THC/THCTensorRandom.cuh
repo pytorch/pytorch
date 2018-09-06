@@ -7,7 +7,7 @@
 
 #include <curand_kernel.h>
 
-#define MAX_NUM_BLOCKS 64
+#define MAX_NUM_BLOCKS 200 
 #define BLOCK_SIZE 256
 /* Separate kernel because curand_log_normal gets extra parameters. */
 
@@ -104,7 +104,7 @@ __global__ void renormRowsL1(T* dist, long rows, long cols) {
       sum = THCNumerics<T>::add(sum, val);
     }
 
-    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T, T>(), zero);
+    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T>(), zero);
     if (threadIdx.x == 0) {
       assert(THCNumerics<T>::gt(sum, zero));
       smem[0] = sum;
@@ -140,8 +140,11 @@ __device__ int binarySearchForMultinomial(T* dist,
 
   if (start == size) {
     // No probability mass or precision problems; just return the
-    // first element
-    start = 0;
+    // first non-zero element by setting start to size-1 here,
+    // the code below will move it to the last non-zero probability
+    // this actually can happen when the random number is 1
+    // (github pytorch issue #4858).
+    start = size - 1;
   }
 
   T curVal = dist[start];
@@ -156,7 +159,10 @@ sampleMultinomialOnce(int64_t* dest,
                       int64_t distributions,
                       int categories,
                       T* sampled,
-                      T* dist) {
+                      T* dist,
+                      int stride_dist,        // dist->stride(0)
+                      int stride_categories   // dist->stride(1)
+                      ) {
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
 
@@ -175,13 +181,15 @@ sampleMultinomialOnce(int64_t* dest,
     AccT sum = accZero;
     T val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
-      val = dist[curDist * categories + cat];
+      val = dist[curDist * stride_dist + cat * stride_categories];
       assert(THCNumerics<T>::ge(val, zero));
+      assert(!THCNumerics<T>::isinf(val));
+      assert(!THCNumerics<T>::isnan(val));
       sum = THCNumerics<AccT>::add(sum, ScalarConvert<T, AccT>::to(val));
     }
 
     // threadIdx.x == 0 has the sum value from this
-    sum = reduceBlock(asmem, blockDim.x, sum, ReduceAdd<AccT, AccT>(), accZero);
+    sum = reduceBlock(asmem, blockDim.x, sum, ReduceAdd<AccT>(), accZero);
 
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
@@ -198,7 +206,7 @@ sampleMultinomialOnce(int64_t* dest,
     T sample = smem[0];
     __syncthreads();
 
-    if (THCNumerics<AccT>::eq(sum,  accZero) || THCNumerics<T>::eq(sample, zero)) {
+    if (THCNumerics<AccT>::eq(sum,  accZero)) {
       // Choose the first element
       if (threadIdx.x == 0) {
         dest[curDist] = TH_INDEX_BASE;
@@ -215,14 +223,14 @@ sampleMultinomialOnce(int64_t* dest,
       // All threads in bounds load a value
       int cat = chunk * blockDim.x + threadIdx.x;
 
-      AccT val =
+      T dist_val = ScalarConvert<AccT, T>::to(
         cat < categories ?
           THCNumerics<AccT>::div(
-              ScalarConvert<T, AccT>::to(dist[curDist * categories + cat]),
+              ScalarConvert<T, AccT>::to(dist[curDist * stride_dist + cat * stride_categories]),
               sum) :
-          accZero;
+	  accZero);
 
-      smem[threadIdx.x] = ScalarConvert<AccT, T>::to(val);
+      smem[threadIdx.x] = dist_val;
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
@@ -248,8 +256,9 @@ sampleMultinomialOnce(int64_t* dest,
         THCNumerics<T>::add(smem[threadIdx.x - 1], prevHighProb);
       bool inBucket =
         (cat < categories) &&
-        (!THCNumerics<T>::gt(sample, curBucket)) &&
-        (THCNumerics<T>::gt(sample, prevBucket));
+        (!THCNumerics<T>::ge(sample, curBucket)) &&
+        (THCNumerics<T>::ge(sample, prevBucket)) &&
+        (THCNumerics<T>::gt(dist_val, zero));
 
       if (inBucket) {
         // We're done; we have the sample
@@ -272,7 +281,7 @@ sampleMultinomialOnce(int64_t* dest,
       // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
       // rarity in which this occurs, this should not be an issue.
       for (int cat = categories - 1; cat >= 0; --cat) {
-        if (THCNumerics<T>::gt(dist[curDist * categories + cat], zero)) {
+        if (THCNumerics<T>::gt(dist[curDist * stride_dist + cat * stride_categories], zero)) {
           dest[curDist] = cat + TH_INDEX_BASE;
           break;
         }

@@ -3,9 +3,14 @@
 #include "GlooCache.hpp"
 #include "Store.hpp"
 
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
+#include "gloo/transport/ibverbs/device.h"
+#endif
+
 #include "gloo/transport/tcp/device.h"
 
 #include <algorithm>
+#include <unistd.h>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -32,6 +37,10 @@
     case ::at::ScalarType::Float: func<float>(args); break;                   \
     case ::at::ScalarType::Double: func<double>(args); break;                 \
     case ::at::ScalarType::Half: func<gloo::float16>(args); break;            \
+    case ::at::ScalarType::Char: func<int8_t>(args); break;                   \
+    case ::at::ScalarType::Byte: func<uint8_t>(args); break;                  \
+    case ::at::ScalarType::Int: func<int32_t>(args); break;                   \
+    case ::at::ScalarType::Long: func<int64_t>(args); break;                  \
     default:                                                                  \
       throw std::runtime_error("Invalid " + std::string(#func) + " function type"); \
   }
@@ -56,9 +65,12 @@ void DataChannelGloo::RequestGloo::wait() {
   _request.wait();
 }
 
-DataChannelGloo::Group::Group(const std::string& addr, port_type port,
-                                      std::vector<rank_type> ranks, rank_type max_rank,
-                                      int store_socket)
+
+DataChannelGloo::Group::Group(const std::string& addr,
+                              port_type port,
+                              std::vector<rank_type> ranks,
+                              rank_type max_rank,
+                              int store_socket)
   : DataChannel::Group(std::move(ranks), max_rank)
   , _store(new Store(addr, port, store_socket)) {}
 
@@ -69,11 +81,36 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
 {
   _num_processes = config.world_size;
 
-  // Default options listen on this host's name.
-  // NOTE: when hostname has bad configuration in `/etc/hosts` processes
-  // will not connect to each other.
-  ::gloo::transport::tcp::attr attr(config.public_address.c_str());
-  _device = ::gloo::transport::tcp::CreateDevice(attr);
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
+
+  // This helper function automatically detects the IB device in the system
+  auto ibDeviceNames = ::gloo::transport::ibverbs::getDeviceNames();
+
+  // If there are IB devices, we will use IB
+  if (!ibDeviceNames.empty()) {
+    // Currently, gloo only supports a single IB device and will use the first
+    auto ibDeviceToUse = ibDeviceNames[0];
+
+    ::gloo::transport::ibverbs::attr attr = {
+      .name = ibDeviceToUse,
+      .port = 1,
+      .index = 0,
+    };
+
+    _deviceList.push_back(::gloo::transport::ibverbs::CreateDevice(attr));
+
+  // Otherwise, fallback to use TCP instead
+  } else
+
+#endif
+
+  {
+    // Default options listen on this host's name.
+    // NOTE: when hostname has bad configuration in `/etc/hosts` processes
+    // will not connect to each other.
+    ::gloo::transport::tcp::attr attr(config.public_address.c_str());
+    _deviceList.push_back(::gloo::transport::tcp::CreateDevice(attr));
+  }
 
   if (_rank == 0) {
     _addr = "localhost";
@@ -86,12 +123,16 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
 }
 
 
-DataChannelGloo::~DataChannelGloo() {}
+DataChannelGloo::~DataChannelGloo() {
+  if (_listen_socket != -1) {
+    ::close(_listen_socket);
+  }
+}
 
 void DataChannelGloo::destroy() {}
 
 bool DataChannelGloo::init() {
-  _cache = std::unique_ptr<GlooCache>(new GlooCache(_rank, _device));
+  _cache = std::unique_ptr<GlooCache>(new GlooCache(_rank, _deviceList));
 
   std::vector<rank_type> ranks;
   ranks.reserve(_num_processes);
@@ -125,8 +166,8 @@ void DataChannelGloo::allGatherT(std::vector<at::Tensor>& output,
       throw std::runtime_error("allGather got input and output on different devices");
     }
   }
-  std::uint64_t tensor_bytes = input.type().elementSizeInBytes() * input.numel();
-  std::uint64_t all_tensor_bytes = tensor_bytes * output.size();
+  uint64_t tensor_bytes = input.type().elementSizeInBytes() * input.numel();
+  uint64_t all_tensor_bytes = tensor_bytes * output.size();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_GATHER, T>(
     group_id, _groups.at(group_id), input_device, tensor_bytes, all_tensor_bytes, input.numel());
 
@@ -135,7 +176,7 @@ void DataChannelGloo::allGatherT(std::vector<at::Tensor>& output,
     std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
     std::memcpy(GlooCache::input_buffer(ret).get(), input.data_ptr(), tensor_bytes);
     GlooCache::algorithm(ret)->run();
-    for (std::size_t i = 0; i < output.size(); i++) {
+    for (size_t i = 0; i < output.size(); i++) {
       std::memcpy(output.at(i).data_ptr(),
                   GlooCache::output_buffer(ret).get() + (i * tensor_bytes),
                   tensor_bytes);
@@ -177,7 +218,7 @@ void DataChannelGloo::scatter(std::vector<at::Tensor>& input,
 template<typename T>
 void DataChannelGloo::allReduceT(at::Tensor& t, THDReduceOp operation,
                                  THDGroup group_id) {
-  std::uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
+  uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_REDUCE, T>(
     group_id, _groups.at(group_id), getDeviceType(t), tensor_bytes, t.numel(), operation);
 
@@ -206,7 +247,7 @@ void DataChannelGloo::reduce(at::Tensor& data, THDReduceOp operation,
 template<typename T>
 void DataChannelGloo::broadcastT(at::Tensor& data, rank_type src_rank,
                                  THDGroup group_id) {
-  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
+  uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::BROADCAST, T>(
     group_id, _groups.at(group_id), getDeviceType(data), tensor_bytes, data.numel(),
     _groups.at(group_id).mustGetGroupRank(src_rank));

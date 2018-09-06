@@ -1,12 +1,18 @@
 #include "THCCachingAllocator.h"
 
+#include <ATen/Context.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/Exceptions.h>
+
 #include <cuda_runtime_api.h>
+#include <algorithm>
 #include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 //
 // Yet another caching allocator for CUDA device allocations.
@@ -33,7 +39,6 @@
 // work.
 //
 
-
 namespace {
 
 typedef std::shared_ptr<THCStream> THCStreamPtr;
@@ -42,6 +47,35 @@ typedef std::set<THCStreamPtr> stream_set;
 const size_t kRoundSmall = 512;     // round up small allocs to 512 bytes
 const size_t kRoundLarge = 131072;  // round up large allocs to 128 KiB
 const size_t kSmallAlloc = 1048576; // largest "small" allocation is 1 MiB
+
+struct DeviceStats {
+  uint64_t   amount_allocated;      // total amount allocated in bytes
+  uint64_t   max_amount_allocated;  // max total amount allocated in bytes
+  uint64_t   amount_cached;         // total amount in cache in bytes
+  uint64_t   max_amount_cached;     // max total amount in cache in bytes
+
+  DeviceStats() :
+      amount_allocated(0), max_amount_allocated(0),
+      amount_cached(0), max_amount_cached(0) { }
+
+  void increaseAllocated(size_t delta) {
+    amount_allocated += delta;
+    max_amount_allocated = std::max(max_amount_allocated, amount_allocated);
+  }
+
+  void decreaseAllocated(size_t delta) {
+    amount_allocated -= delta;
+  }
+
+  void increaseCached(size_t delta) {
+    amount_cached += delta;
+    max_amount_cached = std::max(max_amount_cached, amount_cached);
+  }
+
+  void decreaseCached(size_t delta) {
+    amount_cached -= delta;
+  }
+};
 
 struct Block {
   int           device;      // gpu
@@ -80,6 +114,9 @@ struct THCCachingAllocator
   typedef bool (*Comparison)(const Block*, const Block*);
   typedef std::set<Block*, Comparison> FreeBlocks;
 
+  // device statistics
+  std::vector<DeviceStats> device_stats;
+
   // lock around all operations
   std::mutex mutex;
 
@@ -102,6 +139,14 @@ struct THCCachingAllocator
       large_blocks(BlockComparator),
       small_blocks(BlockComparator) {}
 
+  DeviceStats &get_stats_for_device(int device) {
+    THAssert(device >= 0);
+    if ((size_t) device >= device_stats.size()) {
+      device_stats.resize(device + 1);
+    }
+    return device_stats.at(device);
+  }
+
   /** allocates a block which is safe to use from the provided stream */
   cudaError_t malloc(void** devPtr, size_t size, cudaStream_t stream)
   {
@@ -121,6 +166,8 @@ struct THCCachingAllocator
     size = round_size(size);
     bool small = size <= kSmallAlloc;
 
+    DeviceStats &stats = get_stats_for_device(device);
+
     Block search_key(device, stream, size);
     auto& free_blocks = small ? large_blocks : small_blocks;
 
@@ -138,6 +185,7 @@ struct THCCachingAllocator
       if (err != cudaSuccess) {
         return err;
       }
+      stats.increaseCached(alloc_size);
       block = new Block(device, stream, alloc_size, (char*)ptr);
     }
 
@@ -161,6 +209,8 @@ struct THCCachingAllocator
     allocated_blocks[block->ptr] = block;
 
     *devPtr = (void*)block->ptr;
+
+    stats.increaseAllocated(block->size);
     return cudaSuccess;
   }
 
@@ -180,6 +230,7 @@ struct THCCachingAllocator
     allocated_blocks.erase(it);
     block->allocated = false;
 
+    get_stats_for_device(block->device).decreaseAllocated(block->size);
     if (!block->stream_uses.empty()) {
       return insert_events(block);
     }
@@ -253,7 +304,7 @@ struct THCCachingAllocator
     if (!block) {
       THError("invalid device pointer: %p", ptr);
     }
-    if (stream->stream == block->stream) {
+    if (THCStream_stream(stream) == block->stream) {
       // ignore uses on the allocation stream, since those don't require any
       // special synchronization
       return;
@@ -358,6 +409,7 @@ struct THCCachingAllocator
         if (err != cudaSuccess) {
           return err;
         }
+        get_stats_for_device(block->device).decreaseCached(block->size);
         auto cur = it;
         ++it;
         blocks.erase(cur);
@@ -390,14 +442,14 @@ struct THCCachingAllocator
     for (auto it = streams.begin(); it != streams.end(); ++it) {
       auto& stream = *it;
 
-      err = cudaSetDevice(stream->device);
+      err = cudaSetDevice(THCStream_device(stream.get()));
       if (err != cudaSuccess) break;
 
       cudaEvent_t event;
       err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
       if (err != cudaSuccess) break;
 
-      err = cudaEventRecord(event, stream->stream);
+      err = cudaEventRecord(event, THCStream_stream(stream.get()));
       if (err != cudaSuccess) break;
 
       block->event_count++;
@@ -441,44 +493,43 @@ struct THCCachingAllocator
   }
 };
 
-static cudaError_t THCCachingAllocator_malloc(void* ctx, void** ptr, size_t size, cudaStream_t stream)
-{
-  THCCachingAllocator* a = (THCCachingAllocator*) ctx;
-  return a->malloc(ptr, size, stream);
+THCCachingAllocator caching_allocator;
+
+static void CudaCachingDeleter(void* ptr) {
+  AT_CUDA_CHECK(caching_allocator.free(ptr));
 }
 
-static cudaError_t THCCachingAllocator_free(void* ctx, void* ptr)
-{
-  THCCachingAllocator* a = (THCCachingAllocator*) ctx;
-  return a->free(ptr);
-}
-
-static cudaError_t THCCachingAllocator_emptyCache(void* ctx)
-{
-  THCCachingAllocator* a = (THCCachingAllocator*) ctx;
-  return a->emptyCache();
-}
-
-static cudaError_t THCCachingAllocator_cacheInfo(void* ctx, int dev_id, size_t* cachedAndFree, size_t* largestBlock)
-{
-  THCCachingAllocator* a = (THCCachingAllocator*) ctx;
-  a->cacheInfo(dev_id, cachedAndFree, largestBlock);
-  return cudaSuccess;
-}
-
-static THCCachingAllocator caching_allocator;
-static THCDeviceAllocator device_allocator = {
-  &THCCachingAllocator_malloc,
-  NULL,
-  &THCCachingAllocator_free,
-  &THCCachingAllocator_emptyCache,
-  &THCCachingAllocator_cacheInfo,
-  &caching_allocator
+// NB: I decided not to fold this into THCCachingAllocator, because the latter
+// has a lot more methods and it wasn't altogether clear that they should
+// actually be publically exposed
+struct CudaCachingAllocator : public at::Allocator {
+  at::DataPtr allocate(size_t size) const override {
+    int device;
+    THCudaCheck(cudaGetDevice(&device));
+    void* r = nullptr;
+    if (size != 0) {
+      AT_CUDA_CHECK(caching_allocator.malloc(&r, size, at::cuda::getCurrentCUDAStream(device)));
+    }
+    return {r, r, &CudaCachingDeleter, at::Device(at::DeviceType::CUDA, device)};
+  }
+  at::DeleterFnPtr raw_deleter() const override {
+    return &CudaCachingDeleter;
+  }
 };
 
-THC_API THCDeviceAllocator* THCCachingAllocator_get(void)
+CudaCachingAllocator device_allocator;
+
+THC_API at::Allocator* THCCachingAllocator_get(void)
 {
   return &device_allocator;
+}
+
+THC_API void THCCachingAllocator_emptyCache(void) {
+  AT_CUDA_CHECK(caching_allocator.emptyCache());
+}
+
+THC_API void THCCachingAllocator_cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
+  caching_allocator.cacheInfo(dev_id, cachedAndFree, largestBlock);
 }
 
 THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)
@@ -496,8 +547,30 @@ THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex()
   return &caching_allocator.cuda_free_mutex;
 }
 
-THC_API cudaError_t THCCachingAllocator_emptyCache(void)
-{
-  return caching_allocator.emptyCache();
+static inline void assertValidDevice(int device) {
+  int device_count;
+  THCudaCheck(cudaGetDeviceCount(&device_count));
+  THAssertMsg(0 <= device && device < device_count, "Invalid device argument.");
 }
 
+THC_API uint64_t THCCachingAllocator_currentMemoryAllocated(int device)
+{
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).amount_allocated;
+}
+
+THC_API uint64_t THCCachingAllocator_maxMemoryAllocated(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).max_amount_allocated;
+}
+
+THC_API uint64_t THCCachingAllocator_currentMemoryCached(int device)
+{
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).amount_cached;
+}
+
+THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).max_amount_cached;
+}

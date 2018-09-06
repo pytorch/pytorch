@@ -1,42 +1,40 @@
 #include "ATen/UndefinedTensor.h"
-#include "ATen/Context.h"
+#include "ATen/core/Error.h"
 
 namespace at {
 
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensor::UndefinedTensor()
-: TensorImpl(&(globalContext().getType(Backend::Undefined,ScalarType::Undefined))) {
-}
-
-const char * UndefinedTensor::toString() const {
-  return "UndefinedTensor";
+: TensorImpl(UndefinedTensorId(), ScalarType::Undefined,  /* is variable */ false) {
 }
 
 IntList UndefinedTensor::sizes() const {
-  runtime_error("sizes() called on undefined Tensor");
+  AT_ERROR("sizes() called on undefined Tensor");
+}
+
+int64_t UndefinedTensor::size(int64_t d) const {
+  AT_ERROR("size(dim) called on an undefined Tensor");
+}
+
+int64_t UndefinedTensor::stride(int64_t d) const {
+  AT_ERROR("stride(dim) called on an undefined Tensor");
 }
 
 int64_t UndefinedTensor::dim() const {
-  runtime_error("dim() called on undefined Tensor");
+  AT_ERROR("dim() called on undefined Tensor");
 }
 
-const char * UndefinedTensor::typeString() {
-  return "UndefinedType";
+const Storage& UndefinedTensor::storage() const {
+  AT_ERROR("storage() called on undefined Tensor");
 }
-void * UndefinedTensor::unsafeGetTH(bool retain) {
-  runtime_error("unsafeGetTH(bool retain) called on undefined Tensor");
-}
-std::unique_ptr<Storage> UndefinedTensor::storage() {
-  runtime_error("storage() called on undefined Tensor");
+
+int64_t UndefinedTensor::storage_offset() const {
+  AT_ERROR("storage_offset() called on an undefined Tensor");
 }
 
 IntList UndefinedTensor::strides() const {
-  runtime_error("strides() called on undefined Tensor");
+  AT_ERROR("strides() called on undefined Tensor");
 }
-Scalar UndefinedTensor::localScalar() {
-  runtime_error("localScalar() called on undefined Tensor");
-}
-
 UndefinedTensor UndefinedTensor::_singleton;
 
 }

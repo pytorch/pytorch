@@ -2,32 +2,38 @@
 
 // Provides conversions between Python tensor objects and at::Tensor.
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
+
+#include <ATen/Device.h>
+
 #include <memory>
-#include <unordered_map>
-#include <ATen/ATen.h>
+#include <string>
+
+struct THPDtype;
+struct THPLayout;
+
+namespace at {
+enum class Backend;
+enum class ScalarType;
+struct Storage;
+struct Type;
+} // namespace at
 
 namespace torch {
-
-// Register a PyTypeObject* with the given attributes
-void registerPyTypeObject(
-    PyTypeObject *pytype, const std::string& name,
-    bool is_cuda, bool is_sparse);
-
 // Register a PyTypeObject* with the given attributes
 void registerStoragePyTypeObject(
     PyTypeObject *pytype, const std::string& name,
     bool is_cuda, bool is_sparse);
 
-PyObject* createPyObject(const at::Tensor& tensor);
-PyObject* createPyObject(const at::Storage& storage);
-PyTypeObject* getPyTypeObject(const at::Tensor& tensor);
-at::Type& getATenType(PyTypeObject* type);
-//rename to createPyObject when THPP is removed
-// Creates a at::Tensor from a PyObject.  Does NOT steal the PyObject reference.
-at::Tensor createTensor(PyObject* data);
-std::unique_ptr<at::Storage> createStorage(PyObject* obj);
+void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType);
+void registerLayoutObject(THPLayout *layout, at::Backend backend);
 
+PyObject* createPyObject(const at::Storage& storage);
+at::Storage createStorage(PyObject* obj);
 bool isStorage(PyObject* obj);
 
+THPDtype* getDtype(at::ScalarType scalarType);
+THPLayout* getLayout(at::Backend backend);
+at::Type& getVariableType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device);
+at::Device::Type getDeviceType(const at::Type& type);
 }  // namespace torch

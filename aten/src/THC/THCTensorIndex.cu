@@ -12,6 +12,8 @@
 #include "THCAtomics.cuh"
 #include "THCThrustAllocator.cuh"
 #include "THCTensorSort.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <algorithm> // for std::min
@@ -66,21 +68,30 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexCopySmallIndex kernel is a better choice to reduce memory
 // accesses.
-template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim>
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor>
 __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
                                     TensorInfo<T, IndexType> src,
                                     TensorInfo<int64_t, IndexType> indices,
                                     int dstCopyDim,
                                     int srcCopyDim,
+                                    IndexType totalSize,
                                     IndexType innerSize,
                                     int64_t dstCopyDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < innerSize * indices.sizes[0];
+       linearIndex < totalSize;
        linearIndex += gridDim.x * blockDim.x) {
-    IndexType srcIndex = linearIndex / innerSize;
-    IndexType elementInSlice = linearIndex % innerSize;
+    IndexType srcIndex, elementInSlice;
+    if (IndexIsMajor) {
+      srcIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      srcIndex = linearIndex % innerSize;
+    }
 
     // Lua indices begin at 1
     IndexType dstIndex =
@@ -148,21 +159,30 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexAddSmallIndex kernel is a better choice to reduce memory
 // accesses.
-template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim>
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor>
 __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
                                    TensorInfo<T, IndexType> src,
                                    TensorInfo<int64_t, IndexType> indices,
                                    int dstAddDim,
                                    int srcAddDim,
+                                   IndexType totalSize,
                                    IndexType innerSize,
                                    int64_t dstAddDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < innerSize * indices.sizes[0];
+       linearIndex < totalSize;
        linearIndex += gridDim.x * blockDim.x) {
-    IndexType srcIndex = linearIndex / innerSize;
-    IndexType elementInSlice = linearIndex % innerSize;
+    IndexType srcIndex, elementInSlice;
+    if (IndexIsMajor) {
+      srcIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      srcIndex = linearIndex % innerSize;
+    }
 
     // Lua indices begin at 1
     IndexType dstIndex =
@@ -225,20 +245,29 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexFillSmallIndex kernel is a better choice to reduce memory
 // accesses.
-template <typename T, typename IndexType, int DstDim, int IdxDim>
+template <typename T, typename IndexType, int DstDim, int IdxDim,
+          bool IndexIsMajor>
 __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
                                     TensorInfo<int64_t, IndexType> indices,
                                     int dstFillDim,
+                                    IndexType totalSize,
                                     IndexType innerSize,
                                     int64_t dstFillDimSize,
                                     T val) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < innerSize * indices.sizes[0];
+       linearIndex < totalSize;
        linearIndex += gridDim.x * blockDim.x) {
-    IndexType dstIndex = linearIndex / innerSize;
-    IndexType elementInSlice = linearIndex % innerSize;
+    IndexType dstIndex, elementInSlice;
+    if (IndexIsMajor) {
+      dstIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      dstIndex = linearIndex % innerSize;
+    }
 
     // Lua indices begin at 1
     IndexType dstIndex_ =
@@ -302,7 +331,8 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexSelectSmallIndex kernel is a better choice to reduce memory
 // accesses.
-template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim>
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor>
 __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
                                       TensorInfo<T, IndexType> src,
                                       TensorInfo<int64_t, IndexType> indices,
@@ -316,8 +346,15 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalSize;
        linearIndex += gridDim.x * blockDim.x) {
-    IndexType dstIndex = linearIndex / innerSize;
-    IndexType elementInSlice = linearIndex % innerSize;
+    IndexType dstIndex, elementInSlice;
+    if (IndexIsMajor) {
+      dstIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      dstIndex = linearIndex % innerSize;
+    }
 
     // Lua indices begin at 1
     IndexType srcIndex =
@@ -334,72 +371,6 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
 
     dst.data[dstOffset] = src.data[srcOffset];
   }
-}
-
-template <typename IndexType, unsigned int Dims>
-struct LinearIndexCalcData {
-  // sizes for the Tensor dims (from the Tensor, for bounds checking)
-  IndexType baseSizes[Dims];
-  // sizes for Tensor dims (either from the Tensor, or the size of the adv indexer at that dim)
-  IndexType sizes[Dims];
-  // strides for the Tensor we are indexing into
-  IndexType strides[Dims];
-  // these are pointers to the buffers containing the index selected at each dimension
-  // for all of the indices we want to generate. If a dimension is not under advanced indexing
-  // then the pointer is NULL
-  int64_t *advIndexTensors[Dims];
-};
-
-template <typename IndexType, unsigned int Dims>
-__device__ __forceinline__ int64_t calculateOffset(
-  IndexType index,
-  LinearIndexCalcData<IndexType, Dims> data
-)
-{
-  IndexType offset = 0;
-
-#pragma unroll
-  for (int dim = Dims - 1; dim >= 0; --dim) {
-    IndexType sizeAtDim, strideAtDim, indexAtDim, nextIndex;
-
-    strideAtDim = data.strides[dim];
-    sizeAtDim = data.sizes[dim];
-
-    if (data.advIndexTensors[dim] != NULL) {
-      indexAtDim = data.advIndexTensors[dim][index % sizeAtDim];
-      // Check if next dimension is also advanced indexing, if so we must keep the index
-      // the same and iterate together
-      if (dim > 0 && data.advIndexTensors[dim - 1] != NULL) {
-        nextIndex = index;
-      } else {
-        nextIndex = index / sizeAtDim;
-      }
-    } else {
-      nextIndex = index / sizeAtDim;
-      indexAtDim = index - nextIndex * sizeAtDim;
-    }
-
-    assert(indexAtDim < data.baseSizes[dim]);
-    offset += indexAtDim * strideAtDim;
-    index = nextIndex;
-  }
-
-  return offset;
-}
-
-template <typename IndexType, unsigned int Dims>
-__global__ void calculateLinearIndices(
-  int64_t *output,               // output Tensor for indices
-  int elements,               // number of elements in output <-> indices to calculate
-  ptrdiff_t baseOffset,       // base offset into the Tensor
-  LinearIndexCalcData<IndexType, Dims> data
-)
-{
-  for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
-         i < elements;
-         i += blockDim.x * gridDim.x) {
-      output[i] = baseOffset + calculateOffset<IndexType, Dims>(i, data);
-   }
 }
 
 template <int Dims, typename T, typename IndexType>
@@ -480,30 +451,30 @@ struct TensorPutAccumulateOp {
 };
 
 
-template<typename IndexType, typename real, template<class, class, int> class Op, typename TensorType>
+template<typename IndexType, typename T, template<class, class, int> class Op, typename TensorType>
 void dispatchTakePutImpl(THCState *state, TensorType *a, TensorType *b, THCudaLongTensor *index) {
   // These are only valid if index is contiguous
   auto start = THCudaLongTensor_data(state, index);
   auto end = start + THCudaLongTensor_numel(state, index);
 
-  auto aInfo = getTensorInfo<TensorType, IndexType>(state, a);
+  auto aInfo = getTensorInfo<T, TensorType, IndexType>(state, a);
   aInfo.collapseDims();
-  auto numel = TensorUtils<TensorType>::getNumElements(state, a);
+  auto numel = THCTensor_nElement(state, a);
   if (aInfo.isContiguous()) {
-    auto op = Op<real, IndexType, -2>(aInfo, numel, start, end);
-    THC_pointwiseApply2(state, b, index, op);
+    auto op = Op<T, IndexType, -2>(aInfo, numel, start, end);
+    THC_pointwiseApply2<T, int64_t>(state, b, index, op);
   } else {
-    auto op = Op<real, IndexType, -1>(aInfo, numel, start, end);
-    THC_pointwiseApply2(state, b, index, op);
+    auto op = Op<T, IndexType, -1>(aInfo, numel, start, end);
+    THC_pointwiseApply2<T, int64_t>(state, b, index, op);
   }
 }
 
-template<typename real, template<class, class, int> class Op, typename TensorType>
+template<typename T, template<class, class, int> class Op, typename TensorType>
 void dispatchTakePut(THCState *state, TensorType *a, TensorType *b, THCudaLongTensor *index) {
-  if (TensorUtils<TensorType>::canUse32BitIndexMath(state, a, INT_MAX)) {
-    dispatchTakePutImpl<int32_t, real, Op>(state, a, b, index);
+  if (THCTensor_canUse32BitIndexMath(state, a, INT_MAX)) {
+    dispatchTakePutImpl<int32_t, T, Op>(state, a, b, index);
   } else {
-    dispatchTakePutImpl<int64_t, real, Op>(state, a, b, index);
+    dispatchTakePutImpl<int64_t, T, Op>(state, a, b, index);
   }
 }
 

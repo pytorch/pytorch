@@ -2,7 +2,7 @@
 
 ATen is a simple tensor library thats exposes the Tensor operations in Torch
 and PyTorch directly in C++11. The wrapper respects the semantics of operators
-in PyTorch, except minor details due to differences between C++ in Python in
+in PyTorch, except minor details due to differences between C++ and Python in
 the way default arguments are handled. See the [documentation for tensors](http://pytorch.org/docs/tensors.html) in PyTorch for what these operations do.
 ATen's API is auto-generated from the same declarations PyTorch uses so the
 two APIs will track each other over time.
@@ -12,7 +12,7 @@ does not include templates. That is, there is one `Tensor` type. It can hold a
 CPU or CUDA Tensor, and the tensor may have Doubles, Float, Ints, etc. This design
 makes it easy to write generic code without templating everything.
 
-See the _generated_ [`Tensor.h` file](doc/Tensor.h) and [`Functions.h` file](doc/Functions.h) for the provided API. Excerpt:
+See https://pytorch.org/cppdocs for the provided API. Excerpt:
 ```c++
 Tensor atan2(const Tensor & other) const;
 Tensor & atan2_(const Tensor & other);
@@ -48,7 +48,8 @@ sudo pip install pyyaml
 mkdir build
 cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=/where/you/want # specify your dest directory
-# cmake .. -DNO_CUDA=true  # for CPU only machines
+# cmake .. -DUSE_NVRTC=ON -DUSE_TENSORRT=OFF -DCMAKE_INSTALL_PREFIX=../install -DCAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO=OFF -DUSE_CUDA=ON # for CUDA
+# cmake .. -DUSE_CUDA=OFF  # for CPU only machines
 make install
 ```
 
@@ -60,7 +61,7 @@ Here is a simple example; again, the syntax follows Torch semantics.
 using namespace at; // assumed in the following
 
 Tensor d = CPU(kFloat).ones({3, 4});
-Tensor r = CPU(kFloat).zeros({3,4})
+Tensor r = CPU(kFloat).zeros({3,4});
 for(auto i = 0; i < 100000; i++) {
   r = r.add(d);
   // equivalently
@@ -75,7 +76,7 @@ Want this running on the GPU?
 using namespace at; // assumed in the following
 
 Tensor d = CUDA(kFloat).ones({3, 4});
-Tensor r = CUDA(kFloat).zeros({3,4})
+Tensor r = CUDA(kFloat).zeros({3,4});
 for(auto i = 0; i < 100000; i++) {
   r = r.add(d);
   // equivalently
@@ -87,7 +88,7 @@ for(auto i = 0; i < 100000; i++) {
 
 Expressions like `CUDA(kFloat)` are first-class `at::Type` objects that represent
 the type of a Tensor and are used to create Tensors when their type cannot be
-inferred. See the _generated_ [Type header](doc/Type.h) for its API.
+inferred.
 
 See more in [sample files](src/ATen/test).
 
@@ -164,7 +165,7 @@ behave as normal tensors.
 ### Scalars and zero-dimensional tensors
 
 In addition to the `Tensor` objects, ATen also includes `Scalar`s that represent a single number.
-Like a Tensor, Scalars are dynamically typed and can hold any one of ATen's [number types](doc/Type.h).
+Like a Tensor, Scalars are dynamically typed and can hold any one of ATen's number types.
 Scalars can be implicitly constructed from C++ number types. Scalars are needed because some functions like `addmm` take numbers along with Tensors and expect these
 numbers to be the same dynamic type as the tensor. They are also used in the API to indicate places where
 a function will _always_ return a Scalar value, like `sum`.
@@ -208,7 +209,7 @@ to the CPU, this would result in 2 copies. To avoid these synchronizations, Scal
 optionally backed by a zero-dim Tensor, and are only copied to the CPU when requested.
 
 ```c++
-auto a = CUDA(kFloat).rand({3,4})
+auto a = CUDA(kFloat).rand({3,4});
 Scalar on_gpu = Scalar(a[1][1]); //backed by zero-dim Tensor
 assert(on_gpu.isBackedByTensor());
 

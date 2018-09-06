@@ -65,7 +65,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
         if self.compiler.compiler_type == 'msvc':
             import distutils.msvccompiler
             import distutils.msvc9compiler
-            if sys.version[0] == 2:
+            if sys.version_info < (3, ):
                 orig_compiler = distutils.msvc9compiler.MSVCCompiler
             else:
                 orig_compiler = distutils._msvccompiler.MSVCCompiler
@@ -100,8 +100,14 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     # Cannot find src or obj, revert back to original style
                     return orig_spawn(cmd)
 
-                from distutils.spawn import _nt_quote_args
-                cmd = _nt_quote_args(cmd)
+                quote_regex = re.compile('".*"')
+                quote_list = [quote_regex.search(
+                    arg) is not None for arg in cmd]
+                no_quote = any(quote_list)
+
+                if not no_quote:
+                    from distutils.spawn import _nt_quote_args
+                    cmd = _nt_quote_args(cmd)
 
                 builder.writer.build(
                     [obj], 'compile', [src],

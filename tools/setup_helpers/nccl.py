@@ -1,30 +1,26 @@
 import os
-import sys
 import glob
-import platform
 import warnings
 from itertools import chain
 
-from .env import check_env_flag
-from .cuda import WITH_CUDA, CUDA_HOME
+from .env import IS_WINDOWS, IS_DARWIN, IS_CONDA, CONDA_DIR, check_negative_env_flag, \
+    gather_paths
+
+from .cuda import USE_CUDA, CUDA_HOME
 
 
-def gather_paths(env_vars):
-    return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
-
-is_conda = 'conda' in sys.version or 'Continuum' in sys.version
-conda_dir = os.path.join(os.path.dirname(sys.executable), '..')
-
-IS_WINDOWS = (platform.system() == 'Windows')
-IS_DARWIN = (platform.system() == 'Darwin')
-
-WITH_NCCL = WITH_CUDA and not IS_DARWIN and not IS_WINDOWS
-WITH_SYSTEM_NCCL = False
+USE_NCCL = USE_CUDA and not IS_DARWIN and not IS_WINDOWS
+USE_SYSTEM_NCCL = False
 NCCL_LIB_DIR = None
 NCCL_SYSTEM_LIB = None
 NCCL_INCLUDE_DIR = None
 NCCL_ROOT_DIR = None
-if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
+USE_STATIC_NCCL = os.getenv("USE_STATIC_NCCL")
+LIBNCCL_PREFIX = "libnccl"
+if USE_STATIC_NCCL is not None:
+    LIBNCCL_PREFIX = "libnccl_static"
+
+if USE_CUDA and not check_negative_env_flag('USE_SYSTEM_NCCL'):
     ENV_ROOT = os.getenv('NCCL_ROOT_DIR', None)
     LIB_DIR = os.getenv('NCCL_LIB_DIR', None)
     INCLUDE_DIR = os.getenv('NCCL_INCLUDE_DIR', None)
@@ -52,18 +48,18 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
         '/usr/include'
     ]))
 
-    if is_conda:
-        lib_paths.append(os.path.join(conda_dir, 'lib'))
+    if IS_CONDA:
+        lib_paths.append(os.path.join(CONDA_DIR, 'lib'))
     for path in lib_paths:
         path = os.path.expanduser(path)
         if path is None or not os.path.exists(path):
             continue
-        if glob.glob(os.path.join(path, 'libnccl*')):
+        if glob.glob(os.path.join(path, LIBNCCL_PREFIX + '*')):
             NCCL_LIB_DIR = path
             # try to find an exact versioned .so/.dylib, rather than libnccl.so
-            preferred_path = glob.glob(os.path.join(path, 'libnccl*[0-9]*'))
+            preferred_path = glob.glob(os.path.join(path, LIBNCCL_PREFIX + '*[0-9]*'))
             if len(preferred_path) == 0:
-                NCCL_SYSTEM_LIB = glob.glob(os.path.join(path, 'libnccl*'))[0]
+                NCCL_SYSTEM_LIB = glob.glob(os.path.join(path, LIBNCCL_PREFIX + '*'))[0]
             else:
                 NCCL_SYSTEM_LIB = os.path.realpath(preferred_path[0])
             break
@@ -75,5 +71,5 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
             NCCL_INCLUDE_DIR = path
             break
     if NCCL_LIB_DIR is not None and NCCL_INCLUDE_DIR is not None:
-        WITH_SYSTEM_NCCL = True
+        USE_SYSTEM_NCCL = True
         NCCL_ROOT_DIR = os.path.commonprefix((NCCL_LIB_DIR, NCCL_INCLUDE_DIR))

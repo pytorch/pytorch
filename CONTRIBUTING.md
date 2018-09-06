@@ -19,18 +19,18 @@ If you are not familiar with creating a Pull Request, here are some guides:
 - https://help.github.com/articles/creating-a-pull-request/
 
 
-## Developing locally with PyTorch
+## Developing PyTorch
 
-To locally develop with PyTorch, here are some tips:
+To develop PyTorch on your machine, here are some tips:
 
-1. Uninstall all existing pytorch installs
+1. Uninstall all existing PyTorch installs:
 ```
 conda uninstall pytorch
 pip uninstall torch
 pip uninstall torch # run this command twice
 ```
 
-2. Locally clone a copy of PyTorch from source:
+2. Clone a copy of PyTorch from source:
 
 ```
 git clone https://github.com/pytorch/pytorch
@@ -72,6 +72,31 @@ For example:
 
 You do not need to repeatedly install after modifying python files.
 
+In case you want to reinstall, make sure that you uninstall pytorch first by running `pip uninstall torch`
+and `python setup.py clean`. Then you can install in `build develop` mode again.
+
+## Unit testing
+
+PyTorch's testing is located under `test/`. Run the entire test suite with
+
+```
+python test/run_test.py
+```
+
+or run individual test files, like `python test/test_nn.py`, for individual test suites.
+
+### Better local unit tests with pytest
+We don't officially support `pytest`, but it works well with our `unittest` tests and offers
+a number of useful features for local developing. Install it via `pip install pytest`.
+
+If you want to just run tests that contain a specific substring, you can use the `-k` flag:
+
+```
+pytest test/test_nn.py -k Loss -v
+```
+
+The above is an example of testing a change to Loss functions: this command runs tests such as
+`TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
 ## Writing documentation
 
@@ -79,6 +104,18 @@ PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/late
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
 
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+information on the documentation syntax. To build the documentation locally,
+`cd` into `docs/cpp` and then `make html`.
+
+We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp`.
 
 ## Managing multiple build trees
 
@@ -114,19 +151,20 @@ not very optimized for incremental rebuilds, this will actually be very slow.
 Far better is to only request rebuilds of the parts of the project you are
 working on:
 
-- Working on `torch/csrc`?  Run `python setup.py develop` to rebuild
+- Working on the Python bindings?  Run `python setup.py develop` to rebuild
   (NB: no `build` here!)
 
-- Working on `torch/lib/TH`, did not make any cmake changes, and just want to
-  see if it compiles?  Run `(cd torch/lib/build/TH && make install -j$(getconf _NPROCESSORS_ONLN))`.  This
-  applies for any other subdirectory of `torch/lib`.  **Warning: Changes you
-  make here will not be visible from Python.**  See below.
+- Working on `torch/csrc` or `aten`?  Run `python setup.py rebuild_libtorch` to
+  rebuild and avoid having to rebuild other dependent libraries we
+  depend on.
 
-- Working on `torch/lib` and want to run your changes / rerun cmake?  Run
-  `python setup.py build_deps`.  Note that this will rerun cmake for
-  every subdirectory in TH; if you are only working on one project,
-  consider editing `torch/lib/build_all.sh` and commenting out the
-  `build` lines of libraries you are not working on.
+- Working on one of the other dependent libraries? The other valid
+  targets are listed in `dep_libs` in `setup.py`. prepend `build_` to
+  get a target, and run as e.g. `python setup.py build_gloo`.
+
+- Working on a test binary?  Run `(cd build && ninja bin/test_binary_name)` to
+  rebuild only that test binary (without rerunning cmake).  (Replace `ninja` with
+  `make` if you don't have ninja installed).
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG` and `NO_CUDA`.
@@ -143,7 +181,7 @@ Make sure you continue to pass these flags on subsequent builds.
 
 ### Code completion and IDE support
 
-When using `python setup.py develop`, PyTorch will generate 
+When using `python setup.py develop`, PyTorch will generate
 a `compile_commands.json` file that can be used by many editors
 to provide command completion and error highlighting for PyTorch's
 C++ code. You need to `pip install ninja` to generate accurate
@@ -154,12 +192,14 @@ information for the code in `torch/csrc`. More information at:
 
 #### Use Ninja
 Python `setuptools` is pretty dumb, and always rebuilds every C file in a
-project.  If you install the ninja build system with `pip install ninja`, 
+project.  If you install the ninja build system with `pip install ninja`,
 then PyTorch will use it to track dependencies correctly.
+If pytorch was already built, you will need to run `python setup.py clean` once
+after installing ninja for builds to succeed.
 
 #### Use CCache
 
-Even when dependencies are tracked with file modification, 
+Even when dependencies are tracked with file modification,
 there are many situations where files get rebuilt when a previous
 compilation was exactly the same.
 
@@ -204,11 +244,136 @@ export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
-1. `CUDA_DEBUG=1` will enable CUDA debugging symbols (-g -G). This is particularly
-    helpful in debugging device code. However, it will slow down the build process,
-    so use wisely.
+1. `CUDA_DEVICE_DEBUG=1` will enable CUDA device function debug symbols (`-g -G`).
+    This will be particularly helpful in debugging device code. However, it will
+    slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
 2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
 
 
 Hope this helps, and thanks for considering to contribute.
+
+## Windows development tips
+
+Occasionally, you will write a patch which works on Linux, but fails CI on Windows.
+There are a few aspects in which MSVC (the Windows compiler toolchain we use) is stricter
+than Linux, which are worth keeping in mind when fixing these problems.
+
+1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
+   mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
+   `__declspec(dllimport)`.  We have codified this pattern into a set of macros
+   which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
+   shared library needs a unique macro name, because symbol visibility is on a per
+   shared library basis.)
+
+   The upshot is if you see an "unresolved external" error in your Windows build, this
+   is probably because you forgot to mark a function with `*_API`.  However, there is
+   one important counterexample to this principle: if you want a *templated* function
+   to be instantiated at the call site, do NOT mark it with `*_API` (if you do mark it,
+   you'll have to explicitly instantiate all of the specializations used by the call
+   sites.)
+
+2. If you link against a library, this does not make its dependencies transitively
+   visible. You must explicitly specify a link dependency against every library whose
+   symbols you use.  (This is different from Linux where in most environments,
+   transitive dependencies can be used to fulfill unresolved symbols.)
+
+3. If you have a Windows box (we have a few on EC2 which you can request access to) and
+   you want to run the build, the easiest way is to just run `.jenkins/pytorch/win-build.sh`.
+   If you need to rebuild, run `REBUILD=1 .jenkins/pytorch/win-build.sh` (this will avoid
+   blowing away your Conda environment.)
+
+Even if you don't know anything about MSVC, you can use cmake to build simple programs on
+Windows; this can be helpful if you want to learn more about some peculiar linking behavior
+by reproducing it on a small example.  Here's a simple example cmake file that defines
+two dynamic libraries, one linking with the other:
+
+```
+project(myproject CXX)
+set(CMAKE_CXX_STANDARD 11)
+add_library(foo SHARED foo.cpp)
+add_library(bar SHARED bar.cpp)
+# NB: don't forget to __declspec(dllexport) at least one symbol from foo,
+# otherwise foo.lib will not be created.
+target_link_libraries(bar PUBLIC foo)
+```
+
+You can build it with:
+
+```
+mkdir build
+cd build
+cmake ..
+cmake --build .
+```
+
+### Known MSVC (and MSVC with NVCC) bugs
+
+The PyTorch codebase sometimes likes to use exciting C++ features, and
+these exciting features lead to exciting bugs in Windows compilers.
+To add insult to injury, the error messages will often not tell you
+which line of code actually induced the erroring template instantiation.
+
+I've found the most effective way to debug these problems is to
+carefully read over diffs, keeping in mind known bugs in MSVC/NVCC.
+Here are a few well known pitfalls and workarounds:
+
+* This is not actually a bug per se, but in general, code generated by MSVC
+  is more sensitive to memory errors; you may have written some code
+  that does a use-after-free or stack overflows; on Linux the code
+  might work, but on Windows your program will crash.  ASAN may not
+  catch all of these problems: stay vigilant to the possibility that
+  your crash is due to a real memory problem.
+
+* (NVCC) `at::optional` does not work when used from device code.  Don't use
+  it from kernels.  Upstream issue: https://github.com/akrzemi1/Optional/issues/58
+  and our local issue #10329.
+
+* `constexpr` generally works less well on MSVC.
+
+  * The idiom `static_assert(f() == f())` to test if `f` is constexpr
+    does not work; you'll get "error C2131: expression did not evaluate
+    to a constant".  Don't use these asserts on Windows.
+    (Example: `aten/src/ATen/core/intrusive_ptr.h`)
+
+* (NVCC) Code you access inside a `static_assert` will eagerly be
+  evaluated as if it were device code, and so you might get an error
+  that the code is "not accessible".
+
+```
+class A {
+  static A singleton_;
+  static constexpr inline A* singleton() {
+    return &singleton_;
+  }
+};
+static_assert(std::is_same(A*, decltype(A::singelton()))::value, "hmm");
+```
+
+* The compiler will run out of heap if you attempt to compile files that
+  are too large.  Splitting such files into separate files helps.
+  (Example: `THTensorMath`, `THTensorMoreMath`, `THTensorEvenMoreMath`.)
+
+## Caffe2 notes
+
+In 2018, we merged Caffe2 into the PyTorch source repository.  While the
+steady state aspiration is that Caffe2 and PyTorch share code freely,
+in the meantime there will be some separation.
+
+If you submit a PR to only PyTorch or only Caffe2 code, CI will only
+run for the project you edited.  The logic for this is implemented
+in `.jenkins/pytorch/dirty.sh` and `.jenkins/caffe2/dirty.sh`; you
+can look at this to see what path prefixes constitute changes.
+This also means if you ADD a new top-level path, or you start
+sharing code between projects, you need to modify these files.
+
+There are a few "unusual" directories which, for historical reasons,
+are Caffe2/PyTorch specific.  Here they are:
+
+- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `conda`, `modules`,
+  `scripts` are Caffe2-specific.  Don't put PyTorch code in them without
+  extra coordination.
+
+- `mypy*`, `requirements.txt`, `setup.py`, `test`, `tools` are
+  PyTorch-specific.  Don't put Caffe2 code in them without extra
+  coordination.

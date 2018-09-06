@@ -1,11 +1,14 @@
 #pragma once
 #include <vector>
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 #include <memory>
 #include <vector>
-#include "torch/csrc/jit/interned_strings.h"
 #include <ATen/ATen.h>
+#include "ATen/Utils.h"
+
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/interned_strings.h>
 
 namespace torch { namespace jit {
 
@@ -25,37 +28,37 @@ struct AttributeValue {
   Symbol name;
   virtual AttributeKind kind() const = 0;
   virtual Ptr clone() const = 0;
-  virtual ~AttributeValue() {}
+  virtual ~AttributeValue() = default;
 };
 
 template<typename T, AttributeKind Kind>
 struct ScalarAttributeValue : public AttributeValue {
-  using ConstructorType = const T &;
+  using ConstructorType = T;
   using ValueType = T;
   ScalarAttributeValue(Symbol name, ConstructorType value_)
-  : AttributeValue(name), value_(value_) {}
+  : AttributeValue(name), value_(std::move(value_)) {}
   ValueType & value() {
     return value_;
   }
-  virtual Ptr clone() const override {
+  Ptr clone() const override {
     return Ptr(new ScalarAttributeValue(name, value_));
   }
-  virtual AttributeKind kind() const override { return Kind; }
+  AttributeKind kind() const override { return Kind; }
 private:
   ValueType value_;
 };
 
 template<typename T, AttributeKind Kind>
 struct VectorAttributeValue : public AttributeValue {
-  using ConstructorType = const std::vector<T> &&;
+  using ConstructorType = std::vector<T>;
   using ValueType = std::vector<T>;
   VectorAttributeValue(Symbol name, ConstructorType value_)
   : AttributeValue(name), value_(std::move(value_)) {}
   ValueType & value() {
     return value_;
   }
-  virtual AttributeKind kind() const override { return Kind; }
-  virtual std::unique_ptr<AttributeValue> clone() const override {
+  AttributeKind kind() const override { return Kind; }
+  std::unique_ptr<AttributeValue> clone() const override {
     auto copy = value_;
     return Ptr(new VectorAttributeValue(name, std::move(copy)));
   }
@@ -75,6 +78,22 @@ struct Graph;
 using GraphAttr = ScalarAttributeValue<std::shared_ptr<Graph>,AttributeKind::g>;
 using GraphsAttr = VectorAttributeValue<std::shared_ptr<Graph>,AttributeKind::gs>;
 
+struct AttributeError : public std::exception {
+  AttributeError(Symbol name, bool defined) {
+    std::stringstream ss;
+    if(!defined) {
+      ss << "required keyword attribute '" << name.toUnqualString() << "' is undefined.";
+    } else {
+      ss << "required keyword attribute '" << name.toUnqualString() << "' has the wrong type";
+    }
+    msg = ss.str();
+  }
+  const char* what() const noexcept override  {
+    return msg.c_str();
+  }
+private:
+  std::string msg;
+};
 
 // CRTP so that Node which inherits Attributes can be return for
 // method chaining e.g:
@@ -82,7 +101,7 @@ using GraphsAttr = VectorAttributeValue<std::shared_ptr<Graph>,AttributeKind::gs
 // we return Derived* pointers because Nodes are normally held as pointers.
 template<typename Derived>
 struct Attributes {
-  Attributes() {}
+  Attributes() = default;
   void copyAttributes(const Attributes & rhs) {
     values_.clear();
     for(auto & i : rhs.values_) {
@@ -90,23 +109,52 @@ struct Attributes {
     }
   }
   bool hasAttribute(Symbol name) const {
+    JIT_ASSERT(name.is_attr());
     return find(name,false) != values_.end();
   }
+  // We want direct string accessors, as it is nicer to use than
+  // hasAttribute(Symbol::attr("blah"))
+  //
+  // For some reason, &Attributes<Node>::hasAttribute in pybind11 is able to
+  // give the pybind11 metaprogramming machinery "the right type", but
+  // the equivalent looking lambda [](Attributes<Node>& a, const std::string&)
+  // doesn't work!  So instead we define the methods on the class so we can
+  // continue using the old idiom.
+  bool hasAttributeS(const std::string& name) const {
+    return hasAttribute(Symbol::attr(name));
+  }
   AttributeKind kindOf(Symbol name) const {
+    JIT_ASSERT(name.is_attr());
     return (*find(name,true))->kind();
   }
+  AttributeKind kindOfS(const std::string& name) const {
+    return kindOf(Symbol::attr(name));
+  }
   Derived* removeAttribute(Symbol name) {
+    JIT_ASSERT(name.is_attr());
     values_.erase(find(name,true));
     return This();
   }
+  Derived* removeAttributeS(const std::string& name) {
+    return removeAttribute(Symbol::attr(name));
+  }
   bool hasAttributes() const {
     return values_.size() > 0;
+  }
+  size_t numAttributes() const {
+    return values_.size();
   }
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
     std::vector<Symbol> names;
     for(auto & a : values_)
       names.push_back(a->name);
+    return names;
+  }
+  std::vector<const char*> attributeNamesS() const {
+    std::vector<const char*> names;
+    for(auto & a : values_)
+      names.push_back(a->name.toUnqualString());
     return names;
   }
 
@@ -123,19 +171,44 @@ struct Attributes {
   CREATE_ACCESSOR(Strings,ss)
   CREATE_ACCESSOR(Int,i)
   CREATE_ACCESSOR(Ints,is)
-  CREATE_ACCESSOR(Tensor,t)
-  CREATE_ACCESSOR(Tensors,ts)
   CREATE_ACCESSOR(Graph,g)
   CREATE_ACCESSOR(Graphs,gs)
 
   #undef CREATE_ACCESSOR
 
+  // Our Graphs are not very const-correct, so we need to allow returning
+  // non-const references too
+  GraphAttr::ValueType& g(Symbol name) {
+    return get<GraphAttr>(name);
+  }
+
+  // does not use CREATE_ACCESSOR because we need additional asserts
+  Derived* t_(Symbol name, TensorAttr::ConstructorType v) {
+    JIT_ASSERT(!v.defined() || !v.is_variable());
+    return set<TensorAttr>(name,std::forward<TensorAttr::ConstructorType>(v));
+  }
+  const TensorAttr::ValueType& t(Symbol name) const {
+    return get<TensorAttr>(name);
+  }
+
+  Derived* ts_(Symbol name, TensorsAttr::ConstructorType v) {
+    for(auto & t : v) {
+      JIT_ASSERT(!t.defined() || !t.is_variable());
+    }
+    return set<TensorsAttr>(name,std::forward<TensorsAttr::ConstructorType>(v));
+  }
+  const TensorsAttr::ValueType& ts(Symbol name) const {
+    return get<TensorsAttr>(name);
+  }
+
 private:
-  Derived* This() {
+  // UBSAN error: https://github.com/pytorch/pytorch/issues/9055
+  Derived* This() __ubsan_ignore_vptr__ {
     return static_cast<Derived*>(this);
   }
   template<typename T>
   Derived* set(Symbol name, typename T::ConstructorType v) {
+    JIT_ASSERT(name.is_attr());
     auto it = find(name, false);
     auto nv = AVPtr(new T(name, std::forward<typename T::ConstructorType>(v)));
     if(it == values_.end()) {
@@ -147,9 +220,12 @@ private:
   }
   template<typename T>
   typename T::ValueType & get(Symbol name) const {
+    JIT_ASSERT(name.is_attr());
     auto it = find(name, true);
-    T* child = dynamic_cast<T*>(it->get());
-    JIT_ASSERT(child != nullptr);
+    auto* child = dynamic_cast<T*>(it->get());
+    if(child == nullptr) {
+      throw AttributeError(name, true);
+    }
     return child->value();
   }
   using AVPtr = AttributeValue::Ptr;
@@ -159,19 +235,24 @@ private:
   std::vector<AVPtr> values_;
   using iterator = std::vector<AVPtr>::iterator;
   iterator find(Symbol name, bool required) {
+    JIT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(),[&](const AVPtr & v) {
       return v->name == name;
     });
+    if(required && it == values_.end()) {
+      throw AttributeError(name, false);
+    }
     JIT_ASSERT(!required || it != values_.end());
     return it;
   }
   using const_iterator = std::vector<AVPtr>::const_iterator;
   const_iterator find(Symbol name, bool required) const {
+    JIT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(),[&](const AVPtr & v) {
       return v->name == name;
     });
     if(required && it == values_.end()) {
-      ::torch::barf("%s:%u: %s: required undefined attribute '%s'", __FILE__, __LINE__, __func__, symbolToString(name));
+      throw AttributeError(name, false);
     }
     JIT_ASSERT(!required || it != values_.end());
     return it;

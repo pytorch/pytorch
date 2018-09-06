@@ -1,6 +1,9 @@
 #pragma once
 #include <memory>
 #include <vector>
+#include "ATen/core/optional.h"
+
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 namespace at {
   struct Tensor;
@@ -11,22 +14,31 @@ namespace torch { namespace jit {
 // a separate component in the autograd handles unwrapping and wrapping
 // variable objects for use in the interpreter.
 
+struct Node;
+struct GraphExecutor;
 struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
-struct TensorType;
+struct Node;
+struct IValue;
+using Stack = std::vector<IValue>;
 
-struct Code {
+struct TORCH_API Code {
   Code()
-  : pImpl(nullptr) {}
-  Code(std::shared_ptr<Graph> & graph);
+    : pImpl(nullptr) {}
+  Code(std::shared_ptr<Graph>& graph);
   ~Code();
-  operator bool() const {
+
+  const std::vector<GraphExecutor*>& grad_executors();
+
+  explicit operator bool() const {
     return pImpl != nullptr;
   }
+
 private:
   std::shared_ptr<CodeImpl> pImpl;
   friend struct InterpreterStateImpl;
+  friend std::ostream & operator<<(std::ostream & out, const Code & code);
 };
 
 struct InterpreterState {
@@ -34,10 +46,7 @@ struct InterpreterState {
   // advance the interpreter state by running one stage. Returning the
   // outputs for that stage, suspending the computation.
   // Call this function again continues computation where it left off.
-  void runOneStage(
-    const std::vector<at::Tensor> & inputs,
-    std::vector<at::Tensor> & outputs);
-  const TensorType & tensorTypeForInput(size_t i) const;
+  void runOneStage(Stack & stack);
   ~InterpreterState();
   // create a copy of InterpreterState with its current state
   // used when retain_graph=True so that stages can be re-run

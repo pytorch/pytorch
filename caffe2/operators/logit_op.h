@@ -1,0 +1,41 @@
+#ifndef CAFFE2_OPERATORS_LOGIT_OP_H_
+#define CAFFE2_OPERATORS_LOGIT_OP_H_
+
+#include "caffe2/core/context.h"
+#include "caffe2/core/operator.h"
+#include "caffe2/operators/elementwise_ops.h"
+
+namespace caffe2 {
+
+template <class Context>
+struct LogitFunctor {
+  explicit LogitFunctor(OperatorBase& op)
+      : eps_(op.GetSingleArgument<float>("eps", 1e-6f)) {
+    CAFFE_ENFORCE_GT(eps_, 0.0);
+    CAFFE_ENFORCE_LT(eps_, 0.5);
+  }
+
+  template <typename T>
+  bool operator()(const int size, const T* X, T* Y, Context* context) const;
+
+  const float eps_;
+};
+
+template <typename T, class Context>
+class LogitGradientOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  LogitGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        eps_(this->template GetSingleArgument<float>("eps", 1e-6f)) {}
+  ~LogitGradientOp() {}
+
+  bool RunOnDevice() override;
+
+ protected:
+  float eps_;
+};
+
+} // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_LOGIT_OP_H_

@@ -1,7 +1,8 @@
 #include "../Cuda.hpp"
-#include "../../../csrc/utils/auto_gpu.h"
 #include "DataChannelNccl.hpp"
 #include "DataChannelUtils.hpp"
+
+#include <ATen/ATen.h>
 
 #include <cuda.h>
 #include <THC/THC.h>
@@ -12,6 +13,7 @@
 #include <stdexcept>
 #include <unordered_set>
 #include <sstream>
+#include <algorithm>
 
 namespace thd {
 
@@ -158,7 +160,7 @@ void DataChannelNccl::destroy() {
   _destroySockets();
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   /**
    * Destroy the CUDA and NCCL resources
@@ -180,20 +182,23 @@ void DataChannelNccl::destroy() {
 // Helper function that destroys the CUDA event and NCCL communicator
 void DataChannelNccl::_destroyNcclResources(THDGroup groupId) {
   if (_groupNcclResources.find(groupId) != _groupNcclResources.end()) {
-    // Devices used for this group ID
-    auto devices = getDevicesList(_groupDevices[groupId]);
-    // Guard GPU device
-    AutoGPU gpuGuard;
-    // Destroy the CUDA events
-    size_t idx = 0;
-    for (auto& event : *(_groupNcclResources[groupId].ncclCudaEvents())) {
-      gpuGuard.setDevice(devices[idx++]);
-      THCudaCheck(cudaEventSynchronize(event));
-      THCudaCheck(cudaEventDestroy(event));
-    }
-    // Destroy the communicators
-    for (auto& comm : *(_groupNcclResources[groupId].ncclComms())) {
-      NCCL_CHECK(ncclCommDestroy(comm));
+    for (int i=0; i < _groupDevices[groupId].size(); i++) {
+
+      // Devices used for this group ID
+      auto devices = getDevicesList(_groupDevices[groupId][i]);
+      // Guard GPU device
+      at::DeviceGuard gpuGuard;
+      // Destroy the CUDA events
+      size_t idx = 0;
+      for (auto& event : *(_groupNcclResources[groupId][i].ncclCudaEvents())) {
+        gpuGuard.set_index(devices[idx++]);
+        THCudaCheck(cudaEventSynchronize(event));
+        THCudaCheck(cudaEventDestroy(event));
+      }
+      // Destroy the communicators
+      for (auto& comm : *(_groupNcclResources[groupId][i].ncclComms())) {
+        NCCL_CHECK(ncclCommDestroy(comm));
+      }
     }
   }
 }
@@ -262,27 +267,20 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
     }
   }
 
-  if (_groupDevices.find(groupId) != _groupDevices.end() &&
-      deviceList != _groupDevices[groupId]) {
-    /**
-     * If a new device list from a different call is detected, we will clear
-     * the old NCCL communicator cache (that is associated with the current
-     * device list cached) first and remove the old NCCL resource and
-     * the old device list from the hashmap. The following call will detect the
-     * cache miss and rebuild the cache
-     */
-    _destroyNcclResources(groupId);
-    _groupNcclResources.erase(groupId);
-    _groupDevices.erase(groupId);
+  int index = -1;
+
+  if (_groupDevices.find(groupId) != _groupDevices.end()) {
+    auto pos = std::find(_groupDevices[groupId].begin(), _groupDevices[groupId].end(), deviceList);
+    if (pos != _groupDevices[groupId].end()) index = pos - _groupDevices[groupId].begin();
   }
 
-  if (_groupNcclResources.find(groupId) != _groupNcclResources.end()) {
-    return std::make_pair(_groupNcclResources[groupId].ncclComms(),
-                          _groupNcclResources[groupId].ncclCudaEvents());
+  if (index >= 0) {
+    return std::make_pair(_groupNcclResources[groupId][index].ncclComms(),
+                          _groupNcclResources[groupId][index].ncclCudaEvents());
   }
 
   // Add in the device list of the group
-  _groupDevices[groupId] = deviceList;
+  _groupDevices[groupId].push_back(deviceList);
 
   // NCCL communicator
   auto comms =
@@ -304,18 +302,18 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
   broadcastUniqueNcclId(&ncclId);
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   // Now creating the CUDA events
   for (size_t i = 0; i < input.size(); ++i) {
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.set_index(input[i].get_device());
     THCudaCheck(cudaEventCreate(&((*events)[i])));
   }
   // Create the communicator on each device of the input
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
     int nRanks = int(_numProcesses) * input.size();
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.set_index(input[i].get_device());
     NCCL_CHECK(ncclCommInitRank(&((*comms)[i]),
                                 nRanks,
                                 ncclId,
@@ -324,12 +322,13 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
   NCCL_CHECK(ncclGroupEnd());
 
   // Move into the hash table
-  _groupNcclResources.emplace(
-      std::make_pair(groupId, NcclResources(std::move(comms),
-                                            std::move(events))));
+  if (_groupNcclResources.find(groupId) == _groupNcclResources.end())
+      _groupNcclResources.emplace(std::make_pair(groupId, std::vector<NcclResources>()));
 
-  return std::make_pair(_groupNcclResources[groupId].ncclComms(),
-                        _groupNcclResources[groupId].ncclCudaEvents());
+  _groupNcclResources[groupId].push_back(NcclResources(std::move(comms), std::move(events)));
+
+  return std::make_pair(_groupNcclResources[groupId].back().ncclComms(),
+                        _groupNcclResources[groupId].back().ncclCudaEvents());
 }
 
 
@@ -424,7 +423,7 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& data,
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -432,7 +431,7 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(data[i].get_device());
+    gpuGuard.set_index(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllReduce(data[i].data_ptr(),
@@ -475,7 +474,7 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& output,
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -483,7 +482,7 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& output,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
 
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.set_index(input[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllGather(input[i].data_ptr(),
@@ -527,7 +526,7 @@ void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -535,7 +534,7 @@ void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(data[i].get_device());
+    gpuGuard.set_index(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclReduce(data[i].data_ptr(),
@@ -579,7 +578,7 @@ void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
   auto events = ncclResourcePair.second;
 
   // Guard GPU device
-  AutoGPU gpuGuard;
+  at::DeviceGuard gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -587,7 +586,7 @@ void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(data[i].get_device());
+    gpuGuard.set_index(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclBcast(data[i].data_ptr(),
@@ -619,6 +618,21 @@ void DataChannelNccl::barrier(THDGroup groupId) {
 
 
 THDGroup DataChannelNccl::newGroup(const std::vector<rank_type>& ranks) {
+  /**
+   * Check if the input rank is a full group since
+   * NCCL data channel currently doesn't support sub-group creation
+   */
+  std::vector<rank_type> ranksToCompare = std::vector<rank_type>(ranks);
+  std::sort(ranksToCompare.begin(), ranksToCompare.end());
+  for (size_t i = 0; i < ranksToCompare.size(); ++i) {
+    if (ranksToCompare[i] != static_cast<rank_type>(i)) {
+      throw std::runtime_error("NCCL backend currently only supports fullgroup "
+                               "creation. In other words, every rank in the "
+                               "process group needs to be a member of the new "
+                               "group to be created and sub-group creation is "
+                               "currently not supported.");
+    }
+  }
 
   std::unique_lock<std::mutex> channelLock(_mutex);
 

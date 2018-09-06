@@ -1,6 +1,5 @@
 import re
 import os
-from tools.shared.module_loader import import_module
 from .nested_dict import nested_dict
 
 
@@ -9,8 +8,11 @@ __all__ = [
     'split_name_params', 'write',
 ]
 
-
-CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+try:
+    from src.ATen.code_template import CodeTemplate
+except ImportError:
+    from tools.shared.module_loader import import_module
+    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
 try:
     # use faster C loader if available
@@ -19,8 +21,8 @@ except ImportError:
     from yaml import Loader as YamlLoader
 
 
-GENERATED_COMMENT = CodeTemplate("""\
-generated from tools/autograd/templates/${filename}""")
+GENERATED_COMMENT = CodeTemplate(
+    "@" + "generated from tools/autograd/templates/${filename}")
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurence of a parameter in the derivative formula
@@ -34,8 +36,30 @@ def split_name_params(prototype):
     return name, params.split(', ')
 
 
+# When tracing, we record inplace operations as out-of-place operations,
+# because we don't have a story for side effects in the IR yet.
+#
+# Doing this un-inplacing is a little delicate however; __and__ is NOT inplace!
+# TODO: Do something more robust
+def uninplace_api_name(api_name):
+    if api_name.endswith('_') and not api_name.endswith('__'):
+        api_name = api_name[:-1]
+    return api_name
+
+
 def write(dirname, name, template, env):
     env['generated_comment'] = GENERATED_COMMENT.substitute(filename=name)
     path = os.path.join(dirname, name)
-    with open(path, 'w') as f:
-        f.write(template.substitute(env))
+    # See Note [Unchanging results for ninja]
+    try:
+        with open(path, 'r') as f:
+            old_val = f.read()
+    except IOError:
+        old_val = None
+    new_val = template.substitute(env)
+    if old_val != new_val:
+        with open(path, 'w') as f:
+            print("Writing {}".format(path))
+            f.write(new_val)
+    else:
+        print("Skipped writing {}".format(path))

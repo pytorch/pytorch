@@ -5,9 +5,11 @@ import torch.cuda.nccl as nccl
 import torch.cuda
 
 from common import TestCase, run_tests, IS_WINDOWS
+from common_cuda import TEST_CUDA, TEST_MULTIGPU
+
 
 nGPUs = torch.cuda.device_count()
-if nGPUs == 0:
+if not TEST_CUDA:
     print('CUDA not available, skipping tests')
     TestCase = object  # noqa: F811
 
@@ -20,7 +22,8 @@ class TestNCCL(TestCase):
         self.assertIsInstance(uid, bytes)
         self.assertGreater(len(uid), 1)
 
-    @unittest.skipIf(nGPUs < 2, "only one GPU detected")
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_broadcast(self):
         expected = torch.FloatTensor(128).uniform_()
         tensors = [expected.cuda()]
@@ -32,7 +35,8 @@ class TestNCCL(TestCase):
         for i in range(torch.cuda.device_count()):
             self.assertEqual(tensors[i], expected)
 
-    @unittest.skipIf(nGPUs < 2, "only one GPU detected")
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce(self):
         tensors = [torch.FloatTensor(128).uniform_() for i in range(nGPUs)]
         expected = torch.FloatTensor(128).zero_()
@@ -44,7 +48,8 @@ class TestNCCL(TestCase):
 
         self.assertEqual(tensors[0], expected)
 
-    @unittest.skipIf(nGPUs < 2, "only one GPU detected")
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_all_reduce(self):
         tensors = [torch.FloatTensor(128).uniform_() for i in range(nGPUs)]
         expected = torch.FloatTensor(128).zero_()
@@ -57,7 +62,8 @@ class TestNCCL(TestCase):
         for tensor in tensors:
             self.assertEqual(tensor, expected)
 
-    @unittest.skipIf(nGPUs < 2, "only one GPU detected")
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_all_gather(self):
         inputs = [torch.FloatTensor(128).uniform_() for i in range(nGPUs)]
         expected = torch.cat(inputs, 0)
@@ -70,7 +76,8 @@ class TestNCCL(TestCase):
         for tensor in outputs:
             self.assertEqual(tensor, expected)
 
-    @unittest.skipIf(nGPUs < 2, "only one GPU detected")
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_reduce_scatter(self):
         in_size = 32 * nGPUs
         out_size = 32

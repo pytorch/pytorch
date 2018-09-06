@@ -1,18 +1,13 @@
 import os
 import glob
 import re
-import platform
 import ctypes.util
 from subprocess import Popen, PIPE
 
-from .env import check_env_flag
+from .env import IS_WINDOWS, IS_LINUX, IS_DARWIN, check_env_flag, check_negative_env_flag
 
 LINUX_HOME = '/usr/local/cuda'
 WINDOWS_HOME = glob.glob('C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
-
-IS_WINDOWS = platform.system() == 'Windows'
-IS_LINUX = platform.system() == 'Linux'
-IS_DARWIN = platform.system() == 'Darwin'
 
 
 def find_nvcc():
@@ -63,9 +58,8 @@ def find_cuda_version(cuda_home):
     if len(candidates) > 0:
         return candidates[0]
 
-
-if check_env_flag('NO_CUDA'):
-    WITH_CUDA = False
+if check_negative_env_flag('USE_CUDA') or check_env_flag('USE_ROCM'):
+    USE_CUDA = False
     CUDA_HOME = None
     CUDA_VERSION = None
 else:
@@ -90,4 +84,4 @@ else:
         else:
             CUDA_HOME = None
     CUDA_VERSION = find_cuda_version(CUDA_HOME)
-    WITH_CUDA = CUDA_HOME is not None
+    USE_CUDA = CUDA_HOME is not None

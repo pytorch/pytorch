@@ -22,14 +22,19 @@ __device__ __forceinline__ IndexType getLinearBlockId() {
 // Reduce N values concurrently, i.e. suppose N = 2, and there are 4 threads:
 // (1, 2), (3, 4), (5, 6), (7, 8), then the return in threadVals for thread 0
 // is (1 + 3 + 5 + 7, 2 + 4 + 6 + 8) = (16, 20)
+//
+// If smem is not used again, there is no need to __syncthreads before this
+// call. However, if smem will be used, e.g., this function is called in a loop,
+// then __syncthreads is needed either before or afterwards to prevent non-0
+// threads overriding smem in the next loop before num-0 thread reads from it.
 template <typename T, typename ReduceOp, int N>
 __device__ void reduceNValuesInBlock(T *smem,
                              T threadVals[N],
-                             int numVals,
+                             const unsigned int numVals,
                              ReduceOp reduceOp,
                              T init) {
   if (numVals == 0) {
-#pragma unroll
+    #pragma unroll
     for (int i = 0; i < N; ++i) {
       threadVals[i] = init;
     }
@@ -40,7 +45,7 @@ __device__ void reduceNValuesInBlock(T *smem,
   // the first threadVal for each thread in the block are stored followed by
   // all of the values for the second threadVal for each thread in the block
   if (threadIdx.x < numVals) {
-#pragma unroll
+    #pragma unroll
     for (int i = 0; i < N; ++i) {
       smem[i * numVals + threadIdx.x] = threadVals[i];
     }
@@ -51,22 +56,22 @@ __device__ void reduceNValuesInBlock(T *smem,
   // where to put the outputs of each of the n things we are reducing. If
   // nLP = 32, then we have the 32 outputs for the first threadVal,
   // followed by the 32 outputs for the second threadVal, etc.
-  int numLanesParticipating = min(numVals, warpSize);
+  const unsigned int numLanesParticipating = min(numVals, warpSize);
 
   if (numVals > warpSize && ((threadIdx.x / warpSize) == 0 )) {
-#pragma unroll
+    #pragma unroll
     for (int i = 0; i < N; ++i) {
       threadVals[i] = threadIdx.x < numVals ? threadVals[i] : init;
     }
 
     for (int i = warpSize + threadIdx.x; i < numVals; i += warpSize) {
-#pragma unroll
+      #pragma unroll
       for (int j = 0; j < N; ++j) {
         threadVals[j] = reduceOp(threadVals[j], smem[j * numVals + i]);
       }
     }
 
-#pragma unroll
+    #pragma unroll
     for (int i = 0; i < N; ++i) {
       smem[i * numLanesParticipating + threadIdx.x] = threadVals[i];
     }
@@ -75,15 +80,15 @@ __device__ void reduceNValuesInBlock(T *smem,
 
   if (threadIdx.x == 0) {
     if (numLanesParticipating == 32) {
-#pragma unroll
+      #pragma unroll
       for (int i = 0; i < N; ++i) {
-#pragma unroll
+        #pragma unroll
         for (int j = 1; j < 32; ++j) {
           threadVals[i] = reduceOp(threadVals[i], smem[i * 32 + j]);
         }
       }
     } else {
-#pragma unroll
+      #pragma unroll
       for (int i = 0; i < N; ++i) {
         for (int j = 1; j < numLanesParticipating; ++j) {
           threadVals[i] = reduceOp(threadVals[i], smem[i * numVals + j]);
@@ -95,9 +100,14 @@ __device__ void reduceNValuesInBlock(T *smem,
 
 // Block-wide reduction in shared memory helper; only threadIdx.x == 0 will
 // return the reduced value
+//
+// If smem is not used again, there is no need to __syncthreads before this
+// call. However, if smem will be used, e.g., this function is called in a loop,
+// then __syncthreads is needed either before or afterwards to prevent non-0
+// threads overriding smem in the next loop before num-0 thread reads from it.
 template <typename T, typename ReduceOp>
 __device__ T reduceBlock(T* smem,
-                         int numVals,
+                         const unsigned int numVals,
                          T threadVal,
                          ReduceOp reduceOp,
                          T init) {
@@ -109,16 +119,21 @@ __device__ T reduceBlock(T* smem,
 // Block-wide reduction where each thread locally reduces N
 // values before letting a single warp take over - assumes
 // threadVals is in registers, not shared memory
+//
+// If smem is not used again, there is no need to __syncthreads before this
+// call. However, if smem will be used, e.g., this function is called in a loop,
+// then __syncthreads is needed either before or afterwards to prevent non-0
+// threads overriding smem in the next loop before num-0 thread reads from it.
 template <typename T, typename ReduceOp, int N>
 __device__ T reduceBlockWithNThreadLocalReductions(T *smem,
                          T threadVals[N],
-                         int numVals,
+                         const unsigned int numVals,
                          ReduceOp reduceOp,
                          T init) {
   int offset = threadIdx.x * N;
   T local = offset < numVals ? threadVals[0] : init;
 
-#pragma unroll
+  #pragma unroll
   for (int i = 1; i < N; ++i) {
     ++offset;
     T next = offset < numVals ? threadVals[i] : init;

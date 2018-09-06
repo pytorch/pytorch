@@ -58,7 +58,7 @@ class EmbeddingBag(Function):
                              " ({}), but got offsets[-1] of {}"
                              .format(indices.size(0), offsets[-1]))
 
-        ctx._backend = type2backend[type(weight)]
+        ctx._backend = type2backend[weight.type()]
         ctx._weight_size = weight.size()
         ctx._offset2bag = offsets.new()
 

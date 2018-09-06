@@ -4,6 +4,7 @@
 #include "THC.h"
 #include "THCHalf.h"
 #include "THCNumerics.cuh"
+#include "ATen/ATen.h"
 
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;
@@ -94,7 +95,6 @@ static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
   AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
 }
 
-#ifdef CUDA_HALF_TENSOR
 static inline  __device__ void atomicAdd(half *address, half val) {
   unsigned int * address_as_ui =
     (unsigned int *) ((char *)address - ((size_t)address & 2));
@@ -103,7 +103,7 @@ static inline  __device__ void atomicAdd(half *address, half val) {
 
   do {
     assumed = old;
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     half hsum;
     hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
     hsum = THCNumerics<half>::add(hsum, val);
@@ -117,7 +117,9 @@ static inline  __device__ void atomicAdd(half *address, half val) {
     old = atomicCAS(address_as_ui, assumed, old);
   } while (assumed != old);
 }
-#endif
+static inline __device__ void atomicAdd(at::Half *address, at::Half val) {
+  atomicAdd(reinterpret_cast<half*>(address), val);
+}
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
@@ -135,9 +137,11 @@ static inline  __device__  void atomicAdd(double *address, double val) {
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
 } while (assumed != old);
 }
-#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000)
+#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312
   // This needs to be defined for the host side pass
   static inline  __device__  void atomicAdd(double *address, double val) { }
+#endif
 #endif
 
 #endif // THC_ATOMICS_INC

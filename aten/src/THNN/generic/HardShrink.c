@@ -8,16 +8,16 @@ void THNN_(HardShrink_updateOutput)(
           THTensor *output,
           accreal lambda_)
 {
-  real lambda = TH_CONVERT_ACCREAL_TO_REAL(lambda_);
+  scalar_t lambda = TH_CONVERT_ACCREAL_TO_REAL(lambda_);
   THTensor_(resizeAs)(output, input);
 
-  TH_TENSOR_APPLY2(real, output, real, input,
+  TH_TENSOR_APPLY2(scalar_t, output, scalar_t, input,
     if (*input_data > lambda)
       *output_data = *input_data;
-    else if (*input_data < -lambda)
-      *output_data = *input_data;
-    else
+    else if (*input_data >= -lambda)
       *output_data = 0;
+    else
+      *output_data = *input_data;  // let NaN case pass through here
   );
 }
 
@@ -28,14 +28,14 @@ void THNN_(HardShrink_updateGradInput)(
           THTensor *gradInput,
           accreal lambda_)
 {
-  real lambda = TH_CONVERT_ACCREAL_TO_REAL(lambda_);
+  scalar_t lambda = TH_CONVERT_ACCREAL_TO_REAL(lambda_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
-  TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
-    if (*input_data > lambda || *input_data < -lambda)
-      *gradInput_data = *gradOutput_data;
-    else
+  TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, input,
+    if (*input_data >= -lambda && *input_data <= lambda)
       *gradInput_data = 0;
+    else
+      *gradInput_data = *gradOutput_data;  // let NaN case pass through here
   );
 }
 
