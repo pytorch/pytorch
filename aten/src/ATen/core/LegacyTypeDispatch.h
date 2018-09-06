@@ -46,7 +46,7 @@ struct AT_CORE_API LegacyTypeInitArgs {};
 AT_DECLARE_REGISTRY(LegacyTypeInitRegistry, LegacyTypeInitInterface, LegacyTypeInitArgs);
 #define REGISTER_LEGACY_TYPE_INIT(clsname) AT_REGISTER_CLASS(LegacyTypeInitRegistry, clsname, clsname)
 
-const LegacyTypeInitInterface& getLegacyTypeInit();
+AT_CORE_API const LegacyTypeInitInterface& getLegacyTypeInit();
 
 struct Type;
 
