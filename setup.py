@@ -37,7 +37,7 @@
 #     disables NNPACK build
 #
 #   NO_DISTRIBUTED
-#     disables THD (distributed) build
+#     disables distributed (c10d, gloo, mpi, etc.) build
 #
 #   NO_SYSTEM_NCCL
 #     disables use of system-wide nccl (we will use our submoduled
