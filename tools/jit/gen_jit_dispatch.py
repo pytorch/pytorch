@@ -56,11 +56,11 @@ def jit_type_of(arg):
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
 FROM_IVALUE = {
-    'Device': 'as_device({}.toIntList()->elements())',
+    'Device': '{}.to<at::Device>()',
     'IntList': '{}.toIntList()->elements()',
-    'Layout': 'static_cast<at::Layout>({}.toInt())',
+    'Layout': '{}.to<at::Layout>()',
     'Scalar': '{}.toScalar()',
-    'ScalarType': 'static_cast<at::ScalarType>({}.toInt())',
+    'ScalarType': '{}.to<at::ScalarType>()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
     'bool': 'bool({}.toInt())',
