@@ -1,3 +1,4 @@
+from __future__ import division
 import torch
 import torch.jit
 import torch.nn as nn
@@ -28,6 +29,10 @@ import random
 
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
+
+# For testing truediv in python 2
+from test_module.future_div import div_int_future, div_float_future
+from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 try:
     import torchvision
@@ -261,8 +266,8 @@ class JitTestCase(TestCase):
         return graph
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
-                   optimize=True, drop=None, allow_unused=False,
-                   verbose=False, inputs_require_grads=True, check_tolerance=1e-5):
+                   optimize=True, drop=None, allow_unused=False, verbose=False,
+                   inputs_require_grads=True, check_tolerance=1e-5, export_import=True):
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
@@ -285,6 +290,9 @@ class JitTestCase(TestCase):
             ge = torch._C.GraphExecutor(func, optimize)
         else:
             ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance)
+
+        if export_import:
+            ge = self.getExportImportCopy(ge)
 
         if verbose:
             print(ge.graph)
@@ -522,6 +530,30 @@ class TestJit(JitTestCase):
         self.assertExportImport(trace, (t,) + tuple(model.parameters()))
         self.assertExpectedONNXGraph(trace)
 
+    @unittest.skipIf(not IS_WINDOWS, "Testing Fuse skipped on windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_windows_fuse(self):
+        def scaleshift(x, scale, shift):
+            return x * scale + shift
+
+        graph = torch.jit.script(scaleshift).graph
+
+        inputs = [
+            torch.randn(4, 4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+        ]
+
+        ge = self.checkTrace(scaleshift, inputs)
+        fuse_graph = ge.graph_for(*inputs)
+
+        def run_graph(graph, inputs):
+            m = torch.jit.ScriptModule()
+            m._create_method_from_graph("forward", graph)
+            return m(*inputs)
+
+        self.assertEqual(run_graph(graph, inputs), run_graph(fuse_graph, inputs))
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
@@ -565,7 +597,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_lstm_fusion_concat(self):
+    def test_lstm_fusion_concat_cuda(self):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellC, inputs)
         self.assertExpectedGraph(ge.graph_for(*inputs))
@@ -573,7 +605,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_concat_fusion(self):
+    def test_concat_fusion_cuda(self):
         hx = torch.randn(3, 20, dtype=torch.float, device='cuda')
         cx = torch.randn(3, 20, dtype=torch.float, device='cuda')
 
@@ -604,7 +636,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_fusion_distribute(self):
+    def test_fusion_distribute_cuda(self):
         def f(x, y):
             z1, z2 = (x + y).chunk(2, dim=1)
             return z1 * z2
@@ -618,7 +650,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_fusion_rand(self):
+    def test_fusion_rand_cuda(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
 
@@ -642,7 +674,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_fusion_arg_configurations(self):
+    def test_fusion_arg_configurations_cuda(self):
         # A smoke test to make sure we won't use the same kernel for contiguous
         # and non-contiguous arguments.
         # TODO: add optionally enabled debug counters to the fuser to verify
@@ -667,7 +699,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_comparison_gt_lt(self):
+    def test_comparison_gt_lt_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
@@ -676,7 +708,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_comparison_ge_le(self):
+    def test_comparison_ge_le_cuda(self):
         def f(x, y):
             mask = (x >= 0).type_as(x)
             z = x * mask + y
@@ -696,7 +728,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_relu(self):
+    def test_relu_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
@@ -704,7 +736,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_small_constant(self):
+    def test_small_constant_cuda(self):
         def fn_test_small_constant(x, y):
             return (1e-8 * x + 5e-9 * y) * 1e8
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -719,7 +751,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
-    def test_exp(self):
+    def test_exp_cuda(self):
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
@@ -858,7 +890,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     @skipIfRocm
-    def test_fuse_last_device(self):
+    def test_fuse_last_device_cuda(self):
         device = 'cuda:' + str(1)
         x = torch.tensor([0.4], dtype=torch.float, device=device)
         y = torch.tensor([0.7], dtype=torch.float, device=device)
@@ -1134,7 +1166,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
-    def test_cpp(self):
+    def test_cpp_cuda(self):
         # rather than rebuild assertExpected in cpp,
         # just glob all the cpp outputs into one file for now
         self.assertExpected(torch._C._jit_run_cpp_tests())
@@ -1291,7 +1323,7 @@ class TestJit(JitTestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
     @skipIfRocm
-    def test_traced_module(self):
+    def test_traced_module_cuda(self):
         class Model(nn.Module):
             def __init__(self, num_features, num_layers):
                 super(Model, self).__init__()
@@ -1398,7 +1430,10 @@ class TestJit(JitTestCase):
 
         a, b, c = [torch.tensor(e) for e in (1, [[2.]], [[3.]])]
         addmm(a, b, c)
-        self.assertExpectedGraph(addmm.graph_for(a, b, c))
+        graph = addmm.graph_for(a, b, c)
+        # graph fusion skipped in windows, which runs cse
+        self.run_pass('cse', graph)
+        self.assertExpectedGraph(graph)
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
@@ -2916,6 +2951,16 @@ a")
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    def test_scalar_fusion(self):
+        def fn(x, y):
+            return x + y.type_as(x)
+
+        x = torch.tensor(0.1, dtype=torch.float, device='cpu')
+        y = torch.tensor(1, dtype=torch.float, device='cpu')
+        ge = self.checkScript(fn, (x, y))
+        self.assertExpectedGraph(ge.graph_for(x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_lstm_fusion_cuda(self):
@@ -3347,7 +3392,7 @@ a")
 
         @torch.jit.script
         def bar(c, b):
-            return c / b
+            return c + b
 
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
@@ -3376,10 +3421,6 @@ a")
             return 3.14 {op} 3.14
         ''')
         ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
-        # TODO: turn this on for py3 (and add PY3 division semantics)
-        ops_py2_only = ['/']
-        if PY2:
-            ops.extend(ops_py2_only)
 
         for op in ops:
             code = template.format(op=op)
@@ -3391,6 +3432,19 @@ a")
             self.assertEqual(cu.func2(), scope['func2']())
             self.assertEqual(cu.func3(), scope['func3']())
             self.assertEqual(cu.func4(), scope['func4']())
+
+    def test_number_div(self):
+        self.checkScript(div_int_future, (), optimize=True)
+        self.checkScript(div_float_future, (), optimize=True)
+
+        if PY2:
+            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+                torch.jit.script(div_int_nofuture)
+            with self.assertRaisesRegex(RuntimeError, 'from __future__ import division'):
+                torch.jit.script(div_float_nofuture)
+        else:
+            self.checkScript(div_int_nofuture, (), optimize=True)
+            self.checkScript(div_float_nofuture, (), optimize=True)
 
     def test_number_augassign(self):
         def func():
@@ -4729,6 +4783,38 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
+
+    def test_onnx_export_script_truediv(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                z = x.size(0) / 2
+                return x + z
+
+        mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
+        self.assertExpected(torch.onnx.export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs))
+
+    def test_onnx_raw_export_script_truediv(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                z = x.size(0) / 2
+                return x + z
+
+        mte = ModuleToExport()
+        outputs = mte(torch.zeros(1, 2, 3))
+        self.assertExpected(torch.onnx.export_to_pretty_string(
+            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            example_outputs=outputs, export_raw_ir=True))
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):
@@ -6496,8 +6582,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 x = self.fc2(x)
                 return F.log_softmax(x, dim=1)
 
-        # FIXME: eval() is present because it works around the issue described
-        # in https://github.com/pytorch/pytorch/issues/8448
+        # eval() is present because dropout makes this nondeterministic
         self.checkTrace(Net().eval(), (torch.rand(5, 1, 28, 28),))
 
     def test_reinforcement_learning(self):
@@ -6683,7 +6768,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                     outputs = torch.cat((outputs, output), 1)
                 return outputs
 
-        self.checkTrace(Sequence(), (torch.rand(3, 4),))
+        # TODO: toggle export_import once above issues are fixed
+        self.checkTrace(Sequence(), (torch.rand(3, 4),), export_import=False)
 
     def test_vae(self):
         class VAE(nn.Module):
@@ -6717,8 +6803,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 z = self.reparameterize(mu, logvar)
                 return self.decode(z), mu, logvar
 
-        # FIXME: this fails under training because of the call to `randn_like`
-        # https://github.com/pytorch/pytorch/issues/8443
+        # eval() is present because randn_like makes this nondeterministic
         self.checkTrace(VAE().eval(), (torch.rand(128, 1, 28, 28),))
 
 

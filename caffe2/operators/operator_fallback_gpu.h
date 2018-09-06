@@ -42,11 +42,11 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   USE_OPERATOR_FUNCTIONS(CUDAContext);
   GPUFallbackOp(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws) {
-    CAFFE_ENFORCE_EQ(def.device_option().device_type(), CUDA);
+    CAFFE_ENFORCE_EQ(def.device_option().device_type(), PROTO_CUDA);
     OperatorDef base_def_(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
     base_def_.clear_device_option();
-    base_def_.mutable_device_option()->set_device_type(CPU);
+    base_def_.mutable_device_option()->set_device_type(PROTO_CPU);
     // Set up the symbols for the local workspace.
     for (const string& name : def.input()) {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));

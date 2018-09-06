@@ -38,6 +38,11 @@ bool PrefixStore::check(const std::vector<std::string>& keys) {
   return store_.check(joinedKeys);
 }
 
+void PrefixStore::wait(const std::vector<std::string>& keys) {
+  auto joinedKeys = joinKeys(keys);
+  store_.wait(joinedKeys);
+}
+
 void PrefixStore::wait(
     const std::vector<std::string>& keys,
     const std::chrono::milliseconds& timeout) {

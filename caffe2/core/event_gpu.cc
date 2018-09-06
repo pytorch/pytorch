@@ -11,7 +11,7 @@ struct CudaEventWrapper {
       : cuda_stream_(nullptr),
         cuda_gpu_id_(option.cuda_gpu_id()),
         status_(EventStatus::EVENT_INITIALIZED) {
-    CAFFE_ENFORCE(option.device_type(), CUDA);
+    CAFFE_ENFORCE(option.device_type(), PROTO_CUDA);
     DeviceGuard g(cuda_gpu_id_);
     CUDA_ENFORCE(cudaEventCreate(
         &cuda_event_, cudaEventDefault | cudaEventDisableTiming));

@@ -199,6 +199,7 @@ void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
 }
 
 std::vector<uint8_t> FileStore::get(const std::string& key) {
+  const auto start = std::chrono::steady_clock::now();
   while (cache_.count(key) == 0) {
     File file(path_, O_RDONLY);
     auto lock = file.lockShared();
@@ -206,6 +207,11 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     if (size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
+      const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+          std::chrono::steady_clock::now() - start);
+      if (timeout_ != kNoTimeout && elapsed > timeout_) {
+        throw std::runtime_error("Timeout waiting for key: " + key);
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
     }
@@ -249,6 +255,10 @@ bool FileStore::check(const std::vector<std::string>& keys) {
   }
 
   return true;
+}
+
+void FileStore::wait(const std::vector<std::string>& keys) {
+  wait(keys, timeout_);
 }
 
 void FileStore::wait(
