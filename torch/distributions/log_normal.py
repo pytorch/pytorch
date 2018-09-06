@@ -28,13 +28,13 @@ class LogNormal(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, loc, scale, validate_args=None):
-        self._base_dist = Normal(loc, scale)
-        super(LogNormal, self).__init__(self._base_dist, ExpTransform(), validate_args=validate_args)
+        base_dist = Normal(loc, scale)
+        super(LogNormal, self).__init__(base_dist, ExpTransform(), validate_args=validate_args)
 
     def expand(self, batch_shape):
         new = self.__new__(LogNormal)
-        new._base_dist = self._base_dist.expand(batch_shape)
-        super(LogNormal, new).__init__(new._base_dist, ExpTransform(), validate_args=False)
+        base_dist = self.base_dist.expand(batch_shape)
+        super(LogNormal, new).__init__(base_dist, ExpTransform(), validate_args=False)
         new._validate_args = self._validate_args
         return new
 

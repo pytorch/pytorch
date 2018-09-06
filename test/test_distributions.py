@@ -2200,7 +2200,7 @@ class TestDistributions(TestCase):
         for Dist, params in EXAMPLES:
             if Dist.__name__ == "TransformedDistribution":
                 continue
-            for i, param in enumerate(params):
+            for param in params:
                 base_dist = Dist(**param)
                 for reinterpreted_batch_ndims in range(len(base_dist.batch_shape) + 1):
                     for s in [torch.Size(), torch.Size((2,)), torch.Size((2, 3))]:

@@ -32,8 +32,8 @@ class LogisticNormal(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, loc, scale, validate_args=None):
-        self._base_dist = Normal(loc, scale)
-        super(LogisticNormal, self).__init__(self._base_dist,
+        base_dist = Normal(loc, scale)
+        super(LogisticNormal, self).__init__(base_dist,
                                              StickBreakingTransform(),
                                              validate_args=validate_args)
         # Adjust event shape since StickBreakingTransform adds 1 dimension
@@ -41,8 +41,8 @@ class LogisticNormal(TransformedDistribution):
 
     def expand(self, batch_shape):
         new = self.__new__(LogisticNormal)
-        new._base_dist = self._base_dist.expand(batch_shape + self._base_dist.batch_shape[-1:])
-        super(LogisticNormal, new).__init__(new._base_dist,
+        base_dist = self.base_dist.expand(batch_shape + self.base_dist.batch_shape[-1:])
+        super(LogisticNormal, new).__init__(base_dist,
                                             StickBreakingTransform(),
                                             validate_args=False)
         new._event_shape = self._event_shape

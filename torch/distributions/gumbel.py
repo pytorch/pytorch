@@ -31,18 +31,18 @@ class Gumbel(TransformedDistribution):
         self.loc, self.scale = broadcast_all(loc, scale)
         finfo = _finfo(self.loc)
         if isinstance(loc, Number) and isinstance(scale, Number):
-            self._base_dist = Uniform(finfo.tiny, 1 - finfo.eps)
+            base_dist = Uniform(finfo.tiny, 1 - finfo.eps)
         else:
-            self._base_dist = Uniform(self.loc.new(self.loc.size()).fill_(finfo.tiny), 1 - finfo.eps)
-        self._transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
-                            ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
-        super(Gumbel, self).__init__(self._base_dist, self._transforms, validate_args=validate_args)
+            base_dist = Uniform(self.loc.new(self.loc.size()).fill_(finfo.tiny), 1 - finfo.eps)
+        transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
+                      ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
+        super(Gumbel, self).__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape):
         new = self.__new__(Gumbel)
-        new._base_dist = self._base_dist.expand(batch_shape)
-        new._transforms = self._transforms
-        super(Gumbel, new).__init__(new._base_dist, new._transforms, validate_args=False)
+        base_dist = self.base_dist.expand(batch_shape)
+        transforms = self.transforms
+        super(Gumbel, new).__init__(base_dist, transforms, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

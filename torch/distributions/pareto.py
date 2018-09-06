@@ -28,15 +28,14 @@ class Pareto(TransformedDistribution):
 
     def __init__(self, scale, alpha, validate_args=None):
         self.scale, self.alpha = broadcast_all(scale, alpha)
-        self._base_dist = Exponential(self.alpha)
-        self._transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
-        super(Pareto, self).__init__(self._base_dist, self._transforms, validate_args=validate_args)
+        base_dist = Exponential(self.alpha)
+        transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
+        super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape):
         new = self.__new__(Pareto)
-        new._base_dist = self._base_dist.expand(batch_shape)
-        new._transforms = self._transforms
-        super(Pareto, new).__init__(new._base_dist, new._transforms, validate_args=False)
+        base_dist = self.base_dist.expand(batch_shape)
+        super(Pareto, new).__init__(base_dist, self.transforms, validate_args=False)
         new._validate_args = self._validate_args
         return new
 

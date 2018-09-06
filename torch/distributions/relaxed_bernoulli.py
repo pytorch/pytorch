@@ -113,15 +113,15 @@ class RelaxedBernoulli(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
-        self._base_dist = LogitRelaxedBernoulli(temperature, probs, logits)
-        super(RelaxedBernoulli, self).__init__(self._base_dist,
+        base_dist = LogitRelaxedBernoulli(temperature, probs, logits)
+        super(RelaxedBernoulli, self).__init__(base_dist,
                                                SigmoidTransform(),
                                                validate_args=validate_args)
 
     def expand(self, batch_shape):
         new = self.__new__(RelaxedBernoulli)
-        new._base_dist = self._base_dist.expand(batch_shape)
-        super(RelaxedBernoulli, new).__init__(new._base_dist, SigmoidTransform(), validate_args=False)
+        base_dist = self.base_dist.expand(batch_shape)
+        super(RelaxedBernoulli, new).__init__(base_dist, SigmoidTransform(), validate_args=False)
         new._validate_args = self._validate_args
         return new
 

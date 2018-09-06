@@ -48,7 +48,7 @@ class Bernoulli(ExponentialFamily):
 
     def expand(self, batch_shape):
         batch_shape = torch.Size(batch_shape)
-        new = self.__new__(Bernoulli)
+        new = self.__new__(type(self))
         if 'probs' in self.__dict__:
             new.probs = self.probs.expand(batch_shape)
             new._param = new.probs
