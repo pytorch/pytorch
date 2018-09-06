@@ -48,9 +48,12 @@ class Gamma(ExponentialFamily):
             batch_shape = self.concentration.size()
         super(Gamma, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape):
+    def expand(self, batch_shape, instance=None):
+        if not instance and type(self).__init__ is not Gamma.__init__:
+            raise NotImplementedError("Subclasses that define a custom __init__ method "
+                                      "must also define a custom .expand() method")
         batch_shape = torch.Size(batch_shape)
-        new = self.__new__(Gamma)
+        new = self.__new__(type(self)) if not instance else instance
         new.concentration = self.concentration.expand(batch_shape)
         new.rate = self.rate.expand(batch_shape)
         super(Gamma, new).__init__(batch_shape, validate_args=False)

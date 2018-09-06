@@ -22,8 +22,13 @@ class Chi2(Gamma):
     def __init__(self, df, validate_args=None):
         super(Chi2, self).__init__(0.5 * df, 0.5, validate_args=validate_args)
 
-    def expand(self, batch_shape):
-        return super(Chi2, self).expand(batch_shape)
+    def expand(self, batch_shape, instance=None):
+        if not instance and type(self).__init__ is not Chi2.__init__:
+            raise NotImplementedError("Subclasses that define a custom __init__ method "
+                                      "must also define a custom .expand() method")
+        new = self.__new__(type(self)) if not instance else instance
+        batch_shape = torch.Size(batch_shape)
+        return super(Chi2, self).expand(batch_shape, new)
 
     @property
     def df(self):

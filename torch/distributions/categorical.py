@@ -53,10 +53,13 @@ class Categorical(Distribution):
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
         super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape):
+    def expand(self, batch_shape, instance=None):
+        if not instance and type(self).__init__ is not Categorical.__init__:
+            raise NotImplementedError("Subclasses that define a custom __init__ method "
+                                      "must also define a custom .expand() method")
+        new = self.__new__(type(self)) if not instance else instance
         batch_shape = torch.Size(batch_shape)
         param_shape = batch_shape + torch.Size((self._num_events,))
-        new = self.__new__(Categorical)
         if 'probs' in self.__dict__:
             new.probs = self.probs.expand(param_shape)
             new._param = new.probs

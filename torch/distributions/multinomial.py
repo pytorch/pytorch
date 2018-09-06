@@ -58,9 +58,12 @@ class Multinomial(Distribution):
         event_shape = self._categorical.param_shape[-1:]
         super(Multinomial, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape):
+    def expand(self, batch_shape, instance=None):
+        if not instance and type(self).__init__ is not Multinomial.__init__:
+            raise NotImplementedError("Subclasses that define a custom __init__ method "
+                                      "must also define a custom .expand() method")
+        new = self.__new__(type(self)) if not instance else instance
         batch_shape = torch.Size(batch_shape)
-        new = self.__new__(Multinomial)
         new.total_count = self.total_count
         new._categorical = self._categorical.expand(batch_shape)
         super(Multinomial, new).__init__(batch_shape, self.event_shape, validate_args=False)

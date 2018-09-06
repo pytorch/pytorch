@@ -50,9 +50,12 @@ class Uniform(Distribution):
         if self._validate_args and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")
 
-    def expand(self, batch_shape):
+    def expand(self, batch_shape, instance=None):
+        if not instance and type(self).__init__ is not Uniform.__init__:
+            raise NotImplementedError("Subclasses that define a custom __init__ method "
+                                      "must also define a custom .expand() method")
+        new = self.__new__(type(self)) if not instance else instance
         batch_shape = torch.Size(batch_shape)
-        new = self.__new__(Uniform)
         new.low = self.low.expand(batch_shape)
         new.high = self.high.expand(batch_shape)
         super(Uniform, new).__init__(batch_shape, validate_args=False)

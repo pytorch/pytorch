@@ -35,17 +35,20 @@ class Distribution(object):
                 if not constraint.check(getattr(self, param)).all():
                     raise ValueError("The parameter {} has invalid values".format(param))
 
-    def expand(self, batch_shape):
+    def expand(self, batch_shape, instance=None):
         """
-        Returns a new distribution instance with batch dimensions expanded
-        to `batch_shape`. This method calls :class:`~torch.Tensor.expand`
-        on the distribution's parameters. As such, this does not allocate
-        new memory for the expanded distribution instance. Additionally,
-        this does not repeat any args checking or parameter broadcasting
-        in `__init__.py`, when an instance is first created.
+        Returns a new distribution instance (or populates a provided instance)
+        with batch dimensions expanded to `batch_shape`. This method calls
+        :class:`~torch.Tensor.expand` on the distribution's parameters.
+        As such, this does not allocate new memory for the expanded distribution
+        instance. Additionally, this does not repeat any args checking or
+        parameter broadcasting in `__init__.py`, when an instance is first
+        created.
 
         Args:
-            batch_shape (torch.Size): the desired expanded size
+            batch_shape (torch.Size): the desired expanded size.
+            instance: new instance (e.g. provided by subclasses) to be
+                populated.
 
         Returns:
             New distribution instance with batch dimensions expanded to

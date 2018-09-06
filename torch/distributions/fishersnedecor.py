@@ -37,9 +37,12 @@ class FisherSnedecor(Distribution):
             batch_shape = self.df1.size()
         super(FisherSnedecor, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape):
+    def expand(self, batch_shape, instance=None):
+        if not instance and type(self).__init__ is not FisherSnedecor.__init__:
+            raise NotImplementedError("Subclasses that define a custom __init__ method "
+                                      "must also define a custom .expand() method")
         batch_shape = torch.Size(batch_shape)
-        new = self.__new__(FisherSnedecor)
+        new = self.__new__(type(self)) if not instance else instance
         new.df1 = self.df1.expand(batch_shape)
         new.df2 = self.df2.expand(batch_shape)
         new._gamma1 = self._gamma1.expand(batch_shape)

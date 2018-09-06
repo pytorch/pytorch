@@ -146,11 +146,14 @@ class MultivariateNormal(Distribution):
         batch_shape, event_shape = self.loc.shape[:-1], self.loc.shape[-1:]
         super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape):
+    def expand(self, batch_shape, instance=None):
+        if not instance and type(self).__init__ is not MultivariateNormal.__init__:
+            raise NotImplementedError("Subclasses that define a custom __init__ method "
+                                      "must also define a custom .expand() method")
+        new = self.__new__(type(self)) if not instance else instance
         batch_shape = torch.Size(batch_shape)
         loc_shape = batch_shape + self.event_shape
         cov_shape = batch_shape + self.event_shape + self.event_shape
-        new = self.__new__(MultivariateNormal)
         new.loc = self.loc.expand(loc_shape)
         new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
         if 'covariance_matrix' in self.__dict__:

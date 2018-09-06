@@ -807,6 +807,7 @@ class TestDistributions(TestCase):
                     expanded = d.expand(batch_shape=expanded_shape)
                     sample = expanded.sample()
                     actual_shape = expanded.sample().shape
+                    self.assertEqual(expanded.__class__, d.__class__)
                     self.assertEqual(d.sample().shape, original_shape)
                     self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
                     self.assertEqual(actual_shape, expected_shape)
