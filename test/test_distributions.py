@@ -4071,5 +4071,5 @@ class TestValidation(TestCase):
         super(TestCase, self).tearDown()
         Distribution.set_default_validate_args(False)
 
-# if __name__ == '__main__':
-#     run_tests()
+if __name__ == '__main__':
+    run_tests()
