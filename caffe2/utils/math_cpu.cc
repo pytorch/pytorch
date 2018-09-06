@@ -3459,13 +3459,13 @@ bool TransposeWithHPTT(
 #endif // CAFFE2_USE_HPTT
 
 template <typename T>
-CAFFE2_EXPORT void Transpose2D(const int rows, const int cols, const T* X, T* Y);
+void Transpose2D(const int rows, const int cols, const T* X, T* Y);
 
 #ifdef CAFFE2_USE_MKL
 
 #define DELEGATE_TRANSPOSE_2D_FUNCTION(T, Func)                          \
   template <>                                                            \
-  CAFFE2_EXPORT void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+  void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
     Func('R', 'T', rows, cols, T(1), X, cols, Y, rows);                  \
   }
 DELEGATE_TRANSPOSE_2D_FUNCTION(float, mkl_somatcopy);
@@ -3476,7 +3476,7 @@ DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
 
 #define CAFFE2_SPECIALIZED_TRANSPOSE_2D(T)                               \
   template <>                                                            \
-  CAFFE2_EXPORT void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+  void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
     EigenMatrixMap<T>(Y, rows, cols) =                                   \
         ConstEigenMatrixMap<T>(X, cols, rows).transpose();               \
   }
@@ -3484,7 +3484,7 @@ DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
 #ifndef CAFFE2_USE_MKL
 
 template <>
-CAFFE2_EXPORT void Transpose2D<float>(
+void Transpose2D<float>(
     const int rows,
     const int cols,
     const float* X,
@@ -3530,7 +3530,7 @@ ComputeXStrides(const int ndim, const int* dims, const int* axes) {
 }
 
 template <typename T>
-CAFFE2_EXPORT void TransposeND(
+void TransposeND(
     const int ndim,
     const int* dims,
     const int* axes,
@@ -3568,7 +3568,7 @@ CAFFE2_EXPORT void TransposeND(
 }
 
 template <typename T>
-CAFFE2_EXPORT void TransposeCPUImpl(
+void TransposeCPUImpl(
     const int ndim,
     const int* dims,
     const int* axes,
@@ -3588,7 +3588,7 @@ CAFFE2_EXPORT void TransposeCPUImpl(
 }
 
 template <>
-CAFFE2_EXPORT void TransposeCPUImpl(
+void TransposeCPUImpl(
     const int ndim,
     const int* dims,
     const int* axes,
