@@ -23,8 +23,11 @@ struct TensorDesc {
 
   TensorDesc(const at::ScalarType& type, const std::vector<bool>& contiguity)
   : scalar_type{type}, contiguity{contiguity} {
-    nDim_ = std::count(contiguity.begin(), contiguity.end(), false) 
-      + (lastIsContiguous() ? 1 : 0);
+    if (contiguity.size() == 0) {
+      nDim_ = 0;
+    } else {
+      nDim_ = std::count(contiguity.begin(), contiguity.end(), false) + (lastIsContiguous() ? 1 : 0);
+    }
   }
 
   TensorDesc(const at::ScalarType& type, const at::IntList& sizes, const at::IntList& strides)
