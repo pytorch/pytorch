@@ -256,7 +256,7 @@ hip_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
 # temporarily skip some flaky tests on ROCM before it's getting more mature.
 _device_options_no_hip = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else [])
 device_options = _device_options_no_hip + ([hip_do] if workspace.has_hip_support else [])
-
+_device_options_hip_or_gpu = [hip_do] if workspace.has_hip_support else [gpu_do]
 # Include device option for each GPU
 expanded_device_options = [cpu_do] + (
     [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, cuda_gpu_id=i)
@@ -279,6 +279,7 @@ gcs = dict(
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
 gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do]))
+gcs_gpu_or_hip_only = dict(gc=st.sampled_from(_device_options_hip_or_gpu), dc=st.just(_device_options_hip_or_gpu))
 gcs_no_hip = dict(gc=st.sampled_from(_device_options_no_hip), dc=st.just(_device_options_no_hip))
 
 
