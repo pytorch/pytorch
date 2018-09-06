@@ -115,7 +115,7 @@ option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
 option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
-    USE_MPI "Use MPI. Only available if USE_DISTRIBUTED is on." ON
+    USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." OFF
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
