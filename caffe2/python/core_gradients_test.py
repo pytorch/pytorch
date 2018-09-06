@@ -9,7 +9,7 @@ import hypothesis.strategies as st
 import unittest
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, test_util
+from caffe2.python import core, test_util, workspace
 from caffe2.python.core import CreateOperator, GradientRegistry
 from caffe2.python import workspace
 
@@ -94,7 +94,8 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.CUDA, 1)]))
+        core.DeviceOption(caffe2_pb2.CUDA, 1),
+        core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=1)]))
     def testDirect(self, device_option):
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
@@ -279,7 +280,8 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.CUDA, 1)]))
+        core.DeviceOption(caffe2_pb2.CUDA, 1),
+        core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=1)]))
     def testMultiUseInput(self, device_option):
         """Test gradient for the following case:
 
