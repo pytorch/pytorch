@@ -1308,7 +1308,15 @@ static void ikv_temme(double v, double x, double *Iv_p, double *Kv_p)
     }
     else {
           CF1_ik(v, x, &fv);  /* continued fraction CF1_ik */
-          Iv = W / (Kv * fv + Kv1);   /* Wronskian relation */
+          if ((Kv * fv + Kv1) != 0){
+            Iv = W / (Kv * fv + Kv1);   /* Wronskian relation */
+          }
+          else{
+            #ifdef DEBUG
+              THError("div by 0 in Wronskian");
+            #endif //DEBUG
+            Iv = INFINITY;       /* any value will do */
+          }
     }
   }
   else {
