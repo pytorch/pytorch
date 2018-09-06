@@ -302,16 +302,12 @@ def emit_body(declaration):
         print('WARNING: derivative ignored for {}'.format(name), file=sys.stderr)
 
     def setup_derivative():
-        def error_msg():
-            name = declaration['api_name']
-            return '"the derivative for {} is not implemented"'.format(name)
-
         args_with_derivatives = find_args_with_derivatives()
 
         env = {}
         env['args_with_derivatives'] = reference_args(args_with_derivatives)
-        env['op'] = func['op'] if func is not None else 'Error'
-        env['op_ctor'] = '' if func is not None else error_msg()
+        env['op'] = func['op'] if func is not None else 'NotImplemented'
+        env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
         if is_out_fn:
             setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
