@@ -29,14 +29,14 @@ class TestGroupConvolution(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "CUDNN", "EIGEN"]),
            use_bias=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=5, timeout=100)
     def test_group_convolution(
             self, stride, pad, kernel, size, group,
             input_channels_per_group, output_channels_per_group, batch_size,
             order, engine, use_bias, gc, dc):
         assume(size >= kernel)
         # TODO: Group conv in NHWC not implemented for GPU yet.
-        assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+        assume(group == 1 or order == "NCHW" or gc.device_type not in {caffe2_pb2.CUDA, caffe2_pb2.HIP})
         input_channels = input_channels_per_group * group
         output_channels = output_channels_per_group * group
 
@@ -64,7 +64,8 @@ class TestGroupConvolution(hu.HypothesisTestCase):
 
         inputs = [X, w, b] if use_bias else [X, w]
 
-        self.assertDeviceChecks(dc, op, inputs, [0])
+        if order != 'NHWC' or group == 1:
+            self.assertDeviceChecks(dc, op, inputs, [0])
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
