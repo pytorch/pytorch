@@ -387,7 +387,9 @@ class Tensor(torch._C._TensorBase):
     __ge__ = _C._TensorBase.ge
     __abs__ = _C._TensorBase.abs
 
-    __hash__ = None
+    def __hash__(self):
+        raise TypeError("Tensors are not hashable. If you would like to put tensors "
+                        "in a set or a dict, consider using id().")
 
     def __len__(self):
         if self.dim() == 0:
