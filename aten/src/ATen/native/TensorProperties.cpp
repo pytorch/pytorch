@@ -41,11 +41,14 @@ bool cudnn_is_acceptable(const Tensor& self) {
 }
 
 Tensor detach(const Tensor& self) {
-  return self.unsafeGetTensorImpl()->detach();
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  AT_ERROR("detach is not implemented for Tensor");
+  return self;
 }
 
 Tensor & detach_(Tensor & self) {
-  self.unsafeGetTensorImpl()->detach_();
+  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
+  AT_ERROR("detach_ is not implemented for Tensor");
   return self;
 }
 

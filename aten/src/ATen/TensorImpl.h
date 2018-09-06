@@ -85,11 +85,6 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   virtual Tensor& grad();
   virtual const Tensor& grad() const;
 
-  virtual Tensor detach() const;
-  virtual void detach_() {
-    AT_ERROR("detach_ is not implemented for Tensor");
-  }
-
   virtual void backward(
       at::optional<Tensor> gradient,
       bool keep_graph,

@@ -446,6 +446,46 @@ Tensor VariableType::contiguous(const Tensor & self) const {
   return self.clone();
 }
 
+Tensor VariableType::detach(const Tensor & self) const {
+  profiler::RecordFunction profiler("detach");
+  torch::jit::Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    node = graph->create(jit::aten::detach, /*outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+
+  }
+  // <NON_GENERATED_CODE>
+  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach();
+  // </NON_GENERATED_CODE>
+  if (jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, result);
+  }
+  return result;
+}
+
+Tensor & VariableType::detach_(Tensor & self) const {
+  profiler::RecordFunction profiler("detach_");
+  torch::jit::Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    node = graph->create(jit::aten::detach, /*outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+    jit::tracer::ensureUnique("detach_", self);
+  }
+  // <NON_GENERATED_CODE>
+  as_variable_ref(self).detach_();
+  // </NON_GENERATED_CODE>
+  if (jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
+  return self;
+}
+
 static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
