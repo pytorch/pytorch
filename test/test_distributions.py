@@ -2215,8 +2215,6 @@ class TestDistributions(TestCase):
                         self.assertEqual(expanded.event_shape, indep_dist.event_shape)
                         self.assertEqual(expanded.batch_shape, expanded_shape)
 
-
-
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
         for Dist, params in EXAMPLES:
