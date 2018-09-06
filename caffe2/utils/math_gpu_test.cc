@@ -33,7 +33,7 @@ void executeGpuBinaryOpTest(
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(CUDA);
+  option.set_device_type(PROTO_CUDA);
   CUDAContext context(option);
 
   Blob* blobx0 = ws.CreateBlob("X0");
@@ -85,7 +85,7 @@ TEST(MathUtilGPUTest, testAddStripedBatch) {
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(CUDA);
+  option.set_device_type(PROTO_CUDA);
   CUDAContext context(option);
   Blob* blobx = ws.CreateBlob("X");
   Blob* bloby = ws.CreateBlob("Y");
@@ -253,7 +253,7 @@ class GemmBatchedGPUTest
     if (!HasCudaGPU()) {
       return;
     }
-    option_.set_device_type(CUDA);
+    option_.set_device_type(PROTO_CUDA);
     cuda_context_ = make_unique<CUDAContext>(option_);
     Blob* X_blob = ws_.CreateBlob("X");
     Blob* W_blob = ws_.CreateBlob("W");
@@ -377,7 +377,7 @@ class ReduceTensorGPUTest : public testing::Test {
     if (!HasCudaGPU()) {
       return;
     }
-    option_.set_device_type(CUDA);
+    option_.set_device_type(PROTO_CUDA);
     cuda_context_ = make_unique<CUDAContext>(option_);
     Blob* blob_x = ws_.CreateBlob("X");
     Blob* blob_y = ws_.CreateBlob("Y");
@@ -660,7 +660,7 @@ class BroadcastGPUTest : public testing::Test {
     if (!HasCudaGPU()) {
       return;
     }
-    option_.set_device_type(CUDA);
+    option_.set_device_type(PROTO_CUDA);
     cuda_context_ = make_unique<CUDAContext>(option_);
     Blob* blob_x = ws_.CreateBlob("X");
     Blob* blob_y = ws_.CreateBlob("Y");
@@ -736,7 +736,7 @@ class MomentsGPUTest : public testing::Test {
     if (!HasCudaGPU()) {
       return;
     }
-    option_.set_device_type(CUDA);
+    option_.set_device_type(PROTO_CUDA);
     cuda_context_ = make_unique<CUDAContext>(option_);
     Blob* blob_x = ws_.CreateBlob("X");
     Blob* blob_mean = ws_.CreateBlob("mean");
@@ -864,7 +864,7 @@ class TransposeGPUTest : public testing::Test {
     if (!HasCudaGPU()) {
       return;
     }
-    option_.set_device_type(CUDA);
+    option_.set_device_type(PROTO_CUDA);
     cuda_context_ = make_unique<CUDAContext>(option_);
     Blob* blob_x = ws_.CreateBlob("X");
     Blob* blob_y = ws_.CreateBlob("Y");

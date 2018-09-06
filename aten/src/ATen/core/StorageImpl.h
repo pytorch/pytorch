@@ -6,11 +6,6 @@
 
 #include <ATen/core/intrusive_ptr.h>
 
-struct THFinalizer {
-  virtual void operator()() = 0;
-  virtual ~THFinalizer() {};
-};
-
 namespace at {
 
 struct Type;

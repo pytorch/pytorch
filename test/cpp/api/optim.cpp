@@ -35,8 +35,7 @@ bool test_optimizer_xor(Options options) {
   const int64_t kBatchSize = 4;
   const int64_t kMaximumNumberOfEpochs = 3000;
 
-  auto optimizer = OptimizerClass(std::vector<torch::Tensor>(), options);
-  optimizer.add_parameters(model->parameters());
+  OptimizerClass optimizer(model->parameters(), options);
 
   float running_loss = 1;
   int epoch = 0;
@@ -152,6 +151,9 @@ TEST_CASE("Optim/BasicInterface") {
     REQUIRE(optimizer.size() == 0);
     optimizer.add_parameters(parameters);
     REQUIRE(optimizer.size() == parameters.size());
+    for (size_t p = 0; p < parameters.size(); ++p) {
+      REQUIRE(optimizer.parameters()[p].allclose(parameters[p]));
+    }
   }
   {
     Linear linear(3, 4);

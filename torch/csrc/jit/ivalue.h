@@ -80,18 +80,15 @@ struct TORCH_API IValue final {
       c10::raw::intrusive_ptr::incref(as_intrusive_ptr);
     }
   }
-  IValue(IValue&& rhs) noexcept
-  : payload(rhs.payload)
-  , tag(rhs.tag)
-  , is_intrusive_ptr(rhs.is_intrusive_ptr) {
-    rhs.clearToNone();
+  IValue(IValue&& rhs) noexcept : IValue() {
+    swap(rhs);
   }
   ~IValue() {
     if (is_intrusive_ptr) {
       c10::raw::intrusive_ptr::decref(as_intrusive_ptr);
     }
   }
-  IValue & operator=(IValue && rhs) & {
+  IValue & operator=(IValue && rhs) & noexcept {
     IValue(std::move(rhs)).swap(*this); // this also sets rhs to None
     return *this;
   }
@@ -99,7 +96,7 @@ struct TORCH_API IValue final {
     IValue(rhs).swap(*this);
     return *this;
   }
-  void swap(IValue & rhs) {
+  void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);
