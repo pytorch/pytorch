@@ -20,7 +20,7 @@ struct Fan {
     const auto dimensions = tensor.ndimension();
     AT_CHECK(
         dimensions >= 2,
-        "Fan in and fan out can not be computed for tensor with less than 2 dimensions");
+        "Fan in and fan out can not be computed for tensor with fewer than 2 dimensions");
 
     if (dimensions == 2) {
       in = tensor.size(1);
