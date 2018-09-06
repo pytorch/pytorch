@@ -229,18 +229,20 @@ class _DistTestBase(object):
     def test_send_recv(self):
         rank = dist.get_rank()
         tensor = _build_tensor(rank + 1)
-        for dest in range(0, dist.get_world_size()):
-            if dest == rank:
-                continue
-            dist.send(tensor, dest)
 
         for src in range(0, dist.get_world_size()):
             if src == rank:
-                continue
-            tensor = _build_tensor(src + 1, value=-1)
-            expected_tensor = _build_tensor(src + 1)
-            dist.recv(tensor, src)
-            self.assertEqual(tensor, expected_tensor)
+                # Send mode
+                for dst in range(0, dist.get_world_size()):
+                    if dst == rank:
+                        continue
+                    dist.send(tensor, dst)
+            else:
+                # Recv mode
+                expected_tensor = _build_tensor(src + 1)
+                output_tensor = _build_tensor(src + 1, value=-1)
+                dist.recv(output_tensor, src)
+                self.assertEqual(output_tensor, expected_tensor)
 
         self._barrier()
 
@@ -253,20 +255,26 @@ class _DistTestBase(object):
     )
     def test_send_recv_any_source(self):
         rank = dist.get_rank()
-        tensor = _build_tensor(10, rank)
-        for dest in range(0, dist.get_world_size()):
-            if dest == rank:
-                continue
-            dist.send(tensor, dest)
-
+        tensor = _build_tensor(10, value=rank)
         recv_ranks = set()
-        for src in range(0, dist.get_world_size()):
-            if src == rank:
-                continue
-            tensor = _build_tensor(10, value=-1)
-            sender = dist.recv(tensor)
-            self.assertTrue(tensor.eq(sender).all())
-            recv_ranks.add(sender)
+
+        for dst in range(0, dist.get_world_size()):
+            if dst == rank:
+                # Recv mode
+                for dst in range(0, dist.get_world_size()):
+                    if dst == rank:
+                        continue
+                    output_tensor = _build_tensor(10, value=-1)
+                    sender = dist.recv(output_tensor)
+
+                    # Assert the scalar value "sender" that should be
+                    # equal to the rank of the sender is equal to all
+                    # values in the received tensor.
+                    self.assertTrue(output_tensor.eq(sender).all())
+                    recv_ranks.add(sender)
+            else:
+                # Send mode
+                dist.send(tensor, dst)
 
         self.assertEqual(len(recv_ranks), dist.get_world_size() - 1)
         self._barrier()
@@ -1010,6 +1018,31 @@ class _DistTestBase(object):
             local_bs,
             rank,
             global_bs,
+        )
+        self._barrier()
+
+    @unittest.skipIf(
+        BACKEND == "nccl", "nccl does not support DistributedDataParallelCPU"
+    )
+    def test_DistributedDataParallelCPU(self):
+        # Run a simple end to end DDP-CPU model, use result of single node
+        # model as baseline
+        group, group_id, rank = self._init_global_test()
+
+        # cpu training setup
+        model_base = self._create_Net()
+
+        # DDP-CPU training setup
+        model_DDP = copy.deepcopy(model_base)
+        model_DDP = nn.parallel._DistributedDataParallelC10dCPU(model_DDP)
+
+        # dummy data initialization
+        local_bs = 2
+        global_bs, input_cpu, target, loss = self._prepare_dummy_data(local_bs)
+
+        # check two model parameters over 2 iterations
+        self._test_DDP_2iter(
+            model_base, model_DDP, input_cpu, target, loss, local_bs, rank, global_bs
         )
         self._barrier()
 

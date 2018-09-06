@@ -93,7 +93,7 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     return at::native::${api_name}(${type_method_actuals}, options());
 }
 """)
-# 4. add virtual override to TypeDerived.h
+# 4. add override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
@@ -1494,7 +1494,9 @@ def create_derived(backend_type_env, declarations):
                                else ""
                 wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(
                     env, arguments=[call])
-                return_tensor = "return Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim((${wrapped_tensor})${maybe_scalar}));"
+                return_tensor = (
+                    "return Tensor(" +
+                    "c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim((${wrapped_tensor})${maybe_scalar}));")
                 body.append(CodeTemplate(return_tensor).substitute(
                     env, wrapped_tensor=wrapped_tensor, maybe_scalar=maybe_scalar))
             # return the same underlying Tensor type for both real and accreal; this ensures

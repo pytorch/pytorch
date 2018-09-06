@@ -18,8 +18,8 @@ struct Argument {
       bool kwarg_only = false)
       : name(std::move(name)),
         type(type? type : DynamicType::get()),
-        N(N),
-        default_value(default_value),
+        N(std::move(N)),
+        default_value(std::move(default_value)),
         kwarg_only(kwarg_only) {}
   std::string name;
   TypePtr type;
