@@ -151,15 +151,15 @@ class Distribution(object):
 
         Note that this enumerates over all batched tensors in lock-step
         `[[0, 0], [1, 1], ...]`. With `expand=False`, enumeration happens
-        along the leftmost dimension, `[[0], [1], ..`, with the remaining
-        batch dimensions being collapsed.
-
+        along dim 0, but with the remaining batch dimensions being
+        singleton dimensions, `[[0], [1], ..`.
 
         To iterate over the full Cartesian product use
         `itertools.product(m.enumerate_support())`.
 
         Args:
-            expand (bool):
+            expand (bool): whether to expand the support over the
+                batch dims to match the distribution's `batch_shape`.
 
         Returns:
             Tensor iterating over dimension 0.
