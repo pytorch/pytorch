@@ -1,80 +1,104 @@
 #pragma once
 
-#include <cstdint>
-#include <utility>
+#include "ATen/cuda/ATenCUDAGeneral.h"
+#include "ATen/cuda/CUDAStream.h"
+#include "ATen/cuda/CUDAContext.h"
+#include "ATen/cuda/Exceptions.h"
+#include "ATen/core/Error.h"
+#include "ATen/DeviceGuard.h"
 
 #include "cuda_runtime_api.h"
 
-#include <ATen/cuda/ATenCUDAGeneral.h>
-#include <ATen/Error.h>
+#include <cstdint>
+#include <utility>
+
+namespace at { namespace cuda {
 
 /*
-* The CUDAEvent RAII class and a pointer-based event API.
+* CUDAEvents are movable not copyable wrappers around CUDA's events.
+*
+* - lazy, record usage
 */
-
-struct CUDAEventInternals;
-
-namespace at {
-namespace cuda {
-
-struct CUDAStream;
-
-namespace detail {
-
-// Pointer-based API (for internal use)
-// Note: ATen/Context is preferred to work with streams safely
-AT_CUDA_API CUDAEventInternals* CUDAEvent_create(unsigned int flags);
-AT_CUDA_API void CUDAEvent_retain(CUDAEventInternals* internals);
-AT_CUDA_API void CUDAEvent_uncheckedFree(CUDAEventInternals* internals);
-AT_CUDA_API cudaEvent_t CUDAEvent_event(CUDAEventInternals* internals);
-AT_CUDA_API int64_t CUDAEvent_device(CUDAEventInternals* internals);
-AT_CUDA_API bool CUDAEvent_happened(CUDAEventInternals* internals);
-
-} // namespace detail
-
 struct AT_CUDA_API CUDAEvent {
   // Constants
   static constexpr unsigned int DEFAULT_FLAGS = cudaEventDisableTiming;
 
   // Constructors
-  CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
-  : internals_{detail::CUDAEvent_create(flags)} { }
+  CUDAEvent(unsigned int flags = DEFAULT_FLAGS) 
+  : flags_{flags} { }
 
-  ~CUDAEvent() { detail::CUDAEvent_uncheckedFree(internals_); }
-
-  CUDAEvent(const CUDAEvent& other) {
-    detail::CUDAEvent_retain(other.internals_);
-    internals_ = other.internals_;
+  // Note: event destruction done on creating device to avoid creating a 
+  // CUDA context on other devices.
+  ~CUDAEvent() { 
+    if (is_created_) {
+      at::DeviceGuard device_guard{(int)device_};
+      cudaEventDestroy(event_);
+    }
   }
 
-  CUDAEvent(CUDAEvent&& other) {
-    std::swap(internals_, other.internals_);
-  }
+  CUDAEvent(const CUDAEvent&) = delete;
+  CUDAEvent& operator=(const CUDAEvent&) = delete;
 
-  CUDAEvent& operator=(CUDAEvent other) {
-    std::swap(internals_, other.internals_);
+  CUDAEvent(CUDAEvent&& other) { moveHelper(std::move(other)); } 
+  CUDAEvent& operator=(CUDAEvent&& other) {
+    moveHelper(std::move(other));
     return *this;
   }
 
-  operator cudaEvent_t() const { return detail::CUDAEvent_event(internals_); }
+  operator cudaEvent_t() const { return event(); }
 
   // Less than operator (to allow use in sets)
   friend bool operator<(const CUDAEvent& left, const CUDAEvent& right) {
-    return left.internals_ < right.internals_;
+    return left.event_ < right.event_;
   }
 
-  int64_t device() const { return detail::CUDAEvent_device(internals_); }
-  cudaEvent_t event() const { return detail::CUDAEvent_event(internals_); }
-  CUDAEventInternals* internals() const { return internals_; }
+  int64_t device() const { return device_; }
+  cudaEvent_t event() const { return event_; }
 
-  bool happened() const { return detail::CUDAEvent_happened(internals_); }
+  bool happened() const { 
+    return (was_recorded_ && cudaEventQuery(event_) == cudaSuccess);
+  }
 
-  void record(); // Record on the current stream
-  void record(const CUDAStream& stream);
-  void recordOnce(const CUDAStream& stream);
+  void record() { record(getCurrentCUDAStream()); }
+  
+  void recordOnce(const CUDAStream& stream) { 
+    if (!was_recorded_) record(stream);
+  }
+  
+  void record(const CUDAStream& stream) {
+    if (is_created_) {
+      AT_ASSERT(device_ == stream.device());
+    } else {
+      create(stream.device());
+    }
+
+    AT_CUDA_CHECK(cudaEventRecord(event_, stream));
+    was_recorded_ = true;
+  }
+  
 
 private:
-  CUDAEventInternals* internals_;
+  unsigned int flags_ = DEFAULT_FLAGS;
+  bool is_created_ = false;
+  bool was_recorded_ = false;
+  int64_t device_ = -1;
+  cudaEvent_t event_;
+
+  void moveHelper(CUDAEvent&& other) {
+    std::swap(flags_, other.flags_);
+    std::swap(is_created_, other.is_created_);
+    std::swap(was_recorded_, other.was_recorded_);
+    std::swap(device_, other.device_);
+    std::swap(event_, other.event_);
+  }
+
+  void create(const int64_t device) {
+    at::DeviceGuard device_guard{(int)device};
+    AT_CUDA_CHECK(cudaEventCreateWithFlags(&event_, flags_));
+
+    is_created_ = true;
+    device_ = device;
+  }
 };
 
 } // namespace cuda

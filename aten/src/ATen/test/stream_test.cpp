@@ -245,24 +245,6 @@ TEST_CASE("CUDAEvent Syncs") {
   REQUIRE(event.happened());
 }
 
-
-TEST_CASE("Copying Events") {
-  const auto stream0 = at::cuda::createCUDAStream();
-  const auto stream1 = at::cuda::createCUDAStream();
-  const auto stream2 = at::cuda::createCUDAStream();
-
-  at::cuda::CUDAEvent event;
-  {
-    auto copy = event;
-    copy.recordOnce(stream0);
-    stream1.synchronize_with(copy);
-  }
-
-  stream2.synchronize_with(event);
-  cudaStreamSynchronize(stream2);
-  REQUIRE(event.happened());
-}
-
 TEST_CASE("Cross-Device Events") {
   if (at::cuda::getNumGPUs() < 2) return;
 
