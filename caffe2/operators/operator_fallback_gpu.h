@@ -36,13 +36,13 @@ namespace caffe2 {
  * MyMagic produces two outputs and the first output is always going to live on
  * the CPU, you can do
  *     REGISTER_CUDA_OPERATOR(MyMagic,
- *                            GPUFallbackOp<SkipIndices<0>>);
+ *                            GPUFallbackOpEx<SkipIndices<0>>);
  */
-template <typename SkipOutputCopy = SkipIndices<>>
-class GPUFallbackOp final : public Operator<CUDAContext> {
+template <typename SkipOutputCopy>
+class GPUFallbackOpEx final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  GPUFallbackOp(const OperatorDef& def, Workspace* ws)
+  GPUFallbackOpEx(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws) {
     CAFFE_ENFORCE_EQ(def.device_option().device_type(), PROTO_CUDA);
     OperatorDef base_def_(def);
@@ -109,6 +109,8 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   vector<Blob*> local_output_blobs_;
   unique_ptr<OperatorBase> base_op_;
 };
+
+using GPUFallbackOp = GPUFallbackOpEx<SkipIndices<>>;
 
 } // namespace caffe2
 

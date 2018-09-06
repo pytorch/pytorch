@@ -72,7 +72,7 @@ REGISTER_CUDA_OPERATOR(
     GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(
     MPIReceiveTensor,
-    GPUFallbackOp<SkipIndices<1, 2>>);
+    GPUFallbackOpEx<SkipIndices<1, 2>>);
 #endif
 
 #if CAFFE2_HAS_CUDA_MPI_ALLREDUCE
