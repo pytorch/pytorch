@@ -429,7 +429,7 @@ inline at::Generator* PythonArgs::generator(int i) {
 }
 
 inline at::Storage PythonArgs::storage(int i) {
-  if (!args[i]) return nullptr;
+  if (!args[i]) return at::Storage();
   return createStorage(args[i]);
 }
 

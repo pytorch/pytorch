@@ -7,9 +7,7 @@ namespace at {
 struct AT_API Storage {
 public:
   Storage() {}
-  Storage(StorageImpl* storage_impl) : storage_impl_(c10::intrusive_ptr<StorageImpl>::reclaim(storage_impl)) {}
-  Storage(const c10::intrusive_ptr<StorageImpl>& ptr) : storage_impl_(ptr) {}
-  Storage(c10::intrusive_ptr<StorageImpl>&& ptr) : storage_impl_(std::move(ptr)) {}
+  Storage(c10::intrusive_ptr<StorageImpl> ptr) : storage_impl_(std::move(ptr)) {}
   Storage(
       at::ScalarType,
       size_t size,

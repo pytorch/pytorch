@@ -55,10 +55,10 @@ TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_var
   }
 }
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
+TensorImpl::TensorImpl(Storage storage, TensorTypeId type_id, bool is_variable)
     : TensorImpl(std::move(storage), type_id, dataTypeToScalarType(storage.dtype()), is_variable) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
+TensorImpl::TensorImpl(Storage storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
     : storage_(std::move(storage)),
       storage_offset_(0),
       sizes_{0},

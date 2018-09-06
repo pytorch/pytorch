@@ -106,7 +106,7 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain && th_pointer) {
     c10::raw::intrusive_ptr::incref(static_cast<StorageImpl*>(th_pointer));
   }
-  return Storage(static_cast<StorageImpl*>(th_pointer));
+  return Storage(c10::intrusive_ptr<StorageImpl>::reclaim(static_cast<StorageImpl*>(th_pointer)));
 }
 
 
