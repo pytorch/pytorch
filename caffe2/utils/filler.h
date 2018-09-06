@@ -18,8 +18,12 @@ class TensorFiller {
   void Fill(Tensor* tensor, Context* context) const {
     CAFFE_ENFORCE(context, "context is null");
     CAFFE_ENFORCE(tensor, "tensor is null");
-    auto min = static_cast<Type>(min_);
-    auto max = static_cast<Type>(max_);
+    auto min = (min_ < std::numeric_limits<Type>::min())
+        ? std::numeric_limits<Type>::min()
+        : static_cast<Type>(min_);
+    auto max = (max_ > std::numeric_limits<Type>::max())
+        ? std::numeric_limits<Type>::max()
+        : static_cast<Type>(max_);
     CAFFE_ENFORCE_LE(min, max);
 
     Tensor temp_tensor(shape_, Context::GetDeviceType());
