@@ -1521,12 +1521,11 @@ void RowwiseMoments(
     const T* X,
     T* mean,
     T* variance) {
-  ConstEigenArrayMap<T> X_mat(X, cols, rows);
+  ConstEigenArrayMap<T> X_arr(X, cols, rows);
   EigenVectorArrayMap<T> mean_arr(mean, rows);
-  EigenVectorArrayMap<T> variance_arr(variance, rows);
-  mean_arr = X_mat.colwise().mean();
-  variance_arr = X_mat.array().square().colwise().mean();
-  variance_arr -= mean_arr.square();
+  EigenVectorArrayMap<T> var_arr(variance, rows);
+  mean_arr = X_arr.colwise().mean();
+  var_arr = X_arr.square().colwise().mean() - mean_arr.square().transpose();
 }
 
 template <typename T>
@@ -1536,12 +1535,19 @@ void ColwiseMoments(
     const T* X,
     T* mean,
     T* variance) {
-  ConstEigenArrayMap<T> X_mat(X, cols, rows);
+  std::memset(mean, 0, sizeof(T) * cols);
+  std::memset(variance, 0, sizeof(T) * cols);
+  ConstEigenArrayMap<T> X_arr(X, cols, rows);
   EigenVectorArrayMap<T> mean_arr(mean, cols);
-  EigenVectorArrayMap<T> variance_arr(variance, cols);
-  mean_arr = X_mat.rowwise().mean();
-  variance_arr = X_mat.array().square().rowwise().mean();
-  variance_arr -= mean_arr.square();
+  EigenVectorArrayMap<T> var_arr(variance, cols);
+  // Eigen rowwise reduction is about 10 times slower than this for-loop.
+  for (int i = 0; i < rows; ++i) {
+    mean_arr += X_arr.col(i);
+    var_arr += X_arr.col(i).square();
+  }
+  const T scale = T(1) / static_cast<T>(rows);
+  mean_arr *= scale;
+  var_arr = var_arr * scale - mean_arr.square();
 }
 
 template <typename T>
@@ -1552,23 +1558,21 @@ void BothEndsMoments(
     const T* X,
     T* mean,
     T* variance) {
+  std::memset(mean, 0, sizeof(T) * mid);
+  std::memset(variance, 0, sizeof(T) * mid);
   EigenVectorArrayMap<T> mean_arr(mean, mid);
-  EigenVectorArrayMap<T> variance_arr(variance, mid);
-  mean_arr = ConstEigenArrayMap<T>(X, nxt, mid).colwise().mean();
-  variance_arr = ConstEigenArrayMap<T>(X, nxt, mid).square().colwise().mean();
-  const int stride = mid * nxt;
-  const T* X_ptr = X + stride;
-  for (int i = 1; i < pre; ++i) {
-    mean_arr += ConstEigenArrayMap<T>(X_ptr, nxt, mid).colwise().mean();
-    variance_arr +=
-        ConstEigenArrayMap<T>(X_ptr, nxt, mid).square().colwise().mean();
-    X_ptr += stride;
+  EigenVectorArrayMap<T> var_arr(variance, mid);
+  ConstEigenArrayMap<T> X_arr(X, nxt, pre * mid);
+  for (int i = 0; i < pre; ++i) {
+    for (int j = 0; j < mid; ++j) {
+      const int c = i * mid + j;
+      mean_arr(j) += X_arr.col(c).sum();
+      var_arr(j) += X_arr.col(c).square().sum();
+    }
   }
-  if (pre > 1) {
-    mean_arr /= static_cast<T>(pre);
-    variance_arr /= static_cast<T>(pre);
-  }
-  variance_arr -= mean_arr.square();
+  const T scale = T(1) / static_cast<T>(pre * nxt);
+  mean_arr *= scale;
+  var_arr = var_arr * scale - mean_arr.square();
 }
 
 template <typename T>
@@ -1592,15 +1596,13 @@ void MomentsImpl(
   const int Y_size =
       std::accumulate(Y_dims, Y_dims + num_dims, 1, std::multiplies<int>());
   if (X_size == 0) {
-    if (Y_size > 0) {
-      memset(mean, 0, sizeof(T) * Y_size);
-      memset(variance, 0, sizeof(T) * Y_size);
-    }
+    std::memset(mean, 0, sizeof(T) * Y_size);
+    std::memset(variance, 0, sizeof(T) * Y_size);
     return;
   }
   if (std::equal(X_dims, X_dims + num_dims, Y_dims)) {
-    memcpy(mean, X, sizeof(T) * Y_size);
-    memset(variance, 0, sizeof(T) * Y_size);
+    std::memcpy(mean, X, sizeof(T) * Y_size);
+    std::memset(variance, 0, sizeof(T) * Y_size);
     return;
   }
   int rows;
@@ -1630,10 +1632,11 @@ void MomentsImpl(
     utils::IncreaseIndexInDims(num_dims, dims, index.data());
   }
   const T scale = static_cast<T>(Y_size) / static_cast<T>(X_size);
-  Scale<T, T, CPUContext>(Y_size, scale, mean, mean, context);
-  EigenVectorArrayMap<T> variance_arr(variance, Y_size);
-  variance_arr =
-      variance_arr * scale - ConstEigenVectorArrayMap<T>(mean, Y_size).square();
+  EigenVectorArrayMap<T> mean_arr(mean, Y_size);
+  EigenVectorArrayMap<T> var_arr(variance, Y_size);
+  mean_arr *= scale;
+  var_arr =
+      var_arr * scale - ConstEigenVectorArrayMap<T>(mean, Y_size).square();
 }
 
 } // namespace
@@ -1654,6 +1657,20 @@ void MomentsImpl(
   }
 CAFFE2_SPECIALIZED_MOMENTS(float)
 #undef CAFFE2_SPECIALIZED_MOMENTS
+
+#define CAFFE2_SPECIALIZED_INV_STD(T)                            \
+  template <>                                                    \
+  void InvStd<T, CPUContext>(                                    \
+      const int N,                                               \
+      const T epsilon,                                           \
+      const T* var,                                              \
+      T* inv_std,                                                \
+      CPUContext* context) {                                     \
+    EigenVectorArrayMap<T>(inv_std, N) =                         \
+        (ConstEigenVectorArrayMap<T>(var, N) + epsilon).rsqrt(); \
+  }
+CAFFE2_SPECIALIZED_INV_STD(float)
+#undef CAFFE2_SPECIALIZED_INV_STD
 
 #define CAFFE2_SPECIALIZED_ROWWISEMAX(T)                         \
   template <>                                                    \
@@ -3635,6 +3652,51 @@ CAFFE2_SPECIALIZED_TRANSPOSE(long)
 CAFFE2_SPECIALIZED_TRANSPOSE(std::uint8_t)
 CAFFE2_SPECIALIZED_TRANSPOSE(std::uint16_t)
 #undef CAFFE2_SPECIALIZED_TRANSPOSE
+
+#define CAFFE2_SPECIALIZED_AFFINE_CHANNEL(T)                \
+  template <>                                               \
+  void AffineChannel<T, CPUContext, StorageOrder::NCHW>(    \
+      const int N,                                          \
+      const int C,                                          \
+      const int HxW,                                        \
+      const T* X,                                           \
+      const T* scale,                                       \
+      const T* bias,                                        \
+      T* Y,                                                 \
+      CPUContext* /* context */) {                          \
+    ConstEigenVectorArrayMap<T> scale_arr(scale, C);        \
+    ConstEigenVectorArrayMap<T> bias_arr(bias, C);          \
+    const int stride = C * HxW;                             \
+    const T* X_ptr = X;                                     \
+    T* Y_ptr = Y;                                           \
+    for (int i = 0; i < N; ++i) {                           \
+      EigenArrayMap<T>(Y_ptr, HxW, C) =                     \
+          (ConstEigenArrayMap<T>(X_ptr, HxW, C).rowwise() * \
+           scale_arr.transpose())                           \
+              .rowwise() +                                  \
+          bias_arr.transpose();                             \
+      X_ptr += stride;                                      \
+      Y_ptr += stride;                                      \
+    }                                                       \
+  }                                                         \
+  template <>                                               \
+  void AffineChannel<T, CPUContext, StorageOrder::NHWC>(    \
+      const int N,                                          \
+      const int C,                                          \
+      const int HxW,                                        \
+      const T* X,                                           \
+      const T* scale,                                       \
+      const T* bias,                                        \
+      T* Y,                                                 \
+      CPUContext* /* context */) {                          \
+    EigenArrayMap<T>(Y, C, N * HxW) =                       \
+        (ConstEigenArrayMap<T>(X, C, N * HxW).colwise() *   \
+         ConstEigenVectorArrayMap<T>(scale, C))             \
+            .colwise() +                                    \
+        ConstEigenVectorArrayMap<T>(bias, C);               \
+  }
+CAFFE2_SPECIALIZED_AFFINE_CHANNEL(float)
+#undef CAFFE2_SPECIALIZED_AFFINE_CHANNEL
 
 } // namespace math
 } // namespace caffe2
