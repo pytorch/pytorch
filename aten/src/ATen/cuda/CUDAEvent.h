@@ -55,9 +55,10 @@ struct AT_CUDA_API CUDAEvent {
     return left.event_ < right.event_;
   }
 
+  bool isCreated() const { return is_created_; }
   int64_t device() const { return device_; }
   cudaEvent_t event() const { return event_; }
-
+  
   bool happened() const { 
     return (was_recorded_ && cudaEventQuery(event_) == cudaSuccess);
   }
@@ -77,6 +78,12 @@ struct AT_CUDA_API CUDAEvent {
 
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
     was_recorded_ = true;
+  }
+
+  void block (const CUDAStream& stream) {
+    if (is_created_) {
+      AT_CUDA_CHECK(cudaStreamWaitEvent(stream, event_, 0));
+    }
   }
   
 
