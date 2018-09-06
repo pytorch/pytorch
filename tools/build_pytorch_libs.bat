@@ -151,6 +151,8 @@ goto:eof
                   -DTHNN_SO_VERSION=1 ^
                   -DTHCUNN_SO_VERSION=1 ^
                   -DUSE_CUDA=%USE_CUDA% ^
+                  -DBUILD_EXAMPLES=OFF ^
+                  -DBUILD_TEST=%BUILD_TEST% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
