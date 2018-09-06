@@ -27,20 +27,22 @@ namespace caffe2 {
  * to register the CPU side, you can create its corresponding GPU operator
  * (with performance hits of course) via
  *     REGISTER_CUDA_OPERATOR(MyMagic,
- *                            GPUFallbackOp<MyMagicOp>);
+ *                            GPUFallbackOp);
+ * Note that you will need to make sure that the operators actually share the
+ * same name.
  *
  * Advanced usage: if you want to have some specific outputs never copied, you
  * can use the SkipOutputCopy template argument to do that. For example, if
  * MyMagic produces two outputs and the first output is always going to live on
  * the CPU, you can do
  *     REGISTER_CUDA_OPERATOR(MyMagic,
- *                            GPUFallbackOp<MyMagicOp, SkipIndices<0>>);
+ *                            GPUFallbackOpEx<SkipIndices<0>>);
  */
-template <class CPUOp, typename SkipOutputCopy = SkipIndices<>>
-class GPUFallbackOp final : public Operator<CUDAContext> {
+template <typename SkipOutputCopy>
+class GPUFallbackOpEx final : public Operator<CUDAContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CUDAContext);
-  GPUFallbackOp(const OperatorDef& def, Workspace* ws)
+  GPUFallbackOpEx(const OperatorDef& def, Workspace* ws)
       : Operator<CUDAContext>(def, ws) {
     CAFFE_ENFORCE_EQ(def.device_option().device_type(), PROTO_CUDA);
     OperatorDef base_def_(def);
@@ -52,7 +54,7 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));
       CHECK_NOTNULL(local_input_blobs_.back());
     }
-    base_op_.reset(new CPUOp(base_def_, &local_ws_));
+    base_op_ = CreateOperator(base_def_, &local_ws_);
     for (const string& name : def.output()) {
       local_output_blobs_.push_back(local_ws_.GetBlob(name));
       CHECK_NOTNULL(local_output_blobs_.back());
@@ -105,8 +107,10 @@ class GPUFallbackOp final : public Operator<CUDAContext> {
   Workspace local_ws_;
   vector<Blob*> local_input_blobs_;
   vector<Blob*> local_output_blobs_;
-  std::unique_ptr<CPUOp> base_op_;
+  unique_ptr<OperatorBase> base_op_;
 };
+
+using GPUFallbackOp = GPUFallbackOpEx<SkipIndices<>>;
 
 } // namespace caffe2
 
