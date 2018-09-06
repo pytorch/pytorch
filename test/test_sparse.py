@@ -1023,6 +1023,52 @@ class TestSparse(TestCase):
         test_shape([0, 3, 4], [3, 4, 5, 6], [0])
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
+    def _test_narrow(self, input, narrow_args, dense=None):
+        if dense is None: 
+            dense = input.to_dense()
+        expected = dense.narrow(*narrow_args)
+        self.assertEqual(expected, input.narrow_copy(*narrow_args).to_dense())
+
+    def test_narrow(self):
+        input = self.SparseTensor(
+            self.IndexTensor([[0], [1], [2]]).transpose(1, 0),
+            self.ValueTensor([3, 4, 5]),
+            torch.Size([3]))
+
+        narrow_args = [0, 0, 2]
+
+        self._test_narrow(input, narrow_args)
+        self._test_narrow(input.coalesce(), narrow_args)
+
+        uncoalesced = self.SparseTensor(
+            self.IndexTensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+            self.ValueTensor([2, 3, 4, 1, 1, 1]),
+            torch.Size([3]))
+
+        self._test_narrow(uncoalesced, narrow_args)
+        self._test_narrow(uncoalesced.coalesce(), narrow_args)
+
+    def test_narrow_hybrid(self):
+        input = self.SparseTensor(
+            self.IndexTensor([[0, 2, 0], [0, 2, 1]]),
+            self.ValueTensor([[1, 2], [3, 4], [5, 6]]),
+            torch.Size([3, 3, 2]))
+
+        dense = torch.DoubleTensor([[[1., 2.],
+                                    [5., 6.],
+                                    [0., 0.]],
+
+                                    [[0., 0.],
+                                    [0., 0.],
+                                    [0., 0.]],
+
+                                    [[0., 0.],
+                                    [0., 0.],
+                                    [3., 4.]]])
+        
+        self._test_narrow(input, [0, 0, 2], dense)
+        self._test_narrow(input, [2, 1, 1], dense)
+
     def _test_log1p_tensor(self, input, dense_tensor):
         expected_output = torch.tensor(dense_tensor).log1p_()
         self.assertEqual(expected_output, input.log1p().to_dense())
