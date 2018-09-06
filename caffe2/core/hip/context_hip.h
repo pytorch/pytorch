@@ -392,7 +392,7 @@ class HIPStaticContext final : public BaseStaticContext {
   }
 
   void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(GetDeviceType());
+    device->set_device_type(TypeToProto(GetDeviceType()));
     device->set_hip_gpu_id(GetGPUIDForPointer(data));
   }
 

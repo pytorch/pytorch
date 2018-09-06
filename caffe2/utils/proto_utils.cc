@@ -27,13 +27,13 @@ CAFFE2_EXPORT std::string DeviceTypeName(const int32_t& d) {
 
 CAFFE2_EXPORT int DeviceId(const DeviceOption& option) {
   switch (option.device_type()) {
-    case CPU:
+    case PROTO_CPU:
       return option.numa_node_id();
-    case CUDA:
+    case PROTO_CUDA:
       return option.cuda_gpu_id();
-    case MKLDNN:
+    case PROTO_MKLDNN:
       return option.numa_node_id();
-    case HIP:
+    case PROTO_HIP:
       return option.hip_gpu_id();
     default:
       CAFFE_THROW("Unknown device id for device type: ", option.device_type());

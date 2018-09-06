@@ -59,7 +59,7 @@ CAFFE_DEFINE_TYPED_REGISTRY(
     std::unique_ptr);
 CAFFE_DEFINE_TYPED_REGISTRY(
     BlobFeederRegistry,
-    int,
+    caffe2::DeviceType,
     BlobFeederBase,
     std::unique_ptr);
 
@@ -368,7 +368,7 @@ void addObjectMethods(py::module& m) {
           [](DLPackWrapper<CPUContext>* t) -> py::object {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                CPU,
+                PROTO_CPU,
                 "Expected CPU device option for CPU tensor");
             return t->data();
           },
@@ -378,7 +378,7 @@ void addObjectMethods(py::module& m) {
           [](DLPackWrapper<CPUContext>* t, py::object obj) {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                CPU,
+                PROTO_CPU,
                 "Expected CPU device option for CPU tensor");
             t->feed(obj);
           },
@@ -985,7 +985,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "set_op_engine_pref",
       [](const std::string& op_type,
-         const CaffeMap<int, EnginePrefType>& op_pref) -> void {
+         const CaffeMap<DeviceType, EnginePrefType>& op_pref) -> void {
         caffe2::SetOpEnginePref(op_type, op_pref);
       });
 
