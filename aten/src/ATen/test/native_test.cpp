@@ -6,6 +6,8 @@
 
 using namespace at;
 
+using Catch::Matchers::StartsWith;
+
 #define REQUIRE_EQUAL(t1, t2) \
   REQUIRE(t1.equal(t2));
 
@@ -73,10 +75,10 @@ void test(Type & T, Type & AccT) {
 
   SECTION( "size / stride" ) {
     auto scalar = randn({}, T);
-		REQUIRE_THROWS_WITH(scalar.size(0), "dimension specified as 0 but tensor has no dimensions");
-    REQUIRE_THROWS_WITH(scalar.size(-1), "dimension specified as -1 but tensor has no dimensions");
-    REQUIRE_THROWS_WITH(scalar.stride(0), "dimension specified as 0 but tensor has no dimensions");
-    REQUIRE_THROWS_WITH(scalar.stride(-1), "dimension specified as -1 but tensor has no dimensions");
+    REQUIRE_THROWS_WITH(scalar.size(0), StartsWith("dimension specified as 0 but tensor has no dimensions"));
+    REQUIRE_THROWS_WITH(scalar.size(-1), StartsWith("dimension specified as -1 but tensor has no dimensions"));
+    REQUIRE_THROWS_WITH(scalar.stride(0), StartsWith("dimension specified as 0 but tensor has no dimensions"));
+    REQUIRE_THROWS_WITH(scalar.stride(-1), StartsWith("dimension specified as -1 but tensor has no dimensions"));
 
     auto empty = randn({0}, T);
     REQUIRE(empty.size(0) == 0);
