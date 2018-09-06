@@ -2487,15 +2487,24 @@ class TestAutograd(TestCase):
                 MyFunc.static_grad_ptr = grad.data_ptr()
                 return grad, grad
 
+        class NonContGradFunc(Function):
+            @staticmethod
+            def forward(ctx, inp1):
+                ctx.size = inp1.size()
+                return torch.tensor([1.])
+
+            @staticmethod
+            def backward(ctx, grad):
+                return torch.ones(1).expand(ctx.size)
+
         a = torch.randn(5, 6, requires_grad=True)
         b = torch.randn(5, 6, requires_grad=True)
-        # sum should not trigger no copy since it produce non-contiguous grad
-        MyFunc.apply(a, b).sum().backward()
+        # non-contiguous grad should be copied
+        NonContGradFunc.apply(MyFunc.apply(a, b)).backward()
         self.assertFalse(a.grad.data_ptr() == MyFunc.static_grad_ptr)
         self.assertFalse(b.grad.data_ptr() == MyFunc.static_grad_ptr)
-        # manually setting .grad to None
-        a.grad = b.grad = None
         # test case that should trigger no copy for one of a,b
+        a.grad = b.grad = None
         MyFunc.apply(a, b)[1][0].backward()
         p_g = MyFunc.static_grad_ptr
         p_a = a.grad.data_ptr()
