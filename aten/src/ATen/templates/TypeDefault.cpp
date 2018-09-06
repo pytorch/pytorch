@@ -1,25 +1,25 @@
-#include "ATen/Type.h"
+#include "ATen/TypeDefault.h"
 
 // ${generated_comment}
 
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Storage.h"
 #include "ATen/Tensor.h"
-#include "ATen/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 #include "ATen/DeviceGuard.h"
 
 namespace at {
 
-Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
+Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
   std::tie(b_src) = expand_inplace(self, src, "copy");
   return s_copy_(self, b_src, non_blocking);
 }
 
-Tensor Type::copy(const Tensor & src, bool non_blocking) const {
+Tensor TypeDefault::copy(const Tensor & src, bool non_blocking) const {
   // TODO(psag): have a DeviceGuard here
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   if (is_sparse()) {
@@ -37,10 +37,10 @@ Tensor Type::copy(const Tensor & src, bool non_blocking) const {
   }
 }
 
-Type & Type::toBackend(Backend b) const {
+Type & TypeDefault::toBackend(Backend b) const {
   return at::globalContext().getNonVariableType(b,scalarType());
 }
-Type & Type::toScalarType(ScalarType s) const {
+Type & TypeDefault::toScalarType(ScalarType s) const {
   return at::globalContext().getNonVariableType(backend(),s);
 }
 static std::vector<int64_t> defaultStrides(IntList sizes) {
@@ -64,29 +64,50 @@ static int64_t computeStorageSize(IntList sizes, IntList strides) {
   }
   return size;
 }
-Tensor Type::tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter) const {
+Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter) const {
   return tensorFromBlob(data, sizes, defaultStrides(sizes), deleter);
 }
-Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
+Tensor TypeDefault::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
   return tensor(storage, 0, sizes, strides);
 }
-Tensor Type::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
+Tensor TypeDefault::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
-Tensor Type::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
+Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
   return tensor(storage, 0, sizes, strides);
 }
-Tensor Type::scalarTensor(Scalar s) const {
-  return tensor({}).fill_(s);
+
+Storage TypeDefault::storage(bool resizable) const {
+  return Storage(scalarType(), 0, allocator(), resizable);
+}
+Storage TypeDefault::storage(size_t size, bool resizable) const {
+  return Storage(scalarType(), size, allocator(), resizable);
+}
+Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
+    return Storage(
+      scalarType(),
+      InefficientStdFunctionContext::makeDataPtr(data, deleter, getDeviceFromPtr(data)),
+      size,
+      deleter);
+}
+Storage TypeDefault::storageWithAllocator(int64_t size, Allocator* allocator) const {
+    return Storage(scalarType(), size, allocator);
+}
+Tensor TypeDefault::unsafeTensorFromTH(void * th_pointer, bool retain) const {
+  return Tensor(static_cast<TensorImpl*>(th_pointer), retain);
+}
+Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+  if (retain && th_pointer) {
+    c10::raw::intrusive_ptr::incref(static_cast<StorageImpl*>(th_pointer));
+  }
+  return Storage(static_cast<StorageImpl*>(th_pointer));
 }
 
-bool Type::operator==(const Type& other) const {
-  return this == &other;
-}
-bool Type::operator!=(const Type& other) const {
-  return this != &other;
+
+Tensor TypeDefault::scalarTensor(Scalar s) const {
+  return tensor({}).fill_(s);
 }
 
 ${type_method_definitions}

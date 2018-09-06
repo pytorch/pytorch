@@ -43,7 +43,7 @@ using namespace torch::autograd::generated;
 namespace torch { namespace autograd {
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
+  : TypeDefault(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
   , baseType(baseType)
   , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
@@ -55,10 +55,12 @@ ScalarType VariableType::scalarType() const {
 Backend VariableType::backend() const {
   return baseType->backend();
 }
-bool VariableType::is_cuda() const { return baseType->is_cuda(); }
-bool VariableType::is_sparse() const { return baseType->is_sparse(); }
-bool VariableType::is_distributed() const { return baseType->is_distributed(); }
-
+Allocator* VariableType::allocator() const {
+  return baseType->allocator();
+}
+Device VariableType::getDeviceFromPtr(void * data) const {
+  return baseType->getDeviceFromPtr(data);
+}
 Storage VariableType::storage(bool resizable) const {
   return baseType->storage();
 }
@@ -95,10 +97,6 @@ Type & VariableType::toScalarType(ScalarType s) const {
 }
 TypeID VariableType::ID() const {
   return static_cast<TypeID>(id_);
-}
-
-const char * VariableType::typeString() {
-  return "VariableType";
 }
 
 std::vector<std::unique_ptr<Type>> type_to_variable_type;
@@ -381,6 +379,17 @@ static bool isFloatingPoint(ScalarType s) {
 }
 
 Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
+  jit::Node* node = nullptr;
+  if(torch::jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    // if you have no views of self, then an in place copy is equivalent to
+    // making sure we expand src to the same size as self
+    node = graph->create(jit::aten::expand_as, /*outputs=*/0);
+    jit::tracer::addInputs(node, "src", src);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+    jit::tracer::ensureUnique("copy_ (possibly due to an assignment)", self);
+  }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -400,6 +409,9 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   baseType->s_copy_(self_, src_, non_blocking);
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
+  if(torch::jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
   return self;
 }
 

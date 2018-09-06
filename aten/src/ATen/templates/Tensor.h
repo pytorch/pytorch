@@ -4,11 +4,11 @@
 
 #include "ATen/core/Device.h"
 #include "ATen/core/Layout.h"
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Storage.h"
-#include "ATen/TensorAccessor.h"
+#include "ATen/core/Storage.h"
+#include "ATen/core/TensorAccessor.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/core/optional.h"
 #include "ATen/UndefinedTensor.h"
@@ -52,9 +52,9 @@ struct AT_API Tensor {
     }
   }
   Tensor(const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& ptr)
-      : tensor_impl_(std::move(ptr)) {}
-  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
       : tensor_impl_(ptr) {}
+  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
+      : tensor_impl_(std::move(ptr)) {}
 
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;
@@ -134,9 +134,8 @@ struct AT_API Tensor {
     return tensor_impl_.weak_use_count();
   }
 
-  const char * toString() const {
-    return tensor_impl_->toString();
-  }
+  const char * toString() const;
+
   IntList sizes() const {
     return tensor_impl_->sizes();
   }
@@ -243,13 +242,6 @@ struct AT_API Tensor {
   }
   const Tensor& grad() const {
     return tensor_impl_->grad();
-  }
-
-  Tensor detach() const {
-    return tensor_impl_->detach();
-  }
-  void detach_() {
-    tensor_impl_->detach_();
   }
 
   void set_data(Tensor new_data) {

@@ -104,9 +104,6 @@ bool FunctionParameter::check(PyObject* obj) {
     }
     case ParameterType::SCALAR:
     case ParameterType::DOUBLE: {
-      // NOTE: we don't currently accept most NumPy types as Scalars. np.float64
-      // is okay because it's a subclass of PyFloat. We may want to change this
-      // in the future.
       if (THPUtils_checkDouble(obj)) {
         return true;
       }

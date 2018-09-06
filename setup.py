@@ -150,7 +150,7 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
-    USE_GLOO_IBVERBS, USE_C10D
+    USE_GLOO_IBVERBS
 
 ################################################################################
 # Parameters parsed from environment
@@ -400,11 +400,12 @@ class build_deps(PytorchCommand):
         else:
             libs += ['libshm']
         if USE_DISTRIBUTED:
-            if sys.platform.startswith('linux'):
+            if IS_LINUX:
                 libs += ['gloo']
+                # TODO: make c10d build without CUDA
+                if USE_CUDA:
+                    libs += ['c10d']
             libs += ['THD']
-        if USE_C10D:
-            libs += ['c10d']
         build_libs(libs)
 
         # Use copies instead of symbolic files.
@@ -498,6 +499,20 @@ def monkey_patch_THD_link_flags():
     C.extra_link_args += thd_deps
 
 
+def monkey_patch_C10D_inc_flags():
+    '''
+    C10D's include deps are not determined until after build c10d is run, so
+    we need to monkey-patch it.
+    '''
+    mpi_include_path_file = tmp_install_path + "/include/c10d/mpi_include_path"
+    if os.path.exists(mpi_include_path_file):
+        with open(mpi_include_path_file, 'r') as f:
+            mpi_include_paths = f.readlines()
+        mpi_include_paths = [p.strip() for p in mpi_include_paths]
+        C.include_dirs += mpi_include_paths
+        print("-- For c10d, will include MPI paths: {}".format(mpi_include_paths))
+
+
 build_ext_parent = ninja_build_ext if USE_NINJA \
     else setuptools.command.build_ext.build_ext
 
@@ -534,8 +549,13 @@ class build_ext(build_ext_parent):
         else:
             print('-- Not using NCCL')
         if USE_DISTRIBUTED:
-            print('-- Building with distributed package ')
+            print('-- Building with THD distributed package ')
             monkey_patch_THD_link_flags()
+            if IS_LINUX and USE_CUDA:
+                print('-- Building with c10d distributed package ')
+                monkey_patch_C10D_inc_flags()
+            else:
+                print('-- Building without c10d distributed package')
         else:
             print('-- Building without distributed package')
 
@@ -857,11 +877,10 @@ if USE_DISTRIBUTED:
     ]
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
-
-if USE_C10D:
-    extra_compile_args += ['-DUSE_C10D']
-    main_sources += ['torch/csrc/distributed/c10d/init.cpp']
-    main_link_args += [C10D_LIB]
+    if IS_LINUX and USE_CUDA:
+        extra_compile_args += ['-DUSE_C10D']
+        main_sources += ['torch/csrc/distributed/c10d/init.cpp']
+        main_link_args += [C10D_LIB]
 
 if USE_CUDA:
     nvtoolext_lib_name = None
@@ -910,6 +929,7 @@ if USE_ROCM:
     rocm_include_path = '/opt/rocm/include'
     hcc_include_path = '/opt/rocm/hcc/include'
     rocblas_include_path = '/opt/rocm/rocblas/include'
+    rocfft_include_path = '/opt/rocm/rocfft/include'
     hipsparse_include_path = '/opt/rocm/hcsparse/include'
     hiprand_include_path = '/opt/rocm/hiprand/include'
     rocrand_include_path = '/opt/rocm/rocrand/include'
@@ -918,6 +938,7 @@ if USE_ROCM:
     include_dirs.append(rocm_include_path)
     include_dirs.append(hcc_include_path)
     include_dirs.append(rocblas_include_path)
+    include_dirs.append(rocfft_include_path)
     include_dirs.append(hipsparse_include_path)
     include_dirs.append(hiprand_include_path)
     include_dirs.append(rocrand_include_path)

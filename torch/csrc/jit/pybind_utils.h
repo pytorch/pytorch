@@ -59,7 +59,8 @@ inline IValue toIValue(py::handle input) {
     }
     return Tuple::create(s);
   } else {
-    AT_ERROR("Only tensors and tuples of tensors are supported as inputs to traced functions");
+    AT_ERROR("Only tensors and (possibly nested) tuples of tensors are supported "
+             "as inputs or outputs of traced functions");
   }
 }
 
@@ -139,7 +140,8 @@ inline IValue argumentToIValue(
         schema.name, "() expected value of type ", argument.type->str(),
         " for argument '", argument.name,
         "' in position ", argumentPosition,
-        ", but instead got value of type ", object.get_type().attr("__name__").str(),
+        ", but instead got value of type ",
+        py::str(object.get_type().attr("__name__")),
         ". Declaration: ", schema);
   }
 }

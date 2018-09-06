@@ -49,6 +49,7 @@ struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState
 
   std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq> value_map;
   std::shared_ptr<Graph> graph;
+  bool warn = true;
 };
 
 
@@ -246,6 +247,8 @@ void addInputs(Node *n, const char * name, std::array<bool, N> value) {
   throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
+TORCH_API void ensureUnique(const char * name, const at::Tensor& tensor);
+
 template <
     typename T,
     typename = torch::enable_if_t<
@@ -260,5 +263,32 @@ TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
 TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 
 TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
+
+using warn_fn_type = void (*)(const std::string& msg);
+TORCH_API void _do_warn(const char * _reason);
+inline void warn(const char * _reason) {
+  if (auto state = getTracingState()) {
+    if (!state->warn) return;
+    _do_warn(_reason);
+  }
+}
+TORCH_API void setWarn(warn_fn_type fn);
+
+struct TORCH_API NoWarn {
+  NoWarn(): state(getTracingState()) {
+    if (state) {
+      prev = state->warn;
+      state->warn = false;
+    }
+  }
+  ~NoWarn() {
+    if (state) {
+      state->warn = prev;
+    }
+  }
+  std::shared_ptr<TracingState> state;
+  bool prev;
+};
+
 
 }}} // namespace torch::jit::tracer

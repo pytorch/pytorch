@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 
+#include <ATen/TypeDefault.h>
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstdint> // for size_t
@@ -30,13 +32,12 @@ using at::optional;
 
 void register_variable_type_for(at::Type* baseType);
 
-struct TORCH_API VariableType final : public at::Type {
+struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;
-  virtual bool is_cuda() const override;
-  virtual bool is_sparse() const override;
-  virtual bool is_distributed() const override;
+  virtual at::Allocator* allocator() const override;
+  virtual at::Device getDeviceFromPtr(void * data) const override;
   virtual Storage storage(bool resizable = false) const override;
   virtual Storage storage(size_t size, bool resizable = false) const override;
   virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
@@ -47,7 +48,6 @@ struct TORCH_API VariableType final : public at::Type {
   virtual size_t elementSizeInBytes() const override;
   virtual at::Type & toBackend(at::Backend b) const override;
   virtual at::Type & toScalarType(at::ScalarType s) const override;
-  static const char * typeString();
   virtual Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   virtual at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 

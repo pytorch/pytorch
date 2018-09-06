@@ -105,9 +105,9 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
         item = PySequence_GetItem(first_arg, i);
-        real value = THPUtils_(unpackReal)(item.get());
+        scalar_t value = THPUtils_(unpackReal)(item.get());
 #if !defined(THC_GENERIC_FILE)
-        self->cdata->unsafe_data<real>()[i] = value;
+        self->cdata->unsafe_data<scalar_t>()[i] = value;
 #else
         // TODO: this might be slow - consider batched updates?
         THCStorage_(set)(LIBRARY_STATE self->cdata, i, value);
@@ -118,7 +118,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
           "but one of the items was of type %s instead of %s",
           THPUtils_typename(first_arg),
           THPUtils_typename(item.get()),
-          THPUtils_typeTraits<real>::python_type_str);
+          THPUtils_typeTraits<scalar_t>::python_type_str);
       return nullptr;
     }
     return (PyObject*)self.release();
@@ -156,7 +156,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
               "size %" PRId64, (int64_t) nindex, (int64_t) self->cdata->numel());
       return nullptr;
     }
-    real value = THWStorage_(get)(LIBRARY_STATE self->cdata, nindex);
+    scalar_t value = THWStorage_(get)(LIBRARY_STATE self->cdata, nindex);
     return THPUtils_(newReal)(value);
   /* Slice index */
   } else if (PySlice_Check(index)) {
@@ -174,12 +174,12 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
   HANDLE_TH_ERRORS
   if (!THPUtils_(checkReal)(value)) {
     THPUtils_setError("can only set storage content with a %s, but got "
-        "%s instead", THPUtils_typeTraits<real>::python_type_str,
+        "%s instead", THPUtils_typeTraits<scalar_t>::python_type_str,
         THPUtils_typename(value));
     return -1;
   }
 
-  real rvalue = THPUtils_(unpackReal)(value);
+  scalar_t rvalue = THPUtils_(unpackReal)(value);
   if (THPUtils_checkLong(index)) {
     int64_t nindex = THPUtils_unpackLong(index);
     THWStorage_(set)(LIBRARY_STATE self->cdata, nindex, rvalue);

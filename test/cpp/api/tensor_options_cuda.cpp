@@ -4,7 +4,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 using namespace at;
 
@@ -22,22 +22,22 @@ using namespace at;
   REQUIRE(tensor.type().layout() == (layout_))
 
 TEST_CASE("TensorOptions/ConstructsWellFromCUDATypes", "[cuda]") {
-  auto options = TensorOptions(CUDA(kFloat));
+  auto options = CUDA(kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kStrided);
 
-  options = TensorOptions(CUDA(kInt));
+  options = CUDA(kInt).options();
   REQUIRE_OPTIONS(kCUDA, -1, kInt, kStrided);
 
-  options = TensorOptions(getNonVariableType(Backend::SparseCUDA, kFloat));
+  options = getNonVariableType(Backend::SparseCUDA, kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kSparse);
 
-  options = TensorOptions(getNonVariableType(Backend::SparseCUDA, kByte));
+  options = getNonVariableType(Backend::SparseCUDA, kByte).options();
   REQUIRE_OPTIONS(kCUDA, -1, kByte, kSparse);
 
-  options = TensorOptions(CUDA(kFloat), /*device=*/5);
+  options = CUDA(kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kStrided);
 
-  options = TensorOptions(getNonVariableType(Backend::SparseCUDA, kFloat), /*device=*/5);
+  options = getNonVariableType(Backend::SparseCUDA, kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
