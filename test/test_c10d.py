@@ -644,15 +644,21 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     def test_sync_params_with_buffers(self):
         # Set up process group.
+        print('A')
         store = c10d.TCPStore('localhost', self.port, self.is_master)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        print('B')
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+        print('C')
 
         devices = gpus_for_rank(self.world_size)[self.rank]
+        print('D', self.rank, devices)
         target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
+        print('E', self.rank, target)
         parameter_data = [target]
         parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+        print('F', self.rank, parameter_data)
 
         # sync_params should do a dist_broadcast for buffers, so we only populate the master buffers and
         # then check that other processes' tensors end up matching.
@@ -663,6 +669,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         else:
             buffer_data = [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices]
 
+        print('G', self.rank, buffer_data)
+
         print('Calling c10d._sync_params')
         c10d._sync_params(
             process_group,
@@ -671,14 +679,17 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             devices=devices,
             broadcast_bucket_size=10,
             broadcast_buffers=True)
+        print('H')
 
         for device_data in parameter_data:
             for i, parameter in enumerate(device_data):
                 self.assertEqual(parameter, target[i])
+        print('I')
 
         for device_data in buffer_data:
             for i, buffer in enumerate(device_data):
                 self.assertEqual(buffer, target[i])
+        print('J')
 
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
