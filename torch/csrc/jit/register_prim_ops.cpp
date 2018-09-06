@@ -3,7 +3,7 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fusers/fusion_interface.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"

@@ -1,7 +1,8 @@
+#include "torch/csrc/jit/fusers/Config.h"
 #if USE_CPU_FUSER || USE_CUDA_FUSER
 #pragma once
 
-#include "torch/csrc/jit/fusers/fusion_interface.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/fusers/common/tensor_desc.h"
 
 #include "torch/csrc/jit/ir.h"

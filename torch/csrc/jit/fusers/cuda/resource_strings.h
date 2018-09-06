@@ -1,3 +1,4 @@
+#include "torch/csrc/jit/fusers/Config.h"
 #if USE_CUDA_FUSER
 #pragma once
 

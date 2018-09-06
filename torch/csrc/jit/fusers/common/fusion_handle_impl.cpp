@@ -1,12 +1,12 @@
-#include "torch/csrc/jit/fusers/common/common_fusion_handle.h"
+#include "torch/csrc/jit/fusers/common/fusion_handle_impl.h"
 
-#include "torch/csrc/jit/fusers/fusion_interface.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/fusers/common/fusion_arg_spec.h"
 #include "torch/csrc/jit/fusers/common/annotated_graph.h"
 #include "torch/csrc/jit/fusers/common/tensor_desc.h"
-#include "torch/csrc/jit/fusers/cpu/cpu_fusion_function.h"
-#include "torch/csrc/jit/fusers/cpu/cpu_fusion_compiler.h"
-#include "torch/csrc/jit/fusers/cuda/cuda_fusion_function.h"
+#include "torch/csrc/jit/fusers/cpu/fused_kernel.h"
+#include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/cuda/fused_kernel.h"
 
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -175,7 +175,7 @@ RegisterOperators reg_fused_operators({
     })
 });
 
-CommonFusionHandle::CommonFusionHandle(
+FusionHandleImpl::FusionHandleImpl(
   std::shared_ptr<Graph> _graph
 , int device)
 : device(device)
@@ -185,7 +185,7 @@ CommonFusionHandle::CommonFusionHandle(
 , input_chunks(getInputChunkDescriptors())
 , kernels() { }
 
-std::atomic<size_t> CommonFusionHandle::next_kernel_id {0};
+std::atomic<size_t> FusionHandleImpl::next_kernel_id {0};
 
 static Node* usedInFusedChunk(Value* input) {
   auto uses = input->uses();
@@ -198,7 +198,7 @@ static Node* usedInFusedChunk(Value* input) {
   return nullptr;
 }
 
-auto CommonFusionHandle::getInputChunkDescriptors() -> std::vector<PartitionInfo> {
+auto FusionHandleImpl::getInputChunkDescriptors() -> std::vector<PartitionInfo> {
   std::vector<PartitionInfo> descs;
   descs.reserve(graph->inputs().size());
   for (Value* input : graph->inputs()) {
@@ -243,7 +243,7 @@ static std::vector<int64_t> getInputDependencies(Value* output) {
 }
 
 // See Note [Run-time shape checking code] for more explanation on the algorithm.
-at::optional<std::vector<int64_t>> CommonFusionHandle::canRunKernel(at::TensorList args) {
+at::optional<std::vector<int64_t>> FusionHandleImpl::canRunKernel(at::TensorList args) {
   AT_CHECK(args.size() == input_chunks.size(),
            "Expected ", input_chunks.size(), " arguments, but got ", args.size());
 
@@ -265,7 +265,7 @@ at::optional<std::vector<int64_t>> CommonFusionHandle::canRunKernel(at::TensorLi
   return map_size;
 }
 
-std::unique_ptr<CommonFusionFunction> CommonFusionHandle::compileSpec(
+std::unique_ptr<FusedKernel> FusionHandleImpl::compileSpec(
   const FusionArgSpec& spec
 , const std::vector<int64_t>& map_size) {
   AnnotatedGraph agraph{*graph, device};
@@ -291,25 +291,25 @@ std::unique_ptr<CommonFusionFunction> CommonFusionHandle::compileSpec(
   }
 
   std::string name = "kernel_" + std::to_string(next_kernel_id++);
-  CommonFusionFunction* raw_func;
+  FusedKernel* raw_func;
   if (device != kCPUDevice) {
     #if USE_CUDA_FUSER
-      raw_func = new cudafuser::CUDAFusionFunction(name, agraph);
+      raw_func = new cudafuser::CUDAFusedKernel(name, agraph);
     #else
       throw std::runtime_error("CUDA Fusion is not supported on this build.");
     #endif // USE_CUDA_FUSER
   } else {
-    raw_func = new cpufuser::CPUFusionFunction(
+    raw_func = new cpufuser::CPUFusedKernel(
       name
     , agraph
     , cpufuser::getFusionCompiler().getConfig());
   }
-  return std::unique_ptr<CommonFusionFunction>(raw_func);
+  return std::unique_ptr<FusedKernel>(raw_func);
 }
 
 // NB: args are mutated in this call. map_size is mutated too, but is restored to its original
 // value before this function returns (it's an optimization).
-void CommonFusionHandle::expandArgs(std::vector<at::Tensor>& args, std::vector<int64_t>& map_size) {
+void FusionHandleImpl::expandArgs(std::vector<at::Tensor>& args, std::vector<int64_t>& map_size) {
   for (size_t i = 0; i < args.size(); ++i) {
     auto& arg = args[i];
     auto& pdesc = input_chunks[i];
@@ -326,7 +326,7 @@ void CommonFusionHandle::expandArgs(std::vector<at::Tensor>& args, std::vector<i
   }
 }
 
-std::vector<std::vector<int64_t>> CommonFusionHandle::getInputBroadcastGroups() {
+std::vector<std::vector<int64_t>> FusionHandleImpl::getInputBroadcastGroups() {
   std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>> broadcast_groups;
   for (Value* output : graph->outputs()) {
     broadcast_groups.insert(getInputDependencies(output));
@@ -334,7 +334,7 @@ std::vector<std::vector<int64_t>> CommonFusionHandle::getInputBroadcastGroups() 
   return std::vector<std::vector<int64_t>>{broadcast_groups.begin(), broadcast_groups.end()};
 }
 
-void CommonFusionHandle::run(Stack& stack) {
+void FusionHandleImpl::run(Stack& stack) {
   int64_t num_inputs = graph->inputs().size();
   auto args = fmap(last(stack, num_inputs), [](const IValue& i) {
     return i.toTensor();
@@ -359,7 +359,7 @@ void CommonFusionHandle::run(Stack& stack) {
   pack(stack, std::move(outputs));
 }
 
-at::optional<std::vector<int64_t>> CommonFusionHandle::getMapSize(
+at::optional<std::vector<int64_t>> FusionHandleImpl::getMapSize(
   at::TensorList args
 , at::IntList arg_subset) {
   int64_t dim_after_broadcast = 0;
@@ -401,7 +401,7 @@ at::optional<std::vector<int64_t>> CommonFusionHandle::getMapSize(
   return {map_size};
 }
 
-void CommonFusionHandle::runFallback(Stack& stack) {
+void FusionHandleImpl::runFallback(Stack& stack) {
   InterpreterState(fallback_code).runOneStage(stack);
 }
 

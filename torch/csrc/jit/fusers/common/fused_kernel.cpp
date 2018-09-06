@@ -1,6 +1,6 @@
-#include "torch/csrc/jit/fusers/common/common_fusion_function.h"
+#include "torch/csrc/jit/fusers/common/fused_kernel.h"
 
-#include "torch/csrc/jit/fusers/fusion_interface.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/fusers/cpu/resource_strings.h"
 #include "torch/csrc/jit/fusers/cuda/resource_strings.h"
 #include "torch/csrc/jit/fusers/common/partition_desc.h"
@@ -105,7 +105,7 @@ static void compressContiguous(
   JIT_ASSERT(!cont.back() || strides.back() == 1);
 }
 
-void CommonFusionFunction::launch_with_tensors(
+void FusedKernel::launch_with_tensors(
   at::ArrayRef<at::Tensor> inputs
 , at::ArrayRef<at::Tensor> outputs) {
   at::DeviceGuard device_guard(inputs);
@@ -210,7 +210,7 @@ void CommonFusionFunction::launch_with_tensors(
   launch_raw(numel, arguments.data());
 }
 
-void CommonFusionFunction::launch(
+void FusedKernel::launch(
   at::ArrayRef<at::Tensor> inputs
 , std::vector<at::Tensor> & outputs) {
   at::DeviceGuard guard(inputs.back());

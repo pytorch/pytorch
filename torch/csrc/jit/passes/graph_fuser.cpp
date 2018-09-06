@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/fusers/fusion_interface.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
 #include "ATen/ExpandUtils.h"

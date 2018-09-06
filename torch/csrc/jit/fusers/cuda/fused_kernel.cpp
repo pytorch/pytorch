@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/fusers/cuda/cuda_fusion_function.h"
+#include "torch/csrc/jit/fusers/cuda/fused_kernel.h"
 
 #include "torch/csrc/jit/resource_guard.h"
 
@@ -30,10 +30,10 @@ void checkCUDAVersion(const cudaDeviceProp& prop) {
   }
 }
 
-CUDAFusionFunction::CUDAFusionFunction(
+CUDAFusedKernel::CUDAFusedKernel(
   const std::string& name
 , AnnotatedGraph& agraph)
-: CommonFusionFunction(name, agraph) {
+: FusedKernel(name, agraph) {
   at::DeviceGuard device_guard(agraph.device);
 
   TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
@@ -74,7 +74,7 @@ CUDAFusionFunction::CUDAFusionFunction(
   maxBlocks *= prop.multiProcessorCount;
 }
 
-void CUDAFusionFunction::launch_raw(uint32_t numel, void** arguments) {
+void CUDAFusedKernel::launch_raw(uint32_t numel, void** arguments) {
   int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
 
      //std::cout << "maxBlocks = " << maxBlocks << " needed blocks: " << ceilDiv(numel,blockSize)

@@ -1,6 +1,6 @@
-#include "torch/csrc/jit/fusers/cpu/cpu_fusion_function.h"
+#include "torch/csrc/jit/fusers/cpu/fused_kernel.h"
 
-#include "torch/csrc/jit/fusers/cpu/cpu_fusion_compiler.h"
+#include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
 #include "torch/csrc/jit/fusers/cpu/temp_file.h"
 #include "torch/csrc/jit/fusers/cpu/dynamic_library.h"
 #include "torch/csrc/jit/fusers/common/annotated_graph.h"
@@ -66,11 +66,11 @@ static void disas(const std::string& so_file) {
   JIT_ASSERT(r == 0);
 }
 
-CPUFusionFunction::CPUFusionFunction(
+CPUFusedKernel::CPUFusedKernel(
   const std::string& name
 , AnnotatedGraph& agraph
 , CPUFusionCompilerConfig& config)
-: CommonFusionFunction(name, agraph) {
+: FusedKernel(name, agraph) {
   TempFile so_file(so_template, 3);
   TempFile cpp_file(cpp_template, 4);
 

@@ -1,8 +1,9 @@
+#include "torch/csrc/jit/fusers/Config.h"
 #if USE_CPU_FUSER
 #pragma once
 
-#include "torch/csrc/jit/fusers/fusion_interface.h"
-#include "torch/csrc/jit/fusers/common/common_fusion_handle.h"
+#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fusers/common/fusion_handle_impl.h"
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/disallow_copy.h"
@@ -42,7 +43,7 @@ struct CPUFusionCompiler {
 
 private:
   CPUFusionCompilerConfig config_;
-  std::unordered_map<std::string, std::shared_ptr<CommonFusionHandle>> cache_map;
+  std::unordered_map<std::string, std::shared_ptr<FusionHandleImpl>> cache_map;
 };
 
 CPUFusionCompiler& getFusionCompiler();

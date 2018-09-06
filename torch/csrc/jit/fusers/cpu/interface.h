@@ -1,8 +1,9 @@
+#include "torch/csrc/jit/fusers/Config.h"
 #if USE_CPU_FUSER
 #pragma once
 
-#include "torch/csrc/jit/fusers/fusion_interface.h"
-#include "torch/csrc/jit/fusers/cpu/cpu_fusion_compiler.h"
+#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
 
 #include "ATen/ATen.h"
 

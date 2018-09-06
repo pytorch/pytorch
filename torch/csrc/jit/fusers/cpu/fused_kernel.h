@@ -1,9 +1,10 @@
+#include "torch/csrc/jit/fusers/Config.h"
 #if USE_CPU_FUSER
 #pragma once
 
-#include "torch/csrc/jit/fusers/cpu/cpu_fusion_compiler.h"
+#include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
 #include "torch/csrc/jit/fusers/cpu/dynamic_library.h"
-#include "torch/csrc/jit/fusers/common/common_fusion_function.h"
+#include "torch/csrc/jit/fusers/common/fused_kernel.h"
 #include "torch/csrc/jit/fusers/common/annotated_graph.h"
 
 #include "ATen/ATen.h"
@@ -14,8 +15,8 @@
 
 namespace torch { namespace jit { namespace cpufuser {
 
-struct CPUFusionFunction : public ::torch::jit::CommonFusionFunction {
-  CPUFusionFunction(
+struct CPUFusedKernel : public ::torch::jit::FusedKernel {
+  CPUFusedKernel(
     const std::string& name
   , AnnotatedGraph& agraph
   , CPUFusionCompilerConfig& config);

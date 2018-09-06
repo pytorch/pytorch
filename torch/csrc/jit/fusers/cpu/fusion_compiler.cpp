@@ -1,7 +1,7 @@
-#include "torch/csrc/jit/fusers/cpu/cpu_fusion_compiler.h"
+#include "torch/csrc/jit/fusers/cpu/fusion_compiler.h"
 
-#include "torch/csrc/jit/fusers/fusion_interface.h"
-#include "torch/csrc/jit/fusers/common/common_fusion_handle.h"
+#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fusers/common/fusion_handle_impl.h"
 
 #include "torch/csrc/jit/passes/shape_analysis.h" // EraseShapeInformation
 #include "torch/csrc/utils/functional.h" //fmap
@@ -54,7 +54,7 @@ std::shared_ptr<FusionHandle> CPUFusionCompiler::getFusionHandle(Node* fusion_gr
   std::string key_ = key.str();
   auto it = cache_map.find(key_);
   if (it == cache_map.end()) {
-    std::tie(it, std::ignore) = cache_map.emplace(key_, std::make_shared<CommonFusionHandle>(graph, device));
+    std::tie(it, std::ignore) = cache_map.emplace(key_, std::make_shared<FusionHandleImpl>(graph, device));
   }
   return it->second;
 }

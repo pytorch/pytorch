@@ -1,7 +1,8 @@
+#include "torch/csrc/jit/fusers/Config.h"
 #if USE_CUDA_FUSER
 #pragma once
 
-#include "torch/csrc/jit/fusers/common/common_fusion_function.h"
+#include "torch/csrc/jit/fusers/common/fused_kernel.h"
 #include "torch/csrc/jit/fusers/common/annotated_graph.h"
 
 #include "ATen/ATen.h"
@@ -16,10 +17,10 @@
 
 namespace torch { namespace jit { namespace cudafuser {
 
-struct CUDAFusionFunction : public ::torch::jit::CommonFusionFunction {
-  CUDAFusionFunction(const std::string& name, AnnotatedGraph& agraph);
+struct CUDAFusedKernel : public ::torch::jit::FusedKernel {
+  CUDAFusedKernel(const std::string& name, AnnotatedGraph& agraph);
 
-  virtual ~CUDAFusionFunction() override {
+  virtual ~CUDAFusedKernel() override {
     cuModuleUnload(module);
   }
 

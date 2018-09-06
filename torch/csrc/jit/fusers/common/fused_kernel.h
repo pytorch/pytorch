@@ -1,3 +1,4 @@
+#include "torch/csrc/jit/fusers/Config.h"
 #if USE_CPU_FUSER || USE_CUDA_FUSER
 #pragma once
 
@@ -21,17 +22,17 @@ std::tuple<std::vector<PartitionDesc>, std::vector<PartitionDesc>, bool> emitCom
 , AnnotatedGraph& agraph
 , bool use_cuda);
 
-struct CommonFusionFunction {
-  TH_DISALLOW_COPY_AND_ASSIGN(CommonFusionFunction);
+struct FusedKernel {
+  TH_DISALLOW_COPY_AND_ASSIGN(FusedKernel);
 
-  CommonFusionFunction(
+  FusedKernel(
     const std::string& name
   , AnnotatedGraph& agraph)
   : name{name}
   , input_desc{agraph.input_desc}
   , output_desc{agraph.output_desc} { }
 
-  virtual ~CommonFusionFunction() = default;
+  virtual ~FusedKernel() = default;
 
   // expects outputs to be pre-allocated
   void launch_with_tensors(

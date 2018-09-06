@@ -12,7 +12,7 @@ using Catch::StartsWith;
 #endif
 
 #include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/fusers/fusion_interface.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"

@@ -1,8 +1,9 @@
+#include "torch/csrc/jit/fusers/Config.h"
 #if USE_CUDA_FUSER
 #pragma once
 
-#include "torch/csrc/jit/fusers/fusion_interface.h"
-#include "torch/csrc/jit/fusers/cuda/cuda_fusion_compiler.h"
+#include "torch/csrc/jit/fusers/interface.h"
+#include "torch/csrc/jit/fusers/cuda/fusion_compiler.h"
 
 #include "torch/csrc/jit/ir.h"
 

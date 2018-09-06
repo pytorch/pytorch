@@ -1,9 +1,10 @@
+#include "torch/csrc/jit/fusers/Config.h"
 #if USE_CPU_FUSER || USE_CUDA_FUSER
 #pragma once
 
-#include "torch/csrc/jit/fusers/fusion_interface.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/fusers/common/fusion_arg_spec.h"
-#include "torch/csrc/jit/fusers/common/common_fusion_function.h"
+#include "torch/csrc/jit/fusers/common/fused_kernel.h"
 
 #include "torch/csrc/jit/stack.h"
 #include "torch/csrc/jit/interpreter.h"
@@ -27,8 +28,8 @@ namespace torch { namespace jit {
 //   - the shapes satisfy graph invariants for our fused code (e.g. that all intermediate shapes
 //     are the same - see fusion_compiler.cpp for more details).
 //   - their FusionArgSpecs compare equal
-struct CommonFusionHandle : public FusionHandle {
-  CommonFusionHandle(
+struct FusionHandleImpl : public FusionHandle {
+  FusionHandleImpl(
     std::shared_ptr<Graph> _graph
   , int device);
 
@@ -49,7 +50,7 @@ private:
   at::optional<std::vector<int64_t>> getMapSize(at::TensorList args, at::IntList arg_subset);
   std::vector<std::vector<int64_t>> getInputBroadcastGroups();
   std::vector<PartitionInfo> getInputChunkDescriptors();
-  std::unique_ptr<CommonFusionFunction> compileSpec(
+  std::unique_ptr<FusedKernel> compileSpec(
         const FusionArgSpec& spec, const std::vector<int64_t>& map_size);
 
   static std::atomic<size_t> next_kernel_id;
@@ -61,7 +62,7 @@ private:
   std::vector<PartitionInfo> input_chunks;
   std::unordered_map<
     FusionArgSpec
-  , std::unique_ptr<CommonFusionFunction>
+  , std::unique_ptr<FusedKernel>
   , torch::hash<FusionArgSpec>> kernels;
 };
 
