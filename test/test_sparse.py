@@ -107,6 +107,61 @@ class TestSparse(TestCase):
         # TODO: Put this in torch.cuda.randn
         return self.ValueTensor(*args, **kwargs).normal_()
 
+    @skipIfRocm  # ROCm stack doesn't like the x + x call
+    def test_print(self):
+        shape_sparseDim_nnz = [
+            ((), 0, 2),
+            ((0,), 0, 10),
+            ((2,), 0, 3),
+            ((100, 3), 1, 3),
+            ((100, 20, 3), 2, 0),
+            ((10, 0, 3), 0, 3),
+            ((10, 0, 3), 0, 0),
+        ]
+
+        printed = []
+        for shape, sparseDim, nnz in shape_sparseDim_nnz:
+            indices_shape = torch.Size((sparseDim, nnz))
+            values_shape = torch.Size((nnz,) + shape[sparseDim:])
+            printed.append("# shape: {}".format(torch.Size(shape)))
+            printed.append("# nnz: {}".format(nnz))
+            printed.append("# sparseDim: {}".format(sparseDim))
+            printed.append("# indices shape: {}".format(indices_shape))
+            printed.append("# values shape: {}".format(values_shape))
+
+            indices = torch.arange(indices_shape.numel(), dtype=self.IndexTensor.dtype,
+                                   device=self.device).view(indices_shape)
+            for d in range(sparseDim):
+                indices[d].clamp_(max=(shape[d] - 1))  # make it valid index
+            if self.is_uncoalesced and indices.numel() > 0:
+                indices[:, -1] = indices[:, 0]  # make it uncoalesced
+            values_numel = values_shape.numel()
+            values = torch.arange(values_numel, dtype=self.ValueTensor.dtype,
+                                  device=self.device).view(values_shape).div_(values_numel / 2.)
+            sp_tensor = self.SparseTensor(indices, values, shape)
+
+            dtypes = [torch.int32]
+            if values.dtype == torch.double:
+                dtypes.append(torch.float)
+            else:
+                dtypes.append(torch.double)
+            for dtype in dtypes:
+                printed.append("########## {} ##########".format(dtype))
+                x = sp_tensor.detach().to(dtype)
+                printed.append("# sparse tensor")
+                printed.append(str(x))
+                if x.dtype.is_floating_point:
+                    printed.append("# after requires_grad_")
+                    printed.append(str(x.requires_grad_()))
+                    printed.append("# after addition")
+                    printed.append(str(x + x))
+                printed.append("# _indices")
+                printed.append(str(x._indices()))
+                printed.append("# _values")
+                printed.append(str(x._values()))
+            printed.append('')
+        self.assertExpected('\n'.join(printed))
+
     @skipIfRocm
     def test_basic(self):
         x, i, v = self._gen_sparse(3, 10, 100)
@@ -995,6 +1050,10 @@ class TestSparse(TestCase):
         values = self.ValueTensor([.5, .5])
         sizes = torch.Size([2, 3])
         with self.assertRaisesRegex(RuntimeError, "sizes is inconsistent with indices"):
+            torch.sparse_coo_tensor(indices, values, sizes)
+
+        indices.fill_(-1)
+        with self.assertRaisesRegex(RuntimeError, "found negative index"):
             torch.sparse_coo_tensor(indices, values, sizes)
 
         indices = self.IndexTensor([[1, 2], [0, 2]])
