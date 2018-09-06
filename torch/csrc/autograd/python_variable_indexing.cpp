@@ -11,6 +11,7 @@
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_conversion_dispatch.h"
+#include "torch/csrc/jit/tracer.h"
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -67,9 +68,9 @@ static void invalid_index(PyObject* obj) {
 }
 
 static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, bool ensure_view=false) {
-  Py_ssize_t start, stop, step, slicelength;
+  Py_ssize_t start, stop, step;
   auto length = self.size(dim);
-  if (!THPUtils_parseSlice(slice, length, &start, &stop, &step, &slicelength)) {
+  if (!THPUtils_unpackSlice(slice, &start, &stop, &step)) {
     throw python_error();
   }
   if (step == 0) {
@@ -79,7 +80,10 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
     // TODO: implement negative step
     throw ValueError("negative step not yet supported");
   }
-  if (!ensure_view && start == 0 && stop == length && step == 1) {
+  // Skip this optimization if we are tracing, as the trace may be polymorphic
+  // over the shape of the `self` tensor, and we still want to record
+  // the slice.
+  if (!ensure_view && start == 0 && stop == length && step == 1 && !jit::tracer::isTracing()) {
     return self;
   }
   return self.slice(dim, start, stop, step);
@@ -98,9 +102,9 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
     throw IndexError("index %lld is out of bounds for dimension %lld with size %lld",
       index, dim, size);
   }
-  if (index < 0) {
-    index += size;
-  }
+  // if the index is negative, do not normalize it because that would fix the index
+  // on the current tensor size in the tracer.
+  // aten::select also works on negative indices
   return self.select(dim, index);
 }
 

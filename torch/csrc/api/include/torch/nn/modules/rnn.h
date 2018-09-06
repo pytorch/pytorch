@@ -31,6 +31,8 @@ struct RNNOptionsBase {
   TORCH_ARG(int64_t, layers) = 1;
   TORCH_ARG(bool, with_bias) = true;
   TORCH_ARG(double, dropout) = 0.0;
+  TORCH_ARG(bool, bidirectional) = false;
+  TORCH_ARG(bool, batch_first) = false;
 };
 
 template <typename Derived>
@@ -40,68 +42,82 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   // https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
   enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
-  RNNImplBase(
+  explicit RNNImplBase(
       RNNOptionsBase options_,
       at::optional<CuDNNMode> cudnn_mode = at::nullopt,
-      int64_t number_of_gates = 1,
-      bool has_cell_state = false);
+      int64_t number_of_gates = 1);
 
-  RNNOutput forward(Tensor input, Tensor state = {});
-
+  /// Initializes the parameters of the RNN module.
   void reset() override;
 
-  /// Recursively casts all parameters to the given device and dtype.
+  /// Overrides `nn::Module::to()` to call `flatten_parameters()` after the
+  /// original operation.
   void to(torch::Device device, torch::Dtype dtype, bool non_blocking = false)
       override;
-
-  /// Recursively casts all parameters to the given dtype.
   void to(torch::Dtype dtype, bool non_blocking = false) override;
-
-  /// Recursively moves all parameters to the given device.
   void to(torch::Device device, bool non_blocking = false) override;
 
-  /// Fills the internal flattened parameter buffers passed to cuDNN. Call this
-  /// method if you mess around with the variable storages and want to use
-  /// cuDNN.
-  void flatten_parameters_for_cudnn();
+  /// Modifies the internal storage of weights for optimization purposes.
+  ///
+  /// On CPU, this method should be called if any of the weight or bias vectors
+  /// are changed (i.e. weights are added or removed). On GPU, it should be
+  /// called __any time the storage of any parameter is modified__, e.g. any
+  /// time a parameter is assigned a new value. This allows using the fast path
+  /// in cuDNN implementations of respective RNN `forward()` methods. It is
+  /// called once upon construction, inside `reset()`.
+  void flatten_parameters();
 
+  /// The RNN's options.
   RNNOptionsBase options;
 
+  /// The weights for `input x hidden` gates.
   std::vector<Tensor> w_ih;
+  /// The weights for `hidden x hidden` gates.
   std::vector<Tensor> w_hh;
+  /// The biases for `input x hidden` gates.
   std::vector<Tensor> b_ih;
+  /// The biases for `hidden x hidden` gates.
   std::vector<Tensor> b_hh;
 
-  Dropout dropout;
-
  protected:
-  virtual Tensor cell_forward(Tensor input, Tensor state, int64_t layer) = 0;
+  /// The function signature of `at::rnn_relu`, `at::rnn_tanh` and `at::gru`.
+  using RNNFunctionSignature = std::tuple<Tensor, Tensor>(
+      /*input=*/const Tensor&,
+      /*state=*/const Tensor&,
+      /*params=*/TensorList,
+      /*has_biases=*/bool,
+      /*layers=*/int64_t,
+      /*dropout=*/double,
+      /*train=*/bool,
+      /*bidirectional=*/bool,
+      /*batch_first=*/bool);
 
-  RNNOutput CUDNN_forward(Tensor input, Tensor state);
-  RNNOutput autograd_forward(Tensor input, Tensor state);
+  /// A generic `forward()` used for RNN and GRU (but not LSTM!). Takes the ATen
+  /// RNN function as first argument.
+  RNNOutput generic_forward(
+      std::function<RNNFunctionSignature> function,
+      Tensor input,
+      Tensor state);
 
+  /// Returns a flat vector of all weights, with layer weights following each
+  /// other sequentially in (w_ih, w_hh, b_ih, b_hh) order.
   std::vector<Tensor> flat_weights() const;
-  bool use_cudnn(Tensor sample) const;
-  Tensor create_dropout_state(Tensor input) const;
 
+  /// Very simple check if any of the parameters (weights, biases) are the same.
+  bool any_parameters_alias() const;
+
+  /// The number of gate weights/biases required by the RNN subclass.
   int64_t number_of_gates_;
-  bool has_cell_state_;
+
+  /// The cuDNN RNN mode, if this RNN subclass has any.
   at::optional<CuDNNMode> cudnn_mode_;
 
-  // This is copied from pytorch, to determine whether weights are flat for the
-  // fast CUDNN route. Otherwise, we have to use non flattened weights, which
-  // are much slower.
-  // https://github.com/pytorch/pytorch/blob/1848cad10802db9fa0aa066d9de195958120d863/torch/nn/modules/rnn.py#L159-L165
-  // TODO Actually since we are in C++ we can probably just actually check if
-  // the parameters are flat, instead of relying on data pointers and stuff.
-  std::vector<void*> data_ptrs_;
-  Tensor flat_weights_;
+  /// The cached result of the latest `flat_weights()` call.
+  std::vector<Tensor> flat_weights_;
 };
 } // namespace detail
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// TODO: Replace this with passing an activation module.
 
 enum class RNNActivation { ReLU, Tanh };
 
@@ -116,6 +132,8 @@ struct RNNOptions {
   TORCH_ARG(int64_t, layers) = 1;
   TORCH_ARG(bool, with_bias) = true;
   TORCH_ARG(double, dropout) = 0.0;
+  TORCH_ARG(bool, bidirectional) = false;
+  TORCH_ARG(bool, batch_first) = false;
   TORCH_ARG(RNNActivation, activation) = RNNActivation::ReLU;
 };
 
@@ -125,13 +143,14 @@ class RNNImpl : public detail::RNNImplBase<RNNImpl> {
       : RNNImpl(RNNOptions(input_size, hidden_size)) {}
   explicit RNNImpl(RNNOptions options);
 
-  RNNOptions options;
+  RNNOutput forward(Tensor input, Tensor state = {});
 
- private:
-  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
-  std::function<Tensor(Tensor)> activation_function_;
+  RNNOptions options;
 };
 
+/// A multi-layer Elman RNN module with Tanh or ReLU activation.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.RNN for more
+/// documenation.
 TORCH_MODULE(RNN);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -144,10 +163,12 @@ class LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
       : LSTMImpl(LSTMOptions(input_size, hidden_size)) {}
   explicit LSTMImpl(LSTMOptions options);
 
- private:
-  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
+  RNNOutput forward(Tensor input, Tensor state = {});
 };
 
+/// A multi-layer long-short-term-memory (LSTM) module.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM for more
+/// documenation.
 TORCH_MODULE(LSTM);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -160,10 +181,12 @@ class GRUImpl : public detail::RNNImplBase<GRUImpl> {
       : GRUImpl(GRUOptions(input_size, hidden_size)) {}
   explicit GRUImpl(GRUOptions options);
 
- private:
-  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
+  RNNOutput forward(Tensor input, Tensor state = {});
 };
 
+/// A multi-layer gated recurrent unit (GRU) module.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.GRU for more
+/// documenation.
 TORCH_MODULE(GRU);
 
 } // namespace nn

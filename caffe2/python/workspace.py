@@ -313,29 +313,8 @@ def FeedBlob(name, arr, device_option=None):
     Returns:
       True or False, stating whether the feed is successful.
     """
-    if type(arr) is caffe2_pb2.TensorProto:
-        arr = utils.Caffe2TensorToNumpyArray(arr)
-    if type(arr) is np.ndarray and arr.dtype.kind in 'SU':
-        # Plain NumPy strings are weird, let's use objects instead
-        arr = arr.astype(np.object)
-
-    if device_option is None:
-        device_option = scope.CurrentDeviceScope()
-
-    if device_option and device_option.device_type == caffe2_pb2.CUDA:
-        if arr.dtype == np.dtype('float64'):
-            logger.warning(
-                "CUDA operators do not support 64-bit doubles, " +
-                "please use arr.astype(np.float32) or np.int32 for ints." +
-                " Blob: {}".format(name) +
-                " type: {}".format(str(arr.dtype))
-            )
-
-    name = StringifyBlobName(name)
-    if device_option is not None:
-        return C.feed_blob(name, arr, StringifyProto(device_option))
-    else:
-        return C.feed_blob(name, arr)
+    ws = C.Workspace.current
+    return _Workspace_feed_blob(ws, name, arr, device_option)
 
 
 def FetchBlobs(names):
@@ -621,7 +600,7 @@ def FeedImmediate(*args, **kwargs):
         return FeedBlob(*args, **kwargs)
 
 
-# CWorkspace utilities
+# C.Workspace methods.
 
 def _Workspace_create_net_with_exception_intercept(ws, net, overwrite=False):
     return CallWithExceptionIntercept(
@@ -630,9 +609,6 @@ def _Workspace_create_net_with_exception_intercept(ws, net, overwrite=False):
         GetNetName(net),
         StringifyProto(net), overwrite,
     )
-
-
-C.Workspace.create_net = _Workspace_create_net_with_exception_intercept
 
 
 def _Workspace_run(ws, obj):
@@ -654,8 +630,44 @@ def _Workspace_run(ws, obj):
         "Don't know how to do Workspace.run() on {}".format(type(obj)))
 
 
-C.Workspace.run = _Workspace_run
+def _Workspace_feed_blob(ws, name, arr, device_option=None):
+    if type(arr) is caffe2_pb2.TensorProto:
+        arr = utils.Caffe2TensorToNumpyArray(arr)
+    if type(arr) is np.ndarray and arr.dtype.kind in 'SU':
+        # Plain NumPy strings are weird, let's use objects instead
+        arr = arr.astype(np.object)
 
+    if device_option is None:
+        device_option = scope.CurrentDeviceScope()
+
+    if device_option and device_option.device_type == caffe2_pb2.CUDA:
+        if arr.dtype == np.dtype('float64'):
+            logger.warning(
+                "CUDA operators do not support 64-bit doubles, " +
+                "please use arr.astype(np.float32) or np.int32 for ints." +
+                " Blob: {}".format(name) +
+                " type: {}".format(str(arr.dtype))
+            )
+
+    name = StringifyBlobName(name)
+    if device_option is not None:
+        return ws.create_blob(name).feed(arr, device_option)
+    else:
+        return ws.create_blob(name).feed(arr)
+
+
+def _Workspace_remove_blob(ws, blob):
+    ws._remove_blob(str(blob))
+
+
+Workspace = C.Workspace
+Workspace.create_net = _Workspace_create_net_with_exception_intercept
+Workspace.run = _Workspace_run
+Workspace.feed_blob = _Workspace_feed_blob
+Workspace.remove_blob = _Workspace_remove_blob
+
+
+# C.Blob methods.
 
 def _Blob_feed(blob, arg, device_option=None):
     if device_option is not None:

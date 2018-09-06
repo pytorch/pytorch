@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdexcept>
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/jit/tracer.h"
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
@@ -64,6 +65,7 @@ inline bool THPUtils_checkIndex(PyObject *obj) {
   if (THPUtils_checkLong(obj)) {
     return true;
   }
+  torch::jit::tracer::NoWarn no_warn_guard;
   auto index = THPObjectPtr(PyNumber_Index(obj));
   if (!index) {
     PyErr_Clear();

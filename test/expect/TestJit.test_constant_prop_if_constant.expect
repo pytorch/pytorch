@@ -1,0 +1,31 @@
+graph(%a : Dynamic
+      %b : Dynamic) {
+  %c2.1 : int = prim::Constant[value=1]()
+  %3 : int = prim::TensorToNum(%a)
+  %c0.4 : int, %c1 : int = prim::If(%3)
+    block0() {
+      %6 : int = prim::TensorToNum(%b)
+      %c0.3 : int = prim::If(%6)
+        block0() {
+          %8 : int = prim::Constant[value=2]()
+          -> (%8)
+        }
+        block1() {
+          -> (%c2.1)
+        }
+      -> (%c0.3, %c2.1)
+    }
+    block1() {
+      %9 : int = prim::Constant[value=2]()
+      -> (%c2.1, %9)
+    }
+  %c0.5 : int = aten::add(%c0.4, %c2.1)
+  %11 : int = prim::Constant[value=5]()
+  %12 : int = prim::Constant[value=1]()
+  %13 : Dynamic = aten::add(%a, %c0.5, %12)
+  %14 : int = prim::Constant[value=1]()
+  %15 : Dynamic = aten::add(%13, %c1, %14)
+  %16 : int = prim::Constant[value=1]()
+  %17 : Dynamic = aten::add(%15, %11, %16)
+  return (%17);
+}

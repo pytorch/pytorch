@@ -1,32 +1,23 @@
 #include "caffe2/sgd/lars_op.h"
-#include <math.h>
-#include "caffe2/utils/eigen_utils.h"
-#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
 template <>
-void LarsOp<float, CPUContext>::Compute(
-    TIndex N,
-    const float* X_data,
-    const float* dX_data,
+void LarsOp<float, CPUContext>::ComputeLearningRate(
     const float* wd,
     const float* trust,
     const float* lr_max,
     float offset,
     float lr_min,
+    float* X_norm,
+    float* dX_norm,
     float* lr_rescaled) {
   float val = 1.0;
-  float X_norm =
-      sqrtf((ConstEigenVectorMap<float>(X_data, N).array()).square().sum());
-  if (X_norm > 0) {
-    float dX_norm =
-        sqrtf((ConstEigenVectorMap<float>(dX_data, N).array()).square().sum());
-    val = (*trust) / (dX_norm / X_norm + (*wd) + offset);
+
+  if (*X_norm > 0) {
+    val = (*trust) / (*dX_norm / *X_norm + (*wd) + offset);
   }
-  val = fmin(val, *lr_max);
-  val = fmax(val, lr_min);
-  *lr_rescaled = val;
+  *lr_rescaled = fmaxf(fminf(val, *lr_max), lr_min);
 }
 
 REGISTER_CPU_OPERATOR(Lars, LarsOp<float, CPUContext>);

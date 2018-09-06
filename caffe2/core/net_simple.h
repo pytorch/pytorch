@@ -9,14 +9,14 @@
 #include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
 // This is the very basic structure you need to run a network - all it
 // does is simply to run everything in sequence. If you want more fancy control
 // such as a DAG-like execution, check out other better net implementations.
-class SimpleNet : public NetBase {
+class CAFFE2_API SimpleNet : public NetBase {
  public:
   SimpleNet(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   bool SupportsAsync() override {

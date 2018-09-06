@@ -135,12 +135,12 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
           at::Tensor t = n->t(name);
           // 1-elem tensors are usually boxed scalars, so print them like it
           if (t.numel() == 1) {
-            auto scalar = at::Scalar(t.view({})).local();
+            auto scalar_tensor = t.view({})._local_scalar();
             out << "{";
-            if (scalar.isFloatingPoint()) {
-              out << scalar.toDouble();
+            if (scalar_tensor.isFloatingPoint()) {
+              out << scalar_tensor.toDouble();
             } else {
-              out << scalar.toLong();
+              out << scalar_tensor.toLong();
             }
             out << "}";
           } else if (t.numel() <= max_tensor_display_size) {
@@ -186,7 +186,7 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   IR_ELSE()
     if(n->hasAttribute(attr::Subgraph) && groups) {
       out << n->kind().toQualString() << "_" << groups->size();
-      if (n->numAttributes() > 1) {
+      if (n->numAttributes() > 1 && n->kind() != prim::DifferentiableGraph) {
         printAttributes(out, n, /*ignore_subgraph=*/true);
       }
       groups->push_back(n);
@@ -255,7 +255,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(TensorTypePtr type = v->type()->cast<TensorType>()) {
+    if(CompleteTensorTypePtr type = v->type()->cast<CompleteTensorType>()) {
       if(!has_device) {
         has_device = true;
         device = type->device();
@@ -604,7 +604,7 @@ Value* Node::namedInput(Symbol name) const {
   return input(findArgument(schema(), name));
 }
 
-bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) const {
   if (!sig(signature_literal).matches(this)) return false;
   for (Symbol s : const_inputs) {
     if (!is_constant(s)) return false;
@@ -618,6 +618,54 @@ void Node::dump() const {
 
 void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema();
+}
+
+namespace {
+
+const OperatorSet& nondeterminstic_aten_ops() {
+  static OperatorSet nondeterministic_ops = {
+    "aten::dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
+    "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
+    "aten::_th_bernoulli(Tensor self, *, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self) -> Tensor",
+    "aten::bernoulli(Tensor self, Tensor p, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, Generator generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
+    "aten::poisson(Tensor self, Generator generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::rand_like(Tensor self) -> Tensor",
+    "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint(int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint(int low, int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int high) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high) -> Tensor",
+    "aten::randint_like(Tensor self, int high, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randn(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randn_like(Tensor self) -> Tensor",
+    "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randperm(int n, *, int dtype, int layout, int[] device) -> Tensor"
+  };
+  return nondeterministic_ops;
+}
+
+}  // namespace
+
+bool Node::isNondeterministic() const {
+  if (nondeterminstic_aten_ops().find(this) == nullptr) {
+    return false;
+  }
+  // Dropout with train = False is deterministic
+  if (matches("aten::dropout(Tensor input, float p, int train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
+    return false;
+  }
+  return true;
 }
 
 inline const SourceRange& fakeRange() {

@@ -266,17 +266,28 @@ CAFFE2_SPECIALIZED_DOT(float)
 CAFFE2_SPECIALIZED_AXPY(float)
 #undef CAFFE2_SPECIALIZED_AXPY
 
-#define CAFFE2_SPECIALIZED_AXPBY(T)                              \
-  template <>                                                    \
-  void Axpby<T, CPUContext>(                                     \
-      const int N,                                               \
-      const T alpha,                                             \
-      const T* x,                                                \
-      const T beta,                                              \
-      T* y,                                                      \
-      CPUContext* context) {                                     \
-    EigenVectorMap<T> y_vec(y, N);                               \
-    y_vec = y_vec * beta + ConstEigenVectorMap<T>(x, N) * alpha; \
+#define CAFFE2_SPECIALIZED_AXPBY(T)                                     \
+  template <>                                                           \
+  void Axpby<T, T, CPUContext>(                                         \
+      const int N,                                                      \
+      const T alpha,                                                    \
+      const T* x,                                                       \
+      const T beta,                                                     \
+      T* y,                                                             \
+      CPUContext* context) {                                            \
+    EigenVectorArrayMap<T> y_arr(y, N);                                 \
+    y_arr = y_arr * beta + ConstEigenVectorArrayMap<T>(x, N) * alpha;   \
+  }                                                                     \
+  template <>                                                           \
+  void Axpby<T, T, CPUContext>(                                         \
+      const int N,                                                      \
+      const T* alpha,                                                   \
+      const T* x,                                                       \
+      const T* beta,                                                    \
+      T* y,                                                             \
+      CPUContext* context) {                                            \
+    EigenVectorArrayMap<T> y_arr(y, N);                                 \
+    y_arr = y_arr * *beta + ConstEigenVectorArrayMap<T>(x, N) * *alpha; \
   }
 CAFFE2_SPECIALIZED_AXPBY(float)
 #undef CAFFE2_SPECIALIZED_AXPBY
@@ -424,29 +435,50 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
 // cblas_[sd]axpby is not a standard blas function, and if MKL is not present,
 // we will need to implement it.
 #ifdef CAFFE2_USE_MKL
-#define CAFFE2_SPECIALIZED_AXPBY(T, prefix)            \
-  template <>                                          \
-  void Axpby<T, CPUContext>(                           \
-      const int N,                                     \
-      const T alpha,                                   \
-      const T* x,                                      \
-      const T beta,                                    \
-      T* y,                                            \
-      CPUContext*) {                                   \
-    cblas_##prefix##axpby(N, alpha, x, 1, beta, y, 1); \
+#define CAFFE2_SPECIALIZED_AXPBY(T, prefix)              \
+  template <>                                            \
+  void Axpby<T, T, CPUContext>(                          \
+      const int N,                                       \
+      const T alpha,                                     \
+      const T* x,                                        \
+      const T beta,                                      \
+      T* y,                                              \
+      CPUContext*) {                                     \
+    cblas_##prefix##axpby(N, alpha, x, 1, beta, y, 1);   \
+  }                                                      \
+  template <>                                            \
+  void Axpby<T, T, CPUContext>(                          \
+      const int N,                                       \
+      const T* alpha,                                    \
+      const T* x,                                        \
+      const T* beta,                                     \
+      T* y,                                              \
+      CPUContext*) {                                     \
+    cblas_##prefix##axpby(N, *alpha, x, 1, *beta, y, 1); \
   }
 #else // CAFFE2_USE_MKL
-#define CAFFE2_SPECIALIZED_AXPBY(T, prefix)     \
-  template <>                                   \
-  void Axpby<T, CPUContext>(                    \
-      const int N,                              \
-      const T alpha,                            \
-      const T* x,                               \
-      const T beta,                             \
-      T* y,                                     \
-      CPUContext*) {                            \
-    cblas_##prefix##scal(N, beta, y, 1);        \
-    cblas_##prefix##axpy(N, alpha, x, 1, y, 1); \
+#define CAFFE2_SPECIALIZED_AXPBY(T, prefix)      \
+  template <>                                    \
+  void Axpby<T, T, CPUContext>(                  \
+      const int N,                               \
+      const T alpha,                             \
+      const T* x,                                \
+      const T beta,                              \
+      T* y,                                      \
+      CPUContext*) {                             \
+    cblas_##prefix##scal(N, beta, y, 1);         \
+    cblas_##prefix##axpy(N, alpha, x, 1, y, 1);  \
+  }                                              \
+  template <>                                    \
+  void Axpby<T, T, CPUContext>(                  \
+      const int N,                               \
+      const T* alpha,                            \
+      const T* x,                                \
+      const T* beta,                             \
+      T* y,                                      \
+      CPUContext*) {                             \
+    cblas_##prefix##scal(N, *beta, y, 1);        \
+    cblas_##prefix##axpy(N, *alpha, x, 1, y, 1); \
   }
 #endif // CAFFE2_USE_MKL
 CAFFE2_SPECIALIZED_AXPBY(float, s)
@@ -2807,7 +2839,10 @@ void Im2Col<float, CPUContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CPUContext* context) {
+    CPUContext* context,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Im2Col.
+
   // Fast path for zero padding and no dilation
   if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
       dilation_w == 1) {
@@ -2870,10 +2905,11 @@ void Im2Col<float, CPUContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    CPUContext* context) {
+    CPUContext* context,
+    const int groups) {
   // Fast path for zero padding and no dilation
   if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
-      dilation_w == 1) {
+      dilation_w == 1 && groups == 1) {
     Im2ColZeroPaddingAndNoDilationNHWC<float>(
         C,
         H,
@@ -2893,28 +2929,62 @@ void Im2Col<float, CPUContext, StorageOrder::NHWC>(
   const int output_h = (H + pad_b + pad_t - dkernel_h) / stride_h + 1;
   const int output_w = (W + pad_l + pad_r - dkernel_w) / stride_w + 1;
   int h_pad = -pad_t;
-  for (int h = 0; h < output_h; ++h) {
-    int w_pad = -pad_l;
-    for (int w = 0; w < output_w; ++w) {
-      for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
-        if (!utils::IsAGeZeroAndALtB(ih, H)) {
-          std::memset(col_data, 0, sizeof(float) * kernel_w * C);
-          col_data += kernel_w * C;
-          continue;
-        }
-        for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
-          if (utils::IsAGeZeroAndALtB(iw, W)) {
-            std::memcpy(
-                col_data, img_data + (ih * W + iw) * C, sizeof(float) * C);
-          } else {
-            std::memset(col_data, 0, sizeof(float) * C);
+  if (groups == 1) {
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
+          if (!utils::IsAGeZeroAndALtB(ih, H)) {
+            std::memset(col_data, 0, sizeof(float) * kernel_w * C);
+            col_data += kernel_w * C;
+            continue;
           }
-          col_data += C;
-        }
-      }
-      w_pad += stride_w;
-    }
-    h_pad += stride_h;
+          for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
+            if (utils::IsAGeZeroAndALtB(iw, W)) {
+              std::memcpy(
+                  col_data, img_data + (ih * W + iw) * C, sizeof(float) * C);
+            } else {
+              std::memset(col_data, 0, sizeof(float) * C);
+            }
+            col_data += C;
+          } // iw
+        } // ih
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
+  } else {
+    const int C_per_G = C / groups;
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        int r = 0;
+        for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h, ++r) {
+          int s = 0;
+          for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w, ++s) {
+            if (utils::IsAGeZeroAndALtB(ih, H) &&
+                utils::IsAGeZeroAndALtB(iw, W)) {
+              for (int g = 0; g < groups; ++g) {
+                std::memcpy(
+                    col_data + ((g * kernel_h + r) * kernel_w + s) * C_per_G,
+                    img_data + (ih * W + iw) * C + g * C_per_G,
+                    sizeof(float) * C_per_G);
+              }
+            } else {
+              for (int g = 0; g < groups; ++g) {
+                std::memset(
+                    col_data + ((g * kernel_h + r) * kernel_w + s) * C_per_G,
+                    0,
+                    sizeof(float) * C_per_G);
+              }
+            }
+          } // iw
+        } // ih
+        col_data += kernel_h * kernel_w * C;
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
   }
 }
 
@@ -2935,7 +3005,10 @@ void Col2Im<float, CPUContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CPUContext* context) {
+    CPUContext* context,
+    const int /* groups */) {
+  // In NCHW, the number of groups doesn't affect Col2Im.
+
   // Fast path for zero padding and no dilation
   if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
       dilation_w == 1) {
@@ -2999,10 +3072,11 @@ void Col2Im<float, CPUContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    CPUContext* context) {
+    CPUContext* context,
+    const int groups) {
   // Fast path for zero padding and no dilation
   if (pad_t == 0 && pad_l == 0 && pad_b == 0 && pad_r == 0 && dilation_h == 1 &&
-      dilation_w == 1) {
+      dilation_w == 1 && groups == 1) {
     Col2ImZeroPaddingAndNoDilationNHWC<float>(
         C,
         H,
@@ -3022,27 +3096,58 @@ void Col2Im<float, CPUContext, StorageOrder::NHWC>(
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (H + pad_t + pad_b - dkernel_h) / stride_h + 1;
   const int output_w = (W + pad_l + pad_r - dkernel_w) / stride_w + 1;
+
   int h_pad = -pad_t;
-  for (int h = 0; h < output_h; ++h) {
-    int w_pad = -pad_l;
-    for (int w = 0; w < output_w; ++w) {
-      for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
-        if (!utils::IsAGeZeroAndALtB(ih, H)) {
-          col_data += kernel_w * C;
-          continue;
-        }
-        for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
-          if (utils::IsAGeZeroAndALtB(iw, W)) {
-            float* img_data_patch = img_data + (ih * W + iw) * C;
-            Add<float, CPUContext>(
-                C, img_data_patch, col_data, img_data_patch, context);
+  if (groups == 1) {
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
+          if (!utils::IsAGeZeroAndALtB(ih, H)) {
+            col_data += kernel_w * C;
+            continue;
           }
-          col_data += C;
-        }
-      }
-      w_pad += stride_w;
-    }
-    h_pad += stride_h;
+          for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
+            if (utils::IsAGeZeroAndALtB(iw, W)) {
+              float* img_data_patch = img_data + (ih * W + iw) * C;
+              Add<float, CPUContext>(
+                  C, img_data_patch, col_data, img_data_patch, context);
+            }
+            col_data += C;
+          } // iw
+        } // ih
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
+  } else {
+    const int C_per_G = C / groups;
+    for (int h = 0; h < output_h; ++h) {
+      int w_pad = -pad_l;
+      for (int w = 0; w < output_w; ++w) {
+        int r = 0;
+        for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h, ++r) {
+          int s = 0;
+          for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w, ++s) {
+            if (utils::IsAGeZeroAndALtB(ih, H) &&
+                utils::IsAGeZeroAndALtB(iw, W)) {
+              float* img_data_patch = img_data + (ih * W + iw) * C;
+              for (int g = 0; g < groups; ++g) {
+                Add<float, CPUContext>(
+                    C_per_G,
+                    img_data_patch + g * C_per_G,
+                    col_data + ((g * kernel_h + r) * kernel_w + s) * C_per_G,
+                    img_data_patch + g * C_per_G,
+                    context);
+              }
+            }
+          } // iw
+        } // ih
+        col_data += kernel_h * kernel_w * C;
+        w_pad += stride_w;
+      } // w
+      h_pad += stride_h;
+    } // h
   }
 }
 

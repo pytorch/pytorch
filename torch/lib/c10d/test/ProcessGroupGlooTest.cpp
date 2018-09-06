@@ -48,7 +48,7 @@ class SignalTest {
 
     // Initialize tensor list
     std::vector<at::Tensor> tensors = {
-        at::ones(at::CPU(at::kFloat), {16, 16}),
+        at::ones({16, 16}),
     };
 
     // Loop until an exception happens
@@ -141,7 +141,7 @@ std::vector<std::vector<at::Tensor>> copyTensors(
     const auto& input = inputs[i];
     std::vector<at::Tensor> output(input.size());
     for (size_t j = 0; j < input.size(); j++) {
-      output[j] = input[j].toBackend(at::kCPU);
+      output[j] = input[j].cpu();
     }
     outputs[i] = std::move(output);
   }
@@ -155,7 +155,8 @@ void testAllreduce(const std::string& path, const at::Backend b) {
   // Generate inputs
   std::vector<std::vector<at::Tensor>> inputs(size);
   for (auto i = 0; i < size; i++) {
-    auto tensor = at::ones(at::getType(b, at::kFloat), {16, 16}) * i;
+    auto tensor =
+        at::ones({16, 16}, b) * i;
     inputs[i] = std::vector<at::Tensor>({tensor});
   }
 
@@ -192,7 +193,6 @@ void testBroadcast(const std::string& path, const at::Backend b) {
   auto tests = CollectiveTest::initialize(path, size);
 
   std::vector<std::vector<at::Tensor>> inputs(size);
-  const auto& type = at::getType(b, at::kFloat);
 
   // Try every permutation of root rank and root tensoro
   for (auto i = 0; i < size; i++) {
@@ -202,10 +202,10 @@ void testBroadcast(const std::string& path, const at::Backend b) {
         inputs[k].resize(stride);
         at::DeviceGuard deviceGuard;
         for (auto l = 0; l < stride; l++) {
-          if (type.is_cuda()) {
+          if (b == at::Backend::CUDA) { // NB:wouldn't work with sparse
             deviceGuard.set_index(l);
           }
-          inputs[k][l] = at::ones(type, {16, 16}) * (k * stride + l);
+          inputs[k][l] = at::ones({16, 16}, b) * (k * stride + l);
         }
       }
 
@@ -261,22 +261,22 @@ int main(int argc, char** argv) {
 
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::kCPU);
+    testAllreduce(file.path, at::Backend::CPU);
   }
 
   {
     TemporaryFile file;
-    testAllreduce(file.path, at::kCUDA);
+    testAllreduce(file.path, at::Backend::CUDA);
   }
 
   {
     TemporaryFile file;
-    testBroadcast(file.path, at::kCPU);
+    testBroadcast(file.path, at::Backend::CPU);
   }
 
   {
     TemporaryFile file;
-    testBroadcast(file.path, at::kCUDA);
+    testBroadcast(file.path, at::Backend::CUDA);
   }
 
   return 0;

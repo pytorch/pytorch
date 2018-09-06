@@ -84,34 +84,6 @@ struct TensorSignOp<half> {
 };
 
 template <typename T>
-struct TensorAddOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out += *in;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in1 + *in2;
-  }
-};
-
-template <>
-struct TensorAddOp<half> {
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-    float fout = __half2float(*out);
-    float fin = __half2float(*in);
-    fout += fin;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void operator()(half* out, half* in1, half* in2) {
-    float fin1 = __half2float(*in1);
-    float fin2 = __half2float(*in2);
-    float fout = fin1 + fin2;
-    *out = __float2half(fout);
-  }
-};
-
-template <typename T>
 struct TensorCAddOp {
   TensorCAddOp(T v) : val(v) {}
 
@@ -149,34 +121,6 @@ struct TensorCAddOp<half> {
   }
 
   half val;
-};
-
-template <typename T>
-struct TensorSubOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out -= *in;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in1 - *in2;
-  }
-};
-
-template <>
-struct TensorSubOp<half> {
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-    float fout = __half2float(*out);
-    float fin = __half2float(*in);
-    fout -= fin;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void operator()(half* out, half* in1, half* in2) {
-    float fin1 = __half2float(*in1);
-    float fin2 = __half2float(*in2);
-    float fout = fin1 - fin2;
-    *out = __float2half(fout);
-  }
 };
 
 template <typename T>
@@ -332,40 +276,6 @@ struct TensorCPowOp<half> {
     float fin1 = __half2float(*in1);
     float fin2 = __half2float(*in2);
     float fout = powf(fin1, fin2);
-    *out = __float2half(fout);
-  }
-};
-
-template <typename T>
-struct TensorDivOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out /= *in;
-  }
-
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 / *in2;
-  }
-};
-
-template <>
-struct TensorDivOp<half> {
-  __device__ __forceinline__ void
-  operator()(half* out, half* in) {
-    // No fp16 div instruction yet
-    float fout = __half2float(*out);
-    float fin = __half2float(*in);
-    fout /= fin;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void
-  operator()(half* out, half* in1, half* in2) {
-    // No fp16 div instruction yet
-    float fin1 = __half2float(*in1);
-    float fin2 = __half2float(*in2);
-    float fout = fin1 / fin2;
     *out = __float2half(fout);
   }
 };
@@ -757,11 +667,11 @@ struct TensorBitXorOp {
  * Cephes Math Library Release 2.8:  June, 2000
  * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
  */
-template <typename real, typename accreal>
+template <typename T, typename accreal>
 struct TensorDigammaOp {
   __device__ __forceinline__ void
-  operator()(real* out, real* in) {
-    using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
+  operator()(T* out, T* in) {
+    using compute_type = typename std::conditional<std::is_same<T, half>::value, accreal, T>::type;
     static const double PI_f64 = 3.14159265358979323846;
     static const compute_type PSI_10 = 2.25175258906672110764;
     static const compute_type A[] = {
@@ -776,7 +686,7 @@ struct TensorDigammaOp {
 
     auto x = scalar_cast<compute_type>(*in);
     if (x == 0) {
-      *out = scalar_cast<real>(INFINITY);
+      *out = scalar_cast<T>(INFINITY);
       return;
     }
 
@@ -784,7 +694,7 @@ struct TensorDigammaOp {
     compute_type result = 0;
     if (x < 0) {
       if (x_is_integer) {
-        *out = scalar_cast<real>(INFINITY);
+        *out = scalar_cast<T>(INFINITY);
         return;
       }
       // Rounding errors in tan's input can really affect the output
@@ -799,7 +709,7 @@ struct TensorDigammaOp {
       x += 1;
     }
     if (x == 10) {
-      *out = scalar_cast<real>(result + PSI_10);
+      *out = scalar_cast<T>(result + PSI_10);
       return;
     }
 
@@ -814,18 +724,18 @@ struct TensorDigammaOp {
       y = z * polevl_result;
     }
 
-    *out = scalar_cast<real>(log(x) - (0.5 / x) - y + result);
+    *out = scalar_cast<T>(log(x) - (0.5 / x) - y + result);
     return;
   }
 };
 
-template <typename real, typename accreal>
+template <typename T, typename accreal>
 struct TensorTrigammaOp {
-  using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
+  using compute_type = typename std::conditional<std::is_same<T, half>::value, accreal, T>::type;
   __device__ __forceinline__ void
-  operator()(real* out, real* in) {
+  operator()(T* out, T* in) {
     const compute_type PI = 3.14159265358979323846;
-    compute_type x = ScalarConvert<real, compute_type>::to(*in);
+    compute_type x = ScalarConvert<T, compute_type>::to(*in);
     compute_type sign = +1;
     compute_type result = 0;
     if (x < 0.5f) {
@@ -840,7 +750,7 @@ struct TensorTrigammaOp {
     }
     const compute_type ixx = 1 / (x*x);
     result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
-    *out = ScalarConvert<compute_type, real>::to(sign * result);
+    *out = ScalarConvert<compute_type, T>::to(sign * result);
   }
 };
 

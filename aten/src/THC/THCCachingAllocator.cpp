@@ -508,9 +508,9 @@ struct CudaCachingAllocator : public at::Allocator {
     THCudaCheck(cudaGetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
-      AT_CUDA_CHECK(caching_allocator.malloc(&r, size, at::cuda::getCurrentCUDAStreamOnDevice(device)));
+      AT_CUDA_CHECK(caching_allocator.malloc(&r, size, at::cuda::getCurrentCUDAStream(device)));
     }
-    return {r, r, &CudaCachingDeleter, at::Device(at::kCUDA, device)};
+    return {r, r, &CudaCachingDeleter, at::Device(at::DeviceType::CUDA, device)};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &CudaCachingDeleter;

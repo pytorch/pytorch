@@ -17,6 +17,8 @@ import unittest
 import warnings
 import random
 import contextlib
+import socket
+from collections import OrderedDict
 from functools import wraps
 from itertools import product
 from copy import deepcopy
@@ -111,12 +113,10 @@ def skipIfRocm(fn):
 def skipIfNoLapack(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        try:
+        if not torch._C.has_lapack:
+            raise unittest.SkipTest('PyTorch compiled without Lapack')
+        else:
             fn(*args, **kwargs)
-        except Exception as e:
-            if 'Lapack library not found' in repr(e):
-                raise unittest.SkipTest('Compiled without Lapack')
-            raise
     return wrapper
 
 
@@ -347,6 +347,13 @@ class TestCase(unittest.TestCase):
             super(TestCase, self).assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
             super(TestCase, self).assertEqual(x, y, message)
+        elif isinstance(x, dict) and isinstance(y, dict):
+            if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
+                self.assertEqual(x.items(), y.items())
+            else:
+                self.assertEqual(set(x.keys()), set(y.keys()))
+                key_list = list(x.keys())
+                self.assertEqual([x[k] for k in key_list], [y[k] for k in key_list])
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
@@ -475,13 +482,16 @@ class TestCase(unittest.TestCase):
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      munged_id)
+
+        subname_output = ""
         if subname:
             expected_file += "-" + subname
+            subname_output = " ({})".format(subname)
         expected_file += ".expect"
         expected = None
 
         def accept_output(update_type):
-            print("Accepting {} for {}:\n\n{}".format(update_type, munged_id, s))
+            print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
             with open(expected_file, 'w') as f:
                 f.write(s)
 
@@ -495,9 +505,9 @@ class TestCase(unittest.TestCase):
                 return accept_output("output")
             else:
                 raise RuntimeError(
-                    ("I got this output for {}:\n\n{}\n\n"
+                    ("I got this output for {}{}:\n\n{}\n\n"
                      "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
+                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id))
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -547,3 +557,12 @@ def download_file(url, binary=True):
         msg = "could not download test file '{}'".format(url)
         warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg)
+
+
+def find_free_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(('localhost', 0))
+    sockname = sock.getsockname()
+    sock.close()
+    return sockname[1]
