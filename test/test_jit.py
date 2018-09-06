@@ -2368,16 +2368,16 @@ a")
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.checkScript(func, [x], optimize=True)
 
+    def _check_code(self, code_str, fn_name, inputs):
+        scope = {}
+        exec(code_str, globals(), scope)
+        cu = torch.jit.CompilationUnit(code_str)
+        self.assertEqual(cu.func(*inputs), scope[fn_name](*inputs))
+
     def test_index(self):
         def consec(size, start=0):
             numel = torch.tensor(size).prod().item()
             return torch.arange(numel).view(size)
-
-        def check_code(code_str, fn_name, inputs):
-            scope = {}
-            exec(code_str, globals(), scope)
-            cu = torch.jit.CompilationUnit(code_str)
-            self.assertEqual(cu.func(*inputs), scope['func'](*inputs))
 
         def check_indexing(indexing, tensor):
             template = dedent("""
@@ -2385,7 +2385,7 @@ a")
                 return x{}
             """)
 
-            check_code(template.format(indexing), "func", [tensor])
+            self._check_code(template.format(indexing), "func", [tensor])
 
         def check_dynamic_indexing(indexing, tensor, value1, value2):
             value1 = torch.tensor(value1)
@@ -2398,7 +2398,7 @@ a")
                 return x{}
             """)
 
-            check_code(template.format(indexing), "func", [tensor, value1, value2])
+            self._check_code(template.format(indexing), "func", [tensor, value1, value2])
 
         # basic slices
         check_indexing('[0]', consec((3, 3)))
@@ -2496,6 +2496,93 @@ a")
         for tensor in tensors:
             for i in range(len(script_funs)):
                 self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
+
+    def test_advancedindex(self):
+        def consec(size, start=0):
+            numel = torch.tensor(size).prod().item()
+            return torch.arange(numel).view(size)
+
+        def check_indexing(indexing, tensor, **kwargs):
+            indices_dict = kwargs
+
+            template = dedent("""
+            def func(x{formals}):
+                return x{expr}
+            """)
+
+            formals = []
+            values = []
+            for formal, value in indices_dict.items():
+                formals.append(formal)
+                values.append(value)
+
+            formals = ''.join(map(', {}'.format, formals))
+            inputs = [tensor] + values
+
+            self._check_code(template.format(formals=formals, expr=indexing),
+                             "func", inputs)
+
+        # Indexing with tensor (basic)
+        check_indexing('[i]', consec((3, 3)), i=torch.tensor([0]))
+        check_indexing('[i]', consec((3, 3)), i=torch.tensor(1))
+        check_indexing('[i]', consec((3, 3)), i=torch.tensor([-2]))
+        check_indexing('[i]', consec((3, 3), 2), i=torch.tensor([0, 0]))
+        check_indexing('[i]', consec((3, 3, 2, 2)), i=torch.tensor([0, -2, 1]))
+
+        # NB: indexing with tensors and indexing with sequences can be implemented
+        # in a very similar way (sequences are converted to tensors), so only one
+        # case needs to be tested extensively.
+        # XXX: When we can index with sequences, replace these cases with
+        # sequence indexing expressions; those are much easier to read.
+
+        # Misc sequence advanced indexing
+        inp = consec((4, 8, 5))
+        to_check = [
+            # [[0, 2], [1, 3]]
+            ['[i, j]', dict(i=[0, 2], j=[1, 3])],
+            # [[0, 2], [1, 3], [1, 1]]
+            ['[i, j, k]', dict(i=[0, 2], j=[1, 3], k=[1, 1])],
+            # [[0, 2], 1, [1, 1]]
+            ['[i, j, k]', dict(i=[0, 2], j=1, k=[1, 1])],
+            # [:, :, [0, 3, 4]]
+            ['[:, :, i]', dict(i=[0, 3, 4])],
+            # [:, [2, 4, 5, 7], 2:4]
+            ['[:, i, 2:4]', dict(i=[0, 2, 3])],
+            # [[2, 3], :, :]
+            ['[i, :, :]', dict(i=[2, 3])],
+            # [:, [0, 2, 3], [1, 3, 4]]
+            ['[:, i, j]', dict(i=[0, 2, 3], j=[1, 3, 4])],
+            # [:, [0], [1, 2, 4]]
+            ['[:, i, j]', dict(i=[0], j=[1, 2, 4])],
+            # [:, [0, 1, 3], [4]]
+            ['[:, i, j]', dict(i=[0, 1, 3], j=[4])],
+            # [:, [[0, 1], [1, 0]], [[2, 3]]]
+            ['[:, i, j]', dict(i=[[0, 1], [1, 0]], j=[[2, 3]])],
+            # [:, [[0, 1], [2, 3]], [[0]]]
+            ['[:, i, j]', dict(i=[[0, 1], [2, 3]], j=[[0]])],
+            # [:, [[5, 6]], [[0, 3], [4, 4]]]
+            ['[:, i, j]', dict(i=[[5, 6]], j=[[0, 3], [4, 4]])],
+            # [[0, 2, 3], [1, 3, 4], :]
+            ['[i, j, :]', dict(i=[0, 2, 3], j=[1, 3, 4])],
+            # [0, [1, 2, 4], :]
+            ['[i, j, :]', dict(i=0, j=[1, 2, 4])],
+            # [[0, 1, 3], 4, :]
+            ['[i, j, :]', dict(i=[0, 1, 3], j=4)],
+            # [[[0, 1], [1, 0]], [[2, 1], [3, 5]], :]
+            ['[i, j, :]', dict(i=[[0, 1], [1, 0]], j=[[2, 1], [3, 5]])],
+            # [[[0, 1], [1, 0]], [[2, 3]], :]
+            ['[i, j, :]', dict(i=[[0, 1], [1, 0]], j=[[2, 3]])],
+            # [[[0, 1], [2, 3]], [[0]], :]
+            ['[i, j, :]', dict(i=[[0, 1], [2, 3]], j=[[0]])],
+            # [[[2, 1]], [[0, 3], [4, 4]], :]
+            ['[i, j, :]', dict(i=[[2, 1]], j=[[0, 3], [4, 4]])],
+            # [[[2]], [[0, 3], [4, 1]], 0:2]
+            ['[i, j, 0:2]', dict(i=[[2]], j=[[0, 3], [4, 1]])],
+        ]
+
+        for expr, argdict in to_check:
+            tensordict = {k: torch.tensor(v) for (k, v) in argdict.items()}
+            check_indexing(expr, inp, **tensordict)
 
     def test_keyword(self):
         @torch.jit.script
