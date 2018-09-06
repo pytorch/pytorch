@@ -116,6 +116,8 @@ def _test_reshape(old_shape, new_shape, expected_shape=None, arg_shape=True,
     devices = [core.DeviceOption(caffe2_pb2.CPU, 0)]
     if workspace.NumCudaDevices() > 0:
         devices.append(core.DeviceOption(caffe2_pb2.CUDA, 0))
+    if workspace.NumHipDevices() > 0:
+        devices.append(core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=0))
 
     for device_opt in devices:
         with core.DeviceScope(device_opt):
