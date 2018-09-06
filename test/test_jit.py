@@ -530,6 +530,30 @@ class TestJit(JitTestCase):
         self.assertExportImport(trace, (t,) + tuple(model.parameters()))
         self.assertExpectedONNXGraph(trace)
 
+    @unittest.skipIf(not IS_WINDOWS, "Testing Fuse skipped on windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_windows_fuse(self):
+        def scaleshift(x, scale, shift):
+            return x * scale + shift
+
+        graph = torch.jit.script(scaleshift).graph
+
+        inputs = [
+            torch.randn(4, 4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+            torch.randn(4, dtype=torch.float, device='cuda'),
+        ]
+
+        ge = self.checkTrace(scaleshift, inputs)
+        fuse_graph = ge.graph_for(*inputs)
+
+        def run_graph(graph, inputs):
+            m = torch.jit.ScriptModule()
+            m._create_method_from_graph("forward", graph)
+            return m(*inputs)
+
+        self.assertEqual(run_graph(graph, inputs), run_graph(fuse_graph, inputs))
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
@@ -1406,7 +1430,10 @@ class TestJit(JitTestCase):
 
         a, b, c = [torch.tensor(e) for e in (1, [[2.]], [[3.]])]
         addmm(a, b, c)
-        self.assertExpectedGraph(addmm.graph_for(a, b, c))
+        graph = addmm.graph_for(a, b, c)
+        # graph fusion skipped in windows, which runs cse
+        self.run_pass('cse', graph)
+        self.assertExpectedGraph(graph)
 
     def test_index_put(self):
         ten = torch.zeros(3, 3)
