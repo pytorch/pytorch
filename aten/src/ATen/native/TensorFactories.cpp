@@ -23,7 +23,7 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // A number of factory functions are implemented in the following way:
 //
-//    return at::getMaybeVariableType(options)._arange(start, end, step);
+//    return at::getType(options)._arange(start, end, step);
 //
 // That is to say, they grab a Type for TensorOptions, and then call some
 // internal method.  What's going on?
@@ -33,7 +33,7 @@
 // (and never will) understand TensorOptions, so we need to handle TensorOptions
 // inside native before batting over to TH.  The expectation is that when
 // these factories get ported to native, this is no longer necessary,
-// and we can eliminate the getMaybeVariableType call.
+// and we can eliminate the getType call.
 
 namespace at {
 namespace native {
@@ -73,7 +73,7 @@ Tensor arange(
     Scalar step,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._arange(start, end, step);
+  return at::getType(options)._arange(start, end, step);
 }
 
 Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
@@ -86,7 +86,7 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
 Tensor arange(Scalar end, const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._arange(end);
+  return at::getType(options)._arange(end);
 }
 
 Tensor& arange_out(Tensor& result, Scalar end) {
@@ -102,7 +102,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 Tensor empty(IntList size, const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
   // Can't call a factory function, because the buck stops with us!
-  return at::getMaybeVariableType(options).tensor(size);
+  return at::getType(options).tensor(size);
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
@@ -219,7 +219,7 @@ Tensor linspace(
     int64_t steps,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._linspace(start, end, steps);
+  return at::getType(options)._linspace(start, end, steps);
 }
 
 Tensor& linspace_out(Tensor& result, Scalar start, Scalar end) {
@@ -242,7 +242,7 @@ Tensor logspace(
     int64_t steps,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._logspace(start, end, steps);
+  return at::getType(options)._logspace(start, end, steps);
 }
 
 Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
@@ -476,7 +476,7 @@ Tensor range(
     Scalar step,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._range(start, end, step);
+  return at::getType(options)._range(start, end, step);
 }
 
 Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
