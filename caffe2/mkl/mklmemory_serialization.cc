@@ -26,7 +26,7 @@ class MKLMemorySerializer : public BlobSerializerBase {
     blob_proto.set_type(kTensorBlobType);
     TensorProto* proto = blob_proto.mutable_tensor();
     auto* device_detail = proto->mutable_device_detail();
-    device_detail->set_device_type(MKLDNN);
+    device_detail->set_device_type(PROTO_MKLDNN);
     proto->set_name(name);
     if (blob.IsType<MKLMemory<float>>()) {
       const MKLMemory<float>& src = blob.Get<MKLMemory<float>>();

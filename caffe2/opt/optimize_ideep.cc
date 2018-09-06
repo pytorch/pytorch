@@ -56,7 +56,7 @@ caffe2::OperatorDef* getMutableOpDef(repr::NeuralNetOperator& nnOp) {
 bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
   // We only want to fuse for IDEEP convs
   const auto& op = getOpDef(nnOp);
-  return op.device_option().device_type() == DeviceType::IDEEP;
+  return op.device_option().device_type() == DeviceTypeProto::PROTO_IDEEP;
 }
 
 bool shouldFuseConv(const repr::Conv& conv) {

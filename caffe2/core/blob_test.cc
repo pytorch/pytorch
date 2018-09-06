@@ -883,7 +883,7 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
 
   {
     DeviceOption option;
-    option.set_device_type(CPU);
+    option.set_device_type(PROTO_CPU);
     Argument db_type_arg = MakeArgument<string>("db_type", "vector_db");
     Argument absolute_path_arg = MakeArgument<bool>("absolute_path", true);
     Argument db_source_arg = MakeArgument<string>("db", db_source);
@@ -996,7 +996,7 @@ TEST(ContentChunks, Serialization) {
 
   {
     DeviceOption option;
-    option.set_device_type(CPU);
+    option.set_device_type(PROTO_CPU);
     Argument db_type_arg = MakeArgument<string>("db_type", "vector_db");
     Argument absolute_path_arg = MakeArgument<bool>("absolute_path", true);
     Argument db_source_arg = MakeArgument<string>("db", db_source);
