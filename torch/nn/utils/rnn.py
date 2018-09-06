@@ -29,6 +29,7 @@ class PackedSequence(PackedSequence_):
 
     """
 
+
     def __new__(cls, data, batch_sizes=None):
         # PackedSequence used to only have __init__(self, data, batch_sizes)
         # without a __new__ like this. So to preserve BC for calling in keyword
