@@ -36,12 +36,12 @@
 #   NO_NNPACK
 #     disables NNPACK build
 #
-#   NO_DISTRIBUTED
-#     disables THD (distributed) build
-#
 #   NO_SYSTEM_NCCL
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
+#
+#   USE_DISTRIBUTED
+#     default ON. enables distributed (c10d, gloo, mpi, etc.) build
 #
 #   USE_GLOO_IBVERBS
 #     toggle features related to distributed support
