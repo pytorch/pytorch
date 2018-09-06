@@ -85,6 +85,7 @@ def IsOperatorWithEngine(op_type, engine):
 def DeviceOption(
     device_type,
     cuda_gpu_id=0,
+    hip_gpu_id=0,
     random_seed=None,
     node_name=None,
     numa_node_id=None,
@@ -93,6 +94,7 @@ def DeviceOption(
     option = caffe2_pb2.DeviceOption()
     option.device_type = device_type
     option.cuda_gpu_id = cuda_gpu_id
+    option.hip_gpu_id = hip_gpu_id
     if node_name is not None:
         option.node_name = node_name
     if random_seed is not None:
@@ -115,7 +117,7 @@ def device_option_equal(opt1, opt2, ignore_node_name=True, ignore_random_seed=Tr
     if not opt1.device_type or not opt2.device_type:
         # At least one option is for CPU, check if both are for CPU.
         return not opt1.device_type and not opt2.device_type
-    return opt1.cuda_gpu_id == opt2.cuda_gpu_id
+    return opt1.cuda_gpu_id == opt2.cuda_gpu_id and opt1.hip_gpu_id == opt2.hip_gpu_id
 
 
 def InferBlobDevices(net):
@@ -2110,8 +2112,12 @@ class Net(object):
     def RunAllOnGPU(self, gpu_id=0, use_cudnn=False):
         """A convenient function to run everything on the GPU."""
         device_option = caffe2_pb2.DeviceOption()
-        device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = gpu_id
+        if workspace.has_hip_support:
+            device_option.device_type = caffe2_pb2.HIP
+            device_option.hip_gpu_id = gpu_id
+        else:
+            device_option.device_type = caffe2_pb2.CUDA
+            device_option.cuda_gpu_id = gpu_id
         self._net.device_option.CopyFrom(device_option)
         if use_cudnn:
             for op in self._net.op:
@@ -2280,27 +2286,37 @@ def remap_input(op, blob_name_remapping):
 
 def copy_func_between_devices(src, dst):
     CPU = caffe2_pb2.CPU
-    CUDA = caffe2_pb2.CUDA
+    if workspace.has_hip_support:
+        GPU = caffe2_pb2.HIP
+    else:
+        GPU = caffe2_pb2.CUDA
 
     if src.device_type == CPU and dst.device_type == CPU:
         return None
 
-    if src.device_type == CUDA and dst.device_type == CUDA:
-        if src.cuda_gpu_id == dst.cuda_gpu_id:
-            return None
-        else:
-            def fun(net, *args, **kw):
-                with DeviceScope(dst):
-                    return net.Copy(*args, **kw)
-            return fun
+    if src.device_type == GPU and dst.device_type == GPU:
+        def fun(net, *args, **kw):
+            with DeviceScope(dst):
+                return net.Copy(*args, **kw)
 
-    if src.device_type == CUDA and dst.device_type == CPU:
+        if workspace.has_hip_support:
+            if src.hip_gpu_id == dst.hip_gpu_id:
+                return None
+            else:
+                return fun    
+        else:
+            if src.cuda_gpu_id == dst.cuda_gpu_id:
+                return None
+            else:
+                return fun
+               
+    if src.device_type == GPU and dst.device_type == CPU:
         def fun(net, *args, **kw):
             with DeviceScope(src):
                 return net.CopyGPUToCPU(*args, **kw)
         return fun
 
-    if src.device_type == CPU and dst.device_type == CUDA:
+    if src.device_type == CPU and dst.device_type == GPU:
         def fun(net, *args, **kw):
             with DeviceScope(dst):
                 return net.CopyCPUToGPU(*args, **kw)
@@ -2308,14 +2324,18 @@ def copy_func_between_devices(src, dst):
 
     raise ValueError('Non-supported devices: %s and %s' % (src, dst))
 
-
 def device_equal(src, dst):
     '''
     We are using this fucntion instead of == operator because optional-value
     comparison between empty device_options and {device_type:0, cuda_gpu_id:0}
     returns not equal in some cases.
     '''
-    return src.device_type == dst.device_type and src.cuda_gpu_id == dst.cuda_gpu_id
+    if workspace.has_hip_support:
+        gpu_id_eq = src.hip_gpu_id == dst.hip_gpu_id
+    else:
+        gpu_id_eq = src.cuda_gpu_id == dst.cuda_gpu_id
+
+    return src.device_type == dst.device_type and gpu_id_eq
 
 
 def update_placeholder_op_output(op, blob_to_device):
@@ -2426,10 +2446,13 @@ def InjectCrossDeviceCopies(net, blob_to_device=None, blob_remap=None,
                     def _gen_new_name(blob, device_option):
                         CPU = caffe2_pb2.CPU
                         CUDA = caffe2_pb2.CUDA
+                        HIP = caffe2_pb2.HIP
                         if device_option.device_type == CPU:
                             suffix = '_cpu'
                         elif device_option.device_type == CUDA:
                             suffix = '_cuda_' + str(device_option.cuda_gpu_id)
+                        elif device_option.device_type == HIP:
+                            suffix = '_hip_' + str(device_option.hip_gpu_id)
                         else:
                             raise RuntimeError(
                                 "Unknown device type: {}".
