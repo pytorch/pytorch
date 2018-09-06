@@ -139,9 +139,8 @@ class AT_CORE_API BaseContext {
   }
 
   inline void EnforceMetaCopyOK() {
-    if (!SupportsNonFundamentalTypes()) {
-      AT_ERROR("Context requires fundamental types");
-    }
+    AT_ASSERTM(
+        SupportsNonFundamentalTypes(), "Context requires fundamental types");
   }
 
   void CopyItemsSameDevice(
