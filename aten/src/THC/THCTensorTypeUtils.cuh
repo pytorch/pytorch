@@ -110,26 +110,4 @@ struct ScalarInv<half> {
   }
 };
 
-inline bool operator==(half a, half b) {
-#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
-  return a.x == b.x;
-#else
-  __half_raw araw, braw;
-  araw = __half_raw(a);
-  braw = __half_raw(b);
-  return araw.x == braw.x;
-#endif
-}
-
-inline bool operator!=(half a, half b) {
-#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
-    return a.x != b.x;
-#else
-  __half_raw araw, braw;
-  araw = __half_raw(a);
-  braw = __half_raw(b);
-  return araw.x != braw.x;
-#endif
-}
-
 #endif // THC_TENSOR_TYPE_UTILS_INC

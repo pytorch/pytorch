@@ -113,10 +113,10 @@ struct TopKTypeConfig<double> {
 };
 
 template <>
-struct TopKTypeConfig<half> {
+struct TopKTypeConfig<THCHalf> {
   typedef uint32_t RadixType;
 
-  static inline __device__ RadixType convert(half v) {
+  static inline __device__ RadixType convert(THCHalf v) {
 #if CUDA_VERSION >= 8000
     RadixType x = __half_as_ushort(v);
     RadixType mask = -((x >> 15)) | 0x8000;
@@ -127,16 +127,16 @@ struct TopKTypeConfig<half> {
 #endif
   }
 
-  static inline __device__ half deconvert(RadixType v) {
+  static inline __device__ THCHalf deconvert(RadixType v) {
 #if CUDA_VERSION >= 8000
     RadixType mask = ((v >> 15) - 1) | 0x8000;
     return __ushort_as_half(v ^ mask);
 #else
     assert(false);
-    return ScalarConvert<int, half>::to(0);
+    return ScalarConvert<int, THCHalf>::to(0);
 #endif
   }
-}; 
+};
 
 // This function counts the distribution of all input values in a
 // slice we are selecting by radix digit at `radixDigitPos`, but only

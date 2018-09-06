@@ -15,8 +15,8 @@ template<typename T>
 inline T __device__ curand_uniform_type(curandStateMtgp32 *state);
 
 template <>
-inline half __device__ curand_uniform_type<half>(curandStateMtgp32 *state) {
-  return ScalarConvert<float, half>::to(curand_uniform(state));
+inline THCHalf __device__ curand_uniform_type<THCHalf>(curandStateMtgp32 *state) {
+  return ScalarConvert<float, THCHalf>::to(curand_uniform(state));
 }
 
 template <>

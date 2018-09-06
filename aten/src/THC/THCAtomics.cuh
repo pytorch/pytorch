@@ -103,21 +103,14 @@ static inline  __device__ void atomicAdd(half *address, half val) {
 
   do {
     assumed = old;
-#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
-    half hsum;
+    THCHalf hsum;
     hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    hsum = THCNumerics<half>::add(hsum, val);
-#else
-    __half_raw hsum;
-    hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    half tmpres = THCNumerics<half>::add(hsum, val);
-    hsum = __half_raw(tmpres);
-#endif
+    hsum = THCNumerics<THCHalf>::add(hsum, val);
     old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
     old = atomicCAS(address_as_ui, assumed, old);
   } while (assumed != old);
 }
-static inline __device__ void atomicAdd(at::Half *address, at::Half val) {
+static inline __device__ void atomicAdd(THCHalf *address, THCHalf val) {
   atomicAdd(reinterpret_cast<half*>(address), val);
 }
 

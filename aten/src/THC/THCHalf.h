@@ -6,6 +6,17 @@
 #include <cuda_fp16.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+#include <ATen/core/Half.h>
+#endif
+
+#ifdef __cplusplus
+#define THCHalf at::Half
+#else
+typedef struct at_Half at_Half;
+#define THCHalf at_Half
+#endif
+
 #if CUDA_VERSION >= 9000 || defined(__HIP_PLATFORM_HCC__)
 #ifndef __cplusplus
 typedef __half_raw half;

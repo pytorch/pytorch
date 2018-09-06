@@ -4,7 +4,7 @@
 #include <TH/THGeneral.h>
 
 #ifdef __cplusplus
-#include <ATen/core/TensorImpl.h>
+#include <ATen/core/Half.h>
 #endif
 
 #ifdef __cplusplus
