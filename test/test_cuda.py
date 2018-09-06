@@ -280,7 +280,7 @@ tests = [
         types, False, "skipIfRocm:HalfTensor"),
     ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars',
         types, False, "skipIfRocm:HalfTensor"),
-    ('bmm', small_3d, lambda t: [small_3d(t)], '', types, False, "skipIfRocm:HalfTensor"),
+    ('bmm', small_3d, lambda t: [small_3d(t)], '', float_types_no_half, False, "skipIfRocm:HalfTensor"),
     ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)], '',
         types, False, "skipIfRocm:HalfTensor"),
     ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t), tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)],
