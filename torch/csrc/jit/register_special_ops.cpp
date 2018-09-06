@@ -20,11 +20,8 @@ RegisterOperators reg({
           return 0;
         }),
     Operator(
-        "aten::Size(int[] split_sizes) -> int[]",
+        "aten::Size(int[] sizes) -> int[]",
         [](Stack& stack) {
-          auto result = (std::move(peek(stack, 0, 1))).toIntList()->elements();
-          drop(stack, 1);
-          pack(stack, std::move(result));
           return 0;
         }),
 });
