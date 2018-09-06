@@ -3,6 +3,8 @@
 
 namespace at {
 
+#if !AT_MOBILE
+
 thread_local at::optional<TensorOptions> DefaultTensorOptions::options_;
 
 TensorOptions& DefaultTensorOptions::get() {
@@ -12,5 +14,15 @@ TensorOptions& DefaultTensorOptions::get() {
   }
   return *options_;
 }
+
+#else
+
+TensorOptions DefaultTensorOptions::options_;
+
+const TensorOptions& DefaultTensorOptions::get() {
+  return *options_;
+}
+
+#endif
 
 } // namespace at
