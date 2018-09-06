@@ -17,7 +17,10 @@ namespace at { namespace cuda {
 /*
 * CUDAEvents are movable not copyable wrappers around CUDA's events.
 *
-* - lazy, record usage
+* CUDAEvents are constructed lazily when recorded on streams. The events
+* have a device, and this device is acquired from the first recording stream.
+* Later streams that record to the event must share this device, but streams
+* on any device can wait on the event.
 */
 struct AT_CUDA_API CUDAEvent {
   // Constants
