@@ -36,11 +36,11 @@ class NetTestDummyOp final : public OperatorBase {
 
   // Simulate CUDA operator behavior
   bool HasAsyncPart() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
   bool SupportsAsyncScheduling() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
  protected:

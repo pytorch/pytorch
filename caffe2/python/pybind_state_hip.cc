@@ -53,7 +53,7 @@ void addHIPObjectMethods(py::module& m) {
           [](DLPackWrapper<HIPContext>* t) -> py::object {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                HIP,
+                PROTO_HIP,
                 "Expected HIP device option for HIP tensor");
 
             return t->data();
@@ -64,7 +64,7 @@ void addHIPObjectMethods(py::module& m) {
           [](DLPackWrapper<HIPContext>* t, py::object obj) {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                HIP,
+                PROTO_HIP,
                 "Expected HIP device option for HIP tensor");
             t->feed(obj);
           },

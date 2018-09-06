@@ -36,6 +36,14 @@ void OptimizerBase::zero_grad() {
   }
 }
 
+const std::vector<Tensor>& OptimizerBase::parameters() const noexcept {
+  return parameters_;
+}
+
+std::vector<Tensor>& OptimizerBase::parameters() noexcept {
+  return parameters_;
+}
+
 size_t OptimizerBase::size() const noexcept {
   return parameters_.size();
 }
