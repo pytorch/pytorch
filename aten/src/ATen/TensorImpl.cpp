@@ -7,7 +7,7 @@
 #include <ATen/core/Backend.h>
 #include <ATen/core/WrapDimMinimal.h>
 
-#include <ATen/detail/VariableHooksInterface.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 namespace at {
 
