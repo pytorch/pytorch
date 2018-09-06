@@ -7,6 +7,8 @@
 #include "ATen/core/optional.h"
 #include "ATen/core/TensorTypeId.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
+#include "ATen/core/LegacyTypeDispatch.h"
+#include "ATen/core/Backend.h"
 
 struct THTensor;
 
@@ -25,10 +27,13 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual void release_resources() override;
 
-  // The implementation of this method will have to be hoisted out and
-  // hooked in, so that Caffe2 doesn't need to know about Context
-  // TODO: This really really needs to be inlined.
-  Type & type() const;
+  Type & type() const {
+    // NB: It's valid to use getTypeRaw here, because the TensorImpl
+    // could not have been created without initializing the Type first.
+    // TODO: This is not actually true via the Caffe2 codepath!  Make
+    // it so.
+    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), scalar_type(), is_variable());
+  }
 
   TensorTypeId type_id() const { return type_id_; }
   virtual IntList sizes() const;

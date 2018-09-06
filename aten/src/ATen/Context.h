@@ -28,36 +28,16 @@ public:
     return globalLegacyTypeDispatch().getNonVariableTypeRaw(p, s);
   }
   Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
-    if (p != Backend::Undefined) {
-      initCUDAIfNeeded(backendToDeviceType(p));
-      initComplexIfNeeded(s);
-    }
-    auto type = getNonVariableTypeRaw(p, s);
-
-    if(!type) {
-      // there is only a single Undefined Type.
-      if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        return getNonVariableTypeRaw(Backend::Undefined, ScalarType::Undefined);
-      }
-    }
-
-    return type;
+    return globalLegacyTypeDispatch().getNonVariableTypeOpt(p, s);
   }
   Type & getNonVariableType(Backend p, ScalarType s) {
-    auto* type = getNonVariableTypeOpt(p, s);
-    if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
-    return *type;
+    return globalLegacyTypeDispatch().getNonVariableType(p, s);
   }
   Type & getVariableType(Backend p, ScalarType s) {
-    auto& baseType = getNonVariableType(p, s);
-    return detail::getVariableHooks().getVariableTypeFromBaseType(baseType);
+    return globalLegacyTypeDispatch().getVariableType(p, s);
   }
   Type & getType(Backend p, ScalarType s, bool is_variable) {
-    if (is_variable) {
-      return getVariableType(p, s);
-    } else {
-      return getNonVariableType(p, s);
-    }
+    return globalLegacyTypeDispatch().getType(p, s, is_variable);
   }
   // The passed in Type must be delete'able
   // TODO: Just make it take a unique_ptr
