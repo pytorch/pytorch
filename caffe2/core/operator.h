@@ -447,7 +447,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 // run on different devices. You should then implement the RunOnDevice()
 // function.
 template <class Context>
-class CAFFE2_API Operator : public OperatorBase {
+class Operator : public OperatorBase {
  public:
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
