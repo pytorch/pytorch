@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Registry.h>
+#include <ATen/core/Registry.h>
 #include <ATen/ScalarType.h>
 #include <ATen/Type.h>
 
