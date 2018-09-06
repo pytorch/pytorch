@@ -1,19 +1,13 @@
 #include <ATen/TensorImpl.h>
 
-#include "ATen/Context.h"
 #include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
-#include <ATen/Context.h>
 #include <ATen/core/Backend.h>
 #include <ATen/core/WrapDimMinimal.h>
 
 #include <ATen/core/VariableHooksInterface.h>
 
 namespace at {
-
-Type& TensorImpl::type() const {
-  return at::getType(this);
-}
 
 Tensor& TensorImpl::grad() {
   AT_ERROR("grad is not implemented for Tensor");
