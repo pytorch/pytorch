@@ -15,6 +15,7 @@ We are in an early-release beta. Expect some adventures and rough edges.
   - [Binaries](#binaries)
   - [From Source](#from-source)
   - [Docker Image](#docker-image)
+  - [Building the Documentation](#building-the-documentation)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
@@ -223,6 +224,17 @@ nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
 Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
+
+### Building the Documentation
+
+To build documentation in various formats, you will need Sphinx.
+
+```
+conda install sphinx sphinx_rtd_theme
+pip install sphinxcontrib-katex
+```
+You can then build the documentation by running ``make <format>`` from the
+``docs/`` folder. Run ``make`` to get a list of all available output formats.
 
 ### Previous Versions
 
