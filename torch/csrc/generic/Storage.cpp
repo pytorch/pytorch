@@ -160,8 +160,32 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     return THPUtils_(newReal)(value);
   /* Slice index */
   } else if (PySlice_Check(index)) {
-    THPUtils_setError("storages don't support slicing");
-    return nullptr;
+    Py_ssize_t start, stop, slicelength, step;
+    int64_t len = THWStorage_(size)(LIBRARY_STATE self->cdata);
+    if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
+      return NULL;
+    if (step != 1) {
+      THPUtils_setError("Trying to slice with a step of %" PRId64 ", but only a step of "
+          "1 is supported", (int64_t)step);
+      return NULL;
+    }
+
+    scalar_t *data = THWStorage_(data)(LIBRARY_STATE self->cdata);
+
+    at::StorageImpl* old_storage = self->cdata;
+    c10::raw::intrusive_ptr::incref(old_storage);
+    at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
+      old_storage->dtype(),
+      slicelength,
+      at::DataPtr(static_cast<void*>(data + start),
+                  old_storage,
+                  [](void* s) { c10::raw::intrusive_ptr::decref(static_cast<at::StorageImpl*>(s)); },
+                  old_storage->device()),
+      old_storage->allocator(),
+      /* resizable */ false));
+
+    PyObject *_ret = THPStorage_(New)(new_storage.unsafeReleaseStorageImpl());
+    return _ret;
   }
   PyErr_Format(PyExc_TypeError, "can't index a " THPStorageStr " with %s",
       THPUtils_typename(index));
