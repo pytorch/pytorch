@@ -41,7 +41,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
   if (self.dim() < signal_tensor_ndim) {
     std::ostringstream ss;
     ss << "Given signal_ndim=" << signal_ndim << ", expected an input tensor "
-       << "of at least" << signal_tensor_ndim << "D";
+       << "of at least " << signal_tensor_ndim << "D";
     if (complex_input) {
       ss << " (complex input adds an extra dimension)";
     }
