@@ -1623,37 +1623,74 @@ class TestJit(JitTestCase):
 
     def test_export_batchnorm(self):
         for mode in ['eval', 'train']:
-            class BatchnormTest(torch.nn.Module):
-                def __init__(self):
-                    super(BatchnormTest, self).__init__()
-                    self.batchnorm = torch.nn.BatchNorm1d(100)
+            for clazz in [
+                    torch.nn.BatchNorm1d(100),
+                    torch.nn.BatchNorm1d(100, affine=False),
+                    torch.nn.BatchNorm2d(100),
+                    torch.nn.BatchNorm2d(100, affine=False)]:
+                class BatchnormTest(torch.nn.Module):
+                    def __init__(self):
+                        super(BatchnormTest, self).__init__()
+                        self.batchnorm = clazz
 
-                def forward(self, x):
-                    return self.batchnorm(x)
+                    def forward(self, x):
+                        return self.batchnorm(x)
 
-            test = BatchnormTest()
-            getattr(test, mode)()
+                test = BatchnormTest()
+                getattr(test, mode)()
 
-            traced = torch.jit.trace(test, (torch.randn(20, 100),))
-            imported = self.getExportImportCopy(traced)
-            x = torch.randn(20, 100)
-            self.assertEqual(traced(x), imported(x))
+                input = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
+                            torch.randn(20, 100, 35, 45)
+
+                traced = torch.jit.trace(test, (input,))
+                imported = self.getExportImportCopy(traced)
+                x = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
+                        torch.randn(20, 100, 35, 45)
+                self.assertEqual(traced(x), imported(x))
 
     def test_export_rnn(self):
-        class RNNTest(torch.nn.Module):
+        for clazz in [nn.RNN(10, 20, 2), nn.GRU(10, 20, 2)]:
+            class RNNTest(torch.nn.Module):
+                def __init__(self):
+                    super(RNNTest, self).__init__()
+                    self.rnn = clazz
+
+                def forward(self, x, lengths, h0):
+                    packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
+                    out, h = self.rnn(packed, h0)
+                    padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
+                    return padded_outs
+
+            test = RNNTest()
+
+            traced = torch.jit.trace(test,
+                (torch.randn(5, 3, 10), torch.LongTensor([3, 2, 1]), torch.randn(2, 3, 20)))
+            imported = self.getExportImportCopy(traced)
+            x, lengths, h0 = torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20)
+            self.assertEqual(traced(x, lengths, h0), imported(x, lengths, h0))
+
+
+    def test_export_lstm(self):
+        class LSTMTest(torch.nn.Module):
             def __init__(self):
-                super(RNNTest, self).__init__()
-                self.rnn = nn.RNN(10, 20, 2)
+                super(LSTMTest, self).__init__()
+                self.rnn = nn.LSTM(10, 20, 2)
 
-            def forward(self, x, h0):
-                return self.rnn(x, h0)
+            def forward(self, x, lengths, hiddens):
+                h0, c0 = hiddens
+                packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
+                out, (h, c) = self.rnn(packed, (h0, c0))
+                padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
+                return padded_outs
 
-        test = RNNTest()
+        test = LSTMTest()
 
-        traced = torch.jit.trace(test, (torch.randn(5, 3, 10), torch.randn(2, 3, 20)))
+        traced = torch.jit.trace(test,
+            (torch.randn(5, 3, 10), torch.LongTensor([3, 2, 1]), (torch.randn(2, 3, 20), torch.randn(2, 3, 20))))
         imported = self.getExportImportCopy(traced)
-        x, h0 = torch.randn(5, 3, 10), torch.randn(2, 3, 20)
-        self.assertEqual(traced(x, h0), imported(x, h0))
+        x, lengths, h0, c0 = \
+            torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
+        self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
 
 
 class TestBatched(TestCase):
