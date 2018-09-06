@@ -49,8 +49,8 @@
 #   USE_GLOO_IBVERBS
 #     toggle features related to distributed support
 #
-#   NO_BINARY
-#     disables the additional binaries/ build
+#   BUILD_BINARY
+#     enables the additional binaries/ build
 #
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
