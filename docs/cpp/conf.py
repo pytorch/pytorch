@@ -23,7 +23,6 @@
 import sys
 import textwrap
 
-import torch
 import sphinx_rtd_theme
 
 # -- General configuration ------------------------------------------------
@@ -109,7 +108,7 @@ author = 'Torch Contributors'
 #
 # The short X.Y version.
 # TODO: change to [:2] at v1.0
-version = 'master (' + torch.__version__ + ' )'
+version = 'master'
 # The full version, including alpha/beta/rc tags.
 # TODO: verify this works as expected
 release = 'master'

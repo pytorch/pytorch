@@ -96,9 +96,6 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       // TODO(jerryzh): We'll need to check device type in Get<T>() later
       // Get<T>() -> Get<T>(type)
       const auto& tensor = inputs_.at(idx)->template Get<T>();
-      CAFFE_ENFORCE(
-          tensor.is_contiguous(),
-          "Tensor must be contiguous for caffe2 operators");
       return tensor;
     } catch (::caffe2::EnforceNotMet& enf) {
       if (has_debug_def()) {
@@ -125,11 +122,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
-    auto* tensor = outputs_.at(idx)->GetMutableTensor(type);
-    CAFFE_ENFORCE(
-        tensor->is_contiguous(),
-        "Tensor must be contiguous for caffe2 operators");
-    return tensor;
+    return outputs_.at(idx)->GetMutableTensor(type);
   }
 
   template <typename T>
@@ -806,12 +799,12 @@ typedef Registry<
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
     Workspace*>* (*RegistryFunction)();
-CAFFE2_API std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry();
+CAFFE2_API std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry();
 
 struct CAFFE2_API DeviceTypeRegisterer {
-  explicit DeviceTypeRegisterer(int32_t type, RegistryFunction func) {
+  explicit DeviceTypeRegisterer(DeviceType type, RegistryFunction func) {
     if (gDeviceTypeRegistry()->count(type)) {
-      std::cerr << "Device type " << type
+      std::cerr << "Device type " << DeviceTypeName(type)
                 << "registered twice. This should not happen. Did you have "
                    "duplicated numbers assigned to different devices?";
       std::exit(1);
@@ -967,9 +960,9 @@ CAFFE2_API const std::string OpRegistryKey(
 using EnginePrefType = std::vector<std::string>;
 // {device_type -> {operator_name -> EnginePrefType}}
 using PerOpEnginePrefType =
-    CaffeMap<int, CaffeMap<std::string, EnginePrefType>>;
+    CaffeMap<DeviceType, CaffeMap<std::string, EnginePrefType>>;
 // {device_type -> EnginePrefType}
-using GlobalEnginePrefType = CaffeMap<int, EnginePrefType>;
+using GlobalEnginePrefType = CaffeMap<DeviceType, EnginePrefType>;
 CAFFE2_API void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref);
 CAFFE2_API void SetGlobalEnginePref(const GlobalEnginePrefType& global_engine_pref);
 CAFFE2_API void SetEnginePref(
@@ -977,7 +970,7 @@ CAFFE2_API void SetEnginePref(
     const GlobalEnginePrefType& global_engine_pref);
 CAFFE2_API void SetOpEnginePref(
     const std::string& op_type,
-    const CaffeMap<int, EnginePrefType>& op_pref);
+    const CaffeMap<DeviceType, EnginePrefType>& op_pref);
 
 CAFFE2_API TensorShape GetTensorShapeOfBlob(const Blob* b);
 

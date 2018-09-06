@@ -6,12 +6,13 @@
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorRandom.cuh"
 #include "THCGenerator.hpp"
+#include "ATen/Config.h"
+
+#include "ATen/cuda/_curand_mtgp32_host.h"
 
 #include <thrust/functional.h>
 #include <curand.h>
 #include <curand_kernel.h>
-#include <curand_mtgp32_host.h>
-#include <curand_mtgp32dc_p_11213.h>
 
 #define MAX_NUM_BLOCKS 200 
 #define BLOCK_SIZE 256

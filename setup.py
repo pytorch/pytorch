@@ -188,7 +188,10 @@ cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 tmp_install_path = lib_path + "/tmp_install"
+caffe2_build_dir = os.path.join(cwd, "build")
+# lib/pythonx.x/site-packages
 rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
+# full absolute path to the dir above
 full_site_packages = distutils.sysconfig.get_python_lib()
 
 
@@ -465,6 +468,15 @@ class develop(setuptools.command.develop.develop):
         setuptools.command.develop.develop.run(self)
         self.create_compile_commands()
 
+        # Copy Caffe2's Python proto files (generated during the build with the
+        # protobuf python compiler) from the build folder to the root folder
+        # cp root/build/caffe2/proto/proto.py root/caffe2/proto/proto.py
+        for src in glob.glob(
+                os.path.join(caffe2_build_dir, 'caffe2', 'proto', '*.py')):
+            dst = os.path.join(
+                cwd, os.path.relpath(src, caffe2_build_dir))
+            self.copy_file(src, dst)
+
     def create_compile_commands(self):
         def load(filename):
             with open(filename) as f:
@@ -593,39 +605,40 @@ class build_ext(build_ext_parent):
         # platform dependent build folder created by the "build" command of
         # setuptools. Only the contents of this folder are installed in the
         # "install" command by default.
-        if FULL_CAFFE2:
-            # We only make this copy for Caffe2's pybind extensions
-            caffe2_pybind_exts = [
-                'caffe2.python.caffe2_pybind11_state',
-                'caffe2.python.caffe2_pybind11_state_gpu',
-                'caffe2.python.caffe2_pybind11_state_hip',
-            ]
-            i = 0
-            while i < len(self.extensions):
-                ext = self.extensions[i]
-                if ext.name not in caffe2_pybind_exts:
-                    i += 1
-                    continue
-                fullname = self.get_ext_fullname(ext.name)
-                filename = self.get_ext_filename(fullname)
+        # We only make this copy for Caffe2's pybind extensions
+        caffe2_pybind_exts = [
+            'caffe2.python.caffe2_pybind11_state',
+            'caffe2.python.caffe2_pybind11_state_gpu',
+            'caffe2.python.caffe2_pybind11_state_hip',
+        ]
+        i = 0
+        while i < len(self.extensions):
+            ext = self.extensions[i]
+            if ext.name not in caffe2_pybind_exts:
+                i += 1
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            print("\nCopying extension {}".format(ext.name))
 
-                src = os.path.join(tmp_install_path, rel_site_packages, filename)
-                if not os.path.exists(src):
-                    print("{} does not exist".format(src))
-                    del self.extensions[i]
-                else:
-                    dst = os.path.join(os.path.realpath(self.build_lib), filename)
-                    dst_dir = os.path.dirname(dst)
-                    if not os.path.exists(dst_dir):
-                        os.makedirs(dst_dir)
-                    self.copy_file(src, dst)
-                    i += 1
+            src = os.path.join(tmp_install_path, rel_site_packages, filename)
+            if not os.path.exists(src):
+                print("{} does not exist".format(src))
+                del self.extensions[i]
+            else:
+                dst = os.path.join(os.path.realpath(self.build_lib), filename)
+                print("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+                i += 1
         distutils.command.build_ext.build_ext.build_extensions(self)
 
     def get_outputs(self):
         outputs = distutils.command.build_ext.build_ext.get_outputs(self)
-        if FULL_CAFFE2:
-            outputs.append(os.path.join(self.build_lib, "caffe2"))
+        outputs.append(os.path.join(self.build_lib, "caffe2"))
+        print("setup.py::get_outputs returning {}".format(outputs))
         return outputs
 
 
@@ -831,6 +844,7 @@ main_sources = [
     "torch/csrc/jit/ivalue.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
+    "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/to_batch.cpp",
     "torch/csrc/jit/python_arg_flatten.cpp",
@@ -1007,10 +1021,7 @@ def make_relative_rpath(path):
 ################################################################################
 
 extensions = []
-if FULL_CAFFE2:
-    packages = find_packages(exclude=('tools', 'tools.*'))
-else:
-    packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe2.*'))
+packages = find_packages(exclude=('tools', 'tools.*'))
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,
@@ -1054,19 +1065,18 @@ if USE_CUDA:
                         )
     extensions.append(THNVRTC)
 
-if FULL_CAFFE2:
-    # If building Caffe2 python as well, these extensions are built by cmake
-    # copied manually in build_extensions() inside the build_ext implementaiton
-    extensions.append(
-        setuptools.Extension(
-            name=str('caffe2.python.caffe2_pybind11_state'),
-            sources=[]),
-    )
-    extensions.append(
-        setuptools.Extension(
-            name=str('caffe2.python.caffe2_pybind11_state_gpu'),
-            sources=[]),
-    )
+# These extensions are built by cmake and copied manually in build_extensions()
+# inside the build_ext implementaiton
+extensions.append(
+    setuptools.Extension(
+        name=str('caffe2.python.caffe2_pybind11_state'),
+        sources=[]),
+)
+extensions.append(
+    setuptools.Extension(
+        name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+        sources=[]),
+)
 
 cmdclass = {
     'create_version_file': create_version_file,
@@ -1082,14 +1092,12 @@ cmdclass = {
 }
 cmdclass.update(build_dep_cmds)
 
-entry_points = {}
-if FULL_CAFFE2:
-    entry_points = {
-        'console_scripts': [
-            'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
-            'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
-        ]
-    }
+entry_points = {
+    'console_scripts': [
+        'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
+        'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+    ]
+}
 
 if __name__ == '__main__':
     setup(
@@ -1132,6 +1140,9 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/csrc/cuda/*.h',
                 'lib/include/torch/torch.h',
+            ],
+            'caffe2': [
+                rel_site_packages + '/caffe2/**/*.py'
             ]
         },
     )

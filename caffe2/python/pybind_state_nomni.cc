@@ -104,7 +104,19 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "dataFlow",
           [](NNModule* nn) -> NNGraph* { return &nn->dataFlow; },
-          py::return_value_policy::reference_internal);
+          py::return_value_policy::reference_internal)
+      .def("convertToCaffe2Proto", [](NNModule& nn, py::object def) {
+        auto attr = def.attr("SerializeToString");
+        CAFFE_ENFORCE(
+            attr, "convertToCaffe2Proto takes either no args", "a NetDef");
+        auto str = attr();
+        caffe2::NetDef proto;
+        proto.ParseFromString(py::bytes(str));
+        auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
+        std::string out;
+        new_proto.SerializeToString(&out);
+        return py::bytes(out);
+      });
 
   // NNGraph methods
   py::class_<NNGraph> nngraph(m, "NNGraph");

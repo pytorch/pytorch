@@ -10,8 +10,11 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 
+import unittest
+import os
 
 class RecurrentNetworkTest(hu.HypothesisTestCase):
+    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
