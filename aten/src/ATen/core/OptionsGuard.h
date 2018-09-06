@@ -63,8 +63,16 @@ struct OptionsGuard {
 struct DefaultTensorOptions {
   AT_API static const TensorOptions& get();
 private:
-  static TensorOptions options_(/* use DefaultTensorOptions */ false);
-}
+  static TensorOptions options_;
+};
+
+template<typename T = void>
+struct OptionsGuard {
+  OptionsGuard() {
+      static_assert(!std::is_same<T, void>::value,
+                    "OptionsGuard is not supported on mobile; please pass around TensorOptions manually");
+  }
+};
 
 #endif
 
