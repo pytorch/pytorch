@@ -22,7 +22,7 @@ std::vector<TensorShape> TensorInferenceForConvGradient(
   // FILTER_GRAD has the same shape as FILTER
   out[0] = in[1];
   if (!no_bias) {
-    vector<int> bias_shape = {in[1].dims(0)};
+    vector<int64_t> bias_shape = {in[1].dims(0)};
     out[1] = CreateTensorShape(bias_shape, in[1].data_type());
   }
 
