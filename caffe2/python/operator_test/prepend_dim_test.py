@@ -41,6 +41,9 @@ class TestPrependDim(TestCase):
         if workspace.NumCudaDevices() > 0:
             devices.append(core.DeviceOption(caffe2_pb2.CUDA, 0))
 
+        if workspace.NumHipDevices() > 0:
+            devices.append(core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=0))
+
         for device_opt in devices:
             with core.DeviceScope(device_opt):
                 self._test_fwd_bwd()
