@@ -239,7 +239,9 @@ inline void bmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tenso
   auto s0 = self.accessor<scalar_t, 3>();
   auto m0 = mat2.accessor<scalar_t, 3>();
 
+#ifdef _OPENMP
   #pragma omp parallel for if(bs > 100) // or small ks?
+#endif
   for (int64_t b = 0; b < bs; b++) {
     auto r1 = r0[b];
     auto s1 = s0[b];
@@ -272,7 +274,9 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
   auto s0 = self.accessor<scalar_t, 3>();
   auto m0 = mat2.accessor<scalar_t, 3>();
 
+#ifdef _OPENMP
   #pragma omp parallel for if(bs > 100) // or small ks?
+#endif
   for (int64_t b = 0; b < bs; b++) {
     auto r1 = r0[b];
     auto s1 = s0[b];
@@ -347,7 +351,9 @@ Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch
   return at::native::baddbmm_out_cpu(result, self, batch1, batch2, beta, alpha);
 }
 
-Tensor& baddbmm_out_cpu(Tensor &result, const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm_out_cpu(Tensor &result, const Tensor& self_, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor self;
+  std::tie(self) = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
   result.resize_(self.sizes());
   result.copy_(self);
   return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
