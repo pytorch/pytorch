@@ -1,6 +1,7 @@
 from __future__ import print_function
 import sys
 import os
+import re
 import math
 import shutil
 import random
@@ -8,16 +9,17 @@ import tempfile
 import unittest
 import traceback
 import torch
+import torch.nn as nn
 import torch.utils.data
 import torch.cuda
 import warnings
-from torch.autograd import Variable
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
-from torch.utils.serialization import load_lua
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
+from common import IS_WINDOWS, IS_PPC, skipIfRocm
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -25,10 +27,13 @@ from common import TestCase, run_tests, download_file
 
 try:
     import cffi
-    from torch.utils.ffi import compile_extension
     HAS_CFFI = True
 except ImportError:
     HAS_CFFI = False
+
+
+if HAS_CFFI:
+    from torch.utils.ffi import create_extension
 
 
 class SimplePlugin(Plugin):
@@ -65,7 +70,7 @@ class ModelMock(object):
 
     def __init__(self):
         self.num_calls = 0
-        self.output = Variable(torch.ones(1, 1), requires_grad=True)
+        self.output = torch.ones(1, 1, requires_grad=True)
 
     def __call__(self, i):
         self.num_calls += 1
@@ -110,10 +115,145 @@ class DatasetMock(object):
         return 10
 
 
+class RandomDatasetMock(object):
+
+    def __getitem__(self, index):
+        return torch.tensor([torch.rand(1).item(), random.uniform(0, 1)])
+
+    def __len__(self):
+        return 1000
+
+
+class TestCheckpoint(TestCase):
+
+    # Test whether checkpoint is being triggered or not. For this, we check
+    # the number of times forward pass happens
+    def test_checkpoint_trigger(self):
+
+        class Net(nn.Module):
+
+            def __init__(self):
+                super(Net, self).__init__()
+                self.counter = 0
+
+            def forward(self, input_var):
+                self.counter += 1
+                return input_var
+
+        # checkpointed
+        modules = [Net() for _ in range(10)]
+        for m in modules:
+            self.assertEqual(m.counter, 0)
+        input_var = torch.randn(3, 4, requires_grad=True)
+        out = checkpoint_sequential(modules, 2, input_var)
+        for m in modules:
+            self.assertEqual(m.counter, 1)
+        out.sum().backward()
+        for m in modules[:(len(modules) // 2)]:
+            self.assertEqual(m.counter, 2)
+        for m in modules[(len(modules) // 2):]:
+            self.assertEqual(m.counter, 1)
+
+    def test_checkpoint_valid(self):
+        model = nn.Sequential(
+            nn.Linear(100, 50),
+            nn.ReLU(),
+            nn.Linear(50, 20),
+            nn.ReLU(),
+            nn.Linear(20, 5),
+            nn.ReLU()
+        )
+
+        input_var = torch.randn(1, 100, requires_grad=True)
+
+        # checkpointed
+        chunks = 2
+        modules = list(model.children())
+        out = checkpoint_sequential(modules, chunks, input_var)
+        with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
+            torch.autograd.grad(
+                outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
+            )
+
+    def test_checkpoint(self):
+        model = nn.Sequential(
+            nn.Linear(100, 50),
+            nn.ReLU(),
+            nn.Linear(50, 20),
+            nn.ReLU(),
+            nn.Linear(20, 5),
+            nn.ReLU()
+        )
+
+        x = torch.randn(1, 100, requires_grad=True)
+
+        # not checkpointed
+        out = model(x)
+        out_not_checkpointed = out.data.clone()
+        model.zero_grad()
+        out.sum().backward()
+        grad_not_checkpointed = {}
+        for name, param in model.named_parameters():
+            grad_not_checkpointed[name] = param.grad.data.clone()
+        input_grad = x.grad.data.clone()
+
+        # checkpointed model by passing list of modules
+        chunks = 2
+        modules = list(model.children())
+        input_var = x.detach()
+        input_var.requires_grad = True
+        # pass list of modules to checkpoint
+        out = checkpoint_sequential(modules, chunks, input_var)
+        out_checkpointed = out.data.clone()
+        model.zero_grad()
+        out.sum().backward()
+        grad_checkpointed = {}
+        for name, param in model.named_parameters():
+            grad_checkpointed[name] = param.grad.data.clone()
+        checkpoint_input_grad = input_var.grad.data.clone()
+        # compare the output, input and parameters gradients
+        self.assertEqual(out_checkpointed, out_not_checkpointed)
+        self.assertEqual(input_grad, checkpoint_input_grad)
+        for name in grad_checkpointed:
+            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+
+        # checkpointed by passing sequential directly
+        input_var1 = x.detach()
+        input_var1.requires_grad = True
+        # pass the sequential itself
+        out = checkpoint_sequential(model, 2, input_var1)
+        out_checkpointed = out.data.clone()
+        model.zero_grad()
+        out.sum().backward()
+        grad_checkpointed = {}
+        for name, param in model.named_parameters():
+            grad_checkpointed[name] = param.grad.data.clone()
+        checkpoint_input_grad = input_var1.grad.data.clone()
+        # compare the output, input and parameters gradients
+        self.assertEqual(out_checkpointed, out_not_checkpointed)
+        self.assertEqual(input_grad, checkpoint_input_grad)
+        for name in grad_checkpointed:
+            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+
+
 class TestDataLoader(TestCase):
     def setUp(self):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
+
+    def test_random_seed(self):
+        def run():
+            dataloader = torch.utils.data.DataLoader(RandomDatasetMock(),
+                                                     batch_size=2,
+                                                     num_workers=4,
+                                                     shuffle=True)
+            return next(iter(dataloader))
+
+        torch.manual_seed(2018)
+        x1 = run()
+        torch.manual_seed(2018)
+        x2 = run()
+        self.assertEqual(x1, x2)
 
     def test_single_keep(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
@@ -131,6 +271,7 @@ class TestDataLoader(TestCase):
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
+    @unittest.skip("FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN")
     def test_multi_keep(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
                                                  batch_size=self.batch_size,
@@ -240,16 +381,18 @@ class TestFFI(TestCase):
         shutil.rmtree(self.tmpdir)
 
     @unittest.skipIf(not HAS_CFFI, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
+    @unittest.skipIf(IS_PPC, "skip for ppc64le due to incompatible exception handling")
     def test_cpu(self):
-        compile_extension(
+        create_extension(
             name='test_extensions.cpulib',
-            header=test_dir + '/ffi/src/cpu/lib.h',
+            headers=[test_dir + '/ffi/src/cpu/lib.h'],
             sources=[
                 test_dir + '/ffi/src/cpu/lib1.c',
                 test_dir + '/ffi/src/cpu/lib2.c',
             ],
             verbose=False,
-        )
+        ).build()
         from test_extensions import cpulib
         tensor = torch.ones(2, 2).float()
 
@@ -268,16 +411,20 @@ class TestFFI(TestCase):
                           lambda: cpulib.bad_func(tensor, 2, 1.5))
 
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
+    @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
+    @skipIfRocm
     def test_gpu(self):
-        compile_extension(
+        from torch.utils.cpp_extension import CUDA_HOME
+        create_extension(
             name='gpulib',
-            header=test_dir + '/ffi/src/cuda/cudalib.h',
+            headers=[test_dir + '/ffi/src/cuda/cudalib.h'],
             sources=[
                 test_dir + '/ffi/src/cuda/cudalib.c',
             ],
             with_cuda=True,
             verbose=False,
-        )
+            include_dirs=[os.path.join(CUDA_HOME, 'include')],
+        ).build()
         import gpulib
         tensor = torch.ones(2, 2).float()
 
@@ -345,9 +492,13 @@ class TestLuaReader(TestCase):
         long_size = 8 if sys.platform == 'win32' else None
         tests = load_lua(path, long_size=long_size)
         for name, test in tests['modules'].items():
+            if name == "HardShrink":
+                continue
             test_name = 'test_' + name.replace('nn.', '')
             setattr(cls, test_name, cls._module_test(name, test))
         for name, test in tests['criterions'].items():
+            if name == "HardShrink":
+                continue
             test_name = 'test_' + name.replace('nn.', '')
             setattr(cls, test_name, cls._criterion_test(name, test))
 
@@ -380,6 +531,112 @@ class TestLuaReader(TestCase):
 
     def _transform_MultiMarginCriterion(self, input, target):
         return input, target.sub(1)
+
+
+@unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
+class TestBottleneck(TestCase):
+    def _run(self, command):
+        """Returns (return-code, stdout, stderr)"""
+        import subprocess
+        from common import PY3
+
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, shell=True)
+        output, err = p.communicate()
+        rc = p.returncode
+        if PY3:
+            output = output.decode("ascii")
+            err = err.decode("ascii")
+        return (rc, output, err)
+
+    def _run_bottleneck(self, test_file, scriptargs=''):
+        curdir = os.path.dirname(os.path.abspath(__file__))
+        filepath = '{}/{}'.format(curdir, test_file)
+        if scriptargs != '':
+            scriptargs = ' {}'.format(scriptargs)
+        rc, out, err = self._run(
+            '{} -m torch.utils.bottleneck {}{}'.format(sys.executable, filepath, scriptargs))
+        return rc, out, err
+
+    def _check_run_args(self):
+        # Check that this fails due to missing args
+        rc, out, err = self._run_bottleneck('bottleneck/test_args.py')
+        self.assertEqual(rc, 2, None, self._fail_msg('Missing args should error', out + err))
+
+        # This should succeed
+        rc, out, err = self._run_bottleneck('bottleneck/test_args.py', '--foo foo --bar bar')
+        self.assertEqual(rc, 0, None, self._fail_msg('Should pass args to script', out + err))
+
+    def _fail_msg(self, msg, output):
+        return '{}, output was:\n{}'.format(msg, output)
+
+    def _check_environment_summary(self, output):
+        results = re.search('Environment Summary', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have Enviroment Summary', output))
+
+        # Up to five lines away from the heading, there should be the version number
+        results = re.search(r'Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have PyTorch version', output))
+
+    def _check_cprof_summary(self, output):
+        results = re.search('cProfile output', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have cProfile output', output))
+
+        # This assumes that after the cProfile output section we have
+        # the autograd profiler output
+        results = re.search(r'cProfile output.*(\n.*){6,50}\n.*autograd profiler output', output)
+        self.assertIsNotNone(results, self._fail_msg(
+            'Distance between cProfile and autograd prof out not in [6, 50] lines', output))
+
+    def _check_autograd_summary(self, output):
+        results = re.search('autograd profiler output', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have autograd profiler output', output))
+
+        # This assumes that after the autograd profiler output is the end of the
+        # output.
+        results = re.search(r'autograd profiler output.*(\n.*){6,100}', output)
+        self.assertIsNotNone(results, self._fail_msg(
+            'Distance between autograd prof output and end of output not in [6, 100] lines', output))
+
+    def _check_cuda(self, output):
+        if HAS_CUDA:
+            results = re.search('CUDA mode', output)
+            self.assertIsNotNone(results, self._fail_msg('Should tell users CUDA', output))
+        else:
+            results = re.search('CUDA mode', output)
+            self.assertIsNone(results, self._fail_msg('Should not tell users about CUDA', output))
+
+    @unittest.skipIf(HAS_CUDA, 'CPU-only test')
+    def test_bottleneck_cpu_only(self):
+        rc, out, err = self._run_bottleneck('bottleneck/test.py')
+        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+
+        self._check_run_args()
+        self._check_environment_summary(out)
+        self._check_autograd_summary(out)
+        self._check_cprof_summary(out)
+        self._check_cuda(out)
+
+    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    @skipIfRocm
+    def test_bottleneck_cuda(self):
+        rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
+        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+
+        self._check_run_args()
+        self._check_environment_summary(out)
+        self._check_autograd_summary(out)
+        self._check_cprof_summary(out)
+        self._check_cuda(out)
+
+
+from torch.utils.collect_env import get_pretty_env_info
+
+
+class TestCollectEnv(TestCase):
+    def test_smoke(self):
+        info_output = get_pretty_env_info()
+        self.assertTrue(info_output.count('\n') >= 17)
 
 
 class TestONNXUtils(TestCase):
@@ -442,6 +699,7 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
-TestLuaReader.init()
 if __name__ == '__main__':
+    from torch.utils.serialization import load_lua
+    TestLuaReader.init()
     run_tests()

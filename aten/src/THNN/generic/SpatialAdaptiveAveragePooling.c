@@ -10,8 +10,8 @@
 // 4d tensor B x D x H x W
 
 static void THNN_(SpatialAdaptiveAveragePooling_updateOutput_frame)(
-          real *input_p,
-          real *output_p,
+          scalar_t *input_p,
+          scalar_t *output_p,
           int64_t sizeD,
           int64_t isizeH,
           int64_t isizeW,
@@ -41,17 +41,17 @@ static void THNN_(SpatialAdaptiveAveragePooling_updateOutput_frame)(
         int kW = iendW - istartW;
 
         /* local pointers */
-        real *ip = input_p   + d*istrideD + istartH*istrideH + istartW*istrideW;
-        real *op = output_p  + d*osizeH*osizeW + oh*osizeW + ow;
+        scalar_t *ip = input_p   + d*istrideD + istartH*istrideH + istartW*istrideW;
+        scalar_t *op = output_p  + d*osizeH*osizeW + oh*osizeW + ow;
 
         /* compute local average: */
-        real sum = 0;
+        scalar_t sum = 0;
         int ih, iw;
         for(ih = 0; ih < kH; ih++)
         {
           for(iw = 0; iw < kW; iw++)
           {
-            real val = *(ip + ih*istrideH + iw*istrideW);
+            scalar_t val = *(ip + ih*istrideH + iw*istrideW);
             sum += val;
           }
         }
@@ -74,47 +74,47 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
   int dimH = 1;
   int dimW = 2;
   int64_t sizeB = 1;
-  int64_t sizeD;
-  int64_t isizeH;
-  int64_t isizeW;
+  int64_t sizeD = 0;
+  int64_t isizeH = 0;
+  int64_t isizeW = 0;
 
-  int64_t istrideB;
-  int64_t istrideD;
-  int64_t istrideH;
-  int64_t istrideW;
+  int64_t istrideB = 0;
+  int64_t istrideD = 0;
+  int64_t istrideH = 0;
+  int64_t istrideW = 0;
 
-  real *input_data;
-  real *output_data;
+  scalar_t *input_data = nullptr;
+  scalar_t *output_data = nullptr;
 
 
-  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
-		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
+		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
-    istrideB = input->stride[0];
-    sizeB = input->size[0];
+    istrideB = input->stride(0);
+    sizeB = input->size(0);
     dimD++;
     dimH++;
     dimW++;
   }
 
   /* sizes */
-  sizeD  = input->size[dimD];
-  isizeH = input->size[dimH];
-  isizeW = input->size[dimW];
+  sizeD  = input->size(dimD);
+  isizeH = input->size(dimH);
+  isizeW = input->size(dimW);
   /* strides */
-  istrideD = input->stride[dimD];
-  istrideH = input->stride[dimH];
-  istrideW = input->stride[dimW];
+  istrideD = input->stride(dimD);
+  istrideH = input->stride(dimH);
+  istrideW = input->stride(dimW);
 
   /* resize output */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THTensor_(resize3d)(output, sizeD, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
     THNN_(SpatialAdaptiveAveragePooling_updateOutput_frame)(input_data, output_data,
                                                       sizeD,
@@ -129,8 +129,8 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
 
     THTensor_(resize4d)(output, sizeB, sizeD, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
 #pragma omp parallel for private(b)
     for (b = 0; b < sizeB; b++)
@@ -146,8 +146,8 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
 }
 
 static void THNN_(SpatialAdaptiveAveragePooling_updateGradInput_frame)(
-          real *gradInput_p,
-          real *gradOutput_p,
+          scalar_t *gradInput_p,
+          scalar_t *gradOutput_p,
           int64_t sizeD,
           int64_t isizeH,
           int64_t isizeW,
@@ -158,8 +158,8 @@ static void THNN_(SpatialAdaptiveAveragePooling_updateGradInput_frame)(
 #pragma omp parallel for private(d)
   for (d = 0; d < sizeD; d++)
   {
-    real *gradInput_p_d = gradInput_p + d*isizeW*isizeH;
-    real *gradOutput_p_d = gradOutput_p + d*osizeW*osizeH;
+    scalar_t *gradInput_p_d = gradInput_p + d*isizeW*isizeH;
+    scalar_t *gradOutput_p_d = gradOutput_p + d*osizeW*osizeH;
 
     /* calculate average */
     int64_t oh, ow;
@@ -176,7 +176,7 @@ static void THNN_(SpatialAdaptiveAveragePooling_updateGradInput_frame)(
         int iendW   = END_IND(ow, osizeW, isizeW);
         int kW = iendW - istartW;
 
-        real grad_delta = gradOutput_p_d[oh*osizeW +ow] / kH / kW;
+        scalar_t grad_delta = gradOutput_p_d[oh*osizeW +ow] / kH / kW;
 
         int ih, iw;
         for(ih = istartH; ih < iendH; ih++)
@@ -207,8 +207,8 @@ void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
   int isizeW;
   int osizeH;
   int osizeW;
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
 
   /* get contiguous gradOutput */
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -217,26 +217,26 @@ void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (input->nDimension == 4) {
-    sizeB = input->size[0];
+  if (input->dim() == 4) {
+    sizeB = input->size(0);
     dimD++;
     dimH++;
     dimW++;
   }
 
   /* sizes */
-  sizeD  = input->size[dimD];
-  isizeH = input->size[dimH];
-  isizeW = input->size[dimW];
-  osizeH = gradOutput->size[dimH];
-  osizeW = gradOutput->size[dimW];
+  sizeD  = input->size(dimD);
+  isizeH = input->size(dimH);
+  isizeW = input->size(dimW);
+  osizeH = gradOutput->size(dimH);
+  osizeW = gradOutput->size(dimW);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<scalar_t>();
+  gradOutput_data = gradOutput->data<scalar_t>();
 
   /* backprop */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THNN_(SpatialAdaptiveAveragePooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
                                                          sizeD,
@@ -257,7 +257,7 @@ void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

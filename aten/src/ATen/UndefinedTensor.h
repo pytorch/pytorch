@@ -6,18 +6,24 @@ namespace at {
 
 struct AT_API UndefinedTensor final : public TensorImpl {
 public:
-  static inline UndefinedTensor * singleton() {
+  // Without this, we get:
+  //  error: identifier "at::UndefinedTensor::_singleton" is undefined in device code
+  // (ostensibly because the constexpr tricks MSVC into trying to compile this
+  // function for device as well).
+#ifdef _WIN32
+  static inline TensorImpl * singleton() {
+#else
+  static constexpr inline TensorImpl * singleton() {
+#endif
     return &_singleton;
   }
-  virtual ~UndefinedTensor() {}
-  virtual const char * toString() const override;
-  virtual IntList sizes() const override;
-  virtual IntList strides() const override;
-  virtual int64_t dim() const override;
-  virtual Scalar localScalar() override;
-  virtual void * unsafeGetTH(bool retain) override;
-  virtual std::unique_ptr<Storage> storage() override;
-  static const char * typeString();
+  IntList sizes() const override;
+  IntList strides() const override;
+  int64_t size(int64_t d) const override;
+  int64_t stride(int64_t d) const override;
+  int64_t dim() const override;
+  const Storage& storage() const override;
+  int64_t storage_offset() const override;
 private:
   UndefinedTensor();
   static UndefinedTensor _singleton;

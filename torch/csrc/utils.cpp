@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <stdarg.h>
 #include <string>
 #include <vector>
@@ -8,6 +8,7 @@
 #include "THP.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/invalid_arguments.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/DynamicTypes.h"
 
 #include "generic/utils.cpp"
@@ -15,10 +16,6 @@
 
 #include "generic/utils.cpp"
 #include <TH/THGenerateHalfType.h>
-
-#ifdef WITH_CUDA
-#include "torch/csrc/cuda/THCP.h"
-#endif
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result) {
   if (!PyCallable_Check(arg))
@@ -49,12 +46,32 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
       if (!THPUtils_checkLong(item)) {
         return false;
       }
-      storage->data[i] = THPUtils_unpackLong(item);
+      THLongStorage_set(storage, i, THPUtils_unpackLong(item));
     }
     result  = std::move(storage);
     return true;
   }
   return false;
+}
+
+std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
+  bool tuple = PyTuple_Check(arg);
+  bool list = PyList_Check(arg);
+  if (tuple || list) {
+    int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+    std::vector<int64_t> sizes(nDim);
+    for (int i = 0; i != nDim; ++i) {
+      PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
+      if (!THPUtils_checkLong(item)) {
+        std::ostringstream oss;
+        oss << "expected int at position " << i << ", but got: " << THPUtils_typename(item);
+        throw std::runtime_error(oss.str());
+      }
+      sizes[i] = THPUtils_unpackLong(item);
+    }
+    return sizes;
+  }
+  throw std::runtime_error("Expected tuple or list");
 }
 
 bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result) {
@@ -75,7 +92,7 @@ bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStora
     if (!THPUtils_checkLong(arg)) {
       return false;
     }
-    result->data[i] = THPUtils_unpackLong(arg);
+    THLongStorage_set(result, i, THPUtils_unpackLong(arg));
   }
   return true;
 }
@@ -120,7 +137,7 @@ void THPUtils_setError(const char *format, ...)
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods)
 {
   if (!vector.empty()) {
-    // remove NULL terminator
+    // remove nullptr terminator
     vector.pop_back();
   }
   while (1) {
@@ -211,47 +228,9 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
   return true;
 }
 
-std::vector<at::Tensor> THPUtils_PySequence_to_TensorList(PyObject *obj) {
-  if (!PySequence_Check(obj)) {
-    throw std::runtime_error("Expected a sequence in THPUtils_PySequence_to_TensorList");
+template<>
+void THPPointer<THTensor>::free() {
+  if (ptr) {
+    THTensor_free(LIBRARY_STATE ptr);
   }
-  THPObjectPtr seq = THPObjectPtr(PySequence_Fast(obj, NULL));
-  if (seq.get() == NULL) {
-    throw std::runtime_error("expected PySequence, but got " + std::string(THPUtils_typename(obj)));
-  }
-
-  std::vector<at::Tensor> list;
-  Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
-  for (Py_ssize_t i = 0; i < length; i++) {
-    at::Tensor tensor = torch::createTensor(PySequence_Fast_GET_ITEM(seq.get(), i));
-    list.push_back(tensor);
-  }
-  return list;
 }
-
-#ifdef WITH_CUDA
-std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj) {
-  if (!PySequence_Check(obj)) {
-    throw std::runtime_error("Expected a sequence in THPUtils_PySequence_to_THCStreamList");
-  }
-  THPObjectPtr seq = THPObjectPtr(PySequence_Fast(obj, NULL));
-  if (seq.get() == NULL) {
-    throw std::runtime_error("expected PySequence, but got " + std::string(THPUtils_typename(obj)));
-  }
-
-  std::vector<THCStream*> streams;
-  Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
-  for (Py_ssize_t i = 0; i < length; i++) {
-    PyObject *stream = PySequence_Fast_GET_ITEM(seq.get(), i);
-
-    if (PyObject_IsInstance(stream, THCPStreamClass)) {
-      streams.push_back( ((THCPStream *)stream)->cdata);
-    } else if (stream == Py_None) {
-      streams.push_back(NULL);
-    } else {
-      std::runtime_error("Unknown data type found in stream list. Need THCStream or None");
-    }
-  }
-  return streams;
-}
-#endif

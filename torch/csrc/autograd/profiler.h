@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <nvToolsExt.h>
 #endif
 #include <thread>
@@ -15,8 +15,10 @@
 #include <forward_list>
 #include <tuple>
 #include "ATen/ATen.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/cuda/cuda_check.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
+#include "ATen/cuda/CUDAContext.h"
 #include <cuda_runtime.h>
 #endif
 
@@ -26,7 +28,7 @@ struct Function;
 
 namespace profiler {
 
-constexpr inline std::size_t ceilToMultiple(std::size_t a, std::size_t b) {
+constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
@@ -47,11 +49,11 @@ struct Event {
   : kind_(kind)
   , name_(std::move(name))
   , thread_id_(thread_id) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     if(record_cuda) {
       TORCH_CUDA_CHECK(cudaGetDevice(&device_));
       TORCH_CUDA_CHECK(cudaEventCreate(&event));
-      auto stream = at::globalContext().getCurrentCUDAStream();
+      auto stream = at::cuda::getCurrentCUDAStream();
       cpu_ns_ = getTime();
       TORCH_CUDA_CHECK(cudaEventRecord(event, stream));
     } else {
@@ -79,7 +81,7 @@ struct Event {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
   double cuda_elapsed_us(const Event & e) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     if(!e.has_cuda() || !has_cuda()) {
       throw std::logic_error("Events were not recorded for CUDA");
     }
@@ -96,7 +98,7 @@ struct Event {
 #endif
   }
   bool has_cuda() const {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     return event != nullptr;
 #else
     return false;
@@ -110,7 +112,7 @@ private:
   std::string name_;
   uint32_t thread_id_;
   int64_t cpu_ns_; // signed to allow for negative intervals
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   cudaEvent_t event = nullptr;
 #endif
   int device_ = -1;
@@ -120,9 +122,9 @@ private:
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
-  constexpr static std::size_t MB = 1024 * 1024;
-  constexpr static std::size_t event_block_size = 16 * MB;
-  constexpr static std::size_t num_block_elements =
+  constexpr static size_t MB = 1024 * 1024;
+  constexpr static size_t event_block_size = 16 * MB;
+  constexpr static size_t num_block_elements =
     event_block_size / ceilToMultiple(sizeof(Event), alignof(Event));
   static_assert(sizeof(Event[num_block_elements]) <= event_block_size,
                 "num_block_elements is calculated incorrectly");
@@ -162,80 +164,19 @@ enum class ProfilerState {
     NVTX,  // only emit NVTX markers
 };
 
-extern ProfilerState state;
-extern uint32_t next_thread_id;
-extern std::mutex all_event_lists_mutex;
-extern std::list<std::shared_ptr<RangeEventList>> all_event_lists;
+TORCH_API RangeEventList& getEventList();
+TORCH_API void mark(std::string name, bool include_cuda = true);
+TORCH_API void pushRange(std::string name);
+TORCH_API void popRange();
 
-extern thread_local std::shared_ptr<RangeEventList> event_list;
-extern thread_local int32_t thread_id;
+struct TORCH_API RecordFunction {
+  explicit RecordFunction(Function* fn);
 
-inline RangeEventList& getEventList() {
-  if (!event_list) {
-    std::lock_guard<std::mutex> guard(all_event_lists_mutex);
-    event_list = std::make_shared<RangeEventList>();
-    thread_id = next_thread_id++;
-    all_event_lists.emplace_front(event_list);
-  }
-  return *event_list;
-}
+  explicit RecordFunction(std::string name);
 
-inline void mark(std::string name, bool include_cuda = true) {
-  if (state == ProfilerState::NVTX) {
-#ifdef WITH_CUDA
-    nvtxMarkA(name.c_str());
-#else
-    throw std::logic_error("mark called with NVTX tracing, but compiled without CUDA");
-#endif
-  } else {
-    getEventList().record(EventKind::Mark, std::move(name), thread_id, include_cuda && state == ProfilerState::CUDA);
-  }
-}
+  explicit RecordFunction(const char* name);
 
-inline void pushRange(std::string name) {
-  if (state == ProfilerState::NVTX) {
-#ifdef WITH_CUDA
-    nvtxRangePushA(name.c_str());
-#else
-    throw std::logic_error("pushRange called with NVTX tracing, but compiled without CUDA");
-#endif
-  } else {
-    getEventList().record(EventKind::PushRange, std::move(name), thread_id, state == ProfilerState::CUDA);
-  }
-}
-
-inline void popRange() {
-  if (state == ProfilerState::NVTX) {
-#ifdef WITH_CUDA
-    nvtxRangePop();
-#else
-    throw std::logic_error("popRange called with NVTX tracing, but compiled without CUDA");
-#endif
-  } else {
-    getEventList().record(EventKind::PopRange, std::string(), thread_id, state == ProfilerState::CUDA);
-  }
-}
-
-struct RecordFunction {
-  explicit RecordFunction(Function *fn) {
-    if (state == ProfilerState::Disabled) return;
-    pushFunctionRange(fn);
-  }
-
-  explicit RecordFunction(std::string name) {
-    if (state == ProfilerState::Disabled) return;
-    pushRange(std::move(name));
-  }
-
-  explicit RecordFunction(const char *name) {
-    if (state == ProfilerState::Disabled) return;
-    pushRange(name);
-  }
-
-  ~RecordFunction() {
-    if (state == ProfilerState::Disabled) return;
-    popRange();
-  }
+  ~RecordFunction();
 
   // Needed only because we don't have Function defined yet.
   void pushFunctionRange(Function *fn);
@@ -244,8 +185,8 @@ struct RecordFunction {
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
 // there no autograd functions are being executed when these function are used.
-void enableProfiler(ProfilerState state);
-thread_event_lists disableProfiler();
+TORCH_API void enableProfiler(ProfilerState new_state);
+TORCH_API thread_event_lists disableProfiler();
 
 } // namespace profiler
 }} // namespace torch::autograd

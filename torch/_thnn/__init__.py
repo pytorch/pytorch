@@ -34,7 +34,8 @@ class Backend(object):
         if self.backend is None:
             with self.loading_lock:
                 if self.backend is None:
-                    self.backend = load_backend(self.lib_prefix, self.lib_name,
+                    lib = getattr(torch._C, self.lib_name)
+                    self.backend = load_backend(self.lib_prefix, lib,
                                                 self.functions, self.mixins)
         return self.backend
 
@@ -52,7 +53,7 @@ _thnn_headers = parse_header(THNN_H_PATH)
 _thcunn_headers = parse_header(THCUNN_H_PATH)
 
 for t in ['Float', 'Double']:
-    backend = Backend(t, 'torch._thnn._THNN', _thnn_headers)
+    backend = Backend(t, '_THNN', _thnn_headers)
 
     type2backend.backends['THNN{}Backend'.format(t)] = backend
     type2backend.backends['torch.{}Tensor'.format(t)] = backend
@@ -60,7 +61,7 @@ for t in ['Float', 'Double']:
 
 
 for t in ['Half', '', 'Double']:
-    backend = Backend('Cuda' + t, 'torch._thnn._THCUNN', _thcunn_headers, (THNNCudaBackendStateMixin,))
+    backend = Backend('Cuda' + t, '_THCUNN', _thcunn_headers, (THNNCudaBackendStateMixin,))
     type2backend.backends['THNNCuda{}Backend'.format(t)] = backend
     py_name = 'Float' if t == '' else t
     type2backend.backends['torch.cuda.{}Tensor'.format(py_name)] = backend

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ATen/core/Error.h"
 #include "TH/TH.h"
 
 // This file creates a fake allocator that just throws exceptions if
@@ -11,11 +12,11 @@
 namespace at {
 
 static cpu_fixed_malloc(void *, ptrdiff_t) {
-  runtime_error("attempting to resize a tensor view of an external blob");
+  AT_ERROR("attempting to resize a tensor view of an external blob");
 }
 
 static cpu_fixed_realloc(void *, void*, ptrdiff_t) {
-  runtime_error("attempting to resize a tensor view of an external blob");
+  AT_ERROR("attempting to resize a tensor view of an external blob");
 }
 
 static cpu_fixed_free(void * state, void * allocation) {

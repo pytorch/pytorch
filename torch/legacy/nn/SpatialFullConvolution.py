@@ -32,6 +32,7 @@ class SpatialFullConvolution(Module):
         self.finput = None
         self.fgradInput = None
         self.zeroScalar = None
+        self._input = None
         self._gradOutput = None
 
         self.reset()
@@ -88,14 +89,14 @@ class SpatialFullConvolution(Module):
             tW = targetTensor.size(tDims - 1)
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)
-            if self.finput is None:
+            if not hasattr(self, 'finput') or self.finput is None:
                 self.finput = input[0].new()
-            if self.fgradInput is None:
+            if not hasattr(self, 'fgradInput') or self.fgradInput is None:
                 self.fgradInput = input[0].new()
         else:
-            if self.finput is None:
+            if not hasattr(self, 'finput') or self.finput is None:
                 self.finput = input.new()
-            if self.fgradInput is None:
+            if not hasattr(self, 'fgradInput') or self.fgradInput is None:
                 self.fgradInput = input.new()
 
         inputTensor = self._makeContiguous(inputTensor)
@@ -190,9 +191,9 @@ class SpatialFullConvolution(Module):
         )
 
     def type(self, type=None, tensorCache=None):
-        if self.finput is not None:
+        if hasattr(self, 'finput') and self.finput is not None:
             self.finput = torch.Tensor()
-        if self.fgradInput is not None:
+        if hasattr(self, 'fgradInput') and self.fgradInput is not None:
             self.fgradInput = torch.Tensor()
         return super(SpatialFullConvolution, self).type(type, tensorCache)
 

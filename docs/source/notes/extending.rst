@@ -19,21 +19,24 @@ methods:
 - :meth:`~Function.forward` - the code that performs the operation. It can take
   as many arguments as you want, with some of them being optional, if you
   specify the default values. All kinds of Python objects are accepted here.
-  :class:`Variable` arguments will be converted to :class:`Tensor` s before the
-  call, and their use will be registered in the graph. Note that this logic won't
-  traverse lists/dicts/any other data structures and will only consider Variables
-  that are direct arguments to the call. You can return either a single
-  :class:`Tensor` output, or a :class:`tuple` of :class:`Tensor` s if there are
-  multiple outputs. Also, please refer to the docs of :class:`Function` to find
-  descriptions of useful methods that can be called only from :meth:`~Function.forward`.
+  :class:`Tensor` arguments that track history (i.e., with
+  ``requires_grad=True``) will be converted to ones that don't track history
+  before the call, and their use will be registered in the graph. Note that this
+  logic won't traverse lists/dicts/any other data structures and will only
+  consider :class:`Tensor` s that are direct arguments to the call. You can
+  return either a single :class:`Tensor` output, or a :class:`tuple` of
+  :class:`Tensor` s if there are multiple outputs. Also, please refer to the
+  docs of :class:`Function` to find descriptions of useful methods that can be
+  called only from :meth:`~Function.forward`.
 - :meth:`~Function.backward` - gradient formula. It will be given
-  as many :class:`Variable` arguments as there were outputs, with each of them
+  as many :class:`Tensor` arguments as there were outputs, with each of them
   representing gradient w.r.t. that output. It should return as many
-  :class:`Variable` s as there were inputs, with each of them containing the
+  :class:`Tensor` s as there were inputs, with each of them containing the
   gradient w.r.t. its corresponding input. If your inputs didn't require
-  gradient (see :attr:`~Variable.needs_input_grad`), or were non-:class:`Variable`
+  gradient (:attr:`~ctx.needs_input_grad` is a tuple of booleans indicating
+  whether each input needs gradient computation), or were non-:class:`Tensor`
   objects, you can return :class:`python:None`. Also, if you have optional
-  arguments to :meth:`~Variable.forward` you can return more gradients than there
+  arguments to :meth:`~Function.forward` you can return more gradients than there
   were inputs, as long as they're all :any:`python:None`.
 
 Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
@@ -60,7 +63,7 @@ additional comments::
             # None. Thanks to the fact that additional trailing Nones are
             # ignored, the return statement is simple even when the function has
             # optional inputs.
-            input, weight, bias = ctx.saved_variables
+            input, weight, bias = ctx.saved_tensors
             grad_input = grad_weight = grad_bias = None
 
             # These needs_input_grad checks are optional and there only to
@@ -82,7 +85,7 @@ Now, to make it easier to use these custom ops, we recommend aliasing their
     linear = LinearFunction.apply
 
 Here, we give an additional example of a function that is parametrized by
-non-Variable arguments::
+non-Tensor arguments::
 
     class MulConstant(Function):
         @staticmethod
@@ -98,18 +101,26 @@ non-Variable arguments::
             # Gradients of non-Tensor arguments to forward must be None.
             return grad_output * ctx.constant, None
 
+.. note::
+    Inputs to ``backward``, i.e., :attr:`grad_output`, can also be Tensors that
+    track history. So if ``backward`` is implemented with differentiable
+    operations, (e.g., invocation of another custom
+    :class:`~torch.autograd.function`), higher order derivatives will work.
+
 You probably want to check if the backward method you implemented actually
 computes the derivatives of your function. It is possible by comparing with
 numerical approximations using small finite differences::
 
     from torch.autograd import gradcheck
 
-    # gradchek takes a tuple of tensor as input, check if your gradient
+    # gradcheck takes a tuple of tensors as input, check if your gradient
     # evaluated with these tensors are close enough to numerical
     # approximations and returns True if they all verify this condition.
-    input = (Variable(torch.randn(20,20).double(), requires_grad=True), Variable(torch.randn(30,20).double(), requires_grad=True),)
-    test = gradcheck(Linear.apply, input, eps=1e-6, atol=1e-4)
+    input = (torch.randn(20,20,dtype=torch.double,requires_grad=True), torch.randn(30,20,dtype=torch.double,requires_grad=True))
+    test = gradcheck(linear, input, eps=1e-6, atol=1e-4)
     print(test)
+
+See :ref:`grad-check` for more details on finite-difference gradient comparisons.
 
 Extending :mod:`torch.nn`
 -------------------------
@@ -132,7 +143,7 @@ Since :mod:`~torch.nn` heavily utilizes :mod:`~torch.autograd`, adding a new
 :class:`Module` requires implementing a :class:`~torch.autograd.Function`
 that performs the operation and can compute the gradient. From now on let's
 assume that we want to implement a ``Linear`` module and we have the function
-implementated as in the listing above. There's very little code required to
+implemented as in the listing above. There's very little code required to
 add this. Now, there are two functions that need to be implemented:
 
 - ``__init__`` (*optional*) - takes in arguments such as kernel sizes, numbers
@@ -149,14 +160,13 @@ This is how a ``Linear`` module can be implemented::
             self.input_features = input_features
             self.output_features = output_features
 
-            # nn.Parameter is a special kind of Variable, that will get
+            # nn.Parameter is a special kind of Tensor, that will get
             # automatically registered as Module's parameter once it's assigned
             # as an attribute. Parameters and buffers need to be registered, or
             # they won't appear in .parameters() (doesn't apply to buffers), and
             # won't be converted when e.g. .cuda() is called. You can use
             # .register_buffer() to register buffers.
-            # nn.Parameters can never be volatile and, different than Variables,
-            # they require gradients by default.
+            # nn.Parameters require gradients by default.
             self.weight = nn.Parameter(torch.Tensor(output_features, input_features))
             if bias:
                 self.bias = nn.Parameter(torch.Tensor(output_features))
@@ -174,9 +184,26 @@ This is how a ``Linear`` module can be implemented::
             # See the autograd section for explanation of what happens here.
             return LinearFunction.apply(input, self.weight, self.bias)
 
+        def extra_repr(self):
+            # (Optional)Set the extra information about this module. You can test
+            # it by printing an object of this class.
+            return 'in_features={}, out_features={}, bias={}'.format(
+                self.in_features, self.out_features, self.bias is not None
+            )
+
+
+Writing custom C++ extensions
+-----------------------------
+
+See this
+`PyTorch tutorial <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
+for a detailed explanation and examples.
+
+Documentations are available at :doc:`../cpp_extension`.
+
 
 Writing custom C extensions
 ---------------------------
 
-Coming soon. For now you can find an example at
-`GitHub <https://github.com/pytorch/extension-ffi>`_.
+Example available at
+`this GitHub repository <https://github.com/pytorch/extension-ffi>`_.

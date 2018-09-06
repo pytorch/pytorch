@@ -3,8 +3,8 @@ from .. import functional as F
 
 
 class PixelShuffle(Module):
-    r"""Rearranges elements in a Tensor of shape :math:`(*, C * r^2, H, W]` to a
-    tensor of shape :math:`(C, H * r, W * r)`.
+    r"""Rearranges elements in a Tensor of shape :math:`(*, r^2C, H, W)` to a
+    tensor of shape :math:`(C, rH, rW)`.
 
     This is useful for implementing efficient sub-pixel convolution
     with a stride of :math:`1/r`.
@@ -17,13 +17,13 @@ class PixelShuffle(Module):
         upscale_factor (int): factor to increase spatial resolution by
 
     Shape:
-        - Input: :math:`(N, C * {upscale\_factor}^2, H, W)`
-        - Output: :math:`(N, C, H * {upscale\_factor}, W * {upscale\_factor})`
+        - Input: :math:`(N, C * \text{upscale\_factor}^2, H, W)`
+        - Output: :math:`(N, C, H * \text{upscale\_factor}, W * \text{upscale\_factor})`
 
     Examples::
 
         >>> ps = nn.PixelShuffle(3)
-        >>> input = autograd.Variable(torch.Tensor(1, 9, 4, 4))
+        >>> input = torch.tensor(1, 9, 4, 4)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 1, 12, 12])
@@ -39,5 +39,5 @@ class PixelShuffle(Module):
     def forward(self, input):
         return F.pixel_shuffle(input, self.upscale_factor)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(upscale_factor=' + str(self.upscale_factor) + ')'
+    def extra_repr(self):
+        return 'upscale_factor={}'.format(self.upscale_factor)

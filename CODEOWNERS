@@ -1,0 +1,23 @@
+# This is a comment.
+# Each line is a file pattern followed by one or more owners.
+
+/aten/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+/torch/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+/docs/source @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ssnl @zou3519
+/test @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+/tools @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+/README.md @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+/setup.py @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+/requirements.txt @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+/torch/csrc/api/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ebetica @goldsborough
+/test/cpp/api/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ebetica @goldsborough
+/torch/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
+/torch/csrc/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
+/torch/csrc/jit/passes/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
+/test/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
+/scripts/onnx/ @anderspapitto @bddppq @dzhulgakov @ezyang @houseroad @jamesr66a @smessmer @Yangqing
+/torch/lib/c10d/ @apaszke @pietern @teng-li
+/torch/csrc/distributed/ @apaszke @pietern @teng-li
+/torch/distributed/ @apaszke @pietern @teng-li
+/test/test_c10d.py @apaszke @pietern @teng-li
+/torch/utils/cpp_extension.py @goldsborough @fmassa @apaszke @soumith @ezyang

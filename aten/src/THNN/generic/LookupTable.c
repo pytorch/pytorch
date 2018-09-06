@@ -34,13 +34,13 @@ void THNN_(LookupTable_accGradParameters)(
           int paddingValue,
           accreal ascale)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(ascale);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(ascale);
   ptrdiff_t i;
   THInteger_t *count_data = NULL;
 
   if (scaleGradByFreq)
   {
-    THIntegerTensor_(resize1d)(count, gradWeight->size[0]);
+    THIntegerTensor_(resize1d)(count, THTensor_sizeLegacyNoScalars(gradWeight, 0));
     count_data = THIntegerTensor_(data)(count);
   }
 
@@ -48,9 +48,9 @@ void THNN_(LookupTable_accGradParameters)(
     THError("gradWeight must be contiguous");
   if (!THIndexTensor_(isContiguous)(input))
     THError("input must be contiguous");
-  if (THIndexTensor_(nDimension)(input) != 1 && THIndexTensor_(nDimension)(input) != 2) {
+  if (input->is_empty() || (THIndexTensor_(nDimensionLegacyNoScalars)(input) != 1 && THIndexTensor_(nDimensionLegacyNoScalars)(input) != 2)) {
     THDescBuff s1 = THIndexTensor_(sizeDesc)(input);
-    THError("input must be a vector or matrix, but is of shape: %s", s1.str);
+    THError("input must be a non-empty vector or matrix, but is of shape: %s", s1.str);
   }
 
   THIndex_t *input_data = THIndexTensor_(data)(input);
@@ -67,8 +67,8 @@ void THNN_(LookupTable_accGradParameters)(
 
   gradOutput = THTensor_(newContiguous)(gradOutput);
 
-  real *gw = THTensor_(data)(gradWeight);
-  real *go = THTensor_(data)(gradOutput);
+  scalar_t *gw = gradWeight->data<scalar_t>();
+  scalar_t *go = gradOutput->data<scalar_t>();
   int64_t stride = THTensor_(stride)(gradWeight, 0);
 
   if (count_data)
@@ -95,7 +95,7 @@ void THNN_(LookupTable_accGradParameters)(
             int64_t k = input_data[i] - TH_INDEX_BASE;
             if (k >= start && k < end)
             {
-                real scale_ = scale;
+                scalar_t scale_ = scale;
                 if (count_data) scale_ /= count_data[k];
                 THBlas_(axpy)(stride, scale_, go + i*stride, 1, gw + k*stride, 1);
             }
@@ -103,7 +103,7 @@ void THNN_(LookupTable_accGradParameters)(
       }
     }
 
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
 #endif
@@ -113,13 +113,13 @@ void THNN_(LookupTable_accGradParameters)(
     if (input_data[i] != paddingValue)
     {
         int64_t k = input_data[i] - TH_INDEX_BASE;
-        real scale_ = scale;
+        scalar_t scale_ = scale;
         if (count_data) scale_ /= count_data[k];
         THBlas_(axpy)(stride, scale_, go + i*stride, 1, gw + k*stride, 1);
      }
   }
 
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 /*
@@ -127,13 +127,13 @@ void THNN_(LookupTable_accGradParameters)(
  */
 
 static void THNN_(LookupTable_renormRow)(
-          real *row_data,
+          scalar_t *row_data,
           int64_t stride,
-          real maxNorm,
-          real normType)
+          scalar_t maxNorm,
+          scalar_t normType)
 {
-  real norm = 0;
-  real new_norm;
+  scalar_t norm = 0;
+  scalar_t new_norm;
   int64_t j;
   for (j=0; j<stride; j++)
   {
@@ -167,14 +167,14 @@ void THNN_(LookupTable_renorm)(
           accreal maxNorm_,
           accreal normType_)
 {
-  real maxNorm = TH_CONVERT_ACCREAL_TO_REAL(maxNorm_);
-  real normType = TH_CONVERT_ACCREAL_TO_REAL(normType_);
+  scalar_t maxNorm = TH_CONVERT_ACCREAL_TO_REAL(maxNorm_);
+  scalar_t normType = TH_CONVERT_ACCREAL_TO_REAL(normType_);
   if (!THTensor_(isContiguous)(weight))
     THError("weight must be contiguous");
   if (!THIndexTensor_(isContiguous)(idx))
     THError("input must be contiguous");
-  if (THIndexTensor_(nDimension)(idx) != 1)
-    THError("idx must be a vector");
+  if (idx->is_empty() || THIndexTensor_(nDimensionLegacyNoScalars)(idx) != 1)
+    THError("idx must be a non-empty vector");
   if (normType <= 0)
     THError("non-positive-norm not supported");
 
@@ -184,7 +184,7 @@ void THNN_(LookupTable_renorm)(
 
   int64_t numw = THTensor_(size)(weight, 0);
   int64_t stride = THTensor_(stride)(weight, 0);
-  real *gw = THTensor_(data)(weight);
+  scalar_t *gw = weight->data<scalar_t>();
   for (i=0; i<numel; i++) {
     if (row_idx[i] < TH_INDEX_BASE || row_idx[i] >= numw + TH_INDEX_BASE) {
       THError("input need to be in the range %ld <= input < %ld, "

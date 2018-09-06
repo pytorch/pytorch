@@ -1,0 +1,25 @@
+graph(%mat : Dynamic
+      %mat1 : Dynamic
+      %mat2 : Dynamic
+      %alpha : Dynamic
+      %beta : Dynamic) {
+  %5 : float = prim::Constant[value=2]()
+  %6 : float = prim::Constant[value=4.2]()
+  %7 : Dynamic = aten::mm(%mat1, %mat2)
+  %8 : int = prim::Constant[value=1]()
+  %9 : Dynamic = aten::add(%mat, %7, %8)
+  %10 : Dynamic = aten::mm(%mat1, %mat2)
+  %11 : int = prim::Constant[value=1]()
+  %12 : Dynamic = aten::add(%mat, %10, %11)
+  %c : Dynamic = aten::addmm(%mat, %mat1, %mat2, %5, %6)
+  %14 : int = prim::TensorToNum(%alpha)
+  %15 : int = prim::TensorToNum(%beta)
+  %d : Dynamic = aten::addmm(%mat, %mat1, %mat2, %15, %14)
+  %17 : int = prim::Constant[value=1]()
+  %18 : Dynamic = aten::add(%9, %12, %17)
+  %19 : int = prim::Constant[value=1]()
+  %20 : Dynamic = aten::add(%18, %c, %19)
+  %21 : int = prim::Constant[value=1]()
+  %22 : Dynamic = aten::add(%20, %d, %21)
+  return (%22);
+}

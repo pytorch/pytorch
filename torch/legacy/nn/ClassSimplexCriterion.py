@@ -1,5 +1,6 @@
 import math
 import torch
+from torch.nn.functional import _Reduction
 from .MSECriterion import MSECriterion
 
 """
@@ -80,10 +81,9 @@ class ClassSimplexCriterion(MSECriterion):
             input,
             self._target,
             self.output_tensor,
-            self.sizeAverage,
-            True,  # reduce
+            _Reduction.legacy_get_enum(self.sizeAverage, True, emit_warning=False),
         )
-        self.output = self.output_tensor[0]
+        self.output = self.output_tensor[0].item()
         return self.output
 
     def updateGradInput(self, input, target):
@@ -95,8 +95,7 @@ class ClassSimplexCriterion(MSECriterion):
             self._target,
             implicit_gradOutput,
             self.gradInput,
-            self.sizeAverage,
-            True,  # reduce
+            _Reduction.legacy_get_enum(self.sizeAverage, True, emit_warning=False),
         )
         return self.gradInput
 

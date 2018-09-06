@@ -3,7 +3,6 @@ from collections import defaultdict
 
 import torch
 from torch._thnn.utils import parse_header, THNN_H_PATH
-from torch.autograd import Variable
 from torch.autograd.function import Function, InplaceFunction, once_differentiable
 from torch._thnn import type2backend
 from .auto_double_backwards import double_backwards_fns
@@ -40,7 +39,7 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
 
     @staticmethod
     def forward(ctx, input, target, *args):
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
         ctx.save_for_backward(input, target)
         if weight_arg_idx >= 0:
             ctx.weight = args[0]
@@ -61,7 +60,7 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
 
     @staticmethod
     def backward(ctx, grad_output):
-        input, target = ctx.saved_variables
+        input, target = ctx.saved_tensors
         # apply returns grad_input, so we need to return Nones for target (1) + 1 for each extra arg passed to forward.
         return ((backward_cls.apply(input, target, grad_output, ctx.additional_args, ctx._backend),) +
                 (None,) * (ctx.forward_args_count + 1))
@@ -146,12 +145,12 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
     @staticmethod
     def forward(ctx, input, *params):
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
 
         ctx.additional_args = []
         tensor_param_list = []
         for param in params:
-            if torch.is_tensor(param):
+            if isinstance(param, torch.Tensor):
                 if type(param) != type(input):
                     raise RuntimeError("input type ({}) doesn't match the type of "
                                        "a parameter tensor ({})".format(torch.typename(input),
@@ -179,7 +178,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         args += tuple(additional_args)
 
         # If the module is working in-place its output will be set to the
-        # same storage as input, but its variable won't be dirty.
+        # same storage as input, but its tensor won't be dirty.
         if is_inplace and ctx.inplace:
             ctx.mark_dirty(input)
             output = input
@@ -199,7 +198,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
     @staticmethod
     def backward(ctx, grad_output):
-        t = ctx.saved_variables
+        t = ctx.saved_tensors
         input, tensor_params = t[0], t[1:]
         # Some notes on this function call:
         # 1) We need to pass params as *params so they are unwrapped correctly in backward_cls_forward.

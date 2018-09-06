@@ -24,9 +24,9 @@ static inline size_t flpGetOffset(FeatureLPPoolingSizes* s,
                            FEATURE_LP_SIZE_TYPE opt1,
                            FEATURE_LP_SIZE_TYPE opt2) {
   return s->stride[0] * batch +
-    s->stride[1] * feature +
-    s->stride[2] * opt1 +
-    s->stride[3] * opt2;
+         s->stride[1] * feature +
+         s->stride[2] * opt1 +
+         s->stride[3] * opt2;
 }
 
 static inline size_t flpOutputSize(FEATURE_LP_SIZE_TYPE inputSize,
@@ -39,7 +39,7 @@ static inline size_t flpOutputSize(FEATURE_LP_SIZE_TYPE inputSize,
 
 FeatureLPPoolingSizes
 THNN_(FeatureLPPooling_upcastCPU)(THTensor* t, bool batchMode) {
-  int dim = THTensor_(nDimension)(t);
+  int dim = THTensor_(nDimensionLegacyAll)(t);
 
   // Upcast to [batch dim][feature dim][opt dim 1][opt dim 2]
   FeatureLPPoolingSizes s;
@@ -99,7 +99,7 @@ THNN_(FeatureLPPooling_resizeForOutputCPU)(THTensor* toResize,
                                            bool batchMode,
                                            int width,
                                            int stride) {
-  int inputDim = THTensor_(nDimension)(input);
+  int inputDim = THTensor_(nDimensionLegacyAll)(input);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
   int64_t outSize =
@@ -147,7 +147,7 @@ THNN_(FeatureLPPooling_resizeForOutputCPU)(THTensor* toResize,
 void
 THNN_(FeatureLPPooling_resizeCPU)(THTensor* toResize,
                                   THTensor* src) {
-  int inputDim = THTensor_(nDimension)(src);
+  int inputDim = THTensor_(nDimensionLegacyAll)(src);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
   if (inputDim == 1) {
@@ -183,7 +183,7 @@ THNN_(FeatureLPPooling_updateOutput)(
   int width,
   int stride,
   bool batchMode) {
-  int inputDim = THTensor_(nDimension)(input);
+  int inputDim = THTensor_(nDimensionLegacyAll)(input);
 
   if (batchMode) {
     THArgCheck(inputDim >= 2 && inputDim <= 4, 2,
@@ -197,7 +197,7 @@ THNN_(FeatureLPPooling_updateOutput)(
     THNN_(FeatureLPPooling_upcastCPU)(input, batchMode);
 
   // Make sure the feature dimension is properly sized
-  THArgCheck(inputDesc.size[1] >= width, 3,
+  THArgCheck(inputDesc.size[1] >= (FEATURE_LP_SIZE_TYPE) width, 3,
              "input: feature dimension must be >= width");
 
   // Make sure that width and stride are within range
@@ -215,8 +215,8 @@ THNN_(FeatureLPPooling_updateOutput)(
   FeatureLPPoolingSizes outputDesc =
     THNN_(FeatureLPPooling_upcastCPU)(output, batchMode);
 
-  real* inputP = THTensor_(data)(input);
-  real* outputP = THTensor_(data)(output);
+  scalar_t* inputP = input->data<scalar_t>();
+  scalar_t* outputP = output->data<scalar_t>();
 
   FEATURE_LP_SIZE_TYPE batch, opt1, opt2, outputFeature, i;
 
@@ -228,7 +228,7 @@ THNN_(FeatureLPPooling_updateOutput)(
              outputFeature < FEATURE_LP_CAST_TYPE outputDesc.size[1]; ++outputFeature) {
 
           accreal v = (accreal) 0;
-          for (i = 0; i < width; ++i) {
+          for (i = 0; i < (FEATURE_LP_SIZE_TYPE) width; ++i) {
             FEATURE_LP_SIZE_TYPE inputFeature = outputFeature * stride + i;
             if (inputFeature >= FEATURE_LP_CAST_TYPE inputDesc.size[1]) {
               break;
@@ -261,7 +261,7 @@ THNN_(FeatureLPPooling_updateGradInput)(
   int width,
   int stride,
   bool batchMode) {
-  int inputDim = THTensor_(nDimension)(input);
+  int inputDim = THTensor_(nDimensionLegacyAll)(input);
 
   if (batchMode) {
     THArgCheck(inputDim >= 2 && inputDim <= 4, 3,
@@ -279,7 +279,7 @@ THNN_(FeatureLPPooling_updateGradInput)(
     THNN_(FeatureLPPooling_upcastCPU)(output, batchMode);
 
   // Make sure the feature dimension is properly sized
-  THArgCheck(inputDesc.size[1] >= width, 3,
+  THArgCheck(inputDesc.size[1] >= (FEATURE_LP_SIZE_TYPE) width, 3,
              "input: feature dimension must be >= width");
 
   // Make sure that width and stride are within range
@@ -309,10 +309,10 @@ THNN_(FeatureLPPooling_updateGradInput)(
   FeatureLPPoolingSizes gradInputDesc =
     THNN_(FeatureLPPooling_upcastCPU)(gradInput, batchMode);
 
-  real* gradOutputP = THTensor_(data)(gradOutput);
-  real* gradInputP = THTensor_(data)(gradInput);
-  real* outputP = THTensor_(data)(output);
-  real* inputP = THTensor_(data)(input);
+  scalar_t* gradOutputP = gradOutput->data<scalar_t>();
+  scalar_t* gradInputP = gradInput->data<scalar_t>();
+  scalar_t* outputP = output->data<scalar_t>();
+  scalar_t* inputP = input->data<scalar_t>();
 
   FEATURE_LP_SIZE_TYPE batch, opt1, opt2, outputFeature, i;
 
@@ -325,27 +325,27 @@ THNN_(FeatureLPPooling_updateGradInput)(
 
           // Load output (f(x_is)). It is possible that this is zero, in
           // which case we'll ignore this point.
-          real outputV =
+          scalar_t outputV =
             outputP[
               flpGetOffset(&outputDesc, batch, outputFeature, opt1, opt2)];
 
-          if (outputV == (real) 0) {
+          if (outputV == (scalar_t) 0) {
             continue;
           }
 
-          for (i = 0; i < width; ++i) {
+          for (i = 0; i < (FEATURE_LP_SIZE_TYPE) width; ++i) {
             FEATURE_LP_SIZE_TYPE inputFeature = outputFeature * stride + i;
             THAssert(inputFeature < inputDesc.size[1]);
 
-            real gradOutputV =
+            scalar_t gradOutputV =
               gradOutputP[
                 flpGetOffset(&gradOutputDesc, batch, outputFeature, opt1, opt2)];
-            real inputV =
+            scalar_t inputV =
               inputP[
                 flpGetOffset(&inputDesc, batch, inputFeature, opt1, opt2)];
 
             // Calculate grad * (x_i / f(x_is))^(p - 1)
-            real v = gradOutputV * pow(inputV / outputV, power - (accreal) 1);
+            scalar_t v = gradOutputV * pow(inputV / outputV, power - (accreal) 1);
 
             gradInputP[
               flpGetOffset(&gradInputDesc, batch, inputFeature, opt1, opt2)]

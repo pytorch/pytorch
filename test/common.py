@@ -1,10 +1,24 @@
+r"""Importing this file must **not** initialize CUDA context. test_distributed
+relies on this assumption to properly run. This means that when this is imported
+no CUDA calls shall be made, including torch.cuda.device_count(), etc.
+
+common_cuda.py can freely initialize CUDA context when imported.
+"""
+
 import sys
 import os
+import platform
 import re
+import gc
+import types
+import inspect
 import argparse
 import unittest
 import warnings
+import random
 import contextlib
+import socket
+from collections import OrderedDict
 from functools import wraps
 from itertools import product
 from copy import deepcopy
@@ -15,9 +29,10 @@ import errno
 
 import torch
 import torch.cuda
-from torch.autograd import Variable
-from torch._six import string_classes
+from torch._utils_internal import get_writable_path
+from torch._six import string_classes, inf
 import torch.backends.cudnn
+import torch.backends.mkl
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -34,37 +49,95 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
-def run_tests():
-    unittest.main(argv=UNITTEST_ARGS)
+def run_tests(argv=UNITTEST_ARGS):
+    unittest.main(argv=argv)
+
+PY3 = sys.version_info > (3, 0)
+PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
+IS_PPC = platform.machine() == "ppc64le"
 
-TEST_NUMPY = True
-try:
+
+def _check_module_exists(name):
+    r"""Returns if a top-level module with :attr:`name` exists *without**
+    importing it. This is generally safer than try-catch block around a
+    `import X`. It avoids third party libraries breaking assumptions of some of
+    our tests, e.g., setting multiprocessing start method when imported
+    (see librosa/#747, torchvision/#544).
+    """
+    if not PY3:  # Python 2
+        import imp
+        try:
+            imp.find_module(name)
+            return True
+        except ImportError:
+            return False
+    elif PY34:  # Python [3, 3.4)
+        import importlib
+        loader = importlib.find_loader(name)
+        return loader is not None
+    else:  # Python >= 3.4
+        import importlib
+        spec = importlib.util.find_spec(name)
+        return spec is not None
+
+TEST_NUMPY = _check_module_exists('numpy')
+TEST_SCIPY = _check_module_exists('scipy')
+TEST_MKL = torch.backends.mkl.is_available()
+
+# On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
+# see librosa/librosa#729.
+# TODO: allow Py2 when librosa 0.6.2 releases
+TEST_LIBROSA = _check_module_exists('librosa') and PY3
+
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
+TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
+TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
+TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
+
+if TEST_NUMPY:
     import numpy
-except ImportError:
-    TEST_NUMPY = False
 
-TEST_SCIPY = True
-try:
-    import scipy
-except ImportError:
-    TEST_SCIPY = False
+
+def skipIfRocm(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_ROCM:
+            raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 
 def skipIfNoLapack(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        try:
+        if not torch._C.has_lapack:
+            raise unittest.SkipTest('PyTorch compiled without Lapack')
+        else:
             fn(*args, **kwargs)
-        except Exception as e:
-            if 'Lapack library not found' in e.args[0]:
-                raise unittest.SkipTest('Compiled without Lapack')
-            raise
     return wrapper
 
 
+def skipCUDAMemoryLeakCheckIf(condition):
+    def dec(fn):
+        if getattr(fn, '_do_cuda_memory_leak_check', True):  # if current True
+            fn._do_cuda_memory_leak_check = not condition
+        return fn
+    return dec
+
+
+def get_cuda_memory_usage():
+    # we don't need CUDA synchronize because the statistics are not tracked at
+    # actual freeing, but at when marking the block as free.
+    num_devices = torch.cuda.device_count()
+    gc.collect()
+    return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+
 def suppress_warnings(fn):
+    @wraps(fn)
     def wrapper(*args, **kwargs):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -72,26 +145,30 @@ def suppress_warnings(fn):
     return wrapper
 
 
-def get_cpu_type(t):
-    assert t.__module__ == 'torch.cuda'
-    return getattr(torch, t.__class__.__name__)
+def get_cpu_type(type_name):
+    module, name = type_name.rsplit('.', 1)
+    assert module == 'torch.cuda'
+    return getattr(torch, name)
 
 
-def get_gpu_type(t):
-    assert t.__module__ == 'torch'
-    return getattr(torch.cuda, t.__name__)
+def get_gpu_type(type_name):
+    if isinstance(type_name, type):
+        type_name = '{}.{}'.format(type_name.__module__, type_name.__name__)
+    module, name = type_name.rsplit('.', 1)
+    assert module == 'torch'
+    return getattr(torch.cuda, name)
 
 
 def to_gpu(obj, type_map={}):
-    if torch.is_tensor(obj):
-        t = type_map.get(type(obj), get_gpu_type(type(obj)))
-        return obj.clone().type(t)
+    if isinstance(obj, torch.Tensor):
+        assert obj.is_leaf
+        t = type_map.get(obj.type(), get_gpu_type(obj.type()))
+        with torch.no_grad():
+            res = obj.clone().type(t)
+            res.requires_grad = obj.requires_grad
+        return res
     elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
-    elif isinstance(obj, Variable):
-        assert obj.is_leaf
-        t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
-        return Variable(obj.data.clone().type(t), requires_grad=obj.requires_grad)
     elif isinstance(obj, list):
         return [to_gpu(o, type_map) for o in obj]
     elif isinstance(obj, tuple):
@@ -100,8 +177,13 @@ def to_gpu(obj, type_map={}):
         return deepcopy(obj)
 
 
+def get_function_arglist(func):
+    return inspect.getargspec(func).args
+
+
 def set_rng_seed(seed):
     torch.manual_seed(seed)
+    random.seed(seed)
     if TEST_NUMPY:
         numpy.random.seed(seed)
 
@@ -136,6 +218,42 @@ def is_iterable(obj):
 class TestCase(unittest.TestCase):
     precision = 1e-5
     maxDiff = None
+    _do_cuda_memory_leak_check = False
+
+    def __init__(self, method_name='runTest'):
+        super(TestCase, self).__init__(method_name)
+        # Wraps the tested method if we should do CUDA memory check.
+        test_method = getattr(self, method_name)
+        self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+        # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+        if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+            # the import below may initialize CUDA context, so we do it only if
+            # self._do_cuda_memory_leak_check is True.
+            from common_cuda import TEST_CUDA
+            fullname = self.id().lower()  # class_name.method_name
+            if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
+                # initialize context & RNG to prevent false positive detections
+                # when the test is the first to initialize those
+                from common_cuda import initialize_cuda_context_rng
+                initialize_cuda_context_rng()
+                setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
+
+    def wrap_with_cuda_memory_check(self, method):
+        # Assumes that `method` is the tested function in `self`.
+        # NOTE: Python Exceptions (e.g., unittest.Skip) keeps objects in scope
+        #       alive, so this cannot be done in setUp and tearDown because
+        #       tearDown is run unconditionally no matter whether the test
+        #       passes or not. For the same reason, we can't wrap the `method`
+        #       call in try-finally and always do the check.
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            befores = get_cuda_memory_usage()
+            method(*args, **kwargs)
+            afters = get_cuda_memory_usage()
+            for i, (before, after) in enumerate(zip(befores, afters)):
+                self.assertEqual(before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                                 self.id(), after - before, i))
+        return types.MethodType(wrapper, self)
 
     def setUp(self):
         set_rng_seed(SEED)
@@ -165,11 +283,11 @@ class TestCase(unittest.TestCase):
 
         value_map = {}
         for idx, val in zip(t._indices().t(), t._values()):
-            idx_tup = tuple(idx)
+            idx_tup = tuple(idx.tolist())
             if idx_tup in value_map:
                 value_map[idx_tup] += val
             else:
-                value_map[idx_tup] = val.clone() if torch.is_tensor(val) else val
+                value_map[idx_tup] = val.clone() if isinstance(val, torch.Tensor) else val
 
         new_indices = sorted(list(value_map.keys()))
         new_values = [value_map[idx] for idx in new_indices]
@@ -190,13 +308,6 @@ class TestCase(unittest.TestCase):
 
         return tg
 
-    def unwrapVariables(self, x, y):
-        if isinstance(x, Variable) and isinstance(y, Variable):
-            return x.data, y.data
-        elif isinstance(x, Variable) or isinstance(y, Variable):
-            raise AssertionError("cannot compare {} and {}".format(type(x), type(y)))
-        return x, y
-
     def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
         if isinstance(prec, str) and message == '':
             message = prec
@@ -204,9 +315,11 @@ class TestCase(unittest.TestCase):
         if prec is None:
             prec = self.precision
 
-        x, y = self.unwrapVariables(x, y)
-
-        if torch.is_tensor(x) and torch.is_tensor(y):
+        if isinstance(x, torch.Tensor) and isinstance(y, Number):
+            self.assertEqual(x.item(), y, prec, message, allow_inf)
+        elif isinstance(y, torch.Tensor) and isinstance(x, Number):
+            self.assertEqual(x, y.item(), prec, message, allow_inf)
+        elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
@@ -214,10 +327,11 @@ class TestCase(unittest.TestCase):
                     b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
                     # check that NaNs are in the same locations
                     nan_mask = a != a
-                    self.assertTrue(torch.equal(nan_mask, b != b))
+                    self.assertTrue(torch.equal(nan_mask, b != b), message)
                     diff = a - b
                     diff[nan_mask] = 0
-                    if diff.is_signed():
+                    # TODO: implement abs on CharTensor
+                    if diff.is_signed() and 'CharTensor' not in diff.type():
                         diff = diff.abs()
                     max_err = diff.max()
                     self.assertLessEqual(max_err, prec, message)
@@ -233,12 +347,21 @@ class TestCase(unittest.TestCase):
             super(TestCase, self).assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
             super(TestCase, self).assertEqual(x, y, message)
+        elif isinstance(x, dict) and isinstance(y, dict):
+            if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
+                self.assertEqual(x.items(), y.items())
+            else:
+                self.assertEqual(set(x.keys()), set(y.keys()))
+                key_list = list(x.keys())
+                self.assertEqual([x[k] for k in key_list], [y[k] for k in key_list])
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
+        elif isinstance(x, bool) and isinstance(y, bool):
+            super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
-            if abs(x) == float('inf') or abs(y) == float('inf'):
+            if abs(x) == inf or abs(y) == inf:
                 if allow_inf:
                     super(TestCase, self).assertEqual(x, y, message)
                 else:
@@ -255,12 +378,13 @@ class TestCase(unittest.TestCase):
         self.assertEqual(x, y, prec, msg, allow_inf)
 
     def assertNotEqual(self, x, y, prec=None, message=''):
+        if isinstance(prec, str) and message == '':
+            message = prec
+            prec = None
         if prec is None:
             prec = self.precision
 
-        x, y = self.unwrapVariables(x, y)
-
-        if torch.is_tensor(x) and torch.is_tensor(y):
+        if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             if x.size() != y.size():
                 super(TestCase, self).assertNotEqual(x.size(), y.size())
             self.assertGreater(x.numel(), 0)
@@ -308,8 +432,29 @@ class TestCase(unittest.TestCase):
         # Don't put this in the try block; the AssertionError will catch it
         self.fail(msg="Did not raise when expected to")
 
-    def assertExpected(self, s, subname=None):
+    def assertWarns(self, callable, msg=''):
+        r"""
+        Test if :attr:`callable` raises a warning.
         """
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            callable()
+            self.assertTrue(len(ws) > 0, msg)
+
+    def assertWarnsRegex(self, callable, regex, msg=''):
+        r"""
+        Test if :attr:`callable` raises any warning with message that contains
+        the regex pattern :attr:`regex`.
+        """
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            callable()
+            self.assertTrue(len(ws) > 0, msg)
+            found = any(re.search(regex, str(w.message)) is not None for w in ws)
+            self.assertTrue(found, msg)
+
+    def assertExpected(self, s, subname=None):
+        r"""
         Test that a string matches the recorded contents of a file
         derived from the name of this test and subname.  This file
         is placed in the 'expect' directory in the same directory
@@ -337,13 +482,16 @@ class TestCase(unittest.TestCase):
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      munged_id)
+
+        subname_output = ""
         if subname:
             expected_file += "-" + subname
+            subname_output = " ({})".format(subname)
         expected_file += ".expect"
         expected = None
 
         def accept_output(update_type):
-            print("Accepting {} for {}:\n\n{}".format(update_type, munged_id, s))
+            print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
             with open(expected_file, 'w') as f:
                 f.write(s)
 
@@ -357,9 +505,9 @@ class TestCase(unittest.TestCase):
                 return accept_output("output")
             else:
                 raise RuntimeError(
-                    ("I got this output for {}:\n\n{}\n\n"
+                    ("I got this output for {}{}:\n\n{}\n\n"
                      "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
+                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id))
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -378,7 +526,9 @@ class TestCase(unittest.TestCase):
                 self.assertEqual(s, expected)
 
     if sys.version_info < (3, 2):
-        # assertRaisesRegexp renamed assertRaisesRegex in 3.2
+        # assertRegexpMatches renamed to assertRegex in 3.2
+        assertRegex = unittest.TestCase.assertRegexpMatches
+        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 
 
@@ -393,7 +543,7 @@ def download_file(url, binary=True):
         from urllib import request, error
 
     filename = os.path.basename(urlsplit(url)[2])
-    data_dir = os.path.join(os.path.dirname(__file__), 'data')
+    data_dir = get_writable_path(os.path.join(os.path.dirname(__file__), 'data'))
     path = os.path.join(data_dir, filename)
 
     if os.path.exists(path):
@@ -407,3 +557,12 @@ def download_file(url, binary=True):
         msg = "could not download test file '{}'".format(url)
         warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg)
+
+
+def find_free_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(('localhost', 0))
+    sockname = sock.getsockname()
+    sock.close()
+    return sockname[1]

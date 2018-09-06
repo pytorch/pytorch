@@ -1,14 +1,21 @@
-#include "tensor.h"
+#include "torch/csrc/autograd/functions/tensor.h"
 
-#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/generated/Functions.h"
-#include "torch/csrc/utils/auto_gpu.h"
+#include "torch/csrc/autograd/variable.h"
+
+#include <ATen/ATen.h>
+
+#include <cstddef>
+#include <memory>
+#include <stdexcept>
+#include <utility>
 
 namespace torch { namespace autograd {
 
-auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
+auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1);
   auto& grad = grads[0];
   variable_list grad_inputs(2);
@@ -16,7 +23,7 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
     grad_inputs[0] = at::zeros_like(grad);
   }
   if (should_compute_output(1)) {
-    AutoGPU autoGPU(src_device);
+    at::DeviceGuard device_guard(src_device);
     if (grad.is_cuda() && grad.get_device() != src_device) {
       grad_inputs[1] = src_type->copy(grad);
     } else {
@@ -24,25 +31,28 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
     }
   }
   return grad_inputs;
-};
+}
 
-CopySlices::CopySlices(const Variable& base_var, at::TensorGeometry view_, std::shared_ptr<Function> fn_)
-  : base(base_var)
-  , view(std::move(view_))
-  , fn(std::move(fn_))
-{
-  num_inputs = 1;
-
-  // Take the next_functions of fn as our own, except for index 0 which goes
+CopySlices::CopySlices(
+    const Variable& base_var,
+    at::TensorGeometry view_,
+    std::shared_ptr<Function> fn_)
+    : Function(),
+      base(base_var),
+      view(std::move(view_)),
+      fn(std::move(fn_)) {
+  // Take the next_edges of fn as our own, except for index 0 which goes
   // to base instead of the view.
-  next_functions.resize(fn->next_functions.size());
-  next_functions[0] = std::make_pair(base_var.grad_fn(), base_var.output_nr());
-  for (size_t i = 1; i < next_functions.size(); i++) {
-    next_functions[i] = fn->next_functions[i];
+  add_input_metadata(base_var);
+  const auto num_outputs = fn->num_outputs();
+  next_edges_.reserve(num_outputs);
+  add_next_edge(base_var.gradient_edge());
+  for (size_t i = 1; i < num_outputs; i++) {
+    add_next_edge(fn->next_edge(i));
   }
 }
 
-auto CopySlices::apply(const variable_list& inputs) -> variable_list {
+auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   check_input_variables("CopySlices", inputs, 1);
   auto& grad = inputs[0];
 
@@ -61,10 +71,10 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   // double-backprop is disabled.
   auto res = (*fn)({ grad_slice.clone() });
 
-  variable_list grad_inputs(next_functions.size());
+  variable_list grad_inputs(num_outputs());
   for (size_t i = 0; i < res.size(); i++) {
     if (should_compute_output(i)) {
-      TORCH_ASSERT(res[i].defined());
+      AT_ASSERT(res[i].defined());
       if (i == 0) {
         grad_slice.copy_(res[i]);
         grad_inputs[i] = std::move(result);
@@ -77,7 +87,7 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   return grad_inputs;
 }
 
-void CopySlices::releaseVariables() {
+void CopySlices::release_variables() {
   fn = nullptr;
 }
 

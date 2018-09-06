@@ -1,7 +1,7 @@
 ## Autograd
 
 Autograd is a hotspot for PyTorch performance, so most of the heavy lifting is
-implemented in C++.  This implies that we have to do some shuffling between
+implemented in C++. This implies that we have to do some shuffling between
 Python and C++; and in general, we want data to be in a form that is convenient
 to manipulate from C++.
 

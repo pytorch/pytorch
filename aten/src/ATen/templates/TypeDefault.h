@@ -1,0 +1,49 @@
+#pragma once
+
+// ${generated_comment}
+
+#include "ATen/Type.h"
+
+namespace at {
+
+struct AT_API TypeDefault : public Type {
+  explicit TypeDefault(TensorTypeId type_id, bool is_variable, bool is_undefined)
+      : Type(type_id, is_variable, is_undefined) {}
+
+  // Make sure overload resolution considers the nullary virtual method.
+  // (A single argument overload is generated in the list.)
+  bool is_cuda() const override {
+    return backend() == Backend::CUDA || backend() == Backend::SparseCUDA;
+  }
+  bool is_sparse() const override {
+    return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA;
+  }
+  bool is_distributed() const override {
+    return false;
+  }
+
+  Type & toBackend(Backend b) const override;
+  Type & toScalarType(ScalarType s) const override;
+
+  Tensor copy(const Tensor & src, bool non_blocking=false) const override;
+  Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const override;
+
+  Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const override;
+  Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const override;
+  Tensor tensorWithAllocator(IntList sizes, Allocator* allocator) const override;
+  Tensor tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const override;
+  Tensor scalarTensor(Scalar s) const override;
+
+  Storage storage(bool resizable = false) const override;
+  Storage storage(size_t size, bool resizable = false) const override;
+  Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
+  Storage storageWithAllocator(int64_t size, Allocator* allocator) const override;
+  Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
+  Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
+
+  // example
+  // virtual Tensor * add(Tensor & a, Tensor & b) = 0;
+  ${type_method_declarations}
+};
+
+} // namespace at

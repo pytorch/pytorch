@@ -1,7 +1,9 @@
-from collections import OrderedDict, Iterable
-import string
-import torch
 import warnings
+from collections import OrderedDict, Iterable, Mapping
+from itertools import islice
+import operator
+
+import torch
 from .module import Module
 
 
@@ -21,7 +23,7 @@ class Sequential(Module):
     Modules will be added to it in the order they are passed in the constructor.
     Alternatively, an ordered dict of modules can also be passed in.
 
-    To make it easier to understand, given is a small example::
+    To make it easier to understand, here is a small example::
 
         # Example of using Sequential
         model = nn.Sequential(
@@ -49,18 +51,32 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
+    def _get_item_by_idx(self, iterator, idx):
+        """Get the idx-th item of the iterator"""
+        size = len(self)
+        idx = operator.index(idx)
+        if not -size <= idx < size:
+            raise IndexError('index {} is out of range'.format(idx))
+        idx %= size
+        return next(islice(iterator, idx, None))
+
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             return Sequential(OrderedDict(list(self._modules.items())[idx]))
         else:
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
-            it = iter(self._modules.values())
-            for i in range(idx):
-                next(it)
-            return next(it)
+            return self._get_item_by_idx(self._modules.values(), idx)
+
+    def __setitem__(self, idx, module):
+        key = self._get_item_by_idx(self._modules.keys(), idx)
+        return setattr(self, key, module)
+
+    def __delitem__(self, idx):
+        if isinstance(idx, slice):
+            for key in list(self._modules.keys())[idx]:
+                delattr(self, key)
+        else:
+            key = self._get_item_by_idx(self._modules.keys(), idx)
+            delattr(self, key)
 
     def __len__(self):
         return len(self._modules)
@@ -104,18 +120,34 @@ class ModuleList(Module):
         if modules is not None:
             self += modules
 
+    def _get_abs_string_index(self, idx):
+        """Get the absolute index for the list of modules"""
+        idx = operator.index(idx)
+        if not (-len(self) <= idx < len(self)):
+            raise IndexError('index {} is out of range'.format(idx))
+        if idx < 0:
+            idx += len(self)
+        return str(idx)
+
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             return ModuleList(list(self._modules.values())[idx])
         else:
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
-            return self._modules[str(idx)]
+            return self._modules[self._get_abs_string_index(idx)]
 
     def __setitem__(self, idx, module):
+        idx = operator.index(idx)
         return setattr(self, str(idx), module)
+
+    def __delitem__(self, idx):
+        if isinstance(idx, slice):
+            for k in range(len(self._modules))[idx]:
+                delattr(self, str(k))
+        else:
+            delattr(self, self._get_abs_string_index(idx))
+        # To preserve numbering, self._modules is being reconstructed with modules after deletion
+        str_indices = [str(i) for i in range(len(self._modules))]
+        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
     def __len__(self):
         return len(self._modules)
@@ -155,6 +187,122 @@ class ModuleList(Module):
         return self
 
 
+class ModuleDict(Module):
+    r"""Holds submodules in a dictionary.
+
+    ModuleDict can be indexed like a regular Python dictionary, but modules it
+    contains are properly registered, and will be visible by all Module methods.
+
+    Arguments:
+        modules (iterable, optional): a mapping (dictionary) of (string: module)
+            or an iterable of key/value pairs of type (string, module)
+
+    Example::
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.choices = nn.ModuleDict({
+                        'conv': nn.Conv2d(10, 10, 3),
+                        'pool': nn.MaxPool2d(3)
+                })
+                self.activations = nn.ModuleDict([
+                        ['lrelu', nn.LeakyReLU()],
+                        ['prelu', nn.PReLU()]
+                ])
+
+            def forward(self, x, choice, act):
+                x = self.choices[choice](x)
+                x = self.activations[act](x)
+                return x
+    """
+
+    def __init__(self, modules=None):
+        super(ModuleDict, self).__init__()
+        if modules is not None:
+            self.update(modules)
+
+    def __getitem__(self, key):
+        return self._modules[key]
+
+    def __setitem__(self, key, module):
+        self.add_module(key, module)
+
+    def __delitem__(self, key):
+        del self._modules[key]
+
+    def __len__(self):
+        return len(self._modules)
+
+    def __iter__(self):
+        return iter(self._modules)
+
+    def __contains__(self, key):
+        return key in self._modules
+
+    def clear(self):
+        """Remove all items from the ModuleDict.
+        """
+        self._modules.clear()
+
+    def pop(self, key):
+        r"""Remove key from the ModuleDict and return its module.
+
+        Arguments:
+            key (string): key to pop from the ModuleDict
+        """
+        v = self[key]
+        del self[key]
+        return v
+
+    def keys(self):
+        r"""Return an iterable of the ModuleDict keys.
+        """
+        return self._modules.keys()
+
+    def items(self):
+        r"""Return an iterable of the ModuleDict key/value pairs.
+        """
+        return self._modules.items()
+
+    def values(self):
+        r"""Return an iterable of the ModuleDict values.
+        """
+        return self._modules.values()
+
+    def update(self, modules):
+        r"""Update the ModuleDict with the key/value pairs from a mapping or
+        an iterable, overwriting existing keys.
+
+        Arguments:
+            modules (iterable): a mapping (dictionary) of (string: :class:`~torch.nn.Module``) or
+                an iterable of key/value pairs of type (string, :class:`~torch.nn.Module``)
+        """
+        if not isinstance(modules, Iterable):
+            raise TypeError("ModuleDict.update should be called with an "
+                            "iterable of key/value pairs, but got " +
+                            type(modules).__name__)
+
+        if isinstance(modules, Mapping):
+            if isinstance(modules, OrderedDict):
+                for key, module in modules.items():
+                    self[key] = module
+            else:
+                for key, module in sorted(modules.items()):
+                    self[key] = module
+        else:
+            for j, m in enumerate(modules):
+                if not isinstance(m, Iterable):
+                    raise TypeError("ModuleDict update sequence element "
+                                    "#" + str(j) + " should be Iterable; is" +
+                                    type(m).__name__)
+                if not len(m) == 2:
+                    raise ValueError("ModuleDict update sequence element "
+                                     "#" + str(j) + " has length " + str(len(m)) +
+                                     "; 2 is required")
+                self[m[0]] = m[1]
+
+
 class ParameterList(Module):
     r"""Holds parameters in a list.
 
@@ -187,6 +335,7 @@ class ParameterList(Module):
         if isinstance(idx, slice):
             return ParameterList(list(self._parameters.values())[idx])
         else:
+            idx = operator.index(idx)
             if not (-len(self) <= idx < len(self)):
                 raise IndexError('index {} is out of range'.format(idx))
             if idx < 0:
@@ -194,6 +343,7 @@ class ParameterList(Module):
             return self._parameters[str(idx)]
 
     def __setitem__(self, idx, param):
+        idx = operator.index(idx)
         return self.register_parameter(str(idx), param)
 
     def __len__(self):
@@ -233,13 +383,137 @@ class ParameterList(Module):
             self.register_parameter(str(offset + i), param)
         return self
 
-    def __repr__(self):
-        tmpstr = self.__class__.__name__ + '(\n'
+    def extra_repr(self):
+        child_lines = []
         for k, p in self._parameters.items():
             size_str = 'x'.join(str(size) for size in p.size())
             device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
             parastr = 'Parameter containing: [{} of size {}{}]'.format(
                 torch.typename(p.data), size_str, device_str)
-            tmpstr = tmpstr + '  (' + k + '): ' + parastr + '\n'
-        tmpstr = tmpstr + ')'
+            child_lines.append('  (' + str(k) + '): ' + parastr)
+        tmpstr = '\n'.join(child_lines)
+        return tmpstr
+
+
+class ParameterDict(Module):
+    r"""Holds parameters in a dictionary.
+
+    ParameterDict can be indexed like a regular Python dictionary, but parameters it
+    contains are properly registered, and will be visible by all Module methods.
+
+    Arguments:
+        parameters (iterable, optional): a mapping (dictionary) of
+            (string : :class:`~torch.nn.Parameter``) or an iterable of key,value pairs
+            of type (string, :class:`~torch.nn.Parameter``)
+
+    Example::
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.params = nn.ParameterDict({
+                        'left': nn.Parameter(torch.randn(5, 10)),
+                        'right': nn.Parameter(torch.randn(5, 10))
+                })
+
+            def forward(self, x, choice):
+                x = self.params[choice].mm(x)
+                return x
+    """
+
+    def __init__(self, parameters=None):
+        super(ParameterDict, self).__init__()
+        if parameters is not None:
+            self.update(parameters)
+
+    def __getitem__(self, key):
+        return self._parameters[key]
+
+    def __setitem__(self, key, parameter):
+        self.register_parameter(key, parameter)
+
+    def __delitem__(self, key):
+        del self._parameters[key]
+
+    def __len__(self):
+        return len(self._parameters)
+
+    def __iter__(self):
+        return iter(self._parameters.keys())
+
+    def __contains__(self, key):
+        return key in self._parameters
+
+    def clear(self):
+        """Remove all items from the ParameterDict.
+        """
+        self._parameters.clear()
+
+    def pop(self, key):
+        r"""Remove key from the ParameterDict and return its parameter.
+
+        Arguments:
+            key (string): key to pop from the ParameterDict
+        """
+        v = self[key]
+        del self[key]
+        return v
+
+    def keys(self):
+        r"""Return an iterable of the ParameterDict keys.
+        """
+        return self._parameters.keys()
+
+    def items(self):
+        r"""Return an iterable of the ParameterDict key/value pairs.
+        """
+        return self._parameters.items()
+
+    def values(self):
+        r"""Return an iterable of the ParameterDict values.
+        """
+        return self._parameters.values()
+
+    def update(self, parameters):
+        r"""Update the ParameterDict with the key/value pairs from a mapping or
+        an iterable, overwriting existing keys.
+
+        Arguments:
+            parameters (iterable): a mapping (dictionary) of
+                (string : :class:`~torch.nn.Parameter``) or an iterable of
+                key/value pairs of type (string, :class:`~torch.nn.Parameter``)
+        """
+        if not isinstance(parameters, Iterable):
+            raise TypeError("ParametersDict.update should be called with an "
+                            "iterable of key/value pairs, but got " +
+                            type(parameters).__name__)
+
+        if isinstance(parameters, Mapping):
+            if isinstance(parameters, OrderedDict):
+                for key, parameter in parameters.items():
+                    self[key] = parameter
+            else:
+                for key, parameter in sorted(parameters.items()):
+                    self[key] = parameter
+        else:
+            for j, p in enumerate(parameters):
+                if not isinstance(p, Iterable):
+                    raise TypeError("ParameterDict update sequence element "
+                                    "#" + str(j) + " should be Iterable; is" +
+                                    type(p).__name__)
+                if not len(p) == 2:
+                    raise ValueError("ParameterDict update sequence element "
+                                     "#" + str(j) + " has length " + str(len(p)) +
+                                     "; 2 is required")
+                self[p[0]] = p[1]
+
+    def extra_repr(self):
+        child_lines = []
+        for k, p in self._parameters.items():
+            size_str = 'x'.join(str(size) for size in p.size())
+            device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+            parastr = 'Parameter containing: [{} of size {}{}]'.format(
+                torch.typename(p.data), size_str, device_str)
+            child_lines.append('  (' + k + '): ' + parastr)
+        tmpstr = '\n'.join(child_lines)
         return tmpstr

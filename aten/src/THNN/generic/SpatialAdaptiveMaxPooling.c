@@ -10,8 +10,8 @@
 // 4d tensor B x D x H x W
 
 static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
-          real *input_p,
-          real *output_p,
+          scalar_t *input_p,
+          scalar_t *output_p,
           THIndex_t *ind_p,
           int64_t sizeD,
           int64_t isizeH,
@@ -41,21 +41,20 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
         int kW = iendW - istartW;
 
         /* local pointers */
-        real *ip = input_p   + d*istrideD + istartH*istrideH + istartW*istrideW;
-        real *op = output_p  + d*osizeH*osizeW + oh*osizeW + ow;
+        scalar_t *ip = input_p   + d*istrideD + istartH*istrideH + istartW*istrideW;
+        scalar_t *op = output_p  + d*osizeH*osizeW + oh*osizeW + ow;
         THIndex_t *indp = ind_p   + d*osizeH*osizeW + oh*osizeW + ow;
 
         /* compute local max: */
         int64_t maxindex = -1;
-        real maxval = -FLT_MAX;
-        int64_t tcntr = 0;
+        scalar_t maxval = -FLT_MAX;
         int ih, iw;
         for(ih = 0; ih < kH; ih++)
         {
           for(iw = 0; iw < kW; iw++)
           {
-            real val = *(ip + ih*istrideH + iw*istrideW);
-            if (val > maxval)
+            scalar_t val = *(ip + ih*istrideH + iw*istrideW);
+            if ((val > maxval) || std::isnan(val))
             {
               maxval = val;
               maxindex = (ih+istartH)*isizeW + (iw+istartW);
@@ -84,49 +83,49 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
   int dimW = 2;
   int dimH = 1;
   int64_t sizeB = 1;
-  int64_t sizeD;
-  int64_t isizeH;
-  int64_t isizeW;
+  int64_t sizeD = 0;
+  int64_t isizeH = 0;
+  int64_t isizeW = 0;
 
-  int64_t istrideD;
-  int64_t istrideH;
-  int64_t istrideW;
-  int64_t istrideB;
+  int64_t istrideD = 0;
+  int64_t istrideH = 0;
+  int64_t istrideW = 0;
+  int64_t istrideB = 0;
 
-  real *input_data;
-  real *output_data;
-  THIndex_t *indices_data;
+  scalar_t *input_data = nullptr;
+  scalar_t *output_data = nullptr;
+  THIndex_t *indices_data = nullptr;
 
 
-  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
-		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
+		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
-    istrideB = input->stride[0];
-    sizeB = input->size[0];
+    istrideB = input->stride(0);
+    sizeB = input->size(0);
     dimW++;
     dimH++;
   }
 
   /* sizes */
-  sizeD  = input->size[dimH-1];
-  isizeH = input->size[dimH];
-  isizeW = input->size[dimW];
+  sizeD  = input->size(dimH-1);
+  isizeH = input->size(dimH);
+  isizeW = input->size(dimW);
   /* strides */
-  istrideD = input->stride[dimH-1];
-  istrideH = input->stride[dimH];
-  istrideW = input->stride[dimW];
+  istrideD = input->stride(dimH-1);
+  istrideH = input->stride(dimH);
+  istrideW = input->stride(dimW);
 
   /* resize output */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THTensor_(resize3d)(output, sizeD, osizeH, osizeW);
     /* indices will contain i,j locations for each output point */
     THIndexTensor_(resize3d)(indices, sizeD, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
     indices_data = THIndexTensor_(data)(indices);
 
     THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(input_data, output_data,
@@ -145,8 +144,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     /* indices will contain i,j locations for each output point */
     THIndexTensor_(resize4d)(indices, sizeB, sizeD, osizeH, osizeW);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
     indices_data = THIndexTensor_(data)(indices);
 
 #pragma omp parallel for private(b)
@@ -164,8 +163,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 }
 
 static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(
-          real *gradInput_p,
-          real *gradOutput_p,
+          scalar_t *gradInput_p,
+          scalar_t *gradOutput_p,
           THIndex_t *ind_p,
           int64_t sizeD,
           int64_t isizeH,
@@ -177,8 +176,8 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(
 #pragma omp parallel for private(d)
   for (d = 0; d < sizeD; d++)
   {
-    real *gradInput_p_d = gradInput_p + d*isizeH*isizeW;
-    real *gradOutput_p_d = gradOutput_p + d*osizeH*osizeW;
+    scalar_t *gradInput_p_d = gradInput_p + d*isizeH*isizeW;
+    scalar_t *gradOutput_p_d = gradOutput_p + d*osizeH*osizeW;
     THIndex_t *ind_p_d = ind_p + d*osizeH*osizeW;
 
     /* calculate max points */
@@ -212,8 +211,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   int isizeW;
   int osizeH;
   int osizeW;
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
   THIndex_t *indices_data;
 
   /* get contiguous gradOutput */
@@ -223,26 +222,26 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (input->nDimension == 4) {
-    sizeB = input->size[0];
+  if (input->dim() == 4) {
+    sizeB = input->size(0);
     dimW++;
     dimH++;
   }
 
   /* sizes */
-  sizeD  = input->size[dimH-1];
-  isizeH = input->size[dimH];
-  isizeW = input->size[dimW];
-  osizeH = gradOutput->size[dimH];
-  osizeW = gradOutput->size[dimW];
+  sizeD  = input->size(dimH-1);
+  isizeH = input->size(dimH);
+  isizeW = input->size(dimW);
+  osizeH = gradOutput->size(dimH);
+  osizeW = gradOutput->size(dimW);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<scalar_t>();
+  gradOutput_data = gradOutput->data<scalar_t>();
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
                                                            indices_data,
@@ -265,7 +264,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

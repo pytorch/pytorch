@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <memory>
 #include <vector>
 #include <ATen/ATen.h>
@@ -13,7 +13,6 @@ struct TupleParser {
   void parse(bool& x, const std::string& param_name);
   void parse(int& x, const std::string& param_name);
   void parse(double& x, const std::string& param_name);
-  void parse(at::Tensor& x, const std::string& param_name);
   void parse(std::vector<int>& x, const std::string& param_name);
   void parse(std::string& x, const std::string& param_name);
 

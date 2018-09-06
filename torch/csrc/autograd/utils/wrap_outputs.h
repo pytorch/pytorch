@@ -3,9 +3,11 @@
 // Wrap tensor operation outputs as PyObject*
 
 #include <ATen/ATen.h>
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <tuple>
 
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/Layout.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/python_numbers.h"
@@ -43,6 +45,17 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
   return r.release();
 }
 
+inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
+  auto r = THPObjectPtr{PyTuple_New(5)};
+  if (!r) throw python_error();
+  PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 4, wrap(std::move(std::get<4>(tensors))));
+  return r.release();
+}
+
 inline PyObject* wrap(at::TensorList tl) {
   auto r = THPObjectPtr{PyTuple_New(tl.size())};
   if (!r) throw python_error();
@@ -73,8 +86,17 @@ inline PyObject* wrap(void* value) {
 }
 
 inline PyObject* wrap(at::Scalar scalar) {
-  return wrap(scalar.toTensor());
+  return wrap(scalar_to_tensor(scalar));
 }
 
+inline PyObject* wrap(THPDtype *dtype) {
+  Py_INCREF(dtype);
+  return (PyObject*)dtype;
+}
+
+inline PyObject* wrap(THPLayout *layout) {
+  Py_INCREF(layout);
+  return (PyObject*)layout;
+}
 
 }}} // namespace torch::autograd::utils

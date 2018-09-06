@@ -1,9 +1,6 @@
 #pragma once
 
-#include <Python.h>
-#include <vector>
-#include <utility>
-#include <memory>
+#include "torch/csrc/python_headers.h"
 
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/function.h"
@@ -11,6 +8,15 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/object_ptr.h"
 
+#include <ATen/core/optional.h>
+
+#include <vector>
+#include <utility>
+#include <memory>
+
+namespace at {
+struct DeviceGuard;
+} // namespace at
 
 namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {
@@ -18,10 +24,10 @@ namespace torch { namespace autograd {
 struct VariableInfo {
   explicit VariableInfo(const Variable& var);
 
-  Variable zeros(AutoGPU& gpu_guard) const;
+  Variable zeros(at::DeviceGuard& device_guard) const;
 
   at::Type* type;
-  int device;
+  int32_t device = -1;
   std::vector<int64_t> size;
   bool requires_grad;
 };
@@ -31,12 +37,12 @@ struct VariableInfo {
 struct PyFunction : public Function {
   PyFunction(PyObject* obj) : obj(obj) {}
 
-  virtual variable_list apply(const variable_list& inputs) override;
+  virtual variable_list apply(variable_list&& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
 
-  virtual void releaseVariables() override;
-  virtual std::string name() override;
-  virtual std::shared_ptr<Function> getSharedPtr() override;
+  virtual void release_variables() override;
+  virtual std::string name() const override;
+  virtual std::shared_ptr<Function> get_shared_ptr() override;
   virtual bool is_traceable() override;
 
   // THPFunction this Function is wrapping.
@@ -66,19 +72,15 @@ struct THPFunction {
     PyObject *needs_input_grad;
 
     // Python tuple of tensors whose variables we should save.  Set
-    // by Python with 'save_for_backward'.  If NULL, no tensors were
+    // by Python with 'save_for_backward'.  If nullptr, no tensors were
     // saved.
     PyObject *to_save;
-    // Python pairs of distinct tensors which share storage.  Set by
-    // Python with 'mark_shared_storage'.  If NULL, no tensors share
-    // storage.
-    PyObject *shared_pairs;
     // Python tuple of tensors which are not differentiable.  Set by
-    // Python with 'mark_non_differentiable'.  If NULL, no tensors were
+    // Python with 'mark_non_differentiable'.  If nullptr, no tensors were
     // non-differentiable.
     PyObject *non_differentiable;
     // Python tuple of tensors which had inplace updates in the forward()
-    // pass.  Set by Python with 'mark_dirty'.  If NULL, no tensors were
+    // pass.  Set by Python with 'mark_dirty'.  If nullptr, no tensors were
     // modified inplace.
     PyObject *dirty_tensors;
 
@@ -88,7 +90,6 @@ struct THPFunction {
     // For each input, true if the input is a THPVariable
     std::vector<bool> is_variable_input;
     char has_freed_buffers;
-    char is_traced;
 
     // The C++ wrapper for this Python function.
     // See a comment in THPFunction_asFunction for details about this field.

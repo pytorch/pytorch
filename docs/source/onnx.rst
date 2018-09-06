@@ -7,47 +7,61 @@ Example: End-to-end AlexNet from PyTorch to Caffe2
 
 Here is a simple script which exports a pretrained AlexNet as defined in
 torchvision into ONNX.  It runs a single round of inference and then
-saves the resulting traced model to ``alexnet.proto``::
+saves the resulting traced model to ``alexnet.onnx``::
 
-    from torch.autograd import Variable
-    import torch.onnx
+    import torch
     import torchvision
 
-    dummy_input = Variable(torch.randn(10, 3, 224, 224)).cuda()
+    dummy_input = torch.randn(10, 3, 224, 224, device='cuda')
     model = torchvision.models.alexnet(pretrained=True).cuda()
-    torch.onnx.export(model, dummy_input, "alexnet.proto", verbose=True)
 
-The resulting ``alexnet.proto`` is a binary protobuf file which contains both
+    # Providing input and output names sets the display names for values
+    # within the model's graph. Setting these does not change the semantics
+    # of the graph; it is only for readability.
+    #
+    # The inputs to the network consist of the flat list of inputs (i.e.
+    # the values you would pass to the forward() method) followed by the
+    # flat list of parameters. You can partially specify names, i.e. provide
+    # a list here shorter than the number of inputs to the model, and we will
+    # only set that subset of names, starting from the beginning.
+    input_names = [ "actual_input_1" ] + [ "learned_%d" % i for i in range(16) ]
+    output_names = [ "output1" ]
+
+    torch.onnx.export(model, dummy_input, "alexnet.onnx", verbose=True, input_names=input_names, output_names=output_names)
+
+The resulting ``alexnet.onnx`` is a binary protobuf file which contains both
 the network structure and parameters of the model you exported
 (in this case, AlexNet).  The keyword argument ``verbose=True`` causes the
 exporter to print out a human-readable representation of the network::
 
-    # All parameters are encoded explicitly as inputs.  By convention,
-    # learned parameters (ala nn.Module.state_dict) are first, and the
-    # actual inputs are last.
-    graph(%1 : Float(64, 3, 11, 11)
-          %2 : Float(64)
-          # The definition sites of all variables are annotated with type
-          # information, specifying the type and size of tensors.
-          # For example, %3 is a 192 x 64 x 5 x 5 tensor of floats.
-          %3 : Float(192, 64, 5, 5)
-          %4 : Float(192)
+    # These are the inputs and parameters to the network, which have taken on
+    # the names we specified earlier.
+    graph(%actual_input_1 : Float(10, 3, 224, 224)
+          %learned_0 : Float(64, 3, 11, 11)
+          %learned_1 : Float(64)
+          %learned_2 : Float(192, 64, 5, 5)
+          %learned_3 : Float(192)
           # ---- omitted for brevity ----
-          %15 : Float(1000, 4096)
-          %16 : Float(1000)
-          %17 : Float(10, 3, 224, 224)) { # the actual input!
+          %learned_14 : Float(1000, 4096)
+          %learned_15 : Float(1000)) {
       # Every statement consists of some output tensors (and their types),
       # the operator to be run (with its attributes, e.g., kernels, strides,
-      # etc.), its input tensors (%17, %1)
-      %19 : UNKNOWN_TYPE = Conv[kernels=[11, 11], strides=[4, 4], pads=[2, 2, 2, 2], dilations=[1, 1], group=1](%17, %1), uses = [[%20.i0]];
-      # UNKNOWN_TYPE: sometimes type information is not known.  We hope to eliminate
-      # all such cases in a later release.
-      %20 : Float(10, 64, 55, 55) = Add[broadcast=1, axis=1](%19, %2), uses = [%21.i0];
-      %21 : Float(10, 64, 55, 55) = Relu(%20), uses = [%22.i0];
-      %22 : Float(10, 64, 27, 27) = MaxPool[kernels=[3, 3], pads=[0, 0, 0, 0], dilations=[1, 1], strides=[2, 2]](%21), uses = [%23.i0];
-      # ...
-      # Finally, a network returns some tensors
-      return (%58);
+      # etc.), its input tensors (%actual_input_1, %learned_0, %learned_1)
+      %17 : Float(10, 64, 55, 55) = onnx::Conv[dilations=[1, 1], group=1, kernel_shape=[11, 11], pads=[2, 2, 2, 2], strides=[4, 4]](%actual_input_1, %learned_0, %learned_1), scope: AlexNet/Sequential[features]/Conv2d[0]
+      %18 : Float(10, 64, 55, 55) = onnx::Relu(%17), scope: AlexNet/Sequential[features]/ReLU[1]
+      %19 : Float(10, 64, 27, 27) = onnx::MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%18), scope: AlexNet/Sequential[features]/MaxPool2d[2]
+      # ---- omitted for brevity ----
+      %29 : Float(10, 256, 6, 6) = onnx::MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%28), scope: AlexNet/Sequential[features]/MaxPool2d[12]
+      # Dynamic means that the shape is not known. This may be because of a
+      # limitation of our implementation (which we would like to fix in a
+      # future release) or shapes which are truly dynamic.
+      %30 : Dynamic = onnx::Shape(%29), scope: AlexNet
+      %31 : Dynamic = onnx::Slice[axes=[0], ends=[1], starts=[0]](%30), scope: AlexNet
+      %32 : Long() = onnx::Squeeze[axes=[0]](%31), scope: AlexNet
+      %33 : Long() = onnx::Constant[value={9216}](), scope: AlexNet
+      # ---- omitted for brevity ----
+      %output1 : Float(10, 1000) = onnx::Gemm[alpha=1, beta=1, broadcast=1, transB=1](%45, %learned_14, %learned_15), scope: AlexNet/Sequential[classifier]/Linear[6]
+      return (%output1);
     }
 
 You can also verify the protobuf using the `onnx <https://github.com/onnx/onnx/>`_ library.
@@ -60,7 +74,7 @@ Then, you can run::
     import onnx
 
     # Load the ONNX model
-    model = onnx.load("alexnet.proto")
+    model = onnx.load("alexnet.onnx")
 
     # Check that the IR is well formed
     onnx.checker.check_model(model)
@@ -68,28 +82,19 @@ Then, you can run::
     # Print a human readable representation of the graph
     onnx.helper.printable_graph(model.graph)
 
-To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need three things:
-
-1. You'll need an install of Caffe2.  If you don't have one already, Please
-   `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_.
-
-2. You'll need `onnx-caffe2 <https://github.com/onnx/onnx-caffe2>`_, a
-   pure-Python library which provides a Caffe2 backend for ONNX.  You can install ``onnx-caffe2``
-   with pip::
-
-      pip install onnx-caffe2
+To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need to install `caffe2`: If you don't have one already, Please `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_.
 
 Once these are installed, you can use the backend for Caffe2::
 
     # ...continuing from above
-    import onnx_caffe2.backend as backend
+    import caffe2.python.onnx.backend as backend
     import numpy as np
 
     rep = backend.prepare(model, device="CUDA:0") # or "CPU"
     # For the Caffe2 backend:
     #     rep.predict_net is the Caffe2 protobuf for the network
     #     rep.workspace is the Caffe2 workspace for the network
-    #       (see the class onnx_caffe2.backend.Workspace)
+    #       (see the class caffe2.python.onnx.backend.Workspace)
     outputs = rep.run(np.random.randn(10, 3, 224, 224).astype(np.float32))
     # To run networks with more than one input, pass a tuple
     # rather than a single numpy ndarray.
@@ -130,9 +135,12 @@ The following operators are supported:
 * mm
 * addmm
 * neg
+* sqrt
 * tanh
 * sigmoid
 * mean
+* sum
+* prod
 * t
 * expand (only when used before a broadcasting ONNX operator; e.g., add)
 * transpose
@@ -143,7 +151,7 @@ The following operators are supported:
 * threshold (non-zero threshold/non-zero value not supported)
 * leaky_relu
 * glu
-* softmax
+* softmax (only dim=-1 supported)
 * avg_pool2d (ceil_mode not supported)
 * log_softmax
 * unfold (experimental support with ATen-Caffe2 integration)
@@ -156,6 +164,10 @@ The following operators are supported:
 * max
 * min
 * eq
+* gt
+* lt
+* ge
+* le
 * exp
 * permute
 * Conv
@@ -189,7 +201,7 @@ for installing PyTorch from source.
 If the wanted operator is standardized in ONNX, it should be easy to add
 support for exporting such operator (adding a symbolic function for the operator).
 To confirm whether the operator is standardized or not, please check the
-`ONNX operator list <http://https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_.
+`ONNX operator list <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_.
 
 If the operator is an ATen operator, which means you can find the declaration
 of the function in ``torch/csrc/autograd/generated/VariableType.h``

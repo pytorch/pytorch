@@ -3,9 +3,11 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+
+#include "ATen/core/Error.h"
 #include "THP_export.h"
-#include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/object_ptr.h"
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
@@ -13,17 +15,21 @@
 #define END_HANDLE_TH_ERRORS_RET(retval)                                       \
   } catch (python_error &e) {                                                  \
     return retval;                                                             \
+  } catch (const at::Error &e) {                                               \
+    auto msg = torch::processErrorMsg(e.what_without_backtrace());              \
+    PyErr_SetString(PyExc_RuntimeError, msg.c_str());                          \
+    return retval;                                                             \
   } catch (torch::PyTorchError &e) {                                           \
     auto msg = torch::processErrorMsg(e.what());                               \
     PyErr_SetString(e.python_type(), msg.c_str());                             \
     return retval;                                                             \
-  } catch (std::exception &e) {                                                \
+  } catch (const std::exception &e) {                                          \
     auto msg = torch::processErrorMsg(e.what());                               \
     PyErr_SetString(PyExc_RuntimeError, msg.c_str());                          \
     return retval;                                                             \
   }
 
-#define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(NULL)
+#define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError;
 
@@ -118,7 +124,7 @@ struct TypeError : public PyTorchError {
   }
 };
 
-// Translates to Python TypeError
+// Translates to Python ValueError
 struct ValueError : public PyTorchError {
   ValueError(const char *format, ...);
   virtual PyObject* python_type() override {

@@ -2,66 +2,11 @@
 #define TH_GENERIC_FILE "generic/SpatialFullDilatedConvolution.c"
 #else
 
-static void THNN_(im2col)(const real* data_im, const int channels,
-      const int height, const int width, const int kernel_h, const int kernel_w,
-      const int pad_h, const int pad_w,
-      const int stride_h, const int stride_w,
-      const int dilation_h, const int dilation_w,
-      real* data_col) {
-  const int height_col = (height + 2 * pad_h -
-                          (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
-  const int width_col = (width + 2 * pad_w -
-                         (dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
-  const int channels_col = channels * kernel_h * kernel_w;
-  for (int c_col = 0; c_col < channels_col; ++c_col) {
-    int w_offset = c_col % kernel_w;
-    int h_offset = (c_col / kernel_w) % kernel_h;
-    int c_im = c_col / kernel_h / kernel_w;
-    for (int h_col = 0; h_col < height_col; ++h_col) {
-      for (int w_col = 0; w_col < width_col; ++w_col) {
-        int h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
-        int w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
-        data_col[(c_col * height_col + h_col) * width_col + w_col] =
-          (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) ?
-          data_im[(c_im * height + h_im) * width + w_im] : 0;
-      }
-    }
-  }
-}
-
-static void THNN_(col2im)(const real* data_col, const int channels,
-      const int height, const int width,
-      const int output_height, const int output_width,
-      const int kernel_h, const int kernel_w,
-      const int pad_h, const int pad_w,
-      const int stride_h, const int stride_w,
-      const int dilation_h, const int dilation_w,
-      real* data_im) {
-  memset(data_im, 0, sizeof(real) * height * width * channels);
-  const int height_col = output_height;
-  const int width_col = output_width;
-  const int channels_col = channels * kernel_h * kernel_w;
-  for (int c_col = 0; c_col < channels_col; ++c_col) {
-    int w_offset = c_col % kernel_w;
-    int h_offset = (c_col / kernel_w) % kernel_h;
-    int c_im = c_col / kernel_h / kernel_w;
-    for (int h_col = 0; h_col < height_col; ++h_col) {
-      for (int w_col = 0; w_col < width_col; ++w_col) {
-        int h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
-        int w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
-        if (h_im >= 0 && h_im < height && w_im >= 0 && w_im < width)
-          data_im[(c_im * height + h_im) * width + w_im] +=
-            data_col[(c_col * height_col + h_col) * width_col + w_col];
-      }
-    }
-  }
-}
-
 static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
 	THTensor *input, THTensor *gradOutput,
 	THTensor *weight, THTensor *bias,
 	int kH, int kW, int dH, int dW, int padH, int padW,
-	int dilationH, int dilationW, int adjH, int adjW) {
+	int dilationH, int dilationW, int adjH, int adjW, int weight_nullable) {
 
   THArgCheck(kW > 0 && kH > 0, 9,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
@@ -73,14 +18,18 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
   THArgCheck((adjW < dW || adjW < dilationW) && (adjH < dH || adjH < dilationH), 15,
              "output padding must be smaller than either stride or dilation, but got adjH: %d adjW: %d dH: %d dW: %d dilationH: %d dilationW: %d",
              adjH, adjW, dH, dW, dilationH, dilationW);
-  THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
-		"2D or 4D weight tensor expected, but got: %s");
 
-  if (bias != NULL) {
-    THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[1]);
+  if (weight != NULL) {
+    THNN_ARGCHECK(!weight->is_empty() && (weight->dim() == 2 || weight->dim() == 4), 5, weight,
+                  "non-empty 2D or 4D weight tensor expected, but got: %s");
+    if (bias != NULL) {
+      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size(1));
+    }
+  } else if (!weight_nullable) {
+    THError("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -91,25 +40,33 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
     dimw++;
   }
 
-  THNN_ARGCHECK(ndim == 3 || ndim == 4, 2, input,
-		"3D or 4D input tensor expected but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+		"non-empty 3D or 4D input tensor expected but got: %s");
 
-  int64_t nInputPlane  = weight->size[0];
-  int64_t inputHeight  = input->size[dimh];
-  int64_t inputWidth   = input->size[dimw];
-  int64_t nOutputPlane = weight->size[1];
+  int64_t inputHeight  = input->size(dimh);
+  int64_t inputWidth   = input->size(dimw);
   int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
   int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
-  if (outputWidth < 1 || outputHeight < 1)
-    THError("Given input size: (%d x %d x %d). "
-	    "Calculated output size: (%d x %d x %d). Output size is too small",
-	    nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
+  if (outputWidth < 1 || outputHeight < 1) {
+    THError("Given input size per channel: (%ld x %ld). "
+	    "Calculated output size per channel: (%ld x %ld). Output size is too small",
+	    inputHeight, inputWidth, outputHeight, outputWidth);
+  }
 
-  THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
+  if (weight != NULL) {
+    int64_t nInputPlane = weight->size(0);
+    THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
+  }
 
   if (gradOutput != NULL) {
-    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
+    if (weight != NULL) {
+      int64_t nOutputPlane = weight->size(1);
+      THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
+    } else if (bias != NULL) {
+      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
+      THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
+    }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
   }
@@ -131,7 +88,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
 {
   THNN_(SpatialFullDilatedConvolution_shapeCheck)
     (input, NULL, weight, bias, kH, kW, dH, dW, padH, padW,
-     dilationH, dilationW, adjH, adjW);
+     dilationH, dilationW, adjH, adjW, 0);
 
   int nInputPlane = THTensor_(size)(weight,0);
   int nOutputPlane = THTensor_(size)(weight,1);
@@ -143,20 +100,21 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
     bias = THTensor_(newContiguous)(bias);
     THArgCheck(THTensor_(isContiguous)(ones), 6, "ones needs to be contiguous");
   }
-  int batch = 1;
-  if (input->nDimension == 3) {
+
+  int is_batch = 1;
+  if (input->dim() == 3) {
     // Force batch
-    batch = 0;
-    THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
+    is_batch = 0;
+    THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
   }
 
-  int64_t inputHeight  = input->size[2];
-  int64_t inputWidth   = input->size[3];
+  int64_t inputHeight  = input->size(2);
+  int64_t inputWidth   = input->size(3);
   int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
   int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THTensor_(resize4d)(output, batchSize, nOutputPlane, outputHeight, outputWidth);
@@ -168,7 +126,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+  if (ones->dim() != 2 || ones->size(0)*ones->size(1) < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize2d)(ones, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);
@@ -187,27 +145,27 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    int64_t m = weight->size[1] * weight->size[2] * weight->size[3];
-    int64_t n = columns->size[1];
-    int64_t k = weight->size[0];
+    int64_t m = weight->size(1) * weight->size(2) * weight->size(3);
+    int64_t n = columns->size(1);
+    int64_t k = weight->size(0);
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     THBlas_(gemm)(
         'n', 't',
         n, m, k,
         1,
-        THTensor_(data)(input_n), n,
-        THTensor_(data)(weight), m,
+        input_n->data<scalar_t>(), n,
+        weight->data<scalar_t>(), m,
         0,
-        THTensor_(data)(columns), n
+        columns->data<scalar_t>(), n
     );
 
     // Unpack columns back into input:
     THNN_(col2im)(
-      THTensor_(data)(columns),
+      columns->data<scalar_t>(),
       nOutputPlane, outputHeight, outputWidth, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
-      THTensor_(data)(output_n)
+      output_n->data<scalar_t>()
     );
 
     // Do Bias after:
@@ -223,27 +181,27 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
           't', 'n',
           n_, m_, k_,
           1,
-          THTensor_(data)(ones), k_,
-          THTensor_(data)(bias), k_,
+          ones->data<scalar_t>(), k_,
+          bias->data<scalar_t>(), k_,
           1,
-          THTensor_(data)(output_n), n_
+          output_n->data<scalar_t>(), n_
       );
     }
   }
 
   // Free
-  THTensor_(free)(input_n);
-  THTensor_(free)(output_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(output_n);
 
   // Resize output
-  if (batch == 0) {
+  if (is_batch == 0) {
     THTensor_(resize3d)(output, nOutputPlane, outputHeight, outputWidth);
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(weight);
-  if (bias) THTensor_(free)(bias);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(weight);
+  if (bias) c10::raw::intrusive_ptr::decref(bias);
 }
 
 void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
@@ -261,30 +219,31 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
 {
   THNN_(SpatialFullDilatedConvolution_shapeCheck)
     (input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW,
-     dilationH, dilationW, adjH, adjW);
+     dilationH, dilationW, adjH, adjW, 0);
 
-  int nInputPlane = THTensor_(size)(weight,0);
-  int nOutputPlane = THTensor_(size)(weight,1);
+  int64_t nInputPlane = THTensor_(size)(weight,0);
+  int64_t nOutputPlane = THTensor_(size)(weight,1);
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
   weight = THTensor_(newContiguous)(weight);
   THArgCheck(THTensor_(isContiguous)(gradColumns), 5, "gradColumns needs to be contiguous");
-  int batch = 1;
-  if (input->nDimension == 3) {
+
+  int is_batch = 1;
+  if (input->dim() == 3) {
     // Force batch
-    batch = 0;
-    THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
-    THTensor_(resize4d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
+    is_batch = 0;
+    THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
+    THTensor_(resize4d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1), gradOutput->size(2));
   }
 
-  int64_t inputWidth   = input->size[3];
-  int64_t inputHeight  = input->size[2];
+  int64_t inputWidth   = input->size(3);
+  int64_t inputHeight  = input->size(2);
   int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
   int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THTensor_(resize4d)(gradInput, batchSize, nInputPlane, inputHeight, inputWidth);
@@ -306,46 +265,46 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
 
     // Extract columns:
     THNN_(im2col)(
-      THTensor_(data)(gradOutput_n),
-      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
+      gradOutput_n->data<scalar_t>(),
+      nOutputPlane, outputHeight, outputWidth,
+      inputHeight, inputWidth,
+      kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
-      THTensor_(data)(gradColumns)
+      gradColumns->data<scalar_t>()
     );
-
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    int64_t m = weight->size[0];
-    int64_t n = gradColumns->size[1];
-    int64_t k = weight->size[1] * weight->size[2] * weight->size[3];
+    int64_t m = weight->size(0);
+    int64_t n = gradColumns->size(1);
+    int64_t k = weight->size(1) * weight->size(2) * weight->size(3);
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     THBlas_(gemm)(
         'n', 'n',
         n, m, k,
         1,
-        THTensor_(data)(gradColumns), n,
-        THTensor_(data)(weight), k,
+        gradColumns->data<scalar_t>(), n,
+        weight->data<scalar_t>(), k,
         0,
-        THTensor_(data)(gradInput_n), n
+        gradInput_n->data<scalar_t>(), n
     );
   }
 
-
   // Free
-  THTensor_(free)(gradInput_n);
-  THTensor_(free)(gradOutput_n);
+  c10::raw::intrusive_ptr::decref(gradInput_n);
+  c10::raw::intrusive_ptr::decref(gradOutput_n);
 
   // Resize output
-  if (batch == 0) {
+  if (is_batch == 0) {
     THTensor_(resize3d)(gradOutput, nOutputPlane, outputHeight, outputWidth);
     THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
     THTensor_(resize3d)(gradInput, nInputPlane, inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 
@@ -364,40 +323,49 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
     int adjW, int adjH,
     accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THNN_(SpatialFullDilatedConvolution_shapeCheck)
     (input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW,
-     dilationH, dilationW, adjH, adjW);
+     dilationH, dilationW, adjH, adjW, 1);
 
-  int nInputPlane = THTensor_(size)(gradWeight,0);
-  int nOutputPlane = THTensor_(size)(gradWeight,1);
+  int64_t nOutputPlane;
+  if (gradWeight) {
+    nOutputPlane = THTensor_(size)(gradWeight, 1);
+  } else if (gradBias) {
+    nOutputPlane = THTensor_sizeLegacyNoScalars(gradBias, 0);
+  } else {
+    return;
+  }
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
+  if (gradWeight) {
+    THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
+  }
   THArgCheck(THTensor_(isContiguous)(columns), 6, "columns needs to be contiguous");
   if (gradBias) {
     THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
     THArgCheck(THTensor_(isContiguous)(ones), 7, "ones needs to be contiguous");
   }
-  int batch = 1;
-  if (input->nDimension == 3) {
+
+  int is_batch = 1;
+  if (input->dim() == 3) {
     // Force batch
-    batch = 0;
-    THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
-    THTensor_(resize4d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
+    is_batch = 0;
+    THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
+    THTensor_(resize4d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1), gradOutput->size(2));
   }
 
-  int64_t inputWidth   = input->size[3];
-  int64_t inputHeight  = input->size[2];
+  int64_t inputWidth   = input->size(3);
+  int64_t inputHeight  = input->size(2);
   int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
   int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+  if (ones->dim() != 2 || ones->size(0)*ones->size(1) < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize2d)(ones, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);
@@ -414,67 +382,73 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
   // For each elt in batch, do:
   for (elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
-    THTensor_(select)(input_n, input, 0, elt);
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
 
-    // Extract columns:
-    THNN_(im2col)(
-      THTensor_(data)(gradOutput_n),
-      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
-      dilationH, dilationW,
-      THTensor_(data)(columns)
-    );
+    // Do Weight:
+    if (gradWeight) {
+      // Matrix mulitply per output:
+      THTensor_(select)(input_n, input, 0, elt);
 
-    // M,N,K are dims of matrix A and B
-    // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    int64_t n = columns->size[0];   // nOutputPlane * kh * kw
-    int64_t m = input_n->size[0];   // nInputPlane
-    int64_t k = columns->size[1];   // inputHeight * inputWidth
+      // Extract columns:
+      THNN_(im2col)(
+        gradOutput_n->data<scalar_t>(),
+        nOutputPlane, outputHeight, outputWidth,
+        inputHeight, inputWidth,
+        kH, kW, padH, padW, dH, dW,
+        dilationH, dilationW,
+        columns->data<scalar_t>()
+      );
 
-    // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THBlas_(gemm)(
-        't', 'n',
-        n, m, k,
-        scale,
-        THTensor_(data)(columns), k,
-        THTensor_(data)(input_n), k,
-        1,
-        THTensor_(data)(gradWeight), n
-    );
+      // M,N,K are dims of matrix A and B
+      // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
+      int64_t n = columns->size(0);   // nOutputPlane * kh * kw
+      int64_t m = THTensor_sizeLegacyNoScalars(input_n, 0);   // nInputPlane
+      int64_t k = columns->size(1);   // inputHeight * inputWidth
 
+      // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
+      THBlas_(gemm)(
+          't', 'n',
+          n, m, k,
+          scale,
+          columns->data<scalar_t>(), k,
+          input_n->data<scalar_t>(), k,
+          1,
+          gradWeight->data<scalar_t>(), n
+      );
+    }
 
     // Do Bias:
-    // M,N,K are dims of matrix A and B
-    // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    int64_t m_ = nOutputPlane;
-    int64_t k_ = outputHeight * outputWidth;
-
-    // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
     if (gradBias) {
+      // M,N,K are dims of matrix A and B
+      // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
+      int64_t m_ = nOutputPlane;
+      int64_t k_ = outputHeight * outputWidth;
+
+      // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
       THBlas_(gemv)(
           't',
           k_, m_,
           scale,
-          THTensor_(data)(gradOutput_n), k_,
-          THTensor_(data)(ones), 1,
+          gradOutput_n->data<scalar_t>(), k_,
+          ones->data<scalar_t>(), 1,
           1,
-          THTensor_(data)(gradBias), 1
+          gradBias->data<scalar_t>(), 1
       );
     }
   }
 
   // Free
-  THTensor_(free)(input_n);
-  THTensor_(free)(gradOutput_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(gradOutput_n);
 
   // Resize
-  if (batch == 0) {
+  if (is_batch == 0) {
     THTensor_(resize3d)(gradOutput, nOutputPlane, outputHeight, outputWidth);
-    THTensor_(resize3d)(input, nInputPlane, inputHeight, inputWidth);
+    THTensor_(resize3d)(input, input->size(1), inputHeight, inputWidth);
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

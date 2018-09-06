@@ -1,4 +1,5 @@
 import torch
+from torch.nn.functional import _Reduction
 from .Criterion import Criterion
 
 
@@ -24,13 +25,12 @@ class ClassNLLCriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            self.sizeAverage,
+            _Reduction.legacy_get_enum(self.sizeAverage, True, emit_warning=False),
             self.weights,
             self.total_weight_tensor,
             self.ignore_index,
-            True,  # reduce
         )
-        self.output = self.output_tensor[0]
+        self.output = self.output_tensor[0].item()
         return self.output
 
     def updateGradInput(self, input, target):
@@ -44,11 +44,10 @@ class ClassNLLCriterion(Criterion):
             target,
             implicit_gradOutput,
             self.gradInput,
-            self.sizeAverage,
+            _Reduction.legacy_get_enum(self.sizeAverage, True, emit_warning=False),
             self.weights,
             self.total_weight_tensor,
             self.ignore_index,
-            True,  # reduce
         )
 
         return self.gradInput

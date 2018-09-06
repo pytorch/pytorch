@@ -1,10 +1,10 @@
-from collections import OrderedDict, Iterable
+from collections import OrderedDict
 import functools
+import itertools
 
 import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
-from torch.autograd import Variable
 import torch.utils.hooks as hooks
 
 
@@ -42,10 +42,22 @@ class Module(object):
                return F.relu(self.conv2(x))
 
     Submodules assigned in this way will be registered, and will have their
-    parameters converted too when you call .cuda(), etc.
+    parameters converted too when you call `.cuda()`, etc.
     """
 
     dump_patches = False
+
+    r"""This allows better BC support for :meth:`load_state_dict`. In
+    :meth:`state_dict`, the version number will be saved as in the attribute
+    `_metadata` of the returned state dict, and thus pickled. `_metadata` is a
+    dictionary with keys follow the naming convention of state dict. See
+    ``_load_from_state_dict`` on how to use this information in loading.
+
+    If new parameters/buffers are added/removed from a module, this number shall
+    be bumped, and the module's `_load_from_state_dict` method can compare the
+    version number and do appropriate changes if the state dict is from before
+    the change."""
+    _version = 1
 
     def __init__(self):
         self._backend = thnn_backend
@@ -58,9 +70,9 @@ class Module(object):
         self.training = True
 
     def forward(self, *input):
-        """Defines the computation performed at every call.
+        r"""Defines the computation performed at every call.
 
-        Should be overriden by all subclasses.
+        Should be overridden by all subclasses.
 
         .. note::
             Although the recipe for forward pass needs to be defined within
@@ -71,7 +83,7 @@ class Module(object):
         raise NotImplementedError
 
     def register_buffer(self, name, tensor):
-        """Adds a persistent buffer to the module.
+        r"""Adds a persistent buffer to the module.
 
         This is typically used to register a buffer that should not to be
         considered a model parameter. For example, BatchNorm's ``running_mean``
@@ -84,16 +96,29 @@ class Module(object):
                 from this module using the given name
             tensor (Tensor): buffer to be registered.
 
-        Example:
-            >>> self.register_buffer('running_mean', torch.zeros(num_features))
-        """
-        if hasattr(self, name) and name not in self._buffers:
-            raise KeyError("attribute '{}' already exists".format(name))
+        Example::
 
-        self._buffers[name] = tensor
+            >>> self.register_buffer('running_mean', torch.zeros(num_features))
+
+        """
+        if not isinstance(name, torch._six.string_classes):
+            raise TypeError("buffer name should be a string. "
+                            "Got {}".format(torch.typename(name)))
+        elif '.' in name:
+            raise KeyError("buffer name can't contain \".\"")
+        elif name == '':
+            raise KeyError("buffer name can't be empty string \"\"")
+        elif hasattr(self, name) and name not in self._buffers:
+            raise KeyError("attribute '{}' already exists".format(name))
+        elif tensor is not None and not isinstance(tensor, torch.Tensor):
+            raise TypeError("cannot assign '{}' object to buffer '{}' "
+                            "(torch Tensor or None required)"
+                            .format(torch.typename(tensor), name))
+        else:
+            self._buffers[name] = tensor
 
     def register_parameter(self, name, param):
-        """Adds a parameter to the module.
+        r"""Adds a parameter to the module.
 
         The parameter can be accessed as an attribute using given name.
 
@@ -106,7 +131,14 @@ class Module(object):
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        if hasattr(self, name) and name not in self._parameters:
+        elif not isinstance(name, torch._six.string_classes):
+            raise TypeError("parameter name should be a string. "
+                            "Got {}".format(torch.typename(name)))
+        elif '.' in name:
+            raise KeyError("parameter name can't contain \".\"")
+        elif name == '':
+            raise KeyError("parameter name can't be empty string \"\"")
+        elif hasattr(self, name) and name not in self._parameters:
             raise KeyError("attribute '{}' already exists".format(name))
 
         if param is None:
@@ -117,15 +149,15 @@ class Module(object):
                             .format(torch.typename(param), name))
         elif param.grad_fn:
             raise ValueError(
-                "Cannot assign non-leaf Variable to parameter '{0}'. Model "
+                "Cannot assign non-leaf Tensor to parameter '{0}'. Model "
                 "parameters must be created explicitly. To express '{0}' "
-                "as a function of another variable, compute the value in "
+                "as a function of another Tensor, compute the value in "
                 "the forward() method.".format(name))
         else:
             self._parameters[name] = param
 
     def add_module(self, name, module):
-        """Adds a child module to the current module.
+        r"""Adds a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
 
@@ -137,8 +169,15 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        if hasattr(self, name) and name not in self._modules:
+        elif not isinstance(name, torch._six.string_classes):
+            raise TypeError("module name should be a string. Got {}".format(
+                torch.typename(name)))
+        elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
+        elif '.' in name:
+            raise KeyError("module name can't contain \".\"")
+        elif name == '':
+            raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
     def _apply(self, fn):
@@ -147,7 +186,7 @@ class Module(object):
 
         for param in self._parameters.values():
             if param is not None:
-                # Variables stored in modules are graph leaves, and we don't
+                # Tensors stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
                 param.data = fn(param.data)
                 if param._grad is not None:
@@ -160,7 +199,7 @@ class Module(object):
         return self
 
     def apply(self, fn):
-        """Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
+        r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
         (see also :ref:`torch-nn-init`).
 
@@ -170,28 +209,31 @@ class Module(object):
         Returns:
             Module: self
 
-        Example:
+        Example::
+
             >>> def init_weights(m):
-            >>>     print(m)
-            >>>     if type(m) == nn.Linear:
-            >>>         m.weight.data.fill_(1.0)
-            >>>         print(m.weight)
-            >>>
+                    print(m)
+                    if type(m) == nn.Linear:
+                        m.weight.data.fill_(1.0)
+                        print(m.weight)
+
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
-            Linear (2 -> 2)
+            Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-             1  1
-             1  1
-            [torch.FloatTensor of size 2x2]
-            Linear (2 -> 2)
+            tensor([[ 1.,  1.],
+                    [ 1.,  1.]])
+            Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-             1  1
-             1  1
-            [torch.FloatTensor of size 2x2]
-            Sequential (
-              (0): Linear (2 -> 2)
-              (1): Linear (2 -> 2)
+            tensor([[ 1.,  1.],
+                    [ 1.,  1.]])
+            Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
+            )
+            Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
             )
         """
         for module in self.children():
@@ -200,7 +242,7 @@ class Module(object):
         return self
 
     def cuda(self, device=None):
-        """Moves all model parameters and buffers to the GPU.
+        r"""Moves all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
         it should be called before constructing optimizer if the module will
@@ -216,7 +258,7 @@ class Module(object):
         return self._apply(lambda t: t.cuda(device))
 
     def cpu(self):
-        """Moves all model parameters and buffers to the CPU.
+        r"""Moves all model parameters and buffers to the CPU.
 
         Returns:
             Module: self
@@ -224,7 +266,7 @@ class Module(object):
         return self._apply(lambda t: t.cpu())
 
     def type(self, dst_type):
-        """Casts all parameters and buffers to dst_type.
+        r"""Casts all parameters and buffers to :attr:`dst_type`.
 
         Arguments:
             dst_type (type or string): the desired type
@@ -235,31 +277,109 @@ class Module(object):
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self):
-        """Casts all floating point parameters and buffers to float datatype.
+        r"""Casts all floating point parameters and buffers to float datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float() if not type(t) in torch._integer_tensor_classes else t)
+        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
 
     def double(self):
-        """Casts all floating point parameters and buffers to double datatype.
+        r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double() if not type(t) in torch._integer_tensor_classes else t)
+        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
 
     def half(self):
-        """Casts all floating point parameters and buffers to half datatype.
+        r"""Casts all floating point parameters and buffers to ``half`` datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half() if not type(t) in torch._integer_tensor_classes else t)
+        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
+
+    def to(self, *args, **kwargs):
+        r"""Moves and/or casts the parameters and buffers.
+
+        This can be called as
+
+        .. function:: to(device=None, dtype=None, non_blocking=False)
+
+        .. function:: to(dtype, non_blocking=False)
+
+        .. function:: to(tensor, non_blocking=False)
+
+        Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
+        floating point desired :attr:`dtype` s. In addition, this method will
+        only cast the floating point parameters and buffers to :attr:`dtype`
+        (if given). The integral parameters and buffers will be moved
+        :attr:`device`, if that is given, but with dtypes unchanged. When
+        :attr:`non_blocking` is set, it tries to convert/move asynchronously
+        with respect to the host if possible, e.g., moving CPU Tensors with
+        pinned memory to CUDA devices.
+
+        See below for examples.
+
+        .. note::
+            This method modifies the module in-place.
+
+        Args:
+            device (:class:`torch.device`): the desired device of the parameters
+                and buffers in this module
+            dtype (:class:`torch.dtype`): the desired floating point type of
+                the floating point parameters and buffers in this module
+            tensor (torch.Tensor): Tensor whose dtype and device are the desired
+                dtype and device for all parameters and buffers in this module
+
+        Returns:
+            Module: self
+
+        Example::
+
+            >>> linear = nn.Linear(2, 2)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.1913, -0.3420],
+                    [-0.5113, -0.2325]])
+            >>> linear.to(torch.double)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.1913, -0.3420],
+                    [-0.5113, -0.2325]], dtype=torch.float64)
+            >>> gpu1 = torch.device("cuda:1")
+            >>> linear.to(gpu1, dtype=torch.half, non_blocking=True)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.1914, -0.3420],
+                    [-0.5112, -0.2324]], dtype=torch.float16, device='cuda:1')
+            >>> cpu = torch.device("cpu")
+            >>> linear.to(cpu)
+            Linear(in_features=2, out_features=2, bias=True)
+            >>> linear.weight
+            Parameter containing:
+            tensor([[ 0.1914, -0.3420],
+                    [-0.5112, -0.2324]], dtype=torch.float16)
+
+        """
+
+        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+
+        if dtype is not None:
+            if not dtype.is_floating_point:
+                raise TypeError('nn.Module.to only accepts floating point '
+                                'dtypes, but got desired dtype={}'.format(dtype))
+
+        def convert(t):
+            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
+
+        return self._apply(convert)
 
     def register_backward_hook(self, hook):
-        """Registers a backward hook on the module.
+        r"""Registers a backward hook on the module.
 
         The hook will be called every time the gradients with respect to module
         inputs are computed. The hook should have the following signature::
@@ -282,7 +402,7 @@ class Module(object):
         return handle
 
     def register_forward_pre_hook(self, hook):
-        """Registers a forward pre-hook on the module.
+        r"""Registers a forward pre-hook on the module.
 
         The hook will be called every time before :func:`forward` is invoked.
         It should have the following signature::
@@ -329,17 +449,17 @@ class Module(object):
         return None
 
     def _slow_forward(self, *input, **kwargs):
-        input_vars = tuple(torch.autograd.function._iter_variables(input))
-        tracing_state = torch.jit.get_tracing_state(input_vars)
+        input_vars = tuple(torch.autograd.function._iter_tensors(input))
+        tracing_state = torch._C._get_tracing_state()
         if not tracing_state:
             return self.forward(*input, **kwargs)
         if not hasattr(tracing_state, '_traced_module_stack'):
             tracing_state._traced_module_stack = []
         name = self._tracing_name(tracing_state)
         if name:
-            tracing_state.push_scope('%s[%s]' % (self.__class__.__name__, name))
+            tracing_state.push_scope('%s[%s]' % (self._get_name(), name))
         else:
-            tracing_state.push_scope(self.__class__.__name__)
+            tracing_state.push_scope(self._get_name())
         tracing_state._traced_module_stack.append(self)
         try:
             result = self.forward(*input, **kwargs)
@@ -351,7 +471,7 @@ class Module(object):
     def __call__(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
             hook(self, input)
-        if torch.jit._tracing:
+        if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)
@@ -363,9 +483,9 @@ class Module(object):
                     "didn't return None".format(hook))
         if len(self._backward_hooks) > 0:
             var = result
-            while not isinstance(var, Variable):
+            while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
-                    var = next((v for v in var.values() if isinstance(v, Variable)))
+                    var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
                 else:
                     var = var[0]
             grad_fn = var.grad_fn
@@ -433,7 +553,7 @@ class Module(object):
             else:
                 buffers = self.__dict__.get('_buffers')
                 if buffers is not None and name in buffers:
-                    if value is not None and not torch.is_tensor(value):
+                    if value is not None and not isinstance(value, torch.Tensor):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
                                         "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
@@ -452,132 +572,269 @@ class Module(object):
             object.__delattr__(self, name)
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
-        """Returns a dictionary containing a whole state of the module.
+        r"""Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
-
-        When keep_vars is ``True``, it returns a Variable for each parameter
-        (rather than a Tensor).
-
-        Args:
-            destination (dict, optional):
-                if not None, the return dictionary is stored into destination.
-                Default: None
-            prefix (string, optional): Adds a prefix to the key (name) of every
-                parameter and buffer in the result dictionary. Default: ''
-            keep_vars (bool, optional): if ``True``, returns a Variable for each
-                parameter. If ``False``, returns a Tensor for each parameter.
-                Default: ``False``
 
         Returns:
             dict:
                 a dictionary containing a whole state of the module
 
-        Example:
+        Example::
+
             >>> module.state_dict().keys()
             ['bias', 'weight']
+
         """
         if destination is None:
             destination = OrderedDict()
+            destination._metadata = OrderedDict()
+        destination._metadata[prefix[:-1]] = dict(version=self._version)
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.data
         for name, buf in self._buffers.items():
             if buf is not None:
-                destination[prefix + name] = buf
+                destination[prefix + name] = buf if keep_vars else buf.data
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def load_state_dict(self, state_dict, strict=True):
-        """Copies parameters and buffers from :attr:`state_dict` into
-        this module and its descendants. If :attr:`strict` is ``True`` then
-        the keys of :attr:`state_dict` must exactly match the keys returned
-        by this module's :func:`state_dict()` function.
+    def _load_from_state_dict(self, state_dict, prefix, metadata, strict, missing_keys, unexpected_keys, error_msgs):
+        r"""Copies parameters and buffers from :attr:`state_dict` into only
+        this module, but not its descendants. This is called on every submodule
+        in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
+        module in input :attr:`state_dict` is provided as :attr`metadata`.
+        For state dicts without meta data, :attr`metadata` is empty.
+        Subclasses can achieve class-specific backward compatible loading using
+        the version number at `metadata.get("version", None)`.
+
+        .. note::
+            :attr:`state_dict` is not the same object as the input
+            :attr:`state_dict` to :meth:`~torch.nn.Module.load_state_dict`. So
+            it can be modified.
 
         Arguments:
-            state_dict (dict): A dict containing parameters and
+            state_dict (dict): a dict containing parameters and
                 persistent buffers.
-            strict (bool): Strictly enforce that the keys in :attr:`state_dict`
-                match the keys returned by this module's `:func:`state_dict()`
-                function.
+            prefix (str): the prefix for parameters and buffers used in this
+                module
+            metadata (dict): a dict containing the metadata for this moodule.
+                See
+            strict (bool): whether to strictly enforce that the keys in
+                :attr:`state_dict` with :attr:`prefix` match the names of
+                parameters and buffers in this module
+            missing_keys (list of str): if ``strict=False``, add missing keys to
+                this list
+            unexpected_keys (list of str): if ``strict=False``, add unexpected
+                keys to this list
+            error_msgs (list of str): error messages should be added to this
+                list, and will be reported together in
+                :meth:`~torch.nn.Module.load_state_dict`
         """
-        own_state = self.state_dict()
-        for name, param in state_dict.items():
-            if name in own_state:
-                if isinstance(param, Parameter):
-                    # backwards compatibility for serialized parameters
-                    param = param.data
-                try:
-                    own_state[name].copy_(param)
-                except Exception:
-                    raise RuntimeError('While copying the parameter named {}, '
-                                       'whose dimensions in the model are {} and '
-                                       'whose dimensions in the checkpoint are {}.'
-                                       .format(name, own_state[name].size(), param.size()))
-            elif strict:
-                raise KeyError('unexpected key "{}" in state_dict'
-                               .format(name))
-        if strict:
-            missing = set(own_state.keys()) - set(state_dict.keys())
-            if len(missing) > 0:
-                raise KeyError('missing keys in state_dict: "{}"'.format(missing))
+        local_name_params = itertools.chain(self._parameters.items(), self._buffers.items())
+        local_state = {k: v.data for k, v in local_name_params if v is not None}
 
-    def parameters(self):
-        """Returns an iterator over module parameters.
+        for name, param in local_state.items():
+            key = prefix + name
+            if key in state_dict:
+                input_param = state_dict[key]
+
+                # Backward compatibility: loading 1-dim tensor from 0.3.* to version 0.4+
+                if len(param.shape) == 0 and len(input_param.shape) == 1:
+                    input_param = input_param[0]
+
+                if input_param.shape != param.shape:
+                    # local shape should match the one in checkpoint
+                    error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
+                                      'where the shape is {} in current model.'
+                                      .format(key, input_param.shape, param.shape))
+                    continue
+
+                if isinstance(input_param, Parameter):
+                    # backwards compatibility for serialized parameters
+                    input_param = input_param.data
+                try:
+                    param.copy_(input_param)
+                except Exception:
+                    error_msgs.append('While copying the parameter named "{}", '
+                                      'whose dimensions in the model are {} and '
+                                      'whose dimensions in the checkpoint are {}.'
+                                      .format(key, param.size(), input_param.size()))
+            elif strict:
+                missing_keys.append(key)
+
+        if strict:
+            for key, input_param in state_dict.items():
+                if key.startswith(prefix):
+                    input_name = key[len(prefix):]
+                    input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
+                    if input_name not in self._modules and input_name not in local_state:
+                        unexpected_keys.append(key)
+
+    def load_state_dict(self, state_dict, strict=True):
+        r"""Copies parameters and buffers from :attr:`state_dict` into
+        this module and its descendants. If :attr:`strict` is ``True``, then
+        the keys of :attr:`state_dict` must exactly match the keys returned
+        by this module's :meth:`~torch.nn.Module.state_dict` function.
+
+        Arguments:
+            state_dict (dict): a dict containing parameters and
+                persistent buffers.
+            strict (bool, optional): whether to strictly enforce that the keys
+                in :attr:`state_dict` match the keys returned by this module's
+                :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+        """
+        missing_keys = []
+        unexpected_keys = []
+        error_msgs = []
+
+        # copy state_dict so _load_from_state_dict can modify it
+        metadata = getattr(state_dict, '_metadata', None)
+        state_dict = state_dict.copy()
+        if metadata is not None:
+            state_dict._metadata = metadata
+
+        def load(module, prefix=''):
+            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            module._load_from_state_dict(
+                state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+            for name, child in module._modules.items():
+                if child is not None:
+                    load(child, prefix + name + '.')
+
+        load(self)
+
+        if strict:
+            error_msg = ''
+            if len(unexpected_keys) > 0:
+                error_msgs.insert(
+                    0, 'Unexpected key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in unexpected_keys)))
+            if len(missing_keys) > 0:
+                error_msgs.insert(
+                    0, 'Missing key(s) in state_dict: {}. '.format(
+                        ', '.join('"{}"'.format(k) for k in missing_keys)))
+
+        if len(error_msgs) > 0:
+            raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+                               self.__class__.__name__, "\n\t".join(error_msgs)))
+
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
+        r"""Helper method for yielding various names + members of modules."""
+        memo = set()
+        modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
+        for module_prefix, module in modules:
+            members = get_members_fn(module)
+            for k, v in members:
+                if v is None or v in memo:
+                    continue
+                memo.add(v)
+                name = module_prefix + ('.' if module_prefix else '') + k
+                yield name, v
+
+    def parameters(self, recurse=True):
+        r"""Returns an iterator over module parameters.
 
         This is typically passed to an optimizer.
+
+        Args:
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
 
         Yields:
             Parameter: module parameter
 
-        Example:
+        Example::
+
             >>> for param in model.parameters():
             >>>     print(type(param.data), param.size())
             <class 'torch.FloatTensor'> (20L,)
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+
         """
-        for name, param in self.named_parameters():
+        for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, memo=None, prefix=''):
-        """Returns an iterator over module parameters, yielding both the
-        name of the parameter as well as the parameter itself
+    def named_parameters(self, prefix='', recurse=True):
+        r"""Returns an iterator over module parameters, yielding both the
+        name of the parameter as well as the parameter itself.
+
+        Args:
+            prefix (str): prefix to prepend to all parameter names.
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
 
         Yields:
             (string, Parameter): Tuple containing the name and parameter
 
-        Example:
+        Example::
+
             >>> for name, param in self.named_parameters():
             >>>    if name in ['bias']:
             >>>        print(param.size())
-        """
-        if memo is None:
-            memo = set()
-        for name, p in self._parameters.items():
-            if p is not None and p not in memo:
-                memo.add(p)
-                yield prefix + ('.' if prefix else '') + name, p
-        for mname, module in self.named_children():
-            submodule_prefix = prefix + ('.' if prefix else '') + mname
-            for name, p in module.named_parameters(memo, submodule_prefix):
-                yield name, p
 
-    def _all_buffers(self, memo=None):
-        if memo is None:
-            memo = set()
-        for name, b in self._buffers.items():
-            if b is not None and b not in memo:
-                memo.add(b)
-                yield b
-        for module in self.children():
-            for b in module._all_buffers(memo):
-                yield b
+        """
+        gen = self._named_members(
+            lambda module: module._parameters.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
+
+    def buffers(self, recurse=True):
+        r"""Returns an iterator over module buffers.
+
+        Args:
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+
+        Yields:
+            torch.Tensor: module buffer
+
+        Example::
+
+            >>> for buf in model.buffers():
+            >>>     print(type(buf.data), buf.size())
+            <class 'torch.FloatTensor'> (20L,)
+            <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+
+        """
+        for name, buf in self.named_buffers(recurse=recurse):
+            yield buf
+
+    def named_buffers(self, prefix='', recurse=True):
+        r"""Returns an iterator over module buffers, yielding both the
+        name of the buffer as well as the buffer itself.
+
+        Args:
+            prefix (str): prefix to prepend to all buffer names.
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+
+        Yields:
+            (string, torch.Tensor): Tuple containing the name and buffer
+
+        Example::
+
+            >>> for name, buf in self.named_buffers():
+            >>>    if name in ['running_var']:
+            >>>        print(buf.size())
+
+        """
+        gen = self._named_members(
+            lambda module: module._buffers.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
 
     def children(self):
-        """Returns an iterator over immediate children modules.
+        r"""Returns an iterator over immediate children modules.
 
         Yields:
             Module: a child module
@@ -586,16 +843,18 @@ class Module(object):
             yield module
 
     def named_children(self):
-        """Returns an iterator over immediate children modules, yielding both
+        r"""Returns an iterator over immediate children modules, yielding both
         the name of the module as well as the module itself.
 
         Yields:
             (string, Module): Tuple containing a name and child module
 
-        Example:
+        Example::
+
             >>> for name, module in model.named_children():
             >>>     if name in ['conv4', 'conv5']:
             >>>         print(module)
+
         """
         memo = set()
         for name, module in self._modules.items():
@@ -604,7 +863,7 @@ class Module(object):
                 yield name, module
 
     def modules(self):
-        """Returns an iterator over all modules in the network.
+        r"""Returns an iterator over all modules in the network.
 
         Yields:
             Module: a module in the network
@@ -613,21 +872,25 @@ class Module(object):
             Duplicate modules are returned only once. In the following
             example, ``l`` will be returned only once.
 
+        Example::
+
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.modules()):
-            >>>     print(idx, '->', m)
+                    print(idx, '->', m)
+
             0 -> Sequential (
               (0): Linear (2 -> 2)
               (1): Linear (2 -> 2)
             )
             1 -> Linear (2 -> 2)
+
         """
         for name, module in self.named_modules():
             yield module
 
     def named_modules(self, memo=None, prefix=''):
-        """Returns an iterator over all modules in the network, yielding
+        r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
 
         Yields:
@@ -637,15 +900,19 @@ class Module(object):
             Duplicate modules are returned only once. In the following
             example, ``l`` will be returned only once.
 
+        Example::
+
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
-            >>>     print(idx, '->', m)
+                    print(idx, '->', m)
+
             0 -> ('', Sequential (
               (0): Linear (2 -> 2)
               (1): Linear (2 -> 2)
             ))
             1 -> ('0', Linear (2 -> 2))
+
         """
 
         if memo is None:
@@ -661,9 +928,12 @@ class Module(object):
                     yield m
 
     def train(self, mode=True):
-        """Sets the module in training mode.
+        r"""Sets the module in training mode.
 
-        This has any effect only on modules such as Dropout or BatchNorm.
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
 
         Returns:
             Module: self
@@ -674,14 +944,17 @@ class Module(object):
         return self
 
     def eval(self):
-        """Sets the module in evaluation mode.
+        r"""Sets the module in evaluation mode.
 
-        This has any effect only on modules such as Dropout or BatchNorm.
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
         """
         return self.train(False)
 
     def zero_grad(self):
-        """Sets gradients of all model parameters to zero."""
+        r"""Sets gradients of all model parameters to zero."""
         for p in self.parameters():
             if p.grad is not None:
                 p.grad.detach_()
@@ -690,14 +963,42 @@ class Module(object):
     def share_memory(self):
         return self._apply(lambda t: t.share_memory_())
 
+    def _get_name(self):
+        return self.__class__.__name__
+
+    def extra_repr(self):
+        r"""Set the extra representation of the module
+
+        To print customized extra information, you should reimplement
+        this method in your own modules. Both single-line and multi-line
+        strings are acceptable.
+        """
+        return ''
+
     def __repr__(self):
-        tmpstr = self.__class__.__name__ + '(\n'
+        # We treat the extra repr like the sub-module, one item per line
+        extra_lines = []
+        extra_repr = self.extra_repr()
+        # empty string will be split into list ['']
+        if extra_repr:
+            extra_lines = extra_repr.split('\n')
+        child_lines = []
         for key, module in self._modules.items():
-            modstr = module.__repr__()
-            modstr = _addindent(modstr, 2)
-            tmpstr = tmpstr + '  (' + key + '): ' + modstr + '\n'
-        tmpstr = tmpstr + ')'
-        return tmpstr
+            mod_str = repr(module)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        lines = extra_lines + child_lines
+
+        main_str = self._get_name() + '('
+        if lines:
+            # simple one-liner info, which most builtin Modules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+
+        main_str += ')'
+        return main_str
 
     def __dir__(self):
         module_attrs = dir(self.__class__)

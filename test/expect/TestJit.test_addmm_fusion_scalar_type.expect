@@ -1,0 +1,8 @@
+graph(%a : Long()
+      %b : Double(*, *)
+      %c : Double(*, *)) {
+  %3 : Dynamic = aten::type_as(%a, %b)
+  %4 : int = prim::Constant[value=1]()
+  %5 : Long(*, *) = aten::addmm(%3, %b, %c, %4, %4)
+  return (%5);
+}

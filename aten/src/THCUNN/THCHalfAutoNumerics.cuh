@@ -4,12 +4,14 @@
 #include "THCHalf.h"
 #include "THCNumerics.cuh"
 
+// WARNING: THCNumerics is being deprecated. Read the comments and function usage 
+//          in THCNumerics to learn about the deprecation
+//      
 // Half numerics functions defined as free functions, so cunn code can be
 //written generically, i.e. without excessive calling of THCNumerics<half> functions.
 
 // these functions should move to THCNumerics
 
-#ifdef CUDA_HALF_TENSOR
 inline __host__ __device__ half fmaxType(half x, half y) {
   return THCNumerics<half>::ge(x, y) ? x : y;
 }
@@ -17,7 +19,6 @@ inline __host__ __device__ half fmaxType(half x, half y) {
 inline __host__ __device__ float fmaxType(float x, half y) {
   return fmaxf(x, ScalarConvert<half, float>::to(y));
 }
-#endif
 
 inline __host__ __device__ float fmaxType(float x, float y) {
   return fmaxf(x, y);
@@ -27,7 +28,6 @@ inline __host__ __device__ double fmaxType(double x, double y) {
   return fmax(x, y);
 }
 
-#ifdef CUDA_HALF_TENSOR
 
 // arithmetic functions
 
@@ -168,8 +168,16 @@ inline __host__ __device__ half exp(half a) {
   return THCNumerics<half>::exp(a);
 }
 
+inline __host__ __device__ half log10(half a) {
+  return THCNumerics<half>::log10(a);
+}
+
 inline __host__ __device__ half log1p(half a) {
   return THCNumerics<half>::log1p(a);
+}
+
+inline __host__ __device__ half log2(half a) {
+  return THCNumerics<half>::log2(a);
 }
 
 inline __host__ __device__ half expm1(half a) {
@@ -188,7 +196,7 @@ inline __host__ __device__ half tanh(half a) {
   return THCNumerics<half>::tanh(a);
 }
 
-#if defined(_MSC_VER) && CUDA_VERSION >= 9000
+#if defined(_MSC_VER) && CUDA_VERSION >= 9000 || defined(__HIP_PLATFORM_HCC__)
 inline __host__ __device__ half operator+(half a, int b) {
   return THCNumerics<half>::add(a, ScalarConvert<int, half>::to(b));
 }
@@ -236,5 +244,4 @@ inline __host__ __device__ bool operator>=(half a, int b) {
   return THCNumerics<half>::ge(a, ScalarConvert<int ,half>::to(b));
 }
 
-#endif
 #endif

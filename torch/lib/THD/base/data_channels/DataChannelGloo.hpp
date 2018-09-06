@@ -103,7 +103,16 @@ private:
   std::string _addr;
   port_type _port;
   rank_type _num_processes; // Number of processes in network
-  std::shared_ptr<::gloo::transport::Device> _device;
+  /**
+   * The list of network devices (such as Infiniband) that will be used by Gloo.
+   * Currently Gloo only supports a single network device. Therefore:
+   *
+   * _deviceList.size() will always be equal or less than 1.
+   *
+   * We make it a vector for the purpose of future extension to support multiple
+   * network devices.
+   */
+  std::vector<std::shared_ptr<::gloo::transport::Device>> _deviceList;
   std::unordered_map<THDGroup, Group> _groups;
   int _listen_socket;
 

@@ -1,17 +1,12 @@
 import subprocess
+import re
 import os
 import sys
-import re
 import itertools
 from collections import defaultdict
 
 import torch
-
-try:
-    FileNotFoundError
-except NameError:
-    # py2.7
-    FileNotFoundError = IOError
+from torch._six import FileNotFoundError
 
 
 class range(object):
@@ -147,7 +142,7 @@ class profile(object):
         instance should be enabled at any given time.
 
     Example:
-        >>> x = Variable(torch.randn(1, 1), requires_grad=True)
+        >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         ...     y = x ** 2
         ...     y.backward()
@@ -397,7 +392,7 @@ def demangle(name):
             orig_name = subprocess.check_output(filt_cmd, stderr=devnull).rstrip().decode("ascii")
             orig_name = re.search('is :- \"(.*)"', orig_name).group(1) if is_win else orig_name
             return orig_name
-    except (subprocess.CalledProcessError, AttributeError):
+    except (subprocess.CalledProcessError, AttributeError, FileNotFoundError, OSError):
         return name
 
 
@@ -536,7 +531,7 @@ def parse_nvprof_trace(path):
                           row['kernel_start'],
                           row['kernel_end'])
 
-    functions.sort(key=lambda evt: evt.start)
+    functions.sort(key=lambda evt: evt.cpu_interval.start)
     return functions
 
 
@@ -548,7 +543,10 @@ def build_table(events, sort_by=None, header=None):
     if sort_by is not None:
         events = sorted(events, key=lambda evt: getattr(evt, sort_by))
 
-    max_name_length = max(len(evt.key) for evt in events)
+    name_lengths = [len(evt.key) for evt in events]
+    if len(name_lengths) == 0:
+        return ""
+    max_name_length = max(name_lengths)
     max_name_length += 4  # Add some nice padding
     col_width = 15
     col_format = '  {: >' + str(col_width) + '}'
@@ -556,11 +554,11 @@ def build_table(events, sort_by=None, header=None):
     header_sep = '-' * max_name_length + ('  ' + '-' * col_width) * 5
 
     # Have to use a list because nonlocal is Py3 only...
-    result = ['']
+    result = []
 
     def append(s):
-        result[0] += s
-        result[0] += '\n'
+        result.append(s)
+        result.append('\n')  # Yes, newline after the end as well
 
     # Actual printing
     if header is not None:
@@ -574,4 +572,4 @@ def build_table(events, sort_by=None, header=None):
         append(row_format.format(evt.key, evt.cpu_time_str, evt.cuda_time_str,
                                  evt.count, evt.cpu_time_total_str, evt.cuda_time_total_str))
 
-    return result[0]
+    return ''.join(result)

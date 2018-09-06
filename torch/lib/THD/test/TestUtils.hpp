@@ -17,7 +17,7 @@ constexpr char MASTER_ADDR_ENV[] = "MASTER_ADDR";
 
 struct Barrier {
   Barrier() : _count(0) {}
-  Barrier(std::size_t count) : _count(count) {}
+  Barrier(size_t count) : _count(count) {}
 
   void wait() {
     std::unique_lock<std::mutex> lock{_mutex};
@@ -31,7 +31,7 @@ struct Barrier {
 private:
   std::mutex _mutex;
   std::condition_variable _cv;
-  std::size_t _count;
+  size_t _count;
 };
 
 template<typename T>
@@ -73,7 +73,7 @@ inline int64_t factorial(int n) {
 }
 
 #define ASSERT_TENSOR_VALUE(T, tensor, value) {            \
-  for (std::size_t idx = 0; idx < (tensor).numel(); idx++) \
+  for (size_t idx = 0; idx < (tensor).numel(); idx++) \
     assert(check_equal(                                    \
       reinterpret_cast<T*>((tensor).data())[idx], static_cast<T>(value) \
     ));                                                    \

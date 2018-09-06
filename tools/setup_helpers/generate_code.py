@@ -1,10 +1,14 @@
+import argparse
 import os
 import sys
-import glob
 
-source_files = set(['.py', '.cpp', '.h'])
+source_files = {'.py', '.cpp', '.h'}
+
+DECLARATIONS_PATH = 'torch/lib/tmp_install/share/ATen/Declarations.yaml'
 
 
+# TODO: This is a little inaccurate, because it will also pick
+# up setup_helper scripts which don't affect code generation
 def all_generator_source():
     r = []
     for directory, _, filenames in os.walk('tools'):
@@ -16,10 +20,12 @@ def all_generator_source():
 
 
 inputs = [
-    'torch/csrc/generic/TensorMethods.cwrap',
+    'torch/lib/THNN.h',
+    'torch/lib/THCUNN.h',
     'torch/lib/tmp_install/share/ATen/Declarations.yaml',
     'tools/autograd/derivatives.yaml',
-] + glob.glob('torch/csrc/generic/methods/*.cwrap')
+    'tools/autograd/deprecated.yaml',
+]
 
 outputs = [
     'torch/csrc/autograd/generated/Functions.cpp',
@@ -31,10 +37,10 @@ outputs = [
     'torch/csrc/autograd/generated/python_nn_functions_dispatch.h',
     'torch/csrc/autograd/generated/python_variable_methods.cpp',
     'torch/csrc/autograd/generated/python_variable_methods_dispatch.h',
+    'torch/csrc/autograd/generated/variable_factories.h',
     'torch/csrc/autograd/generated/VariableType.cpp',
     'torch/csrc/autograd/generated/VariableType.h',
-    'torch/csrc/jit/generated/aten_dispatch.cpp',
-    'torch/csrc/jit/generated/aten_dispatch.h',
+    'torch/csrc/jit/generated/register_aten_ops.cpp',
 ]
 
 
@@ -45,10 +51,22 @@ def generate_code_ninja(w):
         outputs, 'do_cmd', all_inputs,
         variables={
             'cmd': cmd,
+            # Note [Unchanging results for ninja]
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            # generate_code.py will avoid bumping the timestamp on its
+            # output files if the contents of the generated file did not
+            # change.  To let Ninja take advantage of this, it must stat
+            # the output files after the build.  See
+            # https://groups.google.com/forum/#!topic/ninja-build/rExDmgDL2oc
+            # for a more detailed discussion.
+            'restat': True,
         })
 
 
-def generate_code(ninja_global=None):
+def generate_code(ninja_global=None,
+                  declarations_path=None,
+                  nn_path=None,
+                  install_dir=None):
     # if ninja is enabled, we just register this file as something
     # ninja will need to call if needed
     if ninja_global is not None:
@@ -57,41 +75,37 @@ def generate_code(ninja_global=None):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
-    from tools.cwrap import cwrap
-    from tools.cwrap.plugins.THPPlugin import THPPlugin
-    from tools.cwrap.plugins.ArgcountSortPlugin import ArgcountSortPlugin
-    from tools.cwrap.plugins.AutoGPU import AutoGPU
-    from tools.cwrap.plugins.BoolOption import BoolOption
-    from tools.cwrap.plugins.KwargsPlugin import KwargsPlugin
-    from tools.cwrap.plugins.NullableArguments import NullableArguments
-
-    from tools.cwrap.plugins.WrapDim import WrapDim
-    from tools.cwrap.plugins.AssertNDim import AssertNDim
-
-    from tools.cwrap.plugins.Broadcast import Broadcast
-    from tools.cwrap.plugins.ProcessorSpecificPlugin import ProcessorSpecificPlugin
     from tools.autograd.gen_autograd import gen_autograd
     from tools.jit.gen_jit_dispatch import gen_jit_dispatch
-    thp_plugin = THPPlugin()
 
-    cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
-        ProcessorSpecificPlugin(), BoolOption(), thp_plugin,
-        AutoGPU(condition='IS_CUDA'), ArgcountSortPlugin(), KwargsPlugin(),
-        AssertNDim(), WrapDim(), Broadcast()
-    ])
+    from tools.nnwrap import generate_wrappers as generate_nn_wrappers
+
+    # Build THNN/THCUNN.cwrap and then THNN/THCUNN.cpp. These are primarily
+    # used by the legacy NN bindings.
+    generate_nn_wrappers(nn_path, install_dir, 'tools/cwrap/plugins/templates')
+
     # Build ATen based Variable classes
-    autograd_gen_dir = 'torch/csrc/autograd/generated'
-    jit_gen_dir = 'torch/csrc/jit/generated'
+    autograd_gen_dir = install_dir or 'torch/csrc/autograd/generated'
+    jit_gen_dir = install_dir or 'torch/csrc/jit/generated'
     for d in (autograd_gen_dir, jit_gen_dir):
         if not os.path.exists(d):
-            os.mkdir(d)
-    gen_autograd(
-        'torch/lib/tmp_install/share/ATen/Declarations.yaml',
-        autograd_gen_dir)
-    gen_jit_dispatch(
-        'torch/lib/tmp_install/share/ATen/Declarations.yaml',
-        jit_gen_dir)
+            os.makedirs(d)
+    gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
+    gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir, 'tools/jit/templates')
 
-# called from ninja
+
+def main():
+    parser = argparse.ArgumentParser(description='Autogenerate code')
+    parser.add_argument('--declarations-path')
+    parser.add_argument('--nn-path')
+    parser.add_argument('--ninja-global')
+    parser.add_argument('--install_dir')
+    options = parser.parse_args()
+    generate_code(options.ninja_global,
+                  options.declarations_path,
+                  options.nn_path,
+                  options.install_dir)
+
+
 if __name__ == "__main__":
-    generate_code(None)
+    main()

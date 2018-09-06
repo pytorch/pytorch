@@ -12,8 +12,20 @@ sudo: false
 matrix:
     fast_finish: true
     include:
-        env: LINT_CHECK
+      - env: LINT_CHECK
         python: "2.7"
-        addons: true
         install: pip install flake8
         script: flake8
+      - env: LINT_CHECK
+        python: "3.7"
+        dist: xenial    # required for Python 3.7 (travis-ci/travis-ci#9069)
+        sudo: required  # required for Python 3.7 (travis-ci/travis-ci#9069)
+        install: pip install flake8
+        script: flake8
+      - env: MYPY_TYPE_CHECK
+        python: "3.6"
+        install: pip install mypy mypy-extensions
+        script: mypy @mypy-files.txt
+      - env: CPP_DOC_CHECK
+        install: sudo apt-get install -y doxygen
+        script: cd docs/cpp && ./check-doxygen.sh

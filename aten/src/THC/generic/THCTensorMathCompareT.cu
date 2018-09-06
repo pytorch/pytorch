@@ -6,108 +6,108 @@ THC_API void
 THCTensor_(ltTensor)(THCState *state, THCudaByteTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorLTOp<typename TensorUtils<THCTensor>::DataType,
-                    unsigned char>());
+  THC_logicalTensor<uint8_t, scalar_t>(state, self_, src1, src2,
+                                   TensorLTOp<scalar_t,
+                                   unsigned char>());
 }
 
 THC_API void
 THCTensor_(gtTensor)(THCState *state, THCudaByteTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorGTOp<typename TensorUtils<THCTensor>::DataType,
-                    unsigned char>());
+  THC_logicalTensor<uint8_t, scalar_t>(state, self_, src1, src2,
+                                   TensorGTOp<scalar_t,
+                                   unsigned char>());
 }
 
 THC_API void
 THCTensor_(leTensor)(THCState *state, THCudaByteTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorLEOp<typename TensorUtils<THCTensor>::DataType,
-                    unsigned char>());
+  THC_logicalTensor<uint8_t, scalar_t>(state, self_, src1, src2,
+                                   TensorLEOp<scalar_t,
+                                   unsigned char>());
 }
 
 THC_API void
 THCTensor_(geTensor)(THCState *state, THCudaByteTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorGEOp<typename TensorUtils<THCTensor>::DataType,
-                    unsigned char>());
+  THC_logicalTensor<uint8_t, scalar_t>(state, self_, src1, src2,
+                                   TensorGEOp<scalar_t,
+                                   unsigned char>());
 }
 
 THC_API void
 THCTensor_(eqTensor)(THCState *state, THCudaByteTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorEQOp<typename TensorUtils<THCTensor>::DataType,
-                    unsigned char>());
+  THC_logicalTensor<uint8_t, scalar_t>(state, self_, src1, src2,
+                                   TensorEQOp<scalar_t,
+                                   unsigned char>());
 }
 
 THC_API void
 THCTensor_(neTensor)(THCState *state, THCudaByteTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorNEOp<typename TensorUtils<THCTensor>::DataType,
-                    unsigned char>());
+  THC_logicalTensor<uint8_t, scalar_t>(state, self_, src1, src2,
+                                   TensorNEOp<scalar_t,
+                                   unsigned char>());
 }
 
 THC_API void
 THCTensor_(ltTensorT)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorLTOp<typename TensorUtils<THCTensor>::DataType,
-                    typename TensorUtils<THCTensor>::DataType>());
+  THC_logicalTensor<scalar_t, scalar_t>(state, self_, src1, src2,
+                                TensorLTOp<scalar_t,
+                                scalar_t>());
 }
 
 THC_API void
 THCTensor_(gtTensorT)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorGTOp<typename TensorUtils<THCTensor>::DataType,
-                    typename TensorUtils<THCTensor>::DataType>());
+  THC_logicalTensor<scalar_t, scalar_t>(state, self_, src1, src2,
+                                TensorGTOp<scalar_t,
+                                scalar_t>());
 }
 
 THC_API void
 THCTensor_(leTensorT)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorLEOp<typename TensorUtils<THCTensor>::DataType,
-                    typename TensorUtils<THCTensor>::DataType>());
+  THC_logicalTensor<scalar_t, scalar_t>(state, self_, src1, src2,
+                                TensorLEOp<scalar_t,
+                                scalar_t>());
 }
 
 THC_API void
 THCTensor_(geTensorT)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorGEOp<typename TensorUtils<THCTensor>::DataType,
-                    typename TensorUtils<THCTensor>::DataType>());
+  THC_logicalTensor<scalar_t, scalar_t>(state, self_, src1, src2,
+                                TensorGEOp<scalar_t,
+                                scalar_t>());
 }
 
 THC_API void
 THCTensor_(eqTensorT)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorEQOp<typename TensorUtils<THCTensor>::DataType,
-                    typename TensorUtils<THCTensor>::DataType>());
+  THC_logicalTensor<scalar_t, scalar_t>(state, self_, src1, src2,
+                                TensorEQOp<scalar_t,
+                                scalar_t>());
 }
 
 THC_API void
 THCTensor_(neTensorT)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, src1, src2));
-  THC_logicalTensor(state, self_, src1, src2,
-                    TensorNEOp<typename TensorUtils<THCTensor>::DataType,
-                    typename TensorUtils<THCTensor>::DataType>());
+  THC_logicalTensor<scalar_t, scalar_t>(state, self_, src1, src2,
+                                TensorNEOp<scalar_t,
+                                scalar_t>());
 }
 
 #endif

@@ -1,28 +1,28 @@
 import math
 import random
+import warnings
 
 import torch
-from torch.autograd import Variable
 
 
 def calculate_gain(nonlinearity, param=None):
-    """Return the recommended gain value for the given nonlinearity function.
+    r"""Return the recommended gain value for the given nonlinearity function.
     The values are as follows:
 
-    ============ ==========================================
-    nonlinearity gain
-    ============ ==========================================
-    linear       :math:`1`
-    conv{1,2,3}d :math:`1`
-    sigmoid      :math:`1`
-    tanh         :math:`5 / 3`
-    relu         :math:`\sqrt{2}`
-    leaky_relu   :math:`\sqrt{2 / (1 + negative\_slope^2)}`
-    ============ ==========================================
+    ================= ====================================================
+    nonlinearity      gain
+    ================= ====================================================
+    Linear / Identity :math:`1`
+    Conv{1,2,3}D      :math:`1`
+    Sigmoid           :math:`1`
+    Tanh              :math:`\frac{5}{3}`
+    ReLU              :math:`\sqrt{2}`
+    Leaky Relu        :math:`\sqrt{\frac{2}{1 + \text{negative\_slope}^2}}`
+    ================= ====================================================
 
     Args:
-        nonlinearity: the nonlinear function (`nn.functional` name)
-        param: optional parameter for the nonlinear function
+        nonlinearity: the non-linear function (`nn.functional` name)
+        param: optional parameter for the non-linear function
 
     Examples:
         >>> gain = nn.init.calculate_gain('leaky_relu')
@@ -47,117 +47,131 @@ def calculate_gain(nonlinearity, param=None):
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
 
-def uniform(tensor, a=0, b=1):
-    """Fills the input Tensor or Variable with values drawn from the uniform
-    distribution :math:`U(a, b)`.
+def uniform_(tensor, a=0, b=1):
+    r"""Fills the input Tensor with values drawn from the uniform
+    distribution :math:`\mathcal{U}(a, b)`.
 
     Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable
+        tensor: an n-dimensional `torch.Tensor`
         a: the lower bound of the uniform distribution
         b: the upper bound of the uniform distribution
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.uniform(w)
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.uniform_(w)
     """
-    if isinstance(tensor, Variable):
-        uniform(tensor.data, a=a, b=b)
-        return tensor
-
-    return tensor.uniform_(a, b)
+    with torch.no_grad():
+        return tensor.uniform_(a, b)
 
 
-def normal(tensor, mean=0, std=1):
-    """Fills the input Tensor or Variable with values drawn from the normal
-    distribution :math:`N(mean, std)`.
+def normal_(tensor, mean=0, std=1):
+    r"""Fills the input Tensor with values drawn from the normal
+    distribution :math:`\mathcal{N}(\text{mean}, \text{std})`.
 
     Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable
+        tensor: an n-dimensional `torch.Tensor`
         mean: the mean of the normal distribution
         std: the standard deviation of the normal distribution
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.normal(w)
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.normal_(w)
     """
-    if isinstance(tensor, Variable):
-        normal(tensor.data, mean=mean, std=std)
-        return tensor
-
-    return tensor.normal_(mean, std)
+    with torch.no_grad():
+        return tensor.normal_(mean, std)
 
 
-def constant(tensor, val):
-    """Fills the input Tensor or Variable with the value `val`.
+def constant_(tensor, val):
+    r"""Fills the input Tensor with the value :math:`\text{val}`.
 
     Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable
+        tensor: an n-dimensional `torch.Tensor`
         val: the value to fill the tensor with
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.constant(w, 0.3)
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.constant_(w, 0.3)
     """
-    if isinstance(tensor, Variable):
-        constant(tensor.data, val)
-        return tensor
-
-    return tensor.fill_(val)
+    with torch.no_grad():
+        return tensor.fill_(val)
 
 
-def eye(tensor):
-    """Fills the 2-dimensional input Tensor or Variable with the identity
-    matrix. Preserves the identity of the inputs in Linear layers, where as
+def ones_(tensor):
+    r"""Fills the input Tensor with ones`.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.ones_(w)
+    """
+    with torch.no_grad():
+        return tensor.fill_(1)
+
+
+def zeros_(tensor):
+    r"""Fills the input Tensor with zeros`.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.zeros_(w)
+    """
+    with torch.no_grad():
+        return tensor.zero_()
+
+
+def eye_(tensor):
+    r"""Fills the 2-dimensional input `Tensor` with the identity
+    matrix. Preserves the identity of the inputs in `Linear` layers, where as
     many inputs are preserved as possible.
 
     Args:
-        tensor: a 2-dimensional torch.Tensor or autograd.Variable
+        tensor: a 2-dimensional `torch.Tensor`
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.eye(w)
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.eye_(w)
     """
     if tensor.ndimension() != 2:
         raise ValueError("Only tensors with 2 dimensions are supported")
 
-    if isinstance(tensor, Variable):
-        eye(tensor.data)
-        return tensor
-
-    return tensor.copy_(torch.eye(tensor.size(0), tensor.size(1)))
+    with torch.no_grad():
+        torch.eye(*tensor.shape, out=tensor, requires_grad=tensor.requires_grad)
+    return tensor
 
 
-def dirac(tensor):
-    """Fills the {3, 4, 5}-dimensional input Tensor or Variable with the Dirac
-    delta function. Preserves the identity of the inputs in Convolutional
+def dirac_(tensor):
+    r"""Fills the {3, 4, 5}-dimensional input `Tensor` with the Dirac
+    delta function. Preserves the identity of the inputs in `Convolutional`
     layers, where as many input channels are preserved as possible.
 
     Args:
-        tensor: a {3, 4, 5}-dimensional torch.Tensor or autograd.Variable
+        tensor: a {3, 4, 5}-dimensional `torch.Tensor`
 
     Examples:
-        >>> w = torch.Tensor(3, 16, 5, 5)
-        >>> nn.init.dirac(w)
+        >>> w = torch.empty(3, 16, 5, 5)
+        >>> nn.init.dirac_(w)
     """
     dimensions = tensor.ndimension()
     if dimensions not in [3, 4, 5]:
         raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
 
-    if isinstance(tensor, Variable):
-        dirac(tensor.data)
-        return tensor
-
     sizes = tensor.size()
     min_dim = min(sizes[0], sizes[1])
-    tensor.zero_()
+    with torch.no_grad():
+        tensor.zero_()
 
-    for d in range(min_dim):
-        if dimensions == 3:  # Temporal convolution
-            tensor[d, d, tensor.size(2) // 2] = 1
-        elif dimensions == 4:  # Spatial convolution
-            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
-        else:  # Volumetric convolution
-            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
+        for d in range(min_dim):
+            if dimensions == 3:  # Temporal convolution
+                tensor[d, d, tensor.size(2) // 2] = 1
+            elif dimensions == 4:  # Spatial convolution
+                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
+            else:  # Volumetric convolution
+                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
     return tensor
 
 
@@ -181,57 +195,57 @@ def _calculate_fan_in_and_fan_out(tensor):
     return fan_in, fan_out
 
 
-def xavier_uniform(tensor, gain=1):
-    """Fills the input Tensor or Variable with values according to the method
+def xavier_uniform_(tensor, gain=1):
+    r"""Fills the input `Tensor` with values according to the method
     described in "Understanding the difficulty of training deep feedforward
     neural networks" - Glorot, X. & Bengio, Y. (2010), using a uniform
     distribution. The resulting tensor will have values sampled from
-    :math:`U(-a, a)` where
-    :math:`a = gain \\times \sqrt{2 / (fan\_in + fan\_out)} \\times \sqrt{3}`.
-    Also known as Glorot initialisation.
+    :math:`\mathcal{U}(-a, a)` where
+
+    .. math::
+        a = \text{gain} \times \sqrt{\frac{6}{\text{fan\_in} + \text{fan\_out}}}
+
+    Also known as Glorot initialization.
 
     Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable
+        tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.xavier_uniform(w, gain=nn.init.calculate_gain('relu'))
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
     """
-    if isinstance(tensor, Variable):
-        xavier_uniform(tensor.data, gain=gain)
-        return tensor
-
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / (fan_in + fan_out))
     a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
-    return tensor.uniform_(-a, a)
+    with torch.no_grad():
+        return tensor.uniform_(-a, a)
 
 
-def xavier_normal(tensor, gain=1):
-    """Fills the input Tensor or Variable with values according to the method
+def xavier_normal_(tensor, gain=1):
+    r"""Fills the input `Tensor` with values according to the method
     described in "Understanding the difficulty of training deep feedforward
     neural networks" - Glorot, X. & Bengio, Y. (2010), using a normal
     distribution. The resulting tensor will have values sampled from
-    :math:`N(0, std)` where
-    :math:`std = gain \\times \sqrt{2 / (fan\_in + fan\_out)}`.
-    Also known as Glorot initialisation.
+    :math:`\mathcal{N}(0, \text{std})` where
+
+    .. math::
+        \text{std} = \text{gain} \times \sqrt{\frac{2}{\text{fan\_in} + \text{fan\_out}}}
+
+    Also known as Glorot initialization.
 
     Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable
+        tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.xavier_normal(w)
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.xavier_normal_(w)
     """
-    if isinstance(tensor, Variable):
-        xavier_normal(tensor.data, gain=gain)
-        return tensor
-
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-    return tensor.normal_(0, std)
+    with torch.no_grad():
+        return tensor.normal_(0, std)
 
 
 def _calculate_correct_fan(tensor, mode):
@@ -244,96 +258,96 @@ def _calculate_correct_fan(tensor, mode):
     return fan_in if mode == 'fan_in' else fan_out
 
 
-def kaiming_uniform(tensor, a=0, mode='fan_in'):
-    """Fills the input Tensor or Variable with values according to the method
+def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
+    r"""Fills the input `Tensor` with values according to the method
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
     uniform distribution. The resulting tensor will have values sampled from
-    :math:`U(-bound, bound)` where
-    :math:`bound = \sqrt{2 / ((1 + a^2) \\times fan\_in)} \\times \sqrt{3}`.
-    Also known as He initialisation.
+    :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
+
+    .. math::
+        \text{bound} = \sqrt{\frac{6}{(1 + a^2) \times \text{fan\_in}}}
+
+    Also known as He initialization.
 
     Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable
+        tensor: an n-dimensional `torch.Tensor`
         a: the negative slope of the rectifier used after this layer (0 for ReLU
             by default)
         mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in`
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing `fan_out` preserves the magnitudes in the
             backwards pass.
+        nonlinearity: the non-linear function (`nn.functional` name),
+            recommended to use only with 'relu' or 'leaky_relu' (default).
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.kaiming_uniform(w, mode='fan_in')
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.kaiming_uniform_(w, mode='fan_in', nonlinearity='relu')
     """
-    if isinstance(tensor, Variable):
-        kaiming_uniform(tensor.data, a=a, mode=mode)
-        return tensor
-
     fan = _calculate_correct_fan(tensor, mode)
-    gain = calculate_gain('leaky_relu', a)
+    gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
-    return tensor.uniform_(-bound, bound)
+    with torch.no_grad():
+        return tensor.uniform_(-bound, bound)
 
 
-def kaiming_normal(tensor, a=0, mode='fan_in'):
-    """Fills the input Tensor or Variable with values according to the method
+def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
+    r"""Fills the input `Tensor` with values according to the method
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
     normal distribution. The resulting tensor will have values sampled from
-    :math:`N(0, std)` where
-    :math:`std = \sqrt{2 / ((1 + a^2) \\times fan\_in)}`. Also known as He
-    initialisation.
+    :math:`\mathcal{N}(0, \text{std})` where
+
+    .. math::
+        \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \text{fan\_in}}}
+
+    Also known as He initialization.
 
     Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable
+        tensor: an n-dimensional `torch.Tensor`
         a: the negative slope of the rectifier used after this layer (0 for ReLU
             by default)
         mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in`
             preserves the magnitude of the variance of the weights in the
             forward pass. Choosing `fan_out` preserves the magnitudes in the
             backwards pass.
+        nonlinearity: the non-linear function (`nn.functional` name),
+            recommended to use only with 'relu' or 'leaky_relu' (default).
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.kaiming_normal(w, mode='fan_out')
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.kaiming_normal_(w, mode='fan_out', nonlinearity='relu')
     """
-    if isinstance(tensor, Variable):
-        kaiming_normal(tensor.data, a=a, mode=mode)
-        return tensor
-
     fan = _calculate_correct_fan(tensor, mode)
-    gain = calculate_gain('leaky_relu', a)
+    gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
-    return tensor.normal_(0, std)
+    with torch.no_grad():
+        return tensor.normal_(0, std)
 
 
-def orthogonal(tensor, gain=1):
-    """Fills the input Tensor or Variable with a (semi) orthogonal matrix, as
+def orthogonal_(tensor, gain=1):
+    r"""Fills the input `Tensor` with a (semi) orthogonal matrix, as
     described in "Exact solutions to the nonlinear dynamics of learning in deep
     linear neural networks" - Saxe, A. et al. (2013). The input tensor must have
     at least 2 dimensions, and for tensors with more than 2 dimensions the
     trailing dimensions are flattened.
 
     Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable, where n >= 2
+        tensor: an n-dimensional `torch.Tensor`, where :math:`n \geq 2`
         gain: optional scaling factor
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.orthogonal(w)
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.orthogonal_(w)
     """
-    if isinstance(tensor, Variable):
-        orthogonal(tensor.data, gain=gain)
-        return tensor
-
     if tensor.ndimension() < 2:
         raise ValueError("Only tensors with 2 or more dimensions are supported")
 
     rows = tensor.size(0)
     cols = tensor[0].numel()
-    flattened = torch.Tensor(rows, cols).normal_(0, 1)
+    flattened = tensor.new(rows, cols).normal_(0, 1)
 
     if rows < cols:
         flattened.t_()
@@ -343,48 +357,77 @@ def orthogonal(tensor, gain=1):
     # Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
     d = torch.diag(r, 0)
     ph = d.sign()
-    q *= ph.expand_as(q)
+    q *= ph
 
     if rows < cols:
         q.t_()
 
-    tensor.view_as(q).copy_(q)
-    tensor.mul_(gain)
+    with torch.no_grad():
+        tensor.view_as(q).copy_(q)
+        tensor.mul_(gain)
     return tensor
 
 
-def sparse(tensor, sparsity, std=0.01):
-    """Fills the 2D input Tensor or Variable as a sparse matrix, where the
+def sparse_(tensor, sparsity, std=0.01):
+    r"""Fills the 2D input `Tensor` as a sparse matrix, where the
     non-zero elements will be drawn from the normal distribution
-    :math:`N(0, 0.01)`, as described in "Deep learning via
+    :math:`\mathcal{N}(0, 0.01)`, as described in "Deep learning via
     Hessian-free optimization" - Martens, J. (2010).
 
     Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable
+        tensor: an n-dimensional `torch.Tensor`
         sparsity: The fraction of elements in each column to be set to zero
         std: the standard deviation of the normal distribution used to generate
-        the non-zero values
+            the non-zero values
 
     Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.sparse(w, sparsity=0.1)
+        >>> w = torch.empty(3, 5)
+        >>> nn.init.sparse_(w, sparsity=0.1)
     """
-    if isinstance(tensor, Variable):
-        sparse(tensor.data, sparsity, std=std)
-        return tensor
-
     if tensor.ndimension() != 2:
         raise ValueError("Only tensors with 2 dimensions are supported")
 
-    tensor.normal_(0, std)
-    rows, cols = tensor.size(0), tensor.size(1)
-    num_zeros = int(math.ceil(rows * sparsity))
+    rows, cols = tensor.shape
+    num_zeros = int(math.ceil(sparsity * rows))
 
-    for col_idx in range(tensor.size(1)):
-        row_indices = list(range(rows))
-        random.shuffle(row_indices)
-        zero_indices = row_indices[:num_zeros]
-        for row_idx in zero_indices:
-            tensor[row_idx, col_idx] = 0
-
+    with torch.no_grad():
+        tensor.normal_(0, std)
+        for col_idx in range(cols):
+            row_indices = torch.randperm(rows)
+            zero_indices = row_indices[:num_zeros]
+            tensor[zero_indices, col_idx] = 0
     return tensor
+
+
+# for backward compatibility
+def _make_deprecate(meth):
+    new_name = meth.__name__
+    old_name = new_name[:-1]
+
+    def deprecated_init(*args, **kwargs):
+        warnings.warn("nn.init.{} is now deprecated in favor of nn.init.{}."
+                      .format(old_name, new_name), stacklevel=2)
+        return meth(*args, **kwargs)
+
+    deprecated_init.__doc__ = r"""
+    {old_name}(...)
+
+    .. warning::
+        This method is now deprecated in favor of :func:`torch.nn.init.{new_name}`.
+
+    See :func:`~torch.nn.init.{new_name}` for details.""".format(
+        old_name=old_name, new_name=new_name)
+    return deprecated_init
+
+
+uniform = _make_deprecate(uniform_)
+normal = _make_deprecate(normal_)
+constant = _make_deprecate(constant_)
+eye = _make_deprecate(eye_)
+dirac = _make_deprecate(dirac_)
+xavier_uniform = _make_deprecate(xavier_uniform_)
+xavier_normal = _make_deprecate(xavier_normal_)
+kaiming_uniform = _make_deprecate(kaiming_uniform_)
+kaiming_normal = _make_deprecate(kaiming_normal_)
+orthogonal = _make_deprecate(orthogonal_)
+sparse = _make_deprecate(sparse_)

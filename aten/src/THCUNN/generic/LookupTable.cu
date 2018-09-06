@@ -14,7 +14,7 @@ void THNN_(LookupTable_accGradParameters)(
            int paddingValue,
            accreal scale_)
 {
-  real scale = ScalarConvert<accreal, real>::to(scale_);
+  scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, sortedIndices, origIndices);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   if (!(THCIndexTensor_(isContiguous)(state, input) &&
@@ -22,8 +22,8 @@ void THNN_(LookupTable_accGradParameters)(
     THError("Tensors must be contiguous");
   }
 
-  int nDim = THCIndexTensor_(nDimension)(state, input);
-  if (THCIndexTensor_(nDimension)(state, input) != 1 && THCIndexTensor_(nDimension)(state, input) != 2) {
+  int nDim = THCIndexTensor_(nDimensionLegacyAll)(state, input);
+  if (THCIndexTensor_(nDimensionLegacyAll)(state, input) != 1 && THCIndexTensor_(nDimensionLegacyAll)(state, input) != 2) {
     THCDescBuff s1 = THCIndexTensor_(sizeDesc)(state, input);
     THError("input must be a vector or matrix, but is of shape: %s", s1.str);
   }
@@ -34,26 +34,30 @@ void THNN_(LookupTable_accGradParameters)(
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   if (numel <= 768 && !scaleGradByFreq) {
-    dim3 grid(THCCeilDiv(stride, (int64_t) 4));
-    dim3 block(128);
+    const int WARP_SIZE = 32;
+    const int BLOCKDIMY = 32;
+    dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
+    dim3 block(WARP_SIZE, BLOCKDIMY);
 
-    cunn_LookupTable_accGradParametersKernelByFeature<<<grid, block, 0, stream>>>(
-      THCIndexTensor_(data)(state, input),
-      THCTensor_(data)(state, gradOutput),
-      THCTensor_(data)(state, gradWeight),
-      scale,
-      numel,
-      stride,
-      paddingValue);
+    cunn_LookupTable_accGradParametersKernelByFeature<scalar_t, accreal>
+    <<<grid, 
+       block, 
+       sizeof(accreal)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
+       stream>>>
+      (THCIndexTensor_(data)(state, input),
+       THCTensor_(data)(state, gradOutput),
+       THCTensor_(data)(state, gradWeight),
+       scale,
+       numel,
+       stride,
+       paddingValue);
     THCTensor_(free)(state, gradOutput);
     THCudaCheck(cudaGetLastError());
     return;
   }
 
-  THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
-  THCIndexTensor_(resize)(state, sortedIndices, inputSize, NULL);
-  THCIndexTensor_(resize)(state, origIndices, inputSize, NULL);
-  THLongStorage_free(inputSize);
+  THCIndexTensor_(resize)(state, sortedIndices, input->sizes(), {});
+  THCIndexTensor_(resize)(state, origIndices, input->sizes(), {});
 
   // Sort the inputs into sorted with the corresponding indices; we
   // don't need a stable or multidimensional sort, so just use Thrust
@@ -129,7 +133,7 @@ void THNN_(LookupTable_accGradParameters)(
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
-  cunn_LookupTable_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTable_accGradParametersKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     sortedIndices_data,
     origIndices_data,
     THCTensor_(data)(state, gradOutput),
@@ -147,7 +151,7 @@ void THNN_(LookupTable_accGradParameters)(
 
 #define THREADS 256
 #define RUN(NORM, IDXTYPE) \
-  calculate_norms_and_renorm<real, accreal, IDXTYPE, NORM> \
+  calculate_norms_and_renorm<scalar_t, accreal, IDXTYPE, NORM> \
     <<<numel, THREADS/2, THREADS * sizeof(accreal), THCState_getCurrentStream(state)>>> \
     (weightsRaw, idxRaw, normType, maxNorm, THCTensor_(stride)(state, weight, 0))
 
@@ -164,7 +168,7 @@ void THNN_(LookupTable_renorm)(
     THError("Tensors must be contiguous");
   }
 
-  if (THCIndexTensor_(nDimension)(state, idx) != 1) {
+  if (THCIndexTensor_(nDimensionLegacyAll)(state, idx) != 1) {
     THError("idx must be a vector");
   }
 
@@ -174,7 +178,7 @@ void THNN_(LookupTable_renorm)(
 
   THCIndex_t numel = THCIndexTensor_(nElement)(state, idx);
 
-  real * weightsRaw = THCTensor_(data)(state, weight);
+  scalar_t * weightsRaw = THCTensor_(data)(state, weight);
   THCIndex_t * idxRaw = THCIndexTensor_(data)(state, idx);
 
   // get the unique indices
@@ -184,7 +188,7 @@ void THNN_(LookupTable_renorm)(
 
   // At launch time figure out what the index type is and norm type
   int Norm = ScalarConvert<accreal, int>::to(normType);
-  if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, idx)) {
+  if (THCTensor_canUse32BitIndexMath(state, idx)) {
     if (Norm == 1) {
       RUN(1, unsigned int);
     } else if (Norm == 2) {

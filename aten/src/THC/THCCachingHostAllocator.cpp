@@ -1,4 +1,5 @@
 #include "THCCachingHostAllocator.h"
+#include "THCStream.h"
 
 #include <cuda_runtime_api.h>
 #include <deque>
@@ -8,7 +9,6 @@
 #include <stdint.h>
 #include <unordered_map>
 #include <utility>
-
 
 namespace {
 
@@ -227,14 +227,14 @@ struct HostAllocator
     for (auto it = streams.begin(); it != streams.end(); ++it) {
       auto& stream = *it;
 
-      err = cudaSetDevice(stream->device);
+      err = cudaSetDevice(THCStream_device(stream.get()));
       if (err != cudaSuccess) break;
 
       cudaEvent_t event;
       err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
       if (err != cudaSuccess) break;
 
-      err = cudaEventRecord(event, stream->stream);
+      err = cudaEventRecord(event, THCStream_stream(stream.get()));
       if (err != cudaSuccess) break;
 
       block.event_count++;
@@ -250,19 +250,6 @@ struct HostAllocator
 
 static HostAllocator allocator;
 
-static void* THCCachingHostAllocator_malloc(void* ctx, ptrdiff_t size)
-{
-  THAssert(size >= 0);
-  void *ptr;
-  THCudaCheck(allocator.malloc(&ptr, size));
-  return ptr;
-}
-
-static void THCCachingHostAllocator_free(void* ctx, void* ptr)
-{
-  allocator.free(ptr);
-}
-
 cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, THCStream *stream)
 {
   return allocator.recordEvent(ptr, stream);
@@ -273,8 +260,23 @@ void THCCachingHostAllocator_emptyCache()
   allocator.emptyCache();
 }
 
-THAllocator THCCachingHostAllocator = {
-  &THCCachingHostAllocator_malloc,
-  NULL,
-  &THCCachingHostAllocator_free,
+static void THCCachingHostDeleter(void* ptr) {
+  allocator.free(ptr);
+}
+
+struct THCCachingHostAllocator final : public at::Allocator {
+  at::DataPtr allocate(size_t size) const override {
+    THAssert(size >= 0);
+    void *ptr;
+    THCudaCheck(allocator.malloc(&ptr, size));
+    return {ptr, ptr, &THCCachingHostDeleter, at::DeviceType::CPU};
+  }
+  at::DeleterFnPtr raw_deleter() const override {
+    return &THCCachingHostDeleter;
+  }
 };
+
+static THCCachingHostAllocator thc_caching_host_allocator;
+at::Allocator* getTHCCachingHostAllocator() {
+  return &thc_caching_host_allocator;
+}

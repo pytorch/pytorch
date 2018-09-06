@@ -1,6 +1,7 @@
 #ifndef THC_TENSORMATH_POINTWISE_CUH
 #define THC_TENSORMATH_POINTWISE_CUH
 
+#include <type_traits>
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
 #include "THCHalf.h"
@@ -30,30 +31,18 @@ struct TensorSigmoidOp {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorSigmoidOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) const {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    half one = ScalarConvert<int, half>::to(1);
-    *out = hdiv(one, __hadd(one, hexp(__hneg(*in))));
-#else
     float fin = __half2float(*in);
     *out = __float2half(1.0f / (1.0f + expf(- fin)));
-#endif
   }
 
   __device__ __forceinline__ void operator()(half* v) const {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    half one = ScalarConvert<int, half>::to(1);
-    *v = hdiv(one, __hadd(one, hexp(__hneg(*v))));
-#else
     float fv = __half2float(*v);
     *v = __float2half(1.0f / (1.0f + expf(- fv)));
-#endif
   }
 };
-#endif
 
 template <typename T>
 struct TensorSignOp {
@@ -81,70 +70,18 @@ struct TensorSignOp<unsigned char> {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorSignOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    half zero = ScalarConvert<int, half>::to(0);
-    half orig = *in;
-    *out = __float2half((float) __hgt(orig, zero) - (float) __hlt(orig, zero));
-#else
     float orig = __half2float(*in);
     *out = __float2half((orig > 0) - (orig < 0));
-#endif
   }
 
   __device__ __forceinline__ void operator()(half* v) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    half zero = ScalarConvert<int, half>::to(0);
-    half orig = *v;
-    *v = __float2half((float) __hgt(orig, zero) -  (float) __hlt(orig, zero));
-#else
     float orig = __half2float(*v);
     *v = __float2half((orig > 0) - (orig < 0));
-#endif
   }
 };
-#endif
-
-template <typename T>
-struct TensorAddOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out += *in;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in1 + *in2;
-  }
-};
-
-#ifdef CUDA_HALF_TENSOR
-template <>
-struct TensorAddOp<half> {
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hadd(*out, *in);
-#else
-    float fout = __half2float(*out);
-    float fin = __half2float(*in);
-    fout += fin;
-    *out = __float2half(fout);
-#endif
-  }
-
-  __device__ __forceinline__ void operator()(half* out, half* in1, half* in2) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hadd(*in1, *in2);
-#else
-    float fin1 = __half2float(*in1);
-    float fin2 = __half2float(*in2);
-    float fout = fin1 + fin2;
-    *out = __float2half(fout);
-#endif
-  }
-};
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorCAddOp {
@@ -161,78 +98,30 @@ struct TensorCAddOp {
   T val;
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorCAddOp<half> {
   TensorCAddOp(half v) : val(v) {}
 
   __device__ __forceinline__ void operator()(half* out, half* in) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hadd(*out, __hmul(val, *in));
-#else
     float fout = __half2float(*out);
     float fval = __half2float(val);
     float fin = __half2float(*in);
 
     fout += fval * fin;
     *out = __float2half(fout);
-#endif
   }
 
   __device__ __forceinline__ void operator()(half* out, half* in1, half* in2) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hadd(*in1, __hmul(val, *in2));
-#else
     float fin1 = __half2float(*in1);
     float fin2 = __half2float(*in2);
     float fval = __half2float(val);
 
     float fout = fin1 + fval * fin2;
     *out = __float2half(fout);
-#endif
   }
 
   half val;
 };
-#endif // CUDA_HALF_TENSOR
-
-template <typename T>
-struct TensorSubOp {
-  __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out -= *in;
-  }
-
-  __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in1 - *in2;
-  }
-};
-
-#ifdef CUDA_HALF_TENSOR
-template <>
-struct TensorSubOp<half> {
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hsub(*out, *in);
-#else
-    float fout = __half2float(*out);
-    float fin = __half2float(*in);
-    fout -= fin;
-    *out = __float2half(fout);
-#endif
-  }
-
-  __device__ __forceinline__ void operator()(half* out, half* in1, half* in2) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hsub(*in1, *in2);
-#else
-    float fin1 = __half2float(*in1);
-    float fin2 = __half2float(*in2);
-    float fout = fin1 - fin2;
-    *out = __float2half(fout);
-#endif
-  }
-};
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorMulOp {
@@ -245,32 +134,22 @@ struct TensorMulOp {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorMulOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hmul(*out, *in);
-#else
     float fout = __half2float(*out);
     float fin = __half2float(*in);
     fout *= fin;
     *out = __float2half(fout);
-#endif
   }
 
   __device__ __forceinline__ void operator()(half* out, half* in1, half* in2) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hmul(*in1, *in2);
-#else
     float fin1 = __half2float(*in1);
     float fin2 = __half2float(*in2);
     float fout = fin1 * fin2;
     *out = __float2half(fout);
-#endif
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template<typename T, int StaticExp>
 struct TensorPowOp {
@@ -281,13 +160,8 @@ struct TensorPowOp {
     } else if (StaticExp == 2) {
       *out = THCNumerics<T>::mul(*in, *in);
     } else if (StaticExp == 3) {
-      *out = THCNumerics<T>::mul(*in, *in);
-      *out = THCNumerics<T>::mul(*out, *in);
-    } else if (StaticExp == -1) {
-      *out = THCNumerics<T>::cinv(*in);
-    } else if (StaticExp == -2) {
-      *out = THCNumerics<T>::mul(*in, *in);
-      *out = THCNumerics<T>::cinv(*out);
+      T square = THCNumerics<T>::mul(*in, *in);
+      *out = THCNumerics<T>::mul(square, *in);
     } else {
       *out = THCNumerics<T>::pow(*in, val);
     }
@@ -300,14 +174,39 @@ struct TensorPowOp {
       *v = THCNumerics<T>::mul(*v, *v);
     } else if (StaticExp == 3) {
       *v = THCNumerics<T>::mul(THCNumerics<T>::mul(*v, *v), *v);
-    } else if (StaticExp == -1) {
-      *v = THCNumerics<T>::cinv(*v);
-    } else if (StaticExp == -2) {
-      *v = THCNumerics<T>::mul(*v, *v);
-      *v = THCNumerics<T>::cinv(*v);
     } else {
       *v = THCNumerics<T>::pow(*v, val);
     }
+  }
+
+  const T val;
+};
+
+template<typename T>
+struct TensorPowOp<T, -1> {
+  TensorPowOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::cinv(*in);
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v = THCNumerics<T>::cinv(*v);
+  }
+
+  const T val;
+};
+
+template<typename T>
+struct TensorPowOp<T, -2> {
+  TensorPowOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    T square = THCNumerics<T>::mul(*in, *in);
+    *out = THCNumerics<T>::cinv(square);
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    T square = THCNumerics<T>::mul(*v, *v);
+    *v = THCNumerics<T>::cinv(square);
   }
 
   const T val;
@@ -331,13 +230,25 @@ struct TensorTPowOp {
 template <typename T>
 struct TensorCPowOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = powf((float) *out, (float) *in);
+    *out = THCNumerics<T>::pow(*out, *in);
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = powf((float) *in1, (float) *in2);
+    *out = THCNumerics<T>::pow(*in1, *in2);
   }
 };
+
+template <>
+struct TensorCPowOp<float> {
+  __device__ __forceinline__ void operator()(float* out, float* in) {
+    *out = powf(*out, *in);
+  }
+
+  __device__ __forceinline__ void operator()(float* out, float* in1, float* in2) {
+    *out = powf(*in1, *in2);
+  }
+};
+
 
 template <>
 struct TensorCPowOp<double> {
@@ -350,7 +261,6 @@ struct TensorCPowOp<double> {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorCPowOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
@@ -369,107 +279,76 @@ struct TensorCPowOp<half> {
     *out = __float2half(fout);
   }
 };
-#endif // CUDA_HALF_TENSOR
 
-template <typename T>
-struct TensorDivOp {
-  __device__ __forceinline__ void
-  operator()(T* out, T* in) {
-    *out /= *in;
-  }
+template<typename T>
+static __device__ __forceinline__
+typename std::enable_if<std::is_signed<T>::value, bool>::type
+modulo_wrap(T a, T b) {
+  return (a != 0) && (a < 0) != (b < 0);
+}
 
-  __device__ __forceinline__ void
-  operator()(T* out, T* in1, T* in2) {
-    *out = *in1 / *in2;
-  }
-};
-
-#ifdef CUDA_HALF_TENSOR
-template <>
-struct TensorDivOp<half> {
-  __device__ __forceinline__ void
-  operator()(half* out, half* in) {
-    // No fp16 div instruction yet
-    float fout = __half2float(*out);
-    float fin = __half2float(*in);
-    fout /= fin;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void
-  operator()(half* out, half* in1, half* in2) {
-    // No fp16 div instruction yet
-    float fin1 = __half2float(*in1);
-    float fin2 = __half2float(*in2);
-    float fout = fin1 / fin2;
-    *out = __float2half(fout);
-  }
-};
-#endif // CUDA_HALF_TENSOR
+template<typename T>
+static __device__ __forceinline__
+typename std::enable_if<std::is_unsigned<T>::value, bool>::type
+modulo_wrap(T a, T b) {
+  return false;
+}
 
 template <typename T>
 struct TensorCRemainderOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out =  *out % *in;
-    if ((*out * *in)<0){
-      *out += *in;
+    T val =  *out % *in;
+    if (modulo_wrap(val, *in)) {
+      val += *in;
     }
+    *out = val;
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in1 % *in2;
-    if ((*out * *in2)<0){
-      *out += *in2;
+    T val = *in1 % *in2;
+    if (modulo_wrap(val, *in2)) {
+      val += *in2;
     }
+    *out = val;
   }
 };
 
 template <>
 struct TensorCRemainderOp<float> {
   __device__ __forceinline__ void operator()(float* out, float* in) {
-    *out = *in != 0 ? *out - *in * floorf(*out / *in) : NAN;
+    *out = *in != 0.f ? *out - *in * floorf(*out / *in) : NAN;
   }
 
   __device__ __forceinline__ void operator()(float* out, float* in1, float* in2) {
-    *out = *in2 != 0 ? *in1 - *in2 * floorf(*in1 / *in2) : NAN;
+    *out = *in2 != 0.f ? *in1 - *in2 * floorf(*in1 / *in2) : NAN;
   }
 };
 
 template <>
 struct TensorCRemainderOp<double> {
   __device__ __forceinline__ void operator()(double* out, double* in) {
-    *out = *in != 0 ? *out - *in * floor(*out / *in) : NAN;
+    *out = *in != 0. ? *out - *in * floor(*out / *in) : NAN;
   }
 
   __device__ __forceinline__ void operator()(double* out, double* in1, double* in2) {
-    *out = *in2 != 0 ? *in1 - *in2 * floor(*in1 / *in2) : NAN;
+    *out = *in2 != 0. ? *in1 - *in2 * floor(*in1 / *in2) : NAN;
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorCRemainderOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hsub(*out, __hmul(*in, hfloor(__hdiv(*out, *in))));
-#else
     float fout = __half2float(*out);
     float fin = __half2float(*in);
     *out = fin != 0 ? __float2half(fout - fin * floorf(fout / fin)) : __float2half(NAN);
-#endif
   }
 
   __device__ __forceinline__ void operator()(half* out, half* in1, half* in2) {
-#ifdef CUDA_HALF_INSTRUCTIONS
-    *out = __hsub(*in1, __hmul(*in2, hfloor(__hdiv(*in1, *in2))));
-#else
     float fin1 = __half2float(*in1);
     float fin2 = __half2float(*in2);
     *out = fin2 != 0 ? __float2half(fin1 - fin2 * floorf(fin1 / fin2)) : __float2half(NAN);
-#endif
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorCFmodOp {
@@ -504,7 +383,6 @@ struct TensorCFmodOp<double> {
   }
 };
 
-#ifdef CUDA_HALF_TENSOR
 template <>
 struct TensorCFmodOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) {
@@ -515,7 +393,6 @@ struct TensorCFmodOp<half> {
     *out = __float2half(fmodf(__half2float(*in1), __half2float(*in2)));
   }
 };
-#endif // CUDA_HALF_TENSOR
 
 template <typename T>
 struct TensorClampOp {
@@ -556,20 +433,24 @@ struct TensorCrossOp {
   TensorCrossOp(int64_t sx, int64_t sy, int64_t so) : sx(sx), sy(sy), so(so) {}
 
   __device__ __forceinline__ void operator()(T* out, T* x, T*y) {
-    out[0 * so] = THCNumerics<T>::sub(
+    T val0 = THCNumerics<T>::sub(
         THCNumerics<T>::mul(x[1 * sx], y[2 * sy]),
         THCNumerics<T>::mul(x[2 * sx], y[1 * sy])
     );
 
-    out[1 * so] = THCNumerics<T>::sub(
+    T val1 = THCNumerics<T>::sub(
         THCNumerics<T>::mul(x[2 * sx], y[0 * sy]),
         THCNumerics<T>::mul(x[0 * sx], y[2 * sy])
     );
 
-    out[2 * so] = THCNumerics<T>::sub(
+    T val2 = THCNumerics<T>::sub(
         THCNumerics<T>::mul(x[0 * sx], y[1 * sy]),
         THCNumerics<T>::mul(x[1 * sx], y[0 * sy])
     );
+
+    out[0 * so] = val0;
+    out[1 * so] = val1;
+    out[2 * so] = val2;
   }
 
   const int64_t sx, sy, so;
@@ -602,11 +483,11 @@ struct TensorMaxValueOp {
   TensorMaxValueOp(T v) : val(v) {}
 
   __device__ __forceinline__ void operator()(T* out) {
-    *out = THCNumerics<T>::gt(*out, val) ? *out : val;
+    *out = THCNumerics<T>::lt(*out, val) ? val : *out;  // this order propagates NaN
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::gt(*in, val) ? *in : val;
+    *out = THCNumerics<T>::lt(*in, val) ? val : *in;  // this order propagates NaN
   }
 
   T val;
@@ -617,11 +498,11 @@ struct TensorMinValueOp {
   TensorMinValueOp(T v) : val(v) {}
 
   __device__ __forceinline__ void operator()(T* out) {
-    *out = THCNumerics<T>::lt(*out, val) ? *out : val;
+    *out = THCNumerics<T>::gt(*out, val) ? val : *out;  // this order propagates NaN
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::lt(*in, val) ? *in : val;
+    *out = THCNumerics<T>::gt(*in, val) ? val : *in;  // this order propagates NaN
   }
 
   T val;
@@ -779,35 +660,82 @@ struct TensorBitXorOp {
   }
 };
 
-template <typename real, typename accreal>
+/*
+ * The following function was converted to CUDA form from code that comes
+ * with the following copyright notice. It has been released under the BSD license.
+ *
+ * Cephes Math Library Release 2.8:  June, 2000
+ * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
+ */
+template <typename T, typename accreal>
 struct TensorDigammaOp {
-  using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
   __device__ __forceinline__ void
-  operator()(real* out, real* in) {
-    static const compute_type PI = 3.14159265358979323846;
-    compute_type x = ScalarConvert<real, compute_type>::to(*in);
+  operator()(T* out, T* in) {
+    using compute_type = typename std::conditional<std::is_same<T, half>::value, accreal, T>::type;
+    static const double PI_f64 = 3.14159265358979323846;
+    static const compute_type PSI_10 = 2.25175258906672110764;
+    static const compute_type A[] = {
+       8.33333333333333333333E-2,
+      -2.10927960927960927961E-2,
+       7.57575757575757575758E-3,
+      -4.16666666666666666667E-3,
+       3.96825396825396825397E-3,
+      -8.33333333333333333333E-3,
+       8.33333333333333333333E-2,
+    };
+
+    auto x = scalar_cast<compute_type>(*in);
+    if (x == 0) {
+      *out = scalar_cast<T>(INFINITY);
+      return;
+    }
+
+    bool x_is_integer = x == floor(x);
     compute_type result = 0;
-    if (x < 0.5f) {
-      result -= PI / THCNumerics<compute_type>::tan(PI * x);
+    if (x < 0) {
+      if (x_is_integer) {
+        *out = scalar_cast<T>(INFINITY);
+        return;
+      }
+      // Rounding errors in tan's input can really affect the output
+      // for extreme values, so we always perform this computation in double.
+      result = scalar_cast<compute_type>(
+          - PI_f64 / tan(PI_f64 * scalar_cast<double>(x)));
       x = 1 - x;
     }
-    for (int i = 0; i < 4; ++i) {
+
+    while (x < 10) {
       result -= 1 / x;
       x += 1;
     }
-    const compute_type ixx = 1 / (x*x);
-    result += THCNumerics<compute_type>::log(x) - 1 / (2*x) - ixx * (1.f/12 - ixx * (1.f/120 - ixx * (1.f/252)));
-    *out = ScalarConvert<compute_type, real>::to(result);
+    if (x == 10) {
+      *out = scalar_cast<T>(result + PSI_10);
+      return;
+    }
+
+    compute_type y = 0;
+    if (x < 1.0e17) {
+      compute_type z = 1.0 / (x * x);
+
+      compute_type polevl_result = 0;
+      for (int i = 0; i <= 6; i++) {
+        polevl_result = polevl_result * z + A[i];
+      }
+      y = z * polevl_result;
+    }
+
+    *out = scalar_cast<T>(log(x) - (0.5 / x) - y + result);
+    return;
   }
 };
 
-template <typename real, typename accreal>
+template <typename T, typename accreal>
 struct TensorTrigammaOp {
-  using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
+  using compute_type = typename std::conditional<std::is_same<T, half>::value, accreal, T>::type;
   __device__ __forceinline__ void
-  operator()(real* out, real* in) {
-    static const compute_type PI = 3.14159265358979323846;
-    compute_type x = ScalarConvert<real, compute_type>::to(*in);
+  operator()(T* out, T* in) {
+    const compute_type PI = 3.14159265358979323846;
+    compute_type x = ScalarConvert<T, compute_type>::to(*in);
     compute_type sign = +1;
     compute_type result = 0;
     if (x < 0.5f) {
@@ -822,7 +750,7 @@ struct TensorTrigammaOp {
     }
     const compute_type ixx = 1 / (x*x);
     result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
-    *out = ScalarConvert<compute_type, real>::to(sign * result);
+    *out = ScalarConvert<compute_type, T>::to(sign * result);
   }
 };
 

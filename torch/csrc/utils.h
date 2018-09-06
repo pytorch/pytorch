@@ -9,7 +9,7 @@
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_compat.h"
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <THC/THC.h>
 #endif
 
@@ -116,23 +116,13 @@
 #define THPByteUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 
-#define THPUtils_assert(cond, ...) THPUtils_assertRet(NULL, cond, __VA_ARGS__)
+#define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
 if (THP_EXPECT(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
 THP_API void THPUtils_setError(const char *format, ...);
 THP_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
-
-#define THPUtils_assert_PyImport(name, module)                          \
-  PyObject* module = PyImport_ImportModule(name);                       \
-  if (!module) {                                                        \
-    if (PyErr_Occurred()) {                                             \
-      PyErr_Print();                                                    \
-    }                                                                   \
-    THPUtils_setError("class loader couldn't access %s", name);         \
-    return NULL;                                                        \
-  }
 
 #ifdef _THP_CORE
 
@@ -143,11 +133,10 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 
-#define THStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
-#define THTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
+#define THWStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
+#define THWTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
 #define THPStoragePtr TH_CONCAT_3(THP,Real,StoragePtr)
 #define THPTensorPtr  TH_CONCAT_3(THP,Real,TensorPtr)
-#define THSTensorPtr  TH_CONCAT_3(THS,Real,TensorPtr)
 #define THSPTensorPtr  TH_CONCAT_3(THSP,Real,TensorPtr)
 
 typedef THPPointer<THPGenerator> THPGeneratorPtr;
@@ -163,6 +152,7 @@ struct THPUtils_typeTraits {};
 
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
+std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg);
 bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
 
@@ -186,9 +176,7 @@ void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
 
-std::vector<at::Tensor> THPUtils_PySequence_to_TensorList(PyObject *obj);
-
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);
 #endif
 
