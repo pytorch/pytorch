@@ -331,17 +331,17 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
-                 '(${Backend}TensorId(), ScalarType::${ScalarName}, false).release()',
+                 '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), false).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
-                     '(${Backend}TensorId(), ScalarType::Byte, false).release()',
+                     '(${Backend}TensorId(), ScalarType::Byte, allocator(), false).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
-                      '(${Backend}TensorId(), ScalarType::Long, false).release()',
+                      '(${Backend}TensorId(), ScalarType::Long, allocator(), false).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
-                        '(${Backend}TensorId(), ScalarType::Int, false).release()',
+                        '(${Backend}TensorId(), ScalarType::Int, allocator(), false).release()',
     'THDenseTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
-                      '(${Backend}TensorId(), ScalarType::${ScalarName}, false).release()',
+                      '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), false).release()',
     'THDenseIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
-                           '(${Backend}TensorId(), ScalarType::Long, false).release()'
+                           '(${Backend}TensorId(), ScalarType::Long, allocator(), false).release()'
 }
 
 ALLOC_WRAP = {
