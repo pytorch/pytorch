@@ -1,5 +1,5 @@
 #include "caffe2/core/operator.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_mkl_memonger_in_use,

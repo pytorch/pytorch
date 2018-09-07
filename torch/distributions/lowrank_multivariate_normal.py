@@ -57,12 +57,12 @@ def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril):
 class LowRankMultivariateNormal(Distribution):
     r"""
     Creates a multivariate normal distribution with covariance matrix having a low-rank form
-    parameterized by `cov_factor` and `cov_diag`::
+    parameterized by :attr:`cov_factor` and :attr:`cov_diag`::
         covariance_matrix = cov_factor @ cov_factor.T + cov_diag
 
     Example:
 
-        >>> m = MultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
+        >>> m = LowRankMultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
         >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[1,0]`, cov_diag=`[1,1]`
         tensor([-0.2102, -0.5429])
 
@@ -120,7 +120,7 @@ class LowRankMultivariateNormal(Distribution):
     def mean(self):
         return self.loc
 
-    @property
+    @lazy_property
     def variance(self):
         return self.cov_factor.pow(2).sum(-1) + self.cov_diag
 

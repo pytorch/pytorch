@@ -600,11 +600,11 @@ def build_table(events, sort_by=None, header=None):
     header_sep = '-' * max_name_length + ('  ' + '-' * col_width) * 5
 
     # Have to use a list because nonlocal is Py3 only...
-    result = ['']
+    result = []
 
     def append(s):
-        result[0] += s
-        result[0] += '\n'
+        result.append(s)
+        result.append('\n')  # Yes, newline after the end as well
 
     # Actual printing
     if header is not None:
@@ -618,4 +618,4 @@ def build_table(events, sort_by=None, header=None):
         append(row_format.format(evt.key, evt.cpu_time_str, evt.cuda_time_str,
                                  evt.count, evt.cpu_time_total_str, evt.cuda_time_total_str))
 
-    return result[0]
+    return ''.join(result)

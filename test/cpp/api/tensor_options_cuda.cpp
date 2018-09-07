@@ -4,7 +4,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 using namespace at;
 
@@ -22,30 +22,30 @@ using namespace at;
   REQUIRE(tensor.type().layout() == (layout_))
 
 TEST_CASE("TensorOptions/ConstructsWellFromCUDATypes", "[cuda]") {
-  auto options = TensorOptions(CUDA(kFloat));
+  auto options = CUDA(kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kStrided);
 
-  options = TensorOptions(CUDA(kInt));
+  options = CUDA(kInt).options();
   REQUIRE_OPTIONS(kCUDA, -1, kInt, kStrided);
 
-  options = TensorOptions(getType(Backend::SparseCUDA, kFloat));
+  options = getNonVariableType(Backend::SparseCUDA, kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kSparse);
 
-  options = TensorOptions(getType(Backend::SparseCUDA, kByte));
+  options = getNonVariableType(Backend::SparseCUDA, kByte).options();
   REQUIRE_OPTIONS(kCUDA, -1, kByte, kSparse);
 
-  options = TensorOptions(CUDA(kFloat), /*device=*/5);
+  options = CUDA(kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kStrided);
 
-  options = TensorOptions(getType(Backend::SparseCUDA, kFloat), /*device=*/5);
+  options = getNonVariableType(Backend::SparseCUDA, kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
 TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[multi-cuda]") {
-  auto options = TensorOptions(empty(5, device(kCUDA).dtype(kDouble)));
+  auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
-  options = TensorOptions(empty(5, getType(Backend::SparseCUDA, kByte)));
+  options = empty(5, getNonVariableType(Backend::SparseCUDA, kByte)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
 
   if (at::globalContext().getNumGPUs() > 1) {
@@ -54,14 +54,14 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[multi-cuda]") {
       DeviceGuard guard(1);
       tensor = empty(5, device(kCUDA));
     }
-    options = TensorOptions(tensor);
+    options = tensor.options();
     REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
 
     {
       DeviceGuard guard(1);
       tensor = empty(5, device(kCUDA).layout(kSparse));
     }
-    options = TensorOptions(tensor);
+    options = tensor.options();
     REQUIRE_OPTIONS(kCUDA, 1, kFloat, kSparse);
   }
 }

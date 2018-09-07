@@ -68,7 +68,7 @@ SparseTensor new_sparse(const SparseType& dtype) {
   } else {
     type_id = SparseCPUTensorId();
   }
-  return SparseTensor(new SparseTensorImpl(type_id, dtype.scalarType()), /* retain */ false);
+  return SparseTensor(c10::make_intrusive<SparseTensorImpl>(type_id, dtype.scalarType()).release(), /* retain */ false);
 }
 
 /*** Helper methods ***/
@@ -125,7 +125,7 @@ SparseTensor new_with_dims_and_size_sparse(const SparseType& dtype, int64_t spar
   SparseTensor self = new_sparse(dtype);
   AT_CHECK(size.size() != 0,
     "cannot construct sparse tensor with 0 dimensions and no values; you must specify at least 1 dimension if you want to create a sparse tensor with no elements, \
-or you must provide a single-element `values` tensor (e.g. x=torch.sparse_coo_tensor(torch.zeros(0,1), 12.3, [])) if you want to create a scalar sparse tensor");
+or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, [])) if you want to create a scalar sparse tensor");
   _get_sparse_impl(self)->resize_and_clear_(sparseDims, denseDims, size);
   return self;
 }
@@ -173,17 +173,24 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
 
   // Check to make sure all indices are within the boundaries of `sizes`
   if (indices.numel() > 0) {
+    LongTensor min_indices = std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
     LongTensor max_indices = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
-    LongTensor cpu_max_indices;
-    if (max_indices.is_cuda()) {
+    LongTensor cpu_min_indices, cpu_max_indices;
+    if (indices.is_cuda()) {
+      cpu_min_indices = at::CPU(kLong).copy(min_indices);
       cpu_max_indices = at::CPU(kLong).copy(max_indices);
     } else {
+      cpu_min_indices = min_indices;
       cpu_max_indices = max_indices;
     }
+    auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
     auto cpu_max_indices_accessor = cpu_max_indices.accessor<int64_t, 1>();
     for (int64_t d = 0; d < sparseDims; d++) {
       // NB: This used to sync ndim times to access each entry; now we copy
       // everything to CPU first and then access it.
+      int64_t min_index_in_dim = cpu_min_indices_accessor[d];
+      AT_CHECK(min_index_in_dim >= 0,
+               "found negative index ", min_index_in_dim, " for dim ", d);
       int64_t max_index_in_dim = cpu_max_indices_accessor[d];
       int64_t dim_size = sizes[static_cast<size_t>(d)];
       AT_CHECK(max_index_in_dim < dim_size,

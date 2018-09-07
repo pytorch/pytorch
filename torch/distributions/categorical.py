@@ -14,7 +14,7 @@ class Categorical(Distribution):
         It is equivalent to the distribution that :func:`torch.multinomial`
         samples from.
 
-    Samples are integers from `0 ... K-1` where `K` is probs.size(-1).
+    Samples are integers from :math:`\{0, \ldots, K-1\}` where `K` is ``probs.size(-1)``.
 
     If :attr:`probs` is 1D with length-`K`, each element is the relative
     probability of sampling the class at that index.
@@ -37,7 +37,8 @@ class Categorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities
     """
-    arg_constraints = {'probs': constraints.simplex}
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real}
     has_enumerate_support = True
 
     def __init__(self, probs=None, logits=None, validate_args=None):

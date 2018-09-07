@@ -3,7 +3,7 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include <gtest/gtest.h>
 
 namespace caffe2 {
@@ -193,7 +193,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
       EXPECT_EQ(tensor_proto.float_data(i), i);
     }
     EXPECT_TRUE(tensor_proto.has_device_detail());
-    EXPECT_EQ(tensor_proto.device_detail().device_type(), CUDA);
+    EXPECT_EQ(tensor_proto.device_detail().device_type(), PROTO_CUDA);
     EXPECT_EQ(tensor_proto.device_detail().cuda_gpu_id(), gpu_id);
     // Test if the restored blob is still of the same device.
     blob.Reset();

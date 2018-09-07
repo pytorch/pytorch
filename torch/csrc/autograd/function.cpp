@@ -118,14 +118,14 @@ void deleteFunction(Function* function) {
 
   delete function;
 
-  if (deleteFunctionQueue.size() == 0) {
+  if (deleteFunctionQueue.empty()) {
     return;
   }
   if (recursion_depth.value() != kDeleteFunctionMaxRecursionDepth) {
     AT_ERROR("Only one deleter per thread should be able to process "
              "the delete queue. Please open an issue.");
   }
-  while (deleteFunctionQueue.size() > 0) {
+  while (!deleteFunctionQueue.empty()) {
     auto queued_function = deleteFunctionQueue.front();
     deleteFunctionQueue.pop_front();
     delete queued_function;

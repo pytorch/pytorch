@@ -13,13 +13,25 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <sstream>
 
 namespace torch { namespace jit {
 
 namespace {
-
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
+
+std::string getExportableSchemaStringForMethod(const script::Method& method) {
+  const auto& schema = method.getSchema();
+  for (const auto& argument : schema.arguments) {
+    AT_CHECK(
+        !argument.default_value,
+        "Default arguments in script graphs may currently not be exported.");
+  }
+  std::ostringstream stream;
+  stream << schema;
+  return stream.str();
+}
 
 std::string getNodeStackTraceString(const Node* n) {
   std::stringstream ss;
@@ -141,7 +153,7 @@ void EncoderBase::EncodeValueInfo(
   onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
 
   onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
+  if (CompleteTensorTypePtr node_type = n->type()->cast<CompleteTensorType>()) {
     const std::vector<std::int64_t>& sizes = node_type->sizes();
     for (size_t i = 0; i < sizes.size(); i++) {
       shape->add_dim();
@@ -471,18 +483,28 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("DynamicType");
   } else if (kind == TypeKind::TensorType) {
     type_proto->set_denotation("TensorType");
-    TensorTypePtr node_type = type->cast<TensorType>();
-    const std::vector<std::int64_t>& sizes = node_type->sizes();
+    // encode the number of dimensions by pushing that number of ones into the shape proto
+    auto tensor_type = type->expect<TensorType>();
+    for (int i = 0; i < tensor_type->dim(); i++) {
+      shape_proto->add_dim();
+      shape_proto->mutable_dim(i)->set_dim_value(1);
+    }
+    tensortype_proto->set_elem_type(ATenTypeToOnnxType(tensor_type->scalarType()));
+  } else if (kind == TypeKind::CompleteTensorType) {
+    type_proto->set_denotation("CompleteTensorType");
+    CompleteTensorTypePtr node_type = type->cast<CompleteTensorType>();
 
     // store the sizes and strides in the dims field of TensorShapeProto
-    for (size_t i = 0; i < sizes.size(); i++) {
+    size_t i = 0;
+    for (auto &size : node_type->sizes()) {
       shape_proto->add_dim();
-      shape_proto->mutable_dim(i)->set_dim_value(sizes[i]);
+      shape_proto->mutable_dim(i)->set_dim_value(size);
+      i++;
     }
-    const std::vector<std::int64_t>& strides = node_type->strides();
-    for (size_t i = 0; i < strides.size(); i++) {
+    for (auto &stride : node_type->strides()) {
       shape_proto->add_dim();
-      shape_proto->mutable_dim(i)->set_dim_value(strides[i]);
+      shape_proto->mutable_dim(i)->set_dim_value(stride);
+      i++;
     }
     tensortype_proto->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
   } else if (kind == TypeKind::TupleType) {
@@ -591,6 +613,13 @@ void ModuleEncoder::EncodeMethod(
     script::Method &method,
     const std::string prefix) {
   node_proto->set_name(prefix + method.name());
+  if (method.is_optimized()) {
+    // mark that this method was optimized
+    node_proto->set_domain("optimized");
+  }
+
+  // We store the schema string in the docstring.
+  node_proto->set_doc_string(getExportableSchemaStringForMethod(method));
 
   // Store member_inputs of Method in input
   for (auto &member_input : method.params()) {

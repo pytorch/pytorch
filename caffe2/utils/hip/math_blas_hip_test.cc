@@ -4,7 +4,7 @@
 #include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/operators/utility_ops.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
@@ -15,7 +15,7 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(HIP);
+  option.set_device_type(PROTO_HIP);
   HIPContext context(option);
 
   Blob* blobX = ws.CreateBlob("X");
@@ -115,7 +115,7 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(HIP);
+  option.set_device_type(PROTO_HIP);
   HIPContext context(option);
 
   Blob* blobX = ws.CreateBlob("X");
@@ -214,7 +214,7 @@ TEST(MathROCBLASTest, GemvNoTrans) {
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(HIP);
+  option.set_device_type(PROTO_HIP);
   HIPContext context(option);
 
   Blob* blobA = ws.CreateBlob("A");
@@ -304,7 +304,7 @@ TEST(MathROCBLASTest, GemvTrans) {
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(HIP);
+  option.set_device_type(PROTO_HIP);
   HIPContext context(option);
 
   Blob* blobA = ws.CreateBlob("A");

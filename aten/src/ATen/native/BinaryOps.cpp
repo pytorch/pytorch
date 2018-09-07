@@ -123,8 +123,8 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
 // to Python.
 
 static Tensor scalar_tensor(Scalar scalar) {
-  auto tensor = scalar.toTensor();
-  tensor.get()->set_wrapped_number(true);
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdlib>
 #include <ctime>
 #include <memory>
@@ -9,7 +10,7 @@
 #include "caffe2/core/event.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -36,7 +37,7 @@ class CAFFE2_API BaseStaticContext {
    * current context and the a data pointer
    */
   virtual void ExtractDeviceOption(DeviceOption* device, const void* /*data*/) {
-    device->set_device_type(GetDeviceType());
+    device->set_device_type(TypeToProto(GetDeviceType()));
   }
 };
 
@@ -166,25 +167,23 @@ class CAFFE2_API BaseContext {
       CopyBytesToCPU(n * meta.itemsize(), src, dst);
     }
   }
-
-  static BaseStaticContext* static_context_[COMPILE_TIME_MAX_DEVICE_TYPES];
-
-  template <int d>
-  friend struct StaticContextFunctionRegisterer;
 };
 
-template <int d>
+using StaticContextMap = CaffeMap<DeviceType, BaseStaticContext*>;
+CAFFE2_API StaticContextMap& GetStaticContexts();
+CAFFE2_API void set_static_context(DeviceType t, BaseStaticContext* ptr);
+CAFFE2_API BaseStaticContext* get_static_context(DeviceType t);
+
+template <DeviceType t>
 struct StaticContextFunctionRegisterer {
   explicit StaticContextFunctionRegisterer(BaseStaticContext* ptr) {
-    static_assert(d < COMPILE_TIME_MAX_DEVICE_TYPES, "");
-    BaseContext::static_context_[d] = ptr;
+    set_static_context(t, ptr);
   }
 };
 
-#define REGISTER_STATIC_CONTEXT(d, f)                                \
+#define REGISTER_STATIC_CONTEXT(t, f)                                \
   namespace {                                                        \
-  static StaticContextFunctionRegisterer<d> g_static_context_##d(f); \
+  static StaticContextFunctionRegisterer<t> g_static_context_##d(f); \
   }
 
-#define GET_STATIC_CONTEXT(d) BaseContext::static_context_[d]
 } // namespace caffe2

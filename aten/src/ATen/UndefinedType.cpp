@@ -3,17 +3,22 @@
 
 namespace at {
 
-UndefinedType::UndefinedType(Context* context)
-    : Type(context, UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
+UndefinedType::UndefinedType()
+    : TypeDefault(UndefinedTensorId(), /*is_variable=*/false, /*is_undefined=*/true) {}
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }
 Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
-bool UndefinedType::is_cuda() const { return false; }
-bool UndefinedType::is_sparse() const { return false; }
-bool UndefinedType::is_distributed() const { return false; }
+
+Allocator* UndefinedType::allocator() const {
+  AT_ERROR("allocator not defined for UndefinedType");
+}
+
+Device UndefinedType::getDeviceFromPtr(void*) const {
+  AT_ERROR("getDeviceFromPtr not defined for UndefinedType");
+}
 
 Storage UndefinedType::storage(bool resizable) const {
   AT_ERROR("storage not defined for UndefinedType");
@@ -38,8 +43,9 @@ std::unique_ptr<Generator> UndefinedType::generator() const {
 }
 
 const char * UndefinedType::toString() const {
-  return UndefinedType::typeString();
+  return "UndefinedType";
 }
+
 TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
@@ -50,19 +56,15 @@ size_t UndefinedType::elementSizeInBytes() const {
 
 Type & UndefinedType::toBackend(Backend b) const {
   if (b == Backend::Undefined) {
-    return Type::toBackend(b);
+    return TypeDefault::toBackend(b);
   }
   AT_ERROR("toBackend not implemented for UndefinedType to non-UndefinedType");
 }
 Type & UndefinedType::toScalarType(ScalarType s) const {
   if (s == ScalarType::Undefined) {
-    return Type::toScalarType(s);
+    return TypeDefault::toScalarType(s);
   }
   AT_ERROR("toScalarType not implemented for UndefinedType to non-UndefinedType");
-}
-
-const char * UndefinedType::typeString() {
-  return "UndefinedType";
 }
 
 Tensor & UndefinedType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {

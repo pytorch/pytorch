@@ -65,10 +65,8 @@ TEST_CASE( "scalar test", "[]" ) {
   REQUIRE_NOTHROW(gen.seed());
   auto && C = at::globalContext();
   if(at::hasCUDA()) {
-    auto & CUDAFloat = C.getType(Backend::CUDA,ScalarType::Float);
-    auto t2 = zeros({4,4}, CUDAFloat);
+    auto t2 = zeros({4,4}, at::kCUDA);
     cout << &t2 << "\n";
-    cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
   }
   auto t = ones({4,4});
 
@@ -101,9 +99,9 @@ TEST_CASE( "scalar test", "[]" ) {
   REQUIRE_NOTHROW(randn({10,10,2}, T));
 
   // check Scalar.toTensor on Scalars backed by different data types
-  REQUIRE(bar.toTensor().type().scalarType() == kDouble);
-  REQUIRE(what.toTensor().type().scalarType() == kLong);
-  REQUIRE(ones({})._local_scalar().toTensor().type().scalarType() == kDouble);
+  REQUIRE(scalar_to_tensor(bar).type().scalarType() == kDouble);
+  REQUIRE(scalar_to_tensor(what).type().scalarType() == kLong);
+  REQUIRE(scalar_to_tensor(ones({})._local_scalar()).type().scalarType() == kDouble);
 
   if (x.type().scalarType() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {

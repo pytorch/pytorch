@@ -5,23 +5,14 @@
 #include <ATen/core/optional.h>
 #include <ATen/Context.h>
 #include <ATen/core/Backend.h>
+#include <ATen/core/WrapDimMinimal.h>
 
 #include <ATen/detail/VariableHooksInterface.h>
-
-#include <TH/THTensor.hpp>
 
 namespace at {
 
 Type& TensorImpl::type() const {
-  // Select backend from the hard-coded ones that the legacy ATen dispatcher
-  // knows about
-  Backend backend = tensorTypeIdToBackend(type_id_);
-  Type* base_type = &globalContext().getType(backend, scalar_type_);
-  if (is_variable_) {
-    return detail::getVariableHooks().getVariableType(*base_type);
-  } else {
-    return *base_type;
-  }
+  return at::getMaybeVariableType(this);
 }
 
 Tensor& TensorImpl::grad() {
@@ -34,11 +25,6 @@ const Tensor& TensorImpl::grad() const {
 
 Tensor TensorImpl::detach() const {
   AT_ERROR("detach is not implemented for Tensor");
-}
-
-const char* TensorImpl::toString() const {
-  // This matches behavior with VariableImpl
-  return type().toString();
 }
 
 void TensorImpl::backward(
@@ -56,7 +42,7 @@ void Tensor::backward(
     at::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
-  pImpl->backward(std::move(gradient), keep_graph, create_graph);
+  tensor_impl_->backward(std::move(gradient), keep_graph, create_graph);
 }
 
 TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
@@ -64,13 +50,13 @@ TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_var
   // UndefinedTensors and SparseTensors don't have storages.
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
-    auto type = &globalContext().getType(tensorTypeIdToBackend(type_id), scalar_type);
+    auto type = &globalContext().getNonVariableType(tensorTypeIdToBackend(type_id), scalar_type);
     storage_ = type->storage(true);
   }
 }
 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
-    : TensorImpl(std::move(storage), type_id, storage.scalar_type(), is_variable) {}
+    : TensorImpl(std::move(storage), type_id, dataTypeToScalarType(storage.dtype()), is_variable) {}
 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
     : storage_(std::move(storage)),
@@ -137,7 +123,7 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   return this;
 }
 
-const Storage& TensorImpl::storage() {
+const Storage& TensorImpl::storage() const {
   return storage_;
 }
 

@@ -33,8 +33,8 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, at::ScalarType scal
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
-    , indices_(globalContext().getTypeOpt(sparseTensorIdToDenseBackend(type_id), ScalarType::Long)->tensor({1, 0}))
-    , values_(globalContext().getTypeOpt(sparseTensorIdToDenseBackend(type_id), scalar_type)->tensor()) {}
+    , indices_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), ScalarType::Long)->tensor({1, 0}))
+    , values_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), scalar_type)->tensor()) {}
 
 IntList SparseTensorImpl::sizes() const {
   return size_;
@@ -75,7 +75,7 @@ TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
            " changing dimensionality via maybe_zero_dim");
   return this;
 }
-const Storage& SparseTensorImpl::storage() {
+const Storage& SparseTensorImpl::storage() const {
   AT_ERROR("sparse tensors do not have storage");
 }
 int64_t SparseTensorImpl::storage_offset() const {

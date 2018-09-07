@@ -54,8 +54,8 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // --------------------------------------------------------------------
 
 static Tensor scalar_tensor(Scalar s) {
-  auto tensor = s.toTensor();
-  tensor.get()->set_wrapped_number(true);
+  auto tensor = scalar_to_tensor(s);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
 
@@ -470,7 +470,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
       r.copy_(t);
     }
   } else {
-    at::mul_out(r, t, beta.toTensor());
+    at::mul_out(r, t, scalar_to_tensor(beta));
   }
 
   auto csr_accessor = csr.accessor<int64_t, 1>();
@@ -541,7 +541,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   int64_t nnz        = sparse._nnz();
 
   if (nnz == 0) {
-    at::mul_out(r, t, r.type().scalarTensor(beta.local()));
+    at::mul_out(r, t, r.type().scalarTensor(beta));
     return r;
   }
 

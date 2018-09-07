@@ -63,7 +63,7 @@ struct FunctionTask {
 
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
     : base(base)
-    , fn(fn)
+    , fn(std::move(fn))
     , inputs(std::move(inputs)) {}
 };
 
@@ -170,15 +170,10 @@ struct GraphTask {
   }
 
   GraphTask(bool keep_graph, bool grad_mode)
-    : exception()
-    , has_error(false)
+    : has_error(false)
     , outstanding_tasks(0)
     , keep_graph(keep_graph)
     , grad_mode(grad_mode)
-    , mutex()
-    , not_done()
-    , not_ready()
-    , dependencies()
     , owner(NO_DEVICE) {}
 };
 
@@ -194,12 +189,12 @@ auto ReadyQueue::push(FunctionTask item) -> void {
 auto ReadyQueue::pop() -> FunctionTask {
   std::unique_lock<std::mutex> lock(mutex);
   not_empty.wait(lock, [this]{ return !heap.empty(); });
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto task = std::move(const_cast<FunctionTask&>(heap.top())); heap.pop();
   return task;
 }
 
-Engine::Engine() : ready_queues() {
-}
+Engine::Engine() = default;
 
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
@@ -376,6 +371,7 @@ static variable_list call_function(FunctionTask& task) {
   checkpoint_valid = prev_checkpoint_valid_state;
 
   if(has_post_hooks){
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     return call_post_hooks(fn, std::move(outputs), std::move(inputs));
   }
   return outputs;
@@ -478,7 +474,7 @@ auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies;
-  while (queue.size() > 0) {
+  while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
@@ -513,6 +509,7 @@ auto Engine::execute(const edge_list& roots,
                      const edge_list& outputs) -> variable_list {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
@@ -559,6 +556,9 @@ auto Engine::execute(const edge_list& roots,
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
+  // WARNING: Don't use a range-for loop here because more callbacks may be
+  // added in between callback calls, so iterators may become invalidated.
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < final_callbacks.size(); ++i) {
     cb_lock.unlock();
     final_callbacks[i]();
