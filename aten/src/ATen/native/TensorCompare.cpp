@@ -43,13 +43,15 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   auto max_error = atol + rtol * other.abs();
   auto close = actual_error <= max_error;
 
-  // Handle +/-inf
-  close.__ior__(self == other);
-  close.__iand__((self == INFINITY) == (other == INFINITY));
-  close.__iand__((self == -INFINITY) == (other == -INFINITY));
+  if (isFloatingType(self.type().scalarType()) && isFloatingType(other.type().scalarType())) {
+    // Handle +/-inf
+    close.__ior__(self == other);
+    close.__iand__((self == INFINITY) == (other == INFINITY));
+    close.__iand__((self == -INFINITY) == (other == -INFINITY));
 
-  if (equal_nan) {
-    close.__ior__((self != self).__and__((other != other)));
+    if (equal_nan) {
+      close.__ior__((self != self).__and__((other != other)));
+    }
   }
   return close;
 }

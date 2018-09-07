@@ -218,8 +218,7 @@ class TestTorch(TestCase):
                        'sparse_resize_and_clear_',
                        )
         test_namespace(torch.nn)
-        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear',
-                       'dropout', 'dropout2d', 'dropout3d', 'feature_alpha_dropout')
+        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
 
@@ -3409,6 +3408,26 @@ class TestTorch(TestCase):
 
         # Test that we still have proper sorting with duplicate keys
         self.assertIsOrdered('descending', x, res2val, res2ind, 'random with duplicate keys')
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_tensordot(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for d in devices:
+            a = torch.arange(60., device=d).reshape(3, 4, 5)
+            b = torch.arange(24., device=d).reshape(4, 3, 2)
+            c = torch.tensordot(a, b, dims=([1, 0], [0, 1])).cpu()
+            cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
+                                               axes=([1, 0], [0, 1])))
+            self.assertEqual(c, cn)
+            a = torch.randn(2, 3, 4, 5, device=d)
+            b = torch.randn(4, 5, 6, 7, device=d)
+            c = torch.tensordot(a, b, dims=2).cpu()
+            cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy(),
+                                               axes=2))
+            self.assertEqual(c, cn)
+            c = torch.tensordot(a, b).cpu()
+            cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
+            self.assertEqual(c, cn)
 
     def test_topk(self):
         def topKViaSort(t, k, dim, dir):
@@ -7743,6 +7762,35 @@ class TestTorch(TestCase):
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
 
+    def test_serialization_storage_slice(self):
+        # Generated using:
+        #
+        # t = torch.zeros(2);
+        # s1 = t.storage()[:1]
+        # s2 = t.storage()[1:]
+        # torch.save((s1, s2), 'foo.ser')
+        #
+        # with PyTorch 0.3.1
+        serialized = (b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9\x03'
+                      b'.\x80\x02}q\x00(X\n\x00\x00\x00type_sizesq\x01}q\x02(X\x03'
+                      b'\x00\x00\x00intq\x03K\x04X\x05\x00\x00\x00shortq\x04K\x02X'
+                      b'\x04\x00\x00\x00longq\x05K\x04uX\x10\x00\x00\x00protocol_versionq'
+                      b'\x06M\xe9\x03X\r\x00\x00\x00little_endianq\x07\x88u.\x80\x02'
+                      b'(X\x07\x00\x00\x00storageq\x00ctorch\nFloatStorage\nq\x01X\x0e'
+                      b'\x00\x00\x0094279043900432q\x02X\x03\x00\x00\x00cpuq\x03K\x02'
+                      b'X\x0e\x00\x00\x0094279029750368q\x04K\x00K\x01\x87q\x05tq\x06'
+                      b'Q(h\x00h\x01X\x0e\x00\x00\x0094279043900432q\x07h\x03K\x02X'
+                      b'\x0e\x00\x00\x0094279029750432q\x08K\x01K\x01\x87q\ttq\nQ'
+                      b'\x86q\x0b.\x80\x02]q\x00X\x0e\x00\x00\x0094279043900432q'
+                      b'\x01a.\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                      b'\x00\x00\x00\x00')
+
+        buf = io.BytesIO(serialized)
+        (s1, s2) = torch.load(buf)
+        self.assertEqual(s1[0], 0)
+        self.assertEqual(s2[0], 0)
+        self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
+
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
                             "Please pre-load the data into a buffer like io.BytesIO and " +
@@ -8276,14 +8324,18 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multiplication_numpy_scalar(self):
-        np_sc = np.float64(2.0)
-        t = torch.ones(2, requires_grad=True)
-        r1 = np_sc * t
-        self.assertIsInstance(r1, torch.Tensor)
-        self.assertTrue(r1.requires_grad)
-        r2 = t * np_sc
-        self.assertIsInstance(r2, torch.Tensor)
-        self.assertTrue(r2.requires_grad)
+        for np_dtype in [np.float32, np.float64, np.int32, np.int64, np.int16, np.uint8]:
+            for t_dtype in [torch.float, torch.double]:
+                np_sc = np_dtype(2.0)
+                t = torch.ones(2, requires_grad=True, dtype=t_dtype)
+                r1 = t * np_sc
+                self.assertIsInstance(r1, torch.Tensor)
+                self.assertTrue(r1.dtype == t_dtype)
+                self.assertTrue(r1.requires_grad)
+                r2 = np_sc * t
+                self.assertIsInstance(r2, torch.Tensor)
+                self.assertTrue(r2.dtype == t_dtype)
+                self.assertTrue(r2.requires_grad)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(

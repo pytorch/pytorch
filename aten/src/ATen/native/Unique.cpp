@@ -21,7 +21,7 @@ std::tuple<Tensor, Tensor> _unique_cpu_template(
   const Tensor& input = self.contiguous();
   const scalar_t* input_data = input.data<scalar_t>();
   std::unordered_set<scalar_t> set(input_data, input_data + input.numel());
-  Tensor output = at::empty({static_cast<int64_t>(set.size())}, input.type());
+  Tensor output = at::empty({static_cast<int64_t>(set.size())}, input.options());
   scalar_t* output_data = output.data<scalar_t>();
 
   if (sorted) {
@@ -32,7 +32,7 @@ std::tuple<Tensor, Tensor> _unique_cpu_template(
     std::copy(set.begin(), set.end(), output_data);
   }
 
-  Tensor inverse_indices = at::empty({0}, self.type().toScalarType(kLong));
+  Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
   if (return_inverse) {
     inverse_indices.resize_(input.sizes());
     int64_t* inverse_indices_data = inverse_indices.data<int64_t>();
@@ -103,12 +103,12 @@ std::tuple<Tensor, Tensor> _unique_dim_cpu_template(
       return false;
     });
 
-  Tensor input_sorted = at::empty(input_flat.sizes(), input_flat.type());
+  Tensor input_sorted = at::empty(input_flat.sizes(), input_flat.options());
   for (int i = 0; i < indices.size(); ++i) {
     input_sorted[i] = input_flat[indices[i]];
   }
 
-  Tensor inverse_indices = at::empty(indices.size(), self.type().toScalarType(kLong));
+  Tensor inverse_indices = at::empty(indices.size(), self.options().dtype(kLong));
   std::vector<Tensor> input_unbind = at::unbind(input_sorted, 0);
   auto last = _unique_dim_cpu_impl(
     input_unbind.begin(), input_unbind.end(), indices, inverse_indices);

@@ -19,7 +19,7 @@ namespace {
 static void AddConstInput(const std::vector<int>& shape, const float value,
                           const string& name, Workspace* ws) {
   DeviceOption option;
-  option.set_device_type(CUDA);
+  option.set_device_type(PROTO_CUDA);
   CUDAContext context(option);
   Blob* blob = ws->CreateBlob(name);
   auto* tensor = blob->GetMutableTensor(CUDA);
@@ -43,7 +43,7 @@ TEST(NervanaFullyConnectedTest, Test) {
   def.add_input("W");
   def.add_input("B");
   def.add_output("Y");
-  def.mutable_device_option()->set_device_type(CUDA);
+  def.mutable_device_option()->set_device_type(PROTO_CUDA);
   def.set_engine("NERVANA");
   AddConstInput(std::vector<int>{5, 10}, 1., "X", &ws);
   AddConstInput(std::vector<int>{6, 10}, 1., "W", &ws);
