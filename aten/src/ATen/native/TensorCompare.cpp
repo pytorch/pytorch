@@ -65,7 +65,7 @@ bool is_nonzero(const Tensor& self) {
   if (n > 1) {
     AT_ERROR("bool value of Tensor with more than one value is ambiguous");
   }
-  Scalar localScalar = self._local_scalar();
+  Scalar localScalar = at::_local_scalar(self);
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
   } else if (localScalar.isIntegral()){
