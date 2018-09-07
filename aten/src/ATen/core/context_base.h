@@ -43,7 +43,7 @@ class AT_CORE_API BaseStaticContext {
    */
   virtual void ExtractDeviceOption(
       caffe2::DeviceOption* device,
-      const void* /*data*/);
+      const void* /*data*/) = 0;
 };
 
 /**

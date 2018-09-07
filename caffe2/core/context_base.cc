@@ -20,12 +20,3 @@ BaseStaticContext* get_static_context(DeviceType t) {
 }
 
 } // namespace caffe2
-
-namespace at {
-void BaseStaticContext::ExtractDeviceOption(
-    caffe2::DeviceOption* device,
-    const void* /*data*/) {
-  device->set_device_type(caffe2::TypeToProto(GetDeviceType()));
-}
-
-} // namespace at
