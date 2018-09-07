@@ -812,6 +812,28 @@ class TestDistributions(TestCase):
                     self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
                     self.assertEqual(actual_shape, expected_shape)
 
+    def test_distribution_subclass_expand(self):
+        expand_by = torch.Size((2,))
+        for Dist, params in EXAMPLES:
+            if Dist.__name__ == "TransformedDistribution":
+                continue
+
+            class SubClass(Dist):
+                pass
+
+            for param in params:
+                d = SubClass(**param)
+                expanded_shape = expand_by + d.batch_shape
+                original_shape = d.batch_shape + d.event_shape
+                expected_shape = expand_by + original_shape
+                expanded = d.expand(batch_shape=expanded_shape)
+                sample = expanded.sample()
+                actual_shape = expanded.sample().shape
+                self.assertEqual(expanded.__class__, d.__class__)
+                self.assertEqual(d.sample().shape, original_shape)
+                self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
+                self.assertEqual(actual_shape, expected_shape)
+
     def test_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
