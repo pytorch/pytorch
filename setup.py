@@ -892,9 +892,10 @@ if USE_DISTRIBUTED:
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
     if IS_LINUX and USE_CUDA:
-        extra_compile_args += ['-DUSE_C10D']
-        main_sources += ['torch/csrc/distributed/c10d/init.cpp']
-        main_link_args += [C10D_LIB]
+        extra_compile_args.append('-DUSE_C10D')
+        main_sources.append('torch/csrc/distributed/c10d/init.cpp')
+        main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
+        main_link_args.append(C10D_LIB)
 
 if USE_CUDA:
     nvtoolext_lib_name = None
@@ -943,8 +944,8 @@ if USE_ROCM:
     rocm_include_path = '/opt/rocm/include'
     hcc_include_path = '/opt/rocm/hcc/include'
     rocblas_include_path = '/opt/rocm/rocblas/include'
+    hipsparse_include_path = '/opt/rocm/hipsparse/include'
     rocfft_include_path = '/opt/rocm/rocfft/include'
-    hipsparse_include_path = '/opt/rocm/hcsparse/include'
     hiprand_include_path = '/opt/rocm/hiprand/include'
     rocrand_include_path = '/opt/rocm/rocrand/include'
     hip_lib_path = '/opt/rocm/hip/lib'

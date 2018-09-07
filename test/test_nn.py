@@ -4895,32 +4895,42 @@ class TestNN(NNTestCase):
         input2 = torch.randn(4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
 
+    @skipIfRocm
     def test_pdist(self):
-        for trans in [False, True]:
-            inp = torch.randn(4, 5, requires_grad=True)
+        for device, trans in itertools.product(device_(), [False, True]):
+            inp = torch.randn(4, 5, dtype=torch.double, device=device, requires_grad=True)
             if trans:
                 inp = inp.transpose(0, 1)
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
                 self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
 
+    @skipIfRocm
     def test_pdist_zeros(self):
         """Test that grad is still valid when dist is 0"""
-        for trans in [False, True]:
-            inp = torch.randn(1, 3, requires_grad=True).repeat([2, 1])
+        for device in device_():
+            inp = torch.randn(1, 3, dtype=torch.double, device=device, requires_grad=True).repeat([2, 1])
             for p in [0, 1, 2, 0.5, 1.5, 2.5, float('inf')]:
                 self.assertTrue(gradcheck(lambda x: F.pdist(x, p), (inp,)))
 
+    @skipIfRocm
     def test_pdist_empty_row(self):
-        inp = torch.randn(1, 3, requires_grad=True)
-        self.assertTrue(gradcheck(F.pdist, (inp,)))
+        for device in device_():
+            inp = torch.randn(1, 3, dtype=torch.double, device=device, requires_grad=True)
+            self.assertTrue(gradcheck(F.pdist, (inp,)))
 
     def test_pdist_empty_col(self):
-        inp = torch.randn(4, 0, requires_grad=True)
-        self.assertTrue(gradcheck(F.pdist, (inp,)))
+        for device in device_():
+            inp = torch.randn(4, 0, dtype=torch.double, device=device, requires_grad=True)
+            self.assertTrue(gradcheck(F.pdist, (inp,)))
 
     @unittest.expectedFailure
-    def test_pdist_gradgrad_unimplemented(self):
+    def test_pdist_cpu_gradgrad_unimplemented(self):
         inp = torch.randn(4, 5, requires_grad=True)
+        gradgradcheck(F.pdist, (inp,))
+
+    @unittest.expectedFailure
+    def test_pdist_cuda_gradgrad_unimplemented(self):
+        inp = torch.randn(4, 5, device='cuda', requires_grad=True)
         gradgradcheck(F.pdist, (inp,))
 
     def test_cosine_embedding_loss_no_reduce(self):
@@ -5353,6 +5363,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @skipIfRocm
     def test_affine_2d_rotate0(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5390,6 +5401,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @skipIfRocm
     def test_affine_2d_rotate90(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5435,6 +5447,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @skipIfRocm
     def test_affine_2d_rotate45(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5473,6 +5486,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @skipIfRocm
     def test_affine_2d_rotateRandom(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
@@ -5521,6 +5535,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
+    @skipIfRocm
     def test_affine_3d_rotateRandom(self):
         # scipy before 1.0.0 do not support homogeneous coordinate
         # scipy.ndimage.affine_transform, so we need to skip.
