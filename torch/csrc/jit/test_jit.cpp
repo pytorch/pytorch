@@ -618,7 +618,7 @@ void testADFormulas() {
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
-    auto grad_spec = differentiate(graph, std::vector<bool>(vars_in.size(), true));
+    auto grad_spec = differentiate(graph);
     LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter
     auto tensors_in                = fmap(vars_in, unwrap);
@@ -651,7 +651,7 @@ void testDifferentiate(std::ostream & out) {
   auto c = a * b * a + b;
   graph->registerOutput(c.value());
 
-  auto grad_spec = differentiate(graph, {true, true});
+  auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_captured_inputs = {0, 1};
   std::vector<size_t> expected_captured_outputs = {1};
   std::vector<size_t> expected_input_vjps = {0, 1};
@@ -674,13 +674,13 @@ void testDifferentiateWithRequiresGrad(std::ostream & out) {
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
-  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type->withRequiresGrad(false));
   auto d = b * b + b;
   auto e = (d + a) * a + b;
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
 
-  auto grad_spec = differentiate(graph, {true, false});
+  auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
   std::vector<size_t> expected_output_vjps = {0};    // only a requires grad
   REQUIRE(grad_spec.f_real_outputs == 2);              // we need one temporary %4 = (d + a)
