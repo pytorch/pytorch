@@ -1,7 +1,6 @@
 #include <ATen/TensorImpl.h>
 
 #include "ATen/Context.h"
-#include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
 #include <ATen/Context.h>
 #include <ATen/core/Backend.h>
@@ -21,10 +20,6 @@ Tensor& TensorImpl::grad() {
 
 const Tensor& TensorImpl::grad() const {
   AT_ERROR("grad is not implemented for Tensor");
-}
-
-Tensor TensorImpl::detach() const {
-  AT_ERROR("detach is not implemented for Tensor");
 }
 
 void TensorImpl::backward(
