@@ -1045,8 +1045,8 @@ class TestSparse(TestCase):
     @skipIfRocm
     def test_log1p(self):
         input = torch.sparse_coo_tensor(
-            torch.LongTensor([[0], [1], [2]]).transpose(1, 0).cuda(),
-            torch.FloatTensor([3, 4, 5]).cuda(),
+            torch.LongTensor([[0], [1], [2]]).transpose(1, 0),
+            torch.FloatTensor([3, 4, 5]),
             torch.Size([3]),
             device=self.device)
         self._test_log1p_tensor(input, [3., 4., 5.])
