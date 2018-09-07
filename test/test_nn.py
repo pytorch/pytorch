@@ -8765,7 +8765,7 @@ new_module_tests = [
 for test_params in module_tests + new_module_tests:
     # TODO: CUDA is not implemented yet
     if 'constructor' not in test_params:
-        name = test_params.pop('module_name')
+        name = test_params.get('module_name')
         test_params['constructor'] = getattr(nn, name)
     decorator = test_params.pop('decorator', None)
     test = NewModuleTest(**test_params)
@@ -8788,7 +8788,7 @@ for test_params in module_tests + new_module_tests:
         add_test(test, decorator)
 
 for test_params in criterion_tests + new_criterion_tests:
-    name = test_params.pop('module_name')
+    name = test_params.get('module_name')
     test_params['constructor'] = getattr(nn, name)
     test = NewCriterionTest(**test_params)
     decorator = test_params.pop('decorator', None)

@@ -24,6 +24,7 @@ import shutil
 import warnings
 from test_autograd import method_tests, create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+from common_nn import TestBase, module_tests as nn_module_tests
 from copy import deepcopy
 import random
 
@@ -6957,13 +6958,13 @@ EXCLUDE_TRACED = {
 
     # nn functional test
     # schema not found for onnx node
-    'test_nn_instance_norm',
+    'test_nn_functional_instance_norm',
 
     # output no dependence with traced input, tracer confusion
-    'test_nn_rrelu',
+    'test_nn_functional_rrelu',
 
     # aten op has additional cudnn argument
-    'test_nn_group_norm',
+    'test_nn_functional_group_norm',
 }
 
 # known to be failing in script
@@ -7021,51 +7022,71 @@ EXCLUDE_SCRIPT = {
     'test_inverse',
     # skipped nn functional tests
     # ops involves sampling which could not test
-    'test_nn_dropout',
-    'test_nn_alpha_dropout',
-    'test_nn_dropout2d',
-    'test_nn_dropout3d',
-    'test_nn_feature_alpha_dropout',
+    'test_nn_functional_dropout',
+    'test_nn_functional_alpha_dropout',
+    'test_nn_functional_dropout2d',
+    'test_nn_functional_dropout3d',
+    'test_nn_functional_feature_alpha_dropout',
 
-    'test_nn_adaptive_max_pool1d',
-    'test_nn_adaptive_max_pool2d',
-    'test_nn_adaptive_max_pool3d',
+    'test_nn_functional_adaptive_max_pool1d',
+    'test_nn_functional_adaptive_max_pool2d',
+    'test_nn_functional_adaptive_max_pool3d',
 
 
     # argument has custom behavior
-    'test_nn_fractional_max_pool2d',
-    'test_nn_embedding',
-    'test_nn_embedding_bag',
-    'test_nn_batch_norm',
+    'test_nn_functional_fractional_max_pool2d',
+    'test_nn_functional_embedding',
+    'test_nn_functional_embedding_bag',
+    'test_nn_functional_batch_norm',
     # aten op has additional cudnn argument
-    'test_nn_group_norm',
-    'test_nn_nll_loss',
-    'test_nn_unfold',
-    'test_nn_max_unpool2d',
+    'test_nn_functional_group_norm',
+    'test_nn_functional_nll_loss',
+    'test_nn_functional_unfold',
+    'test_nn_functional_max_unpool2d',
 
     # argument type not supported
-    'test_nn_affine_grid',
+    'test_nn_functional_affine_grid',
 
     # unknown builtin op
-    'test_nn_tanhshrink',
-    'test_nn_softsign',
-    'test_nn_softmin',
-    'test_nn_local_response_norm',
-    'test_nn_poisson_nll_loss',
-    'test_nn_cross_entropy',
-    'test_nn_binary_cross_entropy_with_logits',
-    'test_nn_multilabel_soft_margin_loss',
-    'test_nn_pixel_shuffle',
-    'test_nn_interpolate',
-    'test_nn_pad',
-    'test_nn_cosine_similarity',
-    'test_nn_normalize',
-    'test_nn_fold',
-    'test_nn_linear',
-    'test_nn_max_unpool1d',
-    'test_nn_lp_pool1d',
-    'test_nn_lp_pool2d',
-    'test_nn_instance_norm',
+    'test_nn_functional_tanhshrink',
+    'test_nn_functional_softsign',
+    'test_nn_functional_softmin',
+    'test_nn_functional_local_response_norm',
+    'test_nn_functional_poisson_nll_loss',
+    'test_nn_functional_cross_entropy',
+    'test_nn_functional_binary_cross_entropy_with_logits',
+    'test_nn_functional_multilabel_soft_margin_loss',
+    'test_nn_functional_pixel_shuffle',
+    'test_nn_functional_interpolate',
+    'test_nn_functional_pad',
+    'test_nn_functional_cosine_similarity',
+    'test_nn_functional_normalize',
+    'test_nn_functional_fold',
+    'test_nn_functional_linear',
+    'test_nn_functional_max_unpool1d',
+    'test_nn_functional_lp_pool1d',
+    'test_nn_functional_lp_pool2d',
+    'test_nn_functional_instance_norm',
+
+    # skipped nn module tests
+    # aten binding _C._nn
+    'test_nn_module_LogSigmoid',
+
+    # not call aten op
+    'test_nn_module_Softsign',
+    'test_nn_module_Softmin',
+    'test_nn_module_Softmin_multidim',
+    'test_nn_module_Tanhshrink',
+
+    # random sampling in training mode (default)
+    'test_nn_module_RReLU',
+    'test_nn_module_RReLU_with_up_down',
+
+    # skipped nn modules (no script version yet)
+    'test_nn_module_CrossMapLRN2d',
+    'test_nn_module_Linear',
+    'test_nn_module_Linear_no_bias',
+
 }
 
 
@@ -7188,6 +7209,24 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
         if g2 is None and g2_ge is None:
             continue
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
+
+
+class ScriptModuleTest(TestBase):
+    def __init__(self, *args, **kwargs):
+        super(ScriptModuleTest, self).__init__(*args, **kwargs)
+        self.precision = kwargs.get('precision', 2e-4)
+        self.constructor_script = kwargs.get('constructor_script')
+        self.constructor = kwargs.get('constructor')
+
+    def __call__(self, test_case):
+        input = self._get_input()
+        script_module = self.constructor_script(*self.constructor_args)
+        orig_module = self.constructor(*self.constructor_args)
+
+        output_script = script_module(input)
+        output_orig = orig_module(input)
+
+        test_case.assertEqual(output_script, output_orig, self.precision)
 
 
 class TestJitGenerated(TestCase):
@@ -7509,8 +7548,17 @@ def add_test(
         post_add_test(test_name, skipTestIf, do_test)
 
 
-def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x: x, kwargs=None):
-    test_name = 'test_nn_' + name
+def add_nn_functional_test(
+        name,
+        self_size,
+        args,
+        variant_name='',
+        skipTestIf=(),
+        output_process_fn=lambda x: x,
+        kwargs=None):
+    test_name = 'test_nn_functional_' + name
+    if variant_name != '':
+        test_name += '_' + variant_name
 
     def do_test(self, name=name, args=args, test_name=test_name):
         torch.manual_seed(2)
@@ -7540,6 +7588,25 @@ def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x
     post_add_test(test_name, skipTestIf, do_test)
 
 
+def add_nn_module_test(test_params):
+    name = test_params.get('module_name')
+    test_name = 'test_nn_module_' + name
+    if test_params.get('desc'):
+        test_name += '_' + test_params['desc']
+
+    def do_test(self, test=test):
+        if test_name not in EXCLUDE_SCRIPT:
+            if 'constructor' not in test_params:
+                import torch.nn.script as nnscript
+                test_params['constructor_script'] = getattr(nnscript, name)
+                test_params['constructor'] = getattr(nn, name)
+
+            test = ScriptModuleTest(**test_params)
+            test(self)
+
+    post_add_test(test_name, (), do_test)
+
+
 def post_add_test(test_name, skipTestIf, do_test):
     assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
 
@@ -7554,7 +7621,10 @@ for test in method_tests:
     add_test(*test)
 
 for test in nn_functional_tests:
-    add_nn_test(*test)
+    add_nn_functional_test(*test)
+
+for test_params in nn_module_tests:
+    add_nn_module_test(test_params)
 
 if __name__ == '__main__':
     run_tests()
