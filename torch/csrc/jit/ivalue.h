@@ -113,23 +113,16 @@ struct TORCH_API IValue final {
     // This is not an optional optimization: our incref call
     // *will not* do the right thing when called on an
     // undefined tensor.
-    payload.as_tensor_impl = t.unsafeReleaseTensorImpl();
+    payload.as_intrusive_ptr = t.unsafeReleaseTensorImpl();
   }
   bool isTensor() const { return Tag::Tensor == tag; }
   at::Tensor toTensor() && {
     JIT_ASSERT(isTensor());
-    at::Tensor t(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensor>::reclaim(payload.as_tensor_impl));
-    clearToNone();
-    return t;
+    return at::Tensor(moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensor>());
   }
   at::Tensor toTensor() const & {
     JIT_ASSERT(isTensor());
-    JIT_ASSERT(is_intrusive_ptr == (payload.as_tensor_impl != at::UndefinedTensor::singleton()));
-    auto tensor_impl = c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensor>::reclaim(payload.as_tensor_impl);
-    if (is_intrusive_ptr) {
-      c10::raw::intrusive_ptr::incref(tensor_impl.get());
-    }
-    return at::Tensor(std::move(tensor_impl));
+    return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensor>());
   }
 
   // Tuple
@@ -299,15 +292,15 @@ private:
 #undef DEFINE_TAG
   };
 
-  template<typename T>
-  c10::intrusive_ptr<T> moveToIntrusivePtr() {
-    auto t = c10::intrusive_ptr<T>::reclaim(static_cast<T*>(payload.as_intrusive_ptr));
+  template<class T, class NullType = c10::detail::intrusive_target_default_null_type<T>>
+  c10::intrusive_ptr<T, NullType> moveToIntrusivePtr() {
+    auto t = c10::intrusive_ptr<T, NullType>::reclaim(static_cast<T*>(payload.as_intrusive_ptr));
     clearToNone();
     return t;
   }
-  template<typename T>
-  c10::intrusive_ptr<T> toIntrusivePtr() const {
-    auto r = c10::intrusive_ptr<T>::reclaim(static_cast<T*>(payload.as_intrusive_ptr));
+  template<typename T, class NullType = c10::detail::intrusive_target_default_null_type<T>>
+  c10::intrusive_ptr<T, NullType> toIntrusivePtr() const {
+    auto r = c10::intrusive_ptr<T, NullType>::reclaim(static_cast<T*>(payload.as_intrusive_ptr));
     auto p = r;
     r.release();
     return p;
@@ -320,7 +313,6 @@ private:
   union {
     int64_t as_int;
     double as_double;
-    at::TensorImpl* as_tensor_impl;
     c10::intrusive_ptr_target* as_intrusive_ptr;
   } payload;
   Tag tag;
