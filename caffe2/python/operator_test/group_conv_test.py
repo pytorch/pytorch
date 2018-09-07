@@ -31,7 +31,7 @@ class TestGroupConvolution(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "CUDNN", "EIGEN"]),
            use_bias=st.booleans(),
            **hu.gcs)
-    @settings(max_examples=5, timeout=100)
+    @settings(max_examples=2, timeout=100)
     def test_group_convolution(
             self, stride, pad, kernel, size, group,
             input_channels_per_group, output_channels_per_group, batch_size,
