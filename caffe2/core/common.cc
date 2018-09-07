@@ -2,7 +2,20 @@
 
 #include "caffe2/core/common.h"
 
+#include "common/fb303/cpp/FacebookBase2.h"
+
 namespace caffe2 {
+
+CounterThenLog::CounterThenLog(const char* name) : name_(name), count_(0) {
+  facebook::fbData->addStatExportType(name_, facebook::stats::SUM);
+}
+void CounterThenLog::bump(int i) {
+  count_ += 1;
+  facebook::fbData->addStatValue(name_);
+  if (count_ % 1000000 < i) {
+    std::cerr << "CounterThenLog: " << name_ << " = " << count_;
+  }
+}
 
 // A global variable to mark if Caffe2 has cuda linked to the current runtime.
 // Do not directly use this variable, but instead use the HasCudaRuntime()
