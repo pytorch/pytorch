@@ -75,8 +75,8 @@ public:
   }
   Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
     if (p != Backend::Undefined) {
-      initBackendIfNeeded(backendToDeviceType(p));
-      initComplexIfNeeded(s);
+      initForDeviceType(backendToDeviceType(p));
+      initForScalarType(s);
     }
     auto type = getNonVariableTypeRaw(p, s);
 
@@ -120,7 +120,7 @@ public:
     detail::getVariableHooks().registerVariableTypeFor(this, b, s);
   }
 private:
-  void initBackendIfNeeded(DeviceType p) {
+  void initForDeviceType(DeviceType p) {
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
     if (p == DeviceType::CPU) {
@@ -133,8 +133,9 @@ private:
       });
     }
   }
-  void initComplexIfNeeded(ScalarType s) {
+  void initForScalarType(ScalarType s) {
     static std::once_flag once;
+    // Only complex may need initialization
     if (isComplexType(s)) {
       std::call_once(once, [] {
         getLegacyTypeInit().initComplex();
