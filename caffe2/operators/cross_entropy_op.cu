@@ -454,9 +454,7 @@ REGISTER_CUDA_OPERATOR(MakeTwoClassGradient,
                        MakeTwoClassGradientOp<float, CUDAContext>);
 
 //TODO(surya) Add full GPU/CUDA support for the CrossEntropyOp
-REGISTER_CUDA_OPERATOR(CrossEntropy,
-                       GPUFallbackOp<CrossEntropyOp<float, CPUContext>>);
-REGISTER_CUDA_OPERATOR(CrossEntropyGradient,
-                       GPUFallbackOp<CrossEntropyGradientOp<float, CPUContext>>);
+REGISTER_CUDA_OPERATOR(CrossEntropy, GPUFallbackOp);
+REGISTER_CUDA_OPERATOR(CrossEntropyGradient, GPUFallbackOp);
 
 }  // namespace caffe2
