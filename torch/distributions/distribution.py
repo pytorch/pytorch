@@ -250,7 +250,13 @@ class Distribution(object):
             raise ValueError('The value argument must be within the support')
 
     def _get_checked_instance(self, cls, instance=None):
-        if instance is None and self.__init__.__func__ is not cls.__init__:
+        def cons(cls_):
+            """
+            Returns the `__init__` function for a python 2.7 / 3 class.
+            """
+            return getattr(cls_.__init__, "__func__", cls_.__init__)
+
+        if instance is None and cons(type(self)) is not cons(cls):
             raise NotImplementedError("Subclass {} of {} that defines a custom __init__ method "
                                       "must also define a custom .expand() method.".
                                       format(self.__class__.__name__, cls.__name__))
