@@ -6,6 +6,7 @@
 #include <typeinfo>
 #include <type_traits>
 #include <vector>
+#include <atomic>
 
 #include "caffe2/core/blob_serializer_base.h"
 #include "caffe2/core/common.h"

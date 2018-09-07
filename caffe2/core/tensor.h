@@ -17,6 +17,16 @@ CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace caffe2 {
 
+inline void bump_tensor_allocated() {
+  static CounterThenLog ctr("caffe2_tensor_allocated");
+  ctr.bump();
+}
+
+inline void bump_tensor_dim_count(int i) {
+  static CounterThenLog ctr("caffe2_tensor_dim_count");
+  ctr.bump(i);
+}
+
 /**
  * A utility function to convert vector<int> to vector<TIndex>.
  */
@@ -810,6 +820,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool SetDims(const vector<T>& src) {
     auto old_numel = numel_;
     dims_.resize(src.size());
+    bump_tensor_dim_count(src.size());
+    bump_tensor_allocated();
     TIndex new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
       new_numel *= src[i];
@@ -822,6 +834,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool SetDims() {
     auto old_numel = numel_;
     dims_.resize(0);
+    bump_tensor_allocated();
     numel_ = 1;
     return numel_ != old_numel;
   }
@@ -831,6 +844,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   // another shot.
   bool SetDims(const TIndex d0) {
     auto old_numel = numel_;
+    bump_tensor_dim_count(1);
+    bump_tensor_allocated();
     dims_.resize(1);
     dims_[0] = d0;
     numel_ = d0;
@@ -839,6 +854,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool SetDims(const TIndex d0, const TIndex d1) {
     auto old_numel = numel_;
+    bump_tensor_dim_count(2);
+    bump_tensor_allocated();
     dims_.resize(2);
     dims_[0] = d0;
     dims_[1] = d1;
@@ -848,6 +865,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool SetDims(const TIndex d0, const TIndex d1, const TIndex d2) {
     auto old_numel = numel_;
+    bump_tensor_dim_count(3);
+    bump_tensor_allocated();
     dims_.resize(3);
     dims_[0] = d0;
     dims_[1] = d1;
@@ -859,6 +878,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool
   SetDims(const TIndex d0, const TIndex d1, const TIndex d2, const TIndex d3) {
     auto old_numel = numel_;
+    bump_tensor_dim_count(4);
+    bump_tensor_allocated();
     dims_.resize(4);
     dims_[0] = d0;
     dims_[1] = d1;
