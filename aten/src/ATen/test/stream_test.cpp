@@ -3,6 +3,7 @@
 
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAGuard.h"
+#include "ATen/cuda/CUDAEvent.h"
 
 #include "cuda_runtime.h"
 
@@ -211,7 +212,6 @@ TEST_CASE("Streampool Round Robin") {
   REQUIRE(hasDuplicates);
 }
 
-// Note: to be expanded once CUDAEvent PR is accepted
 TEST_CASE("Multi-GPU") {
   if (at::cuda::getNumGPUs() < 2) return;
 
@@ -225,4 +225,45 @@ TEST_CASE("Multi-GPU") {
 
   at::DeviceGuard device_guard{1};
   REQUIRE(s1 == at::cuda::getCurrentCUDAStream());
+}
+
+TEST_CASE("CUDAEvent Syncs") {
+  const auto stream = at::cuda::createCUDAStream();
+  at::cuda::CUDAEvent event;
+
+  REQUIRE(!event.happened());
+
+  event.recordOnce(stream);
+
+  const auto wait_stream0 = at::cuda::createCUDAStream();
+  const auto wait_stream1 = at::cuda::createCUDAStream();
+
+  wait_stream0.synchronize_with(event);
+  wait_stream1.synchronize_with(event);
+
+  cudaStreamSynchronize(wait_stream0);
+  REQUIRE(event.happened());
+}
+
+TEST_CASE("Cross-Device Events") {
+  if (at::cuda::getNumGPUs() < 2) return;
+
+  const auto stream0 = at::cuda::createCUDAStream();
+  at::cuda::CUDAEvent event0;
+
+  at::cuda::set_device(1);
+  const auto stream1 = at::cuda::createCUDAStream();
+  at::cuda::CUDAEvent event1;
+
+  event0.record(stream0);
+  event1.record(stream1);
+  
+  event0 = std::move(event1);
+  
+  REQUIRE(event0.device() == 1);
+
+  stream0.synchronize_with(event0);
+  
+  cudaStreamSynchronize(stream0);
+  REQUIRE(event0.happened());
 }
