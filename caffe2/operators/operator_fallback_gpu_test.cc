@@ -29,8 +29,7 @@ OPERATOR_SCHEMA(IncrementByOne)
     .NumInputs(1).NumOutputs(1).AllowInplace({{0, 0}});
 
 REGISTER_CPU_OPERATOR(IncrementByOne, IncrementByOneOp);
-REGISTER_CUDA_OPERATOR(IncrementByOne,
-                       GPUFallbackOp<IncrementByOneOp>);
+REGISTER_CUDA_OPERATOR(IncrementByOne, GPUFallbackOp);
 
 TEST(OperatorFallbackTest, IncrementByOneOp) {
   OperatorDef op_def = CreateOperatorDef(
