@@ -128,14 +128,6 @@ def skipCUDAMemoryLeakCheckIf(condition):
     return dec
 
 
-def get_cuda_memory_usage():
-    # we don't need CUDA synchronize because the statistics are not tracked at
-    # actual freeing, but at when marking the block as free.
-    num_devices = torch.cuda.device_count()
-    gc.collect()
-    return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-
-
 def suppress_warnings(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -225,14 +217,22 @@ class CudaMemoryLeakCheck():
         from common_cuda import initialize_cuda_context_rng
         initialize_cuda_context_rng()
 
+    @staticmethod
+    def get_cuda_memory_usage():
+        # we don't need CUDA synchronize because the statistics are not tracked at
+        # actual freeing, but at when marking the block as free.
+        num_devices = torch.cuda.device_count()
+        gc.collect()
+        return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
     def __enter__(self):
-        self.befores = get_cuda_memory_usage()
+        self.befores = self.get_cuda_memory_usage()
 
     def __exit__(self, exec_type, exec_value, traceback):
         # Don't check for leaks if an exception was thrown
         if exec_type is not None:
             return
-        afters = get_cuda_memory_usage()
+        afters = self.get_cuda_memory_usage()
         for i, (before, after) in enumerate(zip(self.befores, afters)):
             self.testcase.assertEqual(
                 before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
