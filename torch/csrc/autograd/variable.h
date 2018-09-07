@@ -59,7 +59,11 @@ struct Function;
 /// which case it tracks that `Variable`'s data and autograd history. Beyond
 /// construction, the interface of a view is identical to that of a regular
 /// `Variable`. You can determine whether `Variable` is in fact a view by
-/// probing its `is_view()` method.
+/// probing its `is_view()` method. Note that the *view* semantics are only
+/// meaningful for `Variable` relations that are relevant to autograd. For
+/// example, if you hide your code from autograd using `.data`, the `Variable`s
+/// will not be registered as having view relations, even if they share storage.
+///
 ///
 ///                               Interface
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
