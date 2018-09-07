@@ -1,6 +1,7 @@
 #include <ATen/TensorImpl.h>
 
 #include <ATen/Tensor.h>
+#include <ATen/Type.h>
 #include <ATen/core/optional.h>
 #include <ATen/core/Backend.h>
 #include <ATen/core/WrapDimMinimal.h>
