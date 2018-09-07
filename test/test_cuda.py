@@ -248,18 +248,15 @@ def new_t(*sizes):
 # - disable inplace test, if set to True, no inplace test will be done (default=False)
 # - decorator, e.g., unittest.skipIf (default is no decorator)
 tests = [
-    ('add', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
-        "skipIfRocm:ByteTensor,CharTensor,HalfTensor,ShortTensor"),
+    ('add', small_3d, lambda t: [number(3.14, 3, t)]),
     ('add', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('add', small_3d, lambda t: [number(0.2, 2, t), small_3d_positive(t)], 'scalar_tensor'),
-    ('sub', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
-        "skipIfRocm:ByteTensor,CharTensor,HalfTensor,ShortTensor"),
+    ('sub', small_3d, lambda t: [number(3.14, 3, t)]),
     ('sub', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('mul', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
-        "skipIfRocm:ByteTensor,CharTensor,HalfTensor,ShortTensor"),
+        "skipIfRocm:CharTensor,ShortTensor"),
     ('mul', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('div', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
-        "skipIfRocm:ByteTensor,CharTensor,FloatTensor,HalfTensor,ShortTensor"),
+    ('div', small_3d, lambda t: [number(3.14, 3, t)]),
     ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('pow', small_3d, lambda t: [number(3.14, 3, t)], None, float_types, False, "skipIfRocm:HalfTensor"),
     ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1', types, False, "skipIfRocm:HalfTensor"),
@@ -269,7 +266,7 @@ tests = [
     # HalfTensor gives bad result at pow-2 with data sampled from torch.randn
     ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half,
         False, "skipIfRocm:HalfTensor,FloatTensor"),
-    ('pow', small_3d, lambda t: [tensor_abs_(small_3d(t))], 'tensor', float_types, False, "skipIfRocm:HalfTensor"),
+    ('pow', small_3d, lambda t: [tensor_abs_(small_3d(t))], 'tensor', float_types),
     ('addbmm', small_2d, lambda t: [small_3d(t), small_3d(t)], None, float_types, False, "skipIfRocm:HalfTensor"),
     ('addbmm', small_2d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar',
         types, False, "skipIfRocm:HalfTensor"),
@@ -280,13 +277,11 @@ tests = [
         types, False, "skipIfRocm:HalfTensor"),
     ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars',
         types, False, "skipIfRocm:HalfTensor"),
-    ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)], '',
-        types, False, "skipIfRocm:HalfTensor"),
+    ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)]),
     ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t), tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)],
-        'scalar', types, False, "skipIfRocm:HalfTensor"),
-    ('addcmul', small_3d, lambda t: [small_3d(t), small_3d(t)], '', types, False, "skipIfRocm:HalfTensor"),
-    ('addcmul', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar',
-        types, False, "skipIfRocm:HalfTensor"),
+        'scalar'),
+    ('addcmul', small_3d, lambda t: [small_3d(t), small_3d(t)]),
+    ('addcmul', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
     ('addmm', medium_2d, lambda t: [medium_2d(t), medium_2d(t)], '', types, False, "skipIfRocm:HalfTensor"),
     ('addmm', medium_2d, lambda t: [number(0.4, 2, t), medium_2d(t), medium_2d(t)], 'scalar',
         types, False, "skipIfRocm:HalfTensor"),
@@ -331,7 +326,7 @@ tests = [
     ('equal', small_3d_ones, lambda t: [small_3d(t)],),
     ('expand', new_t(M, 1, M), lambda t: [M, 4, M],),
     ('expand_as', new_t(M, 1, M), lambda t: [new_t(M, 4, M)(t)],),
-    ('fill', medium_2d, lambda t: [number(3.14, 3, t)], '', types, False, "skipIfRocm:HalfTensor"),
+    ('fill', medium_2d, lambda t: [number(3.14, 3, t)]),
     ('ge', medium_2d, lambda t: [medium_2d(t)],),
     ('le', medium_2d, lambda t: [medium_2d(t)],),
     ('gt', medium_2d, lambda t: [medium_2d(t)],),
@@ -345,7 +340,7 @@ tests = [
     ('kthvalue', small_3d_unique, lambda t: [3],),
     ('kthvalue', small_3d_unique, lambda t: [3, 1], 'dim'),
     ('kthvalue', small_3d_unique, lambda t: [3, -1], 'neg_dim'),
-    ('lerp', small_3d, lambda t: [small_3d(t), 0.3], '', types, False, "skipIfRocm:HalfTensor"),
+    ('lerp', small_3d, lambda t: [small_3d(t), 0.3]),
     ('max', small_3d_unique, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
     ('max', small_3d_unique, lambda t: [1], 'dim', types, False, skipIfRocm),
     ('max', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
@@ -360,18 +355,16 @@ tests = [
     ('mode', small_3d, lambda t: [], '', types, False, skipIfRocm),
     ('mode', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
     ('mode', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
-    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.1, 10), lambda t: [1], '2d_p=1', float_types_no_half,
-        False, "skipIfRocm:DoubleTensor,FloatTensor"),
-    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.6, 10), lambda t: [2], '2d_p=2', float_types_no_half,
-        False, "skipIfRocm:DoubleTensor,FloatTensor"),
+    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.1, 10), lambda t: [1], '2d_p=1', float_types_no_half),
+    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.6, 10), lambda t: [2], '2d_p=2', float_types_no_half),
     ('remainder', small_3d, lambda t: [3], 'value', types, False, "skipIfRocm:HalfTensor"),
     ('remainder', small_3d, lambda t: [-3], 'negative_value', signed_types),
     ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('remainder', small_3d, lambda t: [constant_tensor_sub(0, small_3d_positive(t))], 'negative_tensor', signed_types),
-    ('std', small_3d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
+    ('std', small_3d, lambda t: []),
     ('std', small_3d, lambda t: [1], 'dim'),
     ('std', small_3d, lambda t: [-1], 'neg_dim'),
-    ('var', small_3d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
+    ('var', small_3d, lambda t: []),
     ('var', small_3d, lambda t: [1], 'dim'),
     ('var', small_3d, lambda t: [-1], 'neg_dim'),
     ('ndimension', small_3d, lambda t: [],),
@@ -382,9 +375,9 @@ tests = [
     ('nonzero', small_3d, lambda t: [], '', types, False, skipIfRocm),
     ('norm', small_3d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
     ('norm', small_3d, lambda t: [3], '3_norm', types, False, "skipIfRocm:HalfTensor"),
-    ('norm', small_3d, lambda t: [3, 0], '3_norm_dim', types, False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
+    ('norm', small_3d, lambda t: [3, 0], '3_norm_dim', types, False, "skipIfRocm:HalfTensor"),
     ('norm', small_3d, lambda t: [3, -2], '3_norm_neg_dim', types,
-        False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
+        False, "skipIfRocm:HalfTensor"),
     ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
     ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
     ('put_', new_t(2, 5, 3), lambda t: [long_type(t)([[0], [-2]]), t([[3], [4]])], '', types, False, skipIfRocm),
@@ -424,7 +417,7 @@ tests = [
     ('topk', small_3d_unique, lambda t: [2, 1, False, True], 'dim_sort', types, False, skipIfRocm),
     ('topk', small_3d_unique, lambda t: [2, -1, False, True], 'neg_dim_sort', types, False, skipIfRocm),
     ('topk', small_3d_unique, lambda t: [2, 1, True, True], 'dim_desc_sort', types, False, skipIfRocm),
-    ('trace', medium_2d, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
+    ('trace', medium_2d, lambda t: []),
     ('tril', medium_2d, lambda t: [],),
     ('tril', medium_2d_expanded, lambda t: [], 'zero_stride', types, True),
     ('tril', medium_2d, lambda t: [2], 'positive'),
@@ -1185,11 +1178,9 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-    @skipIfRocm
     def test_cat_empty_legacy(self):
         TestTorch._test_cat_empty_legacy(self, use_cuda=True)
 
-    @skipIfRocm
     def test_cat_empty(self):
         TestTorch._test_cat_empty(self, use_cuda=True)
 
@@ -1668,7 +1659,6 @@ class TestCuda(TestCase):
     def test_dim_reduction(self):
         TestTorch._test_dim_reduction(self, lambda t: t.cuda())
 
-    @skipIfRocm
     def test_tensor_gather(self):
         TestTorch._test_gather(self, lambda t: t.cuda(), False)
 
