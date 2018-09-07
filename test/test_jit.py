@@ -10,7 +10,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from torch._six import inf
+from torch._six import inf, inf_str
 from common import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm, suppress_warnings
 from textwrap import dedent
 import os
@@ -2588,11 +2588,9 @@ a")
         self.assertEqual(s + s + s, foo(s))
 
     def test_inf(self):
-        import math
-
         @torch.jit.script
         def foo(a):
-            return a < math.inf
+            return a < float('inf')
         s = torch.rand(1)
         self.assertTrue(foo(s))
 
@@ -7614,6 +7612,8 @@ def the_method({}):
 def get_constant(x):
     module = None
     if x == inf or x == -inf:
+        if PY2:
+            return (inf_str, None)
         module = 'math'
     return (str(x), module)
 

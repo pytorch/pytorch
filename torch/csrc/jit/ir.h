@@ -1066,6 +1066,12 @@ public:
     result->output()->setType(IntType::get());
     return result;
   }
+  Node* createFloatInfinity(Value* value) {
+    JIT_ASSERT(*value->type() == *StringType::get());
+    auto* result = create(prim::Infinity, {value});
+    result->output()->setType(FloatType::get());
+    return result;
+  }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
