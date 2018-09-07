@@ -4,6 +4,7 @@ Weight Normalization from https://arxiv.org/abs/1602.07868
 from torch.nn.parameter import Parameter
 from torch import _weight_norm, norm_except_dim
 
+
 class WeightNorm(object):
     def __init__(self, name, dim):
         self.name = name
