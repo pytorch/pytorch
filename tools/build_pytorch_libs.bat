@@ -176,7 +176,7 @@ goto:eof
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
-                  -DBUILD_PYTHON=%BUILD_PYTHON% ^
+                  -DBUILD_PYTHON=OFF ^
                   -DBUILD_BINARY=%BUILD_BINARY% ^
                   -DBUILD_TEST=%BUILD_TEST% ^
                   -DINSTALL_TEST=%INSTALL_TEST% ^
