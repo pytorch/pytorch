@@ -196,7 +196,7 @@ Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar be
 
 Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
   check_1d(vec, "vec", "addmv");
-  return self._addmv_(mat, vec, beta, alpha);
+  return at::_addmv_(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
@@ -213,7 +213,7 @@ Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar b
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return self._addr_(vec1, vec2, beta, alpha);
+  return at::_addr_(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
@@ -225,7 +225,7 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
 Tensor dot(const Tensor& self, const Tensor& tensor) {
   check_1d(self, "self", "dot");
   check_1d(tensor, "tensor", "dot");
-  return self._dot(tensor);
+  return at::_dot(self, tensor);
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
