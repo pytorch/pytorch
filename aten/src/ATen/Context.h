@@ -8,7 +8,7 @@
 #include "ATen/Utils.h"
 #include "ATen/core/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
-#include "ATen/detail/VariableHooksInterface.h"
+#include "ATen/core/VariableHooksInterface.h"
 #include "ATen/detail/ComplexHooksInterface.h"
 
 // This is temporary

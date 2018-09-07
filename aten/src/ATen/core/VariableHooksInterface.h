@@ -1,11 +1,12 @@
 #pragma once
 
 #include <ATen/core/Registry.h>
-#include <ATen/ScalarType.h>
-#include <ATen/Type.h>
+#include <ATen/core/ScalarType.h>
+#include <ATen/core/Backend.h>
 
 namespace at {
   class Context;
+  struct Type;
 }
 
 // NB: Registry class not actually in the namespace detail, due to limitations
