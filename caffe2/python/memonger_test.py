@@ -223,13 +223,18 @@ class MemongerTest(hu.HypothesisTestCase):
         np.testing.assert_almost_equal(loss, optimized_loss)
         np.testing.assert_almost_equal(grad, optimized_grad)
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+    @unittest.skipIf(not workspace.has_gpu_support
+        and not workspace.has_hip_support, "No gpu support.")
     def test_memonger_mix_cpu_gpu(self):
         '''
         Check that memonger does not make blobs cross CPU/GPU boundary
         '''
+        if workspace.has_hip_support:
+            gpu_device_type = caffe2_pb2.HIP
+        else:
+            gpu_device_type = caffe2_pb2.CUDA
         m = model_helper.ModelHelper()
-        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+        with core.DeviceScope(core.DeviceOption(gpu_device_type, 0)):
             fc1 = brew.fc(m, "data", "fc1", dim_in=2, dim_out=2)
             fc2 = brew.fc(m, fc1, "fc2", dim_in=2, dim_out=2)
             fc3 = brew.fc(m, fc2, "fc3", dim_in=2, dim_out=2)
@@ -259,7 +264,7 @@ class MemongerTest(hu.HypothesisTestCase):
 
         # Create set of blobs on CPU side and GPU side and check they don't
         # overlap
-        device_blobs = {caffe2_pb2.CPU: set(), caffe2_pb2.CUDA: set()}
+        device_blobs = {caffe2_pb2.CPU: set(), gpu_device_type: set()}
         for op in optim_proto.op:
             if op.type not in ['CopyCPUToGPU', "CopyGPUToCPU"]:
                 dev = op.device_option.device_type
@@ -267,7 +272,7 @@ class MemongerTest(hu.HypothesisTestCase):
                     device_blobs[dev].add(b)
 
         device_crossers = device_blobs[caffe2_pb2.CPU].intersection(
-            device_blobs[caffe2_pb2.CUDA]
+            device_blobs[gpu_device_type]
         )
         self.assertEquals(device_crossers, set())
 
