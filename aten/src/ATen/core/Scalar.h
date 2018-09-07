@@ -32,7 +32,10 @@ public:
 
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
   Scalar(type vv) \
-  : tag(Tag::HAS_##member), v{ .member = { convert<double>(vv.real()), convert<double>(vv.imag()) } } {}
+  : tag(Tag::HAS_##member) { \
+    v . member[0] = convert<double>(vv.real()); \
+    v . member[1] = convert<double>(vv.imag()); \
+  }
 
   DEFINE_IMPLICIT_CTOR(at::ComplexHalf,ComplexHalf,z)
   DEFINE_IMPLICIT_CTOR(std::complex<float>,ComplexFloat,z)
