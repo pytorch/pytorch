@@ -832,6 +832,10 @@ def _write_ninja_file(path,
 
     if with_cuda:
         cuda_flags = common_cflags
+        cuda_flags += [
+            '-D__CUDA_NO_HALF_OPERATORS__',
+            '-D__CUDA_NO_HALF_CONVERSIONS__',
+            '-D__CUDA_NO_HALF2_OPERATORS__']
         if sys.platform == 'win32':
             cuda_flags = _nt_quote_args(cuda_flags)
         else:
