@@ -183,6 +183,7 @@ goto:eof
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DUSE_CUDNN=OFF ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
+                  -DUSE_OPENCV=%USE_OPENCV% ^
                   -DUSE_GLOG=OFF ^
                   -DUSE_GFLAGS=OFF ^
                   -DUSE_SYSTEM_EIGEN_INSTALL=OFF ^

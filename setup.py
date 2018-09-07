@@ -49,6 +49,9 @@
 #   USE_GLOO_IBVERBS
 #     toggle features related to distributed support
 #
+#   USE_OPENCV
+#     enables use of OpenCV for additional operators
+#
 #   BUILD_BINARY
 #     enables the additional binaries/ build
 #
@@ -137,7 +140,7 @@ def hotpatch_var(var, prefix='USE_'):
 # Before we run the setup_helpers, let's look for NO_* and WITH_*
 # variables and hotpatch environment with the USE_* equivalent
 use_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
-                'SYSTEM_NCCL', 'GLOO_IBVERBS']
+                'OPENCV', 'SYSTEM_NCCL', 'GLOO_IBVERBS']
 list(map(hotpatch_var, use_env_vars))
 
 # Also hotpatch a few with BUILD_* equivalent
@@ -145,7 +148,7 @@ build_env_vars = ['BINARY', 'TEST']
 [hotpatch_var(v, 'BUILD_') for v in build_env_vars]
 
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.build import BUILD_BINARY, BUILD_TEST
+from tools.setup_helpers.build import BUILD_BINARY, BUILD_TEST, USE_OPENCV
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
@@ -374,6 +377,7 @@ def build_libs(libs):
     my_env["BUILD_BINARY"] = "ON" if BUILD_BINARY else "OFF"
     my_env["BUILD_TEST"] = "ON" if BUILD_TEST else "OFF"
     my_env["INSTALL_TEST"] = "ON" if BUILD_TEST else "OFF"
+    my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
 
     try:
         os.mkdir('build')
