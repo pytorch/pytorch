@@ -184,6 +184,9 @@ endif()
 
 
 # ---[ Googletest and benchmark
+# TODO(orionr): Enable all of this for Windows DLL when we
+# can figure out how to get it to build
+if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if(BUILD_TEST)
   # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
@@ -216,6 +219,7 @@ if(BUILD_TEST)
   # in some versions as detailed at https://github.com/google/googletest/issues/1334
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
   set(CMAKE_DEBUG_POSTFIX ${TEMP_CMAKE_DEBUG_POSTFIX} CACHE BOOL "Debug postfix" FORCE)
+endif()
 endif()
 
 # ---[ LMDB
