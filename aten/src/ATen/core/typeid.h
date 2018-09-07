@@ -222,7 +222,7 @@ class AT_CORE_API TypeMeta {
   friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
-  bool Match() const {
+  bool Match() const noexcept {
     return (id_ == Id<T>());
   }
 
