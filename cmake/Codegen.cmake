@@ -42,6 +42,10 @@ if (BUILD_ATEN_MOBILE)
   install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/core
           DESTINATION include/ATen
           FILES_MATCHING PATTERN "*.h")
+  # FIXME: can we install multiple directories to the same place?
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core
+          DESTINATION include/ATen
+          FILES_MATCHING PATTERN "*.h")
 endif()
 install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
         DESTINATION include/caffe2/core)
@@ -163,13 +167,15 @@ if (NOT BUILD_ATEN_MOBILE)
       message(FATAL_ERROR "Failed to get generated_cpp list")
   endif()
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt generated_cpp)
+  file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-core core_generated_cpp)
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cuda cuda_generated_cpp)
 
   file(GLOB_RECURSE all_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*")
 
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
 
-  add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp}
+  add_custom_command(OUTPUT ${generated_cpp} ${core_generated_cpp} ${cuda_generated_cpp}
     COMMAND ${GEN_COMMAND}
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
     DEPENDS ${all_python} ${all_templates} ${cwrap_files})
@@ -177,7 +183,7 @@ if (NOT BUILD_ATEN_MOBILE)
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.
-  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS ${generated_cpp})
+  add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS ${generated_cpp} ${core_generated_cpp})
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS ${cuda_generated_cpp})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
   add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)

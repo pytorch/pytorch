@@ -4,7 +4,7 @@
 
 #include "ATen/CPUTypeDefault.h"
 #include "ATen/Context.h"
-#include "ATen/TensorMethods.h"
+#include "ATen/core/TensorMethods.h"
 #include "ATen/CheckGenerator.h"
 
 $extra_cuda_headers

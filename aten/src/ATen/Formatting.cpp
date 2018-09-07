@@ -1,6 +1,6 @@
 #include "ATen/Formatting.h"
 #include "ATen/Tensor.h"
-#include "ATen/TensorMethods.h"
+#include "ATen/core/TensorMethods.h"
 
 #include <cmath>
 #include <iostream>
