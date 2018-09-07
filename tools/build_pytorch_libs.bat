@@ -178,7 +178,7 @@ goto:eof
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
                   -DBUILD_PYTHON=OFF ^
                   -DBUILD_BINARY=%BUILD_BINARY% ^
-                  -DBUILD_TEST=%BUILD_TEST% ^
+                  -DBUILD_TEST=OFF ^
                   -DINSTALL_TEST=%INSTALL_TEST% ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
