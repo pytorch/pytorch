@@ -79,9 +79,11 @@ class OneHotCategorical(Distribution):
     def entropy(self):
         return self._categorical.entropy()
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         n = self.event_shape[0]
         values = self._new((n, n))
         torch.eye(n, out=values)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
-        return values.expand((n,) + self.batch_shape + (n,))
+        if expand:
+            values = values.expand((n,) + self.batch_shape + (n,))
+        return values
