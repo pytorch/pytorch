@@ -82,7 +82,7 @@ class Independent(Distribution):
         entropy = self.base_dist.entropy()
         return _sum_rightmost(entropy, self.reinterpreted_batch_ndims)
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         if self.reinterpreted_batch_ndims > 0:
             raise NotImplementedError("Enumeration over cartesian product is not implemented")
-        return self.base_dist.enumerate_support()
+        return self.base_dist.enumerate_support(expand=expand)
