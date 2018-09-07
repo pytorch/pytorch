@@ -1348,6 +1348,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
         training, momentum, eps, torch.backends.cudnn.enabled
     )
 
+
 def instance_norm(input, running_mean=None, running_var=None, weight=None,
                   bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
     r"""Applies Instance Normalization for each channel in each data sample in a
@@ -1360,6 +1361,7 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
         input, weight, bias, running_mean, running_var,
         use_input_stats, momentum, eps, torch.backends.cudnn.enabled
     )
+
 
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
     r"""Applies Layer Normalization for last certain number of dimensions.
