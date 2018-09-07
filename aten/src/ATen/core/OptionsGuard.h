@@ -9,7 +9,10 @@
 
 namespace at {
 
-#if !AT_MOBILE
+// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
+// thread_local is not supported.  In that case, we don't provide
+// an OptionsGuard; and force you to pass around options manually.
+#if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
 /// A wrapper over a thread local TensorOptions instance.
 struct DefaultTensorOptions {

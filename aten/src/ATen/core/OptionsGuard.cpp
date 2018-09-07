@@ -3,7 +3,7 @@
 
 namespace at {
 
-#if !AT_MOBILE
+#if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
 thread_local at::optional<TensorOptions> DefaultTensorOptions::options_;
 
