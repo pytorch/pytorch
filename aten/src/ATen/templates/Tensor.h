@@ -211,6 +211,15 @@ struct AT_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
 
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+    PackedTensorAccessor<T,N,PtrTraits> packed_accessor() const& {
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
+    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    return PackedTensorAccessor<T,N,PtrTraits>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
+  }
+  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor<T,N> packed_accessor() && = delete;
+
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
   Tensor& operator+=(Scalar other);
