@@ -39,13 +39,19 @@ void mark(std::string name, bool include_cuda /* = true */) {
   }
 }
 
-void pushRange(std::string name) {
+void pushRange(std::string name, std::string msg/*= {}*/, int64_t sequence_nr/*= -1*/) {
   if (state == ProfilerState::Disabled) {
     return;
   }
   if (state == ProfilerState::NVTX) {
 #ifdef USE_CUDA
-    nvtxRangePushA(name.c_str());
+    if(sequence_nr >= 0) {
+      std::stringstream s;
+      s << name << msg << sequence_nr;
+      nvtxRangePushA(s.str().c_str());
+    } 
+    else
+      nvtxRangePushA(name.c_str());
 #else
     throw std::logic_error(
         "pushRange called with NVTX tracing, but compiled without CUDA");
@@ -101,9 +107,7 @@ RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr)
 {
   if (state == ProfilerState::Disabled)
     return;
-  std::stringstream s;
-  s << name << ", current sequence nr " << current_sequence_nr;
-  pushRange(s.str());
+  pushRange(name, ", seq=", current_sequence_nr);
 }
 
 RecordFunction::~RecordFunction() {
@@ -113,9 +117,7 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::pushFunctionRange(Function* fn) {
-  std::stringstream s;
-  s << fn->name() << ", saved sequence nr " << fn->sequence_nr();
-  pushRange(s.str());
+  pushRange(fn->name(), ", fwd_seq=", fn->sequence_nr());
 }
 
 #ifdef USE_CUDA

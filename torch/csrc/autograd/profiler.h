@@ -166,7 +166,7 @@ enum class ProfilerState {
 
 TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
-TORCH_API void pushRange(std::string name);
+TORCH_API void pushRange(std::string name, std::string msg = {}, int64_t sequence_nr = -1);
 TORCH_API void popRange();
 
 struct TORCH_API RecordFunction {
