@@ -55,11 +55,11 @@ set LIB=%cd%\\mkl\\lib;%LIB
 :: Install MAGMA
 if "%REBUILD%"=="" (
   if "%BUILD_ENVIRONMENT%"=="" (
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z --output magma_cuda90_release_mkl_2018.2.185.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_cuda80_release_mkl_2018.2.185.7z --output magma_cuda80_release_mkl_2018.2.185.7z
   ) else (
-    aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet
+    aws s3 cp s3://ossci-windows/magma_cuda80_release_mkl_2018.2.185.7z magma_cuda80_release_mkl_2018.2.185.7z --quiet
   )
-  7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma
+  7z x -aoa magma_cuda80_release_mkl_2018.2.185.7z -omagma
 )
 set MAGMA_HOME=%cd%\\magma
 
@@ -95,13 +95,15 @@ call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Aux
 
 git submodule update --init --recursive
 
-set PATH=%CD%\\tmp_bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
-set CUDA_PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
-set CUDA_PATH_V9_0=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
+set PATH=%CD%\\tmp_bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v8.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v8.0\\libnvvp;%PATH%
+set CUDA_PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v8.0
+set CUDA_PATH_V8_0=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v8.0
 set NVTOOLSEXT_PATH=C:\\Program Files\\NVIDIA Corporation\\NvToolsExt
-set CUDNN_LIB_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\lib\\x64
-set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
-set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
+set CUDNN_LIB_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v8.0\\lib\\x64
+set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v8.0
+set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v8.0
+
+set "CUDA_HOST_COMPILER=%VS140COMNTOOLS%\..\..\VC\bin\amd64\cl.exe"
 
 :: Target only our CI GPU machine's CUDA arch to speed up the build
 set TORCH_CUDA_ARCH_LIST=5.2
