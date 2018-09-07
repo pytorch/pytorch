@@ -151,3 +151,26 @@ class TestBindings(test_util.TestCase):
         n2 = g.createNode("hello2")
         e = g.createEdge(n1, n2)
         ng.render(g)
+
+    def test_convertToProto(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        nn = ng.NNModule(net)
+        new_netdef = nn.convertToCaffe2Proto()
+        print(new_netdef)
+        print(net.Proto())
+        assert len(new_netdef.op) == len(net.Proto().op)
+        for i in range(len(new_netdef.op)):
+            op = net.Proto().op[i]
+            new_op = new_netdef.op[i]
+            assert op.type == new_op.type
+            assert len(op.input) == len(new_op.input)
+            assert len(op.output) == len(new_op.output)
+            for a, b in zip(op.input, new_op.input):
+                assert a == b
+            for a, b in zip(op.output, new_op.output):
+                assert a == b
+        for a, b in zip(new_netdef.external_input, net.Proto().external_input):
+            assert a == b
+        for a, b in zip(new_netdef.external_output, net.Proto().external_output):
+            assert a == b

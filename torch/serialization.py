@@ -451,20 +451,7 @@ def _load(f, map_location, pickle_module):
                 storage_views = pickle_module.load(f)
                 for target_cdata, root_cdata, offset, size in storage_views:
                     root = deserialized_objects[root_cdata]
-                    if offset != 0 or size != root.size():
-                        warnings.warn("Detected storage view in legacy serialized data: "
-                                      "storage views are no longer natively supported, so we are making "
-                                      "a copy of the data instead.  THIS IS A SEMANTIC CHANGE! "
-                                      "If you need aliasing, reserialize your model using "
-                                      "tensors that share storage.")
-
-                        tensor = torch._utils._rebuild_tensor(root, offset, (size,), (1,))
-                        obj = tensor.clone().storage()
-                    else:
-                        # NB: This line does not appear to be exercised by the
-                        # test suite.
-                        obj = root
-                    deserialized_objects[target_cdata] = obj
+                    deserialized_objects[target_cdata] = root[offset:offset + size]
 
             tar.extract('tensors', path=tmpdir)
             with open(os.path.join(tmpdir, 'tensors'), 'rb', 0) as f:

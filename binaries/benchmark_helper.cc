@@ -68,7 +68,7 @@ bool backendCudaSet(const string& backend) {
 void setDeviceType(caffe2::NetDef* net_def, caffe2::DeviceType& run_dev) {
   for (int j = 0; j < net_def->op_size(); j++) {
     caffe2::OperatorDef* op = net_def->mutable_op(j);
-    op->mutable_device_option()->set_device_type(run_dev);
+    op->mutable_device_option()->set_device_type(caffe2::TypeToProto(run_dev));
   }
 }
 

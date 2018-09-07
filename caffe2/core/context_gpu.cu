@@ -257,7 +257,7 @@ CUDAContext::CUDAContext(const DeviceOption& option)
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
-  DCHECK_EQ(option.device_type(), CUDA);
+  DCHECK_EQ(option.device_type(), PROTO_CUDA);
 }
 
 // shared mutex to lock out alloc / free during NCCL launches

@@ -52,9 +52,9 @@ struct AT_API Tensor {
     }
   }
   Tensor(const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& ptr)
-      : tensor_impl_(std::move(ptr)) {}
-  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
       : tensor_impl_(ptr) {}
+  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
+      : tensor_impl_(std::move(ptr)) {}
 
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;
@@ -157,10 +157,10 @@ struct AT_API Tensor {
   const Storage& storage() const {
     return tensor_impl_->storage();
   }
-  inline Tensor toType(const Type & t, bool non_blocking=false) const;
-  inline Tensor & copy_(const Tensor & src, bool non_blocking=false);
-  inline Tensor toType(ScalarType t) const;
-  inline Tensor toBackend(Backend b) const;
+  Tensor toType(const Type & t, bool non_blocking=false) const;
+  Tensor & copy_(const Tensor & src, bool non_blocking=false);
+  Tensor toType(ScalarType t) const;
+  Tensor toBackend(Backend b) const;
 
   /// New-style `to()` methods.
   /// NB: These methods are defined in TensorOptions.h.

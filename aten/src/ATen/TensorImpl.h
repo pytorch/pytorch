@@ -3,7 +3,7 @@
 #include <atomic>
 #include <memory>
 
-#include "ATen/Storage.h"
+#include "ATen/core/Storage.h"
 #include "ATen/core/optional.h"
 #include "ATen/core/TensorTypeId.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
@@ -84,11 +84,6 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual Tensor& grad();
   virtual const Tensor& grad() const;
-
-  virtual Tensor detach() const;
-  virtual void detach_() {
-    AT_ERROR("detach_ is not implemented for Tensor");
-  }
 
   virtual void backward(
       at::optional<Tensor> gradient,

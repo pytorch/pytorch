@@ -29,6 +29,14 @@ class NNModule(object):
     def dataFlow(self):
         return self._NNModule.dataFlow()
 
+    def convertToCaffe2Proto(self, old_proto=None):
+        if not old_proto:
+            old_proto = caffe2_pb2.NetDef()
+        output = self._NNModule.convertToCaffe2Proto(old_proto)
+        new_proto = caffe2_pb2.NetDef()
+        new_proto.ParseFromString(output)
+        return new_proto
+
     def match(self, pattern):
         for n in self.dataFlow.getMutableNodes():
             m = C.matchSubgraph(n, pattern)

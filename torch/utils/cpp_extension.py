@@ -350,7 +350,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> from setuptools import setup
-        >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
+        >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
                 name='cuda_extension',
                 ext_modules=[

@@ -38,7 +38,8 @@ class Multinomial(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities
     """
-    arg_constraints = {'logits': constraints.real}  # Let logits be the canonical parameterization.
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real}
 
     @property
     def mean(self):
