@@ -718,7 +718,7 @@ def get_hip_file_path(filepath, hipify_caffe2):
 def is_caffe2_gpu_file(filepath):
     filename = os.path.basename(filepath)
     _, ext = os.path.splitext(filename)
-    return 'gpu' in filename or ext in ['.cu', '.cuh']
+    return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
 def preprocessor(filepath, stats, hipify_caffe2):
