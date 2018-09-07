@@ -20,7 +20,11 @@ public:
 
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
   Scalar(type vv) \
-  : tag(Tag::HAS_##member), v{ .member = convert<decltype(v.member),type>(vv) } {}
+  : tag(Tag::HAS_##member) { \
+    v . member = convert<decltype(v.member),type>(vv); \
+  }
+  // We can't set v in the initializer list using the
+  // syntax v{ .member = ... } because it doesn't work on MSVC
 
   AT_FORALL_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
 
