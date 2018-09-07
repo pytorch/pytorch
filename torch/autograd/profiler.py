@@ -263,8 +263,8 @@ class emit_nvtx(object):
     if a backward Function object is created by this forward function, 
     the backward object will receive sequence number N.
     During the backward pass, the top-level range wrapping each C++ backward Function's 
-    ``apply()`` call is decorated with ``fwd_seq=<M>``.  ``M`` is the sequence number that 
-    the backward object was created with.  By comparing ``fwd_seq`` numbers in backward with ``seq``
+    ``apply()`` call is decorated with ``stashed seq=<M>``.  ``M`` is the sequence number that 
+    the backward object was created with.  By comparing ``stashed seq`` numbers in backward with ``seq``
     numbers in forward, you can track down which forward op created each backward Function.
 
     Any functions executed during the backward pass are also decorated with ``seq=<N>``.  During 

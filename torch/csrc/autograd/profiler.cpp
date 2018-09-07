@@ -117,7 +117,7 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::pushFunctionRange(Function* fn) {
-  pushRange(fn->name(), ", fwd_seq=", fn->sequence_nr());
+  pushRange(fn->name(), ", stashed seq=", fn->sequence_nr());
 }
 
 #ifdef USE_CUDA
