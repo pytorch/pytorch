@@ -309,11 +309,7 @@ struct THCNumerics<half> {
   }
 
   static inline __host__ __device__ half abs(half a) {
-#if defined(__HIP_PLATFORM_HCC__)
-    return static_cast<at::Half>(fabsf(static_cast<at::Half>(a)));
-#else
     return static_cast<at::Half>(::abs(static_cast<at::Half>(a)));
-#endif
   }
 
   static inline __host__ __device__ half round(half a) {
