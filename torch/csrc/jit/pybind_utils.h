@@ -59,7 +59,8 @@ inline IValue toIValue(py::handle input) {
     }
     return Tuple::create(s);
   } else {
-    AT_ERROR("Only tensors and tuples of tensors are supported as inputs to traced functions");
+    AT_ERROR("Only tensors and (possibly nested) tuples of tensors are supported "
+             "as inputs or outputs of traced functions");
   }
 }
 

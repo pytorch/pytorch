@@ -72,7 +72,7 @@ Tensor new_with_sizes(const Type& type, int32_t device_index, IntList sizes) {
 }
 
 Tensor new_with_storage(const Type& type, Storage storage) {
-  auto tensor = at::empty({}, type);
+  auto tensor = at::empty({}, type.options());
   tensor.set_(storage);
   return tensor;
 }

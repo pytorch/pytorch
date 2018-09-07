@@ -17,8 +17,8 @@ struct TORCH_API ConstantString : c10::intrusive_ptr_target {
  private:
   const std::string str_;
  public:
-  ConstantString(const std::string & str)
-  : str_(str) {}
+  ConstantString(std::string str)
+  : str_(std::move(str)) {}
   static c10::intrusive_ptr<ConstantString> create(const std::string str_) {
     return c10::make_intrusive<ConstantString>(str_);
   }
@@ -88,7 +88,7 @@ struct TORCH_API IValue {
       c10::raw::intrusive_ptr::decref(as_intrusive_ptr);
     }
   }
-  IValue & operator=(IValue && rhs) & {
+  IValue & operator=(IValue && rhs) & noexcept {
     rhs.swap(*this);
     return *this;
   }
@@ -96,7 +96,7 @@ struct TORCH_API IValue {
       IValue(rhs).swap(*this);
       return *this;
   }
-  void swap(IValue & rhs) {
+  void swap(IValue & rhs) noexcept {
     std::swap(payload, rhs.payload);
     std::swap(is_intrusive_ptr, rhs.is_intrusive_ptr);
     std::swap(tag, rhs.tag);

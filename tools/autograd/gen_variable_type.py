@@ -80,7 +80,7 @@ DONT_REQUIRE_DERIVATIVE = {
 }
 
 METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
@@ -134,7 +134,12 @@ if (jit::tracer::isTracing()) {
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
   graph->appendNode(node);
+  ${inplace_guard}
 }
+""")
+
+INPLACE_GUARD = CodeTemplate("""\
+jit::tracer::ensureUnique("${name}", ${mutable_input});
 """)
 
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
@@ -198,12 +203,15 @@ def format_trace(declaration):
     for argument in declaration['arguments']:
         add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
     local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
-
+    local['inplace_guard'] = ''
     # Record inplace operations as out-of-place operations (e.g.,
     # not add_ but add)
     # TODO: Add a proper concept of side effects to the IR, and
     # properly record inplace operations.
     local['trace_name'] = uninplace_api_name(declaration['api_name'])
+    if local['trace_name'] != declaration['api_name']:
+        local['inplace_guard'] = INPLACE_GUARD.substitute(name=declaration['api_name'],
+                                                          mutable_input=declaration['arguments'][0]['name'])
     if local['trace_name'] in RENAME_TRACE:
         local['trace_name'] = RENAME_TRACE[local['trace_name']]
 
@@ -294,16 +302,12 @@ def emit_body(declaration):
         print('WARNING: derivative ignored for {}'.format(name), file=sys.stderr)
 
     def setup_derivative():
-        def error_msg():
-            name = declaration['api_name']
-            return '"the derivative for {} is not implemented"'.format(name)
-
         args_with_derivatives = find_args_with_derivatives()
 
         env = {}
         env['args_with_derivatives'] = reference_args(args_with_derivatives)
-        env['op'] = func['op'] if func is not None else 'Error'
-        env['op_ctor'] = '' if func is not None else error_msg()
+        env['op'] = func['op'] if func is not None else 'NotImplemented'
+        env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
         if is_out_fn:
             setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]

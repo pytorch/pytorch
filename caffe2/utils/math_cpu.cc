@@ -2335,6 +2335,172 @@ CAFFE2_RAND_FIXED_SUM(uint32_t);
 CAFFE2_RAND_FIXED_SUM(uint64_t);
 #undef CAFFE2_RAND_FIXED_SUM
 
+template <class Type, class Val_t, class Ind_t, class Context_t, bool cdf_app>
+Ind_t generate_stack_distance(
+    std::vector<Ind_t>& cum_val,
+    std::vector<Val_t>& cum_dis,
+    std::vector<Ind_t>& cum_map,
+    Ind_t max_i,
+    Ind_t i,
+    Context_t* context) {
+  /* Description:
+     Inverse Transform Sampling method to generate values for random variable X
+     that is described by the cumulative distribution F (cum_val,cum_dis).
+     Notice, that we may choose to use the inverse map of F (cum_map) as an
+     approximation to avoid searching. Also, scaling the probability so that
+     the values are within max_i refs, because stack distance can not be >
+     than the # of already generated refs (max_i).
+  */
+  Ind_t j, k, n;
+  Val_t u, f, fi;
+
+  // generate a random number u in [0,1] from a uniform distribution U
+  math::RandUniform<Val_t, Context_t>(1, 0, 1, &u, context);
+
+  // scale the random number u to be within range [0,f(i)], if needed
+  if (i < max_i) {
+    // approach 2: allows gaps in the distribution
+    j = (std::upper_bound(cum_val.begin(), cum_val.end(), i) -
+         cum_val.begin()) -
+        1;
+    fi = cum_dis[j];
+    u *= fi;
+  }
+  // 2. compute the stack distance value of x, s.t. F(x)=u
+  // notice that the cumulative distribution F increases monotonically up to 1
+  if (cdf_app) {
+    // look up cum_val corresponding to u <= cum_dis[j]
+    k = cum_map.size();
+    n = (Ind_t)round(u * k);
+    j = cum_map[n];
+    return cum_val[j];
+  } else {
+    // iterate until you find the cum_val corresponding to u <= cum_dis[j]
+    for (j = 0; j < cum_dis.size(); j++) {
+      f = cum_dis[j];
+      if (u <= f) {
+        return cum_val[j];
+      }
+    }
+    return cum_val[j - 1];
+  }
+}
+
+template <class Type, class Val_t, class Ind_t, class Context_t, bool cdf_app>
+void generate_trace_lru(
+    std::vector<Ind_t>& uni_ref,
+    std::vector<Ind_t>& cum_val,
+    std::vector<Val_t>& cum_dis,
+    std::vector<Ind_t>& cum_map,
+    Context_t* context,
+    Ind_t cache_line_size,
+    Ind_t n,
+    Type min,
+    Type max,
+    Type* syn_ref) {
+  /* Description:
+     Generate synthetic trace from a list of unique accesses uni_ref, and
+     cumulative distribution of distances (cum_val,cum_dis) between them.
+     Also, there is an option to use cum_map approximation to avoid searching.
+  */
+  Ind_t i, j, k, sd, line_ref, mem_ref, mem_ref_within_line;
+  Ind_t max_sd = cum_val.back();
+  Ind_t l = uni_ref.size();
+
+  for (i = 0, j = 0; j < n; j++) {
+    // generate stack distance
+    sd = generate_stack_distance<Type, Val_t, Ind_t, Context_t, cdf_app>(
+        cum_val, cum_dis, cum_map, max_sd, i, context);
+    // fixed access within cache line
+    mem_ref_within_line = 0;
+    // random access within cache line
+    // Val_t r;
+    // math::RandUniform<Val_t, Context_t>(1, 0, 1, &r, context);
+    // mem_ref_within_line = floor(r*cache_line_size);
+
+    // generate memory reference
+    if (sd == 0) {
+      k = 0; /// new reference ///
+      i++;
+    } else {
+      k = l - sd; /// existing reference ///
+    }
+    line_ref = uni_ref[k]; // pop k-th element
+    uni_ref.erase(uni_ref.begin() + k);
+    uni_ref.push_back(line_ref); // append it back
+    mem_ref = line_ref * cache_line_size + mem_ref_within_line;
+    /*
+    //debug prints
+    if ((mem_ref < min) || (mem_ref > max)) {
+      //printf("mem_ref[%d]=%d (%ld) \n",j,mem_ref,syn_ref[j]);
+      std::cout << "syn_ref[" << j << "]=" << (Type)mem_ref << " ";
+      std::cout << "(" << mem_ref << ") ";
+      std::cout << "[" << min << "," << max << "]" << std::endl;
+      int scanf_temp;
+      scanf("%d",&scanf_temp);
+    }
+    */
+
+    // patch mem_ref to be within range
+    // WARNING: this should not be needed if instantiation type and distribution
+    // choice is correct. It is remeding a symptom of earlier mistakes.
+    if (mem_ref < min) {
+      mem_ref = min;
+      // std::cout << "clamping (min) mem_ref=" << mem_ref << std::endl;
+    }
+    if (mem_ref > max) {
+      mem_ref = max; // mem_ref % max;
+      // std::cout << "clamping (max) mem_ref=" << mem_ref << std::endl;
+    }
+
+    // save generated memory reference
+    syn_ref[j] = (Type)mem_ref;
+  }
+}
+
+// Generate n values from synthetic data distribution,
+// define by unique accesses and stack distances
+// WARNING: can create this for all tables or per table, but in latter
+// case we need to know the table id, to sample from the right distribution
+#define CAFFE2_RAND_SYNTHETIC_DATA(T)                                         \
+  template <>                                                                 \
+  void RandSyntheticData<T, CPUContext>(                                      \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) {      \
+    /* unique memory references */                                            \
+    std::vector<int> mem_ref = {1, 2, 3, 4, 5, 6};                            \
+    /* cumulative distribution of distances */                                \
+    std::vector<int> cum_val = {0, 1, 3, 4, 5};                               \
+    std::vector<double> cum_dis = {0.55, 0.64, 0.82, 0.91, 1.0};              \
+    /* inverse map of cumulative distribution (for O(1) lookup) */            \
+    /* std::vector<int> cum_map = {0, 0, 0, 0, 0, 1, 2, 2, 3, 4}; */          \
+    int k = 10; /* 100; */                                                    \
+    std::vector<int> cum_map(k, 0);                                           \
+    for (int j = 0; j < cum_dis.size();) {                                    \
+      int sz = (int)round(cum_dis[j] * k);                                    \
+      for (int i = 0; i < sz; i++) {                                          \
+        cum_map[j + i] = j;                                                   \
+      }                                                                       \
+      j += sz;                                                                \
+    }                                                                         \
+                                                                              \
+    /* code to generate the synthetic data from the above values */           \
+    const int cache_line = 1; /* 64; */                                       \
+    generate_trace_lru<T, double, int, CPUContext, false>(                    \
+        mem_ref, cum_val, cum_dis, cum_map, context, cache_line, n, a, b, r); \
+  }
+
+CAFFE2_RAND_SYNTHETIC_DATA(float);
+CAFFE2_RAND_SYNTHETIC_DATA(double);
+CAFFE2_RAND_SYNTHETIC_DATA(int8_t);
+CAFFE2_RAND_SYNTHETIC_DATA(int16_t);
+CAFFE2_RAND_SYNTHETIC_DATA(int32_t);
+CAFFE2_RAND_SYNTHETIC_DATA(int64_t);
+CAFFE2_RAND_SYNTHETIC_DATA(uint8_t);
+CAFFE2_RAND_SYNTHETIC_DATA(uint16_t);
+CAFFE2_RAND_SYNTHETIC_DATA(uint32_t);
+CAFFE2_RAND_SYNTHETIC_DATA(uint64_t);
+#undef CAFFE2_RAND_SYNTHETIC_DATA
+
 #define CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(T)                      \
   template <>                                                          \
   void RandUniformUnique<T, CPUContext>(                               \
@@ -3293,13 +3459,13 @@ bool TransposeWithHPTT(
 #endif // CAFFE2_USE_HPTT
 
 template <typename T>
-void Tranpose2D(const int rows, const int cols, const T* X, T* Y);
+void Transpose2D(const int rows, const int cols, const T* X, T* Y);
 
 #ifdef CAFFE2_USE_MKL
 
 #define DELEGATE_TRANSPOSE_2D_FUNCTION(T, Func)                          \
   template <>                                                            \
-  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+  void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
     Func('R', 'T', rows, cols, T(1), X, cols, Y, rows);                  \
   }
 DELEGATE_TRANSPOSE_2D_FUNCTION(float, mkl_somatcopy);
@@ -3310,7 +3476,7 @@ DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
 
 #define CAFFE2_SPECIALIZED_TRANSPOSE_2D(T)                               \
   template <>                                                            \
-  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+  void Transpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
     EigenMatrixMap<T>(Y, rows, cols) =                                   \
         ConstEigenMatrixMap<T>(X, cols, rows).transpose();               \
   }
@@ -3318,7 +3484,7 @@ DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
 #ifndef CAFFE2_USE_MKL
 
 template <>
-void Tranpose2D<float>(
+void Transpose2D<float>(
     const int rows,
     const int cols,
     const float* X,
@@ -3415,7 +3581,7 @@ void TransposeCPUImpl(
     return;
   }
   if (ndim == 2) {
-    Tranpose2D<T>(dims[0], dims[1], X, Y);
+    Transpose2D<T>(dims[0], dims[1], X, Y);
   } else {
     TransposeND<T>(ndim, dims, axes, X, Y);
   }
@@ -3435,7 +3601,7 @@ void TransposeCPUImpl(
     return;
   }
   if (ndim == 2) {
-    Tranpose2D<float>(dims[0], dims[1], X, Y);
+    Transpose2D<float>(dims[0], dims[1], X, Y);
   } else {
 #ifdef CAFFE2_USE_HPTT
     if (TransposeWithHPTT(ndim, dims, axes, X, Y)) {

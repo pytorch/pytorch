@@ -4,6 +4,7 @@
 /aten/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /torch/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /docs/source @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ssnl @zou3519
+/docs/cpp @goldsborough @ebetica @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /test @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /tools @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /README.md @apaszke @soumith @colesbury @gchanan @zdevito @ezyang

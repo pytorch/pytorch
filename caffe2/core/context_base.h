@@ -6,7 +6,6 @@
 namespace caffe2 {
 using at::BaseContext;
 using at::BaseStaticContext;
-// using at::DeleterFnPtr;
 
 using StaticContextMap = CaffeMap<DeviceType, BaseStaticContext*>;
 CAFFE2_API StaticContextMap& GetStaticContexts();
