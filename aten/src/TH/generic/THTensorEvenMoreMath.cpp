@@ -29,12 +29,8 @@ void THTensor_(zero)(THTensor *r_)
 
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
-  int serial_path = 0;
 #ifdef _OPENMP
-  int inOMP = omp_in_parallel();
-  if (inOMP) {
-    serial_path = 1;
-  } else {
+  if (!omp_in_parallel()) {
     int64_t tensor_size = THTensor_(nElement)(tensor);
     int tensor_contig = THTensor_(isContiguous)(tensor);
     int mask_contig = THTensor_(isContiguous)(mask);
@@ -46,20 +42,17 @@ void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
         *tensor_data = value;
       },
       TH_OMP_OVERHEAD_THRESHOLD);
+    return;
   }
-#else
-  serial_path = 1;
 #endif
-  if (serial_path) {
-    TH_TENSOR_APPLY2(scalar_t, tensor, unsigned char, mask,
-      if (*mask_data > 1) {
-        THFree(mask_counter);
-        THFree(tensor_counter);
-        THError("Mask tensor can take 0 and 1 values only");
-      } else if (*mask_data == 1) {
-        *tensor_data = value;
-      });
-  }
+  TH_TENSOR_APPLY2(scalar_t, tensor, unsigned char, mask,
+    if (*mask_data > 1) {
+      THFree(mask_counter);
+      THFree(tensor_counter);
+      THError("Mask tensor can take 0 and 1 values only");
+    } else if (*mask_data == 1) {
+      *tensor_data = value;
+    });
 }
 
 void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
