@@ -60,19 +60,19 @@ REGISTER_CUDA_OPERATOR(MPIAllgather, MPIAllgatherOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(MPISendTensor, MPISendTensorOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(MPIReceiveTensor, MPIReceiveTensorOp<CUDAContext>);
 #else
-REGISTER_CUDA_OPERATOR(MPIBroadcast, GPUFallbackOp<MPIBroadcastOp<CPUContext>>);
+REGISTER_CUDA_OPERATOR(MPIBroadcast, GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(
     MPIReduce,
-    GPUFallbackOp<MPIReduceOp<float, CPUContext>>);
+    GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(
     MPIAllgather,
-    GPUFallbackOp<MPIAllgatherOp<float, CPUContext>>);
+    GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(
     MPISendTensor,
-    GPUFallbackOp<MPISendTensorOp<CPUContext>>);
+    GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(
     MPIReceiveTensor,
-    GPUFallbackOp<MPIReceiveTensorOp<CPUContext>, SkipIndices<1, 2>>);
+    GPUFallbackOpEx<SkipIndices<1, 2>>);
 #endif
 
 #if CAFFE2_HAS_CUDA_MPI_ALLREDUCE
@@ -80,7 +80,7 @@ REGISTER_CUDA_OPERATOR(MPIAllreduce, MPIAllreduceOp<float, CUDAContext>);
 #else
 REGISTER_CUDA_OPERATOR(
     MPIAllreduce,
-    GPUFallbackOp<MPIAllreduceOp<float, CPUContext>>);
+    GPUFallbackOp);
 #endif
 
 }  // namespace caffe2

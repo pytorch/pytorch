@@ -39,7 +39,7 @@ class Node;
 
 // \brief Edge within a Graph.
 template <typename T, typename... U>
-class Edge : public StorageType<U...> {
+class CAFFE2_API Edge : public StorageType<U...> {
  public:
   using NodeRef = typename Graph<T, U...>::NodeRef;
   Edge(NodeRef tail, NodeRef head, U... args)
@@ -73,7 +73,7 @@ class Edge : public StorageType<U...> {
 
 // \brief Node within a Graph.
 template <typename T, typename... U>
-class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
+class CAFFE2_API Node : public StorageType<T>, public Notifier<Node<T, U...>> {
  public:
   using NodeRef = typename Graph<T, U...>::NodeRef;
   using EdgeRef = typename Graph<T, U...>::EdgeRef;
@@ -152,7 +152,7 @@ class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
 /// for example.
 ///
 template <typename T, typename... U>
-class Subgraph {
+class CAFFE2_API Subgraph {
  public:
   Subgraph() {
     DEBUG_PRINT("Creating instance of Subgraph: %p\n", this);
@@ -219,7 +219,7 @@ class Subgraph {
 /// Everything is owned by the graph to simplify storage concerns.
 ///
 template <typename T, typename... U>
-class Graph {
+class CAFFE2_API Graph {
  public:
   using SubgraphType = Subgraph<T, U...>;
   using NodeRef = Node<T, U...>*;

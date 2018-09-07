@@ -41,7 +41,7 @@ class NeuralNetData;
 /// a saved void* pointer for external use.  Derived classes
 /// add richer semantics to the annotation and it is encouraged
 /// to use them.
-class Annotation {
+class CAFFE2_API Annotation {
  public:
   enum class AnnotationKind { Generic, Caffe2 };
 
@@ -60,7 +60,7 @@ class Annotation {
   const AnnotationKind kind_;
 };
 
-class NeuralNetOperator : public Instruction {
+class CAFFE2_API NeuralNetOperator : public Instruction {
  public:
   /// Discriminator for LLVM-style RTTI (isa<>)
   enum class NNKind {
@@ -135,7 +135,7 @@ class NeuralNetOperator : public Instruction {
   std::unique_ptr<Annotation> extraAnnotation_;
 };
 
-class NeuralNetData : public Data {
+class CAFFE2_API NeuralNetData : public Data {
  public:
   /// Discriminator for LLVM-style RTTI (isa<>)
   enum class NNDataKind { Generic, Tensor };
@@ -159,7 +159,7 @@ class NeuralNetData : public Data {
   size_t version_ = 0;
 };
 
-class Tensor : public NeuralNetData {
+class CAFFE2_API Tensor : public NeuralNetData {
  public:
   enum class DataType { Generic, Float, Half, Int8 };
   enum class Layout { Generic, NCHW, NHWC };
@@ -207,21 +207,21 @@ class Tensor : public NeuralNetData {
 
 #include "nomnigraph/Generated/OpClasses.h"
 
-class While : public NeuralNetOperator {
+class CAFFE2_API While : public NeuralNetOperator {
  public:
   While() : NeuralNetOperator(NNKind::While, Opcode::Branch) {}
   NOMNIGRAPH_DEFINE_NN_RTTI(While);
   ~While() {}
 };
 
-class NNPhi : public NeuralNetOperator {
+class CAFFE2_API NNPhi : public NeuralNetOperator {
  public:
   NNPhi() : NeuralNetOperator(NNKind::NNPhi, Opcode::Phi) {}
   NOMNIGRAPH_DEFINE_NN_RTTI(NNPhi);
   ~NNPhi() {}
 };
 
-class GenericOperator : public NeuralNetOperator {
+class CAFFE2_API GenericOperator : public NeuralNetOperator {
  public:
   GenericOperator() : NeuralNetOperator(NNKind::GenericOperator) {}
   GenericOperator(std::string name)
@@ -243,7 +243,7 @@ using NNGraph = nom::Graph<std::unique_ptr<nom::repr::Value>>;
 using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>>;
 using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 
-struct NNModule {
+struct CAFFE2_API NNModule {
   NNGraph dataFlow;
   NNCFGraph controlFlow;
   std::unordered_set<NNGraph::NodeRef> inputs;
@@ -262,7 +262,7 @@ template <bool B, class T = void>
 using enable_if_t = typename std::enable_if<B, T>::type;
 
 template <typename T, typename U>
-struct inheritedFrom {
+struct CAFFE2_EXPORT inheritedFrom {
   static constexpr bool value =
       std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
 };
@@ -270,14 +270,14 @@ struct inheritedFrom {
 // This is just a way to fix issues when the isa<> implementation
 // can't automatically downcast.
 template <typename T, typename N, typename = void>
-struct is_impl {
+struct CAFFE2_EXPORT is_impl {
   inline static bool impl(N n) {
     return isa<T>(n->data());
   }
 };
 
 template <typename T, typename N>
-struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
+struct CAFFE2_EXPORT is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetOperator>(n->data().get())) {
       return false;
@@ -288,7 +288,7 @@ struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
 };
 
 template <typename T, typename N>
-struct is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
+struct CAFFE2_EXPORT is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetData>(n->data().get())) {
       return false;
@@ -306,14 +306,14 @@ inline bool is(N n) {
 // This is just a way to fix issues when the dyn_cast<> implementation
 // can't automatically downcast.
 template <typename T, typename N, typename = void>
-struct get_impl {
+struct CAFFE2_EXPORT get_impl {
   inline static T* impl(N n) {
     return dyn_cast<T>(n->data().get());
   }
 };
 
 template <typename T, typename N>
-struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
+struct CAFFE2_EXPORT get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
@@ -325,7 +325,7 @@ struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
 };
 
 template <typename T, typename N>
-struct get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
+struct CAFFE2_EXPORT get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
@@ -425,9 +425,9 @@ CAFFE2_API std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
 CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 
 template <NNGraph* G>
-struct NodeHelper {};
+struct CAFFE2_EXPORT NodeHelper {};
 
-struct NNNodeMatchCriteria {
+struct CAFFE2_API NNNodeMatchCriteria {
   std::function<bool(NNGraph::NodeRef)> predicate;
   std::string debugString;
 
@@ -452,7 +452,7 @@ struct NNNodeMatchCriteria {
   }
 };
 
-std::ostream& operator<<(
+CAFFE2_API std::ostream& operator<<(
     std::ostream& oss,
     const NNNodeMatchCriteria& criteria);
 
@@ -489,7 +489,7 @@ NNNodeMatchCriteria matchOp(
       debugString);
 };
 
-struct NNNodeMatch {
+struct CAFFE2_API NNNodeMatch {
   static bool isMatch(
       const NNGraph::NodeRef& node,
       const NNNodeMatchCriteria& criteria) {
@@ -503,7 +503,7 @@ using NNSubgraphMatcher =
 // This helper method makes it easy to create matching criteria in NNGraph.
 // For example, operatorSubgraph(opMatch, ...) will refer to a tree like this:
 // ... -> opMatch -> opMatch_Output
-NNMatchGraph::NodeRef operatorSubgraph(
+CAFFE2_API NNMatchGraph::NodeRef operatorSubgraph(
     NNMatchGraph& g,
     const NNNodeMatchCriteria& root,
     const std::vector<NNMatchGraph::NodeRef>& childrenCriteria = {},
