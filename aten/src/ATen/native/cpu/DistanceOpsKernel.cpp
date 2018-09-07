@@ -1,4 +1,4 @@
-#include "DistanceOpsKernel.h"
+#include "ATen/native/Distance.h"
 
 #include <numeric>
 #include <iterator>
@@ -153,18 +153,21 @@ struct PDist {
 
 };
 
-}  // anonymous namespace
-
-void pdist_kernel_cpu(Tensor& result, const Tensor& self, double p) {
+void pdist_forward_kernel_impl(Tensor& result, const Tensor& self, const double p) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist", [&] {
     PDist<scalar_t>::apply(result, self, p);
   });
 }
 
-void pdist_backward_kernel_cpu(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
+void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor& self, const double p, const Tensor& dist) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_backward", [&] {
     PDist<scalar_t>::apply_backward(result, grad, self, p, dist);
   });
 }
+
+}  // anonymous namespace
+
+REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
+REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
 
 }}  // namespace at::native
