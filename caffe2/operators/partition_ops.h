@@ -248,6 +248,21 @@ class LengthsPartitionOp : public PartitionOpBase {
         1,
         "Only 1-D tensors supported as a partitioning tensor for sharding");
 
+    if (partitions == 1) {
+      // Specialization when partitions == 1 which just becomes a copy.
+      for (int i = 0; i < InputSize(); ++i) {
+        auto& input = Input(i);
+        auto& output = *Output(i);
+        output.ResizeLike(input);
+        context_.CopyItemsSameDevice(
+            input.meta(),
+            input.size(),
+            input.raw_data(),
+            output.raw_mutable_data(input.meta()));
+      }
+      return true;
+    }
+
     // Apply sharding to all parameters except lengths
     ApplyPartition<Index>(true /* skipFirstArgument */);
 

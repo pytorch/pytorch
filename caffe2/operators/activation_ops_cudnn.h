@@ -19,7 +19,7 @@ class CuDNNActivationOpBase : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateActivationDescriptor(&act_desc_));
   }
 
-  ~CuDNNActivationOpBase() {
+  virtual ~CuDNNActivationOpBase() {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
     CUDNN_ENFORCE(cudnnDestroyActivationDescriptor(act_desc_));
   }
