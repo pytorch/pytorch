@@ -438,12 +438,13 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
 
     .. warning::
 
-        Just-in-time compilation currently only works for functions/modules
-        which are not data dependent (e.g., have conditionals on data in
-        tensors) and do not have any untracked external dependencies (e.g.,
-        perform input/output or access global variables). If you trace such
-        models, you will silently get incorrect results on subsequent
-        invocations of the model.
+        Tracing only correctly records functions and modules which are not data
+        dependent (e.g., have conditionals on data in tensors) and do not have
+        any untracked external dependencies (e.g., perform input/output or
+        access global variables). If you trace such models, you may silently get
+        incorrect results on subsequent invocations of the model. The tracer
+        will try to emit warnings when doing something that may cause an
+        incorrect trace to be produced.
 
     Arguments:
         func (callable or torch.nn.Module):  a python function or torch.nn.Module
@@ -820,18 +821,20 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 if _enabled:
     class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
         r"""
-        The core data structure in Torch Script is the ``ScriptModule``. It is an analogue
-        of torch's nn.Module and represents an entire model as a tree of submodules.
-        Like normal modules, each individual module in a ScriptModule can have submodules,
-        parameters, and methods. In nn.Modules methods are implemented as Python functions,
-        but in ScriptModules methods are actually *Torch Script* functions, a statically-typed subset
-        of Python that contains all of PyTorch's built-in Tensor operations. This difference
-        allows your ScriptModules code to run without the need for a Python interpreter.
+        The core data structure in Torch Script is the ``ScriptModule``. It is an
+        analogue of torch's nn.Module and represents an entire model as a tree of
+        submodules. Like normal modules, each individual module in a ScriptModule can
+        have submodules, parameters, and methods. In nn.Modules methods are implemented
+        as Python functions, but in ScriptModules methods typically implemented as
+        *Torch Script* functions,  a statically-typed subset of Python that contains all
+        of PyTorch's built-in Tensor operations. This difference allows your
+        ScriptModules code to run without the need for a Python interpreter.
 
         ScriptModules and the Torch Script functions inside of them can be created in
         two ways:
 
-        tracing
+        **Tracing:**
+
             Using ``torch.jit.trace``, you can take an existing module or python
             function, provide example inputs, and we run the function, recording the
             operations performed on all the tensors. We turn the resulting recording
@@ -846,6 +849,11 @@ if _enabled:
                     return 2*x + y
                 traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
+            .. note::
+                Tracing a *function* will produce a ScriptModule with a single
+                ``forward`` method that implements that function, and that contains
+                no parameteres.
+
             Example::
 
                 import torch
@@ -853,7 +861,18 @@ if _enabled:
                 traced_net = torch.jit.trace(torchvision.models.resnet18(),
                                              torch.rand(1, 3, 224, 224))
 
-        scripting
+            .. note::
+
+                Since tracing only records operations on tensors, it will not record any
+                control-flow operations like if statements or loops. When this control-flow is
+                constant across your module, this is fine and it often just inlines
+                configuration decisions. But sometimes the control-flow is actually part of the
+                model itself. For instance, a beam search in sequence-to-sequence translation is
+                a loop over the (varying) sequence length of inputs. In this case tracing would
+                not be appropriate and the beam search should be written using scripting.
+
+        **Scripting:**
+
             You can write Torch Script code directly using Python syntax. You do this
             using the ``torch.jit.script`` annotation (for functions) or
             ``torch.jit.script_method`` annotation (for methods) on subclasses of
@@ -873,6 +892,11 @@ if _enabled:
                     else:
                         r = y
                     return r
+
+            .. note::
+                A script *function* annotation will construct a ScriptModule
+                with a single ``forward`` method that implements that function,
+                and that contains no parameters.
 
             Example::
 
@@ -905,14 +929,6 @@ if _enabled:
                       input = F.relu(self.conv1(input))
                       input = F.relu(self.conv2(input))
                       return input
-
-        Since tracing only records operations on tensors, it will not record any
-        control-flow operations like if statements or loops. When this control-flow is
-        constant across your module, this is fine and it often just inlines
-        configuration decisions. But sometimes the control-flow is actually part of the
-        model itself. For instance, a beam search in sequence-to-sequence translation is
-        a loop over the (varying) sequence length of inputs. In this case tracing would
-        not be appropriate and the beam search should be written using scripting.
         """
 
         def __init__(self, optimize=True):

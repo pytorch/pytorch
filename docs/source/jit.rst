@@ -1,6 +1,8 @@
 Torch Script
 ============
 
+.. contents:: :local:
+
 .. automodule:: torch.jit
 .. currentmodule:: torch.jit
 
@@ -8,11 +10,15 @@ Torch Script is a way to create serializable and optimizable models from PyTorch
 Anything code written in Torch Script can be saved from your Python
 process and loaded/run a process where there is no python dependency.
 
-We provide tools to incrementally transition a model from being a pure python program
+We provide tools to incrementally transition a model from being a pure Python program
 to a Torch Script program that can be run independently from python, for instance, in a standalone C++ process.
 This makes it possible to train models in PyTorch using familiar tools and then export
 the model to a production environment where it is not a good idea to run models as python programs
 for performance and multi-threading reasons.
+
+Creating Torch Script Code
+--------------------------
+
 
 .. autoclass:: ScriptModule
     :members:
@@ -52,7 +58,7 @@ Example:
     import torch
 
     def foo(x, y):
-        return 2*x + y
+        return 2 * x + y
     traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
 
     @torch.jit.script
@@ -107,13 +113,13 @@ Example:
 
 
 Torch Script Language Reference
-===============================
+-------------------------------
 
 Torch Script is a subset of Python that can either be written directly (using
 the @script annotations) or generated automatically from Python code via
 tracing. When using tracing, code is automatically converted into this subset of
-Python by recording only the actual operators on tensors and simply executing
-the other Python code.
+Python by recording only the actual operators on tensors and simply executing and
+discarding the other surrounding Python code.
 
 When writing Torch Script directly using @script annotations, the programmer must
 only use the subset of Python supported in Torch Script. This section documents
@@ -137,7 +143,7 @@ needed to represent neural network models in Torch.
 
 
 Types
------
+~~~~~
 
 The largest difference between Torch Script and the full Python language is that
 Torch Script only support a small set of types that are needed to express neural
@@ -187,8 +193,13 @@ Example::
 
     print(foo(3, (torch.rand(3), torch.rand(3))))
 
+.. note::
+  It is also possible to annotate types with Python 3 type annotations.
+  In our examples, we use comment-based annotations to ensure Python 2
+  compatibility as well.
+
 Expressions
------------
+~~~~~~~~~~~
 
 The following Python Expressions are supported
 
@@ -200,7 +211,7 @@ Variables
   ``a``
 
   .. note::
-      See 'variable scoping rules' for how variables are resolved.
+      See `Variable Resolution`_ for how variables are resolved.
 
 Tuple Construction
     ``(3, 4)``, ``(3,)``
@@ -272,7 +283,12 @@ Method calls
     Calls to methods of builtin types like tensor: ``x.mm(y)``
 
 
-    Inside of a ``@script_method``, it is possible to call other methods, or methods on submodules
+    When defining a Script method inside of a ScriptModule, the ``@script_method``
+    annotation is used. Inside of these methods it is possible to call other methods
+    of this class or access methods on the submodules.
+
+    Calling a submodule directly (e.g. ``self.resnet(input)``) is equivalent to
+    calling its ``forward`` method (e.g. ``self.resnet.forward(input)``)
 
     ::
 
@@ -305,7 +321,7 @@ Accessing Module Parameters
 
 
 Statements
-----------
+~~~~~~~~~~
 
 Torch Script supports the following types of statements:
 
@@ -314,7 +330,7 @@ Simple Assignments
     ::
 
         a = b
-        a += b # short-hand for a = a + b, does not operator in-place on a
+        a += b # short-hand for a = a + b, does not operate in-place on a
         a -= b
 
 Pattern Matching Assignments
@@ -331,6 +347,7 @@ Print Statements
 If Statements
 
     ::
+
         if a < 4:
             r = -a
         elif a < 3:
@@ -413,7 +430,7 @@ Return
         restriction will be removed in the future.
 
 Variable Resolution
--------------------
+~~~~~~~~~~~~~~~~~~~
 
 Torch Script supports a subset of Python's variable resolution (i.e. scoping)
 rules. Local variables behave the same as in Python, except for the restriction
@@ -434,10 +451,10 @@ Example::
 
 Non-local variables are resolved to Python values at compile time when the
 function is defined. These values are then converted into Torch Script values using
-the rules described in *Use of Python Values*.
+the rules described in `Use of Python Values`_.
 
 Use of Python Values
---------------------
+~~~~~~~~~~~~~~~~~~~~
 
 To make writing Torch Script more convenient, we allow script code to refer
 to Python values in the surrounding scope. For instance, any time there is a
@@ -512,7 +529,7 @@ Python-defined Constants
 
 
 Debugging
----------
+~~~~~~~~~
 
 Print things
 
@@ -524,7 +541,7 @@ Pay attention to tracer warnings
 
 
 Builtin Functions
------------------
+~~~~~~~~~~~~~~~~~
 
 Torch Script supports a subset of the builtin tensor and neural network functions that
 PyTorch provides. Most methods on Tensor as well as functions in the ``torch``
@@ -533,7 +550,7 @@ namespace are available. Many functions in ``torch.nn.functional`` are also avai
 
 We currently do not provide any builtin ScriptModules e.g. a ``Linear`` or
 ``Conv`` module. This functionality is something that will be developed in the future.
-For now we suggestion using ``torch.jit.trace`` to transform standard ``torch.nn``
+For now we suggest using ``torch.jit.trace`` to transform standard ``torch.nn``
 modules into ScriptModules on construction.
 
 .. automodule:: torch.jit.supported_ops
