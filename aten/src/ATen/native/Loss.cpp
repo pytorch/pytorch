@@ -88,7 +88,7 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
 }
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
-    auto loss = at::zeros_like(input);
+    Tensor loss;
     auto max_val = at::clamp_min(-input, 0);
     if (pos_weight.defined()) {
         auto log_weight = 1 + (pos_weight - 1) * target;
@@ -107,7 +107,7 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
 }
 
 Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
-    auto grad_input = at::zeros_like(input);
+    Tensor grad_input;
     if (pos_weight.defined()) {
         grad_input = (-pos_weight * target + (pos_weight * target + 1 - target) * at::sigmoid(input)) * grad;
     } else {
