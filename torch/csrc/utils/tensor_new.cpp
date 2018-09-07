@@ -144,12 +144,20 @@ ScalarType infer_scalar_type(PyObject *obj) {
     return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)(PyArray_FromScalar(obj, nullptr))));
   }
 #endif
+  if (THPUtils_checkString(obj)) {
+    throw TypeError("new(): invalid data type '%s'", Py_TYPE(obj)->tp_name);
+  }
   if (PySequence_Check(obj)) {
     at::optional<ScalarType> scalarType;
     auto length = PySequence_Length(obj);
     if (length < 0) throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0) return torch::tensors::get_default_tensor_type().scalarType();
+    int self_referential = Py_ReprEnter(obj);
+    if (self_referential < 0) throw python_error();
+    if (self_referential > 0) {
+      throw TypeError("new(): self-referential lists are incompatible");
+    }
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle) throw python_error();
