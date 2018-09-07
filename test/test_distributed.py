@@ -241,6 +241,7 @@ class _DistTestBase(object):
         else:
             group = [0, 1]
         group_id = dist.new_group(group)
+        self._barrier()
         dist.destroy_process_group(group_id)
 
     # Test get rank and size of group
@@ -260,6 +261,7 @@ class _DistTestBase(object):
     # Test destroy full groups
     def test_destroy_full_group(self):
         _, group_id, _ = self._init_full_group_test()
+        self._barrier()
         dist.destroy_process_group(group_id)
 
     # Test get rank and size of full group
@@ -1272,6 +1274,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
             getattr(self, self.id().split(".")[2])()
+            self._barrier()
             dist.destroy_process_group()
             sys.exit(0)
 
