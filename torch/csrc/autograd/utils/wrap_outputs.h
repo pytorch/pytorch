@@ -84,7 +84,7 @@ inline PyObject* wrap(double value) {
 inline PyObject* wrap(std::complex<double> value) {
   // I could probably also use FromComplex with a reinterpret cast,
   // but... eh.
-  return PyComplex_FromDoubles(value.real(), value.complex());
+  return PyComplex_FromDoubles(value.real(), value.imag());
 }
 
 inline PyObject* wrap(void* value) {

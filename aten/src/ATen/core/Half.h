@@ -86,13 +86,13 @@ struct alignas(4) ComplexHalf {
 };
 
 template <typename T>
-struct is_complex : public std::false_type {};
+struct is_complex_t : public std::false_type {};
 
 template <typename T>
-struct is_complex<std::complex<T>> : public std::true_type {};
+struct is_complex_t<std::complex<T>> : public std::true_type {};
 
 template <>
-struct is_complex<ComplexHalf> : public std::true_type {};
+struct is_complex_t<ComplexHalf> : public std::true_type {};
 
 // Extract double from std::complex<double>; is identity otherwise
 // TODO: Write in more idiomatic C++17
@@ -101,12 +101,12 @@ template <typename T> struct scalar_value_type<std::complex<T>> { typedef T type
 template <>           struct scalar_value_type<ComplexHalf>     { typedef Half type; };
 
 template <typename To, typename From>
-typename std::enable_if<c10::guts::negation<c10::guts::conjunction<is_complex<From>, c10::guts::negation<is_complex<To>>>>::value, To>::type convert(From f) {
+typename std::enable_if<c10::guts::negation<c10::guts::conjunction<is_complex_t<From>, c10::guts::negation<is_complex_t<To>>>>::value, To>::type convert(From f) {
   return static_cast<To>(f);
 }
 
 template <typename To, typename From>
-typename std::enable_if<c10::guts::conjunction<is_complex<From>, c10::guts::negation<is_complex<To>>>::value, To>::type convert(From f) {
+typename std::enable_if<c10::guts::conjunction<is_complex_t<From>, c10::guts::negation<is_complex_t<To>>>::value, To>::type convert(From f) {
   return static_cast<To>(f.real());
 }
 
@@ -140,16 +140,16 @@ typename std::enable_if<std::is_floating_point<From>::value, bool>::type overflo
 
 
 template <typename To, typename From>
-typename std::enable_if<is_complex<From>::value, bool>::type overflows(
+typename std::enable_if<is_complex_t<From>::value, bool>::type overflows(
     From f) {
   // casts from complex to real are considered to overflow if the
   // imaginary component is non-zero
-  if (!is_complex<To>::value && f.imag() != 0) {
+  if (!is_complex_t<To>::value && f.imag() != 0) {
     return true;
   }
   // Check for overflow componentwise
   // (Technically, the imag overflow check is guaranteed to be false
-  // when !is_complex<To>, but any optimizer worth its salt will be
+  // when !is_complex_t<To>, but any optimizer worth its salt will be
   // able to figure it out.)
   return overflows<typename scalar_value_type<To>::type, typename From::value_type>(f.real()) ||
          overflows<typename scalar_value_type<To>::type, typename From::value_type>(f.imag());
