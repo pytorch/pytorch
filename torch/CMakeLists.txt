@@ -350,7 +350,7 @@ if(USE_ROCM)
     /opt/rocm/include
     /opt/rocm/hcc/include
     /opt/rocm/rocblas/include
-    /opt/rocm/hcsparse/include
+    /opt/rocm/hipsparse/include
     )
 endif()
 
