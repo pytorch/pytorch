@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.2 FATAL_ERROR)
 
 # Find modules.
 list(APPEND CMAKE_MODULE_PATH
-  /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/public
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules_CUDA_fix)
