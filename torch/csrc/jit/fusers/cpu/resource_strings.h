@@ -18,6 +18,10 @@ struct TensorInfo {
   IndexType sizes[N];
   IndexType strides[N];
 };
+template<typename T>
+struct TensorInfo<T, 0> {
+  T * data;
+};
 )");
 
 auto cpu_compilation_unit_template = CodeTemplate(R"(

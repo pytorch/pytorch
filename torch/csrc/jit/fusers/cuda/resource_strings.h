@@ -25,6 +25,10 @@ struct TensorInfo {
   IndexType sizes[N];
   IndexType strides[N];
 };
+template<typename T>
+struct TensorInfo<T, 0> {
+  T * data;
+};
 )");
 
 // We rewrite the code for philox RNG from curand as nvrtc couldn't resolve the

@@ -102,7 +102,9 @@ static void compressContiguous(
     c_strides[compressed_dims] = strides[cur-1];
     compressed_dims++;
   }
-  JIT_ASSERT(!cont.back() || strides.back() == 1);
+  if (ndim > 0) {
+    JIT_ASSERT(!cont.back() || strides.back() == 1);
+  }
 }
 
 void FusedKernel::launch_with_tensors(
@@ -346,7 +348,7 @@ static Node* usedInFusedChunk(Value* input) {
   auto uses = input->uses();
   if (uses.size() == 1) {
     Node *user = uses[0].user;
-    if (user->kind() == prim::FusedChunk) {
+    if (user->kind() == prim::ConstantChunk) {
       return user;
     }
   }
@@ -481,7 +483,7 @@ std::tuple<
     // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
     if (n->kind() == prim::FusedConcat)
       continue;
-    if (n->kind() == prim::FusedChunk)
+    if (n->kind() == prim::ConstantChunk)
       continue;
     if (n->kind() == aten::rand_like) {
       has_random = true;
