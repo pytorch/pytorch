@@ -79,8 +79,9 @@ namespace test_tail {
 }
 
 namespace test_prepend {
-    static_assert(array < int, 3 > {{2, 3, 4}} == prepend(2, array < int, 2 > {{3, 4}}), "");
-    static_assert(array < int, 1 > {{3}} == prepend(3, array < int, 0 > {{}}), "");
+    // Some compilers can't handle move results as constexpr
+    assert(array < int, 3 > {{2, 3, 4}} == prepend(2, array < int, 2 > {{3, 4}}), "");
+    assert(array < int, 1 > {{3}} == prepend(3, array < int, 0 > {{}}), "");
 }
 
 namespace test_to_std_array {
