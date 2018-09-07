@@ -717,7 +717,18 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
 
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
-def instance_norm(g, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
+def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
+    input_sizes = input.type().sizes()
+    if weight is None or weight.node().kind() == "prim::Undefined":
+        assert len(input_sizes) > 1
+        weight_value = torch.tensor([1.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or bias.node().kind() == "prim::Undefined":
+        assert len(input_sizes) > 1
+        bias_value = torch.tensor([0.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        bias = g.op("Constant", value_t=bias_value)
     return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
 
 
