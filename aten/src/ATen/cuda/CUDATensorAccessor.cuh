@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "ATen/ScalarType.h"
+#include "ATen/core/TensorAccessor.h"
 
 namespace at {
 namespace cuda {
@@ -62,8 +63,16 @@ template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPt
 class CUDATensorAccessorBase {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
-  CUDATensorAccessorBase(PtrType data_)
-    : data_(data_) {}
+  CUDATensorAccessorBase(TensorAccessor<T, N>& ta)
+  {
+    data_ = static_cast<PtrType>(ta.data());
+    IntList sizes = ta.sizes();
+    IntList strides = ta.strides();
+    for (size_t i = 0; i < N; i++) {
+      sizes_[i] = sizes[i];
+      strides_[i] = strides[i];
+    }
+  }
   __host__ __device__ int64_t stride(int64_t i) { return strides_[i]; }
   __host__ __device__ int64_t size(int64_t i) { return sizes_[i]; }
 protected:
@@ -79,14 +88,8 @@ class CUDATensorAccessor : public detail::CUDATensorAccessorBase<T,N,PtrTraits> 
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  CUDATensorAccessor(const Tensor& t)
-   : detail::CUDATensorAccessorBase<T,N>(t.data<T>()) {
-   static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-   AT_CHECK(t.dim() == N, "expected ", N, " dims but tensor has ", t.dim());
-   auto sizes_ = t.sizes();
-   auto strides_ = t.strides();
-   std::copy(sizes_.begin(), sizes_.end(), std::begin(this->sizes_));
-   std::copy(strides_.begin(), strides_.end(), std::begin(this->strides_)); }
+  CUDATensorAccessor(TensorAccessor<T,N> ta)
+    : detail::CUDATensorAccessorBase<T,N>(ta) {};
 
   __device__ detail::CUDATensorSubAccessor<T,N-1> operator[](int64_t i) {
     int64_t* new_sizes = this->sizes_+1;
@@ -99,14 +102,8 @@ template<typename T, template <typename U> class PtrTraits>
 class CUDATensorAccessor<T,1,PtrTraits> : public detail::CUDATensorAccessorBase<T,1,PtrTraits> {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
-  CUDATensorAccessor(Tensor& t)
-    : detail::CUDATensorAccessorBase<T,1>(t.data<T>()) {
-    AT_CHECK(t.dim() == 1, "expected 1 dim but tensor has ", t.dim());
-    auto sizes_ = t.sizes();
-    auto strides_ = t.strides();
-    std::copy(sizes_.begin(), sizes_.end(), std::begin(this->sizes_));
-    std::copy(strides_.begin(), strides_.end(), std::begin(this->strides_));
-  }
+  CUDATensorAccessor(TensorAccessor<T,1> ta)
+    : detail::CUDATensorAccessorBase<T,1>(ta) {}
 
   __device__ T & operator[](int64_t i) {
     return this->data_[this->strides_[0]*i];

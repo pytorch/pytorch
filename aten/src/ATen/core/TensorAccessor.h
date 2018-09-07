@@ -19,6 +19,7 @@ public:
   }
   int64_t stride(int64_t i) { return strides()[i]; }
   int64_t size(int64_t i) { return sizes()[i]; }
+  T* data() { return data_; }
 protected:
   T * data_;
   const int64_t* sizes_;
