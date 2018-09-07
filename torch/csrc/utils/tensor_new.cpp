@@ -158,6 +158,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     if (self_referential > 0) {
       throw TypeError("new(): self-referential lists are incompatible");
     }
+    Py_ReprLeave(obj);
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle) throw python_error();
