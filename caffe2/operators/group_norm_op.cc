@@ -156,23 +156,13 @@ bool GroupNormOp<T, Context>::RunOnDeviceImpl(
     T* Y_data,
     T* mu_data,
     T* rsig_data) {
-  const std::array<int, 4> dims = order_ == StorageOrder::NCHW
-      ? std::array<int, 4>{N, G, D, HxW}
-      : std::array<int, 4>{N, HxW, G, D};
-  const std::array<int, 2> axes = order_ == StorageOrder::NCHW
-      ? std::array<int, 2>{2, 3}
-      : std::array<int, 2>{1, 3};
-
-  // Computes mean and variance.
-  math::Moments<T, Context>(
-      4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
-
-  // Uses rsqrt to computes 1 / std which is much faster than computes std.
-  EigenArrayMap<T>(rsig_data, G, N) += epsilon_;
-  math::Rsqrt<T, CPUContext>(N * G, rsig_data, rsig_data, &context_);
-
-  // Computes Y = gamma * (X - mu) * rsig + beta.
   if (order_ == StorageOrder::NCHW) {
+    const std::array<int, 2> dims = {N * G, D * HxW};
+    const int axis = 1;
+    math::Moments<T, Context>(
+        2, dims.data(), 1, &axis, X_data, mu_data, rsig_data, &context_);
+    math::InvStd<T, Context>(
+        N * G, static_cast<T>(epsilon_), rsig_data, rsig_data, &context_);
     GroupNormForwardNCHW<T>(
         N,
         G,
@@ -185,6 +175,12 @@ bool GroupNormOp<T, Context>::RunOnDeviceImpl(
         beta_data,
         Y_data);
   } else {
+    const std::array<int, 4> dims = {N, HxW, G, D};
+    const std::array<int, 2> axes = {1, 3};
+    math::Moments<T, Context>(
+        4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
+    math::InvStd<T, Context>(
+        N * G, static_cast<T>(epsilon_), rsig_data, rsig_data, &context_);
     GroupNormForwardNHWC<T>(
         N,
         G,

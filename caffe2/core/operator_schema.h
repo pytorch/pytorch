@@ -190,7 +190,7 @@ class CAFFE2_API OpSchema {
     uint64_t flops{0}; // Floating point operations.
     uint64_t bytes_read{0}; // Total memory read.
     uint64_t bytes_written{0}; // Total memory written.
-    uint64_t params_bytes{0}; // Memory footprint of parameters
+    uint64_t params_bytes{0}; // Memory read for parameters.
   };
   /**
    * @brief Registers a function that takes in an OperatorDef
