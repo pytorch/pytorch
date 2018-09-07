@@ -33,7 +33,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   if (!variable.requires_grad())
     return {};
 
-  auto& new_grad = grads[0];
+  auto new_grad = std::move(grads[0]);
   for (auto& hook : variable.hooks()) {
     new_grad = (*hook)({new_grad})[0];
   }
