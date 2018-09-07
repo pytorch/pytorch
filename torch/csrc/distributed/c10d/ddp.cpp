@@ -3,12 +3,16 @@
 #include <torch/csrc/cuda/comm.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
+#include <torch/csrc/cuda/nccl.h>
+
 #include <c10d/ProcessGroup.hpp>
 
 #include <ATen/ATen.h>
 
 #include <cstddef>
 #include <memory>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace c10d {
@@ -30,6 +34,7 @@ void copyBroadcastTensorsToReplicas(
 } // namespace
 
 void distBroadcastCoalesced(
+    ProcessGroup& processGroup,
     std::vector<at::Tensor>& tensors,
     int64_t bufferSize,
     ProcessGroup& processGroup) {
@@ -90,9 +95,7 @@ void syncParams(
   }
 
   if (broadcastBuffers && !bufferData[0].empty()) {
-    // Do an inter-node sync first.
-    distBroadcastCoalesced(bufferData[0], broadcastBucketSize, processGroup);
-    // Then an intra-node sync if we have more than one device.
+    distBroadcastCoalesced(processGroup, bufferData[0], broadcastBucketSize);
     if (devices.size() > 1) {
       auto result = torch::cuda::broadcast_coalesced(
           bufferData[0], devices, broadcastBucketSize);
@@ -101,4 +104,32 @@ void syncParams(
   }
 }
 
+std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
+    ProcessGroup& processGroup,
+    std::vector<std::vector<at::Tensor>>& gradsBatch,
+    at::IntList devices,
+    at::optional<std::vector<at::cuda::CUDAStream>> streams) {
+  AT_ASSERT(!gradsBatch.empty());
+  AT_ASSERT(!devices.empty());
+
+  std::vector<at::Tensor> gradsBatchCoalesced;
+  for (size_t device = 0; device < devices.size(); ++device) {
+    at::DeviceGuard guard(device);
+    gradsBatchCoalesced.push_back(
+        torch::utils::flatten_dense_tensors(gradsBatch[device]));
+  }
+
+  if (devices.size() > 1) {
+    torch::cuda::nccl::reduce(
+        /*inputs=*/gradsBatchCoalesced,
+        /*root=*/0,
+        /*op=*/ncclSum,
+        /*streams=*/streams);
+  }
+
+  std::vector<at::Tensor> allreduceInput = {gradsBatchCoalesced[0]};
+  auto reductionWork = processGroup.allreduce(allreduceInput);
+
+  return std::make_tuple(reductionWork, gradsBatchCoalesced[0]);
+}
 } // namespace c10d

@@ -1,3 +1,5 @@
+#include <torch/csrc/cuda/python_comm.h>
+
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/cuda/comm.h"
 #include "torch/csrc/cuda/Stream.h"
@@ -6,6 +8,7 @@
 #include "torch/csrc/utils/functional.h"
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <THC/THC.h>
 
@@ -30,22 +33,16 @@ void initCommMethods(PyObject *module) {
      at::optional<py::object> py_streams) {
      at::optional<std::vector<at::cuda::CUDAStream>> streams;
      if (py_streams) {
-       py::handle handle = *py_streams;
-       streams = fmap(
-           THPUtils_PySequence_to_THCStreamList(handle.ptr()),
-           [](THCStream* stream) {
-             return at::cuda::CUDAStream(stream);
-           });
+       streams = py_object_to_cuda_streams(*py_streams);
      }
-     // Note: We're holding the GIL up to here.
-     AutoNoGIL no_gil;
      return scatter(tensor, devices, chunk_sizes, dim, streams);
    },
    py::arg("tensor"),
    py::arg("devices"),
    py::arg("chunk_sizes"),
    py::arg("dim"),
-   py::arg("streams"))
+   py::arg("streams"),
+   py::call_guard<py::gil_scoped_release>())
    .def("_gather", [](
      std::vector<at::Tensor>& tensors,
      int64_t dim,
@@ -57,4 +54,18 @@ void initCommMethods(PyObject *module) {
    py::arg("destination_index"),
    py::call_guard<py::gil_scoped_release>());
 }
+
+std::vector<at::cuda::CUDAStream> py_object_to_cuda_streams(
+    py::object py_streams) {
+  std::vector<THCStream*> thc_streams;
+  {
+    AutoGIL gil;
+    py::handle handle(py_streams);
+    thc_streams = THPUtils_PySequence_to_THCStreamList(handle.ptr());
+  }
+  return fmap(std::move(thc_streams), [](THCStream* stream) {
+    return at::cuda::CUDAStream(stream, /*retain=*/true);
+  });
+}
+
 }}}

@@ -1,4 +1,4 @@
-#include "torch/csrc/python_headers.h"
+#include <torch/csrc/python_headers.h>
 
 #include <c10d/Def.hpp>
 #include <c10d/FileStore.hpp>
@@ -19,6 +19,7 @@
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/distributed/c10d/ddp.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
@@ -378,9 +379,9 @@ PyObject* c10d_init(PyObject* _unused) {
   module.def(
       "_dist_broadcast_coalesced",
       &::c10d::distBroadcastCoalesced,
+      py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
-      py::arg("process_group"),
       py::call_guard<py::gil_scoped_release>());
   module.def(
       "_sync_params",
@@ -391,6 +392,22 @@ PyObject* c10d_init(PyObject* _unused) {
       py::arg("devices"),
       py::arg("broadcast_bucket_size"),
       py::arg("broadcast_buffers"),
+      py::call_guard<py::gil_scoped_release>());
+  module.def(
+      "_queue_reduction",
+      [](::c10d::ProcessGroup& processGroup,
+         std::vector<std::vector<at::Tensor>>& gradsBatch,
+         std::vector<int64_t>& devices,
+         py::object pyStreams) {
+        auto streams =
+            torch::cuda::python::py_object_to_cuda_streams(pyStreams);
+        return ::c10d::queueReduction(
+            processGroup, gradsBatch, devices, streams);
+      },
+      py::arg("process_group"),
+      py::arg("grads_batch"),
+      py::arg("devices"),
+      py::arg("streams"),
       py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;

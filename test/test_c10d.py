@@ -753,6 +753,29 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             any(torch.isinf(p.grad).any() for p in ddp_model.parameters())
         )
 
+    def test_queue_reduction(self):
+        # Set up process group.
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+
+        # Get this process' split of devices.
+        devices = gpus_for_rank(self.world_size)[self.rank]
+        grads_batch = [torch.ones(10, device=torch.device('cuda', d)).chunk(5) for d in devices]
+
+        work, local_grad_sum = c10d._queue_reduction(process_group, grads_batch, devices, streams=None)
+        # The first return value should be the allreduce work item.
+        self.assertTrue(isinstance(work, c10d.Work))
+        # The second return value will be the finished allreduced gradients.
+        self.assertTrue(isinstance(local_grad_sum, torch.Tensor))
+
+        # Wait for the allreduce to finish.
+        work.wait()
+
+        # The expected result of the allreduce should be 10 * #processes
+        self.assertEqual(local_grad_sum, torch.tensor(10 * len(self.world_size)))
+
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
 

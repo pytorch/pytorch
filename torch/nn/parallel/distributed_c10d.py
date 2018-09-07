@@ -251,7 +251,7 @@ class _DistributedDataParallelC10d(Module):
             module.train(mode)
 
     def _dist_broadcast_coalesced(self, tensors, buffer_size):
-        c10d._dist_broadcast_coalesced(tensors, buffer_size, self.process_group)
+        c10d._dist_broadcast_coalesced(self.process_group, tensors, buffer_size)
 
     def _sync_params(self):
         c10d._sync_params(self.process_group,
@@ -319,27 +319,13 @@ class _DistributedDataParallelC10d(Module):
         return distributed_data_parallel_hook
 
     def _queue_reduction(self, bucket_idx):
-        grads_batch = self.buckets[bucket_idx]
-        grads_batch_coalesced = []
-
-        # coalesce the bucket
-        for dev_id, dev_grads_batch in zip(self.device_ids, grads_batch):
-            with torch.cuda.device(dev_id):
-                dev_grads_batch_coalesced = _flatten_dense_tensors(dev_grads_batch)
-                grads_batch_coalesced.append(dev_grads_batch_coalesced)
-
-        # reduce to the first GPU in self.device_ids
-        if len(self.device_ids) > 1:
-            nccl.reduce(grads_batch_coalesced, root=0, streams=self.default_streams)
-
-        # divide by the number of processes here to reduce chances of overflow
-        grads_batch_coalesced[0] /= self.process_group.size()
-
-        # now work on the first gpu
-        reduction_work = self.process_group.allreduce([grads_batch_coalesced[0]],
-                                                      self.allreduce_opts)
-        self.reduction_works[bucket_idx] = reduction_work
-        self.buckets_coalesced[bucket_idx] = grads_batch_coalesced[0]
+        result = c10d._queue_reduction(
+            self.process_group,
+            self.buckets[bucket_idx],
+            self.device_ids,
+            self.default_streams)
+        self.reduction_works[bucket_idx] = result[0]
+        self.buckets_coalesced[bucket_idx] = result[1]
 
     def _sync_reduction_works(self):
         # Now only work on the first GPU of self.device_ids, uncoalesce

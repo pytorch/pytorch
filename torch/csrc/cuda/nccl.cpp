@@ -3,13 +3,17 @@
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/hash.h"
 
+#include <ATen/ATen.h>
+#include <ATen/Error.h>
+#include <ATen/cuda/CUDAContext.h>
+
+#include <THC/THC.h>
+#include <THC/THCStream.h>
+
 #include <unordered_map>
 #include <sstream>
 #include <limits>
 #include <type_traits>
-#include <ATen/ATen.h>
-#include <THC/THC.h>
-#include <THC/THCStream.h>
 
 namespace torch { namespace cuda { namespace nccl {
 
@@ -222,8 +226,56 @@ void broadcast(TensorList tensors, const stream_list& streams, const comm_list& 
     CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
   }
 #else
-  throw std::runtime_error("PyTorch built without NCCL support");
+  AT_ERROR("PyTorch built without NCCL support");
 #endif
 }
 
+void reduce(
+    const std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>& outputs,
+    int32_t root,
+    int32_t op,
+    at::optional<std::vector<at::cuda::CUDAStream>> streams,
+    at::optional<std::vector<ncclComm_t>> comms) {
+#ifdef USE_NCCL
+  using namespace torch::cuda::nccl::detail;
+  AT_CHECK(
+      root >= 0 && static_cast<size_t>(root) < inputs.size(), "invalid root");
+
+  _check_inputs(inputs, outputs, 1, 1);
+  const auto len = inputs.size();
+
+  ncclDataType_t data_type = _get_data_type(inputs[0].type());
+
+  const auto count = inputs[0].numel();
+  std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
+  auto comms_ref =
+      comms ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(*comms);
+  at::DeviceGuard device_guard;
+  AutoNcclGroup nccl_group_guard;
+  for (size_t i = 0; i < len; i++) {
+    device_guard.set_index(inputs[i].device().index());
+    CHECK(ncclReduce(
+        inputs[i].data_ptr(),
+        outputs[i].data_ptr(),
+        count,
+        data_type,
+        (ncclRedOp_t)op,
+        root,
+        comms_ref[i],
+        streams ? (*streams)[i] : nullptr));
+  }
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
+void reduce(
+    std::vector<at::Tensor>& inputs,
+    int32_t root,
+    int32_t op,
+    at::optional<std::vector<at::cuda::CUDAStream>> streams,
+    at::optional<std::vector<ncclComm_t>> comms) {
+  reduce(inputs, /*outputs=*/inputs, root, op, streams, comms);
+}
 }}}
