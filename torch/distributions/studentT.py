@@ -45,8 +45,8 @@ class StudentT(Distribution):
         batch_shape = torch.Size() if isinstance(df, Number) else self.df.size()
         super(StudentT, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, instance=None):
-        new = self._get_checked_instance(StudentT, instance)
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(StudentT, _instance)
         batch_shape = torch.Size(batch_shape)
         new.df = self.df.expand(batch_shape)
         new.loc = self.loc.expand(batch_shape)

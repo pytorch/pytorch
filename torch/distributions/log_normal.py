@@ -31,8 +31,8 @@ class LogNormal(TransformedDistribution):
         base_dist = Normal(loc, scale)
         super(LogNormal, self).__init__(base_dist, ExpTransform(), validate_args=validate_args)
 
-    def expand(self, batch_shape, instance=None):
-        new = self._get_checked_instance(LogNormal, instance)
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(LogNormal, _instance)
         batch_shape = torch.Size(batch_shape)
         base_dist = self.base_dist.expand(batch_shape)
         super(LogNormal, new).__init__(base_dist, ExpTransform(), validate_args=False)

@@ -51,8 +51,8 @@ class Binomial(Distribution):
             batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, instance=None):
-        new = self._get_checked_instance(Binomial, instance)
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Binomial, _instance)
         batch_shape = torch.Size(batch_shape)
         new.total_count = self.total_count.expand(batch_shape)
         if 'probs' in self.__dict__:

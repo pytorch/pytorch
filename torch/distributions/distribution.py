@@ -35,20 +35,20 @@ class Distribution(object):
                 if not constraint.check(getattr(self, param)).all():
                     raise ValueError("The parameter {} has invalid values".format(param))
 
-    def expand(self, batch_shape, instance=None):
+    def expand(self, batch_shape, _instance=None):
         """
-        Returns a new distribution instance (or populates a provided instance)
-        with batch dimensions expanded to `batch_shape`. This method calls
-        :class:`~torch.Tensor.expand` on the distribution's parameters.
-        As such, this does not allocate new memory for the expanded distribution
-        instance. Additionally, this does not repeat any args checking or
-        parameter broadcasting in `__init__.py`, when an instance is first
-        created.
+        Returns a new distribution instance (or populates an existing instance
+        provided by a derived class) with batch dimensions expanded to
+        `batch_shape`. This method calls :class:`~torch.Tensor.expand` on
+        the distribution's parameters. As such, this does not allocate new
+        memory for the expanded distribution instance. Additionally,
+        this does not repeat any args checking or parameter broadcasting in
+        `__init__.py`, when an instance is first created.
 
         Args:
             batch_shape (torch.Size): the desired expanded size.
-            instance: new instance (e.g. provided by subclasses) to be
-                populated.
+            _instance: new instance provided by subclasses that
+                need to override `.expand`.
 
         Returns:
             New distribution instance with batch dimensions expanded to
@@ -249,18 +249,12 @@ class Distribution(object):
         if not self.support.check(value).all():
             raise ValueError('The value argument must be within the support')
 
-    def _get_checked_instance(self, cls, instance=None):
-        def cons(cls_):
-            """
-            Returns the `__init__` function for a python 2.7 / 3 class.
-            """
-            return getattr(cls_.__init__, "__func__", cls_.__init__)
-
-        if instance is None and cons(type(self)) is not cons(cls):
+    def _get_checked_instance(self, cls, _instance=None):
+        if _instance is None and type(self).__init__ != cls.__init__:
             raise NotImplementedError("Subclass {} of {} that defines a custom __init__ method "
                                       "must also define a custom .expand() method.".
                                       format(self.__class__.__name__, cls.__name__))
-        return self.__new__(type(self)) if not instance else instance
+        return self.__new__(type(self)) if _instance is None else _instance
 
     def __repr__(self):
         param_names = [k for k, _ in self.arg_constraints.items() if k in self.__dict__]

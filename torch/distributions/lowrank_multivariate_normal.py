@@ -116,8 +116,8 @@ class LowRankMultivariateNormal(Distribution):
         super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
                                                         validate_args=validate_args)
 
-    def expand(self, batch_shape, instance=None):
-        new = self._get_checked_instance(LowRankMultivariateNormal, instance)
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(LowRankMultivariateNormal, _instance)
         batch_shape = torch.Size(batch_shape)
         loc_shape = batch_shape + self.event_shape
         new.loc = self.loc.expand(loc_shape)

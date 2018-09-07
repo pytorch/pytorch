@@ -1,4 +1,3 @@
-import math
 from numbers import Number
 
 import torch
@@ -50,8 +49,8 @@ class Uniform(Distribution):
         if self._validate_args and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")
 
-    def expand(self, batch_shape, instance=None):
-        new = self._get_checked_instance(Uniform, instance)
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Uniform, _instance)
         batch_shape = torch.Size(batch_shape)
         new.low = self.low.expand(batch_shape)
         new.high = self.high.expand(batch_shape)

@@ -53,8 +53,8 @@ class Categorical(Distribution):
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
         super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, instance=None):
-        new = self._get_checked_instance(Categorical, instance)
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Categorical, _instance)
         batch_shape = torch.Size(batch_shape)
         param_shape = batch_shape + torch.Size((self._num_events,))
         if 'probs' in self.__dict__:

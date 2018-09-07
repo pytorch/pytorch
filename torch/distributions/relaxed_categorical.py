@@ -41,8 +41,8 @@ class ExpRelaxedCategorical(Distribution):
         event_shape = self._categorical.param_shape[-1:]
         super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, instance=None):
-        new = self._get_checked_instance(ExpRelaxedCategorical, instance)
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(ExpRelaxedCategorical, _instance)
         batch_shape = torch.Size(batch_shape)
         new.temperature = self.temperature
         new._categorical = self._categorical.expand(batch_shape)
@@ -114,8 +114,8 @@ class RelaxedOneHotCategorical(TransformedDistribution):
                                                        ExpTransform(),
                                                        validate_args=validate_args)
 
-    def expand(self, batch_shape, instance=None):
-        new = self._get_checked_instance(RelaxedOneHotCategorical, instance)
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(RelaxedOneHotCategorical, _instance)
         base_dist = self.base_dist.expand(batch_shape)
         super(RelaxedOneHotCategorical, new).__init__(base_dist,
                                                       ExpTransform(),
