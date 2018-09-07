@@ -101,12 +101,22 @@ template <typename T> struct scalar_value_type<std::complex<T>> { typedef T type
 template <>           struct scalar_value_type<ComplexHalf>     { typedef Half type; };
 
 template <typename To, typename From>
-typename std::enable_if<c10::guts::negation<c10::guts::conjunction<is_complex_t<From>, c10::guts::negation<is_complex_t<To>>>>::value, To>::type convert(From f) {
+typename std::enable_if<
+  c10::guts::negation<
+    c10::guts::conjunction<
+      is_complex_t<From>,
+      c10::guts::negation<is_complex_t<To>>
+    >
+  >::value, To>::type convert(From f) {
   return static_cast<To>(f);
 }
 
 template <typename To, typename From>
-typename std::enable_if<c10::guts::conjunction<is_complex_t<From>, c10::guts::negation<is_complex_t<To>>>::value, To>::type convert(From f) {
+typename std::enable_if<
+  c10::guts::conjunction<
+    is_complex_t<From>,
+    c10::guts::negation<is_complex_t<To>>
+  >::value, To>::type convert(From f) {
   return static_cast<To>(f.real());
 }
 
