@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCTensorTopK.cu"
 #else
 
-THC_API void THCTensor_(topk)(THCState* state,
+void THCTensor_(topk)(THCState* state,
                                THCTensor *topK,
                                THCudaLongTensor *indices,
                                THCTensor *input_,
