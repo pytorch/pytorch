@@ -1605,15 +1605,7 @@ class TestJit(JitTestCase):
                                                operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
 
     def test_export_dropout(self):
-        class DropoutTest(torch.nn.Module):
-            def __init__(self):
-                super(DropoutTest, self).__init__()
-                self.dropout = torch.nn.Dropout()
-
-            def forward(self, x):
-                return self.dropout(x)
-
-        test = DropoutTest()
+        test = torch.nn.Dropout()
         test.eval()
 
         traced = torch.jit.trace(test, (torch.rand(3, 4),), check_trace=False)
@@ -1628,21 +1620,12 @@ class TestJit(JitTestCase):
                     torch.nn.BatchNorm1d(100, affine=False),
                     torch.nn.BatchNorm2d(100),
                     torch.nn.BatchNorm2d(100, affine=False)]:
-                class BatchnormTest(torch.nn.Module):
-                    def __init__(self):
-                        super(BatchnormTest, self).__init__()
-                        self.batchnorm = clazz
-
-                    def forward(self, x):
-                        return self.batchnorm(x)
-
-                test = BatchnormTest()
-                getattr(test, mode)()
+                getattr(clazz, mode)()
 
                 input = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
                     torch.randn(20, 100, 35, 45)
 
-                traced = torch.jit.trace(test, (input,))
+                traced = torch.jit.trace(clazz, (input,))
                 imported = self.getExportImportCopy(traced)
                 x = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
                     torch.randn(20, 100, 35, 45)
