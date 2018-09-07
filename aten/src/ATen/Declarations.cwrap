@@ -2856,7 +2856,7 @@
 ]]
 [[
   name: svd
-  cname: gesvd
+  cname: gesdd
   types:
     - Float
     - Double

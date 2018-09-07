@@ -7,12 +7,12 @@
 #include <ATen/core/Backend.h>
 #include <ATen/core/WrapDimMinimal.h>
 
-#include <ATen/detail/VariableHooksInterface.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 namespace at {
 
 Type& TensorImpl::type() const {
-  return at::getMaybeVariableType(this);
+  return at::getType(this);
 }
 
 Tensor& TensorImpl::grad() {
