@@ -389,9 +389,6 @@ endif()
 
 # ---[ Test binaries.
 if (BUILD_TEST)
-  # TODO(orionr): Enable all of this for Windows DLL when we
-  # can figure out how to get it to build
-  if (NOT (MSVC AND BUILD_SHARED_LIBS))
   set(Caffe2_ALL_TEST_SRCS ${Caffe2_CPU_TEST_SRCS})
   if (USE_CUDA)
     list(APPEND Caffe2_ALL_TEST_SRCS ${Caffe2_GPU_TEST_SRCS})
@@ -428,7 +425,6 @@ if (BUILD_TEST)
         install(TARGETS ${test_name} DESTINATION test)
       endif()
     endforeach()
-  endif()
   endif()
 
   # For special tests that explicitly uses dependencies, we add them here
