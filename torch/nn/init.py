@@ -178,7 +178,7 @@ def dirac_(tensor):
 def _calculate_fan_in_and_fan_out(tensor):
     dimensions = tensor.ndimension()
     if dimensions < 2:
-        raise ValueError("Fan in and fan out can not be computed for tensor with less than 2 dimensions")
+        raise ValueError("Fan in and fan out can not be computed for tensor with fewer than 2 dimensions")
 
     if dimensions == 2:  # Linear
         fan_in = tensor.size(1)
