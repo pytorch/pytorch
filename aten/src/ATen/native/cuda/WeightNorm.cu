@@ -349,7 +349,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
        {
          using accscalar_t = acc_type<scalar_t, true>;
 
-         weight_norm_fwd_first_dim_kernel
+         weight_norm_fwd_first_dim_kernel<scalar_t, accscalar_t>
            <<<v.size(0), 
               BLOCK, 
               BLOCK*sizeof(accscalar_t),
@@ -379,7 +379,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
        {
          using accscalar_t = acc_type<scalar_t, true>;
         
-         weight_norm_fwd_last_dim_kernel
+         weight_norm_fwd_last_dim_kernel<scalar_t, accscalar_t>
            <<<(fast_dim_size+TILE_W-1)/TILE_W,
               dim3(TILE_W,TILE_H),
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
@@ -437,7 +437,7 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
        {
          using accscalar_t = acc_type<scalar_t, true>;
 
-	 weight_norm_bwd_first_dim_kernel
+	 weight_norm_bwd_first_dim_kernel<scalar_t, accscalar_t>
 	   <<<grad_w.size(0), 
 	      BLOCK, 
 	      BLOCK*sizeof(accscalar_t),
@@ -469,7 +469,7 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
        {
          using accscalar_t = acc_type<scalar_t, true>;
 
-         weight_norm_bwd_last_dim_kernel
+         weight_norm_bwd_last_dim_kernel<scalar_t, accscalar_t>
            <<<(fast_dim_size+TILE_W-1)/TILE_W,
               dim3(TILE_W,TILE_H), 
               (TILE_W*TILE_H + TILE_W)*sizeof(accscalar_t),
