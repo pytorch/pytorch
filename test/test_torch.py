@@ -1080,7 +1080,7 @@ class TestTorch(TestCase):
 
     @skipIfRocm
     def test_pdist_empty(self):
-        devices = ['cpu']
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             shape = (0, 2)
             x = torch.randn(shape, device=device)
@@ -1098,7 +1098,7 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_pdist_scipy(self):
         from scipy.spatial.distance import pdist
-        devices = ['cpu']
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             for shape in [(4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
@@ -1109,13 +1109,13 @@ class TestTorch(TestCase):
                         actual = torch.pdist(x, p=p)
                         # pdist doesn't handle 0 or inf norm properly
                         if p == 0:
-                            expected = pdist(x, 'hamming') * x.shape[1]
+                            expected = pdist(x.cpu(), 'hamming') * x.shape[1]
                         elif p == float('inf'):
-                            expected = pdist(x, lambda a, b: np.abs(a - b).max())
+                            expected = pdist(x.cpu(), lambda a, b: np.abs(a - b).max())
                         else:
-                            expected = pdist(x, 'minkowski', p=p)
+                            expected = pdist(x.cpu(), 'minkowski', p=p)
                         self.assertEqual(expected.shape, actual.shape)
-                        self.assertTrue(np.allclose(expected, actual.numpy()))
+                        self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
