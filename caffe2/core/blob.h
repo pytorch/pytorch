@@ -122,6 +122,9 @@ class CAFFE2_API Blob final {
         std::is_default_constructible<T>::value,
         "GetMutable can't be called with non-default-constructible types. "
         "Try using specialized methods");
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "Use GetMutableTensor(DeviceType) instead");
     if (IsType<T>()) {
       return static_cast<T*>(pointer_);
     } else {

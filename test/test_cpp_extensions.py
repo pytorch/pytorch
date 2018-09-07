@@ -269,7 +269,7 @@ class TestCppExtension(common.TestCase):
     def test_complex_registration(self):
         cpp_source = '''
         #include <ATen/detail/ComplexHooksInterface.h>
-        #include <ATen/detail/VariableHooksInterface.h>
+        #include <ATen/core/VariableHooksInterface.h>
         #include <ATen/Type.h>
         #include <ATen/CPUFloatType.h>
 

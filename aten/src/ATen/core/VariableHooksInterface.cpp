@@ -1,4 +1,4 @@
-#include <ATen/detail/VariableHooksInterface.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 namespace at {
 

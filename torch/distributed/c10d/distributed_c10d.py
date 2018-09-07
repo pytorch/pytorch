@@ -40,7 +40,10 @@ class GroupMember(object):
     NON_GROUP_MEMBER = object()
 
 
-# Cached process groups, map from ProcessGroup to (DistBackend, Store)
+# Cached process groups
+# For NCCL and GLOO pg, it is a map from ProcessGroup to (DistBackend, Store)
+# For MPI pg, it is a map from ProcessGroup to (DistBackend, Bool), where bool
+# represents if the ProcessGroup objects is part of the group
 _pg_map = {}
 # Process group's names, map from ProcessGroup to str
 _pg_names = {}
@@ -60,7 +63,15 @@ def _rank_not_in_group(group):
     Helper that checks if the current process's rank is not in a given group
 
     """
-    return group == GroupMember.NON_GROUP_MEMBER
+    default_backend, _ = _pg_map[get_default_group()]
+    if default_backend != DistBackend.MPI:
+        return group == GroupMember.NON_GROUP_MEMBER
+    else:
+        if group == GroupMember.WORLD:
+            return False
+        else:
+            _, in_group = _pg_map[group]
+            return not in_group
 
 
 def _get_group_rank(group, rank):
@@ -105,6 +116,19 @@ def _check_default_pg():
     """
     assert _default_pg is not None, \
         "Default process group is not initialized"
+
+
+def _get_group_size(group):
+    """
+    Helper that gets a given group's world size
+
+    """
+    if group is GroupMember.WORLD:
+        _check_default_pg()
+        return _default_pg.size()
+    if group not in _pg_group_ranks:
+        raise RuntimeError("The given group does not exist")
+    return len(_pg_group_ranks[group])
 
 
 def is_mpi_available():
@@ -184,7 +208,8 @@ def init_process_group(backend,
             raise RuntimeError("Distributed package doesn't have MPI built in")
 
         _default_pg = ProcessGroupMPI([])
-        _pg_map[_default_pg] = (DistBackend.MPI, None)
+        _pg_map[_default_pg] = (DistBackend.MPI, True)
+        _pg_names[_default_pg] = group_name
     else:
         # backward compatible API
         if init_method != "env://" and world_size != -1 and rank != -1:
@@ -212,7 +237,11 @@ def init_process_group(backend,
     _default_pg_init_method = init_method
 
 
-def _new_process_group_helper(world_size, rank, ranks, group_name=""):
+def _new_process_group_helper(world_size,
+                              rank,
+                              group_ranks,
+                              in_group=True,
+                              group_name=""):
     """
     Create a new distributed process group. And the new process group can be
     used to perform collective operations.
@@ -235,8 +264,8 @@ def _new_process_group_helper(world_size, rank, ranks, group_name=""):
     if default_backend == DistBackend.MPI:
         if not is_mpi_available():
             raise RuntimeError("Distributed package doesn't have MPI built in")
-        pg = ProcessGroupMPI(ranks)
-        _pg_map[pg] = (DistBackend.MPI, None)
+        pg = ProcessGroupMPI(group_ranks)
+        _pg_map[pg] = (DistBackend.MPI, in_group)
         _pg_names[pg] = group_name
     else:
         # Create the prefix store
@@ -268,18 +297,21 @@ def destroy_process_group(group=group.WORLD):
                                         groups including the default one will
                                         be destroyed.
     """
-    if _rank_not_in_group(group):
-        return
-
     global _pg_map
     global _pg_names
     global _pg_group_ranks
     global _default_pg
     global _default_pg_init_method
 
+    default_backend, _ = _pg_map[get_default_group()]
+    if (default_backend != DistBackend.MPI and
+            group == GroupMember.NON_GROUP_MEMBER):
+        return
+
     if group == GroupMember.WORLD:
         pg = _default_pg
-
+    else:
+        pg = group
     if _pg_map.get(pg, None) is None:
         raise RuntimeError("Invalid process group specified")
 
@@ -314,11 +346,11 @@ def get_rank(group=group.WORLD):
     if _rank_not_in_group(group):
         return -1
 
+    _check_default_pg()
     if group == GroupMember.WORLD:
-        _check_default_pg()
         return _default_pg.rank()
 
-    return group.rank()
+    return _get_group_rank(group, _default_pg.rank())
 
 
 def get_world_size(group=group.WORLD):
@@ -336,11 +368,7 @@ def get_world_size(group=group.WORLD):
     if _rank_not_in_group(group):
         return -1
 
-    if group == GroupMember.WORLD:
-        _check_default_pg()
-        return _default_pg.size()
-
-    return group.size()
+    return _get_group_size(group)
 
 
 def isend(tensor,
@@ -1009,6 +1037,7 @@ def new_group(ranks=None):
 
     # checks the input ranks
     if ranks is not None:
+        input_ranks = list(ranks)
         group_world_size = len(ranks)
         if group_world_size > global_world_size:
             raise RuntimeError("the new group's world size should be less or "
@@ -1024,19 +1053,26 @@ def new_group(ranks=None):
         else:
             group_rank = None
     else:
-        ranks = []
+        input_ranks = []
+        ranks = list(range(global_world_size))
         group_world_size = global_world_size
         group_rank = global_rank
 
     if default_backend == DistBackend.MPI:
-        pg = _new_process_group_helper(group_world_size, group_rank, ranks)
+        in_group = global_rank in ranks
+        pg = _new_process_group_helper(group_world_size,
+                                       group_rank,
+                                       input_ranks,
+                                       in_group)
+    else:
+        # Release ranks not in the group
+        if global_rank not in ranks:
+            return GroupMember.NON_GROUP_MEMBER
 
-    # Release ranks not in the group
-    if global_rank not in ranks:
-        return GroupMember.NON_GROUP_MEMBER
-
-    if default_backend != DistBackend.MPI:
-        pg = _new_process_group_helper(group_world_size, group_rank, ranks)
+        if default_backend != DistBackend.MPI:
+            pg = _new_process_group_helper(group_world_size,
+                                           group_rank,
+                                           input_ranks)
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {}
@@ -1047,18 +1083,3 @@ def new_group(ranks=None):
             if rank in ranks:
                 _pg_group_ranks[pg][rank] = ranks.index(rank)
     return pg
-
-
-# TODO: delete these functions and replace DDP with public functions
-DEFAULT_REDUCE_OPTIONS = AllreduceOptions()
-
-
-def _broadcast(tensor, src, process_group):
-    opts = BroadcastOptions()
-    opts.rootRank = src
-    opts.rootTensor = 0
-    return process_group.broadcast([tensor], opts)
-
-
-def _all_reduce(tensor, process_group, opts=DEFAULT_REDUCE_OPTIONS):
-    return process_group.allreduce([tensor], opts)
