@@ -242,7 +242,7 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
       auto size = r.intlist(1);
       auto generator = r.generator(2);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.isNone(4) ? at::ScalarType::Long : r.scalartype(4);
+      auto dtype = r.scalartypeWithDefault(4, at::ScalarType::Long);
       auto device = r.device(6);
       const auto options = TensorOptions()
           .dtype(dtype)
@@ -261,7 +261,7 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
       auto high = r.toInt64(0);
       auto size = r.intlist(1);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.isNone(3) ? at::ScalarType::Long : r.scalartype(3);
+      auto dtype = r.scalartypeWithDefault(3, at::ScalarType::Long);
       auto device = r.device(5);
       const auto options = TensorOptions()
           .dtype(dtype)
@@ -282,7 +282,7 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
       auto size = r.intlist(2);
       auto generator = r.generator(3);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.isNone(5) ? at::ScalarType::Long : r.scalartype(5);
+      auto dtype = r.scalartypeWithDefault(5, at::ScalarType::Long);
       auto device = r.device(7);
       const auto options = TensorOptions()
           .dtype(dtype)
@@ -302,7 +302,7 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
       auto high = r.toInt64(1);
       auto size = r.intlist(2);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.isNone(4) ? at::ScalarType::Long : r.scalartype(4);
+      auto dtype = r.scalartypeWithDefault(4, at::ScalarType::Long);
       auto device = r.device(6);
       const auto options = TensorOptions()
           .dtype(dtype)

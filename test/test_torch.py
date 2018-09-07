@@ -2945,9 +2945,6 @@ class TestTorch(TestCase):
         torch.set_default_dtype(saved_dtype)
 
     def test_randint_inference(self):
-        saved_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.float32)
-
         size = (2, 1)
         for args in [(3,), (1, 3)]:  # (low,) and (low, high)
             self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
@@ -2960,8 +2957,6 @@ class TestTorch(TestCase):
             out = torch.empty(size, dtype=torch.int64)
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, out=out, dtype=torch.int64).dtype)
-
-        torch.set_default_dtype(saved_dtype)
 
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
