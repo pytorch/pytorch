@@ -3,9 +3,9 @@
 
 namespace at { namespace native {
 
-Tensor _sum_cuda(const Tensor &self_) { return self_._sumall(); }
+Tensor _sum_cuda(const Tensor &self_) { return at::_sumall(self_); }
 
-Tensor _prod_cuda(const Tensor &self_) { return self_._prodall(); }
+Tensor _prod_cuda(const Tensor &self_) { return at::_prodall(self_); }
 
 Tensor &_sum_out_cuda(Tensor &result, const Tensor &self, int64_t dim,
                       bool keepdim) {

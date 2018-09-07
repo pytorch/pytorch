@@ -10,12 +10,12 @@
 
 template <typename T>
 bool exactly_equal(at::Tensor left, T right) {
-  return left._local_scalar().to<T>() == right;
+  return at::_local_scalar(left).to<T>() == right;
 }
 
 template <typename T>
 bool almost_equal(at::Tensor left, T right, T tolerance = 1e-4) {
-  return std::abs(left._local_scalar().to<T>() - right) < tolerance;
+  return std::abs(at::_local_scalar(left).to<T>() - right) < tolerance;
 }
 
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \
