@@ -43,24 +43,13 @@ class AffineChannelOp final : public Operator<Context> {
     const int N = X.dim32(0);
     const int C = X.dim32(1);
     const int HxW = X.size() / (N * C);
-    const std::array<int, 3> X_dims = {N, C, HxW};
-    const std::array<int, 3> scale_dims = {1, C, 1};
     Y->ResizeLike(X);
-    math::Mul<T, Context>(
-        3,
-        X_dims.data(),
-        3,
-        scale_dims.data(),
+    math::AffineChannel<T, Context, StorageOrder::NCHW>(
+        N,
+        C,
+        HxW,
         X.template data<T>(),
         scale.template data<T>(),
-        Y->template mutable_data<T>(),
-        &context_);
-    math::Add<T, Context>(
-        3,
-        X_dims.data(),
-        3,
-        scale_dims.data(),
-        Y->template data<T>(),
         bias.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);
@@ -80,21 +69,16 @@ class AffineChannelOp final : public Operator<Context> {
           "is_learnable = true.");
     }
     const int ndim = X.ndim();
+    const int N = X.dim32(0);
     const int C = X.dim32(ndim - 1);
-    const int rows = X.size() / C;
-    const int cols = C;
+    const int HxW = X.size() / (N * C);
     Y->ResizeLike(X);
-    math::RowwiseMul<T, Context>(
-        rows,
-        cols,
+    math::AffineChannel<T, Context, StorageOrder::NHWC>(
+        N,
+        C,
+        HxW,
         X.template data<T>(),
         scale.template data<T>(),
-        Y->template mutable_data<T>(),
-        &context_);
-    math::RowwiseAdd<T, Context>(
-        rows,
-        cols,
-        Y->template data<T>(),
         bias.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);

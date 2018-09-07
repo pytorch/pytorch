@@ -3,10 +3,9 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
 #include <ATen/core/Backend.h>
+#include <ATen/core/WrapDimMinimal.h>
 
 #include <ATen/core/VariableHooksInterface.h>
-
-#include <TH/THTensor.hpp>
 
 namespace at {
 

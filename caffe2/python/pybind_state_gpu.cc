@@ -22,10 +22,10 @@
 namespace caffe2 {
 namespace python {
 
-REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp<PythonOp<CPUContext, false>>);
+REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(
     PythonGradient,
-    GPUFallbackOp<PythonGradientOp<CPUContext, false>>);
+    GPUFallbackOp);
 
 REGISTER_CUDA_OPERATOR(PythonDLPack, PythonOp<CUDAContext, true>);
 REGISTER_CUDA_OPERATOR(

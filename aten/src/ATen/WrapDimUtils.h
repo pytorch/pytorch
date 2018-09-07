@@ -1,29 +1,9 @@
 #pragma once
 
+#include "ATen/core/WrapDimMinimal.h"
 #include "ATen/TensorImpl.h"
-#include <sstream>
 
 namespace at {
-
-static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wrap_scalar=true) {
-  if (dim_post_expr <= 0) {
-    if (!wrap_scalar) {
-      std::ostringstream oss;
-      oss << "dimension specified as " << dim << " but tensor has no dimensions";
-      throw std::runtime_error(oss.str());
-    }
-    dim_post_expr = 1; // this will make range [-1, 0]
-  }
-
-  int64_t min = -dim_post_expr;
-  int64_t max = dim_post_expr - 1;
-  AT_CHECK(
-      dim >= min && dim <= max,
-      "Dimension out of range (expected to be in range of [",
-      min, ", ", max, "], but got ", dim, ")");
-  if (dim < 0) dim += dim_post_expr;
-  return dim;
-}
 
 static inline int64_t maybe_wrap_dim(int64_t dim, TensorImpl *tensor) {
   return maybe_wrap_dim(dim, tensor->dim());
