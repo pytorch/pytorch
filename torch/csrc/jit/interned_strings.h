@@ -86,6 +86,7 @@ namespace torch { namespace jit {
   _(onnx, Greater)                 \
   _(onnx, Less)                    \
   _(onnx, Not)                     \
+  _(onnx, ATen)                    \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \
