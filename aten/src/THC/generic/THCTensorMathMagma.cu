@@ -321,18 +321,18 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 #endif
 }
 
-THC_API void THCTensor_(gesvd)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *a, const char *jobu)
+THC_API void THCTensor_(gesdd)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *a, const char *jobu)
 {
 #ifdef USE_MAGMA
   THCTensor *ra_ = THCTensor_(new)(state);
-  THCTensor_(gesvd2)(state, ru_, rs_, rv_,  ra_, a, jobu);
+  THCTensor_(gesdd2)(state, ru_, rs_, rv_,  ra_, a, jobu);
   THCTensor_(free)(state, ra_);
 #else
-  THError(NoMagma(gesvd));
+  THError(NoMagma(gesdd));
 #endif
 }
 
-THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a, const char *jobus)
+THC_API void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a, const char *jobus)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
@@ -392,7 +392,7 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
   magma_free_pinned(rs_data);
   magma_free_pinned(a_data);
 #else
-  THError(NoMagma(gesvd2));
+  THError(NoMagma(gesdd2));
 #endif
 }
 
