@@ -22,10 +22,14 @@ from caffe2.proto import caffe2_pb2
 
 import unittest
 
+_has_gpu_support = workspace.has_gpu_support or workspace.has_hip_support
+_num_gpu_devices = workspace.NumHipDevices() if workspace.has_hip_support else \
+                    workspace.NumCudaDevices()
 
-if workspace.has_gpu_support and workspace.NumCudaDevices() > 0:
+if _has_gpu_support and _num_gpu_devices > 0:
     gpu_device_option = caffe2_pb2.DeviceOption()
-    gpu_device_option.device_type = caffe2_pb2.CUDA
+    gpu_device_option.device_type = caffe2_pb2.HIP if workspace.has_hip_support else \
+                                        caffe2_pb2.CUDA
     cpu_device_option = caffe2_pb2.DeviceOption()
     gpu_device_checker = device_checker.DeviceChecker(
         0.01, [gpu_device_option]
