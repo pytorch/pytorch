@@ -6954,16 +6954,6 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
-
-    # nn functional test
-    # schema not found for onnx node
-    'test_nn_instance_norm',
-
-    # output no dependence with traced input, tracer confusion
-    'test_nn_rrelu',
-
-    # aten op has additional cudnn argument
-    'test_nn_group_norm',
 }
 
 # known to be failing in script
@@ -7030,13 +7020,16 @@ EXCLUDE_SCRIPT = {
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
     'test_nn_adaptive_max_pool3d',
+    'test_nn_ctc_loss',
 
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
+    'test_nn_max_unpool3d',
     'test_nn_embedding',
     'test_nn_embedding_bag',
     'test_nn_batch_norm',
+
     # aten op has additional cudnn argument
     'test_nn_group_norm',
     'test_nn_nll_loss',
@@ -7066,6 +7059,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
     'test_nn_instance_norm',
+    'test_nn_grid_sample',
+    'test_nn_gumbel_softmax',
 }
 
 
@@ -7349,6 +7344,7 @@ nn_functional_tests = [
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
     ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
+    ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
     ('lp_pool1d', (S, S, S), (2, 3, 2,)),
     ('lp_pool2d', (S, S, S, S), (2, 3, 2,)),
     ('adaptive_max_pool1d', (S, S, S), (5,)),
@@ -7411,24 +7407,27 @@ nn_functional_tests = [
     ('normalize', (S, S, S), (),),
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
-
-    # distribution sampling make result different in every run for below ops:
-    # ('gumbel_softmax', (S, S), (2,),),
-    #
-    #  No high order gradient for the below ops
-    # ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
-    # ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
-    # ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    # ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),),),
-    # ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)),),),
-    # ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), (torch.randint(1, S + 1, (S, S),
-    # dtype=torch.long), torch.full((S,), S, dtype=torch.long), torch.randint(1,S,(S,), dtype=torch.long))),
+    ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
+    ('gumbel_softmax', (S, S), (2,),),
+    ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
+    ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)), \
+                                   1, 1, non_differentiable(torch.randn(S))),),
+    ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
+                                                           non_differentiable(torch.randn(3, 2))),),
+    ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), \
+     (torch.randint(1, S + 1, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
+      torch.randint(1, S, (S,), dtype=torch.long))),
 ]
 
 
 # Test names in this set are only checked for a single derivative
 nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'pdist',
+    'multilabel_margin_loss',
+    'max_unpool3d',
+    'multi_margin_loss',
+    'binary_cross_entropy',
+    'ctc_loss',
 ])
 
 
