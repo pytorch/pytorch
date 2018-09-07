@@ -13,6 +13,7 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/typeid.h"
 #include "caffe2/proto/caffe2_pb.h"
+#include <ATen/core/intrusive_ptr.h>
 
 namespace caffe2 {
 
@@ -23,7 +24,7 @@ namespace caffe2 {
  * properly when the blob is deallocated or re-allocated with a new type. A blob
  * could contain anything, although the most common case is to contain a Tensor.
  */
-class CAFFE2_API Blob final {
+class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
  public:
   using DestroyCall = void(void*);
 
@@ -277,6 +278,10 @@ class CAFFE2_API Blob final {
 
 inline void swap(Blob& lhs, Blob& rhs) {
   lhs.swap(rhs);
+}
+
+inline std::ostream& operator<<(std::ostream & out, const Blob & v) {
+  return out << "Blob";
 }
 
 }  // namespace caffe2

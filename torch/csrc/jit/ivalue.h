@@ -4,6 +4,7 @@
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
+#include "caffe2/core/blob.h"
 
 #include <type_traits>
 
@@ -65,7 +66,7 @@ using DoubleList = ConstantList<double>;
 // retain/release calls.
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
+  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList) _(Blob)
 
 struct TORCH_API IValue final {
   IValue()
@@ -123,6 +124,20 @@ struct TORCH_API IValue final {
   at::Tensor toTensor() const & {
     JIT_ASSERT(isTensor());
     return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensor>());
+  }
+
+  IValue(caffe2::Blob blob)
+  : tag(Tag::Blob), is_intrusive_ptr(true) {
+    payload.as_intrusive_ptr = c10::make_intrusive<caffe2::Blob>(std::move(blob)).release();
+  }
+  bool isBlob() const { return Tag::Blob == tag; }
+  caffe2::Blob& toBlob() & {
+    JIT_ASSERT(isBlob());
+    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
+  }
+  const caffe2::Blob& toBlob() const & {
+    JIT_ASSERT(isBlob());
+    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
   }
 
   // Tuple
