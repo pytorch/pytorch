@@ -63,8 +63,9 @@ IF "%REL_WITH_DEB_INFO%"=="1" (
   set BUILD_TYPE=RelWithDebInfo
 )
 
+:: sccache will fail if all cores are used for compiling
 IF NOT DEFINED MAX_JOBS (
-  set MAX_JOBS=%NUMBER_OF_PROCESSORS%
+  set /a MAX_JOBS=%NUMBER_OF_PROCESSORS% - 1
 )
 
 IF NOT DEFINED BUILD_SHARED_LIBS (
