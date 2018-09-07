@@ -181,6 +181,7 @@ goto:eof
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_GLOG=OFF ^
                   -DUSE_GFLAGS=OFF ^
+                  -DUSE_SYSTEM_EIGEN_INSTALL=OFF ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^

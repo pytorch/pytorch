@@ -1,7 +1,7 @@
 #ifndef THP_BYTE_ORDER_H
 #define THP_BYTE_ORDER_H
 
-#include <stdint.h>
+#include <cstdint>
 #include <stddef.h>
 #include <THHalf.h>
 

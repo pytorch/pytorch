@@ -1,11 +1,3 @@
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (MSVC AND BUILD_SHARED_LIBS)
-list(APPEND Caffe2_CPU_SRCS	utils/proto_wrap.cc)
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
-return()
-endif()
-
 list(APPEND Caffe2_CPU_SRCS
   utils/proto_wrap.cc
   utils/proto_utils.cc

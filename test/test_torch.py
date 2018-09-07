@@ -218,8 +218,7 @@ class TestTorch(TestCase):
                        'sparse_resize_and_clear_',
                        )
         test_namespace(torch.nn)
-        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear',
-                       'dropout', 'dropout2d', 'dropout3d', 'feature_alpha_dropout')
+        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
 
@@ -7762,6 +7761,35 @@ class TestTorch(TestCase):
 
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
+
+    def test_serialization_storage_slice(self):
+        # Generated using:
+        #
+        # t = torch.zeros(2);
+        # s1 = t.storage()[:1]
+        # s2 = t.storage()[1:]
+        # torch.save((s1, s2), 'foo.ser')
+        #
+        # with PyTorch 0.3.1
+        serialized = (b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9\x03'
+                      b'.\x80\x02}q\x00(X\n\x00\x00\x00type_sizesq\x01}q\x02(X\x03'
+                      b'\x00\x00\x00intq\x03K\x04X\x05\x00\x00\x00shortq\x04K\x02X'
+                      b'\x04\x00\x00\x00longq\x05K\x04uX\x10\x00\x00\x00protocol_versionq'
+                      b'\x06M\xe9\x03X\r\x00\x00\x00little_endianq\x07\x88u.\x80\x02'
+                      b'(X\x07\x00\x00\x00storageq\x00ctorch\nFloatStorage\nq\x01X\x0e'
+                      b'\x00\x00\x0094279043900432q\x02X\x03\x00\x00\x00cpuq\x03K\x02'
+                      b'X\x0e\x00\x00\x0094279029750368q\x04K\x00K\x01\x87q\x05tq\x06'
+                      b'Q(h\x00h\x01X\x0e\x00\x00\x0094279043900432q\x07h\x03K\x02X'
+                      b'\x0e\x00\x00\x0094279029750432q\x08K\x01K\x01\x87q\ttq\nQ'
+                      b'\x86q\x0b.\x80\x02]q\x00X\x0e\x00\x00\x0094279043900432q'
+                      b'\x01a.\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                      b'\x00\x00\x00\x00')
+
+        buf = io.BytesIO(serialized)
+        (s1, s2) = torch.load(buf)
+        self.assertEqual(s1[0], 0)
+        self.assertEqual(s2[0], 0)
+        self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +

@@ -190,7 +190,7 @@ class CAFFE2_API OpSchema {
     uint64_t flops{0}; // Floating point operations.
     uint64_t bytes_read{0}; // Total memory read.
     uint64_t bytes_written{0}; // Total memory written.
-    uint64_t params_bytes{0}; // Memory footprint of parameters
+    uint64_t params_bytes{0}; // Memory read for parameters.
   };
   /**
    * @brief Registers a function that takes in an OperatorDef
@@ -518,8 +518,22 @@ inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
 
 // Helper function
 inline uint64_t nElemFromDim(const TensorShape& X, int dim = 0) {
+  CAFFE_ENFORCE_GE(dim, 0, "Invalid maximum index specified");
+
   uint64_t nElem = 1;
   for (int i = dim; i < X.dims_size(); ++i) {
+    nElem *= X.dims(i);
+  }
+  return nElem;
+}
+
+// Helper function
+inline uint64_t nElemBetweenDim(const TensorShape& X, int start, int stop) {
+  CAFFE_ENFORCE_GE(start, 0, "Invalid maximum index specified");
+  CAFFE_ENFORCE_LE(stop, X.dims_size(), "Invalid maximum index specified");
+
+  uint64_t nElem = 1;
+  for (int i = start; i < stop; ++i) {
     nElem *= X.dims(i);
   }
   return nElem;

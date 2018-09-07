@@ -33,7 +33,7 @@ enum class CudaMemoryPoolType {
  *
  * The memory pool is set up during caffe2's global initialization time.
  */
-CAFFE2_API CudaMemoryPoolType GetCudaMemoryPoolType();
+CAFFE2_CUDA_API CudaMemoryPoolType GetCudaMemoryPoolType();
 
 /**
  * A struct to host thread-local cuda objects.
@@ -44,7 +44,7 @@ CAFFE2_API CudaMemoryPoolType GetCudaMemoryPoolType();
  * and deallocating these objects at the thread scope. This class is solely
  * used inside CUDAContext and should not be used externally.
  */
-class CAFFE2_API ThreadLocalCUDAObjects {
+class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   friend class CUDAContext;
 
  private:
@@ -135,9 +135,9 @@ class CAFFE2_API ThreadLocalCUDAObjects {
 #endif // CAFFE2_USE_CUDNN
 };
 
-CAFFE2_API BaseStaticContext* GetCUDAStaticContext();
+CAFFE2_CUDA_API BaseStaticContext* GetCUDAStaticContext();
 
-class CAFFE2_API CUDAContext final : public BaseContext {
+class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
  public:
   // The default cuda context constructor.
   explicit CUDAContext(const int gpu_id = -1);
@@ -332,7 +332,7 @@ inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  */
-struct CAFFE2_API PinnedCPUAllocator final : CPUAllocator {
+struct CAFFE2_CUDA_API PinnedCPUAllocator final : CPUAllocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
   std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
@@ -381,7 +381,7 @@ struct CAFFE2_API PinnedCPUAllocator final : CPUAllocator {
   DefaultCPUAllocator baseAllocator_;
 };
 
-class CAFFE2_API CUDAStaticContext final : public BaseStaticContext {
+class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
  public:
   std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
 
@@ -403,7 +403,7 @@ class CAFFE2_API CUDAStaticContext final : public BaseStaticContext {
   }
 
   void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(GetDeviceType());
+    device->set_device_type(TypeToProto(GetDeviceType()));
     device->set_cuda_gpu_id(GetGPUIDForPointer(data));
   }
 

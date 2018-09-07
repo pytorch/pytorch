@@ -64,6 +64,15 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
+# sccache will fail for CUDA builds if all cores are used for compiling
+if [ -z "$MAX_JOBS" ]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
+    MAX_JOBS=`expr $(nproc) - 1`
+  else
+    MAX_JOBS=$(nproc)
+  fi
+fi
+
 report_compile_cache_stats() {
   if [[ -n "${SCCACHE}" ]]; then
     "$SCCACHE" --show-stats
@@ -184,13 +193,6 @@ if [[ -x "$(command -v cmake3)" ]]; then
 else
     CMAKE_BINARY=cmake
 fi
-# sccache will fail for CUDA builds if all cores are used for compiling
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
-  MAX_JOBS=`expr $(nproc) - 1`
-else
-  MAX_JOBS=$(nproc)
-fi
-
 
 ###############################################################################
 # Configure and make

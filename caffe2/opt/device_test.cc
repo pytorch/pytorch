@@ -27,13 +27,13 @@ TEST(DeviceTest, InsertCopies) {
       ADD_ARG(def, "pad", i, 0);
       ADD_ARG(def, "order", s, "NCHW");
       def->add_output("X");
-      def->mutable_device_option()->set_device_type(caffe2::CPU);
+      def->mutable_device_option()->set_device_type(caffe2::PROTO_CPU);
     } else {
       caffe2::OperatorDef* def = net.add_op();
       def->set_type("Relu");
       def->add_input("X");
       def->add_output("X");
-      def->mutable_device_option()->set_device_type(caffe2::CPU);
+      def->mutable_device_option()->set_device_type(caffe2::PROTO_CPU);
     }
   }
   auto nn = caffe2::convertToNNModule(net);
@@ -42,7 +42,7 @@ TEST(DeviceTest, InsertCopies) {
     if (nn::is<Relu>(node)) {
       auto annot = nn::get<NeuralNetOperator>(node)->getMutableAnnotation();
       auto c2_annot = dyn_cast<caffe2::Caffe2Annotation>(annot);
-      c2_annot->setDeviceType(caffe2::OPENCL);
+      c2_annot->setDeviceType(caffe2::PROTO_OPENCL);
     }
   }
 
@@ -57,7 +57,7 @@ TEST(DeviceTest, InsertCopies) {
         NOM_REQUIRE_OR_RET_FALSE(annot);
         auto c2_annot = dyn_cast<caffe2::Caffe2Annotation>(annot);
         NOM_REQUIRE_OR_RET_FALSE(c2_annot);
-        return c2_annot->getDeviceType() == caffe2::OPENCL;
+        return c2_annot->getDeviceType() == caffe2::PROTO_OPENCL;
       },
       [](NNGraph& g) {
         return g.createNode(nom::util::make_unique<GenericOperator>());
