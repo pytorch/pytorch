@@ -314,6 +314,8 @@ class TestPooling(hu.HypothesisTestCase):
                             order, op_type, engine, gc, dc):
         # CuDNN 5 does not support deterministic max pooling.
         assume(workspace.GetCuDNNVersion() >= 6000 or op_type != "MaxPool")
+        if engine == 'MIOPEN':
+            assume(op_type != "LpPool" and order == "NCHW")
         op = core.CreateOperator(
             op_type,
             ["X"],
