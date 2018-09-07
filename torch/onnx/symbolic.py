@@ -1097,11 +1097,11 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
             # The ONNX RNN/GRU/LSTM produce an output of dimensions
             #   seq_len, num_directions, batch, hidden_size
             # We have to convert to match pytorch's expected
-            #   seq_len, batch, hidden_size * num_directions
+            #   seq_len, batch, num_directions * hidden_size
             # by first moving num_directions to the end with
             # Transpose, and then combining it with hidden_size
             # with Reshape.
-            prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 3, 1])
+            prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 1, 3])
             prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 0, -1])))
         else:
             prev_output = g.op('Squeeze', prev_output, axes_i=[1])
