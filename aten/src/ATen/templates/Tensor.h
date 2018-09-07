@@ -194,12 +194,12 @@ struct AT_API Tensor {
   //toLongData(), toFloatData() etc.
   #define TO_TYPE_DATA(T,name,_) \
   T * to##name##Data() const;
-  AT_FORALL_SCALAR_TYPES(TO_TYPE_DATA)
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_TYPE_DATA)
   #undef TO_TYPE_DATA
 
   #define TO_C_TYPE(T,name,_) \
   T toC##name () const;
-  AT_FORALL_SCALAR_TYPES(TO_C_TYPE)
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_C_TYPE)
   #undef TO_C_TYPE
 
   template<typename T, size_t N>

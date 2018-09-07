@@ -159,6 +159,15 @@ static double dispatch_to_CDouble(const Tensor & self) {
   return self.toCDouble();
 }
 
+static std::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
+  AutoNoGIL no_gil;
+  DeviceGuard device_guard(self);
+  if (self.numel() != 1) {
+    throw ValueError("only one element tensors can be converted to Python scalars");
+  }
+  return self.toCComplexDouble();
+}
+
 static int64_t dispatch_to_CLong(const Tensor & self) {
   AutoNoGIL no_gil;
   DeviceGuard device_guard(self);
@@ -365,6 +374,8 @@ static PyObject * THPVariable_item(PyObject* self, PyObject* args)
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (self_.is_floating_point()) {
     return wrap(dispatch_to_CDouble(self_));
+  } else if (self_.is_complex()) {
+    return wrap(dispatch_to_CComplexDouble(self_));
   } else {
     return wrap(dispatch_to_CLong(self_));
   }

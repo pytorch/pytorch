@@ -10,6 +10,7 @@
 /// intrinsics directly on the Half type from device code.
 
 #include <ATen/core/Macros.h>
+#include <ATen/core/C++17.h>
 
 #include <cmath>
 #include <cstdint>
@@ -19,6 +20,7 @@
 #include <string>
 #include <utility>
 #include <sstream>
+#include <complex>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -74,18 +76,45 @@ struct alignas(4) ComplexHalf {
   Half real_;
   Half imag_;
   ComplexHalf() = default;
+  Half real() const { return real_; }
+  Half imag() const { return imag_; }
+  inline AT_HOSTDEVICE ComplexHalf(std::complex<float> value)
+    : real_(value.real()), imag_(value.imag()) {}
+  inline AT_HOSTDEVICE operator std::complex<float>() const {
+    return {real_, imag_};
+  }
 };
 
+template <typename T>
+struct is_complex : public std::false_type {};
+
+template <typename T>
+struct is_complex<std::complex<T>> : public std::true_type {};
+
+template <>
+struct is_complex<ComplexHalf> : public std::true_type {};
+
+// Extract double from std::complex<double>; is identity otherwise
+// TODO: Write in more idiomatic C++17
+template <typename T> struct scalar_value_type                  { typedef T type; };
+template <typename T> struct scalar_value_type<std::complex<T>> { typedef T type; };
+template <>           struct scalar_value_type<ComplexHalf>     { typedef Half type; };
+
 template <typename To, typename From>
-To convert(From f) {
+typename std::enable_if<c10::guts::negation<c10::guts::conjunction<is_complex<From>, c10::guts::negation<is_complex<To>>>>::value, To>::type convert(From f) {
   return static_cast<To>(f);
+}
+
+template <typename To, typename From>
+typename std::enable_if<c10::guts::conjunction<is_complex<From>, c10::guts::negation<is_complex<To>>>::value, To>::type convert(From f) {
+  return static_cast<To>(f.real());
 }
 
 // skip isnan and isinf check for integral types
 template <typename To, typename From>
 typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
     From f) {
-  using limit = std::numeric_limits<To>;
+  using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (!limit::is_signed && std::numeric_limits<From>::is_signed) {
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
@@ -97,9 +126,9 @@ typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
 }
 
 template <typename To, typename From>
-typename std::enable_if<!std::is_integral<From>::value, bool>::type overflows(
+typename std::enable_if<std::is_floating_point<From>::value, bool>::type overflows(
     From f) {
-  using limit = std::numeric_limits<To>;
+  using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
     return false;
   }
@@ -107,6 +136,23 @@ typename std::enable_if<!std::is_integral<From>::value, bool>::type overflows(
     return true;
   }
   return f < limit::lowest() || f > limit::max();
+}
+
+
+template <typename To, typename From>
+typename std::enable_if<is_complex<From>::value, bool>::type overflows(
+    From f) {
+  // casts from complex to real are considered to overflow if the
+  // imaginary component is non-zero
+  if (!is_complex<To>::value && f.imag() != 0) {
+    return true;
+  }
+  // Check for overflow componentwise
+  // (Technically, the imag overflow check is guaranteed to be false
+  // when !is_complex<To>, but any optimizer worth its salt will be
+  // able to figure it out.)
+  return overflows<typename scalar_value_type<To>::type, typename From::value_type>(f.real()) ||
+         overflows<typename scalar_value_type<To>::type, typename From::value_type>(f.imag());
 }
 
 template <typename To, typename From>
