@@ -52,7 +52,11 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
       py_inputs[i] = py::cast(enter_info.second[i]);
     }
     auto out = func(*py_inputs);
-    if(!PyTuple_Check(out.ptr())) {
+    if (out.ptr() == Py_None) {
+      AT_ERROR("The traced function didn't return any values! Side-effects are not "
+               "captured in traces, so it would be a no-op.");
+    }
+    if (!PyTuple_Check(out.ptr())) {
       out = py::make_tuple(out);
     }
     tracer::exit(toStack(out));

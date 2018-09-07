@@ -1,5 +1,5 @@
 #include "ATen/cuda/CUDAContext.h"
-#include "THC/THCGeneral.h"
+#include "THC/THCGeneral.hpp"
 
 namespace at { namespace cuda { 
 
@@ -43,6 +43,10 @@ void setCurrentCUDAStream(CUDAStream stream) {
 }
 void uncheckedSetCurrentCUDAStream(CUDAStream stream) {
   detail::CUDAStream_uncheckedSetStream(stream.internals());
+}
+
+Allocator* getCUDADeviceAllocator() {
+  return at::globalContext().getTHCState()->cudaDeviceAllocator;
 }
 
 /* Handles */

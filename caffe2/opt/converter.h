@@ -54,7 +54,7 @@ private:
   std::string Device = "";
   caffe2::OperatorDef OpDef;
   bool OpDefExists = false;
-  int DeviceType = caffe2::DeviceType::CPU;
+  int DeviceType = caffe2::DeviceTypeProto::PROTO_CPU;
 };
 
 CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);

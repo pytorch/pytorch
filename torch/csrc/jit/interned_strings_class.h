@@ -1,4 +1,4 @@
-#include <stdint.h>
+#include <cstdint>
 #include <iostream>
 #include <mutex>
 #include <sstream>

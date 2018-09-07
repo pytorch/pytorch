@@ -210,7 +210,7 @@ def parse_options():
 
 def main():
     options = parse_options()
-    paths = map(normalize_directory_path, options.paths)
+    paths = list(map(normalize_directory_path, options.paths))
     if options.revision:
         files = get_changed_files(options.revision, paths, options.verbose)
     else:

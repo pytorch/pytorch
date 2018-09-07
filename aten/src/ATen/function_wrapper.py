@@ -93,7 +93,7 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
     return at::native::${api_name}(${type_method_actuals}, options());
 }
 """)
-# 4. add virtual override to TypeDerived.h
+# 4. add override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
 ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
