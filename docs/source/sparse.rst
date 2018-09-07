@@ -82,7 +82,7 @@ An empty sparse tensor can be constructed by specifying its size:
     whether or not they are coalesced or not (e.g.,
     :func:`torch.sparse.FloatTensor._values` and
     :func:`torch.sparse.FloatTensor._indices`, as well as
-    :func:`torch.Tensor._sparse_mask`).  These operators are
+    :func:`torch.Tensor.sparse_mask`).  These operators are
     prefixed by an underscore to indicate that they reveal internal
     implementation details and should be used with care, since code
     that works with coalesced sparse tensors may not work with
