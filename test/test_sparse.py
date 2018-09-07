@@ -863,8 +863,8 @@ class TestSparse(TestCase):
                                          torch.randn(dense_dims_shape, dtype=self.value_dtype, device=self.device),
                                          torch.Size(sparse_size))
             with self.assertRaisesRegex(
-                RuntimeError,
-                "add: expected 'self' and 'other' to have same size"):
+                    RuntimeError,
+                    "add: expected 'self' and 'other' to have same size"):
                 x + sparse_y
 
         test_shape([3, 4], [1, 4], [4, 4, 4], [3, 4, 4])
@@ -1045,10 +1045,10 @@ class TestSparse(TestCase):
     @skipIfRocm
     def test_log1p(self):
         input = torch.sparse_coo_tensor(
-                torch.LongTensor([[0], [1], [2]]).transpose(1, 0).cuda(),
-                torch.FloatTensor([3, 4, 5]).cuda(),
-                torch.Size([3]),
-                device=self.device)
+            torch.LongTensor([[0], [1], [2]]).transpose(1, 0).cuda(),
+            torch.FloatTensor([3, 4, 5]).cuda(),
+            torch.Size([3]),
+            device=self.device)
         self._test_log1p_tensor(input, [3., 4., 5.])
 
         # test uncoalesced input
@@ -1060,17 +1060,17 @@ class TestSparse(TestCase):
         self._test_log1p_tensor(input_uncoalesced, [3., 4., 5.])
 
         input = torch.sparse_coo_tensor(
-                torch.zeros([2, 0]),
-                torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
-                torch.Size([0, 0, 5, 5, 5, 5, 5, 5, 0]),
-                device=self.device)
+            torch.zeros([2, 0]),
+            torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+            torch.Size([0, 0, 5, 5, 5, 5, 5, 5, 0]),
+            device=self.device)
         self._test_log1p_tensor(input, torch.zeros([0, 0, 5, 5, 5, 5, 5, 5, 0]))
 
         input = torch.sparse_coo_tensor(
-                torch.zeros([1, 5]),
-                torch.zeros([5, 6, 0]),
-                torch.Size([5, 6, 0]),
-                device=self.device)
+            torch.zeros([1, 5]),
+            torch.zeros([5, 6, 0]),
+            torch.Size([5, 6, 0]),
+            device=self.device)
         self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
 
     @skipIfRocm
@@ -1187,7 +1187,8 @@ class TestSparse(TestCase):
                             include_size = include_size or use_cuda
                             dtype = torch.float64
                             long_dtype = torch.int64
-                            device = torch.device('cpu') if not use_cuda else torch.device(torch.cuda.device_count() - 1)
+                            device = torch.device('cpu') if not use_cuda else \
+                                torch.device(torch.cuda.device_count() - 1)
                             indices = torch.tensor(([0], [2]), dtype=long_dtype) if use_tensor_idx else ([0], [2])
                             if test_empty_tensor:
                                 values = self.ValueTensor(1, 0)
@@ -1595,17 +1596,23 @@ class TestSparseOneOff(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @skipIfRocm
     def test_cuda_from_cpu(self):
-        with self.assertRaisesRegex(RuntimeError, "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4),
                                      [3, 4, 4])
 
-        with self.assertRaisesRegex(RuntimeError, "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
             torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                      torch.randn(4, 4, 4, 0),
                                      [3, 4, 4, 0])
 
-        with self.assertRaisesRegex(RuntimeError, "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "backend of indices \\(CUDA\\) must match backend of values \\(CPU\\)"):
             torch.sparse.FloatTensor(torch.LongTensor(1, 0).cuda(),
                                      torch.randn(0, 4, 4, 0),
                                      [0, 4, 4, 0])
