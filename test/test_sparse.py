@@ -651,7 +651,6 @@ class TestSparse(TestCase):
         test_shape(0, 100, 100, 0)
         test_shape(1000, 0, 100, 0)
         test_shape(1000, 100, 0, 0)
-        test_shape(1000, 100, 0, 20)
 
     @skipIfRocm
     def test_dsmm(self):
