@@ -145,7 +145,7 @@ Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
 }
 
 Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
-    self._bernoulli_(p, gen);
+    at::_bernoulli_(self, p, gen);
     return self;
 }
 

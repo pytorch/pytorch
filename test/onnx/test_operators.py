@@ -436,6 +436,10 @@ class TestOperators(TestCase):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.unsqueeze(len(x.shape)), x)
 
+    def test_batchnorm_noaffine(self):
+        x = Variable(torch.randn(128, 128, 1, 1), requires_grad=True)
+        self.assertONNX(nn.BatchNorm2d(128, affine=False), x)
+
     def test_symbolic_override(self):
         """Lifted from fast-neural-style: custom implementation of instance norm
         to be mapped to ONNX operator"""

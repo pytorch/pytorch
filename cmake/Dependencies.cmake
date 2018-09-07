@@ -83,9 +83,10 @@ elseif(BLAS STREQUAL "MKL")
   else()
     find_package(MKL QUIET)
   endif()
+  include(${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake)
   if(MKL_FOUND)
     include_directories(SYSTEM ${MKL_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${MKL_LIBRARIES})
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -184,9 +185,13 @@ endif()
 
 # ---[ Googletest and benchmark
 if(BUILD_TEST)
+  # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+  set(TEMP_CMAKE_DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
+
   # We will build gtest as static libs and embed it directly into the binary.
-  set(BUILD_SHARED_LIBS OFF)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+
   # For gtest, we will simply embed it into our test binaries, so we won't
   # need to install it.
   set(BUILD_GTEST ON)
@@ -207,8 +212,10 @@ if(BUILD_TEST)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
   include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark/include)
 
-  # Recover the build shared libs option.
-  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+  # Recover build options. Unfortunately gtest modifies CMAKE_DEBUG_POSTFIX
+  # in some versions as detailed at https://github.com/google/googletest/issues/1334
+  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+  set(CMAKE_DEBUG_POSTFIX ${TEMP_CMAKE_DEBUG_POSTFIX} CACHE BOOL "Debug postfix" FORCE)
 endif()
 
 # ---[ LMDB
@@ -756,9 +763,6 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (NOT BUILD_ATEN_MOBILE)
   if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
@@ -767,7 +771,6 @@ if (NOT BUILD_ATEN_MOBILE)
     endif()
     include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
   endif()
-endif()
 endif()
 
 if (USE_ZSTD)

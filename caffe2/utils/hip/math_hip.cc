@@ -3361,6 +3361,47 @@ CAFFE2_SPECIALIZED_HIP_MOMENTS(float)
 
 namespace {
 
+template <typename T>
+__global__ void
+InvStdHIPKernel(const int N, const T epsilon, const T* var, T* inv_std);
+
+#define DELEGATE_INV_STD_KERNEL_FUNCTION(T, Func)               \
+  template <>                                                   \
+  __global__ void InvStdHIPKernel<T>(                           \
+      const int N, const T epsilon, const T* var, T* inv_std) { \
+    HIP_1D_KERNEL_LOOP(i, N) {                                  \
+      inv_std[i] = Func(var[i] + epsilon);                      \
+    }                                                           \
+  }
+DELEGATE_INV_STD_KERNEL_FUNCTION(float, rsqrtf)
+#undef DELEGATE_INV_STD_KERNEL_FUNCTION
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_HIP_INV_STD(T) \
+  template <>                             \
+  void InvStd<T, HIPContext>(             \
+      const int N,                        \
+      const T epsilon,                    \
+      const T* var,                       \
+      T* inv_std,                         \
+      HIPContext* context) {              \
+    hipLaunchKernelGGL(                   \
+        InvStdHIPKernel<T>,               \
+        CAFFE_GET_BLOCKS(N),              \
+        CAFFE_HIP_NUM_THREADS,            \
+        0,                                \
+        context->hip_stream(),            \
+        N,                                \
+        epsilon,                          \
+        var,                              \
+        inv_std);                         \
+  }
+CAFFE2_SPECIALIZED_HIP_INV_STD(float)
+#undef CAFFE2_SPECIALIZED_HIP_INV_STD
+
+namespace {
+
 template <typename T, int D>
 __global__ void TransposeHIPKernel(
     const int size,
@@ -3434,5 +3475,55 @@ CAFFE2_SPECIALIZED_HIP_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(int)
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(TIndex)
 #undef CAFFE2_SPECIALIZED_HIP_TRANSPOSE
+
+namespace {
+
+template <typename T, StorageOrder kOrder>
+__global__ void AffineChannelHIPKernel(
+    const int size,
+    const int C,
+    const int HxW,
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y) {
+  HIP_1D_KERNEL_LOOP(i, size) {
+    const int c = kOrder == StorageOrder::NCHW ? i / HxW % C : i % C;
+    Y[i] = scale[c] * X[i] + bias[c];
+  }
+}
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL(T, kOrder) \
+  template <>                                            \
+  void AffineChannel<T, HIPContext, kOrder>(             \
+      const int N,                                       \
+      const int C,                                       \
+      const int HxW,                                     \
+      const T* X,                                        \
+      const T* scale,                                    \
+      const T* bias,                                     \
+      T* Y,                                              \
+      HIPContext* context) {                             \
+    const int size = N * C * HxW;                        \
+    hipLaunchKernelGGL(                                  \
+        AffineChannelHIPKernel<T, kOrder>,               \
+        CAFFE_GET_BLOCKS(size),                          \
+        CAFFE_HIP_NUM_THREADS,                           \
+        0,                                               \
+        context->hip_stream(),                           \
+        size,                                            \
+        C,                                               \
+        HxW,                                             \
+        X,                                               \
+        scale,                                           \
+        bias,                                            \
+        Y);                                              \
+  }
+CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL(float, StorageOrder::NCHW)
+CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL(float, StorageOrder::NHWC)
+#undef CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL
+
 } // namespace math
 } // namespace caffe2

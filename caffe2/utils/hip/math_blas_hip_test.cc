@@ -15,7 +15,7 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(HIP);
+  option.set_device_type(PROTO_HIP);
   HIPContext context(option);
 
   Blob* blobX = ws.CreateBlob("X");
@@ -115,7 +115,7 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(HIP);
+  option.set_device_type(PROTO_HIP);
   HIPContext context(option);
 
   Blob* blobX = ws.CreateBlob("X");
@@ -214,7 +214,7 @@ TEST(MathROCBLASTest, GemvNoTrans) {
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(HIP);
+  option.set_device_type(PROTO_HIP);
   HIPContext context(option);
 
   Blob* blobA = ws.CreateBlob("A");
@@ -304,7 +304,7 @@ TEST(MathROCBLASTest, GemvTrans) {
     return;
   Workspace ws;
   DeviceOption option;
-  option.set_device_type(HIP);
+  option.set_device_type(PROTO_HIP);
   HIPContext context(option);
 
   Blob* blobA = ws.CreateBlob("A");

@@ -70,7 +70,7 @@ REGISTER_CUDA_OPERATOR(JustTest, JustTest);
 REGISTER_CPU_OPERATOR(JustTestWithSomeOutput, JustTestWithSomeOutput);
 
 TEST(OperatorTest, DeviceTypeRegistryWorks) {
-  EXPECT_EQ(gDeviceTypeRegistry()->count(DeviceType::CPU), 1);
+  EXPECT_EQ(gDeviceTypeRegistry()->count(CPU), 1);
 }
 
 TEST(OperatorTest, RegistryWorks) {
@@ -83,7 +83,7 @@ TEST(OperatorTest, RegistryWorks) {
   // as it needs to instantiate an Event object with CUDAContext. Thus we will
   // guard this test below.
   if (HasCudaRuntime()) {
-    op_def.mutable_device_option()->set_device_type(CUDA);
+    op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
     op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
   }
@@ -93,7 +93,7 @@ TEST(OperatorTest, RegistryWrongDevice) {
   OperatorDef op_def;
   Workspace ws;
   op_def.set_type("JustTypeCPUOnly");
-  op_def.mutable_device_option()->set_device_type(CUDA);
+  op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
   try {
     CreateOperator(op_def, &ws);
     LOG(FATAL) << "No exception was thrown";
@@ -333,7 +333,7 @@ REGISTER_GRADIENT(Foo, GetFooGradient);
 TEST(OperatorGradientRegistryTest, GradientSimple) {
   Argument arg = MakeArgument<int>("arg", 1);
   DeviceOption option;
-  option.set_device_type(CPU);
+  option.set_device_type(PROTO_CPU);
   OperatorDef def = CreateOperatorDef(
       "Foo", "", std::vector<string>{"in"}, std::vector<string>{"out"},
       std::vector<Argument>{arg}, option, "DUMMY_ENGINE");
@@ -351,7 +351,7 @@ TEST(OperatorGradientRegistryTest, GradientSimple) {
   EXPECT_EQ(grad_op.output(0), "in_grad");
   // Checks the engine, device option and arguments.
   EXPECT_EQ(grad_op.engine(), "DUMMY_ENGINE");
-  EXPECT_EQ(grad_op.device_option().device_type(), CPU);
+  EXPECT_EQ(grad_op.device_option().device_type(), PROTO_CPU);
   EXPECT_EQ(grad_op.arg_size(), 1);
   EXPECT_EQ(grad_op.arg(0).SerializeAsString(),
             MakeArgument<int>("arg", 1).SerializeAsString());
@@ -366,7 +366,7 @@ TEST(EnginePrefTest, PerOpEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAR"}}}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAR"}}}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -377,8 +377,7 @@ TEST(EnginePrefTest, PerOpEnginePref) {
 
   // Invalid operator type
   ASSERT_THROW(
-      SetPerOpEnginePref({{DeviceType::CPU, {{"NO_EXIST", {"BAR"}}}}}),
-      EnforceNotMet);
+      SetPerOpEnginePref({{CPU, {{"NO_EXIST", {"BAR"}}}}}), EnforceNotMet);
 }
 
 TEST(EnginePrefTest, GlobalEnginePref) {
@@ -386,7 +385,7 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetGlobalEnginePref({{DeviceType::CPU, {"FOO", "BAR"}}});
+  SetGlobalEnginePref({{CPU, {"FOO", "BAR"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -395,7 +394,7 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   // clear
   SetGlobalEnginePref({});
 
-  SetGlobalEnginePref({{DeviceType::CPU, {"FOO"}}});
+  SetGlobalEnginePref({{CPU, {"FOO"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -405,7 +404,8 @@ TEST(EnginePrefTest, GlobalEnginePref) {
   SetGlobalEnginePref({});
 
   // Invalid device type
-  ASSERT_THROW(SetGlobalEnginePref({{8888, {"FOO"}}}), EnforceNotMet);
+  // This check is no longer necessary with the enum class
+  // ASSERT_THROW(SetGlobalEnginePref({{8888, {"FOO"}}}), EnforceNotMet);
 }
 
 TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePref) {
@@ -413,8 +413,8 @@ TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAR"}}}}});
-  SetGlobalEnginePref({{DeviceType::CPU, {"BAZ"}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAR"}}}}});
+  SetGlobalEnginePref({{CPU, {"BAZ"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -432,8 +432,8 @@ TEST(EnginePrefTest, GlobalEnginePrefAndPerOpEnginePrefAndOpDef) {
   op_def.set_type("JustTest");
   op_def.set_engine("BAR");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAZ"}}}}});
-  SetGlobalEnginePref({{DeviceType::CPU, {"BAZ"}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAZ"}}}}});
+  SetGlobalEnginePref({{CPU, {"BAZ"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -450,8 +450,8 @@ TEST(EnginePrefTest, SetOpEnginePref) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"BAZ"}}}}});
-  SetOpEnginePref("JustTest", {{DeviceType::CPU, {"BAR"}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"BAZ"}}}}});
+  SetOpEnginePref("JustTest", {{CPU, {"BAR"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
@@ -468,8 +468,8 @@ TEST(EnginePrefTest, SetDefaultEngine) {
   Workspace ws;
   op_def.set_type("JustTest");
 
-  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"DEFAULT"}}}}});
-  SetGlobalEnginePref({{DeviceType::CPU, {"BAR"}}});
+  SetPerOpEnginePref({{CPU, {{"JustTest", {"DEFAULT"}}}}});
+  SetGlobalEnginePref({{CPU, {"BAR"}}});
   {
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());

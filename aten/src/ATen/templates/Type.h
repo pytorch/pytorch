@@ -7,7 +7,7 @@
 #include "ATen/core/Deprecated.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Layout.h"
-#include "ATen/Scalar.h"
+#include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/Tensor.h"
@@ -15,7 +15,7 @@
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/Reduction.h"
-#include "ATen/TensorOptions.h"
+#include "ATen/core/TensorOptions.h"
 
 #include <array>
 #include <cstddef>
@@ -41,6 +41,10 @@ static inline void noop_deleter(void*) {}
 
 enum class TypeID {
   ${type_ids}
+  CPUComplexFloat,
+  CPUComplexDouble,
+  CUDAComplexFloat,
+  CUDAComplexDouble,
   Undefined,
   NumOptions
 };
@@ -58,6 +62,8 @@ struct AT_API Type {
   virtual bool is_distributed() const = 0;
   bool is_variable() const noexcept { return is_variable_; }
   bool is_undefined() const noexcept { return is_undefined_; }
+  virtual Allocator * allocator() const = 0;
+  virtual Device getDeviceFromPtr(void * data) const = 0;
   virtual Storage storage(bool resizable = false) const = 0;
   virtual Storage storage(size_t size, bool resizable = false) const = 0;
   virtual Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;

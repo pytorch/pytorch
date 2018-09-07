@@ -85,10 +85,6 @@ void Variable::Impl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("variable impl does not have set_storage_offset");
 }
 
-const char* Variable::Impl::typeString() {
-  return "VariableType";
-}
-
 const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
 }
@@ -117,7 +113,7 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   return result;
 }
 
-Tensor Variable::Impl::detach() const {
+Variable Variable::Impl::detach() const {
   auto detached = make_variable(data_, /*requires_grad=*/false);
   detached.set_version_counter(version_counter_);
   return detached;

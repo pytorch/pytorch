@@ -9,31 +9,53 @@
 
 namespace caffe2 {
 
+// TODO: replace filler distribution enum with a better abstraction
+enum FillerDistribution { FD_UNIFORM, FD_FIXEDSUM, FD_SYNTHETIC };
+
 class TensorFiller {
  public:
   template <class Type, class Context>
   void Fill(Tensor* tensor, Context* context) const {
     CAFFE_ENFORCE(context, "context is null");
     CAFFE_ENFORCE(tensor, "tensor is null");
-    auto min = static_cast<Type>(min_);
-    auto max = static_cast<Type>(max_);
+    auto min = (min_ < std::numeric_limits<Type>::min())
+        ? std::numeric_limits<Type>::min()
+        : static_cast<Type>(min_);
+    auto max = (max_ > std::numeric_limits<Type>::max())
+        ? std::numeric_limits<Type>::max()
+        : static_cast<Type>(max_);
     CAFFE_ENFORCE_LE(min, max);
 
     Tensor temp_tensor(shape_, Context::GetDeviceType());
     tensor->swap(temp_tensor);
     Type* data = tensor->template mutable_data<Type>();
 
-    // TODO: Come up with a good distribution abstraction so that
-    // the users could plug in their own distribution.
-    if (has_fixed_sum_) {
-      auto fixed_sum = static_cast<Type>(fixed_sum_);
-      CAFFE_ENFORCE_LE(min * tensor->size(), fixed_sum);
-      CAFFE_ENFORCE_GE(max * tensor->size(), fixed_sum);
-      math::RandFixedSum<Type, Context>(
-          tensor->size(), min, max, fixed_sum_, data, context);
-    } else {
-      math::RandUniform<Type, Context>(tensor->size(), min, max, data, context);
+    // select distribution
+    switch (dist_) {
+      case FD_UNIFORM: {
+        math::RandUniform<Type, Context>(
+            tensor->size(), min, max, data, context);
+        break;
+      }
+      case FD_FIXEDSUM: {
+        auto fixed_sum = static_cast<Type>(fixed_sum_);
+        CAFFE_ENFORCE_LE(min * tensor->size(), fixed_sum);
+        CAFFE_ENFORCE_GE(max * tensor->size(), fixed_sum);
+        math::RandFixedSum<Type, Context>(
+            tensor->size(), min, max, fixed_sum_, data, context);
+        break;
+      }
+      case FD_SYNTHETIC: {
+        math::RandSyntheticData<Type, Context>(
+            tensor->size(), min, max, data, context);
+        break;
+      }
     }
+  }
+
+  TensorFiller& Dist(FillerDistribution dist) {
+    dist_ = dist;
+    return *this;
   }
 
   template <class Type>
@@ -50,7 +72,7 @@ class TensorFiller {
 
   template <class Type>
   TensorFiller& FixedSum(Type fixed_sum) {
-    has_fixed_sum_ = true;
+    dist_ = FD_FIXEDSUM;
     fixed_sum_ = (double)fixed_sum;
     return *this;
   }
@@ -64,8 +86,8 @@ class TensorFiller {
   // a helper function to construct the segments vector for sparse features
   template <class Type>
   TensorFiller& SparseSegments(Type max_segment) {
-    CAFFE_ENFORCE(!has_fixed_sum_);
-    return Min(0).Max(max_segment);
+    CAFFE_ENFORCE(dist_ != FD_FIXEDSUM);
+    return Min(0).Max(max_segment).Dist(FD_SYNTHETIC);
   }
 
   TensorFiller& Shape(const std::vector<TIndex>& shape) {
@@ -75,10 +97,10 @@ class TensorFiller {
 
   template <class Type>
   TensorFiller(const std::vector<TIndex>& shape, Type fixed_sum)
-      : shape_(shape), has_fixed_sum_(true), fixed_sum_((double)fixed_sum) {}
+      : shape_(shape), dist_(FD_FIXEDSUM), fixed_sum_((double)fixed_sum) {}
 
   TensorFiller(const std::vector<TIndex>& shape)
-      : shape_(shape), has_fixed_sum_(false), fixed_sum_(0) {}
+      : shape_(shape), dist_(FD_UNIFORM), fixed_sum_(0) {}
 
   TensorFiller() : TensorFiller(std::vector<TIndex>()) {}
 
@@ -86,8 +108,16 @@ class TensorFiller {
     std::stringstream stream;
     stream << "shape = [" << shape_ << "]; min = " << min_
            << "; max = " << max_;
-    if (has_fixed_sum_) {
-      stream << "; fixed sum = " << fixed_sum_;
+    switch (dist_) {
+      case FD_FIXEDSUM:
+        stream << "; dist = FD_FIXEDSUM";
+        break;
+      case FD_SYNTHETIC:
+        stream << "; dist = FD_SYNTHETIC";
+        break;
+      default:
+        stream << "; dist = FD_UNIFORM";
+        break;
     }
     return stream.str();
   }
@@ -98,7 +128,7 @@ class TensorFiller {
   // cast everything to double for now.
   double min_ = 0.0;
   double max_ = 1.0;
-  bool has_fixed_sum_;
+  FillerDistribution dist_;
   double fixed_sum_;
 };
 

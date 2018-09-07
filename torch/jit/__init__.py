@@ -59,6 +59,15 @@ def scope(scope_name):
 
 
 def load(filename):
+    r"""
+        Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.ScriptModule.save>`
+
+        Arguments:
+            filename (string): the file to load
+
+        Returns:
+            A ``ScriptModule`` object.
+    """
     m = ScriptModule()
     m._load(filename)
     return m
@@ -277,16 +286,13 @@ def indent(s):
 
 
 class TracingCheckError(Exception):
-    def __init__(self, graph_diff_error, tensor_compare_error, nondeterm_warning, extra_msg=None):
+    def __init__(self, graph_diff_error, tensor_compare_error, extra_msg=None):
         self.message = 'Tracing failed sanity checks!\n'
         if extra_msg is not None:
             self.message += extra_msg + '\n'
         if graph_diff_error is not None:
             self.message += 'ERROR: Graphs differed across invocations!\n'
             self.message += indent(graph_diff_error) + '\n'
-        if nondeterm_warning is not None:
-            self.message += 'WARNING: '
-            self.message += nondeterm_warning + '\n'
         if tensor_compare_error is not None:
             self.message += 'ERROR: Tensor-valued Constant nodes differed in value ' \
                             'across invocations. This often indicates that the tracer has' \
@@ -298,6 +304,8 @@ class TracingCheckError(Exception):
 # Check the traced module against a set of user-provided validation inputs
 def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
     for inputs in check_inputs:
+        if isinstance(inputs, torch.Tensor):
+            inputs = (inputs,)
         check_mod = torch.jit.trace(func, _clone_inputs(inputs), check_trace=False, **executor_options)
 
         def graph_diagnostic_info():
@@ -345,7 +353,7 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
                     try:
                         torch.testing.assert_allclose(mod_tensor_val, check_tensor_val)
                     except (RuntimeError, AssertionError) as e:
-                        if not tensor_compare_errors:
+                        if tensor_compare_errors is None:
                             tensor_compare_errors = ''
                         tensor_compare_errors += 'Node:\n' + indent(str(n_mod)) + '\n'
                         compare_stack = n_mod.getSourceLocation()
@@ -355,63 +363,66 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
 
                         break  # For now, only print the first diverging pair
 
-            nondeterministic_ops_warning = None
-            nondeterm_ops = [op for op in module.graph.nodes() if op.isNondeterministic()]
-            if len(nondeterm_ops) > 0:
-                nondeterministic_ops_warning = "Trace had nondeterministic nodes. Nodes:\n"
-                for op in nondeterm_ops:
-                    nondeterministic_ops_warning += indent(str(op))
-                nondeterministic_ops_warning += "\nThis may cause errors in trace checking. To disable trace checking,"\
-                                                " pass disable_checks=True to torch.jit.trace()"
-
-            return graph_diff_errors, tensor_compare_errors, nondeterministic_ops_warning
+            return graph_diff_errors, tensor_compare_errors
 
         def wrap_retval(x):
             return x if isinstance(x, tuple) else (x,)
 
-        def run_mod_and_filter_tensor_outputs(mod, inputs):
-            outs = wrap_retval(mod(*_clone_inputs(inputs)))
-            outs = [out for out in outs if isinstance(out, torch.Tensor)]
-            return outs
+        def run_mod_and_filter_tensor_outputs(mod, inputs, running_what):
+            try:
+                outs = wrap_retval(mod(*_clone_inputs(inputs)))
+                outs = [out for out in outs if isinstance(out, torch.Tensor)]
+                return outs
+            except Exception as e:
+                raise TracingCheckError(*graph_diagnostic_info(),
+                                        extra_msg='Encountered an exception while running the ' + running_what +
+                                                  ' with test inputs.\nException:\n' + indent(str(e)))
 
-        try:
-            traced_outs = run_mod_and_filter_tensor_outputs(module, inputs)
-        except Exception as e:
-            msg = 'Encountered an exception while running trace with check inputs.\nException:\n' + indent(str(e))
-            raise TracingCheckError(*graph_diagnostic_info(), extra_msg=msg)
+        has_warned = [False]
 
-        try:
-            fn_outs = run_mod_and_filter_tensor_outputs(func, inputs)
-            for orig, check in zip(traced_outs, fn_outs):
-                torch.testing.assert_allclose(orig.double(), check.double(), rtol=check_tolerance,
-                                              atol=torch.testing._get_default_tolerance(orig, check)[1])
-        except (RuntimeError, AssertionError) as e:
-            # TODO: interpose on tracing the function again and check for
-            # divergence? then we can point to where in the source code
-            # we start diverging in python v.s. the trace
-            msg = 'ERROR: Traced function outputs do not match the Python function outputs.\nException: ' + str(e)
-            raise TracingCheckError(*graph_diagnostic_info(),
-                                    extra_msg=msg)
+        def maybe_warn_nondeterministic():
+            if has_warned[0]:
+                return
+            has_warned[0] = True
+            nondeterm_ops = [op for op in module.graph.nodes() if op.isNondeterministic()]
+            if len(nondeterm_ops) > 0:
+                nondeterministic_ops_warning = "Trace had nondeterministic nodes. Nodes:\n"
+                nondeterministic_ops_warning += "\n".join([indent(str(op)) for op in nondeterm_ops][:20])
+                nondeterministic_ops_warning += "\nThis may cause errors in trace checking. To disable trace checking,"\
+                                                " pass disable_checks=True to torch.jit.trace()"
+                warnings.warn(nondeterministic_ops_warning, category=TracerWarning, stacklevel=5)
 
-        try:
-            check_outs = run_mod_and_filter_tensor_outputs(check_mod, inputs)
-        except Exception as e:
-            msg = 'Encountered an exception while running checking trace with check inputs.\nException:\n' \
-                + indent(str(e))
-            raise TracingCheckError(*graph_diagnostic_info(), extra_msg=msg)
+        def compare_outputs(original, reference, match_what):
+            all_ok = True
+            for i, (orig, ref) in enumerate(zip(original, reference)):
+                try:
+                    torch.testing.assert_allclose(orig.double(), ref.double(), rtol=check_tolerance,
+                                                  atol=torch.testing._get_default_tolerance(orig, ref)[1])
+                except AssertionError as e:
+                    maybe_warn_nondeterministic()
+                    warnings.warn('Output nr ' + str(i + 1) + '. of the traced function does not match '
+                                  'the corresponding output of the ' + match_what + '. Detailed error:\n' + str(e),
+                                  category=TracerWarning, stacklevel=4)
+                    all_ok = False
 
-        try:
-            for orig, check in zip(traced_outs, check_outs):
-                torch.testing.assert_allclose(orig.double(), check.double(), rtol=check_tolerance,
-                                              atol=torch.testing._get_default_tolerance(orig, check)[1])
-        except (RuntimeError, AssertionError) as e:
-            raise TracingCheckError(*graph_diagnostic_info())
+            return all_ok
+
+        traced_outs = run_mod_and_filter_tensor_outputs(module, inputs, 'trace')
+        fn_outs = run_mod_and_filter_tensor_outputs(func, inputs, 'Python function')
+        if compare_outputs(traced_outs, fn_outs, 'Python function'):
+            check_outs = run_mod_and_filter_tensor_outputs(check_mod, inputs, 'repeated trace')
+            compare_outputs(traced_outs, check_outs, 'repeated trace')
+
+        diag_info = graph_diagnostic_info()
+        if any(info is not None for info in diag_info):
+            raise TracingCheckError(*diag_info)
 
 
 class TracerWarning(Warning):
     @staticmethod
     def ignore_lib_warnings():
-        warnings.filterwarnings('ignore', category=TracerWarning, module='torch.*')
+        # We ignore warnings from all submodules excluding the JIT, because we need them e.g. for _check_trace
+        warnings.filterwarnings('ignore', category=TracerWarning, module='torch.(?!jit)')
 
 
 # We ignore the tracer warnings coming form inside the library, because all our shape
@@ -427,22 +438,25 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
 
     .. warning::
 
-        Just-in-time compilation currently only works for functions/modules
-        which are not data dependent (e.g., have conditionals on data in
-        tensors) and do not have any untracked external dependencies (e.g.,
-        perform input/output or access global variables). If you trace such
-        models, you will silently get incorrect results on subsequent
-        invocations of the model.
+        Tracing only correctly records functions and modules which are not data
+        dependent (e.g., have conditionals on data in tensors) and do not have
+        any untracked external dependencies (e.g., perform input/output or
+        access global variables). If you trace such models, you may silently get
+        incorrect results on subsequent invocations of the model. The tracer
+        will try to emit warnings when doing something that may cause an
+        incorrect trace to be produced.
 
-    Arg:
-        func - a python function or torch.nn.Module that will be run with example_inputs.
-               arguments and returns to func must be Tensors or (possibly nested) tuples that
-               contain tensors.
-        example_inputs - a tuple of example inputs that will be passed to the function
-                         while tracing. The resulting trace can be run with
-                         inputs of different types and shapes assuming the traced operations
-                         support those types and shapes. example_inputs may also be a single
-                         Tensor in which case it is automatically wrapped in a tuple
+    Arguments:
+        func (callable or torch.nn.Module):  a python function or torch.nn.Module
+                                             that will be run with example_inputs.
+                                             arguments and returns to func must be Tensors
+                                             or (possibly nested) tuples that
+                                             contain tensors.
+        example_inputs (tuple):  a tuple of example inputs that will be passed to the function
+                                 while tracing. The resulting trace can be run with
+                                 inputs of different types and shapes assuming the traced operations
+                                 support those types and shapes. example_inputs may also be a single
+                                 Tensor in which case it is automatically wrapped in a tuple
 
     Keyword arguments:
         optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
@@ -452,20 +466,20 @@ def trace(func, example_inputs, optimize=True, check_trace=True, check_inputs=No
                                       deterministic ops or if you are sure that the network is correct despite
                                       a checker failure.
 
-        check_inputs (list of tuples. optional): A list of tuples of input arguments that should be used
+        check_inputs (list of tuples, optional): A list of tuples of input arguments that should be used
                                                  to check the trace against what is expected. Each tuple
                                                  is equivalent to a seet of input arguments that would
-                                                 be specified in `args`. For best results, pass in a
+                                                 be specified in ``args``. For best results, pass in a
                                                  set of checking inputs representative of the space of
                                                  shapes and types of inputs you expect the network to see.
-                                                 If not specified, the original `args` is used for checking
+                                                 If not specified, the original ``args`` is used for checking
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
 
     Returns:
-        A torch.jit.ScriptModule object with a single forward() method containing the traced code.
-        When func in s a torch.nn.Module, the returned ScriptModule will have the same set of
+        A ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
+        When func is a ``torch.nn.Module``, the returned ``ScriptModule`` will have the same set of
         sub-modules and parameters as func.
 
     Example:
@@ -788,6 +802,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         super_constants = getattr(super(cls), '_constants_set', set())
         cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
 
+        @functools.wraps(original_init)
         def init_then_register(self, *args, **kwargs):
             # ensure even if the user forgets to call super that
             # the pybind object is initialized so it will not segfault
@@ -805,6 +820,117 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 
 if _enabled:
     class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
+        r"""
+        The core data structure in Torch Script is the ``ScriptModule``. It is an
+        analogue of torch's nn.Module and represents an entire model as a tree of
+        submodules. Like normal modules, each individual module in a ScriptModule can
+        have submodules, parameters, and methods. In nn.Modules methods are implemented
+        as Python functions, but in ScriptModules methods typically implemented as
+        *Torch Script* functions,  a statically-typed subset of Python that contains all
+        of PyTorch's built-in Tensor operations. This difference allows your
+        ScriptModules code to run without the need for a Python interpreter.
+
+        ScriptModules and the Torch Script functions inside of them can be created in
+        two ways:
+
+        **Tracing:**
+
+            Using ``torch.jit.trace``, you can take an existing module or python
+            function, provide example inputs, and we run the function, recording the
+            operations performed on all the tensors. We turn the resulting recording
+            into a Torch Script method that is installed as the ``forward`` method of a
+            ScriptModule. This module also contains any parameters that the original
+            module had as well.
+
+            Example::
+
+                import torch
+                def foo(x, y):
+                    return 2*x + y
+                traced_foo = torch.jit.trace(foo, (torch.rand(3), torch.rand(3)))
+
+            .. note::
+                Tracing a *function* will produce a ScriptModule with a single
+                ``forward`` method that implements that function, and that contains
+                no parameteres.
+
+            Example::
+
+                import torch
+                import torchvision
+                traced_net = torch.jit.trace(torchvision.models.resnet18(),
+                                             torch.rand(1, 3, 224, 224))
+
+            .. note::
+
+                Since tracing only records operations on tensors, it will not record any
+                control-flow operations like if statements or loops. When this control-flow is
+                constant across your module, this is fine and it often just inlines
+                configuration decisions. But sometimes the control-flow is actually part of the
+                model itself. For instance, a beam search in sequence-to-sequence translation is
+                a loop over the (varying) sequence length of inputs. In this case tracing would
+                not be appropriate and the beam search should be written using scripting.
+
+        **Scripting:**
+
+            You can write Torch Script code directly using Python syntax. You do this
+            using the ``torch.jit.script`` annotation (for functions) or
+            ``torch.jit.script_method`` annotation (for methods) on subclasses of
+            ScriptModule. With this annotation the body of the annotated function is
+            directly translated into Torch Script. Torch Script itself is a subset of
+            the Python language, so not all features in python work, but we provide
+            enough functionality to compute on tensors and do control-dependent
+            operations.
+
+            Example::
+
+                import torch
+                @torch.jit.script
+                def foo(x, y):
+                    if x.max() > y.max():
+                        r = x
+                    else:
+                        r = y
+                    return r
+
+            .. note::
+                A script *function* annotation will construct a ScriptModule
+                with a single ``forward`` method that implements that function,
+                and that contains no parameters.
+
+            Example::
+
+              import torch
+              class MyModule(torch.jit.ScriptModule):
+                  def __init__(self, N, M):
+                      super(MyModule, self).__init__()
+                      self.weight = torch.nn.Parameter(torch.rand(N, M))
+
+                  @torch.jit.script_method
+                  def forward(self, input):
+                      return self.weight.mv(input)
+
+            Example::
+
+                import torch
+                import torch.nn as nn
+                import torch.nn.functional as F
+                from torch.jit import ScriptModule, script_method, trace
+
+                class MyScriptModule(ScriptModule):
+                    def __init__(self):
+                        super(MyScriptModule, self).__init__()
+                        # trace produces a ScriptModule's conv1 and conv2
+                        self.conv1 = trace(nn.Conv2d(1, 20, 5), torch.rand(1, 1, 16, 16))
+                        self.conv2 = trace(nn.Conv2d(20, 20, 5), torch.rand(1, 20, 16, 16))
+
+                    @script_method
+                    def forward(self, input):
+                      input = F.relu(self.conv1(input))
+                      input = F.relu(self.conv2(input))
+                      return input
+        """
+
         def __init__(self, optimize=True):
             # must be before Module.init since the field is used in __getattr__
             Module.__init__(self)
@@ -997,6 +1123,8 @@ class _ConstSequential(_ConstModuleList):
 
 _builtin_table = None
 
+_modules_containing_builtins = (torch, torch.nn.functional)
+
 
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():
@@ -1010,8 +1138,9 @@ def _get_builtin_table():
             v = getattr(mod, name)
             if callable(v):
                 _builtin_table[id(v)] = "aten::" + name
-    register_all(torch)
-    register_all(torch.nn.functional)
+    for mod in _modules_containing_builtins:
+        register_all(mod)
+
     return _builtin_table
 
 
@@ -1021,6 +1150,16 @@ def _register_builtin(fn, op):
 
 def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
+
+
+class _disable_tracing(object):
+    def __enter__(self):
+        self.state = torch._C._get_tracing_state()
+        torch._C._set_tracing_state(None)
+
+    def __exit__(self, *args):
+        torch._C._set_tracing_state(self.state)
+        self.state = None
 
 
 if not torch._C._jit_init():

@@ -1,19 +1,17 @@
 #include <ATen/TensorImpl.h>
 
 #include "ATen/Context.h"
-#include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
 #include <ATen/Context.h>
 #include <ATen/core/Backend.h>
+#include <ATen/core/WrapDimMinimal.h>
 
-#include <ATen/detail/VariableHooksInterface.h>
-
-#include <TH/THTensor.hpp>
+#include <ATen/core/VariableHooksInterface.h>
 
 namespace at {
 
 Type& TensorImpl::type() const {
-  return at::getMaybeVariableType(this);
+  return at::getType(this);
 }
 
 Tensor& TensorImpl::grad() {
@@ -22,10 +20,6 @@ Tensor& TensorImpl::grad() {
 
 const Tensor& TensorImpl::grad() const {
   AT_ERROR("grad is not implemented for Tensor");
-}
-
-Tensor TensorImpl::detach() const {
-  AT_ERROR("detach is not implemented for Tensor");
 }
 
 void TensorImpl::backward(

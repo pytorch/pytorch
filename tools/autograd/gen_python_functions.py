@@ -151,10 +151,10 @@ def should_generate_python_binding(declaration):
     # TODO: fix handling of SparseTensor. We don't want to generate Python
     # bindings to SparseTensor overloads, such as add(Tensor, SparseTensorRef),
     # since the Tensor-based signature already dynamically dispatches correctly.
-    # However, _sparse_mask only has a SparseTensor signature so we need to bind
+    # However, sparse_mask only has a SparseTensor signature so we need to bind
     # that function.
     for arg in declaration['arguments']:
-        if arg['type'] == 'SparseTensorRef' and declaration['name'] != '_sparse_mask':
+        if arg['type'] == 'SparseTensorRef' and declaration['name'] != 'sparse_mask':
             return False
 
     return True
@@ -427,7 +427,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['actuals'] = actuals
 
         if has_tensor_options:
-            env['initialize_cuda'] = 'maybe_initialize_cuda(at::getMaybeVariableType(options));'
+            env['initialize_cuda'] = 'maybe_initialize_cuda(at::getType(options));'
         else:
             env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(type_args[0]['name']) if type_args else ''
 

@@ -25,7 +25,8 @@ class Geometric(Distribution):
         probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
-    arg_constraints = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval,
+                       'logits': constraints.real}
     support = constraints.nonnegative_integer
 
     def __init__(self, probs=None, logits=None, validate_args=None):

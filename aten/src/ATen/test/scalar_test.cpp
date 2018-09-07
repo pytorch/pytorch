@@ -88,7 +88,7 @@ TEST_CASE( "scalar test", "[]" ) {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  REQUIRE_THROWS(Tensor{}._local_scalar());
+  REQUIRE_THROWS(at::_local_scalar(Tensor{}));
 
   test_overflow();
 
@@ -99,9 +99,9 @@ TEST_CASE( "scalar test", "[]" ) {
   REQUIRE_NOTHROW(randn({10,10,2}, T));
 
   // check Scalar.toTensor on Scalars backed by different data types
-  REQUIRE(bar.toTensor().type().scalarType() == kDouble);
-  REQUIRE(what.toTensor().type().scalarType() == kLong);
-  REQUIRE(ones({})._local_scalar().toTensor().type().scalarType() == kDouble);
+  REQUIRE(scalar_to_tensor(bar).type().scalarType() == kDouble);
+  REQUIRE(scalar_to_tensor(what).type().scalarType() == kLong);
+  REQUIRE(scalar_to_tensor(ones({})._local_scalar()).type().scalarType() == kDouble);
 
   if (x.type().scalarType() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {

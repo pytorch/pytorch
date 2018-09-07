@@ -405,14 +405,14 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
   c10::raw::intrusive_ptr::decref(work);
 }
 
-void THTensor_(gesvd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* jobu)
+void THTensor_(gesdd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* jobz)
 {
   THTensor *ra_ = THTensor_(new)();
-  THTensor_(gesvd2)(ru_, rs_, rv_,  ra_, a, jobu);
+  THTensor_(gesdd2)(ru_, rs_, rv_,  ra_, a, jobz);
   c10::raw::intrusive_ptr::decref(ra_);
 }
 
-void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a, const char* jobu)
+void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a, const char* jobz)
 {
   if (a == NULL) a = ra_;
   THArgCheck(a->dim() == 2, 1, "A should be 2 dimensional");
@@ -422,6 +422,7 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   THTensor *work;
   THTensor *rvf_ = THTensor_(new)();
   scalar_t wkopt;
+  THIntTensor *iwork;
 
   THTensor *ra__ = NULL;
   THTensor *ru__ = NULL;
@@ -438,9 +439,11 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   ldu = m;
   ldvt = n;
 
+  iwork = k ? THIntTensor_newWithSize1d((int64_t)(8 * m)) : THIntTensor_newWithSize1d((int64_t)(8 * n));
+
   THTensor_(resize1d)(rs_,k);
   THTensor_(resize2d)(rvf_,ldvt,n);
-  if (*jobu == 'A')
+  if (*jobz == 'A')
     THTensor_(resize2d)(ru_,m,ldu);
   else
     THTensor_(resize2d)(ru_,k,ldu);
@@ -452,22 +455,22 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   rs__ = THTensor_(newContiguous)(rs_);
   rv__ = THTensor_(newContiguous)(rvf_);
 
-  THLapack_(gesvd)(jobu[0],jobu[0],
+  THLapack_(gesdd)(jobz[0],
 		   m,n,ra__->data<scalar_t>(),lda,
 		   rs__->data<scalar_t>(),
 		   ru__->data<scalar_t>(),
 		   ldu,
 		   rv__->data<scalar_t>(), ldvt,
-		   &wkopt, -1, &info);
+		   &wkopt, -1, THIntTensor_data(iwork), &info);
   lwork = (int)wkopt;
   work = THTensor_(newWithSize1d)(lwork);
-  THLapack_(gesvd)(jobu[0],jobu[0],
+  THLapack_(gesdd)(jobz[0],
 		   m,n,ra__->data<scalar_t>(),lda,
 		   rs__->data<scalar_t>(),
 		   ru__->data<scalar_t>(),
 		   ldu,
 		   rv__->data<scalar_t>(), ldvt,
-		   work->data<scalar_t>(),lwork, &info);
+		   work->data<scalar_t>(),lwork, THIntTensor_data(iwork), &info);
 
   THLapackCheckWithCleanup("Lapack Error %s : %d superdiagonals failed to converge.",
                            THCleanup(
@@ -475,10 +478,11 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
                                c10::raw::intrusive_ptr::decref(rs__);
                                c10::raw::intrusive_ptr::decref(rv__);
                                c10::raw::intrusive_ptr::decref(ra__);
-                               c10::raw::intrusive_ptr::decref(work);),
-                           "gesvd", info, "");
+                               c10::raw::intrusive_ptr::decref(work);
+                               c10::raw::intrusive_ptr::decref(iwork);),
+                           "gesdd", info, "");
 
-  if (*jobu == 'S')
+  if (*jobz == 'S')
     THTensor_(narrow)(rv__,NULL,1,0,k);
 
   THTensor_(freeCopyTo)(ru__, ru_);
@@ -486,10 +490,11 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   THTensor_(freeCopyTo)(rv__, rvf_);
   THTensor_(freeCopyTo)(ra__, ra_);
   c10::raw::intrusive_ptr::decref(work);
+  c10::raw::intrusive_ptr::decref(iwork);
 
-  if (*jobu == 'S') {
+  if (*jobz == 'S')
     THTensor_(narrow)(rvf_,NULL,1,0,k);
-  }
+
   THTensor_(resizeAs)(rv_, rvf_);
   THTensor_(copy)(rv_, rvf_);
   c10::raw::intrusive_ptr::decref(rvf_);

@@ -14,6 +14,31 @@ bool WeightedSumGradientOp<CPUContext>::RunOnDevice() {
   return DoRunWithType<float>();
 }
 
+std::vector<TensorShape> WeightedSumShapeInference(
+    const OperatorDef& /* unused */,
+    const vector<TensorShape>& in) {
+  vector<TensorShape> out(1);
+  out[0] = in[0];
+  return out;
+}
+
+OpSchema::Cost CostInferenceForWeightedSum(
+    const OperatorDef& /* unused */,
+    const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_EQ(
+      in.size() % 2, 0, "WeightedSum requires an even number of inputs");
+  struct OpSchema::Cost c;
+
+  const auto& X0 = in[0];
+  const auto& nElem = nElemFromDim(X0);
+  const auto& nInputs = in.size();
+  c.flops = (nInputs - 1) * nElem;
+  c.bytes_read = (nInputs / 2) * (nElem + 1) * sizeof(X0.data_type());
+  c.bytes_written = nElem * sizeof(X0.data_type());
+  c.params_bytes = (nInputs / 2) * sizeof(X0.data_type());
+  return c;
+}
+
 REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
 REGISTER_CPU_OPERATOR(FlattenToVec, FlattenToVecOp<CPUContext>);
@@ -261,6 +286,8 @@ OPERATOR_SCHEMA(SumInt)
 OPERATOR_SCHEMA(WeightedSum)
     .NumInputs([](int n) { return (n > 0 && n % 2 == 0); })
     .NumOutputs(1)
+    .TensorInferenceFunction(WeightedSumShapeInference)
+    .CostInferenceFunction(CostInferenceForWeightedSum)
     .AllowInplace({{0, 0}})
     .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(

@@ -52,7 +52,11 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
       py_inputs[i] = py::cast(enter_info.second[i]);
     }
     auto out = func(*py_inputs);
-    if(!PyTuple_Check(out.ptr())) {
+    if (out.ptr() == Py_None) {
+      AT_ERROR("The traced function didn't return any values! Side-effects are not "
+               "captured in traces, so it would be a no-op.");
+    }
+    if (!PyTuple_Check(out.ptr())) {
       out = py::make_tuple(out);
     }
     tracer::exit(toStack(out));
@@ -96,6 +100,7 @@ void pythonRecordSourceLocation(Node* n) {
 }
 
 void pythonWarn(const std::string& reason) {
+  AutoGIL gil;
   auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
   PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);
 }
@@ -143,6 +148,9 @@ void initPythonTracerBindings(PyObject* module) {
   });
   m.def("_get_tracing_state", []() {
     return getTracingState();
+  });
+  m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
+    return setTracingState(state);
   });
   m.def("_get_value_trace", [](const Variable& var) {
     return getValueTrace(var);

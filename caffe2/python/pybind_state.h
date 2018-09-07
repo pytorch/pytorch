@@ -73,13 +73,14 @@ inline unique_ptr<BlobFetcherBase> CreateFetcher(TypeIdentifier id) {
 
 CAFFE_DECLARE_TYPED_REGISTRY(
     BlobFeederRegistry,
-    int,
+    DeviceType,
     BlobFeederBase,
     std::unique_ptr);
 #define REGISTER_BLOB_FEEDER(device_type, ...) \
   CAFFE_REGISTER_TYPED_CLASS(BlobFeederRegistry, device_type, __VA_ARGS__)
 inline unique_ptr<BlobFeederBase> CreateFeeder(int device_type) {
-  return BlobFeederRegistry()->Create(device_type);
+  return BlobFeederRegistry()->Create(
+      caffe2::ProtoToType(static_cast<DeviceTypeProto>(device_type)));
 }
 
 static_assert(
@@ -311,7 +312,7 @@ class PythonOpBase : public Operator<Context> {
       py::gil_scoped_acquire g;
 
       DeviceOption cpu_option;
-      cpu_option.set_device_type(CPU);
+      cpu_option.set_device_type(PROTO_CPU);
 
       std::vector<py::object> inputs;
       inputs.reserve(InputSize());

@@ -27,6 +27,9 @@
 #   NO_CUDNN
 #     disables the cuDNN build
 #
+#   NO_TEST
+#     disables the test build
+#
 #   NO_MIOPEN
 #     disables the MIOpen build
 #
@@ -37,7 +40,7 @@
 #     disables NNPACK build
 #
 #   NO_DISTRIBUTED
-#     disables THD (distributed) build
+#     disables distributed (c10d, gloo, mpi, etc.) build
 #
 #   NO_SYSTEM_NCCL
 #     disables use of system-wide nccl (we will use our submoduled
@@ -45,6 +48,12 @@
 #
 #   USE_GLOO_IBVERBS
 #     toggle features related to distributed support
+#
+#   USE_OPENCV
+#     enables use of OpenCV for additional operators
+#
+#   BUILD_BINARY
+#     enables the additional binaries/ build
 #
 #   PYTORCH_BUILD_VERSION
 #   PYTORCH_BUILD_NUMBER
@@ -117,25 +126,29 @@ import importlib
 
 from tools.setup_helpers.env import check_env_flag, check_negative_env_flag
 
-# Before we run the setup_helpers, let's look for NO_* and WITH_*
-# variables and hotpatch the environment with the USE_* equivalent
-config_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
-                   'SYSTEM_NCCL', 'GLOO_IBVERBS']
 
-
-def hotpatch_var(var):
+def hotpatch_var(var, prefix='USE_'):
     if check_env_flag('NO_' + var):
-        os.environ['USE_' + var] = '0'
+        os.environ[prefix + var] = '0'
     elif check_negative_env_flag('NO_' + var):
-        os.environ['USE_' + var] = '1'
+        os.environ[prefix + var] = '1'
     elif check_env_flag('WITH_' + var):
-        os.environ['USE_' + var] = '1'
+        os.environ[prefix + var] = '1'
     elif check_negative_env_flag('WITH_' + var):
-        os.environ['USE_' + var] = '0'
+        os.environ[prefix + var] = '0'
 
-list(map(hotpatch_var, config_env_vars))
+# Before we run the setup_helpers, let's look for NO_* and WITH_*
+# variables and hotpatch environment with the USE_* equivalent
+use_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
+                'OPENCV', 'SYSTEM_NCCL', 'GLOO_IBVERBS']
+list(map(hotpatch_var, use_env_vars))
+
+# Also hotpatch a few with BUILD_* equivalent
+build_env_vars = ['BINARY', 'TEST']
+[hotpatch_var(v, 'BUILD_') for v in build_env_vars]
 
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
+from tools.setup_helpers.build import BUILD_BINARY, BUILD_TEST, USE_OPENCV
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
@@ -150,7 +163,7 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import USE_DISTRIBUTED, \
-    USE_GLOO_IBVERBS, USE_C10D
+    USE_GLOO_IBVERBS
 
 ################################################################################
 # Parameters parsed from environment
@@ -161,7 +174,6 @@ IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
-FULL_CAFFE2 = check_env_flag('FULL_CAFFE2')
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
 USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
 
@@ -188,7 +200,10 @@ cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 tmp_install_path = lib_path + "/tmp_install"
+caffe2_build_dir = os.path.join(cwd, "build")
+# lib/pythonx.x/site-packages
 rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
+# full absolute path to the dir above
 full_site_packages = distutils.sysconfig.get_python_lib()
 
 
@@ -356,10 +371,13 @@ def build_libs(libs):
         build_libs_cmd += ['--use-mkldnn']
     if USE_GLOO_IBVERBS:
         build_libs_cmd += ['--use-gloo-ibverbs']
-    if FULL_CAFFE2:
-        build_libs_cmd += ['--full-caffe2']
 
     my_env["BUILD_TORCH"] = "ON"
+    my_env["BUILD_PYTHON"] = "ON"
+    my_env["BUILD_BINARY"] = "ON" if BUILD_BINARY else "OFF"
+    my_env["BUILD_TEST"] = "ON" if BUILD_TEST else "OFF"
+    my_env["INSTALL_TEST"] = "ON" if BUILD_TEST else "OFF"
+    my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
 
     try:
         os.mkdir('build')
@@ -400,11 +418,12 @@ class build_deps(PytorchCommand):
         else:
             libs += ['libshm']
         if USE_DISTRIBUTED:
-            if sys.platform.startswith('linux'):
+            if IS_LINUX:
                 libs += ['gloo']
+                # TODO: make c10d build without CUDA
+                if USE_CUDA:
+                    libs += ['c10d']
             libs += ['THD']
-        if USE_C10D:
-            libs += ['c10d']
         build_libs(libs)
 
         # Use copies instead of symbolic files.
@@ -463,6 +482,15 @@ class develop(setuptools.command.develop.develop):
         self.run_command('create_version_file')
         setuptools.command.develop.develop.run(self)
         self.create_compile_commands()
+
+        # Copy Caffe2's Python proto files (generated during the build with the
+        # protobuf python compiler) from the build folder to the root folder
+        # cp root/build/caffe2/proto/proto.py root/caffe2/proto/proto.py
+        for src in glob.glob(
+                os.path.join(caffe2_build_dir, 'caffe2', 'proto', '*.py')):
+            dst = os.path.join(
+                cwd, os.path.relpath(src, caffe2_build_dir))
+            self.copy_file(src, dst)
 
     def create_compile_commands(self):
         def load(filename):
@@ -548,15 +576,15 @@ class build_ext(build_ext_parent):
         else:
             print('-- Not using NCCL')
         if USE_DISTRIBUTED:
-            print('-- Building with distributed package ')
+            print('-- Building with THD distributed package ')
             monkey_patch_THD_link_flags()
+            if IS_LINUX and USE_CUDA:
+                print('-- Building with c10d distributed package ')
+                monkey_patch_C10D_inc_flags()
+            else:
+                print('-- Building without c10d distributed package')
         else:
             print('-- Building without distributed package')
-        if USE_C10D:
-            print('-- Building with c10d distributed package ')
-            monkey_patch_C10D_inc_flags()
-        else:
-            print('-- Building without c10d distributed package')
 
         generate_code(ninja_global)
 
@@ -592,39 +620,40 @@ class build_ext(build_ext_parent):
         # platform dependent build folder created by the "build" command of
         # setuptools. Only the contents of this folder are installed in the
         # "install" command by default.
-        if FULL_CAFFE2:
-            # We only make this copy for Caffe2's pybind extensions
-            caffe2_pybind_exts = [
-                'caffe2.python.caffe2_pybind11_state',
-                'caffe2.python.caffe2_pybind11_state_gpu',
-                'caffe2.python.caffe2_pybind11_state_hip',
-            ]
-            i = 0
-            while i < len(self.extensions):
-                ext = self.extensions[i]
-                if ext.name not in caffe2_pybind_exts:
-                    i += 1
-                    continue
-                fullname = self.get_ext_fullname(ext.name)
-                filename = self.get_ext_filename(fullname)
+        # We only make this copy for Caffe2's pybind extensions
+        caffe2_pybind_exts = [
+            'caffe2.python.caffe2_pybind11_state',
+            'caffe2.python.caffe2_pybind11_state_gpu',
+            'caffe2.python.caffe2_pybind11_state_hip',
+        ]
+        i = 0
+        while i < len(self.extensions):
+            ext = self.extensions[i]
+            if ext.name not in caffe2_pybind_exts:
+                i += 1
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            print("\nCopying extension {}".format(ext.name))
 
-                src = os.path.join(tmp_install_path, rel_site_packages, filename)
-                if not os.path.exists(src):
-                    print("{} does not exist".format(src))
-                    del self.extensions[i]
-                else:
-                    dst = os.path.join(os.path.realpath(self.build_lib), filename)
-                    dst_dir = os.path.dirname(dst)
-                    if not os.path.exists(dst_dir):
-                        os.makedirs(dst_dir)
-                    self.copy_file(src, dst)
-                    i += 1
+            src = os.path.join(tmp_install_path, rel_site_packages, filename)
+            if not os.path.exists(src):
+                print("{} does not exist".format(src))
+                del self.extensions[i]
+            else:
+                dst = os.path.join(os.path.realpath(self.build_lib), filename)
+                print("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+                i += 1
         distutils.command.build_ext.build_ext.build_extensions(self)
 
     def get_outputs(self):
         outputs = distutils.command.build_ext.build_ext.get_outputs(self)
-        if FULL_CAFFE2:
-            outputs.append(os.path.join(self.build_lib, "caffe2"))
+        outputs.append(os.path.join(self.build_lib, "caffe2"))
+        print("setup.py::get_outputs returning {}".format(outputs))
         return outputs
 
 
@@ -830,6 +859,7 @@ main_sources = [
     "torch/csrc/jit/ivalue.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
+    "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/to_batch.cpp",
     "torch/csrc/jit/python_arg_flatten.cpp",
@@ -876,11 +906,11 @@ if USE_DISTRIBUTED:
     ]
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
-
-if USE_C10D:
-    extra_compile_args += ['-DUSE_C10D']
-    main_sources += ['torch/csrc/distributed/c10d/init.cpp']
-    main_link_args += [C10D_LIB]
+    if IS_LINUX and USE_CUDA:
+        extra_compile_args.append('-DUSE_C10D')
+        main_sources.append('torch/csrc/distributed/c10d/init.cpp')
+        main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
+        main_link_args.append(C10D_LIB)
 
 if USE_CUDA:
     nvtoolext_lib_name = None
@@ -929,8 +959,8 @@ if USE_ROCM:
     rocm_include_path = '/opt/rocm/include'
     hcc_include_path = '/opt/rocm/hcc/include'
     rocblas_include_path = '/opt/rocm/rocblas/include'
+    hipsparse_include_path = '/opt/rocm/hipsparse/include'
     rocfft_include_path = '/opt/rocm/rocfft/include'
-    hipsparse_include_path = '/opt/rocm/hcsparse/include'
     hiprand_include_path = '/opt/rocm/hiprand/include'
     rocrand_include_path = '/opt/rocm/rocrand/include'
     hip_lib_path = '/opt/rocm/hip/lib'
@@ -1007,10 +1037,7 @@ def make_relative_rpath(path):
 ################################################################################
 
 extensions = []
-if FULL_CAFFE2:
-    packages = find_packages(exclude=('tools', 'tools.*'))
-else:
-    packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe2.*'))
+packages = find_packages(exclude=('tools', 'tools.*'))
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,
@@ -1054,14 +1081,14 @@ if USE_CUDA:
                         )
     extensions.append(THNVRTC)
 
-if FULL_CAFFE2:
-    # If building Caffe2 python as well, these extensions are built by cmake
-    # copied manually in build_extensions() inside the build_ext implementaiton
-    extensions.append(
-        setuptools.Extension(
-            name=str('caffe2.python.caffe2_pybind11_state'),
-            sources=[]),
-    )
+# These extensions are built by cmake and copied manually in build_extensions()
+# inside the build_ext implementaiton
+extensions.append(
+    setuptools.Extension(
+        name=str('caffe2.python.caffe2_pybind11_state'),
+        sources=[]),
+)
+if USE_CUDA:
     extensions.append(
         setuptools.Extension(
             name=str('caffe2.python.caffe2_pybind11_state_gpu'),
@@ -1082,14 +1109,12 @@ cmdclass = {
 }
 cmdclass.update(build_dep_cmds)
 
-entry_points = {}
-if FULL_CAFFE2:
-    entry_points = {
-        'console_scripts': [
-            'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
-            'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
-        ]
-    }
+entry_points = {
+    'console_scripts': [
+        'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
+        'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+    ]
+}
 
 if __name__ == '__main__':
     setup(
@@ -1132,6 +1157,9 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/csrc/cuda/*.h',
                 'lib/include/torch/torch.h',
+            ],
+            'caffe2': [
+                rel_site_packages + '/caffe2/**/*.py'
             ]
         },
     )

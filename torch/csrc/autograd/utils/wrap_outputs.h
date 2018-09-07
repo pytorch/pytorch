@@ -86,7 +86,7 @@ inline PyObject* wrap(void* value) {
 }
 
 inline PyObject* wrap(at::Scalar scalar) {
-  return wrap(scalar.toTensor());
+  return wrap(scalar_to_tensor(scalar));
 }
 
 inline PyObject* wrap(THPDtype *dtype) {

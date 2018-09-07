@@ -120,7 +120,7 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto & tracing_state = getTracingState();
   auto & graph = tracing_state->graph;
 
-  auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
+  auto size_var = autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
   auto* value = getValueTrace(var);
   WithInsertPoint ipoint { graph->block() };
   auto dim_val = graph->insertConstant(dim);
@@ -183,6 +183,17 @@ void _do_warn(const char * _reason) {
 
 void setWarn(warn_fn_type fn) {
   warn_callback.store(fn);
+}
+
+void ensureUnique(const char * name, const at::Tensor& tensor) {
+  auto aliases = tensor.storage().use_count();
+  if (aliases > 1) {
+    std::stringstream ss;
+    ss << "There are " << aliases
+       << " live references to the tensor being modified when tracing in-place operator "
+       << name << " which ";
+    warn(ss.str().c_str());
+  }
 }
 
 }}}

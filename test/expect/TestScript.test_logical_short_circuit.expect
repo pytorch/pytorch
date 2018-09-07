@@ -1,20 +1,20 @@
 graph(%t : Dynamic) {
+  %c1.2 : int = prim::Constant[value=0]()
   %c1.1 : int = prim::Constant[value=1]()
-  %2 : int = prim::Constant[value=0]()
-  %3 : int = prim::If(%2)
+  %3 : int = prim::Constant[value=0]()
+  %4 : int = prim::If(%3)
     block0() {
-      %4 : int = prim::Constant[value=1]()
       %5 : int = prim::Constant[value=0]()
-      %6 : Dynamic = aten::select(%t, %5, %4)
+      %6 : Dynamic = aten::select(%t, %5, %c1.1)
       %7 : int = prim::TensorToNum(%6)
       -> (%7)
     }
     block1() {
-      -> (%2)
-    }
-  %8 : int = prim::If(%3)
-    block0() {
       -> (%3)
+    }
+  %8 : int = prim::If(%4)
+    block0() {
+      -> (%4)
     }
     block1() {
       %9 : int = prim::Constant[value=1]()
@@ -23,17 +23,15 @@ graph(%t : Dynamic) {
           -> (%9)
         }
         block1() {
-          %11 : int = prim::Constant[value=1]()
-          %12 : int = prim::Constant[value=0]()
-          %13 : Dynamic = aten::select(%t, %12, %11)
-          %14 : int = prim::TensorToNum(%13)
-          -> (%14)
+          %11 : int = prim::Constant[value=0]()
+          %12 : Dynamic = aten::select(%t, %11, %c1.1)
+          %13 : int = prim::TensorToNum(%12)
+          -> (%13)
         }
       -> (%10)
     }
   %c1 : int = prim::If(%8)
     block0() {
-      %c1.2 : int = prim::Constant[value=0]()
       -> (%c1.2)
     }
     block1() {

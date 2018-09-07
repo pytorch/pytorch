@@ -7,7 +7,7 @@
 
 namespace torch {
 namespace nn {
-FunctionalImpl::FunctionalImpl(std::function<Tensor(Tensor)> function)
+FunctionalImpl::FunctionalImpl(Function function)
     : function_(std::move(function)) {}
 
 void FunctionalImpl::reset() {}
