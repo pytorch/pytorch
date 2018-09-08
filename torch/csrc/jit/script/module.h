@@ -36,7 +36,7 @@ namespace torch { namespace jit { namespace script {
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 
-struct TORCH_API Method {
+struct Method {
   Method(std::string name, bool optimize,
          std::shared_ptr<Graph> graph,
          std::vector<at::Tensor*> initial_members,
@@ -150,7 +150,7 @@ struct TORCH_API Method {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const;
+  TORCH_API const FunctionSchema& getSchema() const;
 
   std::string pretty_print_schema() const {
     JIT_ASSERT(schema);
