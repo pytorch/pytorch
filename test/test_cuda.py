@@ -1457,6 +1457,10 @@ class TestCuda(TestCase):
         TestTorch._test_pinverse(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_matrix_power(self):
+        TestTorch._test_matrix_power(self, conv_fn=lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_matrix_rank(self):
         TestTorch._test_matrix_rank(self, lambda x: x.cuda())
 
