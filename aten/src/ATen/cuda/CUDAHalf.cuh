@@ -9,18 +9,18 @@
 
 namespace at {
 
-template <> AT_CUDA_API
-struct Converter<half, Half> {
+template <>
+struct AT_CUDA_API Converter<half, Half> {
   half operator()(Half);
 };
 
-template <> AT_CUDA_API
-struct Converter<Half, half> {
+template <>
+struct AT_CUDA_API Converter<Half, half> {
   Half operator()(half);
 };
 
-template <> AT_CUDA_API
-struct Converter<half, double> {
+template <>
+struct AT_CUDA_API Converter<half, double> {
   half operator()(double);
 };
 

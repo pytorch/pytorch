@@ -96,9 +96,9 @@ struct is_complex_t<ComplexHalf> : public std::true_type {};
 
 // Extract double from std::complex<double>; is identity otherwise
 // TODO: Write in more idiomatic C++17
-template <typename T> struct scalar_value_type                  { typedef T type; };
-template <typename T> struct scalar_value_type<std::complex<T>> { typedef T type; };
-template <>           struct scalar_value_type<ComplexHalf>     { typedef Half type; };
+template <typename T> struct scalar_value_type                  { using type = T; };
+template <typename T> struct scalar_value_type<std::complex<T>> { using type = T; };
+template <>           struct scalar_value_type<ComplexHalf>     { using type = Half; };
 
 // The old implementation of Converter as a function made nvcc's head explode
 // when we added std::complex on top of the specializations for CUDA-only types

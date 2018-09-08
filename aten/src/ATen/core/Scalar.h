@@ -30,18 +30,18 @@ public:
 
 #undef DEFINE_IMPLICIT_CTOR
 
-#define DEFINE_IMPLICIT_CTOR(type,name,member) \
+#define DEFINE_IMPLICIT_COMPLEX_CTOR(type,name,member) \
   Scalar(type vv) \
   : tag(Tag::HAS_##member) { \
     v . member[0] = convert<double>(vv.real()); \
     v . member[1] = convert<double>(vv.imag()); \
   }
 
-  DEFINE_IMPLICIT_CTOR(at::ComplexHalf,ComplexHalf,z)
-  DEFINE_IMPLICIT_CTOR(std::complex<float>,ComplexFloat,z)
-  DEFINE_IMPLICIT_CTOR(std::complex<double>,ComplexDouble,z)
+  DEFINE_IMPLICIT_COMPLEX_CTOR(at::ComplexHalf,ComplexHalf,z)
+  DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<float>,ComplexFloat,z)
+  DEFINE_IMPLICIT_COMPLEX_CTOR(std::complex<double>,ComplexDouble,z)
 
-#undef DEFINE_IMPLICIT_CTOR
+#undef DEFINE_IMPLICIT_COMPLEX_CTOR
 
 #define DEFINE_ACCESSOR(type,name,member) \
   type to##name () const { \
@@ -54,6 +54,7 @@ public:
     } \
   }
 
+  // TODO: Support ComplexHalf accessor
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ACCESSOR)
 
   //also support scalar.to<int64_t>();
