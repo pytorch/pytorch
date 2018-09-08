@@ -908,6 +908,9 @@
 - func: is_floating_point(Tensor self) -> bool
   device_guard: false
 
+- func: is_complex(Tensor self) -> bool
+  device_guard: false
+
 - func: is_nonzero(Tensor self) -> bool
   device_guard: false
 
