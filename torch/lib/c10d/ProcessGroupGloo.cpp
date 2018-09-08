@@ -200,6 +200,70 @@ void ProcessGroupGloo::WorkGloo::finishWithException(
   cv_.notify_all();
 }
 
+ProcessGroupGloo::SendWork::SendWork(
+    at::Tensor& tensor,
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
+    : tensor_(tensor),
+      buffer_(std::move(buffer)) {
+}
+
+bool ProcessGroupGloo::SendWork::isCompleted() const {
+  // No way to poll for completion yet
+  return true;
+}
+
+bool ProcessGroupGloo::SendWork::isSuccess() const {
+  // No way to fail yet
+  return true;
+}
+
+void ProcessGroupGloo::SendWork::synchronize() {
+  // CPU only, no need to synchronize
+  return;
+}
+
+bool ProcessGroupGloo::SendWork::wait() {
+  buffer_->waitSend();
+  return true;
+}
+
+const std::exception& ProcessGroupGloo::SendWork::exception() const {
+  throw std::runtime_error("no exception");
+}
+
+ProcessGroupGloo::RecvWork::RecvWork(
+    at::Tensor& tensor,
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+    int* srcRank)
+    : tensor_(tensor),
+      buffer_(std::move(buffer)),
+      srcRank_(srcRank) {
+}
+
+bool ProcessGroupGloo::RecvWork::isCompleted() const {
+  // No way to poll for completion yet
+  return true;
+}
+
+bool ProcessGroupGloo::RecvWork::isSuccess() const {
+  // No way to fail yet
+  return true;
+}
+
+void ProcessGroupGloo::RecvWork::synchronize() {
+  // CPU only, no need to synchronize
+  return;
+}
+
+bool ProcessGroupGloo::RecvWork::wait() {
+  buffer_->waitRecv(srcRank_);
+  return true;
+}
+
+const std::exception& ProcessGroupGloo::RecvWork::exception() const {
+  throw std::runtime_error("no exception");
+}
+
 ProcessGroupGloo::Options::Options()
     : timeout(std::chrono::milliseconds(10 * 1000)),
       threads(2),
@@ -595,22 +659,79 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
   throw std::runtime_error("ProcessGroupGloo does not support scatter");
 }
 
+at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
+  if (tensors.size() != 1) {
+    throw std::runtime_error("ProcessGroupGloo::send takes a single tensor");
+  }
+  auto& tensor = tensors[0];
+  if (!tensor.is_contiguous()) {
+    throw std::runtime_error("input tensor has to be contiguous");
+  }
+  if (tensor.is_sparse()) {
+    throw std::runtime_error("input tensor has to be dense");
+  }
+  return tensor;
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
-    std::vector<at::Tensor>& /* unused */,
-    int /* unused */) {
-  throw std::runtime_error("ProcessGroupGloo does not support send");
+    std::vector<at::Tensor>& tensors,
+    int dstRank) {
+  auto& tensor = checkSingleTensor(tensors);
+  auto ptr = tensor.data_ptr();
+  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+
+  // Construct unbound buffer.
+  auto& context = contexts_[0];
+  auto buf = context->createUnboundBuffer(ptr, size);
+  buf->send(dstRank, 0);
+
+  // The work captures the tensor to prevent it being deallocated and
+  // the unbound buffer to synchronize on completion of the send.
+  return std::make_shared<SendWork>(tensor, std::move(buf));
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
-    std::vector<at::Tensor>& /* unused */,
-    int /* unused */) {
-  throw std::runtime_error("ProcessGroupGloo does not support recv");
+    std::vector<at::Tensor>& tensors,
+    int srcRank) {
+  auto& tensor = checkSingleTensor(tensors);
+  auto ptr = tensor.data_ptr();
+  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+
+  // Construct unbound buffer.
+  auto& context = contexts_[0];
+  auto buf = context->createUnboundBuffer(ptr, size);
+  buf->recv(srcRank, 0);
+
+  // The work captures the tensor to prevent it being deallocated and
+  // the unbound buffer to synchronize on completion of the recv.
+  return std::make_shared<RecvWork>(tensor, std::move(buf), nullptr);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
-    std::vector<at::Tensor>& /* unused */,
-    int* /* unused */) {
-  throw std::runtime_error("ProcessGroupGloo does not support recv");
+    std::vector<at::Tensor>& tensors,
+    int* srcRank) {
+  auto& tensor = checkSingleTensor(tensors);
+  auto ptr = tensor.data_ptr();
+  auto size = tensor.numel() * tensor.type().elementSizeInBytes();
+
+  // Construct unbound buffer.
+  auto& context = contexts_[0];
+  auto buf = context->createUnboundBuffer(ptr, size);
+
+  // Build list of ranks that this operation can recv from. In these
+  // bindings we don't differentiate between ranks and can receive
+  // from any other process in the group.
+  std::vector<int> srcRanks;
+  srcRanks.resize(size_);
+  for (auto i = 0; i < size_; i++) {
+    srcRanks.push_back(i);
+  }
+
+  buf->recv(srcRanks, 0);
+
+  // The work captures the tensor to prevent it being deallocated and
+  // the unbound buffer to synchronize on completion of the recv.
+  return std::make_shared<RecvWork>(tensor, std::move(buf), srcRank);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
