@@ -524,6 +524,10 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         data_type.id() != TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
+    CAFFE_ENFORCE_WITH_CALLER(
+        data_type == storage_.dtype(),
+        "ShareExternalPointer is not permitted to change the dtype of "
+        "a tensor.");
     if (!capacity) {
       capacity = numel_ * data_type.itemsize();
     }
