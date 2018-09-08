@@ -136,6 +136,9 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
           id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         fi
         pwd
+
+        cp -r /opt/workspace/build_workspace/. /home/circleci/project  # This copies all source files from build step to the current step
+
         echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
         echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
         echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
@@ -143,9 +146,9 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
         echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
 
-        docker cp "/opt/workspace/build_workspace" "$id:/var/lib/jenkins/workspace"  # This copies all source files from build step to the current step
         mkdir -p /home/circleci/project/build
         cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
+        docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
         echo "mkdir -p /opt/conda/lib/python${PYTHON_VERSION}/site-packages" | docker exec -u jenkins -i "$id" bash
         docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch"
         if [ -d "/opt/workspace/cpp-build" ]; then
@@ -283,6 +286,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
           id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         fi
         pwd
+        cp -r /opt/workspace/build_workspace/. /home/circleci/project  # This copies all source files from build step to the current step
         echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
         echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
         # This IAM user allows write access to S3 bucket for sccache
@@ -331,7 +335,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         # =================== The above code will be executed inside Docker container ===================
         EOL
         chmod +x /home/circleci/project/ci_build_script.sh
-        docker cp "/opt/workspace/build_workspace" "$id:/var/lib/jenkins/workspace"  # This copies all source files from build step to the current step
+        docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
         if [ -d "/opt/workspace/caffe2" ]; then
           echo "mkdir -p /usr/local/caffe2" | docker exec -u jenkins -i "$id" bash
           docker cp /opt/workspace/caffe2/. "$id:/usr/local/caffe2"
