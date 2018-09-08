@@ -77,7 +77,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         git submodule sync && git submodule update --init
         .jenkins/pytorch/build.sh
         mkdir -p pytorch-ci-env/
-        cp -r /var/lib/jenkins/workspace pytorch-ci-env/build_workspace
+        cp -r /var/lib/jenkins/workspace pytorch-ci-env/build_workspace  # This copies all source files from build step to the next step
         cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch pytorch-ci-env/torch
         cp -r build/bin pytorch-ci-env/cpp_test_bin
         if [ -d "../cpp-build" ]; then
@@ -221,7 +221,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
         # Copy all necessary binaries to shared workspace
         mkdir -p caffe2-ci-env
-        cp -r /var/lib/jenkins/workspace caffe2-ci-env/build_workspace
+        cp -r /var/lib/jenkins/workspace caffe2-ci-env/build_workspace  # This copies all source files from build step to the next step
         cp -r third_party/onnx caffe2-ci-env/onnx
         if [ -d "/usr/local/caffe2" ]; then
           cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
