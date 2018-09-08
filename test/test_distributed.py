@@ -271,7 +271,6 @@ class _DistTestBase(object):
         self.assertEqual(dist.get_rank(group_id), dist.get_rank())
 
     # SEND RECV
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support send/recv")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
     def test_send_recv(self):
         rank = dist.get_rank()
@@ -294,9 +293,6 @@ class _DistTestBase(object):
         self._barrier()
 
     # SEND RECV ANY SOURCE
-    @unittest.skipIf(
-        BACKEND == "gloo", "Gloo does not support send/recv from any source"
-    )
     @unittest.skipIf(
         BACKEND == "nccl", "Nccl does not support send/recv from any source"
     )
@@ -327,7 +323,6 @@ class _DistTestBase(object):
         self._barrier()
 
     # ISEND
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support isend")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
     def test_isend(self):
         rank = dist.get_rank()
@@ -349,7 +344,6 @@ class _DistTestBase(object):
         self._barrier()
 
     # IRECV
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support irecv")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support irecv")
     def test_irecv(self):
         rank = dist.get_rank()
