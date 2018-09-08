@@ -76,15 +76,16 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
         git submodule sync && git submodule update --init
         .jenkins/pytorch/build.sh
-        mkdir -p pytorch-ci-env/
-        cp -r /var/lib/jenkins/workspace pytorch-ci-env/build_workspace  # This copies all source files from build step to the next step
-        cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch pytorch-ci-env/torch
-        cp -r build/bin pytorch-ci-env/cpp_test_bin
+        export PYTORCH_CI_ENV_DIR=/var/lib/jenkins/pytorch-ci-env
+        mkdir -p ${PYTORCH_CI_ENV_DIR}
+        cp -r /var/lib/jenkins/workspace ${PYTORCH_CI_ENV_DIR}/build_workspace  # This copies all source files from build step to the next step
+        cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch ${PYTORCH_CI_ENV_DIR}/torch
+        cp -r build/bin ${PYTORCH_CI_ENV_DIR}/cpp_test_bin
         if [ -d "../cpp-build" ]; then
-          cp -r ../cpp-build pytorch-ci-env/cpp-build
+          cp -r ../cpp-build ${PYTORCH_CI_ENV_DIR}/cpp-build
         fi
   - persist_to_workspace:
-      root: /var/lib/jenkins/workspace/pytorch-ci-env
+      root: /var/lib/jenkins/pytorch-ci-env
       paths:
         - "*"
 
@@ -220,17 +221,18 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         fi
 
         # Copy all necessary binaries to shared workspace
-        mkdir -p caffe2-ci-env
-        cp -r /var/lib/jenkins/workspace caffe2-ci-env/build_workspace  # This copies all source files from build step to the next step
-        cp -r third_party/onnx caffe2-ci-env/onnx
+        export CAFFE2_CI_ENV_DIR=/var/lib/jenkins/caffe2-ci-env
+        mkdir -p ${CAFFE2_CI_ENV_DIR}
+        cp -r /var/lib/jenkins/workspace ${CAFFE2_CI_ENV_DIR}/build_workspace  # This copies all source files from build step to the next step
+        cp -r third_party/onnx ${CAFFE2_CI_ENV_DIR}/onnx
         if [ -d "/usr/local/caffe2" ]; then
-          cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
+          cp -r /usr/local/caffe2 ${CAFFE2_CI_ENV_DIR}/caffe2
         fi
         if [ -d "/opt/conda" ]; then
-          cp -r /opt/conda caffe2-ci-env/conda_env
+          cp -r /opt/conda ${CAFFE2_CI_ENV_DIR}/conda_env
         fi
   - persist_to_workspace:
-      root: /var/lib/jenkins/workspace/caffe2-ci-env
+      root: /var/lib/jenkins/caffe2-ci-env
       paths:
         - "*"
 
