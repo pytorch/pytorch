@@ -5,10 +5,13 @@ docker_config_defaults: &docker_config_defaults
     aws_access_key_id: AKIAJ2J6FIG5OSZTQ3IA
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_ONLY}
 
+# NOTE: We only perform the merge in build step and not in test step, because
+# all source files will be shared from build to test
 merge_pull_request_onto_master: &merge_pull_request_onto_master
   name: Merge Onto Master
   no_output_timeout: "10h"
   command: |
+    # yf225 TODO: add `if [ -n "${CIRCLE_PULL_REQUEST}" ]; then` wrapper here
     git config --global user.email "circleci.ossci@gmail.com"
     git config --global user.name "CircleCI"
 
@@ -31,6 +34,8 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
   working_directory: /var/lib/jenkins/workspace
   steps:
   - checkout
+  - run:
+      <<: *merge_pull_request_onto_master
   - run:
       name: Build
       no_output_timeout: "10h"
@@ -58,8 +63,6 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
       name: Build
       no_output_timeout: "10h"
       command: |
-        git log -2
-
         export IN_CIRCLECI=1
         export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         if [ -n "${CUDA_VERSION}" ]; then
@@ -74,6 +77,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         git submodule update --init || git submodule update --init || git submodule update --init
         .jenkins/pytorch/build.sh
         mkdir -p pytorch-ci-env/
+        cp -r /var/lib/jenkins/workspace pytorch-ci-env/build_workspace
         cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch pytorch-ci-env/torch
         cp -r build/bin pytorch-ci-env/cpp_test_bin
         if [ -d "../cpp-build" ]; then
@@ -88,7 +92,6 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   machine:
     image: default
   steps:
-  - checkout
   - run:
       name: Prepare workspace
       command: |
@@ -138,9 +141,10 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         # This IAM user allows write access to S3 bucket for sccache
         echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
         echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
+
+        docker cp "/opt/workspace/build_workspace" "$id:/var/lib/jenkins/workspace"  # This copies all source files from build step to the current step
         mkdir -p /home/circleci/project/build
         cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
-        docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
         echo "mkdir -p /opt/conda/lib/python${PYTHON_VERSION}/site-packages" | docker exec -u jenkins -i "$id" bash
         docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch"
         if [ -d "/opt/workspace/cpp-build" ]; then
@@ -157,6 +161,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   working_directory: /var/lib/jenkins/workspace
   steps:
   - checkout
+  - run:
+      <<: *merge_pull_request_onto_master
   - run:
       name: Build
       no_output_timeout: "10h"
@@ -215,6 +221,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
         # Copy all necessary binaries to shared workspace
         mkdir -p caffe2-ci-env
+        cp -r /var/lib/jenkins/workspace caffe2-ci-env/build_workspace
         cp -r third_party/onnx caffe2-ci-env/onnx
         if [ -d "/usr/local/caffe2" ]; then
           cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
@@ -231,7 +238,6 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
     image: default
   steps:
-  - checkout
   - run:
       name: Prepare workspace
       command: |
@@ -323,7 +329,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         # =================== The above code will be executed inside Docker container ===================
         EOL
         chmod +x /home/circleci/project/ci_build_script.sh
-        docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
+        docker cp "/opt/workspace/build_workspace" "$id:/var/lib/jenkins/workspace"  # This copies all source files from build step to the current step
         if [ -d "/opt/workspace/caffe2" ]; then
           echo "mkdir -p /usr/local/caffe2" | docker exec -u jenkins -i "$id" bash
           docker cp /opt/workspace/caffe2/. "$id:/usr/local/caffe2"
@@ -340,6 +346,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
     xcode: "9.0"
   steps:
     - checkout
+    - run:
+        <<: *merge_pull_request_onto_master
     - run:
         name: Build
         no_output_timeout: "10h"
@@ -551,6 +559,8 @@ jobs:
     steps:
       - checkout
       - run:
+          <<: *merge_pull_request_onto_master
+      - run:
           name: Build
           environment:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
@@ -572,6 +582,9 @@ jobs:
             git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
+
+            # TODO: need to share source files from build to test, when macOS builds are enabled
+
       - persist_to_workspace:
           root: /Users/distiller/pytorch-ci-env
           paths:
@@ -581,7 +594,6 @@ jobs:
     macos:
       xcode: "9.0"
     steps:
-      - checkout
       - run:
           name: Prepare workspace
           command: |
@@ -595,6 +607,7 @@ jobs:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
           no_output_timeout: "10h"
           command: |
+            # TODO: need to share source files from build to test, when macOS builds are enabled
             set -ex
             export IN_CIRCLECI=1
             git submodule update --init
@@ -606,6 +619,8 @@ jobs:
       xcode: "9.0"
     steps:
       - checkout
+      - run:
+          <<: *merge_pull_request_onto_master
       - run:
           name: Build
           environment:
