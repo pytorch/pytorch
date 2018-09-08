@@ -5,7 +5,7 @@
 #include <ATen/core/Backend.h>
 
 namespace at {
-  class Context;
+  class LegacyTypeDispatch;
   struct Type;
 }
 
@@ -30,7 +30,7 @@ struct AT_API VariableHooksInterface {
     AT_ERROR("cannot getVariableTypeFromBaseType without libtorch");
   }
 
-  virtual void registerVariableTypeFor(Context*, Backend backend, ScalarType scalar_type) const {
+  virtual void registerVariableTypeFor(LegacyTypeDispatch*, Backend backend, ScalarType scalar_type) const {
     // no-op if Variable not available; it'll get handled (if at all) when
     // libtorch.so gets loaded
   }
