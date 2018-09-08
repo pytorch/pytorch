@@ -366,6 +366,42 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         work.wait()
         self.assertEqual(torch.Tensor([float(self.world_size * (self.world_size + 1) / 2)]), x)
 
+    def test_send_recv_all_to_all(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        # Preallocate tensors for input/output
+        inputs = [torch.Tensor([self.rank]) for _ in range(self.world_size)]
+        outputs = [torch.Tensor([-1]) for _ in range(self.world_size)]
+
+        # Issue sends
+        send_work = []
+        for i in range(self.world_size):
+            if i == self.rank:
+                continue
+            send_work.append(pg.send([inputs[i]], i))
+
+        # Issue recvs
+        recv_work = []
+        for i in range(self.world_size):
+            if i == self.rank:
+                continue
+            recv_work.append(pg.recv([outputs[i]], i))
+
+        # Wait for sends to complete
+        for work in send_work:
+            work.wait()
+
+        # Wait for recvs to complete
+        for work in recv_work:
+            work.wait()
+
+        # Test that every output other than our own contains the respective rank
+        for i in range(self.world_size):
+            if i == self.rank:
+                continue
+            self.assertEqual(torch.Tensor([i]), outputs[i])
+
 
 class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
