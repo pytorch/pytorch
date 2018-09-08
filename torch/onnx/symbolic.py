@@ -1098,7 +1098,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
             #   seq_len, num_directions, batch, hidden_size
             # We have to convert to match pytorch's expected
             #   seq_len, batch, num_directions * hidden_size
-            # by first moving num_directions to the end with
+            # by first moving num_directions before hidden_size with
             # Transpose, and then combining it with hidden_size
             # with Reshape.
             prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 1, 3])
