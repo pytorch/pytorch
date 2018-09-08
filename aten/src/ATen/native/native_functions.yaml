@@ -860,6 +860,10 @@
   variants: function, method
   device_guard: false
 
+- func: is_complex(Tensor self) -> bool
+  variants: function, method
+  device_guard: false
+
 - func: is_nonzero(Tensor self) -> bool
   variants: function, method
   device_guard: false
