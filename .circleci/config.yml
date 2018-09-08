@@ -36,6 +36,8 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
       no_output_timeout: "10h"
       command: |
         # yf225 debug
+        printenv
+
         git config --global user.email "circleci.ossci@gmail.com"
         git config --global user.name "CircleCI"
 
