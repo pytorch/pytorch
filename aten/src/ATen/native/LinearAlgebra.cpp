@@ -347,5 +347,44 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+Tensor matrix_power(const Tensor& a, int64_t n) {
+  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.type().scalarType()),
+           "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
+           "of floating types with dim at least 2");
+  if (n == 0) {
+    return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
+  } else if (n < 0) {
+    AT_CHECK(a.dim() == 2, "Negative powers for batch matrices are currently not supported");
+    Tensor a_ = at::inverse(a);
+    n *= -1;
+    return at::native::matrix_power(a_, n);
+  } else if (n == 1) {
+    return a.clone();
+  } else if (n == 2) {
+    return at::native::matmul(a, a);
+  } else if (n == 3) {
+    return at::native::matmul(at::native::matmul(a, a), a);
+  }
+
+  // This is a binary decomposition of n.
+  // Moving from the least significant bit to the most significant bit
+  // This is done to reduce the number of matrix multiplications
+  // by raising the input matrix in powers of 2
+  // The total number of matrix multiplications are
+  // number of bits + number of bits that equal 1 ~ O(log n)
+  // instead of O(n)
+  Tensor result, z;
+  int64_t r;
+  while (n > 0) {
+    z = (!z.defined()) ? a.clone() : at::native::matmul(z, z);
+    r = n % 2;
+    n = n / 2;
+    if (r == 1) {
+      result = (!result.defined()) ? z.clone() : at::native::matmul(result, z);
+    }
+  }
+  return result;
 }
-}
+
+} // namespace native
+} // namespace at
