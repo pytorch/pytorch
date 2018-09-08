@@ -23,7 +23,7 @@ namespace c10 { namespace guts {
 template <typename T, typename... Args>
 typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
 make_unique(Args&&... args) {
-  return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+  return std::unique_ptr<T>(new T(forward<Args>(args)...));
 }
 // Allows 'make_unique<T[]>(10)'. (N3690 s20.9.1.4 p3-4)
 template <typename T>
@@ -37,6 +37,7 @@ typename std::enable_if<std::extent<T>::value != 0, std::unique_ptr<T>>::type
 make_unique(Args&&...) = delete;
 
 #endif
+
 
 
 #ifdef __cpp_lib_integer_sequence
@@ -148,12 +149,29 @@ template<typename... Ts> using void_t = typename make_void<Ts...>::type;
 #endif
 
 
+// C++11 doesn't have constexpr std::move / std::forward.
+// Implementation taken from libc++.
+template<class T>
+constexpr inline guts::remove_reference_t<T>&& move(T&& t) noexcept {
+  return static_cast<guts::remove_reference_t<T>&&>(t);
+}
+template <class T>
+constexpr inline T&& forward(guts::remove_reference_t<T>& t) noexcept {
+    return static_cast<T&&>(t);
+}
+template <class T>
+constexpr inline T&& forward(guts::remove_reference_t<T>&& t) noexcept {
+    static_assert(!std::is_lvalue_reference<T>::value,
+                  "can not forward an rvalue as an lvalue.");
+    return static_cast<T&&>(t);
+}
+
 
 #ifdef __cpp_lib_apply
 
 template <class F, class Tuple>
 inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
-  return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
+  return std::apply(forward<F>(f), forward<Tuple>(t));
 }
 
 #else
@@ -162,19 +180,19 @@ inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 // TODO This is an incomplete implementation of std::apply, not working for member functions.
 namespace detail {
 template <class F, class Tuple, std::size_t... I>
-constexpr auto apply_impl(F&& f, Tuple&& t, guts::index_sequence<I...>) -> decltype(std::forward<F>(f)(std::get<I>(std::forward<Tuple>(t))...))
+constexpr auto apply_impl(F&& f, Tuple&& t, guts::index_sequence<I...>) -> decltype(forward<F>(f)(std::get<I>(forward<Tuple>(t))...))
 {
-    return std::forward<F>(f)(std::get<I>(std::forward<Tuple>(t))...);
+    return forward<F>(f)(std::get<I>(forward<Tuple>(t))...);
 }
 }  // namespace detail
 
 template <class F, class Tuple>
 constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
-    std::forward<F>(f), std::forward<Tuple>(t),
+    forward<F>(f), forward<Tuple>(t),
     guts::make_index_sequence<std::tuple_size<guts::remove_reference_t<Tuple>>::value>{}))
 {
     return detail::apply_impl(
-        std::forward<F>(f), std::forward<Tuple>(t),
+        forward<F>(f), forward<Tuple>(t),
         guts::make_index_sequence<std::tuple_size<guts::remove_reference_t<Tuple>>::value>{});
 }
 
