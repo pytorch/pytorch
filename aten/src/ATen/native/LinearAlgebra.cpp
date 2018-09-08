@@ -320,6 +320,11 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     checkSize(c, self_arg, 2, res_cols);
   }
 
+  if (at::hasMKL() && at::native::is_floating_point(self_or_result)) {
+    at::native::baddbmm__mkl(self_or_result, batch1, batch2, beta, alpha);
+    return self_or_result;
+  }
+
   if (bs > contraction_size * 10) { // better criterion?
     if (is_bmm_out) {
       AT_DISPATCH_ALL_TYPES(batch1.type(), "bmm", [&] {
@@ -369,8 +374,9 @@ Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
 }
 
 Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
-  Scalar dummy;
-  return bmm_out_or_baddbmm_(result, batch1, batch2, dummy, dummy, true);
+  Scalar beta(0.0);
+  Scalar alpha(1.0);
+  return bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
 }
 
 Tensor dot(const Tensor& self, const Tensor& tensor) {
