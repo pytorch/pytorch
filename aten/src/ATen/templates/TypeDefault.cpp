@@ -2,7 +2,10 @@
 
 // ${generated_comment}
 
+#include "ATen/core/SparseTensorRef.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/ExpandUtils.h"
+#include "ATen/Functions.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"

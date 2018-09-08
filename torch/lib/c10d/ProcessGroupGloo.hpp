@@ -212,6 +212,60 @@ class ProcessGroupGloo : public ProcessGroup {
     friend class ProcessGroupGloo;
   };
 
+  // For send and recv operations there is no need to pass them to the
+  // thread pool as they are entirely completed by the device thread.
+  // This work object is used to synchronize completion of the send or
+  // recv operation. It keeps a reference to the tensor it is
+  // operating on to prevent it from being deallocated while the
+  // operation is still in flight.
+  class SendWork : public ProcessGroup::Work {
+   public:
+    explicit SendWork(
+        at::Tensor& tensor,
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+
+    virtual ~SendWork() = default;
+
+    bool isCompleted() const override;
+
+    bool isSuccess() const override;
+
+    void synchronize() override;
+
+    bool wait() override;
+
+    const std::exception& exception() const override;
+
+   protected:
+    at::Tensor tensor_;
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+  };
+
+  class RecvWork : public ProcessGroup::Work {
+   public:
+    explicit RecvWork(
+        at::Tensor& tensor,
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        int* srcRank);
+
+    virtual ~RecvWork() = default;
+
+    bool isCompleted() const override;
+
+    bool isSuccess() const override;
+
+    void synchronize() override;
+
+    bool wait() override;
+
+    const std::exception& exception() const override;
+
+   protected:
+    at::Tensor tensor_;
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
+    int* srcRank_;
+  };
+
   struct Options {
     explicit Options();
 

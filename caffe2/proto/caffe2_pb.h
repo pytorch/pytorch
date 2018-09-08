@@ -44,9 +44,6 @@ inline CAFFE2_API DeviceType ProtoToType(const caffe2::DeviceTypeProto p) {
           ". If you have recently updated the caffe2.proto file to add a new "
           "device type, did you forget to update the ProtoToType() and TypeToProto"
           "function to reflect such recent changes?");
-      // The below code won't run but is needed to suppress some compiler
-      // warnings.
-      return DeviceType::ONLY_FOR_TEST;
   }
 }
 
@@ -77,9 +74,6 @@ inline CAFFE2_API DeviceTypeProto TypeToProto(const DeviceType& t) {
           ". If you have recently updated the caffe2.proto file to add a new "
           "device type, did you forget to update the ProtoToType() and TypeToProto"
           "function to reflect such recent changes?");
-      // The below code won't run but is needed to suppress some compiler
-      // warnings.
-      return PROTO_ONLY_FOR_TEST;
   }
 }
 
