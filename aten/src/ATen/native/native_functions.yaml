@@ -993,7 +993,6 @@
 
 - func: logsumexp_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
 
-
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
@@ -1004,6 +1003,9 @@
 - func: matrix_rank(Tensor self, double tol, bool symmetric=false) -> Tensor
 
 - func: matrix_rank(Tensor self, bool symmetric=false) -> Tensor
+
+- func: matrix_power(Tensor self, int64_t n) -> Tensor
+  variants: function, method
 
 - func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
   variants: function, method
