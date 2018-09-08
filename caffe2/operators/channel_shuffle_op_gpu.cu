@@ -1,43 +1,85 @@
-#include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/channel_shuffle_op.h"
+
+#include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/fixed_divisor.h"
 
 namespace caffe2 {
 
-__global__ void ChannelShuffleNCHWKernel(
-    const int N,
-    const int S,
-    const int C,
-    const int G,
-    const int K,
-    const float* Xdata,
-    float* Ydata) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    const int out_s = i % S;
-    const int i_2 = i / S;
-    const int out_c = i_2 % C;
-    const int n = i_2 / C;
-
-    const int g = out_c % G;
-    const int k = out_c / G;
-    const int in_c = k + K * g;
-    Ydata[out_s + S * out_c + S * C * n] = Xdata[out_s + S * in_c + S * C * n];
+template <typename T>
+__global__ void ChannelShuffleNCHWCUDAKernel(
+    const int size,
+    const FixedDivisor<int> C,
+    const FixedDivisor<int> G,
+    const FixedDivisor<int> HxW,
+    const T* X,
+    T* Y) {
+  const int K = C.d() / G.d();
+  CUDA_1D_KERNEL_LOOP(i, size) {
+    int nc;
+    int hw;
+    HxW.DivMod(i, &nc, &hw);
+    int n;
+    int c;
+    C.DivMod(nc, &n, &c);
+    int g;
+    int k;
+    G.DivMod(c, &k, &g);
+#if __CUDA_ARCH__ >= 350
+    Y[i] = __ldg(X + (n * C.d() + g * K + k) * HxW.d() + hw);
+#else
+    Y[i] = X[(n * C.d() + g * K + k) * HxW.d() + hw];
+#endif
   }
 }
 
-__global__ void ChannelShuffleNHWCKernel(
-    const int N,
-    const int G,
-    const int K,
-    const float* Xdata,
-    float* Ydata) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    const int out_g = i % G;
-    const int i_2 = i / G;
-    const int out_k = i_2 % K;
-    const int n = i_2 / K;
+template <typename T, int kChannelSize>
+__global__ void ChannelShuffleNHWCSharedCUDAKernel(
+    const int outer_size,
+    const int C,
+    const FixedDivisor<int> G,
+    const T* X,
+    T* Y) {
+  const int K = C / G.d();
+  __shared__ T channel[kChannelSize + 1];
+  for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
+    for (int j = threadIdx.x; j < C; j += blockDim.x) {
+#if __CUDA_ARCH__ >= 350
+      channel[j] = __ldg(X + i * C + j);
+#else
+      channel[j] = X[i * C + j];
+#endif
+    }
+    __syncthreads();
+    for (int j = threadIdx.x; j < C; j += blockDim.x) {
+      int g;
+      int k;
+      G.DivMod(j, &k, &g);
+      Y[i * C + j] = channel[g * K + k];
+    }
+    __syncthreads();
+  }
+}
 
-    const int in_c = out_k + K * out_g;
-    Ydata[out_g + G * out_k + G * K * n] = Xdata[in_c + G * K * n];
+template <typename T>
+__global__ void ChannelShuffleNHWCCUDAKernel(
+    const int size,
+    const FixedDivisor<int> C,
+    const FixedDivisor<int> G,
+    const T* X,
+    T* Y) {
+  const int K = C.d() / G.d();
+  CUDA_1D_KERNEL_LOOP(i, size) {
+    int nhw;
+    int c;
+    C.DivMod(i, &nhw, &c);
+    int g;
+    int k;
+    G.DivMod(c, &k, &g);
+#if __CUDA_ARCH__ >= 350
+    Y[i] = __ldg(X + nhw * C.d() + g * K + k);
+#else
+    Y[i] = X[nhw * C.d() + g * K + k];
+#endif
   }
 }
 
@@ -46,17 +88,23 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
-  const auto C = X.dim32(1);
-  const auto G = this->group_;
-  CAFFE_ENFORCE(C % G == 0, "");
-  const auto K = C / G;
-  const auto S = X.dim32(2) * X.dim32(3);
-  ChannelShuffleNCHWKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      X.size(), S, C, G, K, X.data<float>(), Y->template mutable_data<float>());
+  const int size = X.size();
+  const int N = X.dim32(0);
+  const int C = X.dim32(1);
+  const int G = this->group_;
+  CAFFE_ENFORCE_EQ(C % G, 0);
+  const int HxW = size / (N * C);
+  ChannelShuffleNCHWCUDAKernel<float>
+      <<<CAFFE_GET_BLOCKS(size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          size,
+          FixedDivisor<int>(C),
+          FixedDivisor<int>(G),
+          FixedDivisor<int>(HxW),
+          X.data<float>(),
+          Y->mutable_data<float>());
   return true;
 }
 
@@ -65,16 +113,43 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
-  const auto C = X.dim32(3);
-  const auto G = this->group_;
-  CAFFE_ENFORCE(C % G == 0, "");
-  const auto K = C / G;
-  ChannelShuffleNHWCKernel<<<
-      CAFFE_GET_BLOCKS(X.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      X.size(), G, K, X.data<float>(), Y->template mutable_data<float>());
+  const int ndim = X.ndim();
+  const int size = X.size();
+  const int C = X.dim32(ndim - 1);
+  const int G = this->group_;
+  CAFFE_ENFORCE_EQ(C % G, 0);
+  const int outer_size = size / C;
+  const float* X_data = X.data<float>();
+  float* Y_data = Y->mutable_data<float>();
+  if (C <= 32) {
+    ChannelShuffleNHWCSharedCUDAKernel<float, 32>
+        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            outer_size, C, FixedDivisor<int>(G), X_data, Y_data);
+  } else if (C <= 128) {
+    ChannelShuffleNHWCSharedCUDAKernel<float, 128>
+        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            outer_size, C, FixedDivisor<int>(G), X_data, Y_data);
+  } else if (C <= 512) {
+    ChannelShuffleNHWCSharedCUDAKernel<float, 512>
+        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            outer_size, C, FixedDivisor<int>(G), X_data, Y_data);
+  } else {
+    ChannelShuffleNHWCCUDAKernel<float>
+        <<<CAFFE_GET_BLOCKS(size),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            size, FixedDivisor<int>(C), FixedDivisor<int>(G), X_data, Y_data);
+  }
   return true;
 }
 
@@ -83,23 +158,24 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
   auto* dX = Output(0);
   dX->ResizeLike(dY);
-  const auto C = dY.dim32(1);
-  const auto G = this->group_;
-  CAFFE_ENFORCE(C % G == 0, "");
-  const auto K = C / G;
-  const auto S = dY.dim32(2) * dY.dim32(3);
-  ChannelShuffleNCHWKernel<<<
-      CAFFE_GET_BLOCKS(dY.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      dY.size(),
-      S,
-      C,
-      K,
-      G,
-      dY.data<float>(),
-      dX->template mutable_data<float>());
+  const int size = dY.size();
+  const int N = dY.dim32(0);
+  const int C = dY.dim32(1);
+  const int G = this->group_;
+  CAFFE_ENFORCE_EQ(C % G, 0);
+  const int K = C / G;
+  const int HxW = size / (N * C);
+  ChannelShuffleNCHWCUDAKernel<float>
+      <<<CAFFE_GET_BLOCKS(size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          size,
+          FixedDivisor<int>(C),
+          FixedDivisor<int>(K),
+          FixedDivisor<int>(HxW),
+          dY.data<float>(),
+          dX->mutable_data<float>());
   return true;
 }
 
@@ -108,16 +184,44 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
   auto* dX = Output(0);
   dX->ResizeLike(dY);
-  const auto C = dY.dim32(3);
-  const auto G = this->group_;
-  CAFFE_ENFORCE(C % G == 0, "");
-  const auto K = C / G;
-  ChannelShuffleNHWCKernel<<<
-      CAFFE_GET_BLOCKS(dY.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      dY.size(), K, G, dY.data<float>(), dX->template mutable_data<float>());
+  const int ndim = dY.ndim();
+  const int size = dY.size();
+  const int C = dY.dim32(ndim - 1);
+  const int G = this->group_;
+  CAFFE_ENFORCE_EQ(C % G, 0);
+  const int outer_size = size / C;
+  const int K = C / G;
+  const float* dY_data = dY.data<float>();
+  float* dX_data = dX->mutable_data<float>();
+  if (C <= 32) {
+    ChannelShuffleNHWCSharedCUDAKernel<float, 32>
+        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            outer_size, C, FixedDivisor<int>(K), dY_data, dX_data);
+  } else if (C <= 128) {
+    ChannelShuffleNHWCSharedCUDAKernel<float, 128>
+        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            outer_size, C, FixedDivisor<int>(K), dY_data, dX_data);
+  } else if (C <= 512) {
+    ChannelShuffleNHWCSharedCUDAKernel<float, 512>
+        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            outer_size, C, FixedDivisor<int>(K), dY_data, dX_data);
+  } else {
+    ChannelShuffleNHWCCUDAKernel<float>
+        <<<CAFFE_GET_BLOCKS(size),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            size, FixedDivisor<int>(C), FixedDivisor<int>(K), dY_data, dX_data);
+  }
   return true;
 }
 
