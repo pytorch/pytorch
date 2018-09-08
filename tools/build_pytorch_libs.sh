@@ -100,11 +100,11 @@ else
     fi
 fi
 CPP_FLAGS=" -std=c++11 "
-GLOO_FLAGS=""
+GLOO_FLAGS="-DBUILD_TEST=OFF "
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $USE_CUDA -eq 1 ]]; then
-    GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
+    GLOO_FLAGS+="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 # Gloo infiniband support
 if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
