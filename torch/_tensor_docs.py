@@ -1317,6 +1317,13 @@ masked_select(mask) -> Tensor
 See :func:`torch.masked_select`
 """)
 
+add_docstr_all('matrix_rank',
+               r"""
+matrix_rank(tol=None, bool symmetric=False) -> Tensor
+
+See :func:`torch.matrix_rank`
+""")
+
 add_docstr_all('matrix_power',
                r"""
 matrix_power(n) -> Tensor
