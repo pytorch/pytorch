@@ -102,12 +102,6 @@ fi
 # Add the test binaries so that they won't be git clean'ed away
 git add -f build/bin
 
-# Testing ATen install
-if [[ "$BUILD_ENVIRONMENT" != *cuda* ]]; then
-  echo "Testing ATen install"
-  time tools/test_aten_install.sh
-fi
-
 # Test C FFI plugins
 # cffi install doesn't work for Python 3.7
 if [[ "$BUILD_ENVIRONMENT" != *pynightly* ]]; then
