@@ -35,6 +35,29 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
       name: Build
       no_output_timeout: "10h"
       command: |
+        # yf225 debug
+        git config --global user.email "circleci.ossci@gmail.com"
+        git config --global user.name "CircleCI"
+
+        git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/*:refs/remotes/origin/* --depth=50 --quiet
+        git config remote.origin.url https://github.com/pytorch/pytorch.git
+        git config --add remote.origin.fetch +refs/heads/*:refs/remotes/origin/*
+        git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/*:refs/remotes/origin/* +refs/pull/*:refs/remotes/origin/pr/* --depth=50 --quiet
+
+        export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
+        echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+        export GIT_COMMIT=${CIRCLE_SHA1}
+        echo "GIT_COMMIT: " ${GIT_COMMIT}
+
+        git checkout -f ${GIT_COMMIT}
+        git reset --hard ${GIT_COMMIT}
+        git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
+
+        git log -2
+
+        export GIT_MERGE_COMMIT=`git log -n 1 --pretty=format:"%H"`
+        git show --stat ${GIT_MERGE_COMMIT}
+
         export IN_CIRCLECI=1
         export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         if [ -n "${CUDA_VERSION}" ]; then
