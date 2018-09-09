@@ -11,32 +11,26 @@
 #include <omp.h>
 #endif
 
-
 namespace at { 
 namespace native {
 
 // Staying faithful to the Python for now for clarity, look for optimizations later
-// (eg single return statement for RVO)
+// (e.g., single return statement for RVO)
 Tensor norm_except_dim(const Tensor & v, int64_t pow, int64_t dim)
 {
   // I assume tensor.contiguous(), view(), norm(), etc. here will dispatch through VariableType.
-  if(dim == -1)
+  if (dim == -1) {
     return v.norm(pow);
-  else if(dim == 0)
-  {
+  } else if (dim == 0) {
     std::vector<int64_t> output_size(v.dim(), 1);
     output_size[0] = v.size(0);
     return v.contiguous().view({v.size(0), -1}).norm(pow, 1).view(output_size);
-  }
-  else if(dim == v.dim() - 1)
-  {
+  } else if (dim == v.dim() - 1) {
     std::vector<int64_t> output_size(v.dim(), 1);
     output_size[v.dim() - 1] = v.size(v.dim() - 1);
     return v.contiguous().view({-1, v.size(v.dim() - 1)}).norm(pow, 0).view(output_size);
-  }
-  else 
-  {
-    // To consider:  at::native::norm_except_dim is probably fine as well, 
+  } else {
+    // To consider: at::native::norm_except_dim is probably fine as well, 
     // and would avoid an additional dynamic dispatch.  
     return at::norm_except_dim(v.transpose(0, dim), pow, 0).transpose(0, dim); // optimize?
   }
@@ -48,23 +42,21 @@ Tensor _weight_norm
    int64_t dim) 
 {
 
-  AT_CHECK
-    (v_in.type().is_cuda() == g_in.type().is_cuda(),
-     "In weight_norm, v and g must both be on CPU, or both be on GPU") 
+  AT_CHECK(
+    v_in.device() == g_in.device(),
+    "weight_norm: expected v_in and g_in to be on the same device, but v_in is "
+    "on ", v_in.device(), " and g_in is on ", g_in.device()); 
 
   auto v = v_in.contiguous();
   auto g = g_in.contiguous();
     
   bool can_use_fused = v.type().is_cuda() && (dim == 0 || dim == v.dim() - 1);
 
-  if(can_use_fused) 
-  {
+  if (can_use_fused) {
     // weight_norm does not have a derivative defined for it, so this will route back through
     // VariableType.cpp, and construct a WeightNormFusedBackward object in the autograd graph.
     return std::get<0>(at::weight_norm_cuda_interface(v, g, dim));
-  }
-  else
-  {
+  } else {
     // Double-differentiable primitive ops
     // at::native::norm_except_dim would probably be fine as well.
     return v*(g/at::norm_except_dim(v, 2, dim));
@@ -106,16 +98,13 @@ std::tuple<Tensor, Tensor> weight_norm_differentiable_backward
   std::vector<int64_t> bcast_size(saved_v.dim(), 1);
 
   // Analytic backward path using differentiable primitive ops
-  if(dim == 0)
-  {
+  if (dim == 0) {
     bcast_size[0] = saved_v.size(0);
     auto per_dim_sums = (grad_w*saved_v).view({saved_v.size(0), -1}).sum(1).view(bcast_size);
     auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
     auto grad_g = per_dim_sums/norms; 
     return std::tuple<Tensor, Tensor>{grad_v, grad_g};
-  }
-  else // dim == last_dim
-  {
+  } else { // dim == last_dim
     bcast_size[last_dim] = last_size; 
     auto per_dim_sums = (grad_w*saved_v).view({-1, last_size}).sum(0).view(bcast_size);
     auto grad_v = (saved_g/norms)*(grad_w - saved_v*(per_dim_sums/(norms*norms)));
