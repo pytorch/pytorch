@@ -35,6 +35,9 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
       name: Build
       no_output_timeout: "10h"
       command: |
+        # DEBUG
+        printenv
+
         export IN_CIRCLECI=1
         export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         if [ -n "${CUDA_VERSION}" ]; then
