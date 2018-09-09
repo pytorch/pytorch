@@ -187,6 +187,12 @@ struct TORCH_API Variable : public at::Tensor {
   /// this. If this `Variable` is a view, throws an `std::runtime_error()`.
   void detach_();
 
+  /// Computes the gradient of current tensor w.r.t. graph leaves.
+  void backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const;
+
+  /// Sets the type of the Variable.
+  void set_data(Tensor new_data) const;
+
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.
   /// NOTE: This will always set the `grad_fn`, even if this is a leaf variable,
@@ -324,14 +330,12 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   Variable detach() const;
   void detach_();
 
-  /// Sets the type of the Variable.
-  void set_data(Tensor new_data) override;
+  void set_data(Tensor new_data);
 
-  /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
       at::optional<at::Tensor> gradient,
       bool keep_graph,
-      bool create_graph) override;
+      bool create_graph);
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
@@ -498,6 +502,14 @@ inline Variable Variable::detach() const {
 
 inline void Variable::detach_() {
   get()->detach_();
+}
+
+inline void Variable::backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  get()->backward(gradient, keep_graph, create_graph);
+}
+
+inline void Variable::set_data(Tensor new_data) const {
+  get()->set_data(new_data);
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {

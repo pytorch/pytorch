@@ -1,6 +1,5 @@
 #include <ATen/TensorImpl.h>
 
-#include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
 #include <ATen/core/Backend.h>
 #include <ATen/core/WrapDimMinimal.h>
@@ -16,24 +15,6 @@ Tensor& TensorImpl::grad() {
 
 const Tensor& TensorImpl::grad() const {
   AT_ERROR("grad is not implemented for Tensor");
-}
-
-void TensorImpl::backward(
-    at::optional<Tensor> gradient,
-    bool keep_graph,
-    bool create_graph) {
-  AT_ERROR("backward is not implemented for Tensor");
-}
-
-void TensorImpl::set_data(Tensor new_data) {
-  AT_ERROR("set_type is not implemented for Tensor");
-}
-
-void Tensor::backward(
-    at::optional<Tensor> gradient,
-    bool keep_graph,
-    bool create_graph) {
-  tensor_impl_->backward(std::move(gradient), keep_graph, create_graph);
 }
 
 TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable)

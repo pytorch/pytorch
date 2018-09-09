@@ -90,13 +90,6 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   virtual Tensor& grad();
   virtual const Tensor& grad() const;
 
-  virtual void backward(
-      at::optional<Tensor> gradient,
-      bool keep_graph,
-      bool create_graph);
-
-  virtual void set_data(Tensor new_data);
-
   // TODO: make these protected
   // Note: storage->size() may be greater than the recorded size
   // of a tensor
