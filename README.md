@@ -227,11 +227,12 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 ### Building the Documentation
 
-To build documentation in various formats, you will need Sphinx.
+To build documentation in various formats, you will need Sphinx and the
+readthedocs theme.
 
 ```
-conda install sphinx sphinx_rtd_theme
-pip install sphinxcontrib-katex
+cd docs/
+pip install -r requirements.txt
 ```
 You can then build the documentation by running ``make <format>`` from the
 ``docs/`` folder. Run ``make`` to get a list of all available output formats.
