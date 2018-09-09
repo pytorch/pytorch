@@ -1298,8 +1298,8 @@ void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension, int
   THTensor_(catArray)(r_, inputs, 2, dimension, pad, pad_value);
 }
 
-void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension, scalar_t pad);
-inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension, scalar_t pad)
+void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension, int pad);
+inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension, int pad)
 {
   int first_dims = first->dim();
   int second_dims = second->dim();
@@ -1423,16 +1423,16 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
     for (int j = 0; j < numInputs; j++) {
       if (!should_skip(inputs[j])) {
         int64_t dimSize = inputs[j]->size(dimension);
-        THTensor *nt = THTensor_(newWithTensor)(result);
+        THTensor* nt = THTensor_(newWithTensor)(result);
         if (pad) {
           for (int dim = 0; dim < nDims; dim++) {
             if (dimension == dim) {
               THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
-            }else{
+            } else {
               THTensor_(narrow)(nt, NULL, dim, 0, inputs[j]->size(dim));
             }
           }
-        }else{
+        } else {
           THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
         }
         THTensor_(copy)(nt, inputs[j]);
