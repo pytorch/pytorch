@@ -166,6 +166,13 @@ public:
   Vec256<T> rsqrt() const {
     return map([](T x) { return 1 / std::sqrt(x); });
   }
+  Vec256<T> pow(const Vec256<T> &exp) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size; i++) {
+      ret[i] = std::pow(values[i], exp[i]);
+    }
+    return ret;
+  }
 };
 
 template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {
@@ -204,6 +211,14 @@ template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c[i] = std::max(a[i], b[i]);
+  }
+  return c;
+}
+
+template <class T> Vec256<T> min(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size; i++) {
+    c[i] = std::min(a[i], b[i]);
   }
   return c;
 }
