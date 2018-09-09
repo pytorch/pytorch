@@ -3719,9 +3719,9 @@ class TestNN(NNTestCase):
         padded = rnn_utils.pad_sequence([b, a, c], True, 1)
         self.assertEqual(padded, expected)
 
-        # padding_type = 'pre'
+        # padding_type = "pre"
         expected = torch.tensor([[0, 4, 5], [1, 2, 3], [0, 0, 6]])
-        padded = rnn_utils.pad_sequence([b, a, c], True, padding_type='pre')
+        padded = rnn_utils.pad_sequence([b, a, c], True, padding_type="pre")
         self.assertEqual(padded, expected)
 
         # Test pad sorted sequence

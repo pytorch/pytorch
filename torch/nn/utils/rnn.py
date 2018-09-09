@@ -271,7 +271,7 @@ def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0
 pad_packed_sequence = torch.onnx.symbolic_override(_symbolic_pad_packed_sequence)(pad_packed_sequence)
 
 
-def pad_sequence(sequences, batch_first=False, padding_value=0, padding_type='post'):
+def pad_sequence(sequences, batch_first=False, padding_value=0, padding_type="post"):
     r"""Pad a list of variable length Tensors with zero
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
@@ -303,7 +303,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0, padding_type='po
         batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
             ``T x B x *`` otherwise
         padding_value (float, optional): value for padded elements. Default: 0.
-        padding_type: (string, 'pre' or 'post'): pad either before or after each sequence. Default: 'post'.
+        padding_type: (string, "pre" or "post"): pad either before or after each sequence. Default: "post".
 
     Returns:
         Tensor of size ``T x B x *`` if batch_first is False
@@ -323,14 +323,14 @@ def pad_sequence(sequences, batch_first=False, padding_value=0, padding_type='po
 
     if not isinstance(padding_type, str):
         raise TypeError("Expected padding_type to be str type but {} found".format(type(padding_type)))
-    if padding_type == 'post':
+    if padding_type == "post":
         for i, tensor in enumerate(sequences):
             length = tensor.size(0)
             if batch_first:
                 out_tensor[i, :length, ...] = tensor
             else:
                 out_tensor[:length, i, ...] = tensor
-    elif padding_type == 'pre':
+    elif padding_type == "pre":
         for i, tensor in enumerate(sequences):
             length = tensor.size(0)
             if batch_first:
