@@ -120,6 +120,8 @@ class Conv1d(_ConvNd):
          then you use the constructor arguments
          :math:`(\text{in\_channels}=C_{in}, \text{out\_channels}=C_{in} * K, ..., \text{groups}=C_{in})`
 
+    .. include:: cudnn_deterministic.rst
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -243,6 +245,8 @@ class Conv2d(_ConvNd):
          then you use the constructor arguments
          :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
 
+    .. include:: cudnn_deterministic.rst
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -364,6 +368,8 @@ class Conv3d(_ConvNd):
          depthwise convolution with a depthwise multiplier `K`,
          then you use the constructor arguments
          :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -524,6 +530,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
+    .. include:: cudnn_deterministic.rst
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -633,6 +641,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         effectively increasing the calculated output shape on one side. Note
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -773,6 +783,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         effectively increasing the calculated output shape on one side. Note
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
