@@ -455,30 +455,35 @@ if (BUILD_TEST)
 endif()
 
 if (BUILD_PYTHON)
-  # Python site-packages
-  # Get canonical directory for python site packages (relative to install
-  # location).  It varies from system to system.
-  pycmd(PYTHON_SITE_PACKAGES "
+  if (NOT PYTHON_LIB_REL_PATH)
+    # Python site-packages
+    # Get canonical directory for python site packages (relative to install
+    # location).  It varies from system to system.
+    pycmd(PYTHON_SITE_PACKAGES "
       from distutils import sysconfig
       print(sysconfig.get_python_lib(prefix=''))
   ")
-  SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
-  # ---[ Options.
-  SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
+    SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} CACHE STRING "Python site packages dir, for summary" PARENT_SCOPE ) # for Summary
+    # ---[ Options.
+    SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
+  endif()
   message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
-  # Python extension suffix
-  # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
-  # fallback to ".pyd" if windows and ".so" for all others.
-  pycmd(PY_EXT_SUFFIX "
+
+  if (NOT DEFINED PY_EXT_SUFFIX)
+    # Python extension suffix
+    # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
+    # fallback to ".pyd" if windows and ".so" for all others.
+    pycmd(PY_EXT_SUFFIX "
       from distutils import sysconfig
       ext_suffix = sysconfig.get_config_var('EXT_SUFFIX')
       print(ext_suffix if ext_suffix else '')
   ")
-  if("${PY_EXT_SUFFIX}" STREQUAL "")
-    if (MSVC)
-      set(PY_EXT_SUFFIX ".pyd")
-    else()
-      set(PY_EXT_SUFFIX ".so")
+    if("${PY_EXT_SUFFIX}" STREQUAL "")
+      if (MSVC)
+	set(PY_EXT_SUFFIX ".pyd" CACHE STRING "Python expected extension suffix")
+      else()
+	set(PY_EXT_SUFFIX ".so" CACHE STRING "Python expected extension suffix")
+      endif()
     endif()
   endif()
 

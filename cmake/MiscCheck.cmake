@@ -11,30 +11,33 @@ include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
 # ---[ If running on Ubuntu, check system version and compiler version.
-if(EXISTS "/etc/os-release")
-  execute_process(COMMAND
-    "sed" "-ne" "s/^ID=\\([a-z]\\+\\)$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  execute_process(COMMAND
-    "sed" "-ne" "s/^VERSION_ID=\"\\([0-9\\.]\\+\\)\"$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_VERSION_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  if(OS_RELEASE_ID STREQUAL "ubuntu")
-    if(OS_RELEASE_VERSION_ID VERSION_GREATER "17.04")
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0.0")
-          message(FATAL_ERROR
-            "Please use GCC 6 or higher on Ubuntu 17.04 and higher. "
-            "For more information, see: "
-            "https://github.com/caffe2/caffe2/issues/1633"
-            )
-        endif()
+if (NOT CHECKED_GCCVER_UBUNTU_1704)
+  if(EXISTS "/etc/os-release")
+    execute_process(COMMAND
+      "sed" "-ne" "s/^ID=\\([a-z]\\+\\)$/\\1/p" "/etc/os-release"
+      OUTPUT_VARIABLE OS_RELEASE_ID
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+    execute_process(COMMAND
+      "sed" "-ne" "s/^VERSION_ID=\"\\([0-9\\.]\\+\\)\"$/\\1/p" "/etc/os-release"
+      OUTPUT_VARIABLE OS_RELEASE_VERSION_ID
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+    if(OS_RELEASE_ID STREQUAL "ubuntu")
+      if(OS_RELEASE_VERSION_ID VERSION_GREATER "17.04")
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+          if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0.0")
+            message(FATAL_ERROR
+              "Please use GCC 6 or higher on Ubuntu 17.04 and higher. "
+              "For more information, see: "
+              "https://github.com/caffe2/caffe2/issues/1633"
+              )
+          endif()
+	endif()
       endif()
     endif()
   endif()
+  set(CHECKED_GCCVER_UBUNTU_1704 CACHE INTERNAL "Check Ubuntu 17.04 gcc version")
 endif()
 
 # ---[ Check if the data type long and int32_t/int64_t overlap.
@@ -141,7 +144,7 @@ CHECK_CXX_SOURCE_COMPILES(
        return 0;
      }" CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
-  message(STATUS "Current compiler supports avx2 extention. Will build perfkernels.")
+  message(STATUS "Current compiler supports avx2 extension. Will build perfkernels.")
   # Currently MSVC seems to have a symbol not found error while linking (related
   # to source file order?). As a result we will currently disable the perfkernel
   # in msvc.
