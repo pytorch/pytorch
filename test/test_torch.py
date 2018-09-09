@@ -590,16 +590,19 @@ class TestTorch(TestCase):
                             self._digamma_input(test_poles=False))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfRocm
     def test_i0(self):
         from scipy.special import i0
         self._test_math(torch.i0, i0)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfRocm
     def test_i1(self):
         from scipy.special import i1
         self._test_math(torch.i1, i1)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @skipIfRocm
     def test_iv(self):
         from scipy.special import iv
         for v in range(0, 50, 5):
