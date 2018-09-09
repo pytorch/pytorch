@@ -959,6 +959,32 @@ for k, v in cast_pytorch_to_onnx.items():
     globals()[name] = parse_args('v', 'i')(partial(_cast_func_template, v))
 
 
+dtype_to_onnx = [
+    cast_pytorch_to_onnx["Byte"],
+    cast_pytorch_to_onnx["Char"],
+    cast_pytorch_to_onnx["Short"],
+    cast_pytorch_to_onnx["Int"],
+    cast_pytorch_to_onnx["Long"],
+    cast_pytorch_to_onnx["Half"],
+    cast_pytorch_to_onnx["Float"],
+    cast_pytorch_to_onnx["Double"],
+]
+
+
+# layout and device info is not needed for factory methods
+# like zeros/ones in ONNX, ignoring here.
+def zeros(g, size, dtype, layout, device):
+    shape = _maybe_get_const(size, 'is')
+    dtype = _maybe_get_const(dtype, 'i')
+    return g.op("ConstantFill", shape_i=shape, dtype_i=dtype_to_onnx[dtype], value_i=0)
+
+
+def ones(g, size, dtype, layout, device):
+    shape = _maybe_get_const(size, 'is')
+    dtype = _maybe_get_const(dtype, 'i')
+    return g.op("ConstantFill", shape_i=shape, dtype_i=dtype_to_onnx[dtype], value_i=1)
+
+
 def zeros_like(g, input):
     return g.op("Sub", input, input).setType(input.type().contiguous())
 
