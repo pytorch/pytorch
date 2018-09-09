@@ -9,26 +9,19 @@ reproducible between CPU and GPU executions, even when using identical seeds.
 However, in order to make computations deterministic on your specific problem on
 one specific platform and PyTorch release, there are a couple of steps to take.
 
-There are several pseudorandom number generators involved in various layers of
-the library, which you will need to seed manually to make runs reproducible.
-
-Numpy
-.....
-The numpy rng can be seeded with::
-
-    import numpy as np
-    np.random.seed(0)
+There are two pseudorandom number generators involved in PyTorch, which you will
+need to seed manually to make runs reproducible. Furthermore, you should ensure
+that all other libraries your code relies on an which use random numbers also
+use a fixed seed.
 
 PyTorch
 .......
-When running on the CPU, you should seed the RNG with::
+You can use :meth:`torch.manual_seed()` to seed the RNG for all devices (both
+CPU and CUDA)
 
     import torch
     torch.manual_seed(0)
 
-While this will seed all CUDA RNGs as well, you can do so explicitly with
-:meth:`torch.cuda.manual_seed` for the current device, or
-:meth:`torch.cuda.manual_seed_all` to seed the RNG for all GPUs
 
 CuDNN
 .....
@@ -39,3 +32,11 @@ When running on the CuDNN backend, one further option must be set::
 .. warning::
 
     Deterministic mode can have a performance impact, depending on your model.
+
+Numpy
+.....
+If you or any of the libraries you are using rely on Numpy, you should seed the
+Numpy RNG as well. This can be done with::
+
+    import numpy as np
+    np.random.seed(0)
