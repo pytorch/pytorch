@@ -5,7 +5,7 @@
 /* a la lua? dim, storageoffset, ...  et les methodes ? */
 
 #ifdef __cplusplus
-#include <ATen/TensorImpl.h>
+#include <ATen/core/TensorImpl.h>
 #endif
 
 #ifdef __cplusplus
