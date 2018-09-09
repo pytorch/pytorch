@@ -47,7 +47,10 @@ class CopyOpsTest(unittest.TestCase):
         
     @unittest.skipIf(_num_gpu() < 1, "Need at least 1 GPU.")    
     def test_copy_gradient_gpu(self):
-        self.run_test_copy_gradient(core.DeviceOption(caffe2_pb2.HIP, 0))
+        if workspace.has_hip_support:
+	    self.run_test_copy_gradient(core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=0))
+        else:
+	    self.run_test_copy_gradient(core.DeviceOption(caffe2_pb2.CUDA, cuda_gpu_id=0))
 
     @unittest.skipIf(_num_gpu() < 2, "Need at least 2 GPU.")
     def test_copy_gradient_multiple_gpus(self):
