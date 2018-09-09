@@ -179,7 +179,7 @@ def _check_seekable(f):
         raise_err_msg(["seek", "tell"], e)
 
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
+def save(obj, f, pickle_module=pickle, use_highest_protocol=False):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
@@ -189,8 +189,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         f: a file-like object (has to implement write and flush) or a string
            containing a file name
         pickle_module: module used for pickling metadata and objects
-        pickle_protocol: can be specified to override the default protocol. To
-            use highest protocol, it can be specified as a string 'HIGHEST'.
+        use_highest_protocol: if True, then use the highest protocol for pickling.
 
     .. warning::
         If you are using Python 2, torch.save does NOT support StringIO.StringIO
@@ -207,7 +206,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
     """
-    if pickle_protocol == 'HIGHEST':
+    if use_highest_protocol:
         pickle_protocol = pickle.HIGHEST_PROTOCOL
     return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol))
 
