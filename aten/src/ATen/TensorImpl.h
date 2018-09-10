@@ -22,7 +22,7 @@ struct Tensor;
 namespace at {
 struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
-  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
+  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable);
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
   virtual void release_resources() override;
@@ -89,13 +89,6 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual Tensor& grad();
   virtual const Tensor& grad() const;
-
-  virtual void backward(
-      at::optional<Tensor> gradient,
-      bool keep_graph,
-      bool create_graph);
-
-  virtual void set_data(Tensor new_data);
 
   // TODO: make these protected
   // Note: storage->size() may be greater than the recorded size
