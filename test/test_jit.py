@@ -1676,6 +1676,15 @@ class TestJit(JitTestCase):
             torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
         self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
 
+    def test_trace_variable_instantiation(self):
+        def random_foo(x):
+            return Variable(Variable(x) + 1.0)
+
+        random_foo_traced = torch.jit.trace(random_foo, (torch.rand(3, 4),))
+
+        x = torch.rand(5, 6)
+        self.assertEqual(random_foo(x), random_foo_traced(x))
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
