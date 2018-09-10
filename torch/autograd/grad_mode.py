@@ -42,7 +42,7 @@ class no_grad(object):
     def __call__(self, func):
         @functools.wraps(func)
         def decorate_no_grad(*args, **kwargs):
-            with self:
+            with torch.no_grad():
                 return func(*args, **kwargs)
         return decorate_no_grad
 
@@ -89,7 +89,7 @@ class enable_grad(object):
     def __call__(self, func):
         @functools.wraps(func)
         def decorate_enable_grad(*args, **kwargs):
-            with self:
+            with torch.no_grad():
                 return func(*args, **kwargs)
         return decorate_enable_grad
 
