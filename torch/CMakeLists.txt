@@ -176,7 +176,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
@@ -209,6 +209,7 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     )
 
 endif()
@@ -349,7 +350,7 @@ if(USE_ROCM)
     /opt/rocm/include
     /opt/rocm/hcc/include
     /opt/rocm/rocblas/include
-    /opt/rocm/hcsparse/include
+    /opt/rocm/hipsparse/include
     )
 endif()
 
@@ -433,6 +434,7 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/static.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
     ${TORCH_API_TEST_DIR}/tensor.cpp
+    ${TORCH_API_TEST_DIR}/jit.cpp
     # Temporary until ATen tests are built with Caffe2
     ${TORCH_API_TEST_DIR}/tensor_options.cpp
     ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp

@@ -2385,6 +2385,38 @@ Example::
     tensor(9)
 """)
 
+add_docstr(torch.matrix_power,
+           r"""
+matrix_power(input, n) -> Tensor
+
+Returns the matrix raised to the power :attr:`n` for square matrices.
+For batch of matrices, each individual matrix is raised to the power :attr:`n`.
+
+If :attr:`n` is negative, then the inverse of the matrix (if invertible) is
+raised to the power :attr:`n`. If :attr:`n` is 0, then an identity matrix
+is returned.
+
+Args:
+    input (Tensor): the input tensor
+    n (int): the power to raise the matrix to
+
+Example::
+
+    >>> a = torch.randn(2, 2, 2)
+    >>> a
+    tensor([[[-1.9975, -1.9610],
+             [ 0.9592, -2.3364]],
+
+            [[-1.2534, -1.3429],
+             [ 0.4153, -1.4664]]])
+    >>> torch.matrix_power(a, 3)
+    tensor([[[  3.9392, -23.9916],
+             [ 11.7357,  -0.2070]],
+
+            [[  0.2468,  -6.7168],
+             [  2.0774,  -0.8187]]])
+""")
+
 add_docstr(torch.max,
            r"""
 .. function:: max(input) -> Tensor
@@ -4408,6 +4440,10 @@ of size :math:`\min(n, m)` containing the non-negative diagonal entries.
 
 If :attr:`some` is ``True`` (default), the returned `U` and `V` matrices will
 contain only :math:`min(n, m)` orthonormal columns.
+
+.. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
+          `gesdd` as well.
 
 .. note:: Irrespective of the original strides, the returned matrix `U`
           will be transposed, i.e. with strides `(1, n)` instead of `(n, 1)`.

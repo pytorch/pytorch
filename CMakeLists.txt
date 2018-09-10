@@ -56,7 +56,7 @@ include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
-option(BUILD_BINARY "Build C++ binaries" ON)
+option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
@@ -115,7 +115,7 @@ option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
 option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
-    USE_MPI "Use MPI. Only available if USE_DISTRIBUTED is on." ON
+    USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." OFF
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
@@ -404,23 +404,15 @@ else()
 endif()
 
 # ---[ Modules
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
 add_subdirectory(modules)
-endif()
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules
 # are built. For the binaries, they will be linked to the Caffe2 main
 # libraries, as well as all the modules that are built with Caffe2 (the ones
 # built in the previous Modules section above).
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
 if (BUILD_BINARY)
   add_subdirectory(binaries)
-endif()
 endif()
 
 include(cmake/Summary.cmake)

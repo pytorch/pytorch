@@ -16,7 +16,6 @@ USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
-FULL_CAFFE2=0
 CAFFE2_STATIC_LINK_CUDA=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -34,9 +33,6 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
-          ;;
-      --full-caffe2)
-          FULL_CAFFE2=1
           ;;
       --cuda-static-link)
           CAFFE2_STATIC_LINK_CUDA=1
@@ -104,11 +100,11 @@ else
     fi
 fi
 CPP_FLAGS=" -std=c++11 "
-GLOO_FLAGS=""
+GLOO_FLAGS="-DBUILD_TEST=OFF "
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $USE_CUDA -eq 1 ]]; then
-    GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
+    GLOO_FLAGS+="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 # Gloo infiniband support
 if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
@@ -183,6 +179,8 @@ function build() {
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
               -DUSE_CUDA=$USE_CUDA \
+              -DBUILD_EXAMPLES=OFF \
+              -DBUILD_TEST=$BUILD_TEST \
               -DNO_NNPACK=$((1-$USE_NNPACK)) \
               -DNCCL_EXTERNAL=1 \
               -DCMAKE_DEBUG_POSTFIX="" \
@@ -260,18 +258,20 @@ function build_caffe2() {
       -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_TORCH=$BUILD_TORCH \
-      -DBUILD_PYTHON=ON \
+      -DBUILD_PYTHON=$BUILD_PYTHON \
       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
-      -DBUILD_BINARY=$FULL_CAFFE2 \
-      -DBUILD_TEST=$FULL_CAFFE2 \
-      -DINSTALL_TEST=$FULL_CAFFE2 \
+      -DBUILD_BINARY=$BUILD_BINARY \
+      -DBUILD_TEST=$BUILD_TEST \
+      -DINSTALL_TEST=$INSTALL_TEST \
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
       -DUSE_CUDA=$USE_CUDA \
       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
       -DUSE_ROCM=$USE_ROCM \
       -DUSE_NNPACK=$USE_NNPACK \
+      -DUSE_OPENCV=$USE_OPENCV \
       -DUSE_GLOG=OFF \
       -DUSE_GFLAGS=OFF \
+      -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \

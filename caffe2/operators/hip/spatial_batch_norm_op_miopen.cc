@@ -118,7 +118,10 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
 
   // Only 2D BatchNorm is supported in MIopen for now
   // @petrex will follow up on adding 1D and 3D support
-  CAFFE_ENFORCE_EQ(X.ndim(), 4, "Only 2D input is supported in MIOpen BatchNormalization right now.");
+  CAFFE_ENFORCE_EQ(
+      X.ndim(),
+      4,
+      "Only 2D input is supported in MIOpen BatchNormalization right now.");
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
@@ -211,7 +214,7 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
     }
     // Save the mean and inv var results.
     auto* save_mean = Output(SAVED_MEAN);
-    auto* save_var = Output(SAVED_INV_VAR);
+    auto* save_var = Output(SAVED_INV_STD);
     save_mean->Resize(C);
     save_var->Resize(C);
     void* save_mean_data = save_mean->template mutable_data<BNParamType>();
@@ -294,17 +297,17 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   auto* dBias_data = dBias->template mutable_data<BNParamType>();
 
   const auto& saved_mean = Input(SAVED_MEAN);
-  const auto& saved_var = Input(SAVED_INV_VAR);
+  const auto& saved_var = Input(SAVED_INV_STD);
   const void* saved_mean_data = saved_mean.template data<BNParamType>();
   const void* saved_var_data = saved_var.template data<BNParamType>();
 
-if (N == 0) {
+  if (N == 0) {
     // set gradients to zeros
     math::Set<BNParamType, HIPContext>(C, 0, dScale_data, &context_);
     math::Set<BNParamType, HIPContext>(C, 0, dBias_data, &context_);
     return true;
   }
-  
+
   MIOPEN_ENFORCE(miopenBatchNormalizationBackward(
       miopen_wrapper_.inline_miopen_handle(),
       mode_,
@@ -335,11 +338,6 @@ bool MIOpenSpatialBNGradientOp::RunOnDevice() {
   }
   return true;
 }
-
-// Since there is no default implementation for spatial batch normalization,
-// we will register the miopen version as the default as well.
-REGISTER_HIP_OPERATOR(SpatialBN, MIOpenSpatialBNOp);
-REGISTER_HIP_OPERATOR(SpatialBNGradient, MIOpenSpatialBNGradientOp);
 
 REGISTER_MIOPEN_OPERATOR(SpatialBN, MIOpenSpatialBNOp);
 REGISTER_MIOPEN_OPERATOR(SpatialBNGradient, MIOpenSpatialBNGradientOp);

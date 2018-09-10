@@ -101,12 +101,13 @@ class Binomial(Distribution):
                 value * self.logits + self.total_count * max_val -
                 self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
             raise NotImplementedError("Inhomogeneous total count not supported by `enumerate_support`.")
         values = self._new(1 + total_count,)
         torch.arange(1 + total_count, out=values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
-        values = values.expand((-1,) + self._batch_shape)
+        if expand:
+            values = values.expand((-1,) + self._batch_shape)
         return values
