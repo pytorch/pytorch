@@ -128,6 +128,8 @@ struct TORCH_API IValue final {
 
   IValue(caffe2::Blob blob)
   : tag(Tag::Blob), is_intrusive_ptr(true) {
+    // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract and
+    //      store it as a Tensor instead.
     payload.as_intrusive_ptr = c10::make_intrusive<caffe2::Blob>(std::move(blob)).release();
   }
   bool isBlob() const { return Tag::Blob == tag; }
