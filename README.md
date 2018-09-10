@@ -197,6 +197,7 @@ On Windows
 set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 set DISTUTILS_USE_SDK=1
+set TORCH_CUDA_ARCH_LIST=5.2
 REM The following two lines are needed for Python 2.7, but the support for it is very experimental.
 set MSSdk=1
 set FORCE_PY27_BUILD=1
