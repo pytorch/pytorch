@@ -489,7 +489,7 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final
         "noise_size", 491 /* prime to avoid artifacts */);
     // Treaded as half4 in the kernel, so need half4 here.
     noiseSize = divRoundUp(noiseSize, 4) * 4;
-    if (!noiseBlob->IsType<Tensor>(CPU) ||
+    if (!noiseBlob->IsTensorType(CPU) ||
         noiseBlob->Get<TensorCPU>().size() != noiseSize) {
       VLOG(2) << "Initializing stylizer with noise: " << noiseSize;
       caffe2::Timer rt;
