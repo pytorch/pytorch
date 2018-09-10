@@ -378,6 +378,13 @@ static bool isFloatingPoint(ScalarType s) {
   return s == kFloat || s == kDouble || s == kHalf;
 }
 
+void VariableType::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  as_variable_ref(self).backward(gradient, keep_graph, create_graph);
+}
+
+void VariableType::set_data(Tensor & self, Tensor new_data) const {
+  as_variable_ref(self).set_data(new_data);
+}
 Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   jit::Node* node = nullptr;
   if(torch::jit::tracer::isTracing()) {

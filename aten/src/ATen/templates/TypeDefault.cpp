@@ -40,6 +40,14 @@ Tensor TypeDefault::copy(const Tensor & src, bool non_blocking) const {
   }
 }
 
+void TypeDefault::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  AT_ERROR("backward is not implemented for Tensor");
+}
+
+void TypeDefault::set_data(Tensor & self, Tensor new_data) const {
+  AT_ERROR("set_data is not implemented for Tensor");
+}
+
 Type & TypeDefault::toBackend(Backend b) const {
   return at::globalContext().getNonVariableType(b,scalarType());
 }
