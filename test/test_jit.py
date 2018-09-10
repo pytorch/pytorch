@@ -1081,6 +1081,23 @@ class TestJit(JitTestCase):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def test_trace_casts(self):
+        casts = [
+            lambda x: x.byte(),
+            lambda x: x.float(),
+            lambda x: x.cpu(),
+            lambda x: x.to(device='cpu'),
+            lambda x: x.to(dtype=torch.int64),
+            lambda x: x.to(device='cpu', dtype=torch.float),
+            lambda x: x.to(x)
+        ]
+
+        for cast in casts:
+            trace = torch.jit.trace(cast, torch.randn(2, 2))
+            self.assertEqual(sum(n.kind() == 'aten::to' for n in trace.graph.nodes()), 1)
+            x = torch.randn(2, 2)
+            self.assertEqual(trace(x), cast(x))
+
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.

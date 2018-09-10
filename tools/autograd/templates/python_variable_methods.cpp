@@ -8,7 +8,6 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -234,9 +233,7 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-   auto backend = self_.is_sparse() ? Backend::SparseCPU : Backend::CPU;
-   auto& type = self_.type().toBackend(backend);
-   return wrap(torch::utils::dispatch_type_conversion(self_, type));
+   return THPVariable_Wrap(self_.to(at::Device(at::DeviceType::CPU)));
    END_HANDLE_TH_ERRORS
 }
 
@@ -250,25 +247,18 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto backend = self_.is_sparse() ? at::Backend::SparseCUDA : at::Backend::CUDA;
-  auto& type = self_.type().toBackend(backend);
   auto device_obj = r.device(0);
   if (!r.isNone(0) && device_obj.is_cpu()) {
     throw std::runtime_error("Invalid device, must be cuda device");
   }
-  int32_t device_index = -1;
-  if (device_obj.has_index() && device_obj.is_cuda()) {
-    device_index = device_obj.index();
-  }
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, r.toBool(1)));
+  return THPVariable_Wrap(self_.to(device_obj, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  auto& type = self_.type().toScalarType(scalarType);
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
+  return THPVariable_Wrap(self_.to(scalarType));
   END_HANDLE_TH_ERRORS
 }
 static PyObject * THPVariable_byte(PyObject* self, PyObject* args) {
@@ -490,30 +480,6 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  auto parsed = parse_to_conversion(args, kwargs);
-  auto& device = std::get<0>(parsed);
-  auto& scalarType = std::get<1>(parsed);
-  auto non_blocking = std::get<2>(parsed);
-  if (!device) {
-    // device not given
-    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-    auto& type = self_.type().toScalarType(scalarType.value_or(self_.type().scalarType()));
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
-  } else {
-    // device and maybe dtype are given
-    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-    auto& layout = *torch::getLayout(self_.type().backend());
-    auto& type = torch::getVariableType(scalarType.value_or(self_.type().scalarType()), layout, device->type());
-    const int32_t device_index = type.is_cuda() ? device->index() : -1;
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, non_blocking));
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -622,7 +588,6 @@ PyMethodDef variable_methods[] = {
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
   {"storage_type", (PyCFunction)THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"to", (PyCFunction)THPVariable_to, METH_VARARGS | METH_KEYWORDS, NULL},
   {"tolist", (PyCFunction)THPVariable_tolist, METH_NOARGS, NULL},
   {"type", (PyCFunction)THPVariable_type, METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
