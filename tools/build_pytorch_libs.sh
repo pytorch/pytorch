@@ -10,6 +10,11 @@
 
 set -ex
 
+SYNC_COMMAND="cp"
+if [ -x "$(command -v rsync)" ]; then
+    SYNC_COMMAND="time rsync -lptgoD"
+fi
+
 # Options for building only a subset of the libraries
 USE_CUDA=0
 USE_ROCM=0
@@ -222,7 +227,7 @@ function build_nccl() {
               -DNUM_JOBS="$MAX_JOBS"
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
-  cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
+  $SYNC_COMMAND "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
     ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
   fi
@@ -294,8 +299,8 @@ function build_caffe2() {
 
   # This is needed by the aten tests built with caffe2
   if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
-    # cp root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
-    cp "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
+    # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
+    $SYNC_COMMAND "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
   fi
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
@@ -352,15 +357,15 @@ pushd $TORCH_LIB_DIR
 # binaries to torch/lib
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
-cp -r "$INSTALL_DIR/lib"/* .
+$SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
-    cp -r "$INSTALL_DIR/lib64"/* .
+    $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
 fi
-cp ../../aten/src/THNN/generic/THNN.h .
-cp ../../aten/src/THCUNN/generic/THCUNN.h .
-cp -r "$INSTALL_DIR/include" .
+$SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
+$SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
+$SYNC_COMMAND "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
-    cp -r "$INSTALL_DIR/bin/"/* .
+    $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
 fi
 
 popd
