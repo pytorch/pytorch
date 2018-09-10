@@ -6,69 +6,6 @@
 
 namespace caffe2 {
 
-template <>
-template <typename T>
-void SpatialBNOp<CPUContext>::ComputeFusedParam(
-    const int C,
-    const T* scale,
-    const T* bias,
-    const T* mean,
-    const T* var,
-    T* alpha,
-    T* beta) {
-  EigenVectorArrayMap<T> alpha_arr(alpha, C);
-  EigenVectorArrayMap<T> beta_arr(beta, C);
-  alpha_arr = ConstEigenVectorArrayMap<T>(scale, C) *
-      (ConstEigenVectorArrayMap<T>(var, C) + static_cast<T>(epsilon_)).rsqrt();
-  beta_arr = ConstEigenVectorArrayMap<T>(bias, C) -
-      alpha_arr * ConstEigenVectorArrayMap<T>(mean, C);
-}
-
-template <>
-template <typename T>
-void SpatialBNOp<CPUContext>::ComputeBatchMoments(
-    const int N,
-    const int C,
-    const int HxW,
-    const T* batch_mean_sum,
-    const T* batch_var_sum,
-    T* mean,
-    T* var) {
-  const T scale = T(1) / static_cast<T>(num_batches_ * N * HxW);
-  EigenVectorArrayMap<T> mean_arr(mean, C);
-  EigenVectorArrayMap<T> var_arr(var, C);
-  mean_arr = ConstEigenVectorArrayMap<T>(batch_mean_sum, C) * scale;
-  var_arr =
-      ConstEigenVectorArrayMap<T>(batch_var_sum, C) * scale - mean_arr.square();
-}
-
-template <>
-template <typename T>
-void SpatialBNOp<CPUContext>::ComputeRunningMomentsAndFusedParam(
-    const int C,
-    const T* scale,
-    const T* bias,
-    const T* mean,
-    const T* var,
-    T* running_mean,
-    T* running_var,
-    T* rstd,
-    T* alpha,
-    T* beta) {
-  const T a = T(1) - static_cast<T>(momentum_);
-  const T b = static_cast<T>(momentum_);
-  math::Axpby<T, T, CPUContext>(C, a, mean, b, running_mean, &context_);
-  math::Axpby<T, T, CPUContext>(C, a, var, b, running_var, &context_);
-  math::InvStd<T, CPUContext>(
-      C, static_cast<T>(epsilon_), var, rstd, &context_);
-  EigenVectorArrayMap<T> alpha_arr(alpha, C);
-  EigenVectorArrayMap<T> beta_arr(beta, C);
-  alpha_arr = ConstEigenVectorArrayMap<T>(scale, C) *
-      ConstEigenVectorArrayMap<T>(rstd, C);
-  beta_arr = ConstEigenVectorArrayMap<T>(bias, C) -
-      alpha_arr * ConstEigenVectorArrayMap<T>(mean, C);
-}
-
 namespace {
 
 OpSchema::Cost CostInferenceForSpatialBN(
