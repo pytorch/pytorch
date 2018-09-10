@@ -12,15 +12,20 @@ set -ex
 
 # Options for building only a subset of the libraries
 USE_CUDA=0
+USE_DISTRIBUTED=0
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
+USE_GLOO=0
 USE_GLOO_IBVERBS=0
 CAFFE2_STATIC_LINK_CUDA=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
       --use-cuda)
           USE_CUDA=1
+          ;;
+      --use-distributed)
+          USE_DISTRIBUTED=1
           ;;
       --use-rocm)
           USE_ROCM=1
@@ -30,6 +35,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --use-mkldnn)
           USE_MKLDNN=1
+          ;;
+      --use-gloo)
+          USE_GLOO=1
           ;;
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
@@ -100,15 +108,10 @@ else
     fi
 fi
 CPP_FLAGS=" -std=c++11 "
-GLOO_FLAGS="-DBUILD_TEST=OFF "
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
-if [[ $USE_CUDA -eq 1 ]]; then
-    GLOO_FLAGS+="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
-fi
 # Gloo infiniband support
 if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
-    GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
     THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
 CWRAP_FILES="\
@@ -265,11 +268,14 @@ function build_caffe2() {
       -DINSTALL_TEST=$INSTALL_TEST \
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
       -DUSE_CUDA=$USE_CUDA \
+      -DUSE_DISTRIBUTED=$USE_DISTRIBUTED \
       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
       -DUSE_ROCM=$USE_ROCM \
       -DUSE_NNPACK=$USE_NNPACK \
       -DUSE_OPENCV=$USE_OPENCV \
       -DUSE_GLOG=OFF \
+      -DUSE_GLOO=$USE_GLOO \
+      -DUSE_GLOO_IBVERBS=$USE_GLOO_IBVERBS \
       -DUSE_GFLAGS=OFF \
       -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
@@ -317,10 +323,6 @@ for arg in "$@"; do
     if [[ "$arg" == "nccl" ]]; then
         pushd $THIRD_PARTY_DIR
         build_nccl
-        popd
-    elif [[ "$arg" == "gloo" ]]; then
-        pushd "$THIRD_PARTY_DIR"
-        build gloo $GLOO_FLAGS
         popd
     elif [[ "$arg" == "caffe2" ]]; then
         build_caffe2

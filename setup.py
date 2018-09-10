@@ -307,7 +307,7 @@ class create_version_file(PytorchCommand):
 # All libraries that torch could depend on
 dep_libs = [
     'nccl', 'caffe2',
-    'libshm', 'libshm_windows', 'gloo', 'THD', 'c10d',
+    'libshm', 'libshm_windows', 'THD', 'c10d',
 ]
 
 missing_pydep = '''
@@ -369,6 +369,10 @@ def build_libs(libs):
         my_env["MKLDNN_LIBRARY"] = MKLDNN_LIBRARY
         my_env["MKLDNN_INCLUDE_DIR"] = MKLDNN_INCLUDE_DIR
         build_libs_cmd += ['--use-mkldnn']
+    if USE_DISTRIBUTED:
+        build_libs_cmd += ['--use-distributed']
+        if IS_LINUX:
+            build_libs_cmd += ['--use-gloo']
     if USE_GLOO_IBVERBS:
         build_libs_cmd += ['--use-gloo-ibverbs']
 
@@ -419,7 +423,6 @@ class build_deps(PytorchCommand):
             libs += ['libshm']
         if USE_DISTRIBUTED:
             if IS_LINUX:
-                libs += ['gloo']
                 # TODO: make c10d build without CUDA
                 if USE_CUDA:
                     libs += ['c10d']
