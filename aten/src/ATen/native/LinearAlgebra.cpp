@@ -196,7 +196,7 @@ Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar be
 
 Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
   check_1d(vec, "vec", "addmv");
-  return self._addmv_(mat, vec, beta, alpha);
+  return at::_addmv_(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
@@ -213,7 +213,7 @@ Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar b
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return self._addr_(vec1, vec2, beta, alpha);
+  return at::_addr_(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
@@ -225,7 +225,7 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
 Tensor dot(const Tensor& self, const Tensor& tensor) {
   check_1d(self, "self", "dot");
   check_1d(tensor, "tensor", "dot");
-  return self._dot(tensor);
+  return at::_dot(self, tensor);
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
@@ -347,5 +347,44 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+Tensor matrix_power(const Tensor& a, int64_t n) {
+  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.type().scalarType()),
+           "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
+           "of floating types with dim at least 2");
+  if (n == 0) {
+    return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
+  } else if (n < 0) {
+    AT_CHECK(a.dim() == 2, "Negative powers for batch matrices are currently not supported");
+    Tensor a_ = at::inverse(a);
+    n *= -1;
+    return at::native::matrix_power(a_, n);
+  } else if (n == 1) {
+    return a.clone();
+  } else if (n == 2) {
+    return at::native::matmul(a, a);
+  } else if (n == 3) {
+    return at::native::matmul(at::native::matmul(a, a), a);
+  }
+
+  // This is a binary decomposition of n.
+  // Moving from the least significant bit to the most significant bit
+  // This is done to reduce the number of matrix multiplications
+  // by raising the input matrix in powers of 2
+  // The total number of matrix multiplications are
+  // number of bits + number of bits that equal 1 ~ O(log n)
+  // instead of O(n)
+  Tensor result, z;
+  int64_t r;
+  while (n > 0) {
+    z = (!z.defined()) ? a.clone() : at::native::matmul(z, z);
+    r = n % 2;
+    n = n / 2;
+    if (r == 1) {
+      result = (!result.defined()) ? z.clone() : at::native::matmul(result, z);
+    }
+  }
+  return result;
 }
-}
+
+} // namespace native
+} // namespace at

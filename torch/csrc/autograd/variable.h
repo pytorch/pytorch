@@ -59,7 +59,11 @@ struct Function;
 /// which case it tracks that `Variable`'s data and autograd history. Beyond
 /// construction, the interface of a view is identical to that of a regular
 /// `Variable`. You can determine whether `Variable` is in fact a view by
-/// probing its `is_view()` method.
+/// probing its `is_view()` method. Note that the *view* semantics are only
+/// meaningful for `Variable` relations that are relevant to autograd. For
+/// example, if you hide your code from autograd using `.data`, the `Variable`s
+/// will not be registered as having view relations, even if they share storage.
+///
 ///
 ///                               Interface
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -172,6 +176,22 @@ struct TORCH_API Variable : public at::Tensor {
       return Edge(grad_accumulator(), 0);
     }
   }
+
+  /// Returns a copy of this `Variable` that is detached from its autograd graph
+  /// and has a blank version. This method is OK to call if the `Variable` is a
+  /// view.
+  Variable detach() const;
+
+  /// Like `detach()`, but removes this `Variable` in-place. This method may
+  /// only be called on non-view `Variable`s. You can use `is_view()` to check
+  /// this. If this `Variable` is a view, throws an `std::runtime_error()`.
+  void detach_();
+
+  /// Computes the gradient of current tensor w.r.t. graph leaves.
+  void backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const;
+
+  /// Sets the type of the Variable.
+  void set_data(Tensor new_data) const;
 
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.
@@ -307,24 +327,15 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
     return grad_;
   }
 
-  /// Returns a copy of this `Variable` that is detached from its autograd graph
-  /// and has a blank version. This method is OK to call if the `Variable` is a
-  /// view.
-  Tensor detach() const override;
+  Variable detach() const;
+  void detach_();
 
-  /// Like `detach()`, but removes this `Variable` in-place. This method may
-  /// only be called on non-view `Variable`s. You can use `is_view()` to check
-  /// this. If this `Variable` is a view, throws an `std::runtime_error()`.
-  void detach_() override;
+  void set_data(Tensor new_data);
 
-  /// Sets the type of the Variable.
-  void set_data(Tensor new_data) override;
-
-  /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
       at::optional<at::Tensor> gradient,
       bool keep_graph,
-      bool create_graph) override;
+      bool create_graph);
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
@@ -483,6 +494,22 @@ inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
 
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
   return get()->get_grad_accumulator();
+}
+
+inline Variable Variable::detach() const {
+  return get()->detach();
+}
+
+inline void Variable::detach_() {
+  get()->detach_();
+}
+
+inline void Variable::backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  get()->backward(gradient, keep_graph, create_graph);
+}
+
+inline void Variable::set_data(Tensor new_data) const {
+  get()->set_data(new_data);
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
