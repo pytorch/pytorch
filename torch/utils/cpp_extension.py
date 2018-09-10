@@ -820,7 +820,7 @@ def _write_ninja_file(path,
 
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
     common_cflags += ['-I{}'.format(include) for include in user_includes]
-    common_cflags += ['-isystem{}'.format(include) for include in system_includes]
+    common_cflags += ['-isystem {}'.format(include) for include in system_includes]
 
     if is_binary_build():
         common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=0']
