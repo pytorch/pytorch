@@ -369,19 +369,7 @@ class PrettyPrintPass {
     const size_t level
   ) {
     const auto body_block = node->blocks()[0];
-    // aliases_[body_block->inputs()[0]] = body_block->inputs()[0]->uniqueName();
     aliases_[body_block->inputs()[0]] = body_block->inputs()[0];
-
-    // The block outputs are not live after the end of the block, so we can use
-    // them as the value names and avoid printing assignments
-    dualIterator<const Value*>(
-      node->outputs(),
-      body_block->outputs(),
-      0, 1,
-      [&](const Value* node_output, const Value* return_input) {
-        aliases_[node_output] = return_input;
-      }
-    );
 
     // Add temporaries for loop-carried dependencies
     dualIterator<const Value*>(
@@ -391,6 +379,17 @@ class PrettyPrintPass {
       [&](const Value* node_input, const Value* param_output) {
         if (isValueUsedLater(param_output)) {
           printAssignment(out, param_output, node_input, level);
+        }
+      }
+    );
+
+    dualIterator<const Value*>(
+      node->outputs(),
+      node->inputs(),
+      0, 2,
+      [&](const Value* node_output, const Value* return_input) {
+        if (isValueUsedLater(node_output)) {
+          printAssignment(out, node_output, return_input, level);
         }
       }
     );
@@ -413,6 +412,19 @@ class PrettyPrintPass {
       [&](const Value* param_output, const Value* return_input) {
         if (isValueUsedLater(param_output)) {
           printAssignment(out, param_output, return_input, level + 1);
+        }
+      }
+    );
+
+    // The block outputs are not live after the end of the block, so we can use
+    // them as the value names and avoid printing assignments
+    dualIterator<const Value*>(
+      node->outputs(),
+      body_block->outputs(),
+      0, 1,
+      [&](const Value* node_output, const Value* return_input) {
+        if (isValueUsedLater(node_output)) {
+          printAssignment(out, node_output, return_input, level + 1);
         }
       }
     );

@@ -5,18 +5,18 @@ def script(a1, b1):
   t8 = a1
   t12 = b1
   while t7:
-    a2 = aten::add(t8, 1, 1)
-    b2 = aten::add(t12, 1, 1)
-    t16 = aten::gt(a2, b2)
-    t17 = prim::TensorToNum(t16)
-    if t17:
-      c4 = 2
+    a = aten::add(t8, 1, 1)
+    b = aten::add(t12, 1, 1)
+    t15 = aten::gt(a, b)
+    t16 = prim::TensorToNum(t15)
+    if t16:
+      c = 2
     else:
-      c4 = 3
-    t23 = aten::lt(a2, 10)
-    t24 = prim::TensorToNum(t23)
-    t7 = t24
-    t8 = a2
-    t12 = b2
-  t30 = aten::add(a2, 1, 1)
-  return t30
+      c = 3
+    t21 = aten::lt(a, 10)
+    t22 = prim::TensorToNum(t21)
+    t7 = t22
+    t8 = a
+    t12 = b
+  t27 = aten::add(a, 1, 1)
+  return t27

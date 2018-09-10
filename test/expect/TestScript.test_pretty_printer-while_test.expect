@@ -5,11 +5,11 @@ def script(a1, i1):
   t7 = a1
   t9 = i1
   while t6:
-    a2 = aten::mul(t7, t7)
-    i2 = aten::add(t9, 1, 1)
-    t14 = aten::lt(i2, 3)
-    t15 = prim::TensorToNum(t14)
-    t6 = t15
-    t7 = a2
-    t9 = i2
-  return a2
+    a = aten::mul(t7, t7)
+    i = aten::add(t9, 1, 1)
+    t13 = aten::lt(i, 3)
+    t14 = prim::TensorToNum(t13)
+    t6 = t14
+    t7 = a
+    t9 = i
+  return a

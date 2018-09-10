@@ -6989,10 +6989,21 @@ a")
                     c = 3
             return a + 1
 
+        @torch.jit.script
+        def loop_use_test(y):
+            x = y + 1
+            z = x + 5
+            while y < 8:
+                y += 1
+                z = x
+            # z += 10
+            return x, z
+
         self.assertExpected(if_test.graph.pretty_print(), "if_test")
         self.assertExpected(if_one.graph.pretty_print(), "if_one")
         self.assertExpected(while_test.graph.pretty_print(), "while_test")
         self.assertExpected(while_if_test.graph.pretty_print(), "while_if_test")
+        self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
 
 
 class MnistNet(nn.Module):
