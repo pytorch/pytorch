@@ -150,7 +150,7 @@ struct Method {
     return *this;
   }
 
-  TORCH_API const FunctionSchema& getSchema() const;
+  const FunctionSchema& getSchema() const;
 
   std::string pretty_print_schema() const {
     JIT_ASSERT(schema);
