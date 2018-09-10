@@ -38,6 +38,7 @@ class Linear(Module):
         >>> input = torch.randn(128, 20)
         >>> output = m(input)
         >>> print(output.size())
+        torch.Size([128, 30])
     """
 
     def __init__(self, in_features, out_features, bias=True):
@@ -102,6 +103,7 @@ class Bilinear(Module):
         >>> input2 = torch.randn(128, 30)
         >>> output = m(input1, input2)
         >>> print(output.size())
+        torch.Size([128, 40])
     """
 
     def __init__(self, in1_features, in2_features, out_features, bias=True):
