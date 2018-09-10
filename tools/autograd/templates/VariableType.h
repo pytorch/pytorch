@@ -58,6 +58,10 @@ struct TORCH_API VariableType final : public at::TypeDefault {
 
   Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
   Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
+
+  void backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const override;
+  void set_data(Tensor & self, Tensor new_data) const override;
+
   ${type_derived_method_declarations}
 
 private:

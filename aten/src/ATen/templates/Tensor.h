@@ -244,9 +244,7 @@ struct AT_API Tensor {
     return tensor_impl_->grad();
   }
 
-  void set_data(Tensor new_data) {
-    tensor_impl_->set_data(new_data);
-  }
+  void set_data(Tensor new_data);
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
