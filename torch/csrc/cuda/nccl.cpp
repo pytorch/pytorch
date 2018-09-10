@@ -216,7 +216,7 @@ void broadcast(TensorList tensors, const stream_list& streams, const comm_list& 
     device_guard.set_index(tensors[i].get_device());
     // TODO: use current stream
     const auto stream = (streams.empty() || !streams[i]) ? nullptr : THCStream_stream(streams[i]);
-    AT_CHECK(numel <= count_max,
+    AT_CHECK(static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
              "Broadcast tensor has ", numel, " elements, which exceeds the "
              "maximum NCCL supports (", count_max, ")");
     CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
