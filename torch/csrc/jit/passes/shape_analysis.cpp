@@ -563,7 +563,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
 
     // Ops with Tensor-Tensor overloads only
     "aten::atan2(Tensor self, Tensor other) -> Tensor",
-    "aten::dist(Tensor self, Tensor other, Scalar p) -> Tensor",
 
     // Non-binary ops
     "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor",
@@ -722,7 +721,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::prod(Tensor self) -> Tensor",
   }, [](Node * node) -> type_vec_t {
     if (auto type = node->input(0)->type()->cast<TensorType>()) {
-      return {at::isFloatingType(type->scalarType()) ? type : type->toScalarType(at::kLong)};
+      return {at::isFloatingType(type->scalarType()) ? type->withDim(0) : type->withDim(0)->toScalarType(at::kLong)};
     }
     return {};
   }};
@@ -931,6 +930,16 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     return node->input(index)->type()->cast<TensorType>();
   };
   if (node->matches("aten::masked_select(Tensor self, Tensor mask) -> Tensor")) {
+    auto type = input_type(0);
+    auto mask_type = input_type(1);
+    if (type && mask_type) {
+      if (type->dim() == 0 && mask_type->dim() == 0) {
+        node->output()->setType(type->withDim(0));
+      } else {
+        node->output()->setType(type->withDim(1));
+      }
+      return true;
+    }
     if (auto type = input_type(0)) {
       node->output()->setType(type->withDim(1));
       return true;
@@ -958,11 +967,31 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
       node->output()->setType(type->withDim(3));
       return true;
     }
-  } else if (node->matches("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor") ||
-             node->matches("aten::index_put(Tensor self, Tensor[] indices, Tensor values) -> Tensor") ||
-             node->matches("aten::gather(Tensor self, int dim, Tensor index) -> Tensor")) {
-    if (auto type = input_type(0)) {
-      node->output()->setType(type);
+  } else if (node->matches("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor")) {
+    auto type = input_type(0);
+    auto index_type = input_type(1);
+    // index_select behaves very weirdly when self.dim() == 0. It allows both 0D and 1D
+    // indices, and returns a value that has as many dimensions as index.
+    if (type && index_type) {
+      if (type->dim() == 0) {
+        node->output()->setType(type->withDim(index_type->dim()));
+      } else {
+        node->output()->setType(type);
+      }
+      return true;
+    }
+  } else if (node->matches("aten::gather(Tensor self, int dim, Tensor index) -> Tensor")) {
+    auto type = input_type(0);
+    auto index_type = input_type(1);
+    // Gather has this annoying edge case where index always needs to match the number of
+    // dims of self, **except** when self is 1D and index is 0D in which case we return
+    // a 0D output.
+    if (type && index_type) {
+      if (index_type->dim() == 0) {
+        node->output()->setType(type->withDim(0));
+      } else {
+        node->output()->setType(type);
+      }
       return true;
     }
   } else if (node->matches("aten::embedding(Tensor weight, Tensor indices, int padding_idx, int scale_grad_by_freq, int sparse) -> Tensor")) {
@@ -979,6 +1008,11 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     }
     if (auto type = input_type(1)) {
       node->output()->setType(type);
+      return true;
+    }
+  } else if (node->matches("aten::dist(Tensor self, Tensor other, Scalar p) -> Tensor")) {
+    if (auto type = any_tensor_type(node)) {
+      node->output()->setType(type->withDim(0));
       return true;
     }
   }
@@ -1055,7 +1089,8 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
         return nullptr;
       }
     } else if (node->matches("aten::unfold(Tensor self, int dimension, int size, int step) -> Tensor")) {
-      return tensor_types.at(0)->withDim(3);
+      auto & t = tensor_types.at(0);
+      return t->dim() == 0 ? t : t->withDim(t->dim() + 1);
     } else if (node->matches("aten::polygamma(int n, Tensor self) -> Tensor")) {
       return tensor_types.at(0);
     }

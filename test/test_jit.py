@@ -7050,6 +7050,19 @@ EXCLUDE_TRACED = {
     'test_split_dim_neg0',
 }
 
+EXCLUDE_TYPE_CHECK = {
+    # slogdet tests use itemgetter to select its only differentiable output,
+    # but this happens outside of the graph we handle, so there are fewer
+    # reference outputs than graph outputs.
+    'test_slogdet_1x1_neg_det',
+    'test_slogdet_1x1_pos_det',
+    'test_slogdet_distinct_singular_values',
+    'test_slogdet_neg_det',
+    'test_slogdet_pos_det',
+    'test_slogdet_symmetric',
+    'test_slogdet_symmetric_pd',
+}
+
 # known to be failing in script
 EXCLUDE_SCRIPT = {
     # TODO: Fix var/std
@@ -7173,7 +7186,9 @@ def create_traced_fn(self, fn):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(fn_tensors, inputs_tensors)
         self.assertExportImport(traced.graph, inputs_tensors)
-        return traced(*inputs_tensors)
+        output = traced(*inputs_tensors)
+        traced_fn.last_graph = traced.graph_for(*inputs_tensors)
+        return output
     return traced_fn
 
 script_template = '''
@@ -7212,13 +7227,38 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
 
         script = script_template.format(', '.join(formals), call)
         CU = torch.jit.CompilationUnit(script)
+<<<<<<< HEAD
         self.assertExportImport(CU.the_method.graph, tensors)
 
         return output_process_fn(CU.the_method(*tensors))
+||||||| merged common ancestors
+        return output_process_fn(CU.the_method(*tensors))
+=======
+        output = output_process_fn(CU.the_method(*tensors))
+        script_fn.last_graph = CU.the_method.graph_for(*tensors)
+        return output
+>>>>>>> Add tests for shape propagation
     return script_fn
 
 
-def check_against_reference(self, func, reference_func, args, kwargs=None, allow_unused=True):
+def check_output_types(self, func, ref_outputs, args, kwargs):
+    graph = getattr(func, 'last_graph', None)
+    if not isinstance(ref_outputs, tuple):
+        ref_outputs = (ref_outputs,)
+    types = [o.type() for o in graph.outputs()]
+    self.assertEqual(len(types), len(ref_outputs))
+    for i, (t, ref_out) in enumerate(zip(types, ref_outputs)):
+        if isinstance(ref_out, list):
+            assert len(ref_out) > 0
+            elem = ref_out[0]
+            assert isinstance(elem, torch.Tensor)
+            self.assertTrue(t.isSubtypeOf(torch._C.ListType.ofTensors()))
+        else:
+            ref_type = torch._C.Type.inferFrom(ref_out)
+            self.assertTrue(ref_type.isSubtypeOf(t))
+
+
+def check_against_reference(self, func, reference_func, args, kwargs=None, allow_unused=True, check_types=True):
     kwargs = kwargs if kwargs else {}
 
     def allSum(vs):
@@ -7242,6 +7282,9 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
     outputs = reference_func(*nograd_inputs, **kwargs)
     outputs_test = func(*nograd_inputs, **kwargs)
     self.assertEqual(outputs, outputs_test)
+
+    if check_types:
+        check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
     # test single grad case
     outputs = reference_func(*recording_inputs, **kwargs)
@@ -7568,15 +7611,35 @@ def add_test(
                     output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
                     return output_process_fn(output)
 
+                check_types = test_name not in EXCLUDE_TYPE_CHECK
+
                 if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
                     if test_name not in EXCLUDE_TRACED:
+<<<<<<< HEAD
                         check_against_reference(self, create_traced_fn(self, fn),
                                                 fn, (self_variable,) + args_variable, kwargs_variable)
+||||||| merged common ancestors
+                        check_against_reference(self, create_traced_fn(fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable)
+=======
+                        check_against_reference(self, create_traced_fn(fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable,
+                                                check_types=check_types)
+>>>>>>> Add tests for shape propagation
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
+<<<<<<< HEAD
                                                 create_script_fn(self, name, 'method', output_process_fn),
                                                 fn, (self_variable,) + args_variable, kwargs_variable)
+||||||| merged common ancestors
+                                                create_script_fn(name, 'method', output_process_fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable)
+=======
+                                                create_script_fn(name, 'method', output_process_fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable,
+                                                check_types=check_types)
+>>>>>>> Add tests for shape propagation
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -7588,12 +7651,28 @@ def add_test(
                     f_args_tensor = (self_tensor,) + args_tensor
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
+<<<<<<< HEAD
                         check_against_reference(self, create_traced_fn(self, fn), fn, f_args_variable, kwargs_variable)
+||||||| merged common ancestors
+                        check_against_reference(self, create_traced_fn(fn), fn, f_args_variable, kwargs_variable)
+=======
+                        check_against_reference(self, create_traced_fn(fn), fn,
+                                                f_args_variable, kwargs_variable, check_types=check_types)
+>>>>>>> Add tests for shape propagation
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
+<<<<<<< HEAD
                                                 create_script_fn(self, name, 'functional', output_process_fn),
                                                 fn, f_args_variable, kwargs_variable)
+||||||| merged common ancestors
+                                                create_script_fn(name, 'functional', output_process_fn),
+                                                fn, f_args_variable, kwargs_variable)
+=======
+                                                create_script_fn(name, 'functional', output_process_fn),
+                                                fn, f_args_variable, kwargs_variable,
+                                                check_types=check_types)
+>>>>>>> Add tests for shape propagation
 
             check(name)
             inplace_name = name + '_'
