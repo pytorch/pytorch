@@ -35,9 +35,11 @@ fi
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 export HCC_AMDGPU_TARGET=gfx900
+export KMTHINLTO=1
 
 ########## HIPIFY Caffe2 operators
 ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
+${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
 
 MAX_JOBS=$(nproc)
 
