@@ -26,7 +26,7 @@ SKIP_PYTHON_BINDINGS = [
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
-    'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice',
+    'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice', 'randint(_out)?',
     '_local_scalar', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear'
 ]
@@ -151,10 +151,10 @@ def should_generate_python_binding(declaration):
     # TODO: fix handling of SparseTensor. We don't want to generate Python
     # bindings to SparseTensor overloads, such as add(Tensor, SparseTensorRef),
     # since the Tensor-based signature already dynamically dispatches correctly.
-    # However, _sparse_mask only has a SparseTensor signature so we need to bind
+    # However, sparse_mask only has a SparseTensor signature so we need to bind
     # that function.
     for arg in declaration['arguments']:
-        if arg['type'] == 'SparseTensorRef' and declaration['name'] != '_sparse_mask':
+        if arg['type'] == 'SparseTensorRef' and declaration['name'] != 'sparse_mask':
             return False
 
     return True

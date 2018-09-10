@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/tensor_numpy.h"
-#include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/tracing_state.h"
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;

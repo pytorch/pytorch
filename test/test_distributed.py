@@ -241,6 +241,7 @@ class _DistTestBase(object):
         else:
             group = [0, 1]
         group_id = dist.new_group(group)
+        self._barrier()
         dist.destroy_process_group(group_id)
 
     # Test get rank and size of group
@@ -260,6 +261,7 @@ class _DistTestBase(object):
     # Test destroy full groups
     def test_destroy_full_group(self):
         _, group_id, _ = self._init_full_group_test()
+        self._barrier()
         dist.destroy_process_group(group_id)
 
     # Test get rank and size of full group
@@ -269,7 +271,6 @@ class _DistTestBase(object):
         self.assertEqual(dist.get_rank(group_id), dist.get_rank())
 
     # SEND RECV
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support send/recv")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
     def test_send_recv(self):
         rank = dist.get_rank()
@@ -292,9 +293,6 @@ class _DistTestBase(object):
         self._barrier()
 
     # SEND RECV ANY SOURCE
-    @unittest.skipIf(
-        BACKEND == "gloo", "Gloo does not support send/recv from any source"
-    )
     @unittest.skipIf(
         BACKEND == "nccl", "Nccl does not support send/recv from any source"
     )
@@ -325,7 +323,6 @@ class _DistTestBase(object):
         self._barrier()
 
     # ISEND
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support isend")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
     def test_isend(self):
         rank = dist.get_rank()
@@ -347,7 +344,6 @@ class _DistTestBase(object):
         self._barrier()
 
     # IRECV
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support irecv")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support irecv")
     def test_irecv(self):
         rank = dist.get_rank()
@@ -1272,6 +1268,7 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
             getattr(self, self.id().split(".")[2])()
+            self._barrier()
             dist.destroy_process_group()
             sys.exit(0)
 
