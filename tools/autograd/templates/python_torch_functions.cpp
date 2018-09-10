@@ -53,9 +53,8 @@ static void check_out_type_matches(Tensor result,
   const auto& type = torch::getVariableType(scalarType_arg, layout_arg, device_type_arg);
   if (result.type() != type) {
     AT_ERROR(
-        "type corresponding to %s does not match type of out parameter (%s)",
-        type.toString(),
-        result.type().toString());
+        "type corresponding to ", type.toString(),
+        " does not match type of out parameter (", result.type().toString(), ")");
   }
 }
 
@@ -184,6 +183,140 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
+inline Tensor dispatch_randint(int64_t high, IntList size, Generator * generator, Tensor result) {
+  AutoNoGIL no_gil;
+  return at::randint_out(result, high, size, generator);
+}
+inline Tensor dispatch_randint(int64_t high, IntList size, Generator * generator, const TensorOptions & options) {
+  maybe_initialize_cuda(at::getType(options));
+  AutoNoGIL no_gil;
+  return torch::randint(high, size, generator, options);
+}
+inline Tensor dispatch_randint(int64_t high, IntList size, Tensor result) {
+  AutoNoGIL no_gil;
+  return at::randint_out(result, high, size);
+}
+inline Tensor dispatch_randint(int64_t high, IntList size, const TensorOptions & options) {
+  maybe_initialize_cuda(at::getType(options));
+  AutoNoGIL no_gil;
+  return torch::randint(high, size, options);
+}
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Generator * generator, Tensor result) {
+  AutoNoGIL no_gil;
+  return at::randint_out(result, low, high, size, generator);
+}
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Generator * generator, const TensorOptions & options) {
+  maybe_initialize_cuda(at::getType(options));
+  AutoNoGIL no_gil;
+  return torch::randint(low, high, size, generator, options);
+}
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Tensor result) {
+  AutoNoGIL no_gil;
+  return at::randint_out(result, low, high, size);
+}
+inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, const TensorOptions & options) {
+  maybe_initialize_cuda(at::getType(options));
+  AutoNoGIL no_gil;
+  return torch::randint(low, high, size, options);
+}
+
+static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "randint(int64_t high, IntList size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntList size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntList size, *, Generator generator, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntList size, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<9> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    if (r.isNone(3)) {
+      auto high = r.toInt64(0);
+      auto size = r.intlist(1);
+      auto generator = r.generator(2);
+      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
+      auto dtype = r.scalartypeWithDefault(4, at::ScalarType::Long);
+      auto device = r.device(6);
+      const auto options = TensorOptions()
+          .dtype(dtype)
+          .device(device)
+          .layout(r.layout(5).layout)
+          .requires_grad(r.toBool(7));
+      return wrap(dispatch_randint(high, size, generator, options));
+    } else {
+      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
+                             r.layout(5), r.isNone(5),
+                             r.device(6), r.isNone(6));
+      return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.generator(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
+    }
+  } else if (r.idx == 1) {
+    if (r.isNone(2)) {
+      auto high = r.toInt64(0);
+      auto size = r.intlist(1);
+      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
+      auto dtype = r.scalartypeWithDefault(3, at::ScalarType::Long);
+      auto device = r.device(5);
+      const auto options = TensorOptions()
+          .dtype(dtype)
+          .device(device)
+          .layout(r.layout(4).layout)
+          .requires_grad(r.toBool(6));
+      return wrap(dispatch_randint(high, size, options));
+    } else {
+      check_out_type_matches(r.tensor(2), r.scalartype(3), r.isNone(3),
+                             r.layout(4), r.isNone(4),
+                             r.device(5), r.isNone(5));
+      return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.tensor(2)).set_requires_grad(r.toBool(6)));
+    }
+  } else if (r.idx == 2) {
+    if (r.isNone(4)) {
+      auto low = r.toInt64(0);
+      auto high = r.toInt64(1);
+      auto size = r.intlist(2);
+      auto generator = r.generator(3);
+      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
+      auto dtype = r.scalartypeWithDefault(5, at::ScalarType::Long);
+      auto device = r.device(7);
+      const auto options = TensorOptions()
+          .dtype(dtype)
+          .device(device)
+          .layout(r.layout(6).layout)
+          .requires_grad(r.toBool(8));
+      return wrap(dispatch_randint(low, high, size, generator, options));
+    } else {
+      check_out_type_matches(r.tensor(4), r.scalartype(5), r.isNone(5),
+                             r.layout(6), r.isNone(6),
+                             r.device(7), r.isNone(7));
+      return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.generator(3), r.tensor(4)).set_requires_grad(r.toBool(8)));
+    }
+  } else if (r.idx == 3) {
+    if (r.isNone(3)) {
+      auto low = r.toInt64(0);
+      auto high = r.toInt64(1);
+      auto size = r.intlist(2);
+      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
+      auto dtype = r.scalartypeWithDefault(4, at::ScalarType::Long);
+      auto device = r.device(6);
+      const auto options = TensorOptions()
+          .dtype(dtype)
+          .device(device)
+          .layout(r.layout(5).layout)
+          .requires_grad(r.toBool(7));
+      return wrap(dispatch_randint(low, high, size, options));
+    } else {
+      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
+                             r.layout(5), r.isNone(5),
+                             r.device(6), r.isNone(6));
+      return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
+    }
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -240,6 +373,7 @@ static PyMethodDef torch_functions[] = {
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"hsmm", (PyCFunction)THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"_promote_types", (PyCFunction)THPVariable__promote_types, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"randint", (PyCFunction)THPVariable_randint, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"range", (PyCFunction)THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"sparse_coo_tensor", (PyCFunction)THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

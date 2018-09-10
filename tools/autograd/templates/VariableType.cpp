@@ -127,7 +127,7 @@ struct VariableTypeRegistry {
 
 struct VariableHooks : public at::VariableHooksInterface {
   VariableHooks(at::VariableHooksArgs) {}
-  void registerVariableTypeFor(at::Context*, at::Backend, at::ScalarType) const override;
+  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend, at::ScalarType) const override;
   at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
 };
 
@@ -161,7 +161,7 @@ static VariableTypeRegistry registry;
 REGISTER_VARIABLE_HOOKS(VariableHooks)
 
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
-void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
+void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend, at::ScalarType scalar_type) const {
   auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
   register_variable_type_for(baseType);
 }
@@ -378,6 +378,13 @@ static bool isFloatingPoint(ScalarType s) {
   return s == kFloat || s == kDouble || s == kHalf;
 }
 
+void VariableType::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  as_variable_ref(self).backward(gradient, keep_graph, create_graph);
+}
+
+void VariableType::set_data(Tensor & self, Tensor new_data) const {
+  as_variable_ref(self).set_data(new_data);
+}
 Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   jit::Node* node = nullptr;
   if(torch::jit::tracer::isTracing()) {
@@ -444,6 +451,46 @@ Tensor VariableType::contiguous(const Tensor & self) const {
     return self;
   }
   return self.clone();
+}
+
+Tensor VariableType::detach(const Tensor & self) const {
+  profiler::RecordFunction profiler("detach");
+  torch::jit::Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    node = graph->create(jit::aten::detach, /*outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+
+  }
+  // <NON_GENERATED_CODE>
+  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach();
+  // </NON_GENERATED_CODE>
+  if (jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, result);
+  }
+  return result;
+}
+
+Tensor & VariableType::detach_(Tensor & self) const {
+  profiler::RecordFunction profiler("detach_");
+  torch::jit::Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    node = graph->create(jit::aten::detach, /*outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+    jit::tracer::ensureUnique("detach_", self);
+  }
+  // <NON_GENERATED_CODE>
+  as_variable_ref(self).detach_();
+  // </NON_GENERATED_CODE>
+  if (jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
+  return self;
 }
 
 static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {

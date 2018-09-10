@@ -71,9 +71,15 @@ public:
   virtual bool isSubtypeOf(const TypePtr rhs) const {
     return *this == *rhs;
   }
-  // user-friendly form of the type, separate from
-  // operator<< which is verbose and unambiguous
+
+  // How this type will appear in FunctionSchema declarations
   virtual std::string str() const = 0;
+
+  // How this type will appear as if it were a type annotation in Python
+  // which is sometimes different than how it appears in declarations (e.g. int[] vs List[int])
+  virtual std::string python_str() const {
+    return str();
+  }
 
   TypeKind kind() const {
     return kind_;
@@ -331,6 +337,11 @@ struct TORCH_API ListType : public Type {
     ss << getElementType()->str() << "[]";
     return ss.str();
   }
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "List[" << getElementType()->python_str() << "]";
+    return ss.str();
+  }
   TypePtr getElementType() const {
     return elem;
   }
@@ -377,6 +388,17 @@ struct TORCH_API TupleType : public Type {
       ss << elements()[i]->str();
     }
     ss << ")";
+    return ss.str();
+  }
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "Tuple[";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->python_str();
+    }
+    ss << "]";
     return ss.str();
   }
 private:

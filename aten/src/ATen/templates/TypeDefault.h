@@ -28,6 +28,9 @@ struct AT_API TypeDefault : public Type {
   Tensor copy(const Tensor & src, bool non_blocking=false) const override;
   Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const override;
 
+  void backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const override;
+  void set_data(Tensor & self, Tensor new_data) const override;
+
   Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const override;
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const override;
   Tensor tensorWithAllocator(IntList sizes, Allocator* allocator) const override;
