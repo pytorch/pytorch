@@ -70,7 +70,6 @@ TH_API void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t 
 TH_API void THTensor_(addr)(THTensor *r_,  scalar_t beta, THTensor *t, scalar_t alpha, THTensor *vec1, THTensor *vec2);
 
 TH_API void THTensor_(addbmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2);
-TH_API void THTensor_(baddbmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2);
 
 TH_API void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain);
 

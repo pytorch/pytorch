@@ -2570,8 +2570,9 @@
   name: _th_bmm
   cname: baddbmm
   variants:
-    - method
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2624,8 +2625,9 @@
   name: _th_baddbmm
   cname: baddbmm
   variants:
-    - method
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2644,6 +2646,8 @@
 [[
   name: _th_baddbmm_
   cname: baddbmm
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - THTensor* self
