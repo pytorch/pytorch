@@ -187,6 +187,7 @@ IS_LINUX = (platform.system() == 'Linux')
 
 BUILD_PYTORCH = check_env_flag('BUILD_PYTORCH')
 USE_CUDA_STATIC_LINK = check_env_flag('USE_CUDA_STATIC_LINK')
+RERUN_CMAKE = True
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
@@ -382,6 +383,8 @@ def build_libs(libs):
         build_libs_cmd += ['--use-mkldnn']
     if USE_GLOO_IBVERBS:
         build_libs_cmd += ['--use-gloo-ibverbs']
+    if not RERUN_CMAKE:
+        build_libs_cmd += ['--dont-rerun-cmake']
 
     my_env["BUILD_TORCH"] = "ON"
     my_env["BUILD_PYTHON"] = "ON"
@@ -514,8 +517,15 @@ class develop(setuptools.command.develop.develop):
         all_commands = [entry
                         for f in ninja_files + cmake_files
                         for entry in load(f)]
-        with open('compile_commands.json', 'w') as f:
-            json.dump(all_commands, f, indent=2)
+
+        new_contents = json.dumps(all_commands, indent=2)
+        contents = ''
+        if os.path.exists('compile_commands.json'):
+            with open('compile_commands.json', 'r') as f:
+                contents = f.read()
+        if contents != new_contents:
+            with open('compile_commands.json', 'w') as f:
+                f.write(new_contents)
         if not USE_NINJA:
             print("WARNING: 'develop' is not building C++ code incrementally")
             print("because ninja is not installed. Run this to enable it:")
@@ -674,6 +684,17 @@ class build(distutils.command.build.build):
     sub_commands = [
         ('build_deps', lambda self: True),
     ] + distutils.command.build.build.sub_commands
+
+
+class rebuild(distutils.command.build.build):
+    sub_commands = [
+        ('build_deps', lambda self: True),
+    ] + distutils.command.build.build.sub_commands
+
+    def run(self):
+        global RERUN_CMAKE
+        RERUN_CMAKE = False
+        distutils.command.build.build.run(self)
 
 
 class install(setuptools.command.install.install):
@@ -1116,6 +1137,7 @@ cmdclass = {
     'build_deps': build_deps,
     'build_module': build_module,
     'rebuild_libtorch': rebuild_libtorch,
+    'rebuild': rebuild,
     'develop': develop,
     'install': install,
     'clean': clean,
