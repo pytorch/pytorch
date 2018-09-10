@@ -180,7 +180,7 @@ std::uint64_t version() {
 }
 
 namespace {
-  // NCCL changed the umerical type used for count between NCCL1 and NCCL2.
+  // NCCL changed the numerical type used for count between NCCL1 and NCCL2.
   // So we use the following struct, which gets the type of the second argument
   // of T, if T is a function type, with ncclBcast, to get that type statically
   // and programmatically.
