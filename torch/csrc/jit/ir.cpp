@@ -262,11 +262,13 @@ class PrettyPrintPass {
   // When printing a name if there is a conflict with an existing name in the
   // graph, record the value -> new generated name mapping
   std::unordered_map<const Value*, const Value*> aliases_;
-  // std::unordered_map<const Value*, std::string> aliases_;
 
   // The Graph already tracks unique_names_, this is just for additional ones
   // generated during printing
   std::unordered_map<std::string, const Value*> generated_names_;
+
+  // Cache of value names
+  std::unordered_map<const Value*, std::string> value_names_;
 
   template<class T>
   void dualIterator(
@@ -508,6 +510,13 @@ class PrettyPrintPass {
     std::ostream & out,
     const Value* val
   ) {
+    auto cached_name = value_names_.find(val);
+    if (cached_name != value_names_.end()) {
+      // If this value has been seen before, print out cached name
+      out << cached_name->second;
+      return out;
+    }
+
     const auto node = val->node();
     if (node->kind() == prim::Constant) {
       printAttributeValue(out, node->attributeNames()[0], node);
@@ -550,6 +559,7 @@ class PrettyPrintPass {
       generated_names_[name] = name_source;
     }
 
+    value_names_[val] = name;
     out << name;
     return out;
   }
