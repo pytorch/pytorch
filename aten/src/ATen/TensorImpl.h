@@ -7,6 +7,8 @@
 #include "ATen/core/optional.h"
 #include "ATen/core/TensorTypeId.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
+#include "ATen/core/LegacyTypeDispatch.h"
+#include "ATen/core/Backend.h"
 
 struct THTensor;
 
@@ -20,15 +22,18 @@ struct Tensor;
 namespace at {
 struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
-  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
+  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable);
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
   virtual void release_resources() override;
 
-  // The implementation of this method will have to be hoisted out and
-  // hooked in, so that Caffe2 doesn't need to know about Context
-  // TODO: This really really needs to be inlined.
-  Type & type() const;
+  Type & type() const {
+    // NB: It's valid to use getTypeRaw here, because the TensorImpl
+    // could not have been created without initializing the Type first.
+    // TODO: This is not actually true via the Caffe2 codepath!  Make
+    // it so.
+    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), scalar_type(), is_variable());
+  }
 
   TensorTypeId type_id() const { return type_id_; }
   virtual IntList sizes() const;
@@ -84,18 +89,6 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual Tensor& grad();
   virtual const Tensor& grad() const;
-
-  virtual Tensor detach() const;
-  virtual void detach_() {
-    AT_ERROR("detach_ is not implemented for Tensor");
-  }
-
-  virtual void backward(
-      at::optional<Tensor> gradient,
-      bool keep_graph,
-      bool create_graph);
-
-  virtual void set_data(Tensor new_data);
 
   // TODO: make these protected
   // Note: storage->size() may be greater than the recorded size

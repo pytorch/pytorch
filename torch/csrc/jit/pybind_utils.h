@@ -78,6 +78,19 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   return ConstantList<IValue>::create(std::move(elems));
 }
 
+struct ConvertError : public std::exception {
+    ConvertError(std::string msg)
+    : msg_(std::move(msg)) {}
+    const char* what() const noexcept override  {
+        return msg_.c_str();
+    }
+private:
+    std::string msg_;
+};
+
+#define TORCH_CONVERT_ERROR(...) \
+  throw ConvertError(at::str(__VA_ARGS__))
+
 inline IValue toIValue(py::handle obj, const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::DynamicType:
@@ -95,7 +108,7 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
         size_t tuple_size = tuple.size();
         const auto & elem_types = type->cast<TupleType>()->elements();
         if (elem_types.size() != tuple_size) {
-          AT_ERROR("Expected ", elem_types.size(), " tuple elements for argument, but got ", tuple_size);
+          TORCH_CONVERT_ERROR("Expected ", elem_types.size(), " tuple elements for argument, but got ", tuple_size);
         }
         std::vector<IValue> values;
         values.reserve(tuple_size);
@@ -121,9 +134,9 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
         }
       }
       case TypeKind::NumberType:
-        AT_ERROR("Insufficient type information to convert input");
+        TORCH_CONVERT_ERROR("Insufficient type information to convert input");
       case TypeKind::GeneratorType:
-        AT_ERROR("Generators are not supported yet.");
+        TORCH_CONVERT_ERROR("Generators are not supported yet.");
     }
   AT_ERROR("Missing cases in toIValue! File a bug report.");
 }
@@ -142,7 +155,15 @@ inline IValue argumentToIValue(
         "' in position ", argumentPosition,
         ", but instead got value of type ",
         py::str(object.get_type().attr("__name__")),
-        ". Declaration: ", schema);
+        ".\nDeclaration: ", schema);
+  } catch (const ConvertError& error) {
+    AT_ERROR(
+        schema.name, "(): ", error.what(),
+        "\n for argument '", argument.name,
+        "' in position ", argumentPosition,
+        ", but instead got value of type ",
+        py::str(object.get_type().attr("__name__")),
+        ".\nDeclaration: ", schema);
   }
 }
 

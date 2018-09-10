@@ -77,7 +77,7 @@ AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
 
 // RAII for a CUDA stream
 // Allows use as a cudaStream_t, copying, moving, and metadata access.
-struct CUDAStream {
+struct AT_CUDA_API CUDAStream {
 
   // Constructors
   CUDAStream() = default;

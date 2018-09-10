@@ -291,13 +291,13 @@ constexpr inline array<T, N-1> tail(const array<T, N>& arg) {
 
 namespace detail {
 template<class T, size_t N, size_t... I>
-constexpr inline array<T, N+1> prepend_(T head, const array<T, N>& tail, guts::index_sequence<I...>) {
-  return {{std::move(head), get<I>(tail)...}};
+constexpr inline array<T, N+1> prepend_(T&& head, const array<T, N>& tail, guts::index_sequence<I...>) {
+  return {{std::forward<T>(head), get<I>(tail)...}};
 }
 }
 template<class T, size_t N>
-constexpr inline array<T, N+1> prepend(T head, const array<T, N>& tail) {
-  return detail::prepend_(std::move(head), tail, guts::make_index_sequence<N>());
+constexpr inline array<T, N+1> prepend(T&& head, const array<T, N>& tail) {
+  return detail::prepend_(std::forward<T>(head), tail, guts::make_index_sequence<N>());
 }
 
 /**

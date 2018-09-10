@@ -78,9 +78,11 @@ namespace test_tail {
     static_assert(array < int, 0 > {{}} == tail(array < int, 1 > {{3}}), "");
 }
 
-namespace test_prepend {
-    static_assert(array < int, 3 > {{2, 3, 4}} == prepend(2, array < int, 2 > {{3, 4}}), "");
-    static_assert(array < int, 1 > {{3}} == prepend(3, array < int, 0 > {{}}), "");
+TEST(ArrayTest, TestPrepend) {
+  // Some compilers can't handle move results as constexpr, so use
+  // gtest assert for this test
+  ASSERT_EQ((array<int, 3> {{2, 3, 4}}), (prepend(2, array<int, 2> {{3, 4}})));
+  ASSERT_EQ((array<int, 1> {{3}}), (prepend(3, array<int, 0> {{}})));
 }
 
 namespace test_to_std_array {

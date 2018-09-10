@@ -151,6 +151,9 @@ public:
   Vec256<double> rsqrt() const {
     return _mm256_div_pd(_mm256_set1_pd(1), _mm256_sqrt_pd(values));
   }
+  Vec256<double> pow(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_powd4_u10(values, b));
+  }
 };
 
 template <>
@@ -176,6 +179,11 @@ Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_max_pd(a, b);
+}
+
+template <>
+Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_min_pd(a, b);
 }
 
 #ifdef __AVX2__

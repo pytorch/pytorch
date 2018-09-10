@@ -1583,6 +1583,97 @@ class TestJit(JitTestCase):
         test_x = torch.rand(6, 3)
         self.assertEqual(foo(test_x), traced(test_x))
 
+    def test_export_expand_aten_fallback(self):
+        class ExpandTest(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                y = x
+                for i in range(5):
+                    y = x.expand([3, 4, i])
+                return y
+
+        mod = ExpandTest()
+        example_outs = mod(torch.rand(3, 4, 1))
+        f = io.BytesIO()
+        with self.assertRaisesRegex(RuntimeError, 'Could not export a broadcasted operation'):
+            torch.onnx.export_to_pretty_string(mod, (torch.rand(3, 4, 1),), f, verbose=False,
+                                               example_outputs=example_outs)
+
+        self.assertExpected(
+            torch.onnx.export_to_pretty_string(mod, (torch.rand(3, 4, 1),), f, verbose=False,
+                                               example_outputs=example_outs,
+                                               operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK))
+
+    def test_export_dropout(self):
+        test = torch.nn.Dropout()
+        test.eval()
+
+        traced = torch.jit.trace(test, (torch.rand(3, 4),), check_trace=False)
+        imported = self.getExportImportCopy(traced)
+        x = torch.randn(3, 4)
+        self.assertEqual(traced(x), imported(x))
+
+    def test_export_batchnorm(self):
+        for mode in ['eval', 'train']:
+            for clazz in [
+                    torch.nn.BatchNorm1d(100),
+                    torch.nn.BatchNorm1d(100, affine=False),
+                    torch.nn.BatchNorm2d(100),
+                    torch.nn.BatchNorm2d(100, affine=False)]:
+                getattr(clazz, mode)()
+
+                input = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
+                    torch.randn(20, 100, 35, 45)
+
+                traced = torch.jit.trace(clazz, (input,))
+                imported = self.getExportImportCopy(traced)
+                x = torch.randn(20, 100) if isinstance(clazz, torch.nn.BatchNorm1d) else \
+                    torch.randn(20, 100, 35, 45)
+                self.assertEqual(traced(x), imported(x))
+
+    def test_export_rnn(self):
+        for clazz in [nn.RNN(10, 20, 2), nn.GRU(10, 20, 2)]:
+            class RNNTest(torch.nn.Module):
+                def __init__(self):
+                    super(RNNTest, self).__init__()
+                    self.rnn = clazz
+
+                def forward(self, x, lengths, h0):
+                    packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
+                    out, h = self.rnn(packed, h0)
+                    padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
+                    return padded_outs
+
+            test = RNNTest()
+
+            traced = torch.jit.trace(test, (torch.randn(5, 3, 10), torch.LongTensor([3, 2, 1]), torch.randn(2, 3, 20)))
+            imported = self.getExportImportCopy(traced)
+            x, lengths, h0 = torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20)
+            self.assertEqual(traced(x, lengths, h0), imported(x, lengths, h0))
+
+    def test_export_lstm(self):
+        class LSTMTest(torch.nn.Module):
+            def __init__(self):
+                super(LSTMTest, self).__init__()
+                self.rnn = nn.LSTM(10, 20, 2)
+
+            def forward(self, x, lengths, hiddens):
+                h0, c0 = hiddens
+                packed = torch.nn.utils.rnn.pack_padded_sequence(x, lengths)
+                out, (h, c) = self.rnn(packed, (h0, c0))
+                padded_outs, _ = torch.nn.utils.rnn.pad_packed_sequence(out)
+                return padded_outs
+
+        test = LSTMTest()
+
+        traced = torch.jit.trace(test, (torch.randn(5, 3, 10),
+                                        torch.LongTensor([3, 2, 1]),
+                                        (torch.randn(2, 3, 20), torch.randn(2, 3, 20))))
+        imported = self.getExportImportCopy(traced)
+        x, lengths, h0, c0 = \
+            torch.randn(5, 3, 10), torch.LongTensor([3, 3, 2]), torch.randn(2, 3, 20), torch.randn(2, 3, 20)
+        self.assertEqual(traced(x, lengths, (h0, c0)), imported(x, lengths, (h0, c0)))
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -3038,6 +3129,7 @@ a")
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skip("this test is flaky, see #11360")
     def test_scalar_fusion(self):
         def fn(x, y):
             return x + y.type_as(x)
@@ -6953,16 +7045,6 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
-
-    # nn functional test
-    # schema not found for onnx node
-    'test_nn_instance_norm',
-
-    # output no dependence with traced input, tracer confusion
-    'test_nn_rrelu',
-
-    # aten op has additional cudnn argument
-    'test_nn_group_norm',
 }
 
 # known to be failing in script
@@ -6991,9 +7073,6 @@ EXCLUDE_SCRIPT = {
     'test_norm_inf',
     'test_renorm_norm_inf',
     'test_split',
-    'test_split_size_list',
-    'test_split_size_list_dim',
-    'test_split_size_list_dim_neg0',
     'test_expand',
     'test_expand_1_element',
     'test_expand_new_dim',
@@ -7006,18 +7085,17 @@ EXCLUDE_SCRIPT = {
     'test_repeat_scalar',
     'test_repeat_single_number',
     'test_repeat_unsqueeze',
-    'test_reshape',
     'test_reshape_1d',
     'test_reshape_scalar_to_1d',
-    'test_reshape_size',
     'test_view',
     'test_view_1d',
     'test_view_scalar_to_1d',
-    'test_view_size',
     'test_split_dim',
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+    'test_matrix_power_n=-1',  # involves inverse
+    'test_matrix_power_n=-3',  # involves inverse
     # skipped nn functional tests
     # ops involves sampling which could not test
     'test_nn_dropout',
@@ -7029,13 +7107,16 @@ EXCLUDE_SCRIPT = {
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
     'test_nn_adaptive_max_pool3d',
+    'test_nn_ctc_loss',
 
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
+    'test_nn_max_unpool3d',
     'test_nn_embedding',
     'test_nn_embedding_bag',
     'test_nn_batch_norm',
+
     # aten op has additional cudnn argument
     'test_nn_group_norm',
     'test_nn_nll_loss',
@@ -7065,6 +7146,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_lp_pool1d',
     'test_nn_lp_pool2d',
     'test_nn_instance_norm',
+    'test_nn_grid_sample',
+    'test_nn_gumbel_softmax',
 }
 
 
@@ -7348,6 +7431,7 @@ nn_functional_tests = [
     ('max_pool3d', (S, S, S, S, S), (2, 1)),
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
     ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
+    ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
     ('lp_pool1d', (S, S, S), (2, 3, 2,)),
     ('lp_pool2d', (S, S, S, S), (2, 3, 2,)),
     ('adaptive_max_pool1d', (S, S, S), (5,)),
@@ -7410,24 +7494,27 @@ nn_functional_tests = [
     ('normalize', (S, S, S), (),),
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
-
-    # distribution sampling make result different in every run for below ops:
-    # ('gumbel_softmax', (S, S), (2,),),
-    #
-    #  No high order gradient for the below ops
-    # ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
-    # ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
-    # ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    # ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),),),
-    # ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)),),),
-    # ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), (torch.randint(1, S + 1, (S, S),
-    # dtype=torch.long), torch.full((S,), S, dtype=torch.long), torch.randint(1,S,(S,), dtype=torch.long))),
+    ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
+    ('gumbel_softmax', (S, S), (2,),),
+    ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
+    ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)), \
+                                   1, 1, non_differentiable(torch.randn(S))),),
+    ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)), \
+                                                           non_differentiable(torch.randn(3, 2))),),
+    ('ctc_loss', torch.randn(S, S, S).log_softmax(2).detach().requires_grad_(), \
+     (torch.randint(1, S + 1, (S, S), dtype=torch.long), torch.full((S,), S, dtype=torch.long), \
+      torch.randint(1, S, (S,), dtype=torch.long))),
 ]
 
 
 # Test names in this set are only checked for a single derivative
 nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'pdist',
+    'multilabel_margin_loss',
+    'max_unpool3d',
+    'multi_margin_loss',
+    'binary_cross_entropy',
+    'ctc_loss',
 ])
 
 
