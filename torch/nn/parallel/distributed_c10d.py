@@ -164,7 +164,9 @@ class _DistributedDataParallelC10d(Module):
         else:
             self._module_copies = [self.module]
 
+        # .data() of each parameter for each model replica
         self.modules_params_data = [[] for _ in range(len(self.device_ids))]
+        # .data() of each buffer for each model replica
         self.modules_buffers_data = [[] for _ in range(len(self.device_ids))]
 
         for dev_idx, module in enumerate(self._module_copies):
@@ -252,29 +254,12 @@ class _DistributedDataParallelC10d(Module):
         c10d._dist_broadcast_coalesced(tensors, buffer_size, self.process_group)
 
     def _sync_params(self):
-        if len(self.device_ids) > 1:
-            # intra-node parameter sync
-            result = broadcast_coalesced(self.modules_params_data[0],
-                                         self.device_ids,
-                                         self.broadcast_bucket_size)
-            for tensors, module_params_data in zip(result[1:], self.modules_params_data[1:]):
-                for tensor, param_data in zip(tensors, module_params_data):
-                    param_data.set_(tensor)
-
-        # module buffer sync
-        if self.broadcast_buffers:
-            if len(self.modules_buffers_data[0]) > 0:
-                # cross-node buffer sync
-                self._dist_broadcast_coalesced(self.modules_buffers_data[0],
-                                               self.broadcast_bucket_size)
-                if len(self.device_ids) > 1:
-                    # intra-node buffer sync
-                    result = broadcast_coalesced(self.modules_buffers_data[0],
-                                                 self.device_ids,
-                                                 self.broadcast_bucket_size)
-                    for tensors, module_buffers_data in zip(result[1:], self.modules_buffers_data[1:]):
-                        for tensor, buffer_data in zip(tensors, module_buffers_data):
-                            buffer_data.set_(tensor)
+        c10d._sync_params(self.process_group,
+                          self.modules_params_data,
+                          self.modules_buffers_data,
+                          self.device_ids,
+                          self.broadcast_bucket_size,
+                          self.broadcast_buffers)
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope

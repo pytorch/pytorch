@@ -25,6 +25,21 @@ _(at::ComplexHalf,ComplexHalf,z)        /* 8 */ \
 _(std::complex<float>,ComplexFloat,z)   /* 9 */ \
 _(std::complex<double>,ComplexDouble,z) /* 10 */
 
+// If you want to support ComplexHalf for real, replace occurrences
+// of this macro with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX.  But
+// beware: convert() doesn't work for all the conversions you need...
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(_) \
+_(uint8_t,Byte,i)  \
+_(int8_t,Char,i)   \
+_(int16_t,Short,i) \
+_(int,Int,i)       \
+_(int64_t,Long,i)  \
+_(at::Half,Half,d) \
+_(float,Float,d)   \
+_(double,Double,d) \
+_(std::complex<float>,ComplexFloat,z) \
+_(std::complex<double>,ComplexDouble,z)
+
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i)  \
 _(int8_t,Char,i)   \

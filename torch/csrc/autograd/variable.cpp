@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().type_id(), data.type().scalarType(), /* is variable */ true),
+    : TensorImpl(data.type().type_id(), data.type().scalarType(), data.type().allocator(), /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -113,7 +113,7 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   return result;
 }
 
-Tensor Variable::Impl::detach() const {
+Variable Variable::Impl::detach() const {
   auto detached = make_variable(data_, /*requires_grad=*/false);
   detached.set_version_counter(version_counter_);
   return detached;
