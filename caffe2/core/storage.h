@@ -29,8 +29,13 @@ using at::DeviceType;
 class CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   StorageImpl() = delete;
+  StorageImpl(StorageImpl&) = delete;
   StorageImpl(const StorageImpl&) = delete;
-  StorageImpl& operator=(const StorageImpl&) = delete;
+  StorageImpl(const StorageImpl&& other) = delete;
+  StorageImpl& operator=(const StorageImpl& src) = delete;
+
+  StorageImpl(StorageImpl&& other) = default;
+  StorageImpl& operator=(StorageImpl&& other) = default;
 
   explicit StorageImpl(DeviceType device_type) : device_type_(device_type) {}
   StorageImpl(DeviceType device_type, TypeMeta data_type)
@@ -113,11 +118,6 @@ class CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
   inline size_t itemsize() const {
     return data_type_.itemsize();
   }
-
-  // Rule of Five
-  StorageImpl(StorageImpl&&) = default;
-  ~StorageImpl() = default;
-  StorageImpl& operator=(StorageImpl&&) = default;
 
   /**
    * Can only be called when use_count is 1

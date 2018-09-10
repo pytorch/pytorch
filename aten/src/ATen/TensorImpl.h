@@ -25,6 +25,13 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable);
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
+  TensorImpl(TensorImpl&) = delete;
+  TensorImpl(const TensorImpl&) = delete;
+  TensorImpl(TensorImpl&& other) = delete;
+  TensorImpl(const TensorImpl&& other) = delete;
+  TensorImpl& operator=(TensorImpl&& other) = delete;
+  TensorImpl& operator=(const TensorImpl& src) = delete;
+
   virtual void release_resources() override;
 
   Type & type() const {
