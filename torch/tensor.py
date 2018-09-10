@@ -325,13 +325,15 @@ class Tensor(torch._C._TensorBase):
         See :func:`torch.unique`
         """
         if dim is not None:
-            output, inverse_indices = self._unique_dim(
+            output, inverse_indices = torch._unique_dim(
+                self,
                 sorted=sorted,
                 return_inverse=return_inverse,
                 dim=dim
             )
         else:
-            output, inverse_indices = self._unique(
+            output, inverse_indices = torch._unique(
+                self,
                 sorted=sorted,
                 return_inverse=return_inverse
             )

@@ -31,7 +31,7 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'contiguous', 'resize_', 'resize_as_'
+    'contiguous', 'resize_', 'resize_as_', 'detach', 'detach_',
 }
 
 # These functions we don't want to record for tracing, because we always want

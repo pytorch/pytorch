@@ -51,10 +51,10 @@ fi
 # Build Caffe2 and PyTorch
 ###########################################################
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  FULL_CAFFE2=1 MACOSX_DEPLOYMENT_TARGET=10.9 python setup.py install
+  USE_OPENCV=1 BUILD_BINARY=1 MACOSX_DEPLOYMENT_TARGET=10.9 python setup.py install
   exit 0
 fi
-FULL_CAFFE2=1 python setup.py install
+USE_OPENCV=1 BUILD_BINARY=1 python setup.py install
 
 
 
