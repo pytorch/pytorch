@@ -217,8 +217,20 @@ def discover_sparse_tensor_operations(declaration):
                                                                        (raw_args - filtered_args)]
 
 
+def is_internal_method(option):
+    if 'method' in option['variants']:
+        return False
+    elif option.get('deprecated', False):
+        return False
+    elif not option['variants']:
+        return False
+    else:
+        return True
+
+
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
+    non_internal_method = set()
     for declaration in declarations:
         common_with_cwrap.set_declaration_defaults(declaration)
         declaration['options'] = [deepcopy(o) for o in declaration['options']]
@@ -237,6 +249,11 @@ def run(declarations):
                 sanitize_return(option)
             process_types_and_backends(option)
             add_variants(option)
+            if not is_internal_method(option):
+                non_internal_method.add(option['api_name'])
         declaration['options'] = handle_outputs_taken_as_arguments(
             declaration['options'])
+    for declaration in declarations:
+        for option in declaration['options']:
+            option['internal_method'] = option['api_name'] not in non_internal_method
     return declarations
