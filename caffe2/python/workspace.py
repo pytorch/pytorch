@@ -57,7 +57,6 @@ else:
     GetCuDNNVersion = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
     GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
-    GetDeviceProperties = lambda x: None # noqa
 
 if has_hip_support:
     NumHipDevices = C.num_hip_devices
@@ -69,6 +68,8 @@ if has_hip_support:
 else:
     NumHipDevices = lambda: 0 # noqa
     GetHipPeerAccessPattern = lambda: np.array([]) # noqa
+
+if not has_gpu_support and not has_hip_support:
     GetDeviceProperties = lambda x: None # noqa
 
 IsNUMAEnabled = C.is_numa_enabled
