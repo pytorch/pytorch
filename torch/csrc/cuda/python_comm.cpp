@@ -63,9 +63,7 @@ std::vector<at::cuda::CUDAStream> py_object_to_cuda_streams(
     py::handle handle(py_streams);
     thc_streams = THPUtils_PySequence_to_THCStreamList(handle.ptr());
   }
-  return fmap(std::move(thc_streams), [](THCStream* stream) {
-    return at::cuda::CUDAStream(stream, /*retain=*/true);
-  });
+  return fmap<at::cuda::CUDAStream>(thc_streams);
 }
 
 }}}

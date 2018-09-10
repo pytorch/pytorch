@@ -36,8 +36,7 @@ void copyBroadcastTensorsToReplicas(
 void distBroadcastCoalesced(
     ProcessGroup& processGroup,
     std::vector<at::Tensor>& tensors,
-    int64_t bufferSize,
-    ProcessGroup& processGroup) {
+    int64_t bufferSize) {
   auto tensorGroups = torch::utils::take_tensors(tensors, bufferSize);
   // We store single-element vectors in `flatTensors` because
   // `ProcessGroup::broadcast` takes a reference to a vector, which must be

@@ -132,9 +132,7 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
   std::vector<at::Tensor> outputs = extract_tensors(_outputs);
   auto thc_streams = unpack_streams(_streams, inputs.size());
-  auto streams = fmap(thc_streams, [](THCStream* stream) {
-    return at::cuda::CUDAStream(stream, /*retain=*/true);
-  });
+  auto streams = fmap<at::cuda::CUDAStream>(thc_streams);
   auto user_comms = unpack_comms(_comms, inputs.size());
 
   with_no_gil([&]{
