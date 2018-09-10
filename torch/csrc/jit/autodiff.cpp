@@ -149,7 +149,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
       return {grads.at(0).mm(inputs.at(1).t()), inputs.at(0).t().mm(grads.at(0))};
 
-    } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor")) {
+    } else if (node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
       const auto& input_sizes = inputs.at(0).sizes();
       if (input_sizes.size() == 0)
         return {grads.at(0).sum(), nullptr, nullptr};

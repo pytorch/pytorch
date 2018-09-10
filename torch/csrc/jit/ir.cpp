@@ -84,6 +84,18 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   out << "]";
 }
 
+void printBoolList(std::ostream & out, const std::vector<bool> & items) {
+  out << "[";
+  int i = 0;
+  for(auto item : items) {
+    if (i++ > 0) {
+      out << ", ";
+    }
+    out << (item ? "true" : "false");
+  }
+  out << "]";
+}
+
 std::string escapeString(std::string s) {
   std::vector<char> search = {'\n', '\t', '\v'};
   std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
@@ -121,6 +133,9 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
       case AttributeKind::i:
         out << n->i(name);
         break;
+      case AttributeKind::b:
+        out << (n->b(name) ? "true" : "false");
+        break;
       case AttributeKind::is:
         printPrimList(out,n->is(name));
         break;
@@ -129,6 +144,9 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
         break;
       case AttributeKind::ss:
         printPrimList(out,n->ss(name));
+        break;
+      case AttributeKind::bs:
+        printBoolList(out, n->bs(name));
         break;
       case AttributeKind::t:
         {

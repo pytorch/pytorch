@@ -63,7 +63,7 @@ FROM_IVALUE = {
     'ScalarType': 'static_cast<at::ScalarType>({}.toInt())',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
-    'bool': 'bool({}.toInt())',
+    'bool': '{}.toBool()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',

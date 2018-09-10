@@ -56,6 +56,7 @@ using Tuple = ConstantList<IValue>;
 using IntList = ConstantList<int64_t>;
 using TensorList = ConstantList<at::Tensor>;
 using DoubleList = ConstantList<double>;
+using BoolList = ConstantList<bool>;
 
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
@@ -65,7 +66,7 @@ using DoubleList = ConstantList<double>;
 // retain/release calls.
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
+  _(None) _(Tensor) _(Double) _(Int) _(Bool) _(Tuple) _(IntList) _(DoubleList) _(BoolList) _(String) _(TensorList)
 
 struct TORCH_API IValue {
   IValue()
@@ -159,14 +160,37 @@ struct TORCH_API IValue {
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i)
   : IValue(static_cast<int64_t>(i)) {}
-  IValue(bool b)
-  : IValue(static_cast<int64_t>(b)) {}
 
   bool isInt() const { return Tag::Int == tag; }
 
   int64_t toInt() const {
     JIT_ASSERT(isInt());
     return as_int;
+  }
+
+  TORCH_API std::ostream& formatInt(std::ostream& out) const {
+    JIT_ASSERT(isInt());
+    out << as_int;
+    return out;
+  }
+
+  // Bool
+  IValue(bool b)
+  : tag(Tag::Bool), is_intrusive_ptr(false) {
+    as_bool = b;
+  }
+
+  bool isBool() const { return Tag::Bool == tag; }
+
+  bool toBool() const {
+    JIT_ASSERT(isBool());
+    return as_bool;
+  }
+
+  TORCH_API std::ostream& formatBool(std::ostream& out) const {
+    JIT_ASSERT(isBool());
+    out << (as_bool ? "true" : "false");
+    return out;
   }
 
   // IntList
@@ -212,6 +236,18 @@ struct TORCH_API IValue {
   c10::intrusive_ptr<DoubleList> toDoubleList() const & {
     JIT_ASSERT(isDoubleList());
     return toIntrusivePtr<DoubleList>();
+  }
+
+  IValue(Shared<BoolList> v);
+  IValue(std::vector<bool> v);
+  bool isBoolList() const { return Tag::BoolList == tag; }
+  Shared<BoolList> toBoolList() && {
+    JIT_ASSERT(isBoolList());
+    return moveToIntrusivePtr<BoolList>();
+  }
+  Shared<BoolList> toBoolList() const & {
+    JIT_ASSERT(isBoolList());
+    return toIntrusivePtr<BoolList>();
   }
 
   //TensorList
@@ -317,6 +353,7 @@ private:
     c10::intrusive_ptr_target* as_intrusive_ptr;
     double as_double;
     int64_t as_int;
+    bool as_bool;
     // this type should be as big as all the other types because it will
     // be used to copy the union's value in certain cases
     int64_t payload;
@@ -341,12 +378,12 @@ DEFINE_TO(at::Tensor, toTensor)
 DEFINE_TO(c10::intrusive_ptr<Tuple>, toTuple)
 DEFINE_TO(double, toDouble)
 DEFINE_TO(int64_t, toInt)
+DEFINE_TO(bool, toBool)
 DEFINE_TO(c10::intrusive_ptr<DoubleList>, toDoubleList)
 DEFINE_TO(c10::intrusive_ptr<IntList>, toIntList)
 DEFINE_TO(c10::intrusive_ptr<TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
-DEFINE_TO(bool, toInt)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
@@ -385,6 +422,14 @@ inline IValue::IValue(c10::intrusive_ptr<TensorList> v)
 }
 inline IValue::IValue(std::vector<at::Tensor> v)
 : IValue(TensorList::create(std::move(v))) {}
+
+inline IValue::IValue(c10::intrusive_ptr<BoolList> v)
+: tag(Tag::BoolList), is_intrusive_ptr(true) {
+  as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(std::vector<bool> v)
+: IValue(BoolList::create(std::move(v))) {}
+
 
 inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();
