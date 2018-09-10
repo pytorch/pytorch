@@ -135,7 +135,7 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
           at::Tensor t = n->t(name);
           // 1-elem tensors are usually boxed scalars, so print them like it
           if (t.numel() == 1) {
-            auto scalar_tensor = t.view({})._local_scalar();
+            auto scalar_tensor = at::_local_scalar(t.view({}));
             out << "{";
             if (scalar_tensor.isFloatingPoint()) {
               out << scalar_tensor.toDouble();

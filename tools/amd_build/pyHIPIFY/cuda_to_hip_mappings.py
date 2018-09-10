@@ -2171,7 +2171,7 @@ CUDA_IDENTIFIER_MAP = {
 CUDA_SPARSE_MAP = {
     "cusparseStatus_t": ("hipsparseStatus_t", CONV_MATH_FUNC, API_SPARSE),
     "cusparseHandle_t": ("hipsparseHandle_t", CONV_MATH_FUNC, API_SPARSE),
-    "cusparseOperation_t": ("hcsparseOperation_t", CONV_TYPE, API_SPARSE),
+    "cusparseOperation_t": ("hipsparseOperation_t", CONV_TYPE, API_SPARSE),
     "cusparseCreate": ("hipsparseCreate", CONV_MATH_FUNC, API_SPARSE),
     "cusparseDestroy": ("hipsparseDestroy", CONV_MATH_FUNC, API_SPARSE),
     "CUSPARSE_STATUS_SUCCESS": ("HIPSPARSE_STATUS_SUCCESS", CONV_NUMERIC_LITERAL, API_SPARSE),
@@ -2202,6 +2202,7 @@ CAFFE2_SPECIFIC_MAPPINGS = {
     "common_gpu"  : ("hip/common_hip", API_CAFFE2),
     "mixed_utils" : ("hip/mixed_utils_hip", API_CAFFE2),
     "operator_fallback_gpu" : ("hip/operator_fallback_hip", API_CAFFE2),
+    "spatial_batch_norm_op_gpu_impl" : ("hip/spatial_batch_norm_op_hip_impl", API_CAFFE2),
     "recurrent_network_executor_gpu" : ("hip/recurrent_network_executor_hip", API_CAFFE2),
     "max_pool_with_index_gpu": ("hip/max_pool_with_index_hip", API_CAFFE2),
     "THCCachingAllocator_gpu": ("hip/THCCachingAllocator_hip", API_CAFFE2),

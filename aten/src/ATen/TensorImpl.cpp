@@ -1,19 +1,14 @@
 #include <ATen/TensorImpl.h>
 
-#include "ATen/Context.h"
-#include <ATen/Tensor.h>
+#include <ATen/Type.h>
 #include <ATen/core/optional.h>
-#include <ATen/Context.h>
 #include <ATen/core/Backend.h>
 #include <ATen/core/WrapDimMinimal.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
-#include <ATen/detail/VariableHooksInterface.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 namespace at {
-
-Type& TensorImpl::type() const {
-  return at::getMaybeVariableType(this);
-}
 
 Tensor& TensorImpl::grad() {
   AT_ERROR("grad is not implemented for Tensor");
@@ -21,10 +16,6 @@ Tensor& TensorImpl::grad() {
 
 const Tensor& TensorImpl::grad() const {
   AT_ERROR("grad is not implemented for Tensor");
-}
-
-Tensor TensorImpl::detach() const {
-  AT_ERROR("detach is not implemented for Tensor");
 }
 
 void TensorImpl::backward(
@@ -50,7 +41,7 @@ TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_var
   // UndefinedTensors and SparseTensors don't have storages.
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
-    auto type = &globalContext().getNonVariableType(tensorTypeIdToBackend(type_id), scalar_type);
+    auto type = &globalLegacyTypeDispatch().getNonVariableType(tensorTypeIdToBackend(type_id), scalar_type);
     storage_ = type->storage(true);
   }
 }
