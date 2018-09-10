@@ -460,6 +460,52 @@ class TestJit(JitTestCase):
         finally:
             torch.jit._enabled = True
 
+    def test_train_eval(self):
+        class Sub(nn.Module):
+            def forward(self, input):
+                if self.training:
+                    return input
+                else:
+                    return -input
+
+        class MyModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.sub = Sub()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.sub(input) + 1
+
+        m = MyModule()
+        input = torch.rand(3, 4)
+        self.assertEqual(input + 1, m(input))
+        m.eval()
+        self.assertEqual(-input + 1, m(input))
+
+    def test_train_eval_const(self):
+        class MyModule(torch.jit.ScriptModule):
+            __constants__ = ['training']
+
+            def __init__(self):
+                super(MyModule, self).__init__()
+                # TODO: it is illegal to try to call
+                # eval/train because training has already
+                # been set. Consider allowing
+                # constants to be mutable until the end of __init__
+
+            @torch.jit.script_method
+            def forward(self, input):
+                if self.training:
+                    x = 2 * input
+                else:
+                    x = -input
+                return x + 1
+
+        m = MyModule()
+        input = torch.rand(3, 4)
+        self.assertEqual(2 * input + 1, m(input))
+
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
     # and we attempted to trace its derivative (which is not
