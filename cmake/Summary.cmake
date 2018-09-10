@@ -38,6 +38,7 @@ function (caffe2_print_configuration_summary)
     message(STATUS "    Python includes     : ${PYTHON_INCLUDE_DIRS}")
     message(STATUS "    Python site-packages: ${PYTHON_SITE_PACKAGES}")
   endif()
+  message(STATUS "  BUILD_CAFFE2_OPS      : ${BUILD_CAFFE2_OPS}")
   message(STATUS "  BUILD_SHARED_LIBS     : ${BUILD_SHARED_LIBS}")
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
 

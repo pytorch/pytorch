@@ -180,10 +180,13 @@ goto:eof
                   -DBUILD_BINARY=%BUILD_BINARY% ^
                   -DBUILD_TEST=OFF ^
                   -DINSTALL_TEST=%INSTALL_TEST% ^
+                  -DBUILD_CAFFE2_OPS=%BUILD_CAFFE2_OPS% ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DUSE_CUDNN=OFF ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
+                  -DUSE_LEVELDB=%USE_LEVELDB% ^
+                  -DUSE_LMDB=%USE_LMDB% ^
                   -DUSE_OPENCV=%USE_OPENCV% ^
                   -DUSE_GLOG=OFF ^
                   -DUSE_GFLAGS=OFF ^
