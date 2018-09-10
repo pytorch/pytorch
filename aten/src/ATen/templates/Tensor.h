@@ -1,7 +1,5 @@
 #pragma once
 
-// ${generated_comment}
-
 #include "ATen/core/Device.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
