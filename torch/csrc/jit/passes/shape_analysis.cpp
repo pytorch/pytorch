@@ -772,6 +772,8 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::median(Tensor self, int dim, int keepdim) -> (Tensor, Tensor)",
     "aten::mode(Tensor self, int dim, int keepdim) -> (Tensor, Tensor)",
   }, [](Node * node) -> type_vec_t {
+    // NB: Note that while this function is generally meant to be used with ops that
+    // have a single output, we will fix up its return right below.
     auto output_types = multidim_reduce_with_postprocess(node, /*num_reduce_dim=*/1, /*integer_upcast=*/false);
     if (!output_types.empty() && node->outputs().size() == 2) {
       output_types.push_back(output_types.back()->toScalarType(at::kLong));
