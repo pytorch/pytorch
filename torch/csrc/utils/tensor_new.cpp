@@ -511,7 +511,7 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
 Tensor new_empty(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_empty(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  });
+  }, /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -525,7 +525,7 @@ Tensor new_empty(const Type& type, PyObject* args, PyObject* kwargs) {
 Tensor new_full(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_full(IntList size, Scalar fill_value, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  });
+  }, /*traceable=*/true);
 
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -539,7 +539,7 @@ Tensor new_full(const Type& type, PyObject* args, PyObject* kwargs) {
 Tensor new_ones(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_ones(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  });
+  }, /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -553,7 +553,7 @@ Tensor new_ones(const Type& type, PyObject* args, PyObject* kwargs) {
 Tensor new_zeros(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_zeros(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  });
+  }, /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);

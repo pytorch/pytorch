@@ -26,8 +26,9 @@ void genericAddInput(Node *n, T value) {
   n->addInput(v);
 }
 
-void badArgType() {
-  AT_ERROR("Found an unsupported argument type in the JIT tracer. File a bug report.");
+template<typename T>
+void badArgType(const T& v) {
+  AT_ERROR("Found an unsupported argument type in the JIT tracer: ", at::demangle_type<T>(), ". File a bug report.");
 }
 
 thread_local std::shared_ptr<TracingState> tracing_state;
@@ -39,8 +40,10 @@ void addInputs(Node *n, const char * name, bool value)               { detail::g
 void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
-void addInputs(Node *n, const char * name, const std::string& value)         { detail::badArgType(); }
-void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(); }
+void addInputs(Node *n, const char * name, const std::string& value)         { detail::badArgType(value); }
+void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(value); }
+void addInputs(Node *n, const char * name, at::Generator * value)            { detail::badArgType(value); }
+void addInputs(Node *n, const char * name, at::ScalarType value)             { detail::badArgType(value); }
 
 void addInputs(Node *n, const char * name, at::TensorList value) {
   Graph *g = n->owningGraph();

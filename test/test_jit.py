@@ -916,6 +916,7 @@ class TestJit(JitTestCase):
 
         torch.jit.verify(f, (x, y), loss_fn=lambda z, w: z * w, devices=[])
 
+    @suppress_warnings
     def test_constant(self):
         x = torch.randn(2, 2, requires_grad=True)
 
@@ -6197,7 +6198,7 @@ a")
             target[indices] = rhs
             return target
 
-        self.assertExpected(str(test_index_put.graph))
+        self.assertExpectedGraph(test_index_put.graph)
 
     def test_index_put_trace_without_view(self):
         @_trace(torch.rand(100), torch.tensor([1, 2, 3, 4]), torch.rand(4))
@@ -6205,7 +6206,7 @@ a")
             target[indices] = rhs
             return target
 
-        self.assertExpected(str(test_index_put.graph))
+        self.assertExpectedGraph(test_index_put.graph)
 
     def test_annotated_script_fn(self):
         @torch.jit.script
@@ -6895,6 +6896,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         net = Net(upscale_factor=4)
         self.checkTrace(net, (torch.rand(5, 1, 64, 64),))
 
+    @suppress_warnings
     def test_time_sequence_prediction(self):
         class Sequence(torch.jit.ScriptModule):
             def __init__(self):

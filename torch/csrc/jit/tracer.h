@@ -172,6 +172,8 @@ TORCH_API void addInputs(Node *n, const char * name, const ArrayRef<double>& val
 TORCH_API void addInputs(Node *n, const char * name, const std::string& value);
 TORCH_API void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
 TORCH_API void addInputs(Node *n, const char * name, const at::TensorOptions& value);
+TORCH_API void addInputs(Node *n, const char * name, at::Generator * value);
+TORCH_API void addInputs(Node *n, const char * name, at::ScalarType value);
 
 template<size_t N>
 void addInputs(Node *n, const char * name, std::array<bool, N> value) {
