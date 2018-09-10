@@ -818,6 +818,11 @@ def _write_ninja_file(path,
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     system_includes.append(sysconfig.get_paths()['include'])
 
+    # Windoze does not understand `-isystem`.
+    if sys.platform == 'win32':
+        user_includes += system_includes
+        system_includes.clear()
+
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
     common_cflags += ['-I{}'.format(include) for include in user_includes]
     common_cflags += ['-isystem {}'.format(include) for include in system_includes]
