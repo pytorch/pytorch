@@ -185,6 +185,8 @@ goto:eof
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DUSE_CUDNN=OFF ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
+                  -DUSE_LEVELDB=%USE_LEVELDB% ^
+                  -DUSE_LMDB=%USE_LMDB% ^
                   -DUSE_OPENCV=%USE_OPENCV% ^
                   -DUSE_GLOG=OFF ^
                   -DUSE_GFLAGS=OFF ^
