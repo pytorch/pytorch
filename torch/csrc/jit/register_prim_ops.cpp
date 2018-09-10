@@ -369,6 +369,19 @@ RegisterOperators reg({
           };
         }),
     Operator(
+      prim::TupleIndex,
+      [](Node* node) {
+        return [](Stack& stack) {
+          int64_t index;
+          pop(stack, index);
+          auto tup = pop(stack).toTuple();
+          const auto & elems = tup->elements();
+          // index in-bounds check at compile time
+          stack.insert(stack.end(), elems.begin() + index, elems.begin() + index + 1);
+          return 0;
+        };
+      }),
+    Operator(
         prim::TupleConstruct,
         [](Node* node) {
           size_t num_inputs = node->inputs().size();

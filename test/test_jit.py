@@ -6945,6 +6945,43 @@ a")
 
         self.assertExpectedGraph(test_index_put.graph)
 
+    def test_tuple_indexing(self):
+        @torch.jit.script
+        def tuple_index(a):
+            if a:
+                b = (1,)
+            else:
+                b = (0,)
+            return b[0]
+
+        self.assertExpectedGraph(tuple_index.graph)
+        self.assertEqual(tuple_index(torch.tensor([1])), 1)
+        self.run_pass('lower_all_tuples', tuple_index.graph)
+        self.assertTrue("Tuple" not in str(tuple_index.graph))
+
+        with self.assertRaisesRegex(RuntimeError, "Indexing on tuples only supported with integer constants:"):
+            @torch.jit.script
+            def test_non_constant_input(a):
+                if a:
+                    b = 1
+                else:
+                    b = 0
+                c = (0, 1)
+                return c[b]
+
+        with self.assertRaisesRegex(RuntimeError, "Tuple index out of range."):
+            @torch.jit.script
+            def test_indexing_out_of_bounds():
+                c = (1,)
+                return c[1]
+
+    def test_indexing_error(self):
+        with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
+            @torch.jit.script
+            def test_wrong_type():
+                a = 8
+                return a[0]
+
     def test_annotated_script_fn(self):
         @torch.jit.script
         def foo(x, y, z):

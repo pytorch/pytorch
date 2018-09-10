@@ -831,6 +831,7 @@ public:
   TORCH_API Node* createFusionGroup(int device);
   TORCH_API Node* createTuple(at::ArrayRef<Value*> values);
   TORCH_API Node* createTupleUnpack(Value * v);
+  TORCH_API Node* createTupleIndex(Value * tup, int64_t index);
   TORCH_API Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values);
   TORCH_API Node * createListUnpack(Value *v, size_t size);
   TORCH_API Node* createNumToTensor(Value* value);

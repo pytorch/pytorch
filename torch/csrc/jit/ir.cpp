@@ -908,6 +908,14 @@ Node* Graph::createTupleUnpack(Value * v) {
   return n;
 }
 
+Node* Graph::createTupleIndex(Value * tup, int64_t index) {
+  auto n = create(prim::TupleIndex, {tup});
+  n->i_(attr::index, index);
+  auto tuple_type = tup->type()->expect<TupleType>();
+  n->output()->setType(tuple_type->elements().at(index));
+  return n;
+}
+
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for(const auto & v : values) {

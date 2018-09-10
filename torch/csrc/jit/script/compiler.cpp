@@ -1816,6 +1816,41 @@ private:
     return emitSlice(loc, sliceable, maybe_dim, slice_exp);
   }
 
+  int64_t getTupleIndexVal(const SourceRange& loc,
+    const TupleTypePtr& tuple_type,
+      Value * idx_val,
+      bool allow_out_of_bounds) {
+     int64_t index;
+    at::optional<IValue> ivalue = toIValue(idx_val);
+    if (ivalue && ivalue->isInt()) {
+      index = ivalue->to<int64_t>();
+    } else {
+      throw ErrorReport(loc)
+        << "tuple indices must be integer constants";
+    }
+     // set index to be positive to simplify logic in runtime
+    int64_t adj_index = index;
+    int64_t tuple_len = tuple_type->elements().size();
+    if (index < 0) {
+      adj_index = tuple_len + index;
+    }
+    if (!allow_out_of_bounds && (adj_index >= tuple_len || adj_index < 0)) {
+      throw ErrorReport(loc)
+        << "Tuple index out of range. Tuple is length " << tuple_len
+        << " and index is " << index;
+    }
+    return adj_index;
+  }
+
+  Value* emitTupleIndex(const SourceRange& loc,
+    Value * tuple_val,
+    Value * idx_val) {
+    auto tuple_typ = tuple_val->type()->cast<TupleType>();
+    auto adj_index = getTupleIndexVal(loc, tuple_typ, idx_val, /*allow_out_of_bounds*/false);
+    return graph->insertNode(
+        graph->createTupleIndex(tuple_val, adj_index))->output();
+  }
+
   // Desugars gather syntactic sugar foo[i]
   Value* emitBasicGather(const Subscript& subscript) {
     const auto& loc = subscript.range();
@@ -1827,9 +1862,14 @@ private:
       auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
                  loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
-    } else {
-      JIT_ASSERT(gatherable->type()->isSubtypeOf(DynamicType::get()));
+    } else if (gatherable->type()->isSubtypeOf(DynamicType::get())) {
       return emitMultidimSlicing(loc, gatherable, subscript);
+    } else if (auto tuple_type = gatherable->type()->cast<TupleType>()) {
+      auto* idx = emitExpr(subscript.subscript_exprs()[0]);
+      return emitTupleIndex(loc, gatherable, idx);
+    } else {
+      throw ErrorReport(loc)
+        << "Indexing only supported on lists, tensors, and tuples.";
     }
   }
 };
