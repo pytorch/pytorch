@@ -7,6 +7,6 @@ graph(%0 : Double(100)
   %6 : int = prim::Constant[value=0]()
   %7 : Long(4) = aten::_cast_Long(%1, %6)
   %8 : Dynamic[] = prim::ListConstruct(%7)
-  %20 : Double(100) = aten::index_put(%0, %8, %5)
-  return (%20);
+  %9 : Double(100) = aten::index_put(%0, %8, %5)
+  return (%9);
 }
