@@ -2,7 +2,10 @@
 
 // ${generated_comment}
 
+#include "ATen/core/SparseTensorRef.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/ExpandUtils.h"
+#include "ATen/Functions.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
@@ -35,6 +38,14 @@ Tensor TypeDefault::copy(const Tensor & src, bool non_blocking) const {
     r.copy_(src, non_blocking);
     return r;
   }
+}
+
+void TypeDefault::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  AT_ERROR("backward is not implemented for Tensor");
+}
+
+void TypeDefault::set_data(Tensor & self, Tensor new_data) const {
+  AT_ERROR("set_data is not implemented for Tensor");
 }
 
 Type & TypeDefault::toBackend(Backend b) const {

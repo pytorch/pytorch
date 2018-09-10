@@ -736,7 +736,7 @@ class TestSparse(TestCase):
             [17, 18, 19, 20],
         ])
         exp_v = self.ValueTensor([7, 14, 3, 20])
-        res = dense._sparse_mask(x)
+        res = dense.sparse_mask(x)
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
 
@@ -839,7 +839,7 @@ class TestSparse(TestCase):
             [[13, 5], [14, 1], [15, 1], [16, 6]],
             [[17, 7], [18, 2], [19, 7], [20, 1]],
         ])
-        res = dense._sparse_mask(x)
+        res = dense.sparse_mask(x)
         exp_v = self.ValueTensor([[7, 9], [14, 1], [3, 3], [20, 1]])
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
         self.assertEqual(res, expected)
