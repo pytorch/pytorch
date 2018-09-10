@@ -145,7 +145,16 @@ bool isValidReturnForRunning(Value* v) {
       v->type()->isSubtypeOf(NumberType::get());
 }
 
+OperatorSet cannot_propagate_shape_by_running_it = {
+  "aten::gesv(Tensor self, Tensor A) -> (Tensor, Tensor)",
+  "aten::inverse(Tensor self) -> Tensor",
+};
+
 bool canPropagateShapeByRunningIt(Node* node) {
+  if(cannot_propagate_shape_by_running_it.find(node)) {
+    return false;
+  }
+
   bool valid_args = std::all_of(
       node->inputs().begin(), node->inputs().end(), isValidArgumentForRunning);
   if (!valid_args)

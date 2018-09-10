@@ -9,7 +9,12 @@
 
 namespace at {
 
-
+inline Tensor & Tensor::operator=(Tensor const & rhs) && {
+  return copy_(rhs);
+}
+inline Tensor & Tensor::operator=(Tensor && rhs) && {
+  return copy_(rhs);
+}
 inline Tensor & Tensor::operator=(Scalar v) && {
   return fill_(v);
 }

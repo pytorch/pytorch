@@ -9,10 +9,6 @@
 
 namespace at {
 
-inline Tensor & Tensor::operator=(Tensor const & rhs) && {
-  return copy_(rhs);
-}
-
 inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
   if(type() == t)
     return *this;

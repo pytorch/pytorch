@@ -149,12 +149,9 @@ struct Method {
     return *this;
   }
 
-  const FunctionSchema& getSchema() const {
-    AT_ASSERT(schema != nullptr);
-    return *schema;
-  }
+  const FunctionSchema& getSchema() const;
 
-  std::string prettyPrintSchema() const {
+  std::string pretty_print_schema() const {
     JIT_ASSERT(schema);
     std::stringstream ss;
     ss << *schema;
@@ -205,7 +202,9 @@ private:
   std::function<void(Method&)> method_creator;
 
   // if absent, then we generate a default schema based on the graph
-  std::unique_ptr<FunctionSchema> schema;
+  // mutable because getSchema caches the default schema if one is requested
+  // before a call to setSchema
+  mutable std::unique_ptr<FunctionSchema> schema;
 };
 
 struct Module;

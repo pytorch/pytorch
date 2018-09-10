@@ -911,23 +911,23 @@ void testControlFlow() {
 
 void testIValue() {
   Shared<IntList> foo = IntList::create({3, 4, 5});
-  JIT_ASSERT(foo->use_count() == 1);
+  JIT_ASSERT(foo.use_count() == 1);
   IValue bar(foo);
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   auto baz = bar;
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   auto foo2 = std::move(bar);
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   JIT_ASSERT(foo2.isIntList());
   JIT_ASSERT(bar.isNone());
   foo2 = IValue(4.0);
   JIT_ASSERT(foo2.isDouble());
   JIT_ASSERT(foo2.toDouble() == 4.0);
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   JIT_ASSERT(ArrayRef<int64_t>(baz.toIntList()->elements()).equals({3,4,5}));
 
   auto move_it = std::move(baz).toIntList();
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   JIT_ASSERT(baz.isNone());
   IValue i(4);
   JIT_ASSERT(i.isInt() && i.toInt() == 4);
@@ -940,18 +940,18 @@ void testIValue() {
   dlist = IValue(DoubleList::create({3.4}));
   JIT_ASSERT(ArrayRef<double>(dlist.toDoubleList()->elements()).equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   JIT_ASSERT(the_list.isTuple());
   auto first = std::move(the_list).toTuple()->elements().at(1);
   JIT_ASSERT(first.toInt() == 4);
   at::Tensor tv = at::rand({3,4});
   IValue ten(tv);
-  JIT_ASSERT(tv.get()->use_count() == 2);
+  JIT_ASSERT(tv.use_count() == 2);
   auto ten2 = ten;
-  JIT_ASSERT(tv.get()->use_count() == 3);
+  JIT_ASSERT(tv.use_count() == 3);
   JIT_ASSERT(ten2.toTensor().equal(ten.toTensor()));
   std::move(ten2).toTensor();
-  JIT_ASSERT(tv.get()->use_count() == 2);
+  JIT_ASSERT(tv.use_count() == 2);
 }
 
 void testProto() {

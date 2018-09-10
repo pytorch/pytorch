@@ -294,7 +294,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *args) {
   HANDLE_TH_ERRORS
   THStorage* storage = self->cdata;
-  return PyLong_FromVoidPtr(storage->_raw_make_weak());
+  return PyLong_FromVoidPtr(c10::raw::intrusive_ptr::make_weak(storage));
   END_HANDLE_TH_ERRORS
 }
 
@@ -304,7 +304,7 @@ PyObject * THPStorage_(newWithWeakPtr)(PyObject *_unused, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg),
       "_new_with_weak_ptr(): arg must be an 'int'");
   THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  if (auto* storage = weak_storage->_raw_weak_lock()) {
+  if (auto* storage = c10::raw::weak_intrusive_ptr::lock(weak_storage)) {
     return THPStorage_(New)(storage);
   }
   Py_RETURN_NONE;
@@ -320,7 +320,7 @@ PyObject * THPStorage_(freeWeakRef)(PyObject *_unused, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg),
       "_free_weak_ref(): arg must be an 'int'");
   THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  weak_storage->_raw_weak_decweakref();
+  c10::raw::weak_intrusive_ptr::decref(weak_storage);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -331,7 +331,7 @@ PyObject * THPStorage_(expired)(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "_expired(): arg must be an 'int'");
   THStorage *weak_storage = (THStorage*)PyLong_AsVoidPtr(arg);
-  return PyBool_FromLong(weak_storage->_raw_weak_use_count() == 0);
+  return PyBool_FromLong(c10::raw::weak_intrusive_ptr::use_count(weak_storage) == 0);
   END_HANDLE_TH_ERRORS
 }
 
