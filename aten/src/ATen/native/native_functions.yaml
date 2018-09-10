@@ -246,6 +246,7 @@
     CUDA: _atan_out_cuda
 
 - func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function, method
   dispatch:
     CPU: baddbmm_cpu
     CUDA: baddbmm_cuda
@@ -256,7 +257,7 @@
     CPU: baddbmm__cpu
     CUDA: baddbmm__cuda
 
-- func: baddbmm__mkl(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+- func: baddbmm_mkl_(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method
 
 - func: baddbmm_out(Tensor result, Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor

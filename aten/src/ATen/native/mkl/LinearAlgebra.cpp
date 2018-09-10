@@ -6,7 +6,7 @@
 
 namespace at { namespace native {
 
-Tensor baddbmm__mkl(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm_mkl_(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   AT_ERROR("bmm: ATen not compiled with MKL support");
 }
 
@@ -55,7 +55,7 @@ static inline void gemm_batched(const CBLAS_TRANSPOSE trans_A, const CBLAS_TRANS
 }
 
 template <typename scalar_t>
-static inline void _baddbmm__mkl(const Tensor& res, const Tensor& mat1, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
+static inline void _baddbmm_mkl(const Tensor& res, const Tensor& mat1, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
   auto is_transposed = [&](const Tensor& t) {
     return t.stride(0) == 1 && t.stride(1) == t.size(0);
   };
@@ -81,10 +81,10 @@ static inline void _baddbmm__mkl(const Tensor& res, const Tensor& mat1, const Te
   gemm_batched(trans_A, trans_B, batch_size, M, N, K, alpha, A.data(), B.data(), beta, C.data());
 }
 
-Tensor baddbmm__mkl(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+Tensor& baddbmm_mkl_(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
   // checks are done in native/LinearAlgebra.cpp
   AT_DISPATCH_FLOATING_TYPES(self.type(), "baddbmm__mkl", [&] {
-      _baddbmm__mkl<scalar_t>(self, batch1, batch2, beta, alpha);
+      _baddbmm_mkl<scalar_t>(self, batch1, batch2, beta, alpha);
     });
 
   return self;

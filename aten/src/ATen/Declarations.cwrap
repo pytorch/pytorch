@@ -2548,24 +2548,6 @@
     - THTensor* batch2
 ]]
 [[
-  name: _th_baddbmm_
-  cname: baddbmm
-  backends:
-    - CUDA
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - arg: real beta
-      default: AS_REAL(1)
-      kwarg_only: True
-    - THTensor* self
-    - arg: real alpha
-      default: AS_REAL(1)
-      kwarg_only: True
-    - THTensor* batch1
-    - THTensor* batch2
-]]
-[[
   name: addcmul
   variants:
     - method
