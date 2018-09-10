@@ -1955,6 +1955,13 @@ class TestCuda(TestCase):
             with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 1"):
                 leak_gpu1()
 
+    def test_cuda_memory_leak_detection_propagates_errors(self):
+        with self.assertRaisesRegex(RuntimeError, r"The size of tensor a \(3\) must match"):
+            with self.assertLeaksNoCudaTensors():
+                x = torch.randn(3, 1, device='cuda')
+                y = torch.randn(2, 1, device='cuda')
+                z = x + y
+
 
 def load_ignore_file():
     from os.path import join, dirname
