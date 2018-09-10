@@ -43,7 +43,7 @@ class DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
   using detail::DropoutImplBase<DropoutImpl>::DropoutImplBase;
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
-  Tensor forward(Tensor input) const;
+  Tensor forward(Tensor input);
 };
 
 /// Applies spatial [Dropout](https://arxiv.org/abs/1207.0580) to inputs with
@@ -60,7 +60,7 @@ class FeatureDropoutImpl : public detail::DropoutImplBase<FeatureDropoutImpl> {
   using detail::DropoutImplBase<FeatureDropoutImpl>::DropoutImplBase;
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
-  Tensor forward(Tensor input) const;
+  Tensor forward(Tensor input);
 };
 
 /// A `ModuleHolder` subclass for `DropoutImpl`.
