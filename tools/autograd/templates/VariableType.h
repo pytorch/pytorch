@@ -68,7 +68,7 @@ private:
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 
-  at::Type* baseType;
+  at::TypeInternalInterface* baseType;
   std::string str;
   size_t id_;
 };
