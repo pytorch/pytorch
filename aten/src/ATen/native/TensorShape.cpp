@@ -206,7 +206,7 @@ Tensor repeat(const Tensor& self, IntList repeats) {
   Tensor xtensor = self.expand(padded_size);
 
   Tensor result = self.type().tensor(target_size);
-  Tensor urtensor = result.type().alias(result);
+  Tensor urtensor = at::alias(result);
   for (int64_t i = 0; i < xtensor.dim(); ++i) {
     // can't unfold with step 0, so make sure step is at least 1
     // (it doesn't matter what it is in that case, because the size is 0).
