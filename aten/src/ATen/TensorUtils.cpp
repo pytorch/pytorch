@@ -219,15 +219,19 @@ void * maybe_data_ptr(const TensorArg& tensor) {
 bool geometry_is_contiguous(IntList sizes, IntList strides) {
   int64_t dim = sizes.size();
   int64_t expected_stride = 1;
+  bool contig_if_nonempty = true;
   for (int64_t i = dim - 1; i >= 0; i--) {
     if (sizes[i] == 0) {
       return true;
-    } else if (sizes[i] != 1 && strides[i] != expected_stride) {
-      return false;
     }
-    expected_stride *= sizes[i];
+    if (contig_if_nonempty) {
+      if (sizes[i] != 1 && strides[i] != expected_stride) {
+        contig_if_nonempty = false;
+      }
+      expected_stride *= sizes[i];
+    }
   }
-  return true;
+  return contig_if_nonempty;
 }
 
 }

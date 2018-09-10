@@ -287,7 +287,7 @@ template <class T> Vec256<T> inline min(const Vec256<T> &a, const Vec256<T> &b) 
   return c;
 }
 
-#define DEFINE_LOGICAL_OP(op)                                               \
+#define DEFINE_BITWISE_OP(op)                                               \
 template <class T>                                                          \
 Vec256<T> inline operator op(const Vec256<T> &a, const Vec256<T> &b) {      \
   using iT = int_same_size_t<T>;                                            \
@@ -301,10 +301,10 @@ Vec256<T> inline operator op(const Vec256<T> &a, const Vec256<T> &b) {      \
   }                                                                         \
   return Vec256<T>::loadu(buffer);                                          \
 }
-DEFINE_LOGICAL_OP(&)
-DEFINE_LOGICAL_OP(|)
-DEFINE_LOGICAL_OP(^)
-#undef DEFINE_LOGICAL_OP
+DEFINE_BITWISE_OP(&)
+DEFINE_BITWISE_OP(|)
+DEFINE_BITWISE_OP(^)
+#undef DEFINE_BITWISE_OP
 
 template <typename T>
 inline T fmadd(const T& a, const T& b, const T& c) {

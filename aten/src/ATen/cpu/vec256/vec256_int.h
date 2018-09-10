@@ -420,26 +420,6 @@ Vec256<int16_t> inline operator*(const Vec256<int16_t>& a, const Vec256<int16_t>
   return _mm256_mullo_epi16(a, b);
 }
 
-/* TODO:
- * From Agner Fog's vectorclass:
- *
- * Mathematical formula, used for signed division with fixed or variable divisor:
- * (From T. Granlund and P. L. Montgomery: Division by Invariant Integers Using Multiplication,
- * Proceedings of the SIGPLAN 1994 Conference on Programming Language Design and Implementation.
- * http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.1.2556 )
- * x = dividend
- * d = abs(divisor)
- * w = integer word size, bits
- * L = ceil(log2(d)) = bit_scan_reverse(d-1)+1
- * L = max(L,1)
- * m = 1 + 2^(w+L-1)/d - 2^w                      [division should overflow to 0 if d = 1]
- * sh1 = L-1
- * q = x + (m*x >> w)                             [high part of signed multiplication with 2w bits]
- * q = (q >> sh1) - (x<0 ? -1 : 0)
- * if (divisor < 0) q = -q
- * result trunc(x/d) = q
- */
-
 template <typename T>
 Vec256<T> inline intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
   T values_a[Vec256<T>::size];
@@ -452,7 +432,7 @@ Vec256<T> inline intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
   return Vec256<T>::loadu(values_a);
 }
 
-#define DEFINE_WIDTH_IGNOSTIC_BINARY_OP(op, func)                                         \
+#define DEFINE_INTEGER_BINARY_OP(op, func)                                                \
 template <>                                                                               \
 Vec256<int64_t> inline operator op(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {  \
   return func(a, b);                                                                      \
@@ -466,12 +446,12 @@ Vec256<int16_t> inline operator op(const Vec256<int16_t>& a, const Vec256<int16_
   return func(a, b);                                                                      \
 }
 
-DEFINE_WIDTH_IGNOSTIC_BINARY_OP(/, intdiv_256)
-DEFINE_WIDTH_IGNOSTIC_BINARY_OP(&, _mm256_and_si256)
-DEFINE_WIDTH_IGNOSTIC_BINARY_OP(|, _mm256_or_si256)
-DEFINE_WIDTH_IGNOSTIC_BINARY_OP(^, _mm256_xor_si256)
+DEFINE_INTEGER_BINARY_OP(/, intdiv_256)
+DEFINE_INTEGER_BINARY_OP(&, _mm256_and_si256)
+DEFINE_INTEGER_BINARY_OP(|, _mm256_or_si256)
+DEFINE_INTEGER_BINARY_OP(^, _mm256_xor_si256)
 
-#undef DEFINE_WITDTH_IGNOSTIC_BINARY_OP
+#undef DEFINE_INTEGER_BINARY_OP
 
 #endif
 
