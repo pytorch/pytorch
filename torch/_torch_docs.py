@@ -2954,6 +2954,32 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
+add_docstr(torch.narrow,
+           r"""
+narrow(input, dimension, start, length) -> Tensor
+
+Returns a new tensor that is a narrowed version of :attr:`input` tensor. The
+dimension :attr:`dim` is input from :attr:`start` to :attr:`start + length`. The
+returned tensor and :attr:`self` tensor share the same underlying storage.
+
+Args:
+    input (Tensor): the tensor to narrow
+    dimension (int): the dimension along which to narrow
+    start (int): the starting dimension
+    length (int): the distance to the ending dimension
+
+Example::
+
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> torch.narrow(x, 0, 0, 2)
+    tensor([[ 1,  2,  3],
+            [ 4,  5,  6]])
+    >>> torch.narrow(x, 1, 1, 2)
+    tensor([[ 2,  3],
+            [ 5,  6],
+            [ 8,  9]])
+""")
+
 add_docstr(torch.ne,
            r"""
 ne(input, other, out=None) -> Tensor
