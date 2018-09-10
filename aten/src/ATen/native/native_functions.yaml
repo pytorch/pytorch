@@ -257,8 +257,8 @@
     CPU: baddbmm__cpu
     CUDA: baddbmm__cuda
 
-- func: baddbmm_mkl_(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  variants: method
+- func: _baddbmm_mkl_(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
 
 - func: baddbmm_out(Tensor result, Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function

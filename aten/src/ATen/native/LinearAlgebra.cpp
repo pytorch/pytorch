@@ -301,6 +301,13 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
     checkSize(c, self_arg, 2, res_cols);
   }
 
+  // handle pathological cases that blas may not like
+  if (self_or_result.numel() == 0) {
+    return self_or_result;
+  } else if (contraction_size == 0) {
+    return self_or_result.zero_();
+  }
+  
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
     return (t.stride(2) == 1 && t.stride(1) == t.size(2))
             || (t.stride(1) == 1 && t.stride(2) == t.size(1));
@@ -320,7 +327,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 	     && batch_items_contiguous_or_transposed(batch1)
 	     && batch_items_contiguous_or_transposed(batch2)
 	     && self_or_result.is_contiguous()) {
-    at::native::baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
+    at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
   } else { // split along batch dimension
     if (is_bmm_out) {
       for (int64_t b = 0; b < bs; b++) {
