@@ -976,13 +976,13 @@ dtype_to_onnx = [
 def zeros(g, size, dtype, layout, device):
     shape = _maybe_get_const(size, 'is')
     dtype = _maybe_get_const(dtype, 'i')
-    return g.op("ConstantFill", shape_i=shape, dtype_i=dtype_to_onnx[dtype], value_i=0)
+    return g.op("ConstantFill", shape_i=shape, dtype_i=dtype_to_onnx[dtype], value_f=0)
 
 
 def ones(g, size, dtype, layout, device):
     shape = _maybe_get_const(size, 'is')
     dtype = _maybe_get_const(dtype, 'i')
-    return g.op("ConstantFill", shape_i=shape, dtype_i=dtype_to_onnx[dtype], value_i=1)
+    return g.op("ConstantFill", shape_i=shape, dtype_i=dtype_to_onnx[dtype], value_f=1)
 
 
 def zeros_like(g, input):
