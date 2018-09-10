@@ -4,12 +4,14 @@ def script(a1, i1):
   t6 = t5
   t7 = a1
   t9 = i1
+  a = a1
   while t6:
-    a = aten::mul(t7, t7)
-    i = aten::add(t9, 1, 1)
-    t13 = aten::lt(i, 3)
+    a2 = aten::mul(t7, t7)
+    i2 = aten::add(t9, 1, 1)
+    t13 = aten::lt(i2, 3)
     t14 = prim::TensorToNum(t13)
     t6 = t14
-    t7 = a
-    t9 = i
+    t7 = a2
+    t9 = i2
+    a = a2
   return a

@@ -4,19 +4,21 @@ def script(a1, b1):
   t7 = t6
   t8 = a1
   t12 = b1
+  a = a1
   while t7:
-    a = aten::add(t8, 1, 1)
-    b = aten::add(t12, 1, 1)
-    t15 = aten::gt(a, b)
+    a2 = aten::add(t8, 1, 1)
+    b2 = aten::add(t12, 1, 1)
+    t15 = aten::gt(a2, b2)
     t16 = prim::TensorToNum(t15)
     if t16:
-      c = 2
+      c4 = 2
     else:
-      c = 3
-    t21 = aten::lt(a, 10)
+      c4 = 3
+    t21 = aten::lt(a2, 10)
     t22 = prim::TensorToNum(t21)
     t7 = t22
-    t8 = a
-    t12 = b
+    t8 = a2
+    t12 = b2
+    a = a2
   t27 = aten::add(a, 1, 1)
   return t27
