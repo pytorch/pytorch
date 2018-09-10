@@ -222,7 +222,7 @@ public:
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
          << at::toString(input.type().scalarType());
-      AT_CHECK(ss.str());
+      AT_ERROR(ss.str());
     }
 
 #else
@@ -243,7 +243,7 @@ public:
       std::ostringstream ss;
       ss << "cuFFT doesn't support tensor of type: "
          << at::toString(input.type().scalarType());
-      AT_CHECK(ss.str());
+      AT_ERROR(ss.str());
     }
 #endif
 

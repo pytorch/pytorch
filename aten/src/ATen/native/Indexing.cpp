@@ -263,7 +263,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
            "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
 
   int64_t numIndices = index.numel();
-  AT_CHECK(source.dim() != 0 && numIndices == 1,
+  AT_CHECK(source.dim() != 0 || numIndices == 1,
            "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
   AT_CHECK(index.type().scalarType() == ScalarType::Long,
            "index_copy_(): Expected LongTensor for index");
