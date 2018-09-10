@@ -55,7 +55,7 @@ Tensor _weight_norm
   if (can_use_fused) {
     // weight_norm does not have a derivative defined for it, so this will route back through
     // VariableType.cpp, and construct a WeightNormFusedBackward object in the autograd graph.
-    return std::get<0>(at::weight_norm_cuda_interface(v, g, dim));
+    return std::get<0>(at::_weight_norm_cuda_interface(v, g, dim));
   } else {
     // Double-differentiable primitive ops
     // at::native::norm_except_dim would probably be fine as well.
@@ -67,7 +67,7 @@ Tensor _weight_norm
 // when backward is itself creating a graph.
 // The GradMode::is_enabled() check must be performed within Functions.cpp; that's why we
 // define a separate function here, instead of inlining it in weight_norm_cuda_backward.
-std::tuple<Tensor, Tensor> weight_norm_differentiable_backward
+std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
   (const Tensor & grad_w,
    const Tensor & saved_v,
    const Tensor & saved_g,
