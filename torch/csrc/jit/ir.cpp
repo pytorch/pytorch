@@ -271,17 +271,19 @@ class PrettyPrintPass {
   std::unordered_map<const Value*, std::string> value_names_;
 
   template<class T>
-  void dualIterator(
+  void zipWith(
     at::ArrayRef<T> list_a,
     at::ArrayRef<T> list_b,
-    const size_t offset_a,
-    const size_t offset_b,
     std::function<void(T, T)> action
   ) const {
-    auto it_a = list_a.begin() + offset_a;
-    auto it_b = list_b.begin() + offset_b;
+    auto it_a = list_a.begin();
+    auto it_b = list_b.begin();
 
-    for (; it_a != list_a.end() && it_b != list_b.end(); ++it_a, ++it_b) {
+    if (list_a.size() != list_b.size()) {
+      AT_ERROR("Pretty printer expected 2 lists of same size");
+    }
+
+    for (; it_a != list_a.end(); ++it_a, ++it_b) {
       action(*it_a, *it_b);
     }
   }
@@ -311,7 +313,7 @@ class PrettyPrintPass {
     printValue(out, lhs);
     out << " = ";
     printValue(out, rhs);
-    out << std::endl;
+    out << "\n";
   }
 
   std::ostream& printIf(
@@ -324,28 +326,26 @@ class PrettyPrintPass {
     const auto if_block = node->blocks()[0];
     const auto else_block = node->blocks()[1];
     printValue(out, node->inputs()[0]);
-    out << ":" << std::endl;
+    out << ":" << "\n";
 
     // Print node contents
     printBlock(out, if_block, level + 1);
 
     // Print if block output
-    dualIterator<const Value*>(
+    zipWith<const Value*>(
       node->outputs(),
       if_block->outputs(),
-      0, 0,
       [&](const Value* node_output, const Value* return_input) {
         printAssignment(out, node_output, return_input, level + 1);
       }
     );
 
     indent(out, level);
-    out << "else:" << std::endl;
+    out << "else:\n";
     printBlock(out, else_block, level + 1);
-    dualIterator<const Value*>(
+    zipWith<const Value*>(
       node->outputs(),
       else_block->outputs(),
-      0, 0,
       [&](const Value* node_output, const Value* return_input) {
         printAssignment(out, node_output, return_input, level + 1);
       }
@@ -372,10 +372,9 @@ class PrettyPrintPass {
     aliases_[body_block->inputs()[0]] = body_block->inputs()[0];
 
     // Add temporaries for loop-carried dependencies
-    dualIterator<const Value*>(
-      node->inputs(),
+    zipWith<const Value*>(
+      node->inputs().slice(1),
       body_block->inputs(),
-      1, 0,
       [&](const Value* node_input, const Value* param_output) {
         if (isValueUsedLater(param_output)) {
           printAssignment(out, param_output, node_input, level);
@@ -383,10 +382,9 @@ class PrettyPrintPass {
       }
     );
 
-    dualIterator<const Value*>(
+    zipWith<const Value*>(
       node->outputs(),
-      node->inputs(),
-      0, 2,
+      node->inputs().slice(2),
       [&](const Value* node_output, const Value* return_input) {
         if (isValueUsedLater(node_output)) {
           printAssignment(out, node_output, return_input, level);
@@ -398,17 +396,15 @@ class PrettyPrintPass {
     indent(out, level);
     out << "while ";
     printValue(out, body_block->inputs()[0]);
-    out << ":";
-    out << std::endl;
+    out << ":\n";
 
     // Loop body
     printBlock(out, body_block, level + 1);
 
     // Re-assign block outputs to inputs for next iteration
-    dualIterator<const Value*>(
+    zipWith<const Value*>(
       body_block->inputs(),
       body_block->outputs(),
-      0, 0,
       [&](const Value* param_output, const Value* return_input) {
         if (isValueUsedLater(param_output)) {
           printAssignment(out, param_output, return_input, level + 1);
@@ -418,10 +414,9 @@ class PrettyPrintPass {
 
     // The block outputs are not live after the end of the block, so we can use
     // them as the value names and avoid printing assignments
-    dualIterator<const Value*>(
+    zipWith<const Value*>(
       node->outputs(),
-      body_block->outputs(),
-      0, 1,
+      body_block->outputs().slice(1),
       [&](const Value* node_output, const Value* return_input) {
         if (isValueUsedLater(node_output)) {
           printAssignment(out, node_output, return_input, level + 1);
@@ -468,7 +463,7 @@ class PrettyPrintPass {
       // Print instruction parameters
       printValueList(out, node->inputs());
 
-      out << std::endl;
+      out << "\n";
     }
 
     return out;
@@ -489,7 +484,7 @@ class PrettyPrintPass {
       } else {
         printValue(out, returns[0]);
       }
-      out << std::endl;
+      out << "\n";
     }
     return out;
   }
@@ -583,7 +578,7 @@ public:
     out << "def script";
     const Node* params = graph_.block()->param_node();
     printValueList(out, params->outputs());
-    out << ":" << std::endl;
+    out << ":\n";
 
     // Print body
     printBlock(out, graph_.block(), 1);
