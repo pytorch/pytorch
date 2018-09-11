@@ -13,6 +13,7 @@
 #include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
+#include "caffe2/python/pybind_state_registry.h"
 
 #ifdef CAFFE2_USE_TRT
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
@@ -21,10 +22,10 @@
 namespace caffe2 {
 namespace python {
 
-REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp<PythonOp<CPUContext, false>>);
+REGISTER_CUDA_OPERATOR(Python, GPUFallbackOp);
 REGISTER_CUDA_OPERATOR(
     PythonGradient,
-    GPUFallbackOp<PythonGradientOp<CPUContext, false>>);
+    GPUFallbackOp);
 
 REGISTER_CUDA_OPERATOR(PythonDLPack, PythonOp<CUDAContext, true>);
 REGISTER_CUDA_OPERATOR(
@@ -120,7 +121,7 @@ void addCUDAObjectMethods(py::module& m) {
           [](DLPackWrapper<CUDAContext>* t) -> py::object {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                CUDA,
+                PROTO_CUDA,
                 "Expected CUDA device option for CUDA tensor");
 
             return t->data();
@@ -131,7 +132,7 @@ void addCUDAObjectMethods(py::module& m) {
           [](DLPackWrapper<CUDAContext>* t, py::object obj) {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                CUDA,
+                PROTO_CUDA,
                 "Expected CUDA device option for CUDA tensor");
             t->feed(obj);
           },
@@ -153,6 +154,9 @@ PYBIND11_MODULE(caffe2_pybind11_state_gpu, m) {
   addCUDAGlobalMethods(m);
   addObjectMethods(m);
   addCUDAObjectMethods(m);
+  for (const auto& addition : PybindAdditionRegistry()->Keys()) {
+    PybindAdditionRegistry()->Create(addition, m);
+  }
 }
 } // namespace python
 } // namespace caffe2

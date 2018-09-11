@@ -12,7 +12,7 @@
  * 3. A dispatch stub, which is what is actually called by clients, that simply wraps the dispatch pointer.
  */
 
-static void (*THVector_(fill_DISPATCHPTR))(real *, const real, const ptrdiff_t) = &THVector_(fill_DEFAULT);
+static void (*THVector_(fill_DISPATCHPTR))(scalar_t *, const scalar_t, const ptrdiff_t) = &THVector_(fill_DEFAULT);
 static FunctionDescription THVector_(fill_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
@@ -40,11 +40,11 @@ static FunctionDescription THVector_(fill_DISPATCHTABLE)[] = {
   #endif
   FUNCTION_IMPL(THVector_(fill_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(fill)(real *x, const real c, const ptrdiff_t n) {
+void THVector_(fill)(scalar_t *x, const scalar_t c, const ptrdiff_t n) {
   THVector_(fill_DISPATCHPTR)(x, c, n);
 }
 
-static void (*THVector_(cadd_DISPATCHPTR))(real *, const real *, const real *, const real, const ptrdiff_t) = &THVector_(cadd_DEFAULT);
+static void (*THVector_(cadd_DISPATCHPTR))(scalar_t *, const scalar_t *, const scalar_t *, const scalar_t, const ptrdiff_t) = &THVector_(cadd_DEFAULT);
 static FunctionDescription THVector_(cadd_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
@@ -73,11 +73,11 @@ static FunctionDescription THVector_(cadd_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(cadd_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(cadd)(real *z, const real *x, const real *y, const real c, const ptrdiff_t n) {
+void THVector_(cadd)(scalar_t *z, const scalar_t *x, const scalar_t *y, const scalar_t c, const ptrdiff_t n) {
   THVector_(cadd_DISPATCHPTR)(z, x, y, c, n);
 }
 
-static void (*THVector_(adds_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(adds_DEFAULT);
+static void (*THVector_(adds_DISPATCHPTR))(scalar_t *, const scalar_t *, const scalar_t, const ptrdiff_t) = &THVector_(adds_DEFAULT);
 static FunctionDescription THVector_(adds_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
@@ -107,11 +107,11 @@ static FunctionDescription THVector_(adds_DISPATCHTABLE)[] = {
   FUNCTION_IMPL(THVector_(adds_DEFAULT), SIMDExtension_DEFAULT)
 };
 // Dispatch stubs that just call the pointers
-TH_API void THVector_(adds)(real *r_, const real *t, const real value, const ptrdiff_t n) {
+TH_API void THVector_(adds)(scalar_t *r_, const scalar_t *t, const scalar_t value, const ptrdiff_t n) {
   THVector_(adds_DISPATCHPTR)(r_, t, value, n);
 }
 
-static void (*THVector_(cmul_DISPATCHPTR))(real *, const real *, const real *, const ptrdiff_t) = &THVector_(cmul_DEFAULT);
+static void (*THVector_(cmul_DISPATCHPTR))(scalar_t *, const scalar_t *, const scalar_t *, const ptrdiff_t) = &THVector_(cmul_DEFAULT);
 static FunctionDescription THVector_(cmul_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
@@ -134,11 +134,11 @@ static FunctionDescription THVector_(cmul_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(cmul_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(cmul)(real *z, const real *x, const real *y, const ptrdiff_t n) {
+void THVector_(cmul)(scalar_t *z, const scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
   THVector_(cmul_DISPATCHPTR)(z, x, y, n);
 }
 
-static void (*THVector_(muls_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(muls_DEFAULT);
+static void (*THVector_(muls_DISPATCHPTR))(scalar_t *, const scalar_t *, const scalar_t, const ptrdiff_t) = &THVector_(muls_DEFAULT);
 static FunctionDescription THVector_(muls_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
@@ -167,11 +167,11 @@ static FunctionDescription THVector_(muls_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(muls_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(muls)(real *y, const real *x, const real c, const ptrdiff_t n) {
+void THVector_(muls)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n) {
   THVector_(muls_DISPATCHPTR)(y, x, c, n);
 }
 
-static void (*THVector_(cdiv_DISPATCHPTR))(real *, const real *, const real *, const ptrdiff_t) = &THVector_(cdiv_DEFAULT);
+static void (*THVector_(cdiv_DISPATCHPTR))(scalar_t *, const scalar_t *, const scalar_t *, const ptrdiff_t) = &THVector_(cdiv_DEFAULT);
 static FunctionDescription THVector_(cdiv_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
@@ -194,11 +194,11 @@ static FunctionDescription THVector_(cdiv_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(cdiv_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(cdiv)(real *z, const real *x, const real *y, const ptrdiff_t n) {
+void THVector_(cdiv)(scalar_t *z, const scalar_t *x, const scalar_t *y, const ptrdiff_t n) {
   THVector_(cdiv_DISPATCHPTR)(z, x, y, n);
 }
 
-static void (*THVector_(divs_DISPATCHPTR))(real *, const real *, const real, const ptrdiff_t) = &THVector_(divs_DEFAULT);
+static void (*THVector_(divs_DISPATCHPTR))(scalar_t *, const scalar_t *, const scalar_t, const ptrdiff_t) = &THVector_(divs_DEFAULT);
 static FunctionDescription THVector_(divs_DISPATCHTABLE)[] = {
   #if defined(__NEON__)
     #if defined(TH_REAL_IS_FLOAT)
@@ -221,11 +221,11 @@ static FunctionDescription THVector_(divs_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(divs_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(divs)(real *y, const real *x, const real c, const ptrdiff_t n) {
+void THVector_(divs)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n) {
   THVector_(divs_DISPATCHPTR)(y, x, c, n);
 }
 
-static void (*THVector_(copy_DISPATCHPTR))(real *, const real *, const ptrdiff_t) = &THVector_(copy_DEFAULT);
+static void (*THVector_(copy_DISPATCHPTR))(scalar_t *, const scalar_t *, const ptrdiff_t) = &THVector_(copy_DEFAULT);
 static FunctionDescription THVector_(copy_DISPATCHTABLE)[] = {
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
@@ -235,12 +235,12 @@ static FunctionDescription THVector_(copy_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(copy_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(copy)(real *y, const real *x, const ptrdiff_t n) {
+void THVector_(copy)(scalar_t *y, const scalar_t *x, const ptrdiff_t n) {
   THVector_(copy_DISPATCHPTR)(y, x, n);
 }
 
 #ifndef TH_REAL_IS_INT
-static void (*THVector_(cvtFromInt_DISPATCHPTR))(real *, const int *, const ptrdiff_t) = &THVector_(cvtFromInt_DEFAULT);
+static void (*THVector_(cvtFromInt_DISPATCHPTR))(scalar_t *, const int *, const ptrdiff_t) = &THVector_(cvtFromInt_DEFAULT);
 static FunctionDescription THVector_(cvtFromInt_DISPATCHTABLE)[] = {
   #if defined(USE_AVX)
     #if defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT)
@@ -257,12 +257,12 @@ static FunctionDescription THVector_(cvtFromInt_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(cvtFromInt_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(cvtFromInt)(real *y, const int *x, const ptrdiff_t n) {
+void THVector_(cvtFromInt)(scalar_t *y, const int *x, const ptrdiff_t n) {
   THVector_(cvtFromInt_DISPATCHPTR)(y, x, n);
 }
 #endif
 
-static void (*THVector_(normal_fill_DISPATCHPTR))(real *, const int64_t, THGenerator *, const real, const real) = &THVector_(normal_fill_DEFAULT);
+static void (*THVector_(normal_fill_DISPATCHPTR))(scalar_t *, const int64_t, THGenerator *, const scalar_t, const scalar_t) = &THVector_(normal_fill_DEFAULT);
 static FunctionDescription THVector_(normal_fill_DISPATCHTABLE)[] = {
   #if defined(TH_REAL_IS_FLOAT) && defined(USE_AVX2)
       FUNCTION_IMPL(THVector_(normal_fill_AVX2), SIMDExtension_AVX2),
@@ -270,16 +270,16 @@ static FunctionDescription THVector_(normal_fill_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(normal_fill_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(normal_fill)(real *data,
+void THVector_(normal_fill)(scalar_t *data,
                             const int64_t size,
                             struct THGenerator *generator,
-                            const real mean,
-                            const real stddev) {
+                            const scalar_t mean,
+                            const scalar_t stddev) {
   THVector_(normal_fill_DISPATCHPTR)(data, size, generator, mean, stddev);
 }
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-static void (*THVector_(sigmoid_DISPATCHPTR))(real *, const real *, const ptrdiff_t) = &THVector_(sigmoid_DEFAULT);
+static void (*THVector_(sigmoid_DISPATCHPTR))(scalar_t *, const scalar_t *, const ptrdiff_t) = &THVector_(sigmoid_DEFAULT);
 static FunctionDescription THVector_(sigmoid_DISPATCHTABLE)[] = {
   #if defined(TH_REAL_IS_FLOAT) && defined(USE_AVX2)
       FUNCTION_IMPL(THVector_(sigmoid_AVX2), SIMDExtension_AVX2),
@@ -287,7 +287,7 @@ static FunctionDescription THVector_(sigmoid_DISPATCHTABLE)[] = {
 
   FUNCTION_IMPL(THVector_(sigmoid_DEFAULT), SIMDExtension_DEFAULT)
 };
-void THVector_(sigmoid)(real *y, const real *x, const ptrdiff_t n) {
+void THVector_(sigmoid)(scalar_t *y, const scalar_t *x, const ptrdiff_t n) {
   THVector_(sigmoid_DISPATCHPTR)(y, x, n);
 }
 #endif

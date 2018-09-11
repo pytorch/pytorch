@@ -49,7 +49,7 @@ fi
 
 mkdir -p $TEST_DIR/{cpp,python}
 
-cd ${INSTALL_PREFIX}
+cd "${WORKSPACE}"
 
 # C++ tests
 echo "Running C++ tests.."
@@ -136,6 +136,8 @@ echo "Running Python tests.."
   ${rocm_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
+
+cd ${INSTALL_PREFIX}
 
 if [[ -n "$INTEGRATED" ]]; then
   pip install --user torchvision

@@ -9,10 +9,16 @@ namespace caffe2 {
 namespace mkl {
 
 template <typename T>
-class MKLBNOp final : public SpatialBNOp<MKLContext> {
+class MKLBNOp final : public Operator<MKLContext> {
  public:
   MKLBNOp(const OperatorDef& operator_def, Workspace* ws)
-      : SpatialBNOp<MKLContext>(operator_def, ws) {
+      : Operator<MKLContext>(operator_def, ws),
+        OP_SINGLE_ARG(int, OpSchema::Arg_IsTest, is_test_, 0),
+        OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5f),
+        OP_SINGLE_ARG(float, "momentum", momentum_, 0.9f),
+        order_(StringToStorageOrder(
+            this->template GetSingleArgument<string>("order", "NCHW"))),
+        OP_SINGLE_ARG(int, "num_batches", num_batches_, 1) {
     OPERATOR_NEEDS_FEATURE(
         order_ == StorageOrder::NCHW, "Only NCHW order supported.");
     OPERATOR_NEEDS_FEATURE(
@@ -20,7 +26,7 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
         "Inplace BN not supported");
   }
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& X = OperatorBase::Input<MKLMemory<float>>(INPUT);
     auto& scale = OperatorBase::Input<MKLMemory<float>>(SCALE);
     auto& bias = OperatorBase::Input<MKLMemory<float>>(BIAS);
@@ -34,7 +40,7 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
     MKLMemory<float>* saved_mean =
         OperatorBase::Output<MKLMemory<float>>(SAVED_MEAN & (is_test_ - 1));
     MKLMemory<float>* saved_var =
-        OperatorBase::Output<MKLMemory<float>>(SAVED_INV_VAR & (is_test_ - 1));
+        OperatorBase::Output<MKLMemory<float>>(SAVED_INV_STD & (is_test_ - 1));
 
     // current code supports only NCHW -
     // have to look for MKL related changes for NHWC later
@@ -134,6 +140,12 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
   }
 
  private:
+  const bool is_test_;
+  float epsilon_;
+  const float momentum_;
+  const StorageOrder order_;
+  const int num_batches_;
+
   vector<TIndex> cached_input_dims_;
   LayoutWrapper<T> scale_bias_layout_;
   LayoutWrapper<T> saved_mean_layout_;
@@ -150,6 +162,16 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
   PrimitiveWrapper<T> primitive_;
   MKLMemory<T> buffer_;
   void* resources_[dnnResourceNumber] = {0};
+
+  INPUT_TAGS(
+      INPUT,
+      SCALE,
+      BIAS,
+      EST_MEAN,
+      EST_VAR,
+      BATCH_MEAN_SUM,
+      BATCH_VAR_SUM);
+  OUTPUT_TAGS(OUTPUT, RUNNING_MEAN, RUNNING_VAR, SAVED_MEAN, SAVED_INV_STD);
 };
 } // namespace mkl
 

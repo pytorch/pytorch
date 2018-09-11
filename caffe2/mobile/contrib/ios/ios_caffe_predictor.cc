@@ -53,10 +53,11 @@ void Caffe2IOSPredictor::run(const Tensor& inData, Tensor& outData, std::string&
   caffe2::Tensor input(caffe2::CPU);
   input.Resize(inData.dims);
   input.ShareExternalPointer(inData.data);
-  caffe2::Predictor::TensorVector input_vec{&input};
-  caffe2::Predictor::TensorVector output_vec;
+  caffe2::Predictor::TensorList input_vec;
+  input_vec.emplace_back(std::move(input));
+  caffe2::Predictor::TensorList output_vec;
   try {
-    predictor_.run(input_vec, &output_vec);
+    predictor_(input_vec, &output_vec);
   } catch (const caffe2::EnforceNotMet& e) {
     std::string error = e.msg();
     errorMessage.swap(error);
@@ -66,7 +67,7 @@ void Caffe2IOSPredictor::run(const Tensor& inData, Tensor& outData, std::string&
     errorMessage.swap(error);
     return;
   }
-  caffe2::TensorCPU* output = output_vec.front();
+  caffe2::TensorCPU* output = &output_vec.front();
   outData.data = output->mutable_data<uint8_t>();
   outData.dims = output->dims();
 }

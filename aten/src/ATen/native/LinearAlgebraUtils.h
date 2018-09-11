@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include <limits>
 
 namespace at { namespace native {
 
@@ -37,6 +38,18 @@ static inline int64_t batchCount(const Tensor& batched_matrices) {
 // Computes the number of elements of a matrix in a batched matrix tensor
 static inline int64_t matrixStride(const Tensor& batched_matrices) {
   return batched_matrices.size(-1) * batched_matrices.size(-2);
+}
+
+// Returns the epsilon value for floating types except half
+static inline double _get_epsilon(const ScalarType& sc_type) {
+  switch (sc_type) {
+    case at::ScalarType::Float:
+      return static_cast<double>(std::numeric_limits<float>::epsilon());
+    case at::ScalarType::Double:
+      return std::numeric_limits<double>::epsilon();
+    default:
+      AT_ERROR("This function doesn't handle types other than float and double");
+  }
 }
 
 }}  // namespace at::native

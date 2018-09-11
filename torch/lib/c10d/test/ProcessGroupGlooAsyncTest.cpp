@@ -69,14 +69,11 @@ class AsyncInputIsOutputTest : public AsyncTest {
         numTensors_(numTensors),
         numDevices_(cudaNumDevices()),
         state_(::at::globalContext().lazyInitCUDA()) {
-    const auto& type = at::getType(at::Backend::CUDA, at::kFloat);
 
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);
-    at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numTensors_; i++) {
-      deviceGuard.set_index(i % numDevices_);
-      inputs_[i] = type.tensor({16, 16});
+      inputs_[i] = at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}));
     }
 
     // Allocate a stream per device.
@@ -86,6 +83,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
+    at::DeviceGuard deviceGuard;
     streams_.resize(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);

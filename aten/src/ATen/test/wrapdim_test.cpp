@@ -24,7 +24,7 @@ TEST_CASE( "wrapdim test", "[]" ) {
 
     // can unsqueeze scalar
     auto b = randn(1, T);
-    b.get()->maybe_zero_dim(true);
+    b.unsafeGetTensorImpl()->maybe_zero_dim(true);
     REQUIRE(b.unsqueeze(0).equal(b.unsqueeze(-1)));
   }
 
@@ -36,8 +36,8 @@ TEST_CASE( "wrapdim test", "[]" ) {
   SECTION( "scalar vs 1-dim, 1-size" ) {
     auto a = randn(1, T);
     REQUIRE(a.prod(0).equal(a.prod(-1)));
-    a.get()->maybe_zero_dim(true);
-    REQUIRE(a.get()->dim() == 0);
+    a.unsafeGetTensorImpl()->maybe_zero_dim(true);
+    REQUIRE(a.dim() == 0);
     REQUIRE(a.prod(0).equal(a.prod(-1)));
   }
 }

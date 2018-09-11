@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().type_id(), data.type().scalarType(), /* is variable */ true),
+    : TensorImpl(data.type().type_id(), data.type().scalarType(), data.type().allocator(), /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -41,12 +41,20 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
 
 Variable::Impl::~Impl() = default;
 
+int64_t Variable::Impl::numel() const {
+  return data_.numel();
+}
+
 IntList Variable::Impl::sizes() const {
   return data_.sizes();
 }
 
 IntList Variable::Impl::strides() const {
   return data_.strides();
+}
+
+bool Variable::Impl::is_contiguous() const {
+  AT_ERROR("variable impl does not have is_contiguous");
 }
 
 int64_t Variable::Impl::dim() const {
@@ -56,20 +64,29 @@ int64_t Variable::Impl::dim() const {
 int64_t Variable::Impl::size(int64_t d) const {
   return data_.size(d);
 }
+
 int64_t Variable::Impl::stride(int64_t d) const {
   return data_.stride(d);
 }
 
-const char* Variable::Impl::typeString() {
-  return "VariableType";
+void Variable::Impl::resize_dim(int64_t ndim) {
+  AT_ERROR("variable impl does not have resize_dim");
 }
 
-std::unique_ptr<at::Storage> Variable::Impl::storage() {
+void Variable::Impl::set_size(int64_t dim, int64_t new_size) {
+  AT_ERROR("variable impl does not have set_size");
+}
+
+void Variable::Impl::set_stride(int64_t dim, int64_t new_stride) {
+  AT_ERROR("variable impl does not have set_stride");
+}
+
+void Variable::Impl::set_storage_offset(int64_t storage_offset) {
+  AT_ERROR("variable impl does not have set_storage_offset");
+}
+
+const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
-}
-
-at::StorageImpl* Variable::Impl::storageImpl() const {
-  return data_.unsafeGetTensorImpl()->storageImpl();
 }
 
 int64_t Variable::Impl::storage_offset() const {
@@ -91,12 +108,14 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   if (result)
     return result;
 
-  result = std::make_shared<AccumulateGrad>(Variable(this, true));
+  c10::raw::intrusive_ptr::incref(this);
+  auto intrusive_from_this = c10::intrusive_ptr<Variable::Impl>::reclaim(this);
+  result = std::make_shared<AccumulateGrad>(Variable(std::move(intrusive_from_this)));
   grad_accumulator_ = result;
   return result;
 }
 
-Tensor Variable::Impl::detach() const {
+Variable Variable::Impl::detach() const {
   auto detached = make_variable(data_, /*requires_grad=*/false);
   detached.set_version_counter(version_counter_);
   return detached;

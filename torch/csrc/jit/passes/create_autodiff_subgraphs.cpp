@@ -17,7 +17,7 @@ namespace {
 // right before nodes[0] (i.e. it will not create cycles and all uses of
 // new node will be after this position).
 // prereq: nodes are in topological order
-void mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
+Node* mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
   JIT_ASSERT(nodes.size() > 0);
   std::unordered_map<Value*, Value*> value_map;
   Graph * graph = block->owningGraph();
@@ -66,11 +66,12 @@ void mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
     nodes[i - 1]->destroy();
   }
   JIT_ASSERT(isDifferentiable(*new_graph));
+  return group_node;
 }
 
 }
 
-void CreateAutodiffSubgraphs(Block * block, size_t threshold) {
+void CreateAutodiffSubgraphs(Block * block, size_t threshold, std::vector<Node*>& diff_graphs) {
   // This implementation is not optimal, but it is simple.
   // It just scans through the list in order looking for runs of
   // differentiable ops, and then grouping them together when
@@ -93,21 +94,23 @@ void CreateAutodiffSubgraphs(Block * block, size_t threshold) {
       groupable.push_back(node);
     } else {
       if(groupable.size() >= threshold) {
-        mergeNodes(block, prim::GraphExecutor, groupable);
+        diff_graphs.push_back(mergeNodes(block, prim::DifferentiableGraph, groupable));
       }
       groupable.clear();
       for (Block * sub_block : node->blocks()) {
-        CreateAutodiffSubgraphs(sub_block, threshold);
+        CreateAutodiffSubgraphs(sub_block, threshold, diff_graphs);
       }
     }
   }
   if(groupable.size() >= threshold) {
-    mergeNodes(block, prim::GraphExecutor, groupable);
+    diff_graphs.push_back(mergeNodes(block, prim::DifferentiableGraph, groupable));
   }
 }
 
-void CreateAutodiffSubgraphs(Graph & graph, size_t threshold) {
-  CreateAutodiffSubgraphs(graph.block(), threshold);
+std::vector<Node*> CreateAutodiffSubgraphs(Graph & graph, size_t threshold) {
+  std::vector<Node*> diff_nodes;
+  CreateAutodiffSubgraphs(graph.block(), threshold, diff_nodes);
+  return diff_nodes;
 }
 
 

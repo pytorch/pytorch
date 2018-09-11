@@ -13,7 +13,7 @@ void THNN_(DistKLDivCriterion_updateOutput)(
 
   if (reduction == Reduction::None) {
     THTensor_(resizeAs)(output, input);
-    TH_TENSOR_APPLY3(real, input, real, target, real, output,
+    TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
       *output_data = *target_data > 0 ? *target_data * (log(*target_data) - *input_data) : 0;
     );
     return;
@@ -21,9 +21,9 @@ void THNN_(DistKLDivCriterion_updateOutput)(
 
   THTensor_(resize1d)(output, 1);
 
-  real sum = 0;
+  scalar_t sum = 0;
 
-  TH_TENSOR_APPLY2(real, input, real, target,
+  TH_TENSOR_APPLY2(scalar_t, input, scalar_t, target,
     sum += *target_data > 0 ? *target_data * (log(*target_data) - *input_data) : 0;
   );
 
@@ -46,7 +46,7 @@ void THNN_(DistKLDivCriterion_updateGradInput)(
 
   if (reduction == Reduction::None) {
     THNN_CHECK_SHAPE(input, gradOutput);
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, target,
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, target,
       *gradInput_data = *target_data > 0 ? (-*target_data) * *gradOutput_data : 0;
     );
     return;
@@ -54,9 +54,9 @@ void THNN_(DistKLDivCriterion_updateGradInput)(
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
 
-  real norm = (reduction == Reduction::ElementwiseMean ? 1./((real)THTensor_(nElement)(input)) : 1.);
+  scalar_t norm = (reduction == Reduction::ElementwiseMean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
 
-  TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
+  TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
     *gradInput_data = *target_data > 0 ? norm * (-*target_data) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0) : 0;
   );
 }

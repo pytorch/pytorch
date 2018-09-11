@@ -7,7 +7,6 @@
 #include "ATen/core/Error.h"
 #include "ATen/core/optional.h"
 #include <ATen/native/sparse/SparseUtils.h>
-
 #include <algorithm>
 #include <vector>
 
@@ -139,11 +138,11 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return self.type().tensor().set_(*self.storage(), storage_offset, size, stride);
+  return self.type().tensor().set_(self.storage(), storage_offset, size, stride);
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return self.set_(*self.storage(), storage_offset, size, stride);
+  return self.set_(self.storage(), storage_offset, size, stride);
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
@@ -378,7 +377,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    return self.sparse_raw_resize_(sizes, self._sparseDims(), self._denseDims());
+    _get_sparse_impl(self)->raw_resize_(self._sparseDims(), self._denseDims(), sizes);
   } else {
     auto indices = self._indices();
     auto row0 = indices.select(0, dim0);
@@ -395,8 +394,9 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    return self.sparse_raw_resize_(sizes, -1, -1);
+    _get_sparse_impl(self)->raw_resize_(self._indices().size(0), self._values().dim() - 1, sizes);
   }
+  return self;
 }
 
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
@@ -593,7 +593,7 @@ Tensor view_as(const Tensor& self, const Tensor& other) {
 }
 
 int64_t numel(const Tensor& self) {
-  return self.pImpl->numel();
+  return self.unsafeGetTensorImpl()->numel();
 }
 
 std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {

@@ -3,7 +3,7 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include <gtest/gtest.h>
 
 namespace caffe2 {
@@ -148,7 +148,7 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
     }                                                                      \
     Blob new_blob;                                                         \
     EXPECT_NO_THROW(new_blob.Deserialize(serialized));                     \
-    EXPECT_TRUE(new_blob.IsType<Tensor>(CUDA));                            \
+    EXPECT_TRUE(new_blob.IsTensorType(CUDA));                            \
     Tensor new_cpu_tensor(blob.Get<Tensor>(), CPU);                        \
     EXPECT_EQ(new_cpu_tensor.ndim(), 2);                                   \
     EXPECT_EQ(new_cpu_tensor.dim(0), 2);                                   \
@@ -193,12 +193,12 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
       EXPECT_EQ(tensor_proto.float_data(i), i);
     }
     EXPECT_TRUE(tensor_proto.has_device_detail());
-    EXPECT_EQ(tensor_proto.device_detail().device_type(), CUDA);
+    EXPECT_EQ(tensor_proto.device_detail().device_type(), PROTO_CUDA);
     EXPECT_EQ(tensor_proto.device_detail().cuda_gpu_id(), gpu_id);
     // Test if the restored blob is still of the same device.
     blob.Reset();
     EXPECT_NO_THROW(blob.Deserialize(serialized));
-    EXPECT_TRUE(blob.IsType<Tensor>(CUDA));
+    EXPECT_TRUE(blob.IsTensorType(CUDA));
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()),
               gpu_id);
     // Test if we force the restored blob on a different device, we
@@ -206,7 +206,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     blob.Reset();
     proto.mutable_tensor()->mutable_device_detail()->set_cuda_gpu_id(0);
     EXPECT_NO_THROW(blob.Deserialize(proto.SerializeAsString()));
-    EXPECT_TRUE(blob.IsType<Tensor>(CUDA));
+    EXPECT_TRUE(blob.IsTensorType(CUDA));
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()), 0);
   }
 }

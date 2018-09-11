@@ -346,11 +346,11 @@ class TestCaffe2Backend(unittest.TestCase):
         mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
-            assert len(prepared.init_net.op) == 1038
-            assert len(prepared.predict_net.op) == 101
+            assert len(prepared.init_net.op) == 1019
+            assert len(prepared.predict_net.op) == 142
         else:
-            assert len(prepared.init_net.op) == 27
-            assert len(prepared.predict_net.op) == 1112
+            assert len(prepared.init_net.op) == 8
+            assert len(prepared.predict_net.op) == 1153
 
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
@@ -488,6 +488,11 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.BatchNorm1d(224)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
+    def test_batchnorm2d_noaffine(self):
+        c = Variable(torch.randn(128, 128, 1, 1))
+        model = nn.BatchNorm2d(128, affine=False)
+        self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
+
     def test_constant(self):
         c = Variable(torch.randn(BATCH_SIZE, 3, 224, 224))
 
@@ -546,7 +551,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input):
                 # TODO: Why index? This returns a tuple and test runner doesn't
                 # support tuple comparison.
-                return input.chunk(20, dim=2)[-1]
+                return input.chunk(8, dim=2)[-1]
         self.run_model_test(MyModel(), train=False, batch_size=BATCH_SIZE)
 
     def test_sqrt(self):
@@ -798,6 +803,18 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.ConvTranspose2d(3, 3, 3, stride=3, bias=False, padding=1, output_padding=2)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE, atol=1e-7)
 
+    def test_unsqueeze(self):
+        shape = (3, 4, 5)
+        for dim in range(len(shape) + 1):
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+
+                def forward(self, x):
+                    return x.unsqueeze(dim)
+            x = Variable(torch.randn(*shape))
+            self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, atol=1e-7)
+
     # NB: InstanceNorm model includes unused weights, so skip this in TestCaffe2BackendEmbed
     # TODO: We should have another pass to eliminate the unused initializers in ONNX models.
     @skipIfEmbed
@@ -827,6 +844,52 @@ class TestCaffe2Backend(unittest.TestCase):
         x = Variable(torch.randn(1, 5, 10))
         y = Variable(torch.randn(1, 5, 1))
         self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_int8_export(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.param = torch.ByteTensor(3, 4).random_()
+
+            def forward(self, x):
+                return x * self.param.float()
+
+        import io
+        f = io.BytesIO()
+        from torch.onnx import ExportTypes
+        torch.onnx._export(MyModel(), (torch.rand(3, 4),), f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE)
+
+        X = np.random.rand(3, 4).astype(np.float32)
+
+        f.seek(0)
+        import caffe2.python.onnx.backend as c2
+        model = c2.prepare_zip_archive(f)
+        model.run(X)
+
+    def test_neg_slice(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[-1, :, :]
+
+        x = torch.randn(3, 4, 5)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_neg_slice_large(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -3]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
+    def test_neg_slice_large_negone(self):
+        class NegSlice(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :, :, :, -1]
+
+        x = torch.randn(3, 4, 5, 6, 7)
+        self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
 # a bit of metaprogramming to set up all the rnn tests
 

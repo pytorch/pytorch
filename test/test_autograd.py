@@ -2473,6 +2473,47 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'backward without computing eigenvectors'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
+    def test_no_grad_copy(self):
+        # create autograd function that saves grad pointer as class static
+        class MyFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
+
+            @staticmethod
+            def backward(ctx, grad):
+                MyFunc.static_grad_ptr = grad.data_ptr()
+                return grad, grad
+
+        class NonContGradFunc(Function):
+            @staticmethod
+            def forward(ctx, inp1):
+                ctx.size = inp1.size()
+                return torch.tensor([1.])
+
+            @staticmethod
+            def backward(ctx, grad):
+                return torch.ones(1).expand(ctx.size)
+
+        a = torch.randn(5, 6, requires_grad=True)
+        b = torch.randn(5, 6, requires_grad=True)
+        # non-contiguous grad should be copied
+        NonContGradFunc.apply(MyFunc.apply(a, b)).backward()
+        self.assertFalse(a.grad.data_ptr() == MyFunc.static_grad_ptr)
+        self.assertFalse(b.grad.data_ptr() == MyFunc.static_grad_ptr)
+        # test case that should trigger no copy for one of a,b
+        a.grad = b.grad = None
+        MyFunc.apply(a, b)[1][0].backward()
+        p_g = MyFunc.static_grad_ptr
+        p_a = a.grad.data_ptr()
+        p_b = b.grad.data_ptr()
+        # check a,b uses different grad buffer
+        self.assertFalse(p_a == p_b)
+        # check one of them is using the computed buffer
+        self.assertTrue(p_a == p_g or p_b == p_g)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -2945,6 +2986,14 @@ method_tests = [
     ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d"),
     ('matmul', (S, S, M, M), ((M,),), "4d_1d"),
     ('matmul', (M,), ((S, S, M, S),), "1d_4d"),
+    ('matrix_power', (S, S), [2], "n=2"),
+    ('matrix_power', (S, S, S), [3], "n=3"),
+    ('matrix_power', (S, S, S), [1], "n=1"),
+    ('matrix_power', (S, S, S), [0], "n=0"),
+    ('matrix_power', lambda: random_fullrank_matrix_distinct_singular_value(S), [-1], "n=-1",
+     NO_ARGS, [skipIfNoLapack]),
+    ('matrix_power', lambda: random_fullrank_matrix_distinct_singular_value(S), [-3], "n=-3",
+     NO_ARGS, [skipIfNoLapack]),
     ('addcmul', (S, S), ((S, S), (S, S))),
     ('addcmul', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
     ('addcmul', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),

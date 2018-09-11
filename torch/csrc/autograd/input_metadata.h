@@ -15,7 +15,7 @@ struct InputMetadata {
   InputMetadata(const at::Type& type, at::IntList shape, const int64_t device)
   : type_{&type} , shape_{shape}, device_{device} { }
 
-  InputMetadata(const at::Tensor& t) 
+  InputMetadata(const at::Tensor& t)
   : InputMetadata(t.type(), t.sizes(), t.is_cuda() ? t.get_device() : - 1) { }
 
   bool is_valid() const {
@@ -33,6 +33,10 @@ struct InputMetadata {
 
   int64_t device() const {
     return device_;
+  }
+
+  at::Tensor zeros_like() const {
+    return at::zeros(shape_, type_->options(static_cast<int32_t>(device_)));
   }
 
 private:

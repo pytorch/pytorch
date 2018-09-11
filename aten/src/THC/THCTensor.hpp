@@ -34,7 +34,6 @@ THC_API void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage
 THC_API void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int dimension_);
 THC_API void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int dimension_);
 
-THC_API bool THCTensor_isContiguous(THCState *state, const THCTensor *self);
 THC_API bool THCTensor_allContiguous(THCState *state, THCTensor **inputs, int numInputs);
 THC_API ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self);
 

@@ -518,7 +518,7 @@ class Caffe2Backend(Backend):
                 pred_mh.net.VariableLengthSequencePadding(
                     [concatted_output, sequence_lens], [concatted_output])
             reshaped_output, _ = pred_mh.net.Reshape(concatted_output, [cls.dummy_name(), cls.dummy_name()], shape=[0,0,-1,2])
-            pred_mh.net.Transpose(reshaped_output, n.outputs[0], axes=[0,3,1,2])
+            pred_mh.net.Transpose(reshaped_output, n.outputs[0], axes=[0,2,1,3])
             for i in range(1, len(n.outputs)):
                 pred_mh.net.Concat([outputs_f[i], outputs_b[i]],
                                    [n.outputs[i], cls.dummy_name()], axis=0)

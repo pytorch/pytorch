@@ -98,7 +98,7 @@ namespace {
     cudnnDirectionMode_t bidirectional;
     cudnnRNNMode_t mode;
     cudnnDataType_t datatype;
-
+    cudnnRNNAlgo_t algo = CUDNN_RNN_ALGO_STANDARD;
     cudnnRNNInputMode_t input_mode = CUDNN_LINEAR_INPUT;
 
     int64_t num_directions() const {
@@ -131,6 +131,10 @@ namespace {
     void set_bidirectional(bool fn_bidirectional) {
       bidirectional = fn_bidirectional ? CUDNN_BIDIRECTIONAL : CUDNN_UNIDIRECTIONAL;
     }
+     
+    void set_algo(cudnnRNNAlgo_t algo){
+      this->algo = algo;
+    }
 
     void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype) {
       this->set_mode(mode);
@@ -143,7 +147,7 @@ namespace {
 
     RNNDescriptor descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       RNNDescriptor rnn_desc;
-      rnn_desc.set(handle, hidden_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype);
+      rnn_desc.set(handle, hidden_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype, algo);
       return rnn_desc;
     }
 
@@ -459,7 +463,7 @@ namespace {
               mat_numel * num_linear_layers / 2, 1};
             // Generate a new parameter tensor which is a view into the
             // weight_buf.
-            Tensor param = weight_buf.type().tensor().set_(*weight_buf.storage(), offset, size);
+            Tensor param = weight_buf.type().tensor().set_(weight_buf.storage(), offset, size);
             params.emplace_back(std::move(param));
             layer_params_count++;
           } else {
@@ -555,6 +559,30 @@ namespace {
     } else {
       return {tensors.seq_length, tensors.mini_batch, rnn.hidden_size * rnn.num_directions()};
     }
+  }
+
+  cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors){
+#if CUDNN_VERSION < 7200 || CUDA_VERSION < 9010
+      return CUDNN_RNN_ALGO_STANDARD;
+#else
+      cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+      const int64_t bsize = tensors.mini_batch;
+      if (prop->major == 7 && rnn.datatype == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
+          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && tensors.input_size <=1024 && rnn.num_directions() == 1 &&
+                  rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
+              //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf, 
+              //weed them out
+              if ((bsize % 16 == 0 && bsize != 80 && bsize !=112) || bsize == 8){
+                  if ((tensors.seq_length >=40 && bsize <=128) ||
+                     (tensors.seq_length >=20 && bsize <=96) ||
+                     (tensors.seq_length >=10 && bsize <=32)) {
+                     return CUDNN_RNN_ALGO_PERSIST_STATIC;
+                  }
+              }
+          }
+      }
+      return CUDNN_RNN_ALGO_STANDARD;
+#endif
   }
 
 } // anonymous namespace
@@ -676,6 +704,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto y = output;
 
   auto handle = getCudnnHandle();
+  cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors);
+  fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
   FilterDescriptor w_desc;
@@ -858,6 +888,8 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     throw std::runtime_error("Gradients aren't CUDA tensors");
   }
 
+  cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors);
+  fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
   FilterDescriptor w_desc;
@@ -968,6 +1000,8 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   const auto& y = output;
   auto dw = weight_buf.type().tensor(weight_buf.sizes()).zero_();
 
+  cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors);
+  fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
   FilterDescriptor w_desc;
@@ -1089,6 +1123,12 @@ struct DropoutState {
   at::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
 
+  // Every time we use a dropout state, we need to synchronize with its event,
+  // to make sure all previous uses finish running before this one starts. Once
+  // we're done, we record the event to allow others to synchronize with this kernel.
+  // Those events are really needed only for inter-stream sync on a single GPU.
+  // I doubt anyone will want to run cuDNN RNNs in parallel on a single GPU, so
+  // they should end up being complete no-ops.
   void lock() {
     // NB: We can't ignore the lock even when event is undefined, because someone
     // could then define it before we get to unlock().
@@ -1148,7 +1188,7 @@ Tensor try_get_weight_buf(
   // Try to get parameter storage
   auto & any_param = parameters.at(0);
   auto param_storage = any_param.storage();
-  auto weight_buf = any_param.type().tensor().set_(*param_storage);
+  auto weight_buf = any_param.type().tensor().set_(param_storage);
   if (weight_buf.size(0) < num_params) {
     return {};
   } else if (weight_buf.size(0) > num_params) {

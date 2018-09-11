@@ -5,15 +5,15 @@
 
 THC_API void
 THCTensor_(maskedFill)(THCState* state,
-                       THCTensor *tensor, THCudaByteTensor *mask, real value)
+                       THCTensor *tensor, THCudaByteTensor *mask, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, mask));
   THArgCheck(THCTensor_(nElement)(state, tensor) ==
              THCudaByteTensor_nElement(state, mask),
              2, "sizes do not match");
 
-  if (!THC_pointwiseApply2<real, uint8_t>(state, tensor, mask,
-                                          TensorMaskedFillOp<real, unsigned char>(value))) {
+  if (!THC_pointwiseApply2<scalar_t, uint8_t>(state, tensor, mask,
+                                          TensorMaskedFillOp<scalar_t, unsigned char>(value))) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 
@@ -22,7 +22,7 @@ THCTensor_(maskedFill)(THCState* state,
 
 THC_API void
 THCTensor_(maskedFillByte)(THCState* state,
-                           THCTensor *tensor, THByteTensor *mask, real value)
+                           THCTensor *tensor, THByteTensor *mask, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
@@ -85,9 +85,9 @@ THCTensor_(maskedCopy)(THCState* state,
 
   // update `tensor` where `mask` == 1 but pull from `src` at
   // maskPrefixSum
-  bool status = THC_pointwiseApply3<real, uint8_t, int64_t>(
+  bool status = THC_pointwiseApply3<scalar_t, uint8_t, int64_t>(
     state, tensor, mask, maskPrefixSum,
-    TensorMaskedCopyOp<real, unsigned char, int64_t>(
+    TensorMaskedCopyOp<scalar_t, unsigned char, int64_t>(
       THCTensor_(data)(state, contigSrc)));
 
   THCTensor_(free)(state, contigSrc);
@@ -152,9 +152,9 @@ THCTensor_(maskedSelect)(THCState* state,
     maskPrefixSumData);
 
   // Then copy over the masked elements at their desired output index
-  bool status = THC_pointwiseApply3<uint8_t, int64_t, real>(
+  bool status = THC_pointwiseApply3<uint8_t, int64_t, scalar_t>(
     state, mask, maskPrefixSum,
-    src, TensorMaskedSelectOp<real, unsigned char, int64_t>(
+    src, TensorMaskedSelectOp<scalar_t, unsigned char, int64_t>(
       THCTensor_(data)(state, tensor)));
 
   THCudaLongTensor_free(state, maskLong);

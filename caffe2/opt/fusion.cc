@@ -94,8 +94,7 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
 #undef EXPOSE_TENSOR_DATA
 
     // Assume M{CHW,HWC}
-    auto chwDim = filterTensor->dim32(1) * filterTensor->dim32(2) *
-        filterTensor->dim32(3);
+    auto chwDim = filterTensor->size_from_dim(1);
     for (auto c = 0; c < filterTensor->dim32(0); ++c) {
       float coeff =
           scaleData[c] / std::sqrt(varianceData[c] + bn->getEpsilon());

@@ -105,8 +105,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 PyTorch has minimal framework overhead. We integrate acceleration libraries
 such as Intel MKL and NVIDIA (cuDNN, NCCL) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
-(TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.
-They are mature and have been tested for years.
+(TH, THC, THNN, THCUNN) are mature and have been tested for years.
 
 Hence, PyTorch is quite fast – whether you run small or large neural networks.
 

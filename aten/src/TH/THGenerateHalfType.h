@@ -3,7 +3,7 @@
 #endif
 
 #include "THHalf.h"
-#define real THHalf
+#define scalar_t THHalf
 #define accreal float
 #define TH_CONVERT_REAL_TO_ACCREAL(_val) TH_half2float(_val)
 #define TH_CONVERT_ACCREAL_TO_REAL(_val) TH_float2half(_val)
@@ -12,7 +12,7 @@
 #define TH_REAL_IS_HALF
 #line 1 TH_GENERIC_FILE
 #include TH_GENERIC_FILE
-#undef real
+#undef scalar_t
 #undef accreal
 #undef Real
 #undef THInf

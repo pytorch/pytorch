@@ -6,12 +6,13 @@
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorRandom.cuh"
 #include "THCGenerator.hpp"
+#include "ATen/Config.h"
+
+#include "ATen/cuda/_curand_mtgp32_host.h"
 
 #include <thrust/functional.h>
 #include <curand.h>
 #include <curand_kernel.h>
-#include <curand_mtgp32_host.h>
-#include <curand_mtgp32dc_p_11213.h>
 
 #define MAX_NUM_BLOCKS 200 
 #define BLOCK_SIZE 256
@@ -147,9 +148,9 @@ struct is_same { static const bool value = false; };
 template<typename T>
 struct is_same<T, T> { static const bool value = true; };
 
-template<typename real, typename prob_type>
+template<typename T, typename prob_type>
 __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
-        real *result, prob_type *probs)
+        T *result, prob_type *probs)
 {
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
@@ -157,11 +158,11 @@ __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
     if (is_same<prob_type, double>::value) {
       double x = curand_uniform_double(&state[blockIdx.x]);
       if (i < size)
-        result[i] = ScalarConvert<bool, real>::to(x <= probs[i]);
+        result[i] = ScalarConvert<bool, T>::to(x <= probs[i]);
     } else {
       float x = curand_uniform(&state[blockIdx.x]);
       if (i < size)
-        result[i] = ScalarConvert<bool, real>::to(x <= probs[i]);
+        result[i] = ScalarConvert<bool, T>::to(x <= probs[i]);
     }
   }
 }
