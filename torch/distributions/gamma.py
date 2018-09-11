@@ -8,12 +8,12 @@ from torch.distributions.utils import _finfo, broadcast_all, lazy_property
 
 
 def _standard_gamma(concentration):
-    return concentration._standard_gamma()
+    return torch._standard_gamma(concentration)
 
 
 class Gamma(ExponentialFamily):
     r"""
-    Creates a Gamma distribution parameterized by shape `concentration` and `rate`.
+    Creates a Gamma distribution parameterized by shape :attr:`concentration` and :attr:`rate`.
 
     Example::
 

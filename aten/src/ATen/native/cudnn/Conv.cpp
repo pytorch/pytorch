@@ -424,7 +424,7 @@ size_t getMaxWorkspaceSize(
     size_t total_gpu_mem = 0;
     size_t free_gpu_mem = 0;
 
-    THCudaCheck(THCudaMemGetInfoCached(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
+    THCudaCheck(THCudaMemGetInfo(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
 
     for (int i = 0; i < n_algo; i++) {
         cudnnStatus_t err;

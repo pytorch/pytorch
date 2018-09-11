@@ -1,12 +1,13 @@
 #include "ATen/Formatting.h"
-#include "ATen/Tensor.h"
-#include "ATen/Context.h"
-#include "ATen/TensorMethods.h"
+
+#include <ATen/ATen.h>
 
 #include <cmath>
-#include <iostream>
+#include <cstdint>
 #include <iomanip>
-
+#include <iostream>
+#include <sstream>
+#include <tuple>
 
 namespace at {
 
@@ -59,7 +60,7 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
   for(int64_t i = 0; i < size; i++) {
     auto z = self_p[i];
     if(std::isfinite(z)) {
-      if(z != ceil(z)) {
+      if(z != std::ceil(z)) {
         intMode = false;
         break;
       }
@@ -92,12 +93,12 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
       }
     }
     if(expMin != 0) {
-      expMin = floor(log10(expMin)) + 1;
+      expMin = std::floor(std::log10(expMin)) + 1;
     } else {
       expMin = 1;
     }
     if(expMax != 0) {
-      expMax = floor(log10(expMax)) + 1;
+      expMax = std::floor(std::log10(expMax)) + 1;
     } else {
       expMax = 1;
     }
@@ -115,14 +116,14 @@ static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Ten
   } else {
     if(expMax-expMin > 4) {
       sz = 11;
-      if(fabs(expMax) > 99 || fabs(expMin) > 99) {
+      if(std::fabs(expMax) > 99 || std::fabs(expMin) > 99) {
         sz = sz + 1;
       }
       stream << std::scientific << std::setprecision(4);
     } else {
       if(expMax > 5 || expMax < 0) {
         sz = 7;
-        scale = pow(10, expMax-1);
+        scale = std::pow(10, expMax-1);
         stream << std::fixed << std::setprecision(4);
       } else {
         if(expMax == 0) {
@@ -244,7 +245,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   if(!tensor_.defined()) {
     stream << "[ Tensor (undefined) ]";
   } else if (tensor_.is_sparse()) {
-    stream << "[ " << tensor_.pImpl->toString() << "{}\n";
+    stream << "[ " << tensor_.toString() << "{}\n";
     stream << "indices:\n" << tensor_._indices() << "\n";
     stream << "values:\n" << tensor_._values() << "\n";
     stream << "size:\n" << tensor_.sizes() << "\n";
@@ -254,7 +255,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     Tensor tensor = tensor_.toType(cpudouble).contiguous();
     if(tensor.ndimension() == 0) {
       stream << defaultfloat << tensor.data<double>()[0] << std::endl;
-      stream << "[ " << tensor_.pImpl->toString() << "{} ]";
+      stream << "[ " << tensor_.toString() << "{} ]";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
         double scale;
@@ -268,17 +269,17 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }
       }
-      stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "} ]";
+      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "} ]";
     } else if(tensor.ndimension() == 2) {
       if (tensor.numel() > 0) {
         __printMatrix(stream, tensor, linesize, 0);
       }
-      stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "} ]";
+      stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "} ]";
     } else {
       if (tensor.numel() > 0) {
         __printTensor(stream, tensor, linesize);
       }
-      stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0);
+      stream << "[ " << tensor_.toString() << "{" << tensor.size(0);
       for(int64_t i = 1; i < tensor.ndimension(); i++) {
         stream << "," << tensor.size(i);
       }

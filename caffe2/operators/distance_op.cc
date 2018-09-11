@@ -437,22 +437,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = 5*np.ones((1, 4))
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.ones((1, 4))
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```
@@ -645,22 +645,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = np.random.randn(3, 3)
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.random.randn(3, 3)
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```

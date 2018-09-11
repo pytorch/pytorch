@@ -1,3 +1,5 @@
+#include "caffe2/core/common.h"
+
 class CAFFE2_API OnnxAnnotation : public nom::repr::Annotation {
 public:
   OnnxAnnotation() : Annotation(AnnotationKind::Onnx) {}

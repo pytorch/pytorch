@@ -4,7 +4,7 @@
 
 #include "THCHalf.h"
 
-#define real half
+#define scalar_t half
 #define accreal float
 #define Real Half
 
@@ -13,7 +13,7 @@
 #define THC_REAL_IS_HALF
 #line 1 THC_GENERIC_FILE
 #include THC_GENERIC_FILE
-#undef real
+#undef scalar_t
 #undef accreal
 #undef Real
 

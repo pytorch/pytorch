@@ -266,6 +266,14 @@ class TestCppExtension(common.TestCase):
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
 
+    def test_complex_registration(self):
+        module = torch.utils.cpp_extension.load(
+            name='complex_registration_extension',
+            sources='cpp_extensions/complex_registration_extension.cpp',
+            verbose=True)
+
+        torch.empty(2, 2, dtype=torch.complex64)
+
 
 if __name__ == '__main__':
     common.run_tests()

@@ -593,7 +593,19 @@ def adaptive_avg_pool3d(input, output_size):
 
 
 # Activation functions
-def dropout(input, p=0.5, training=False, inplace=False):
+def dropout(input, p=0.5, training=True, inplace=False):
+    r"""
+    During training, randomly zeroes some of the elements of the input
+    tensor with probability :attr:`p` using samples from a Bernoulli
+    distribution.
+
+    See :class:`~torch.nn.Dropout` for details.
+
+    Args:
+        p: probability of an element to be zeroed. Default: 0.5
+        training: apply dropout if is ``True``. Defualt: ``True``
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+    """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -613,7 +625,21 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
     return f(input, p, training)
 
 
-def dropout2d(input, p=0.5, training=False, inplace=False):
+def dropout2d(input, p=0.5, training=True, inplace=False):
+    r"""
+    Randomly zero out entire channels (a channel is a 2D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 2D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    Each channel will be zeroed out independently on every forward call.
+    with probability :attr:`p` using samples from a Bernoulli distribution.
+
+    See :class:`~torch.nn.Dropout2d` for details.
+
+    Args:
+        p: probability of a channel to be zeroed. Default: 0.5
+        training: apply dropout if is ``True``. Defualt: ``True``
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+    """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -621,7 +647,21 @@ def dropout2d(input, p=0.5, training=False, inplace=False):
     return f(input, p, training)
 
 
-def dropout3d(input, p=0.5, training=False, inplace=False):
+def dropout3d(input, p=0.5, training=True, inplace=False):
+    r"""
+    Randomly zero out entire channels (a channel is a 3D feature map,
+    e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
+    batched input is a 3D tensor :math:`\text{input}[i, j]`) of the input tensor).
+    Each channel will be zeroed out independently on every forward call.
+    with probability :attr:`p` using samples from a Bernoulli distribution.
+
+    See :class:`~torch.nn.Dropout3d` for details.
+
+    Args:
+        p: probability of a channel to be zeroed. Default: 0.5
+        training: apply dropout if is ``True``. Defualt: ``True``
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+    """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -1576,7 +1616,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='elementwise
         reduction = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.kl_div(input, target, reduction)
+    return torch.kl_div(input, target, reduction)
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
@@ -2297,6 +2337,30 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
     See :class:`torch.nn.PairwiseDistance` for details
     """
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
+
+
+pdist = _add_docstr(torch.pdist, r"""
+pdist(input, p=2) -> Tensor
+
+Computes the p-norm distance between every pair of row vectors in the input.
+This is identical to the upper triangular portion, excluding the diagonal, of
+`torch.norm(input[:, None] - input, dim=2, p=p)`. This function will be faster
+if the rows are contiguous.
+
+If input has shape :math:`N \times M` then the output will have shape
+:math:`\frac{1}{2} N (N - 1)`.
+
+This function is equivalent to `scipy.spatial.distance.pdist(input,
+'minkowski', p=p)` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
+equivalent to `scipy.spatial.distance.pdist(input, 'hamming') * M`.
+When :math:`p = \infty`, the closest scipy function is
+`scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())`.
+
+Args:
+    input: input tensor of shape :math:`N \times M`.
+    p: p value for the p-norm distance to calculate between each vector pair
+        :math:`\in [0, \infty]`.
+""")
 
 
 def cosine_similarity(x1, x2, dim=1, eps=1e-8):

@@ -10,7 +10,7 @@ from torch.distributions.utils import broadcast_all
 
 class StudentT(Distribution):
     r"""
-    Creates a Student's t-distribution parameterized by `df`.
+    Creates a Student's t-distribution parameterized by :attr:`df`.
 
     Example::
 

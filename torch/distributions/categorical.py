@@ -14,7 +14,7 @@ class Categorical(Distribution):
         It is equivalent to the distribution that :func:`torch.multinomial`
         samples from.
 
-    Samples are integers from `0 ... K-1` where `K` is probs.size(-1).
+    Samples are integers from :math:`\{0, \ldots, K-1\}` where `K` is ``probs.size(-1)``.
 
     If :attr:`probs` is 1D with length-`K`, each element is the relative
     probability of sampling the class at that index.
@@ -37,7 +37,8 @@ class Categorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities
     """
-    arg_constraints = {'probs': constraints.simplex}
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real}
     has_enumerate_support = True
 
     def __init__(self, probs=None, logits=None, validate_args=None):
@@ -93,21 +94,21 @@ class Categorical(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        value_shape = torch._C._infer_size(value.size(), self.batch_shape) if self.batch_shape else value.size()
-        param_shape = value_shape + (self._num_events,)
-        value = value.expand(value_shape)
-        log_pmf = self.logits.expand(param_shape)
-        return log_pmf.gather(-1, value.unsqueeze(-1).long()).squeeze(-1)
+        value = value.long().unsqueeze(-1)
+        value, log_pmf = torch.broadcast_tensors(value, self.logits)
+        value = value[..., :1]
+        return log_pmf.gather(-1, value).squeeze(-1)
 
     def entropy(self):
         p_log_p = self.logits * self.probs
         return -p_log_p.sum(-1)
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         num_events = self._num_events
         values = torch.arange(num_events).long()
         values = values.view((-1,) + (1,) * len(self._batch_shape))
-        values = values.expand((-1,) + self._batch_shape)
+        if expand:
+            values = values.expand((-1,) + self._batch_shape)
         if self._param.is_cuda:
             values = values.cuda(self._param.get_device())
         return values

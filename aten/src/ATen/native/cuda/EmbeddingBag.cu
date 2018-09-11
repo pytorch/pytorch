@@ -175,15 +175,15 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   Tensor &bag_size = const_cast<Tensor &>(bag_size_);
 
-  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.type());
+  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   ptrdiff_t numel = indices.numel();
   int64_t stride = grad_weight.stride(0);
 
-  auto sorted_indices = indices.type().tensor(indices.sizes());
-  auto orig_indices = indices.type().tensor(indices.sizes());
+  auto sorted_indices = at::empty_like(indices);
+  auto orig_indices = at::empty_like(indices);
   using device_ptr = thrust::device_ptr<int64_t>;
 
   // Sort the inputs into sorted with the corresponding indices; we
@@ -208,7 +208,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   Tensor count;
   if (scale_grad_by_freq) {
-    count = indices.type().tensor(indices.sizes());
+    count = at::empty_like(indices);
 
     auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     auto policy = thrust::cuda::par(allocator).on(stream);
@@ -278,7 +278,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
                                    const Tensor &max_indices,
                                    int64_t num_weights) {
 
-  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.type());
+  auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.options());
 
   int64_t stride = grad_weight.stride(0);
 

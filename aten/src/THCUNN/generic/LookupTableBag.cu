@@ -38,7 +38,7 @@ void THNN_(LookupTableBag_updateOutput)(
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
-  cunn_LookupTableBag_updateOutputKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTableBag_updateOutputKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     THCIndexTensor_(data)(state, input),
     THCIndexTensor_(data)(state, offsets),
     THCTensor_(data)(state, weight),
@@ -69,7 +69,7 @@ void THNN_(LookupTableBag_accGradParameters)(
 	   THCIndexTensor *bag_size,
            accreal scale_)
 {
-  real scale = ScalarConvert<accreal, real>::to(scale_);
+  scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 6, input, gradOutput, gradWeight, offset2bag, sortedIndices, origIndices);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   if (!(THCIndexTensor_(isContiguous)(state, input) &&
@@ -172,7 +172,7 @@ void THNN_(LookupTableBag_accGradParameters)(
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
-  cunn_LookupTableBag_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
+  cunn_LookupTableBag_accGradParametersKernel<scalar_t, accreal><<<grid, block, 0, stream>>>(
     sortedIndices_data,
     origIndices_data,
     THCTensor_(data)(state, gradOutput),

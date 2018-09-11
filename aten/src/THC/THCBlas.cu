@@ -285,6 +285,13 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
       cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
       cublasSetStream(handle, THCState_getCurrentStream(state));
 
+#ifdef __HIP_PLATFORM_HCC__
+      THCublasCheck(rocblas_hgemm(handle, opa, opb, i_m, i_n, i_k,
+                    reinterpret_cast<rocblas_half*>(&alpha), reinterpret_cast<rocblas_half*>(a), i_lda,
+                    reinterpret_cast<rocblas_half*>(b), i_ldb, reinterpret_cast<rocblas_half*>(&beta),
+                    reinterpret_cast<rocblas_half*>(c), i_ldc));
+#else
+
       // Simulated Hgemm
       float fAlpha = THC_half2float(alpha);
       float fBeta = THC_half2float(beta);
@@ -314,6 +321,7 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
                                     a, CUDA_R_16F, i_lda, b, CUDA_R_16F,
                                     i_ldb, &fBeta, c, CUDA_R_16F, i_ldc));
       }
+#endif
 #endif
       return;
     }

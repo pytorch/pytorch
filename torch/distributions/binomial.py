@@ -7,9 +7,9 @@ from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_prope
 
 class Binomial(Distribution):
     r"""
-    Creates a Binomial distribution parameterized by `total_count` and
-    either `probs` or `logits` (but not both). `total_count` must be
-    broadcastable with `probs`/`logits`.
+    Creates a Binomial distribution parameterized by :attr:`total_count` and
+    either :attr:`probs` or :attr:`logits` (but not both). :attr:`total_count` must be
+    broadcastable with :attr:`probs`/:attr:`logits`.
 
     Example::
 
@@ -28,7 +28,8 @@ class Binomial(Distribution):
         logits (Tensor): Event log-odds
     """
     arg_constraints = {'total_count': constraints.nonnegative_integer,
-                       'probs': constraints.unit_interval}
+                       'probs': constraints.unit_interval,
+                       'logits': constraints.real}
     has_enumerate_support = True
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
@@ -100,12 +101,13 @@ class Binomial(Distribution):
                 value * self.logits + self.total_count * max_val -
                 self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
             raise NotImplementedError("Inhomogeneous total count not supported by `enumerate_support`.")
         values = self._new(1 + total_count,)
         torch.arange(1 + total_count, out=values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
-        values = values.expand((-1,) + self._batch_shape)
+        if expand:
+            values = values.expand((-1,) + self._batch_shape)
         return values

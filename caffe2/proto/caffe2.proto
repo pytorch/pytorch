@@ -111,17 +111,17 @@ message Argument {
 // Note: if you add a device type, make sure you add the corresponding device
 // line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
 // and update ATen/core/DeviceType.h
-enum DeviceType {
-  CPU = 0;                    // In default, we will use CPU.
-  CUDA = 1;                   // CUDA.
-  MKLDNN = 2;                 // Reserved for explicit MKLDNN
-  OPENGL = 3;                 // OpenGL
-  OPENCL = 4;                 // OpenCL
-  IDEEP = 5;                  // IDEEP.
-  HIP = 6;                    // AMD HIP
+enum DeviceTypeProto {
+  PROTO_CPU = 0;                    // In default, we will use CPU.
+  PROTO_CUDA = 1;                   // CUDA.
+  PROTO_MKLDNN = 2;                 // Reserved for explicit MKLDNN
+  PROTO_OPENGL = 3;                 // OpenGL
+  PROTO_OPENCL = 4;                 // OpenCL
+  PROTO_IDEEP = 5;                  // IDEEP.
+  PROTO_HIP = 6;                    // AMD HIP
   // Change the following number if you add more devices in the code.
-  COMPILE_TIME_MAX_DEVICE_TYPES = 7;
-  ONLY_FOR_TEST = 20901701;   // This device type is only for test.
+  PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 7;
+  PROTO_ONLY_FOR_TEST = 20901701;   // This device type is only for test.
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for
@@ -142,7 +142,7 @@ message DeviceOption {
   // Used for net transformation purposes. Must be empty at execution time.
   optional string node_name = 4;
   // [CPU and Linux specific] NUMA node id
-  optional int32 numa_node_id = 5 [default = -1];
+  optional int32 numa_node_id = 5;
   // [general] Extra information passed, not used at execution time currently.
   repeated string extra_info = 6;
   // [HIP specific] the hip gpu id.

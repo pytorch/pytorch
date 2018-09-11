@@ -27,15 +27,15 @@ void THNN_(Sqrt_updateGradInput)(
       !THTensor_(isContiguous)(gradOutput) ||
       !THTensor_(isContiguous)(gradInput))
   {
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, output,
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, output,
       *gradInput_data = (*output_data == 0.0) ? 0.0 : (0.5 * (*gradOutput_data / *output_data));
     );
   }
   else
   {
-    real *gradOutput_data = THTensor_(data)(gradOutput);
-    real *gradInput_data  = THTensor_(data)(gradInput);
-    real *output_data     = THTensor_(data)(output);
+    scalar_t *gradOutput_data = gradOutput->data<scalar_t>();
+    scalar_t *gradInput_data  = gradInput->data<scalar_t>();
+    scalar_t *output_data     = output->data<scalar_t>();
     int64_t i;
 #pragma omp parallel for private(i)
     for(i = 0; i < THTensor_(nElement)(output); i++)

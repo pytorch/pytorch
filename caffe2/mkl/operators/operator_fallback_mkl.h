@@ -5,7 +5,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/mkl/mkl_utils.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 #ifdef CAFFE2_HAS_MKL_DNN
 namespace caffe2 {
@@ -44,12 +44,12 @@ class MKLFallbackOp final : public Operator<MKLContext> {
   USE_OPERATOR_FUNCTIONS(MKLContext);
   MKLFallbackOp(const OperatorDef& def, Workspace* ws)
       : Operator<MKLContext>(def, ws) {
-    CAFFE_ENFORCE_EQ(def.device_option().device_type(), MKLDNN);
+    CAFFE_ENFORCE_EQ(def.device_option().device_type(), PROTO_MKLDNN);
     OperatorDef base_def_(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
     // Copy to allow random_seed to be correctly propagated.
     base_def_.mutable_device_option()->CopyFrom(def.device_option());
-    base_def_.mutable_device_option()->set_device_type(CPU);
+    base_def_.mutable_device_option()->set_device_type(PROTO_CPU);
     // Set up the symbols for the local workspace.
     for (const string& name : def.input()) {
       local_input_blobs_.push_back(local_ws_.CreateBlob(name));

@@ -191,7 +191,7 @@ void broadcast(TensorList tensors, const stream_list& streams, const comm_list& 
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
     device_guard.set_index(tensors[i].get_device());
     // TODO: use current stream
-    const auto stream = (streams.empty() || !streams[i]) ? NULL : THCStream_stream(streams[i]);
+    const auto stream = (streams.empty() || !streams[i]) ? nullptr : THCStream_stream(streams[i]);
     CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
   }
 #else

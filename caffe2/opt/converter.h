@@ -3,7 +3,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/ControlFlow.h"
 #include "nomnigraph/Representations/NeuralNet.h"
@@ -12,7 +12,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API Caffe2Annotation : public nom::repr::Annotation {
+class Caffe2Annotation : public nom::repr::Annotation {
 public:
   Caffe2Annotation() : Annotation(AnnotationKind::Caffe2) {}
   Caffe2Annotation(std::string device)
@@ -54,7 +54,7 @@ private:
   std::string Device = "";
   caffe2::OperatorDef OpDef;
   bool OpDefExists = false;
-  int DeviceType = caffe2::DeviceType::CPU;
+  int DeviceType = caffe2::DeviceTypeProto::PROTO_CPU;
 };
 
 CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
@@ -75,7 +75,7 @@ CAFFE2_API caffe2::OperatorDef convertToOperatorDef(
 
 class CAFFE2_API Converter {
  public:
-  explicit Converter() {}
+  explicit Converter() = default;
   virtual std::unique_ptr<nom::repr::NeuralNetOperator>
   convertToNeuralNetOperator(const OperatorDef&) = 0;
   virtual OperatorDef convertToOperatorDef(const nom::repr::NeuralNetOperator*);

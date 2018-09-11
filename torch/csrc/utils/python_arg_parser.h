@@ -55,6 +55,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/autograd/variable.h"
 
 #include <ATen/ATen.h>
 
@@ -120,7 +121,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
-  inline std::unique_ptr<at::Storage> storage(int i);
+  inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
   inline at::optional<at::ScalarType> scalartypeOptional(int i);
@@ -210,8 +211,8 @@ inline at::Tensor PythonArgs::tensor(int i) {
       throw TypeError("expected Tensor as argument %d, but got %s", i,
           Py_TYPE(obj)->tp_name);
     }
-    auto tensor = scalar.toTensor();
-    tensor.get()->set_wrapped_number(true);
+    auto tensor = scalar_to_tensor(scalar);
+    tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
     return autograd::make_variable(tensor);
   }
   return reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -226,7 +227,7 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(args[i])) {
-    return at::Scalar(((THPVariable*)args[i])->cdata);
+    return at::_local_scalar(((THPVariable*)args[i])->cdata);
   }
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
@@ -428,7 +429,7 @@ inline at::Generator* PythonArgs::generator(int i) {
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
-inline std::unique_ptr<at::Storage> PythonArgs::storage(int i) {
+inline at::Storage PythonArgs::storage(int i) {
   if (!args[i]) return nullptr;
   return createStorage(args[i]);
 }

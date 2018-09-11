@@ -64,6 +64,15 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
+# sccache will fail for CUDA builds if all cores are used for compiling
+if [ -z "$MAX_JOBS" ]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
+    MAX_JOBS=`expr $(nproc) - 1`
+  else
+    MAX_JOBS=$(nproc)
+  fi
+fi
+
 report_compile_cache_stats() {
   if [[ -n "${SCCACHE}" ]]; then
     "$SCCACHE" --show-stats
@@ -106,10 +115,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   # docker image
   PROTOBUF_INCDIR=/opt/conda/include pip install -b /tmp/pip_install_onnx "file://${ROOT_DIR}/third_party/onnx#egg=onnx"
   report_compile_cache_stats
-  exit 0
-elif [[ $BUILD_ENVIRONMENT == *setup* ]]; then
-  rm -rf $INSTALL_PREFIX && mkdir $INSTALL_PREFIX
-  PYTHONPATH=$INSTALL_PREFIX $PYTHON setup_caffe2.py develop --install-dir $INSTALL_PREFIX
   exit 0
 fi
 
@@ -156,6 +161,11 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   export LC_ALL=C.UTF-8
   export HCC_AMDGPU_TARGET=gfx900
 
+  # The link time of libcaffe2_hip.so takes 40 minutes, according to
+  # https://github.com/RadeonOpenCompute/hcc#thinlto-phase-1---implemented
+  # using using ThinLTO could significantly improve link-time performance.
+  export KMTHINLTO=1
+
   ########## HIPIFY Caffe2 operators
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_pytorch_amd.py"
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
@@ -183,13 +193,6 @@ if [[ -x "$(command -v cmake3)" ]]; then
 else
     CMAKE_BINARY=cmake
 fi
-# sccache will fail for CUDA builds if all cores are used for compiling
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
-  MAX_JOBS=`expr $(nproc) - 1`
-else
-  MAX_JOBS=$(nproc)
-fi
-
 
 ###############################################################################
 # Configure and make
@@ -217,13 +220,21 @@ if [[ -z "$INTEGRATED" ]]; then
 
 else
 
-  FULL_CAFFE2=1 python setup.py install --user
-  # TODO: I'm not sure why this is necessary
+  # sccache will be stuck if  all cores are used for compiling
+  # see https://github.com/pytorch/pytorch/pull/7361
+  if [[ -n "${SCCACHE}" ]]; then
+    export MAX_JOBS=`expr $(nproc) - 1`
+  fi
+
+  USE_OPENCV=1 BUILD_BINARY=1 python setup.py install --user
+
+  # This is to save test binaries for testing
   cp -r torch/lib/tmp_install $INSTALL_PREFIX
 
-fi
+  ls $INSTALL_PREFIX
 
-report_compile_cache_stats
+  report_compile_cache_stats
+fi
 
 
 ###############################################################################

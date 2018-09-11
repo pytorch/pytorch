@@ -8,7 +8,7 @@ from torch.distributions.utils import broadcast_all
 
 class Poisson(ExponentialFamily):
     r"""
-    Creates a Poisson distribution parameterized by `rate`, the rate parameter.
+    Creates a Poisson distribution parameterized by :attr:`rate`, the rate parameter.
 
     Samples are nonnegative integers, with a pmf given by
 

@@ -10,7 +10,7 @@ from torch.distributions.utils import broadcast_all, _finfo
 
 class FisherSnedecor(Distribution):
     r"""
-    Creates a Fisher-Snedecor distribution parameterized by `df1` and `df2`.
+    Creates a Fisher-Snedecor distribution parameterized by :attr:`df1` and :attr:`df2`.
 
     Example::
 

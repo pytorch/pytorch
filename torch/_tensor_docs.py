@@ -315,6 +315,13 @@ Example::
 
 """)
 
+add_docstr_all('allclose',
+               r"""
+allclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
+
+See :func:`torch.allclose`
+""")
+
 add_docstr_all('any',
                r"""
 .. function:: any() -> bool
@@ -648,6 +655,20 @@ add_docstr_all('diagonal',
 diagonal(offset=0, dim1=0, dim2=1) -> Tensor
 
 See :func:`torch.diagonal`
+""")
+
+add_docstr_all('digamma',
+               r"""
+digamma() -> Tensor
+
+See :func:`torch.digamma`
+""")
+
+add_docstr_all('digamma_',
+               r"""
+digamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.digamma`
 """)
 
 add_docstr_all('dim',
@@ -1294,6 +1315,13 @@ add_docstr_all('masked_select',
 masked_select(mask) -> Tensor
 
 See :func:`torch.masked_select`
+""")
+
+add_docstr_all('matrix_power',
+               r"""
+matrix_power(n) -> Tensor
+
+See :func:`torch.matrix_power`
 """)
 
 add_docstr_all('max',

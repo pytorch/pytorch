@@ -64,8 +64,6 @@ REGISTER_CUDA_OPERATOR(GaussianFill, GaussianFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(XavierFill, XavierFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(MSRAFill, MSRAFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(RangeFill, RangeFillOp<float, CUDAContext>);
-REGISTER_CUDA_OPERATOR(
-    LengthsRangeFill,
-    GPUFallbackOp<LengthsRangeFillOp<CPUContext>>);
+REGISTER_CUDA_OPERATOR(LengthsRangeFill, GPUFallbackOp);
 
 } // namespace caffe2

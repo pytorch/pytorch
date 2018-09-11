@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/native/LinearAlgebraUtils.h"
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -105,16 +106,47 @@ Tensor pinverse(const Tensor& self, double rcond) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
-  AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
   if (self.numel() == 0) {
     // Match NumPy
     return self.type().tensor({self.size(1), self.size(0)});
   }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
-  double max_val = S[0].toCDouble();
+  Tensor max_val = S[0];
   Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
   return V.mm(S_pseudoinv.diag().mm(U.t()));
+}
+
+static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
+  Tensor S;
+  if (!symmetric) {
+    Tensor U, V;
+    std::tie(U, S, V) = self.svd();
+  } else {
+    Tensor eigvecs;
+    std::tie(S, eigvecs) = self.symeig();
+    S = S.abs();
+  }
+  return S;
+}
+
+Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+           "of floating types");
+
+  Tensor S = _matrix_rank_helper(self, symmetric);
+  return (S > tol).sum();
+}
+
+Tensor matrix_rank(const Tensor& self, bool symmetric) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+           "of floating types");
+
+  Tensor S = _matrix_rank_helper(self, symmetric);
+  double tol = _get_epsilon(self.type().scalarType()) * std::max(self.size(0), self.size(1));
+  return (S > S.max().mul_(tol)).sum();
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
@@ -164,7 +196,7 @@ Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar be
 
 Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
   check_1d(vec, "vec", "addmv");
-  return self._addmv_(mat, vec, beta, alpha);
+  return at::_addmv_(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
@@ -181,7 +213,7 @@ Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar b
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return self._addr_(vec1, vec2, beta, alpha);
+  return at::_addr_(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
@@ -193,7 +225,7 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
 Tensor dot(const Tensor& self, const Tensor& tensor) {
   check_1d(self, "self", "dot");
   check_1d(tensor, "tensor", "dot");
-  return self._dot(tensor);
+  return at::_dot(self, tensor);
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
@@ -315,5 +347,44 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+Tensor matrix_power(const Tensor& a, int64_t n) {
+  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.type().scalarType()),
+           "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
+           "of floating types with dim at least 2");
+  if (n == 0) {
+    return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
+  } else if (n < 0) {
+    AT_CHECK(a.dim() == 2, "Negative powers for batch matrices are currently not supported");
+    Tensor a_ = at::inverse(a);
+    n *= -1;
+    return at::native::matrix_power(a_, n);
+  } else if (n == 1) {
+    return a.clone();
+  } else if (n == 2) {
+    return at::native::matmul(a, a);
+  } else if (n == 3) {
+    return at::native::matmul(at::native::matmul(a, a), a);
+  }
+
+  // This is a binary decomposition of n.
+  // Moving from the least significant bit to the most significant bit
+  // This is done to reduce the number of matrix multiplications
+  // by raising the input matrix in powers of 2
+  // The total number of matrix multiplications are
+  // number of bits + number of bits that equal 1 ~ O(log n)
+  // instead of O(n)
+  Tensor result, z;
+  int64_t r;
+  while (n > 0) {
+    z = (!z.defined()) ? a.clone() : at::native::matmul(z, z);
+    r = n % 2;
+    n = n / 2;
+    if (r == 1) {
+      result = (!result.defined()) ? z.clone() : at::native::matmul(result, z);
+    }
+  }
+  return result;
 }
-}
+
+} // namespace native
+} // namespace at
