@@ -1391,8 +1391,8 @@ struct PythonOp : public Node {
   // TraceInterpreterState for execution semantics.
   THPObjectPtr pyobj;
   // The calling convention for the Python function.
-  // 's' -- python scalar argument
-  // 't' -- tensor argument
+  // 'c' -- constant argument
+  // 'd' -- dynamic argument
   std::string cconv;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.

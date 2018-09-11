@@ -998,7 +998,7 @@ _compiled_methods_whitelist = {
     '_named_members', 'parameters', 'named_parameters',
     'buffers', 'named_buffers', 'children', 'named_children', 'modules',
     'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr',
-    '_slow_forward', '_tracing_name'
+    '_slow_forward', '_tracing_name', 'eval', 'train',
 }
 
 
