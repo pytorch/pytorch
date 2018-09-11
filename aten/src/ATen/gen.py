@@ -166,7 +166,7 @@ top_env = {
     'cuda_type_registrations': [],
     'cuda_type_headers': [],
     'pure_virtual_type_method_declarations': [],
-    'pure_virtual_internal_type_method_declarations': [],
+    'pure_virtual_extended_type_method_declarations': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'type_method_inline_definitions': [],
