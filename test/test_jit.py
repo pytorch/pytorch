@@ -3742,19 +3742,25 @@ a")
         template = dedent('''
         # int, int -> int
         def func1():
-            return 8 {op} 2
+            return 7 {op} 2
 
         def func2():
-            return 2 {op} 2
+            return 3 {op} 2
+
+        def func3():
+            return -1 {op} 2
 
         # float, float -> float
-        def func3():
+        def func4():
             return 3.14 {op} 0.125
 
-        def func4():
+        def func5():
             return 3.14 {op} 3.14
+
+        def func6():
+            return -0.5 {op} 2.0
         ''')
-        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
 
         for op in ops:
             code = template.format(op=op)
@@ -3766,6 +3772,8 @@ a")
             self.assertEqual(cu.func2(), scope['func2']())
             self.assertEqual(cu.func3(), scope['func3']())
             self.assertEqual(cu.func4(), scope['func4']())
+            self.assertEqual(cu.func5(), scope['func5']())
+            self.assertEqual(cu.func6(), scope['func6']())
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -3820,7 +3828,7 @@ a")
         var_int = 2
         var_float = 1.4321
 
-        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
         # TODO: turn this on for py3 (and add PY3 division semantics)
         ops_py2_only = ['/']
         if PY2:
@@ -3838,6 +3846,10 @@ a")
             # FIXME: things like 2 / long_tensor are not implemented correctly
             # Look in torch/tensor.py to see how pytorch implements it.
             if op == '/' and tensor.data_ptr() == long_tensor.data_ptr():
+                continue
+
+            # % operator does not take const % tensor
+            if op == '%' and swap_args is True:
                 continue
 
             test(op, const, swap_args)
