@@ -16,14 +16,14 @@ Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking
   if (self.device() == device && self.dtype() == dtype) {
     return self;
   }
-  return self.to(self.options().device(device).dtype(dtype), non_blocking);
+  return self.type().toScalarType(dtype).copy(self, non_blocking, device);
 }
 
 Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking) {
   if (self.dtype() == dtype) {
     return self;
   }
-  return self.to(self.options().dtype(dtype), non_blocking);
+  return self.type().toScalarType(dtype).copy(self, non_blocking, self.device());
 }
 
 Tensor to(const Tensor& self, Device device, bool non_blocking) {
@@ -31,11 +31,17 @@ Tensor to(const Tensor& self, Device device, bool non_blocking) {
   if (self.device() == device) {
     return self;
   }
-  return self.to(self.options().device(device), non_blocking);
+  return self.type().copy(self, non_blocking, device);
 }
 
 Tensor to(const Tensor& self, const Tensor& other, bool non_blocking) {
-  return self.to(other.options());
+  auto self_options = self.options();
+  auto options = other.options();
+  if (self_options == options) {
+    return self;
+  }
+  return self.type().toBackend(options.backend()).toScalarType(options.dtype())
+                    .copy(self, non_blocking, options.device());
 }
 
 }} // namespace at::native

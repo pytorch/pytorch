@@ -43,20 +43,6 @@ inline TensorOptions Tensor::options() const {
                         .is_variable(is_variable());
 }
 
-inline Tensor Tensor::to(
-    const TensorOptions& options,
-    bool non_blocking) const {
-  // Don't copy if the options match.
-  if (this->options() == options) {
-    return *this;
-  }
-  AT_CHECK(is_variable() == options.is_variable(),
-           "cannot change is_variable, from: ", is_variable(),
-           " to: ", options.is_variable());
-  return type().toBackend(options.backend()).toScalarType(options.dtype())
-               .copy(*this, non_blocking, options.device());
-}
-
 inline void Tensor::backward(
     at::optional<Tensor> gradient,
     bool keep_graph,

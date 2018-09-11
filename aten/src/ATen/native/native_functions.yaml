@@ -2036,6 +2036,7 @@
 
 - func: to(Tensor self, ScalarType dtype, bool non_blocking=false) -> Tensor
   variants: method
+  device_guard: false
 
 - func: to(Tensor self, Device device, bool non_blocking=false) -> Tensor
   variants: method

@@ -154,8 +154,6 @@ struct AT_API Tensor {
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
-  Tensor to(const TensorOptions& options, bool non_blocking = false) const;
-
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
   /// Defined in Type.h because of include order issues.
   bool is_variable() const noexcept;
