@@ -122,16 +122,25 @@ class LegacyTracedModule(Module):
         # us avoid a special casing functions versus modules.
         self.inner = inner
 
+    def _flatten(self, args):
+        if isinstance(args, (list, tuple)):
+            return [e for a in args for e in self._flatten(a)]
+        elif isinstance(args, dict):
+            return [e for v in args.values() for e in self._flatten(v)]
+        elif isinstance(args, Tensor):
+            return (args, )
+        else:
+            raise ValueError()
+
     def forward(self, *args):
-        in_vars, in_desc = _flatten(args)
+        in_vars = self._flatten(args)
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
         try:
-            trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
-            out = self.inner(*trace_inputs)
-            out_vars, _ = _flatten(out)
+            out = self.inner(*args)
+            out_vars = self._flatten(out)
             torch._C._tracer_exit(tuple(out_vars))
         except Exception:
             torch._C._tracer_abandon()
