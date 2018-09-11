@@ -250,6 +250,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
   AT_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
+  torch::utils::cuda_lazy_init();
   return THPVariable_Wrap(self_.to(device, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
@@ -487,6 +488,9 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (device && device->is_cuda()) {
+    torch::utils::cuda_lazy_init();
+  }
   if (!device && !scalarType) {
     Py_INCREF(self);
     return self;
