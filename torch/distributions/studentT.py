@@ -45,6 +45,17 @@ class StudentT(Distribution):
         batch_shape = torch.Size() if isinstance(df, Number) else self.df.size()
         super(StudentT, self).__init__(batch_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(StudentT, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.df = self.df.expand(batch_shape)
+        new.loc = self.loc.expand(batch_shape)
+        new.scale = self.scale.expand(batch_shape)
+        new._chi2 = self._chi2.expand(batch_shape)
+        super(StudentT, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def rsample(self, sample_shape=torch.Size()):
         # NOTE: This does not agree with scipy implementation as much as other distributions.
         # (see https://github.com/fritzo/notebooks/blob/master/debug-student-t.ipynb). Using DoubleTensor

@@ -12,7 +12,7 @@ from functools import reduce, wraps
 
 import torch
 import torch.cuda
-import torch.distributed.c10d as dist
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -1149,7 +1149,7 @@ class _DistTestBase(object):
         # DDP training setup
         model_DDP = copy.deepcopy(model)
         model_DDP.cuda(gpu_subset[0])
-        model_DDP = nn.parallel._DistributedDataParallelC10d(
+        model_DDP = nn.parallel.DistributedDataParallel(
             model_DDP, device_ids=gpu_subset
         )
 
@@ -1183,7 +1183,7 @@ class _DistTestBase(object):
 
         # DDP-CPU training setup
         model_DDP = copy.deepcopy(model_base)
-        model_DDP = nn.parallel._DistributedDataParallelC10dCPU(model_DDP)
+        model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
 
         # dummy data initialization
         local_bs = 2

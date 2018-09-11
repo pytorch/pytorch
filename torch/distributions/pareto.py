@@ -1,7 +1,3 @@
-from numbers import Number
-
-import math
-
 import torch
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
@@ -31,6 +27,13 @@ class Pareto(TransformedDistribution):
         base_dist = Exponential(self.alpha)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
         super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Pareto, _instance)
+        base_dist = self.base_dist.expand(batch_shape)
+        super(Pareto, new).__init__(base_dist, self.transforms, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @property
     def mean(self):

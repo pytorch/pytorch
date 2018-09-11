@@ -187,7 +187,7 @@ if(${check_name}.type().is_sparse()) {
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
-auto ${name}_ = c10::make_intrusive<TensorImpl, UndefinedTensor>(
+auto ${name}_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
     ${Backend}TensorId(), ScalarType::${ScalarName}, ${THTensor}_new(), false).release();
 auto ${name} = Tensor(${name}_, false);""")
 
@@ -330,17 +330,17 @@ CHECKED_USE = {
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
-    'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+    'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                  '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), false).release()',
-    'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+    'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                      '(${Backend}TensorId(), ScalarType::Byte, allocator(), false).release()',
-    'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+    'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                       '(${Backend}TensorId(), ScalarType::Long, allocator(), false).release()',
-    'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+    'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                         '(${Backend}TensorId(), ScalarType::Int, allocator(), false).release()',
-    'THDenseTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+    'THDenseTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                       '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), false).release()',
-    'THDenseIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensor>'
+    'THDenseIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                            '(${Backend}TensorId(), ScalarType::Long, allocator(), false).release()'
 }
 
@@ -1295,11 +1295,12 @@ def create_derived(backend_type_env, declarations):
         tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
-            tensor_arg = ('{}_ == nullptr ? (TensorImpl*)UndefinedTensor::singleton() : (TensorImpl*){}_'
+            tensor_arg = ('{}_ == nullptr ? (TensorImpl*)UndefinedTensorImpl::singleton() : (TensorImpl*){}_'
                           .format(name, name))
+        intrusive_ptr_type = 'c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>'
         return [
             'auto {}_ = {};'.format(name, allocation),
-            'auto {} = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim({}));'.format(name, tensor_arg),
+            'auto {} = Tensor({}::reclaim({}));'.format(name, intrusive_ptr_type, tensor_arg),
         ]
 
     def resize_arg(arg):
@@ -1509,7 +1510,8 @@ def create_derived(backend_type_env, declarations):
                     env, arguments=[call])
                 return_tensor = (
                     "return Tensor(" +
-                    "c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim((${wrapped_tensor})${maybe_scalar}));")
+                    "c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(" +
+                    "(${wrapped_tensor})${maybe_scalar}));")
                 body.append(CodeTemplate(return_tensor).substitute(
                     env, wrapped_tensor=wrapped_tensor, maybe_scalar=maybe_scalar))
             # return the same underlying Tensor type for both real and accreal; this ensures
