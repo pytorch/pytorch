@@ -47,4 +47,6 @@ void broadcast(at::TensorList tensors,
                const stream_list& streams = {},
                const comm_list& user_comms = {});
 
+size_t get_max_count();
+
 }}}
