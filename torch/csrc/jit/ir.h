@@ -993,7 +993,9 @@ public:
     return create(prim::Undefined);
   }
   Node * createNoneGenerator() {
-    return create(prim::NoneGenerator);
+    auto n = create(prim::NoneGenerator);
+    n->output()->setType(GeneratorType::get());
+    return n;
   }
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);

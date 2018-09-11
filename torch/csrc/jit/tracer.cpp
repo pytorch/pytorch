@@ -42,7 +42,14 @@ void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::g
 void addInputs(Node *n, const char * name, const std::string& value) { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
 void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(value); }
-void addInputs(Node *n, const char * name, at::Generator * value)            { detail::badArgType(value); }
+void addInputs(Node *n, const char * name, at::Generator * value)            {
+  if (value) {
+    detail::badArgType(value);
+  }
+  Graph * g = n->owningGraph();
+  Value * undef_gen = g->insertNode(g->createNoneGenerator())->output();
+  n->addInput(undef_gen);
+}
 void addInputs(Node *n, const char * name, at::ScalarType value)             { detail::badArgType(value); }
 
 void addInputs(Node *n, const char * name, at::TensorList value) {
