@@ -7961,10 +7961,11 @@ def add_autograd_test(
                 if run_magic_methods or not is_magic_method:
                     check_against_reference(
                         self,
-                        fn_creator(fn, name, "method", output_process_fn),
+                        fn_creator(self, fn, name, "method", output_process_fn),
                         fn,
                         (self_variable,) + args_variable,
                         kwargs_variable,
+                        check_types=check_types,
                     )
 
             # functional interface tests
@@ -7979,10 +7980,11 @@ def add_autograd_test(
                 if not is_inplace:
                     check_against_reference(
                         self,
-                        fn_creator(fn, name, "functional", output_process_fn),
+                        fn_creator(self, fn, name, "functional", output_process_fn),
                         fn,
                         f_args_variable,
                         kwargs_variable,
+                        check_types=check_types
                     )
 
         check(name)
@@ -8008,11 +8010,11 @@ def add_test(
     if variant_name != '':
         basic_test_name += '_' + variant_name
 
-    def script_fn_creator(fn, name, type, output_process_fn):
-        return create_script_fn(name, type, output_process_fn)
+    def script_fn_creator(self, fn, name, type, output_process_fn):
+        return create_script_fn(self, name, type, output_process_fn)
 
-    def traced_fn_creator(fn, name, type, output_process_fn):
-        return create_traced_fn(fn)
+    def traced_fn_creator(self, fn, name, type, output_process_fn):
+        return create_traced_fn(self, fn)
 
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
@@ -8071,19 +8073,12 @@ def add_nn_test(name, self_size, args, skipTestIf=(), output_process_fn=lambda x
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
 
-<<<<<<< HEAD
-        if test_name not in EXCLUDE_SCRIPT:
-            check_against_reference(self,
-                                    create_script_fn(self, name, 'nn_functional', output_process_fn),
-                                    fn, f_args_variable, kwargs_variable)
-=======
         check_against_reference(self,
-                                create_script_fn(name, 'nn_functional', output_process_fn),
+                                create_script_fn(self, name, 'nn_functional', output_process_fn),
                                 fn, f_args_variable, kwargs_variable)
 
     if test_name in EXCLUDE_SCRIPT:
         do_test = unittest.expectedFailure(do_test)
->>>>>>> Mark failing tests as expected failures
 
     post_add_test(test_name, skipTestIf, do_test)
 
