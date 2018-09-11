@@ -53,8 +53,8 @@ inline Tensor Tensor::to(
   AT_CHECK(is_variable() == options.is_variable(),
            "cannot change is_variable, from: ", is_variable(),
            " to: ", options.is_variable());
-  return tensor.type().toBackend(options.backend()).toScalarType(options.dtype())
-               .copy(tensor, non_blocking, options.device());
+  return type().toBackend(options.backend()).toScalarType(options.dtype())
+               .copy(*this, non_blocking, options.device());
 }
 
 inline void Tensor::backward(
