@@ -36,95 +36,53 @@ AnomalyMetadata* Function::metadata() noexcept {
   return anomaly_metadata_.get();
 }
 
-/*
- * Fix for #5534: prevent stack overflow on deletion of deep computation graph
- *
- * Sometimes one can end up with a very big computation graph of Functions
- * and Edges. Each std::shared_ptr<Function> contains a list of Edge, and
- * each Edge contains a std::shared_ptr<Function>. Deleting a
- * std::shared_ptr<Function> can trigger the recursive deletion of other
- * std::shared_ptr<Function>'s: this can stack overflow if the graph
- * is deep enough. Here is an example of such a graph:
- *
- * shared_ptr<Function> -> Edge -> shared_ptr<Function> -> Edge -> ... -> shared_ptr<Function>
- *
- * The solution here is to use a custom deleter with each
- * std::shared_ptr<Function>. The custom deleter keeps track of how many
- * nested deleters it is in. When this number exceeds the maximum allowed
- * depth, the Function* to be deleted are accumulated in a per-thread
- * delete queue and handled by one of the deleters.
- *
- * Note that these custom deleters are NOT necessary for deleting PyFunction.
- * This is because a THPFunction Python object owns a PyFunction that is in a
- * computation graph. When Python objects get recursively destroyed, they
- * are also queued into a delete list. This happens very early for them
- * (at 50 deleters): https://github.com/python/cpython/blob/f320be77ffb73e3b9e7fc98c37b8df3975d84b40/Include/object.h#L1024-L1063
- * so we don't need to worry about them.
- */
-
-thread_local std::deque<Function*> deleteFunctionQueue;
-thread_local size_t deleteFunctionRecursionDepth = 0;
+static void gatherFunctions(Function* func,
+                            std::vector<std::shared_ptr<Function>>& stack) {
+  for (auto& edge : func->next_edges()) {
+    if (edge.function.use_count() == 1) {
+      stack.emplace_back(std::move(edge.function));
+    }
+  }
+}
 
 /*
- * If this number is set too high, a deep computation graph can still
- * stack overflow. The procedure for setting this number was to
- * 1) find the smallest value that would not guard against stack overflows
- *    on various machines
- * 2) Take the minimum of all such values and subtract some leeway because
- *    the memory of these stack frames will probably grow as time passes.
- * Testing on a few machines machines, the magic numbers were:
- * - Mac OSX (Macbook Pro 15) : ~60000
- * - A beefy Ubuntu 16.04 box : ~15000
- * - Windows AWS instance (g3.4xlarge): variable. My two attempts at different
- *   times have gotten the following numbers: ~8300, 3669
- */
-#ifdef _WIN32
-size_t deleteFunctionMaxRecursionDepth = 3000;
-#else
-size_t deleteFunctionMaxRecursionDepth = 10000;
-#endif
-
-struct RecursionDepthCounter {
- public:
-  explicit RecursionDepthCounter() {
-    ++deleteFunctionRecursionDepth;
-  }
-  ~RecursionDepthCounter() {
-    --deleteFunctionRecursionDepth;
-  }
-
-  size_t value() {
-    return deleteFunctionRecursionDepth;
-  }
-};
-
-/*
- * Note that the custom deleter deletes in BFS style. Without using
- * the custom deleter, the computation graph is deleted in a DFS style.
- * The BFS deletion is valid (and safe) because if a shared_ptr<Function>
- * 's reference count hits 0, nothing else will access it.
- */
+  * Fix for #5534: prevent stack overflow on deletion of deep computation graph
+  * 
+  * Sometimes one can end up with a very big computation graph of Functions
+  * and Edges. Each std::shared_ptr<Function> contains a list of Edge, and
+  * each Edge contains a std::shared_ptr<Function>. Deleting a
+  * std::shared_ptr<Function> can trigger the recursive deletion of other
+  * std::shared_ptr<Function>'s: this can stack overflow if the graph
+  * is deep enough. Here is an example of such a graph:
+  *
+  * shared_ptr<Function> -> Edge -> shared_ptr<Function> -> Edge -> ... -> shared_ptr<Function>
+  *
+  * The solution here is to detect when we are decrementing away the last
+  * reference to a Function, and when doing so to buffer up the Function's
+  * that will be recursively decremented.  We can then decrement (and free)
+  * the original Function without causing a recursive cascade, before
+  * draining the buffer applying the same behavior.  This is, in effect,
+  * converting recursion to a loop, using a heap buffer in place of the
+  * recursive call stack.
+  */
 void deleteFunction(Function* function) {
-  RecursionDepthCounter recursion_depth;
-
-  if (recursion_depth.value() > deleteFunctionMaxRecursionDepth) {
-    deleteFunctionQueue.push_back(function);
-    return;
-  }
-
+  // To avoid stack overflow on large computational graphs,
+  // we need to track reference decrementing and freeing
+  // on the heap.
+  std::vector<std::shared_ptr<Function>> stack;
+  gatherFunctions(function, stack);
   delete function;
 
-  if (deleteFunctionQueue.empty()) {
-    return;
-  }
-  if (recursion_depth.value() != deleteFunctionMaxRecursionDepth) {
-    AT_ERROR("Only one deleter per thread should be able to process "
-             "the delete queue. Please open an issue.");
-  }
-  while (!deleteFunctionQueue.empty()) {
-    auto queued_function = deleteFunctionQueue.front();
-    deleteFunctionQueue.pop_front();
-    delete queued_function;
+  while (!stack.empty()) {
+    auto& curr_func = stack.back();
+
+    if (curr_func.use_count() == 1) {
+      // If this is the last reference, gather function references
+      // that will be recursively decremented.
+      gatherFunctions(curr_func.get(), stack);
+    }
+
+    stack.pop_back();
   }
 }
 
