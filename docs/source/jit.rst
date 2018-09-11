@@ -531,11 +531,44 @@ Python-defined Constants
 Debugging
 ~~~~~~~~~
 
+Disable JIT for Debugging
+    If you want to disable all JIT modes (tracing and scripting) so you can
+    debug your program in raw Python, you can use the ``PYTORCH_JIT`` environment
+    variable. ``PYTORCH_JIT`` can be used to globally disable the
+    JIT by setting its value to ``0``. Given an example script::
+
+        @torch.jit.script
+        def scripted_fn(x : torch.Tensor):
+            for i in range(12):
+                x = x + x
+            return x
+
+
+        def fn(x):
+            x = torch.neg(x)
+            import pdb; pdb.set_trace()
+            return scripted_fn(x)
+
+        traced_fn = torch.jit.trace(fn, (torch.rand(4, 5),))
+
+        traced_fn(torch.rand(3, 4))
+
+    Debugging this script with PDB works except for when we invoke the @script
+    function. We can globally disable JIT, so that we can call the @script
+    function as a normal python function and not compile it. If the above script
+    is called ``disable_jit_example.py``, we can invoke it like so::
+
+        $ PYTORCH_JIT=0 python disable_jit_example.py
+
+    and we will be able to step into the @script function as a normal Python
+    function.
+
+
 Interpreting Graphs
     TorchScript uses a static single assignment (SSA) intermediate representation
     (IR) to represent computation. The instructions in this format consist of
-    ATen operators and other primitive operators, including control flow
-    operators for loops and conditionals. As an example::
+    ATen (the C++ backend of PyTorch) operators and other primitive operators,
+    including control flow operators for loops and conditionals. As an example::
 
         @torch.jit.script
         def foo(len):
@@ -620,7 +653,7 @@ Tracing Edge Cases
 
 
 Automatic Trace Checking
-    A way to automatically detect such edge cases is by using ``check_inputs``
+    One way to automatically catch many errors in traces is by using ``check_inputs``
     on the ``torch.jit.trace()`` API. ``check_inputs`` takes a list of tuples
     of inputs that will be used to re-trace the computation and verify the
     results. For example::
@@ -745,38 +778,6 @@ Tracer Warnings
 
         traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
         print(traced.graph)
-        traced(torch.rand(5, 6))
-
-
-Disable JIT for Debugging
-    The environment variable ``PYTORCH_JIT`` can be used to globally disable the
-    JIT by setting its value to ``0``. Given an example script::
-
-        @torch.jit.script
-        def scripted_fn(x : torch.Tensor):
-            for i in range(12):
-                x = x + x
-            return x
-
-
-        def fn(x):
-            x = torch.neg(x)
-            import pdb; pdb.set_trace()
-            return scripted_fn(x)
-
-        traced_fn = torch.jit.trace(fn, (torch.rand(4, 5),))
-
-        traced_fn(torch.rand(3, 4))
-
-    Debugging this script with PDB works except for when we invoke the @script
-    function. We can globally disable JIT, so that we can call the @script
-    function as a normal python function and not compile it. If the above script
-    is called ``disable_jit_example.py``, we can invoke it like so::
-
-        $ PYTORCH_JIT=0 python disable_jit_example.py
-
-    and we will be able to step into the @script function as a normal Python
-    function.
 
 
 Builtin Functions
