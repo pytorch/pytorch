@@ -406,7 +406,17 @@ if (BUILD_TORCH_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
     target_link_libraries(test_jit ${CUDA_LIBRARIES})
   endif()
 endif()
-
+if (BUILD_TORCH_TEST)
+	set(TORCH_API_GTEST_DIR "${TORCH_ROOT}/test/cpp/api/gtest")
+	add_executable(gtest_api
+		${TORCH_API_GTEST_DIR}/main.cpp
+		${TORCH_API_GTEST_DIR}/static.cpp
+		)
+	#target_link_libraries(gtest_api gtest_main)
+	target_include_directories(gtest_api PUBLIC "${TORCH_ROOT}/third_party/googletest/googletest/include")
+	target_include_directories(gtest_api PUBLIC ${ATen_CPU_INCLUDE})
+	target_link_libraries(gtest_api torch ${TORCH_CUDA_LIBRARIES})
+endif()
 if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
   set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
 
@@ -423,7 +433,7 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/sequential.cpp
     ${TORCH_API_TEST_DIR}/serialization.cpp
-    ${TORCH_API_TEST_DIR}/static.cpp
+	#${TORCH_API_TEST_DIR}/static.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
     ${TORCH_API_TEST_DIR}/tensor.cpp
     # Temporary until ATen tests are built with Caffe2
