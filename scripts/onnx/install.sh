@@ -35,4 +35,4 @@ _pip_install -b "$BUILD_DIR/onnx" "file://$tp2_dir/onnx#egg=onnx"
 # Install caffe2 and pytorch
 pip install -r "$top_dir/caffe2/requirements.txt"
 pip install -r "$top_dir/requirements.txt"
-USE_OPENCV=1 BUILD_BINARY=1 python setup.py install
+USE_LEVELDB=1 USE_LMDB=1 USE_OPENCV=1 BUILD_BINARY=1 python setup.py install

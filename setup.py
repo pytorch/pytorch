@@ -46,11 +46,20 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
+#   NO_CAFFE2_OPS
+#     disable Caffe2 operators build
+#
 #   USE_GLOO_IBVERBS
 #     toggle features related to distributed support
 #
 #   USE_OPENCV
 #     enables use of OpenCV for additional operators
+#
+#   USE_LEVELDB
+#     enables use of LevelDB for storage
+#
+#   USE_LMBD
+#     enables use of LMDB for storage
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -144,11 +153,13 @@ use_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
 list(map(hotpatch_var, use_env_vars))
 
 # Also hotpatch a few with BUILD_* equivalent
-build_env_vars = ['BINARY', 'TEST']
+build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
 [hotpatch_var(v, 'BUILD_') for v in build_env_vars]
 
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.build import BUILD_BINARY, BUILD_TEST, USE_OPENCV
+from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
+                                       BUILD_CAFFE2_OPS, USE_LEVELDB,
+                                       USE_LMDB, USE_OPENCV)
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
@@ -376,7 +387,10 @@ def build_libs(libs):
     my_env["BUILD_PYTHON"] = "ON"
     my_env["BUILD_BINARY"] = "ON" if BUILD_BINARY else "OFF"
     my_env["BUILD_TEST"] = "ON" if BUILD_TEST else "OFF"
+    my_env["BUILD_CAFFE2_OPS"] = "ON" if BUILD_CAFFE2_OPS else "OFF"
     my_env["INSTALL_TEST"] = "ON" if BUILD_TEST else "OFF"
+    my_env["USE_LEVELDB"] = "ON" if USE_LEVELDB else "OFF"
+    my_env["USE_LMDB"] = "ON" if USE_LMDB else "OFF"
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
 
     try:
