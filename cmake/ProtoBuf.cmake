@@ -179,7 +179,7 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
 
         # If we remove all reference to these pb.h files from external
         # libraries and binaries this rewrite can be removed.
-        COMMAND ${CMAKE_COMMAND} -DFILENAME=${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h -DNAMESPACES=caffe\;caffe2\;onnx -P ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake
+        COMMAND ${CMAKE_COMMAND} -DFILENAME=${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h -DNAMESPACES=caffe\;caffe2\;onnx\;torch -P ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake
 
         DEPENDS ${CAFFE2_PROTOC_EXECUTABLE} ${abs_fil}
         COMMENT "Running C++/Python protocol buffer compiler on ${fil}" VERBATIM )
