@@ -69,18 +69,15 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // introspection.
     size_t actual_n_args = n_args;
     if (!signature.is_none()) {
-      std::vector<TypePtr> arg_types, ret_types;
-      std::tie(arg_types, ret_types) = py::cast<std::pair<std::vector<TypePtr>, std::vector<TypePtr>>>(signature);
+      std::vector<TypePtr> arg_types;
+      TypePtr ret_type;
+      std::tie(arg_types, ret_type) = py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
       args.reserve(arg_types.size());
       size_t idx = 0; // Fake argument names by putting in the index
       for (auto &arg_type : arg_types) {
         args.push_back(Argument(std::to_string(idx++), std::move(arg_type), {}, {}, false));
       }
-      rets.reserve(ret_types.size());
-      idx = 0;
-      for (auto &ret_type : ret_types) {
-        rets.push_back(Argument(std::to_string(idx++), std::move(ret_type), {}, {}, false));
-      }
+      rets.push_back(Argument(std::to_string(0), std::move(ret_type), {}, {}, false));
     } else {
       // Create a default signature using what information we have
 
@@ -99,10 +96,12 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       for (size_t i=0; i < actual_n_args; ++i) {
         args.push_back(Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
       }
-      rets.reserve(n_binders);
-      for (size_t i = 0; i < n_binders; ++i) {
-        rets.push_back(Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
+      TypePtr ret_type = DynamicType::get();
+      if(n_binders != 1) {
+        std::vector<TypePtr> tuple_values(n_binders, ret_type);
+        ret_type = TupleType::create(std::move(tuple_values));
       }
+      rets.push_back(Argument(std::to_string(0), ret_type, {}, {}, false));
     }
     return FunctionSchema("", std::move(args), std::move(rets));
   }
@@ -120,7 +119,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
     // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
-    std::string cconv(inputs.size(), 't');
+    std::string cconv(inputs.size(), 'd');
     Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
       THPObjectPtr(func.release().ptr()), cconv, {}));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));

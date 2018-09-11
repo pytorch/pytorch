@@ -32,9 +32,10 @@ Operation createPythonOperation(Node* op_) {
   py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
-    if(arg_type == 't')
+    if(arg_type == 'd')
       num_inputs++;
   }
+  JIT_ASSERT(op->outputs().size() == 1);
   return [=](Stack & stack) {
     AutoGIL gil;
     py::tuple py_inputs(op->cconv.size());
@@ -42,40 +43,18 @@ Operation createPythonOperation(Node* op_) {
     size_t next_scalar = 0;
     size_t next_tensor = 0;
     for (auto arg_type : op->cconv) {
-      if (arg_type == 's') {
+      if (arg_type == 'c') {
         py_inputs[i] = py::reinterpret_borrow<py::object>(
             op->scalar_args[next_scalar++].get());
-      } else if (arg_type == 't') {
+      } else if (arg_type == 'd') {
         py_inputs[i] = toPyObject(std::move(peek(stack, next_tensor, num_inputs)));
         next_tensor++;
       }
       i++;
     }
     drop(stack, num_inputs);
-    py::object py_outputs(func(*py_inputs));
-
-    auto num_outputs = op->outputs().size();
-    auto addOutput = [&](py::handle entry, size_t pos) {
-      stack.push_back(returnToIValue(pos, op->outputs().at(pos)->type(), entry));
-    };
-
-    if (!PyTuple_Check(py_outputs.ptr())) {
-      if (num_outputs != 1) {
-        throw std::runtime_error(
-            "Function.apply returned the wrong number of outputs.");
-      }
-      addOutput(py_outputs, 0);
-    } else {
-      auto output_tuple = py::tuple(py_outputs);
-      if (output_tuple.size() != num_outputs) {
-        throw std::runtime_error(
-            "Function application returned the wrong number of outputs.");
-      }
-      size_t i = 0;
-      for (py::handle entry : output_tuple) {
-        addOutput(entry, i++);
-      }
-    }
+    py::object py_output(func(*py_inputs));
+    stack.push_back(returnToIValue(op->output()->type(), py_output));
     return 0;
   };
 }

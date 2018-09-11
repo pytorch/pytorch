@@ -1464,6 +1464,25 @@ class TestJit(JitTestCase):
         fn(x)
         fn(y)
 
+    def test_python_function_tup(self):
+        class MyFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1, x - 1
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        @_trace(torch.zeros(2))
+        def fn(x):
+            a, b = MyFn.apply(x + 2)
+            return a + b + 3
+        x = torch.tensor([1., 2., 3.])
+        y = torch.randn(2, 2, requires_grad=True)
+        fn(x)
+        fn(y)
+
     def test_decompose_addmm(self):
         @torch.jit.script
         def addmm(mat, mat1, mat2, alpha, beta):
@@ -4486,8 +4505,8 @@ a")
 
     def test_python_call_non_tensor(self):
         def foo(a, b, c):
-            d, e = c
             # type: (Tensor, int, Tuple[Tensor, int]) -> Tuple[int, Tensor]
+            d, e = c
             return b + e, a + d
 
         @torch.jit.script
@@ -5842,7 +5861,7 @@ a")
                 return foo(torch.full([1], 1), torch.full([1], 2), torch.full([1], 3))
 
     def test_wrong_return_type(self):
-        with self.assertRaisesRegex(RuntimeError, 'Function application returned the wrong number of outputs.'):
+        with self.assertRaisesRegex(RuntimeError, 'but instead got value of type tuple'):
             def somefunc():
                 # type: () -> Tuple[Tuple[Tensor, Tensor]]
                 return torch.zeros(3, 4), torch.zeros(4, 5)

@@ -105,16 +105,6 @@ def get_num_params(fn):
         return num_params
 
 
-def flatten_return_type(type):
-    if isinstance(type, TupleType):
-        return_types = []
-        for elem_type in type.elements():
-            return_types.append(elem_type)
-        return return_types
-    else:
-        return [type]
-
-
 def parse_type_line(type_line):
     """Parses a type annotation specified as a comment.
 
@@ -138,9 +128,7 @@ def parse_type_line(type_line):
         raise RuntimeError("Failed to parse the return type of a type annotation")
 
     arg_types = [ann_to_type(ann) for ann in arg_ann]
-    ret_types = flatten_return_type(ann_to_type(ret_ann))
-
-    return arg_types, ret_types
+    return arg_types, ann_to_type(ret_ann)
 
 
 def get_type_line(source):

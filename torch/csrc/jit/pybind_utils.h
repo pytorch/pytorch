@@ -168,7 +168,6 @@ inline IValue argumentToIValue(
 }
 
 inline IValue returnToIValue(
-    size_t pos,
     const TypePtr& type,
     py::handle object) {
   try {
@@ -176,15 +175,12 @@ inline IValue returnToIValue(
   } catch (const py::cast_error& error) {
     AT_ERROR(
         " expected value of type ", type->str(),
-        " for return in position ", pos,
-        ", but instead got value of type ",
+        " for return value but instead got value of type ",
         py::str(object.get_type().attr("__name__")));
   } catch (const ConvertError& error) {
-    AT_ERROR(
-        " expected value of type ", type->str(),
-        " for return in position ", pos,
-        ", but instead got value of type ",
-        py::str(object.get_type().attr("__name__")));
+    AT_ERROR(" expected value of type ", type->str(),
+    " for return value but instead got value of type ",
+    py::str(object.get_type().attr("__name__")));
   }
 }
 
