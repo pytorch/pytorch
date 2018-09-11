@@ -22,6 +22,11 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     contained in :attr:`inputs` (positional) and :attr:`kwargs_tup` (keyword)
     on each of :attr:`devices`.
 
+    Args:
+        modules (Module): modules to be parallelized
+        inputs (tensor): inputs to the modules
+        devices (list of int or torch.device): CUDA devices
+
     :attr:`modules`, :attr:`inputs`, :attr:`kwargs_tup` (if given), and
     :attr:`devices` (if given) should all have same length. Moreover, each
     element of :attr:`inputs` can either be a single object as the only argument

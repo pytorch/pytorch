@@ -75,11 +75,9 @@ class DataParallel(Module):
         See :ref:`pack-rnn-unpack-with-data-parallelism` section in FAQ for
         details.
 
-
-    Args:
-        module: module to be parallelized
-        device_ids: CUDA devices (default: all devices)
-        output_device: device location of output (default: device_ids[0])
+        module (Module): module to be parallelized
+        device_ids (list of int or torch.device): CUDA devices (default: all devices)
+        output_device (int or torch.device): device location of output (default: device_ids[0])
 
     Attributes:
         module (Module): the module to be parallelized
@@ -143,10 +141,10 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
     This is the functional version of the DataParallel module.
 
     Args:
-        module: the module to evaluate in parallel
-        inputs: inputs to the module
-        device_ids: GPU ids on which to replicate module
-        output_device: GPU location of the output  Use -1 to indicate the CPU.
+        module (Module): the module to evaluate in parallel
+        inputs (tensor): inputs to the module
+        device_ids (list of int or torch.device): GPU ids on which to replicate module
+        output_device (list of int or torch.device): GPU location of the output  Use -1 to indicate the CPU.
             (default: device_ids[0])
     Returns:
         a Tensor containing the result of module(input) located on
