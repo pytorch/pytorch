@@ -137,12 +137,15 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::Infinity,
+        prim::StringToFloat,
         [](Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();
             if (s->string() != "inf") {
-              AT_ERROR("Expected 'inf', but got '", s->string(), "'");
+              AT_ERROR(
+                  "Expected 'inf' when casting to float, but got '",
+                  s->string(),
+                  "'");
             }
             push(stack, std::numeric_limits<double>::infinity());
             return 0;

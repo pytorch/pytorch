@@ -1066,9 +1066,9 @@ public:
     result->output()->setType(IntType::get());
     return result;
   }
-  Node* createFloatInfinity(Value* value) {
+  Node* createStringToFloat(Value* value) {
     JIT_ASSERT(*value->type() == *StringType::get());
-    auto* result = create(prim::Infinity, {value});
+    auto* result = create(prim::StringToFloat, {value});
     result->output()->setType(FloatType::get());
     return result;
   }
