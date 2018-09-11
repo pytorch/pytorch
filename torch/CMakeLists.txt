@@ -302,7 +302,7 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
 
-  option(TORCH_WITH_CEREAL "Build the C++ API with Cereal for serialization support" ON)
+  option(TORCH_WITH_CEREAL "Build the C++ API with Cereal for serialization support" OFF)
   if (TORCH_WITH_CEREAL)
     target_compile_definitions(torch PUBLIC TORCH_WITH_CEREAL)
     # SYSTEM headers are included with -isystem and thus do not trigger warnings.
