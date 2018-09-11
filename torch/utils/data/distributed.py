@@ -1,7 +1,7 @@
 import math
 import torch
 from . import Sampler
-from torch.distributed import get_world_size, get_rank
+import torch.distributed as dist
 
 
 class DistributedSampler(Sampler):
@@ -24,9 +24,13 @@ class DistributedSampler(Sampler):
 
     def __init__(self, dataset, num_replicas=None, rank=None):
         if num_replicas is None:
-            num_replicas = get_world_size()
+            if not dist.is_available():
+                raise RuntimeError("Requires distributed package to be available")
+            num_replicas = dist.get_world_size()
         if rank is None:
-            rank = get_rank()
+            if not dist.is_available():
+                raise RuntimeError("Requires distributed package to be available")
+            rank = dist.get_rank()
         self.dataset = dataset
         self.num_replicas = num_replicas
         self.rank = rank

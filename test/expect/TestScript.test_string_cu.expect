@@ -1,7 +1,7 @@
 graph(%a : Dynamic) {
   %2 : int = prim::Constant[value=2]()
-  %1 : string = prim::Constant[string=a\n\tb\n]()
-  %3 : string = prim::Constant[string=aa]()
+  %1 : string = prim::Constant[value="a\n\tb\n"]()
+  %3 : string = prim::Constant[value="aa"]()
    = prim::Print(%a, %1, %2, %3)
   return (%a);
 }

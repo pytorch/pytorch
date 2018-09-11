@@ -322,6 +322,11 @@ class AT_CORE_API TypeMeta {
     return detail::TypeMetaDataRegistry<T>::data.name_;
   }
 
+  template<class T>
+  static constexpr size_t ItemSize() noexcept {
+    return sizeof(T);
+  }
+
   /**
    * Returns a TypeMeta object that corresponds to the typename T.
    */

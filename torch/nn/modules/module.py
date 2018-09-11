@@ -42,7 +42,7 @@ class Module(object):
                return F.relu(self.conv2(x))
 
     Submodules assigned in this way will be registered, and will have their
-    parameters converted too when you call `.cuda()`, etc.
+    parameters converted too when you call :meth:`to`, etc.
     """
 
     dump_patches = False

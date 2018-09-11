@@ -10,11 +10,12 @@
 using std::string;
 
 namespace caffe2 {
-
+namespace detail {
 void _ThrowRuntimeTypeLogicError(const string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
   AT_ERROR(msg);
+}
 }
 
 TypeIdentifier TypeIdentifier::createTypeId() {
