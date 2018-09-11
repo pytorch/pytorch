@@ -80,6 +80,10 @@ install_customhcc() {
     dpkg -i /opt/rocm/debians/hip_doc.deb
     dpkg -i /opt/rocm/debians/hip_samples.deb
     dpkg -i /opt/rocm/debians/hip_hcc.deb
+
+    if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
+        sudo sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>/' /opt/rocm/hip/cmake/FindHIP.cmake
+    fi
 }
 
 # Install Python packages depending on the base OS
