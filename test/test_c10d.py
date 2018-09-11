@@ -722,6 +722,37 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             for i, buffer in enumerate(device_data):
                 self.assertEqual(buffer, target[i])
 
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_fp16(self):
+        store = c10d.TCPStore('localhost', self.port, self.rank == 0)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        gpus = gpus_for_rank(self.world_size)[self.rank]
+        model = nn.Linear(1, 1, bias=False).cuda(gpus[0]).half()
+        nn.init.constant_(model.weight, 1)
+        ddp_model = distributed_c10d._DistributedDataParallelC10d(
+            model,
+            device_ids=[gpus[0]],
+            process_group=process_group,
+            bucket_cap_mb=1,
+        )
+
+        # Input 2**15, so that the gradients will overflow with a
+        # world_size of 2, unless we normalize the gradient by the
+        # world_size before the reduction
+        input = torch.Tensor([[2**15]]).cuda(gpus[0]).half()
+
+        # Step model
+        ddp_model.train()
+        output = ddp_model(input)
+        loss = output.sum()
+        loss.backward()
+
+        self.assertFalse(
+            any(torch.isinf(p.grad).any() for p in ddp_model.parameters())
+        )
+
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
 

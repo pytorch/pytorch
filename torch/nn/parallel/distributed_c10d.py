@@ -332,6 +332,9 @@ class _DistributedDataParallelC10d(Module):
         if len(self.device_ids) > 1:
             nccl.reduce(grads_batch_coalesced, root=0, streams=self.default_streams)
 
+        # divide by the number of processes here to reduce chances of overflow
+        grads_batch_coalesced[0] /= self.process_group.size()
+
         # now work on the first gpu
         reduction_work = self.process_group.allreduce([grads_batch_coalesced[0]],
                                                       self.allreduce_opts)
@@ -345,7 +348,6 @@ class _DistributedDataParallelC10d(Module):
             # wait will let current stream wait on the c10d reduction stream
             self.reduction_works[bucket_idx].wait()
 
-            self.buckets_coalesced[bucket_idx] /= self.process_group.size()
             grads_batch_reduced = _unflatten_dense_tensors(
                 self.buckets_coalesced[bucket_idx], grads_batch[0])
 

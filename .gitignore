@@ -35,6 +35,7 @@ test/data/legacy_modules.t7
 test/data/legacy_serialized.pt
 test/data/linear.pt
 test/htmlcov
+test/cpp_extensions/install/
 third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
