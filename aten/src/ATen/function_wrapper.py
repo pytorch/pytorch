@@ -108,7 +108,7 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formal
 # because we will inherit it from the TYPE_METHOD_DEFINITION_CONCRETE in
 # the superclass.  But it doesn't seem to be harmful.
 #
-# self_ty is a hack to make things work for native methods which need to
+# TODO: self_ty is a hack to make things work for native methods which need to
 # take a dtype, but also need to dispatch differently for different types.
 # Eliminate it at some point.
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
@@ -177,7 +177,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 # the same name (but different signature) already
 ZERO_DIM_CHECK = CodeTemplate("""\
 if (${check_name}.dim() == 0) {
-    return static_cast<const TypeInternalInterface*>(this)->${api_name}(${zero_dim_actuals});
+    return static_cast<const TypeExtendedInterface*>(this)->${api_name}(${zero_dim_actuals});
 }""")
 
 ZERO_DIM_ONLY = CodeTemplate("""\
@@ -187,7 +187,7 @@ AT_ERROR("${api_name} only supports a 0-dimensional ${check_name} tensor, but go
 
 SPARSE_CHECK = CodeTemplate("""\
 if(${check_name}.type().is_sparse()) {
-    return static_cast<const TypeInternalInterface*>(this)->${api_name}(${sparse_actuals});
+    return static_cast<const TypeExtendedInterface*>(this)->${api_name}(${sparse_actuals});
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
@@ -394,7 +394,7 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'type_registrations': List[str],
     'type_headers': List[str],
     'pure_virtual_type_method_declarations': List[str],
-    'pure_virtual_internal_type_method_declarations': List[str],
+    'pure_virtual_extended_type_method_declarations': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'type_method_inline_definitions': List[str],
@@ -496,8 +496,8 @@ FunctionOption = TypedDict('FunctionOption', {
     'inferred_type': str,
     'inplace': bool,
     # This controls whether or not we generate the interface in Type or
-    # TypeInternalInterface
-    'internal_method': bool,
+    # TypeExtendedInterface
+    'extended_method': bool,
     'method_actuals': List[str],
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
@@ -844,8 +844,8 @@ def create_generic(top_env, declarations):
             # NN function with no _forward/_backward suffix don't have cimpls.
             # They call the _forward function and discard any buffer returns
             abstract = False
-            if option['internal_method']:
-                top_env['pure_virtual_internal_type_method_declarations'].append(
+            if option['extended_method']:
+                top_env['pure_virtual_extended_type_method_declarations'].append(
                     PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             else:
                 top_env['pure_virtual_type_method_declarations'].append(
@@ -857,8 +857,8 @@ def create_generic(top_env, declarations):
                 TYPE_METHOD_DEFINITION_CONCRETE.substitute(
                     env, type_definition_body=body))
         elif broadcast_arg is None:
-            if option['internal_method']:
-                top_env['pure_virtual_internal_type_method_declarations'].append(
+            if option['extended_method']:
+                top_env['pure_virtual_extended_type_method_declarations'].append(
                     PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             else:
                 top_env['pure_virtual_type_method_declarations'].append(
@@ -868,10 +868,10 @@ def create_generic(top_env, declarations):
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
         else:
-            if option['internal_method']:
-                top_env['pure_virtual_internal_type_method_declarations'].append(
+            if option['extended_method']:
+                top_env['pure_virtual_extended_type_method_declarations'].append(
                     PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
-                top_env['pure_virtual_internal_type_method_declarations'].append(
+                top_env['pure_virtual_extended_type_method_declarations'].append(
                     PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST.substitute(env))
             else:
                 top_env['pure_virtual_type_method_declarations'].append(
@@ -910,7 +910,7 @@ def create_generic(top_env, declarations):
             method_of.append('Tensor')
 
         if is_namespace_function:
-            option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
+            option['inferred_type'] = 'detail::infer_type({})'.format(dispatch_tensor)
             top_env['function_declarations'].append(
                 FUNCTION_DECLARATION.substitute(env))
             top_env['function_definitions'].append(
@@ -1082,12 +1082,17 @@ def create_generic(top_env, declarations):
         # Factory methods are not dispatched over `Type`.
         if not is_factory_method:
             if option['deprecated']:
-                # Deprecated functions are always non-internal
+                # Deprecated functions are always non-extended,
+                # because they need to be made available from Type
+                # (the public interface) so that code like
+                # tensor.type().arange(...) keeps working.  Once
+                # we remove the deprecated functions, we can eliminate
+                # these methods entirely.
                 top_env['pure_virtual_type_method_declarations'].append(
                     DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             else:
-                if option['internal_method']:
-                    top_env['pure_virtual_internal_type_method_declarations'].append(
+                if option['extended_method']:
+                    top_env['pure_virtual_extended_type_method_declarations'].append(
                         PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
                 else:
                     top_env['pure_virtual_type_method_declarations'].append(
@@ -1143,12 +1148,12 @@ def create_generic(top_env, declarations):
 
         if is_namespace_function:
             if dispatch_type:
-                option['inferred_type'] = 'static_cast<const TypeInternalInterface&>({})'.format(dispatch_type['name'])
+                option['inferred_type'] = 'static_cast<const TypeExtendedInterface&>({})'.format(dispatch_type['name'])
             elif dispatch_tensor:
-                option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
+                option['inferred_type'] = 'detail::infer_type({})'.format(dispatch_tensor)
             else:
                 # doesn't depend on a specific type, use undefined float
-                option['inferred_type'] = 'non_specific_type()'
+                option['inferred_type'] = 'detail::non_specific_type()'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
             if is_factory_method:

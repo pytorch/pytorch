@@ -214,10 +214,10 @@ private:
     DEFINE_IF(int64, Long)
     CAFFE_THROW("unsupported type annotation: ", name);
   }
-  at::TypeInternalInterface & stringToType(const std::string & name) {
-    return static_cast<at::TypeInternalInterface&>(at::getNonVariableType(backend(), stringToScalarType(name)));
+  at::TypeExtendedInterface & stringToType(const std::string & name) {
+    return static_cast<at::TypeExtendedInterface&>(at::getNonVariableType(backend(), stringToScalarType(name)));
   }
-  at::TypeInternalInterface * readTypeAttribute(const std::string & name) {
+  at::TypeExtendedInterface * readTypeAttribute(const std::string & name) {
     CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<std::string>(name));
     return &stringToType(OperatorBase::GetSingleArgument<std::string>(name, ""));
   }

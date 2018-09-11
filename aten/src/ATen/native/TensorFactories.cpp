@@ -59,8 +59,8 @@ void window_function_checks(
       window_length);
 }
 
-const TypeInternalInterface& getFactoryType(const TensorOptions& options) {
-  return static_cast<const TypeInternalInterface&>(at::getType(options));
+const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
+  return static_cast<const TypeExtendedInterface&>(at::getType(options));
 }
 
 } // namespace
@@ -98,7 +98,7 @@ Tensor& arange_out(Tensor& result, Scalar end) {
 }
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
-  return static_cast<const TypeInternalInterface&>(like.type().toScalarType(at::kLong))._arange(like.size(dim));
+  return static_cast<const TypeExtendedInterface&>(like.type().toScalarType(at::kLong))._arange(like.size(dim));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
