@@ -121,7 +121,6 @@ __global__ void THCTensor_kernel_renorm(T *data,
   buffer[tx] = scalar_cast<AccT>(0);
   AccT norm;
 
-#if !defined(__HIP_DEVICE_COMPILE__)
   if (THCNumerics<AccT>::eq(value, scalar_cast<AccT, float>(INFINITY))) {
     // get norm of axis
     for (ptrdiff_t i = tx; i < size; i += step) {
@@ -168,7 +167,6 @@ __global__ void THCTensor_kernel_renorm(T *data,
       row[i] = scalar_cast<T>(THCNumerics<AccT>::mul(val, norm));
     }
   }
-#endif
 }
 
 template <typename T>
