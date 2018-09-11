@@ -271,6 +271,7 @@ template <class T> Vec256<T> inline operator/(const Vec256<T> &a, const Vec256<T
   return c;
 }
 
+
 template <class T> Vec256<T> inline max(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
