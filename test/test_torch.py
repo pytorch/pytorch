@@ -7097,7 +7097,7 @@ class TestTorch(TestCase):
 
         # fail parse with additional positional args after intlist arg
         self.assertRaises(TypeError, lambda: torch.LongTensor((6, 0), 1, 1, 0))
-        self.assertRaises(TypeError, lambda: torch.tensor().new_zeros((5,5), 0))
+        self.assertRaises(TypeError, lambda: torch.tensor().new_zeros((5, 5), 0))
 
     def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
