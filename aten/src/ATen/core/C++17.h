@@ -12,6 +12,26 @@
 
 namespace c10 { namespace guts {
 
+// C++11 doesn't have constexpr std::move / std::forward.
+// Implementation taken from libc++.
+template<class T>
+constexpr inline guts::remove_reference_t<T>&& move(T&& t) noexcept {
+  return static_cast<guts::remove_reference_t<T>&&>(t);
+}
+template <class T>
+constexpr inline T&& forward(guts::remove_reference_t<T>& t) noexcept {
+    return static_cast<T&&>(t);
+}
+template <class T>
+constexpr inline T&& forward(guts::remove_reference_t<T>&& t) noexcept {
+    static_assert(!std::is_lvalue_reference<T>::value,
+                  "can not forward an rvalue as an lvalue.");
+    return static_cast<T&&>(t);
+}
+
+
+
+
 #if __cplusplus >= 201402L || defined(__cpp_lib_make_unique) && __cpp_lib_make_unique >= 201304L || \
   (defined(__ANDROID__) && __ANDROID__ && __cplusplus >= 201300L) || defined(_MSC_VER) && _MSC_VER >= 1900
 
@@ -150,23 +170,6 @@ template<typename... Ts> using void_t = typename make_void<Ts...>::type;
 
 #endif
 
-
-// C++11 doesn't have constexpr std::move / std::forward.
-// Implementation taken from libc++.
-template<class T>
-constexpr inline guts::remove_reference_t<T>&& move(T&& t) noexcept {
-  return static_cast<guts::remove_reference_t<T>&&>(t);
-}
-template <class T>
-constexpr inline T&& forward(guts::remove_reference_t<T>& t) noexcept {
-    return static_cast<T&&>(t);
-}
-template <class T>
-constexpr inline T&& forward(guts::remove_reference_t<T>&& t) noexcept {
-    static_assert(!std::is_lvalue_reference<T>::value,
-                  "can not forward an rvalue as an lvalue.");
-    return static_cast<T&&>(t);
-}
 
 
 #ifdef __cpp_lib_apply
