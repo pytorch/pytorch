@@ -3346,7 +3346,7 @@ triangular such that the returned tensor is
     inv = (u^T u)^{-1}
 
 If :attr:`upper` is ``False``, :attr:`u` is lower triangular
-such that the tensor value is
+such that the returned tensor is
 
 .. math::
     inv = (uu^{T})^{-1}
@@ -5308,7 +5308,7 @@ The operation is defined as:
 
 .. math::
     out_i = \begin{cases}
-        x_i & \text{if } condition_i \\
+        x_i & \text{if } \text{condition}_i \\
         y_i & \text{otherwise} \\
     \end{cases}
 
