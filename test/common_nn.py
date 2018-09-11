@@ -653,6 +653,7 @@ criterion_tests = [
             multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         check_gradgrad=False,
+        check_half=False
     ),
     dict(
         module_name='MultiLabelSoftMarginLoss',
