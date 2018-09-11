@@ -33,7 +33,7 @@ using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
 
-extern size_t deleteFunctionMaxRecursionDepth;
+TORCH_API extern size_t deleteFunctionMaxRecursionDepth;
 
 // Custom deleter to prevent stack overflows.
 void deleteFunction(Function* function);
