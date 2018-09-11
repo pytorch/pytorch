@@ -654,8 +654,7 @@ class Module(object):
                     continue
 
                 if isinstance(input_param, Parameter):
-                    # backwards compatibility for serialized parameters
-                    input_param = input_param.data
+                    self._parameters[name] = input_param.to(param.device, param.dtype)
                 try:
                     param.copy_(input_param)
                 except Exception:
