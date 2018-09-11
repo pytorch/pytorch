@@ -49,7 +49,7 @@ class PackedFCOp final : public Operator<CPUContext> {
 
     // Check out what is the passed in format.
     const MKLPackedMatrix* packed_matrix = nullptr;
-    if (OperatorBase::InputIsType<Tensor>(1, CPU)) {
+    if (OperatorBase::InputIsTensorType(1, CPU)) {
       const auto& W = Input(1);
       CAFFE_ENFORCE_EQ(W.ndim(), 2);
       CAFFE_ENFORCE_EQ(W.dim32(0), N);

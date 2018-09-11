@@ -1,4 +1,4 @@
-#include <ATen/TensorImpl.h>
+#include <ATen/core/TensorImpl.h>
 
 #include <ATen/core/optional.h>
 #include <ATen/core/Backend.h>

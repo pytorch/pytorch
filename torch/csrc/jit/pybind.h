@@ -24,7 +24,12 @@ public:
   PYBIND11_TYPE_CASTER(torch::jit::IValue, _("IValue"));
 
   bool load(handle src, bool) {
-    return false;
+    try {
+      value = torch::jit::toIValue(src);
+      return true;
+    } catch (std::exception& e) {
+      return false;
+    }
   }
 
   static handle cast(torch::jit::IValue src, return_value_policy /* policy */, handle /* parent */) {
