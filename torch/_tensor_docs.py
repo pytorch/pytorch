@@ -1746,9 +1746,10 @@ add_docstr_all('reshape',
                r"""
 reshape(*shape) -> Tensor
 
-Returns a tensor with the same data and number of elements as :attr:`self`,
+Returns a tensor with the same data and number of elements as :attr:`self`
 but with the specified shape. This method returns a view if :attr:`shape` is
-compatible with the current shape.
+compatible with the current shape. See :meth:`torch.Tensor.view` on when it is
+possible to return a view.
 
 See :func:`torch.reshape`
 
@@ -1763,8 +1764,10 @@ reshape_as(other) -> Tensor
 
 Returns this tensor as the same shape as :attr:`other`.
 ``self.reshape_as(other)`` is equivalent to ``self.reshape(other.sizes())``.
+This method returns a view if ``other.sizes()`` is compatible with the current
+shape. See :meth:`torch.Tensor.view` on when it is possible to return a view.
 
-Please see :meth:`~Tensor.reshape` for more information about ``reshape``.
+Please see :meth:`reshape` for more information about ``reshape``.
 
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same shape

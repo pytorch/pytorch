@@ -3993,6 +3993,8 @@ of :attr:`input`. Otherwise, it will be a copy. Contiguous inputs and inputs
 with compatible strides can be reshaped without copying, but you should not
 depend on the copying vs. viewing behavior.
 
+See :meth:`torch.Tensor.view` on when it is possible to return a view.
+
 A single dimension may be -1, in which case it's inferred from the remaining
 dimensions and the number of elements in :attr:`input`.
 
