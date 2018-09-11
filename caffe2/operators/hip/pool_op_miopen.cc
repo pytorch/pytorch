@@ -27,7 +27,7 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
         do_backward_(
-            OperatorBase::GetSingleArgument<bool>("do_backward", true)),
+            OperatorBase::GetSingleArgument<bool>("do_backward", false)),
         poolWs_(nullptr),
         poolWsSize_(0)
 
@@ -95,12 +95,6 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         top_desc_, miopenTypeWrapper<T>::type, N_out, C_out, H_out, W_out));
 
-    MIOPEN_ENFORCE(miopenPoolingGetWorkSpaceSize(top_desc_, &poolWsSize_));
-
-    if ((poolWsSize_ > 0) && (poolWs_ == nullptr)) {
-      HIP_CHECK(hipMalloc(&poolWs_, poolWsSize_));
-    }
-
     const T* Xdata = X.template data<T>();
     T* Ydata = Y->template mutable_data<T>();
     MIOPEN_ENFORCE(miopenPoolingForward(
@@ -112,9 +106,9 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
         &beta_,
         top_desc_,
         Ydata,
-        do_backward_,
-        poolWs_,
-        poolWsSize_));
+        false,
+        nullptr,
+        0));
 
     return true;
   }
@@ -231,21 +225,21 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
 
     MIOPEN_ENFORCE(miopenPoolingGetWorkSpaceSize(top_desc_, &poolWsSize_));
 
-    if ((poolWsSize_ > 0) && (poolWs_ == nullptr)) {
-      HIP_CHECK(hipMalloc(&poolWs_, poolWsSize_));
-    }
-
-    if (bwdPoolScratch_ == nullptr) {
-      HIP_CHECK(hipMalloc(&bwdPoolScratch_, Y.size() * sizeof(float)));
-    }
-
     // Carry out the pooling computation.
     const T* Xdata = X.template data<T>();
     const T* Ydata = Y.template data<T>();
     const T* dYdata = dY.template data<T>();
     T* dXdata = dX->template mutable_data<T>();
 
-    MIOPEN_ENFORCE(miopenPoolingForward(
+    if (mode_ == miopenPoolingMax) {
+      if ((poolWsSize_ > 0) && (poolWs_ == nullptr)) {
+        HIP_CHECK(hipMalloc(&poolWs_, poolWsSize_));
+      }
+      if (bwdPoolScratch_ == nullptr) {
+        HIP_CHECK(hipMalloc(&bwdPoolScratch_, Y.size() * sizeof(float)));
+      }
+
+      MIOPEN_ENFORCE(miopenPoolingForward(
         miopen_wrapper_.inline_miopen_handle(),
         pooling_desc_,
         &alpha_,
@@ -257,6 +251,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
         true,
         poolWs_,
         poolWsSize_));
+    }
 
     MIOPEN_ENFORCE(miopenPoolingBackward(
         miopen_wrapper_.inline_miopen_handle(),
