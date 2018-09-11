@@ -51,6 +51,20 @@ class Binomial(Distribution):
             batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Binomial, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.total_count = self.total_count.expand(batch_shape)
+        if 'probs' in self.__dict__:
+            new.probs = self.probs.expand(batch_shape)
+            new._param = new.probs
+        else:
+            new.logits = self.logits.expand(batch_shape)
+            new._param = new.logits
+        super(Binomial, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
@@ -101,12 +115,13 @@ class Binomial(Distribution):
                 value * self.logits + self.total_count * max_val -
                 self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
             raise NotImplementedError("Inhomogeneous total count not supported by `enumerate_support`.")
         values = self._new(1 + total_count,)
         torch.arange(1 + total_count, out=values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
-        values = values.expand((-1,) + self._batch_shape)
+        if expand:
+            values = values.expand((-1,) + self._batch_shape)
         return values

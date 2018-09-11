@@ -16,14 +16,15 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
 
+#include <ATen/core/Device.h>
+#include <ATen/core/DeviceType.h>
 #include <ATen/core/intrusive_ptr.h>
 
 namespace caffe2 {
 
 using DataType = TypeMeta;
-// TODO: changed to DataPtr in Aten when shared folder
-// is ready
 using DataPtr = std::shared_ptr<void>;
+using at::DeviceType;
 
 class CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
  public:
@@ -150,7 +151,6 @@ class CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
   // allocator_ takes precedence over StaticContext from device_type_
   // Allocator* allocator_;
   DeviceType device_type_ = CPU;
-
 };
 
 class CAFFE2_API Storage {

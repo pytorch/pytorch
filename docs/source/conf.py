@@ -55,22 +55,6 @@ extensions = [
     'sphinxcontrib.katex',
 ]
 
-# katex (mathjax replacement) macros
-#
-#
-
-katex_macros = r'''
-"\\op": "\\operatorname{{#1}}",
-"\\i": "\\mathrm{i}",
-"\\e": "\\mathrm{e}^{#1}",
-"\\w": "\\omega",
-"\\vec": "\\mathbf{#1}",
-"\\x": "\\vec{x}",
-"\\d": "\\operatorname{d}\\!{}",
-"\\dirac": "\\operatorname{\\delta}\\left(#1\\right)",
-"\\scalarprod": "\\left\\langle#1,#2\\right\\rangle",
-'''
-
 # katex options
 #
 #
@@ -78,10 +62,9 @@ katex_macros = r'''
 katex_options = r'''
 delimiters : [
    {left: "$$", right: "$$", display: true},
-   {left: "\\(", right: "\\)", display: true},
+   {left: "\\(", right: "\\)", display: false},
    {left: "\\[", right: "\\]", display: true}
-],
-strict : false
+]
 '''
 
 napoleon_use_ivar = True
@@ -246,7 +229,7 @@ texinfo_documents = [
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
     'python': ('https://docs.python.org/', None),
-    'numpy': ('http://docs.scipy.org/doc/numpy/', None),
+    'numpy': ('https://docs.scipy.org/doc/numpy/', None),
 }
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------

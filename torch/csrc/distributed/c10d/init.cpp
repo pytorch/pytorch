@@ -34,7 +34,7 @@ using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
   auto c10d_module =
-      THPObjectPtr(PyImport_ImportModule("torch.distributed.c10d"));
+      THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
   }
@@ -97,8 +97,22 @@ PyObject* c10d_init(PyObject* _unused) {
               &::c10d::Store::add,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "set_timeout",
+              &::c10d::Store::setTimeout,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "wait",
-              &::c10d::Store::wait,
+              [](::c10d::Store& store, const std::vector<std::string>& keys) {
+                store.wait(keys);
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "wait",
+              [](::c10d::Store& store,
+                 const std::vector<std::string>& keys,
+                 const std::chrono::milliseconds& timeout) {
+                store.wait(keys, timeout);
+              },
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
@@ -361,7 +375,23 @@ PyObject* c10d_init(PyObject* _unused) {
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_dist_broadcast_coalesced", &::c10d::distBroadcastCoalesced);
+  module.def(
+      "_dist_broadcast_coalesced",
+      &::c10d::distBroadcastCoalesced,
+      py::arg("tensors"),
+      py::arg("buffer_size"),
+      py::arg("process_group"),
+      py::call_guard<py::gil_scoped_release>());
+  module.def(
+      "_sync_params",
+      &::c10d::syncParams,
+      py::arg("process_group"),
+      py::arg("parameter_data"),
+      py::arg("buffer_data"),
+      py::arg("devices"),
+      py::arg("broadcast_bucket_size"),
+      py::arg("broadcast_buffers"),
+      py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;
 }

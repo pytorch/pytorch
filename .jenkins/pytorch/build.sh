@@ -8,13 +8,13 @@
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
   # TODO: move this to Docker
   sudo apt-get update
-  sudo apt-get install libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+  sudo apt-get install -y --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
   # TODO: move this to Docker
   sudo apt-get update
-  sudo apt-get install openmpi-bin libopenmpi-dev
+  sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
   sudo apt-get install -y --no-install-recommends openssh-client openssh-server
   sudo mkdir -p /var/run/sshd
 fi
@@ -72,8 +72,10 @@ fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
 # gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
-if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
-  export MAX_JOBS=`expr $(nproc) - 1`
+if [ -z "$MAX_JOBS" ]; then
+  if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
+    export MAX_JOBS=`expr $(nproc) - 1`
+  fi
 fi
 
 # Target only our CI GPU machine's CUDA arch to speed up the build
@@ -99,12 +101,6 @@ fi
 
 # Add the test binaries so that they won't be git clean'ed away
 git add -f build/bin
-
-# Testing ATen install
-if [[ "$BUILD_ENVIRONMENT" != *cuda* ]]; then
-  echo "Testing ATen install"
-  time tools/test_aten_install.sh
-fi
 
 # Test C FFI plugins
 # cffi install doesn't work for Python 3.7
@@ -135,5 +131,15 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   mkdir -p ../cpp-build/caffe2
   pushd ../cpp-build/caffe2
   WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
+  popd
+
+  # Build custom operator tests.
+  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+  CUSTOM_OP_TEST="$PWD/test/custom_operator"
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  mkdir "$CUSTOM_OP_BUILD"
+  pushd "$CUSTOM_OP_BUILD"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
+  make VERBOSE=1
   popd
 fi

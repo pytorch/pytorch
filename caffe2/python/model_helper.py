@@ -466,7 +466,8 @@ class ModelHelper(object):
             op.debug_info = op.debug_info + "/param_init_net"
         new_net.AppendNet(self.net)
         # keep the execution optimization
-        new_net.Proto().type = self.net.Proto().type
+        if self.net.Proto().HasField("type"):
+            new_net.Proto().type = self.net.Proto().type
         return new_net
 
     def ConstructInitTrainNetfromNet(self, net):

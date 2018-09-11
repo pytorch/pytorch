@@ -1,4 +1,6 @@
-#include <ATen/ATen.h>
+#include <ATen/Tensor.h>
+#include <ATen/Type.h>
+#include <ATen/Formatting.h>
 
 #include <iostream>
 

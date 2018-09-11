@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <algorithm>
@@ -57,6 +57,7 @@ namespace torch { namespace jit {
   _(prim, FusedConcat)             \
   _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
+  _(aten, floordiv)                \
   _(aten, __not__)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \
@@ -85,6 +86,7 @@ namespace torch { namespace jit {
   _(onnx, Greater)                 \
   _(onnx, Less)                    \
   _(onnx, Not)                     \
+  _(onnx, ATen)                    \
   FORALL_ATTR_BASE_SYMBOLS(_)      \
   _(attr, Subgraph)                \
   _(attr, ReverseSubgraph)         \
@@ -107,7 +109,6 @@ namespace torch { namespace jit {
   _(attr, transA)                  \
   _(attr, transB)                  \
   _(attr, name)                    \
-  _(attr, string)                  \
   _(attr, a)                       \
   _(attr, b)
 

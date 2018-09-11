@@ -189,6 +189,7 @@ class TestTorch(TestCase):
                        'is_coalesced',
                        'is_distributed',
                        'is_floating_point',
+                       'is_complex',
                        'is_nonzero',
                        'is_same_size',
                        'is_signed',
@@ -216,10 +217,10 @@ class TestTorch(TestCase):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
+                       'sparse_mask',
                        )
         test_namespace(torch.nn)
-        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear',
-                       'dropout', 'dropout2d', 'dropout3d', 'feature_alpha_dropout')
+        test_namespace(torch.nn.functional, 'assert_int_or_pair', 'bilinear', 'feature_alpha_dropout')
         # TODO: add torch.* tests when we have proper namespacing on ATen functions
         # test_namespace(torch)
 
@@ -1081,7 +1082,7 @@ class TestTorch(TestCase):
 
     @skipIfRocm
     def test_pdist_empty(self):
-        devices = ['cpu']
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             shape = (0, 2)
             x = torch.randn(shape, device=device)
@@ -1099,7 +1100,7 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_pdist_scipy(self):
         from scipy.spatial.distance import pdist
-        devices = ['cpu']
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             for shape in [(4, 5), (3, 2), (2, 1)]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
@@ -1110,13 +1111,13 @@ class TestTorch(TestCase):
                         actual = torch.pdist(x, p=p)
                         # pdist doesn't handle 0 or inf norm properly
                         if p == 0:
-                            expected = pdist(x, 'hamming') * x.shape[1]
+                            expected = pdist(x.cpu(), 'hamming') * x.shape[1]
                         elif p == float('inf'):
-                            expected = pdist(x, lambda a, b: np.abs(a - b).max())
+                            expected = pdist(x.cpu(), lambda a, b: np.abs(a - b).max())
                         else:
-                            expected = pdist(x, 'minkowski', p=p)
+                            expected = pdist(x.cpu(), 'minkowski', p=p)
                         self.assertEqual(expected.shape, actual.shape)
-                        self.assertTrue(np.allclose(expected, actual.numpy()))
+                        self.assertTrue(np.allclose(expected, actual.cpu().numpy()))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_logsumexp(self):
@@ -2511,6 +2512,24 @@ class TestTorch(TestCase):
         self.assertEqual(torch.tensor(x), torch.as_tensor(x))
         self.assertEqual(torch.tensor(x, dtype=torch.float32), torch.as_tensor(x, dtype=torch.float32))
 
+        # python data with heterogeneous types
+        z = [0, 'torch']
+        with self.assertRaisesRegex(TypeError, "invalid data type"):
+            torch.tensor(z)
+            torch.as_tensor(z)
+
+        # python data with self-referential lists
+        z = [0]
+        z += [z]
+        with self.assertRaisesRegex(TypeError, "self-referential lists are incompatible"):
+            torch.tensor(z)
+            torch.as_tensor(z)
+
+        z = [[1, 2], z]
+        with self.assertRaisesRegex(TypeError, "self-referential lists are incompatible"):
+            torch.tensor(z)
+            torch.as_tensor(z)
+
         # from tensor (doesn't copy unless type is different)
         y = torch.tensor(x)
         self.assertIs(y, torch.as_tensor(y))
@@ -2925,6 +2944,20 @@ class TestTorch(TestCase):
                                    torch.tensor(3),
                                    torch.tensor(1, dtype=torch.int16)).dtype)
         torch.set_default_dtype(saved_dtype)
+
+    def test_randint_inference(self):
+        size = (2, 1)
+        for args in [(3,), (1, 3)]:  # (low,) and (low, high)
+            self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, layout=torch.strided).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.default_generator).dtype)
+            self.assertIs(torch.float32, torch.randint(*args, size=size, dtype=torch.float32).dtype)
+            out = torch.empty(size, dtype=torch.float32)
+            self.assertIs(torch.float32, torch.randint(*args, size=size, out=out).dtype)
+            self.assertIs(torch.float32, torch.randint(*args, size=size, out=out, dtype=torch.float32).dtype)
+            out = torch.empty(size, dtype=torch.int64)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, out=out).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, out=out, dtype=torch.int64).dtype)
 
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
@@ -4562,6 +4595,49 @@ class TestTorch(TestCase):
     @skipIfNoLapack
     def test_pinverse(self):
         self._test_pinverse(self, conv_fn=lambda x: x)
+
+    @staticmethod
+    def _test_matrix_power(self, conv_fn):
+        def run_test(M, sign=1):
+            if sign == -1:
+                M = M.inverse()
+            MP2 = torch.matrix_power(M, 2)
+            self.assertEqual(MP2, torch.matmul(M, M))
+
+            MP3 = torch.matrix_power(M, 3)
+            self.assertEqual(MP3, torch.matmul(MP2, M))
+
+            MP4 = torch.matrix_power(M, 4)
+            self.assertEqual(MP4, torch.matmul(MP2, MP2))
+
+            MP6 = torch.matrix_power(M, 6)
+            self.assertEqual(MP6, torch.matmul(MP3, MP3))
+
+            MP0 = torch.matrix_power(M, 0)
+            self.assertEqual(MP0, torch.eye(M.size(-2)).expand_as(M))
+
+        # Single matrix
+        M = conv_fn(torch.randn(5, 5))
+        run_test(M)
+
+        # Batch matrices
+        M = conv_fn(torch.randn(3, 3, 3))
+        run_test(M)
+
+        # Many batch matrices
+        M = conv_fn(torch.randn(2, 3, 3, 3))
+        run_test(M)
+
+        # Single matrix, but full rank
+        # This is for negative powers
+        from test_autograd import random_fullrank_matrix_distinct_singular_value
+        M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
+        run_test(M)
+        run_test(M, sign=-1)
+
+    @skipIfNoLapack
+    def test_matrix_power(self):
+        self._test_matrix_power(self, conv_fn=lambda x: x)
 
     @staticmethod
     def _test_det_logdet_slogdet(self, conv_fn):
@@ -7762,6 +7838,35 @@ class TestTorch(TestCase):
 
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
+
+    def test_serialization_storage_slice(self):
+        # Generated using:
+        #
+        # t = torch.zeros(2);
+        # s1 = t.storage()[:1]
+        # s2 = t.storage()[1:]
+        # torch.save((s1, s2), 'foo.ser')
+        #
+        # with PyTorch 0.3.1
+        serialized = (b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9\x03'
+                      b'.\x80\x02}q\x00(X\n\x00\x00\x00type_sizesq\x01}q\x02(X\x03'
+                      b'\x00\x00\x00intq\x03K\x04X\x05\x00\x00\x00shortq\x04K\x02X'
+                      b'\x04\x00\x00\x00longq\x05K\x04uX\x10\x00\x00\x00protocol_versionq'
+                      b'\x06M\xe9\x03X\r\x00\x00\x00little_endianq\x07\x88u.\x80\x02'
+                      b'(X\x07\x00\x00\x00storageq\x00ctorch\nFloatStorage\nq\x01X\x0e'
+                      b'\x00\x00\x0094279043900432q\x02X\x03\x00\x00\x00cpuq\x03K\x02'
+                      b'X\x0e\x00\x00\x0094279029750368q\x04K\x00K\x01\x87q\x05tq\x06'
+                      b'Q(h\x00h\x01X\x0e\x00\x00\x0094279043900432q\x07h\x03K\x02X'
+                      b'\x0e\x00\x00\x0094279029750432q\x08K\x01K\x01\x87q\ttq\nQ'
+                      b'\x86q\x0b.\x80\x02]q\x00X\x0e\x00\x00\x0094279043900432q'
+                      b'\x01a.\x02\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+                      b'\x00\x00\x00\x00')
+
+        buf = io.BytesIO(serialized)
+        (s1, s2) = torch.load(buf)
+        self.assertEqual(s1[0], 0)
+        self.assertEqual(s2[0], 0)
+        self.assertEqual(s1.data_ptr() + 4, s2.data_ptr())
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +

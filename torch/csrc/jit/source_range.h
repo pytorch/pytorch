@@ -10,10 +10,10 @@ namespace jit {
 // range.
 struct SourceRange : public SourceLocation {
   SourceRange(
-      const std::shared_ptr<std::string>& file_,
+      std::shared_ptr<std::string> file_,
       size_t start_,
       size_t end_)
-      : file_(file_), start_(start_), end_(end_) {}
+      : file_(std::move(file_)), start_(start_), end_(end_) {}
   const std::string text() const {
     return file().substr(start(), end() - start());
   }
@@ -22,7 +22,7 @@ struct SourceRange : public SourceLocation {
   }
 
   static const size_t CONTEXT = 10;
-  virtual void highlight(std::ostream& out) const override {
+  void highlight(std::ostream& out) const override {
     const std::string& str = file();
     size_t begin_line = start(); // beginning of line to highlight
     size_t end_line = start(); // end of line to highlight
@@ -57,7 +57,7 @@ struct SourceRange : public SourceLocation {
     out << std::string(len, '~')
         << (len < size() ? "...  <--- HERE" : " <--- HERE");
     out << str.substr(end_line, end_highlight - end_line);
-    if (str.size() > 0 && str.back() != '\n')
+    if (!str.empty() && str.back() != '\n')
       out << "\n";
   }
   const std::string& file() const {

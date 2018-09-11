@@ -17,7 +17,7 @@ struct SourceLocation {
   void wrapAndRethrowException(const std::exception & e, const std::string & additional = "") {
     std::stringstream msg;
     msg << "\n" << e.what() << ":\n";
-    if(additional.size() != 0) {
+    if(!additional.empty()) {
       msg << additional << ":\n";
     }
     highlight(msg);

@@ -38,6 +38,13 @@ ELSE()
   SET(ROCBLAS_PATH $ENV{ROCBLAS_PATH})
 ENDIF()
 
+# ROCSPARSE_PATH
+IF(NOT DEFINED ENV{ROCSPARSE_PATH})
+  SET(ROCSPARSE_PATH ${ROCM_PATH}/rocsparse)
+ELSE()
+  SET(ROCSPARSE_PATH $ENV{ROCSPARSE_PATH})
+ENDIF()
+
 # ROCFFT_PATH
 IF(NOT DEFINED ENV{ROCFFT_PATH})
   SET(ROCBLAS_PATH ${ROCM_PATH}/rocfft)
@@ -47,7 +54,7 @@ ENDIF()
 
 # HIPSPARSE_PATH
 IF(NOT DEFINED ENV{HIPSPARSE_PATH})
-  SET(HIPSPARSE_PATH ${ROCM_PATH}/hcsparse)
+  SET(HIPSPARSE_PATH ${ROCM_PATH}/hipsparse)
 ELSE()
   SET(HIPSPARSE_PATH $ENV{HIPSPARSE_PATH})
 ENDIF()
@@ -115,12 +122,14 @@ IF(HIP_FOUND)
   set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
   set(rocfft_DIR ${ROCFFT_PATH}/lib/cmake/rocfft)
   set(hipsparse_DIR ${HIPSPARSE_PATH}/lib/cmake/hipsparse)
+  set(rocsparse_DIR ${ROCSPARSE_PATH}/lib/cmake/rocsparse)
 
   find_package(rocrand REQUIRED)
   find_package(hiprand REQUIRED)
   find_package(rocblas REQUIRED)
   find_package(rocfft REQUIRED)
   find_package(miopen REQUIRED)
+  #find_package(rocsparse REQUIRED)
   #find_package(hipsparse REQUIRED)
 
   # TODO: hip_hcc has an interface include flag "-hc" which is only
@@ -132,6 +141,7 @@ IF(HIP_FOUND)
   # however currently it's just the lib name
   FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
   FIND_LIBRARY(hiprand_LIBRARIES hiprand HINTS ${HIPRAND_PATH}/lib)
+  FIND_LIBRARY(rocsparse_LIBRARIES rocsparse HINTS ${ROCSPARSE_PATH}/lib)
   FIND_LIBRARY(hipsparse_LIBRARIES hipsparse HINTS ${HIPSPARSE_PATH}/lib)
 
 

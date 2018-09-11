@@ -43,12 +43,12 @@ class IDEEPFallbackOp final : public IDEEPOperator {
 
   IDEEPFallbackOp(const OperatorDef& def, Workspace* ws)
       : IDEEPOperator(def, ws) {
-    CAFFE_ENFORCE_EQ(def.device_option().device_type(), IDEEP);
+    CAFFE_ENFORCE_EQ(def.device_option().device_type(), PROTO_IDEEP);
     base_def_.CopyFrom(def);
     // base_def_ runs on CPU, so we will set its device option to CPU.
     // Copy to allow random_seed to be correctly propagated.
     base_def_.mutable_device_option()->CopyFrom(def.device_option());
-    base_def_.mutable_device_option()->set_device_type(CPU);
+    base_def_.mutable_device_option()->set_device_type(PROTO_CPU);
     // Create output blobs in parent workspace,
     // then forward output blobs to local workspace.
     std::unordered_map<string, string> forwarded_output_blobs;
@@ -121,7 +121,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         continue;
       }
       CAFFE_ENFORCE(
-          local_output_blobs_[i]->template IsType<Tensor>(CPU),
+          local_output_blobs_[i]->IsTensorType(CPU),
           "IDEEP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();

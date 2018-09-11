@@ -38,6 +38,14 @@ class OneHotCategorical(Distribution):
         event_shape = self._categorical.param_shape[-1:]
         super(OneHotCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(OneHotCategorical, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new._categorical = self._categorical.expand(batch_shape)
+        super(OneHotCategorical, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
 
@@ -79,9 +87,11 @@ class OneHotCategorical(Distribution):
     def entropy(self):
         return self._categorical.entropy()
 
-    def enumerate_support(self):
+    def enumerate_support(self, expand=True):
         n = self.event_shape[0]
         values = self._new((n, n))
         torch.eye(n, out=values)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
-        return values.expand((n,) + self.batch_shape + (n,))
+        if expand:
+            values = values.expand((n,) + self.batch_shape + (n,))
+        return values

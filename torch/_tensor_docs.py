@@ -1317,6 +1317,13 @@ masked_select(mask) -> Tensor
 See :func:`torch.masked_select`
 """)
 
+add_docstr_all('matrix_power',
+               r"""
+matrix_power(n) -> Tensor
+
+See :func:`torch.matrix_power`
+""")
+
 add_docstr_all('max',
                r"""
 max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
@@ -1405,14 +1412,7 @@ add_docstr_all('narrow',
                r"""
 narrow(dimension, start, length) -> Tensor
 
-Returns a new tensor that is a narrowed version of :attr:`self` tensor. The
-dimension :attr:`dim` is narrowed from :attr:`start` to :attr:`start + length`. The
-returned tensor and :attr:`self` tensor share the same underlying storage.
-
-Args:
-    dimension (int): the dimension along which to narrow
-    start (int): the starting dimension
-    length (int): the distance to the ending dimension
+See :func:`torch.narrow`
 
 Example::
 

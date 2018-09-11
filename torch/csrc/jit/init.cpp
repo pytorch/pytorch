@@ -11,6 +11,7 @@
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/erase_number_types.h"
+#include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
@@ -90,6 +91,7 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
+   .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
    .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
      return ConstantPropagation(g);
@@ -251,6 +253,31 @@ void initJITBindings(PyObject *module) {
       throw std::runtime_error(error.what_without_backtrace());
     }
   }, py::arg("qualified_name"));
+
+  py::class_<FunctionSchema>(m, "FunctionSchema")
+  .def_property_readonly("name", [](FunctionSchema& self) { return self.name; })
+  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments; })
+  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns; });
+  py::class_<Argument>(m, "Argument")
+  .def_property_readonly("name", [](Argument& self) { return self.name; })
+  .def_property_readonly("type", [](Argument& self) { return self.type; })
+  .def_property_readonly("N", [](Argument& self) -> py::object {
+    return (self.N) ? py::cast(*self.N) :  py::none();
+  })
+  .def_property_readonly("default_value", [](Argument& self) -> py::object {
+    if(!self.default_value)
+      return py::none();
+    IValue v = *self.default_value;
+    return toPyObject(std::move(v));
+  });
+  m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
+    auto symbol = Symbol::fromQualString(qualified_name);
+    auto operations = getAllOperatorsFor(std::move(symbol));
+    return fmap(operations, [](const std::shared_ptr<Operator>& op) {
+        return op->schema();
+      });
+  });
+
 
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);

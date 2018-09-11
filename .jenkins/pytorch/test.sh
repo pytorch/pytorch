@@ -9,6 +9,22 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
+if [ -n "${IN_CIRCLECI}" ]; then
+  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+    # TODO: move this to Docker
+    sudo apt-get update
+    sudo apt-get install -y --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
+    # TODO: move this to Docker
+    sudo apt-get update
+    sudo apt-get install -y --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
+    sudo apt-get install -y --no-install-recommends openssh-client openssh-server
+    sudo mkdir -p /var/run/sshd
+  fi
+fi
+
 # JIT C++ extensions require ninja.
 git clone https://github.com/ninja-build/ninja --quiet
 pushd ninja
@@ -81,7 +97,7 @@ test_aten() {
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
     if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-      SUDO=sudo 
+      SUDO=sudo
     fi
 
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
@@ -124,12 +140,28 @@ test_libtorch() {
   fi
 }
 
+test_custom_script_ops() {
+  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+    echo "Testing custom script operators"
+    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    pushd test/custom_operator
+    cp -r "$CUSTOM_OP_BUILD" build
+    # Run tests Python-side and export a script module.
+    python test_custom_ops.py -v
+    python model.py --export-script-module=model.pt
+    # Run tests C++-side and load the exported script module.
+    build/test_custom_ops ./model.pt
+    popd
+  fi
+}
+
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
   test_python_nn
   test_python_all_except_nn
   test_aten
   test_torchvision
   test_libtorch
+  test_custom_script_ops
 else
   if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
     test_python_nn
@@ -138,5 +170,6 @@ else
     test_aten
     test_torchvision
     test_libtorch
+    test_custom_script_ops
   fi
 fi
