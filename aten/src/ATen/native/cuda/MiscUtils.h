@@ -41,7 +41,7 @@ static inline Storage pin_memory(int64_t size, Tensor dummy) {
   auto& backend = dummy.type().toBackend(Backend::CPU).toScalarType(kByte);
   return backend.storageWithAllocator(adjusted_size, allocator);
 }
-
+  
 } // namespace native
 } // namespace at
 
