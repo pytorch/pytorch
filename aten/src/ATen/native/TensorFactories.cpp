@@ -408,6 +408,44 @@ Tensor randn_like(const Tensor& self, const TensorOptions& options) {
   return native::randn(self.sizes(), nullptr, options);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ normal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor normal(const Tensor& mean, double std, const TensorOptions& options) {
+  return native::normal(mean, std, nullptr, options);
+}
+
+Tensor normal(double mean, const Tensor& std, const TensorOptions& options) {
+  return native::normal(mean, std, nullptr, options);
+}
+
+Tensor normal(const Tensor& mean, const Tensor& std, const TensorOptions& options) {
+  return native::normal(mean, std, nullptr, options);
+}
+
+Tensor normal(const Tensor& mean, double std, Generator* generator, const TensorOptions& options) {
+  return at::getType(options).th_normal(mean, std, generator);
+}
+
+Tensor normal(double mean, const Tensor& std, Generator* generator, const TensorOptions& options) {
+  return at::getType(options).th_normal(mean, std, generator);
+}
+
+Tensor normal(const Tensor& mean, const Tensor& std, Generator* generator, const TensorOptions& options) {
+  return at::getType(options).th_normal(mean, std, generator);
+}
+
+Tensor& normal_out(Tensor& result, const Tensor& mean, double std, Generator* generator) {
+  return at::th_normal_out(result, mean, std, generator);
+}
+
+Tensor& normal_out(Tensor& result, double mean, const Tensor& std, Generator* generator) {
+  return at::th_normal_out(result, mean, std, generator);
+}
+
+Tensor& normal_out(Tensor& result, const Tensor& mean, const Tensor& std, Generator* generator) {
+  return at::th_normal_out(result, mean, std, generator);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randperm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace {

@@ -1243,6 +1243,24 @@
 - func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
   deprecated: true
 
+- func: normal(Tensor mean, double std=1, *, TensorOptions options={}) -> Tensor
+
+- func: normal(Tensor mean, double std, *, Generator* generator, TensorOptions options={}) -> Tensor
+
+- func: normal(double mean, Tensor std, *, TensorOptions options={}) -> Tensor
+
+- func: normal(double mean, Tensor std, *, Generator* generator, TensorOptions options={}) -> Tensor
+
+- func: normal(Tensor mean, Tensor std, *, TensorOptions options={}) -> Tensor
+
+- func: normal(Tensor mean, Tensor std, *, Generator* generator, TensorOptions options={}) -> Tensor
+
+- func: normal_out(Tensor result, Tensor mean, double std=1, *, Generator* generator=nullptr) -> Tensor
+
+- func: normal_out(Tensor result, double mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+
+- func: normal_out(Tensor result, Tensor mean, Tensor std, *, Generator* generator=nullptr) -> Tensor
+
 - func: randperm(int64_t n, *, TensorOptions options={}) -> Tensor
 
 - func: randperm(int64_t n, *, Generator* generator, TensorOptions options={}) -> Tensor
