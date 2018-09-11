@@ -5,15 +5,17 @@
 #include <numeric>
 #include <string>
 
+using std::string;
+
 namespace at {
 
 namespace detail {
 
-std::string StripBasename(const std::string& full_path) {
+string StripBasename(const string& full_path) {
   const char kSeparator = '/';
   size_t pos = full_path.rfind(kSeparator);
-  if (pos != std::string::npos) {
-    return full_path.substr(pos + 1, std::string::npos);
+  if (pos != string::npos) {
+    return full_path.substr(pos + 1, string::npos);
   } else {
     return full_path;
   }
@@ -27,8 +29,8 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
 }
 
 Error::Error(
-    const std::string& new_msg,
-    const std::string& backtrace,
+    const string& new_msg,
+    const string& backtrace,
     const void* caller)
     : msg_stack_{new_msg}, backtrace_(backtrace), caller_(caller) {
   msg_ = msg();
@@ -36,7 +38,7 @@ Error::Error(
 }
 
 // PyTorch-style error message
-Error::Error(SourceLocation source_location, const std::string& msg)
+Error::Error(SourceLocation source_location, const string& msg)
     : Error(
           msg,
           str(" (",
@@ -49,8 +51,8 @@ Error::Error(
     const char* file,
     const int line,
     const char* condition,
-    const std::string& msg,
-    const std::string& backtrace,
+    const string& msg,
+    const string& backtrace,
     const void* caller)
     : Error(
           str("[enforce fail at ",
@@ -64,17 +66,17 @@ Error::Error(
           backtrace,
           caller) {}
 
-std::string Error::msg() const {
+string Error::msg() const {
   return std::accumulate(
-             msg_stack_.begin(), msg_stack_.end(), std::string("")) +
+             msg_stack_.begin(), msg_stack_.end(), string("")) +
       backtrace_;
 }
 
-std::string Error::msg_without_backtrace() const {
-  return std::accumulate(msg_stack_.begin(), msg_stack_.end(), std::string(""));
+string Error::msg_without_backtrace() const {
+  return std::accumulate(msg_stack_.begin(), msg_stack_.end(), string(""));
 }
 
-void Error::AppendMessage(const std::string& new_msg) {
+void Error::AppendMessage(const string& new_msg) {
   msg_stack_.push_back(new_msg);
   // Refresh the cache
   // TODO: Calling AppendMessage O(n) times has O(n^2) cost.  We can fix
@@ -84,7 +86,7 @@ void Error::AppendMessage(const std::string& new_msg) {
   msg_without_backtrace_ = msg_without_backtrace();
 }
 
-void Warning::warn(SourceLocation source_location, std::string msg) {
+void Warning::warn(SourceLocation source_location, string msg) {
   warning_handler_(source_location, msg.c_str());
 }
 
@@ -99,5 +101,13 @@ void Warning::print_warning(
 }
 
 Warning::handler_t Warning::warning_handler_ = &Warning::print_warning;
+
+string GetExceptionString(const std::exception& e) {
+#ifdef __GXX_RTTI
+  return at::demangle(typeid(e).name()) + ": " + e.what();
+#else
+  return string("Exception (no RTTI available): ") + e.what();
+#endif // __GXX_RTTI
+}
 
 } // namespace at
