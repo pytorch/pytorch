@@ -109,6 +109,7 @@ Tensor instance_norm(
   auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
                             use_input_stats, momentum, eps, cudnn_enabled);
 
+  // we alias running_mean and running_var because they are const but we want to modify their data
   if (running_mean.defined()) {
     at::alias(running_mean).copy_(running_mean_.view({ b, c }).mean(0, false));
   }
