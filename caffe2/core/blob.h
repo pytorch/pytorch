@@ -26,12 +26,10 @@ namespace caffe2 {
  */
 class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
  public:
-  using DestroyCall = void(void*);
-
   /**
    * Initializes an empty Blob.
    */
-  Blob() noexcept : meta_(), pointer_(nullptr), destroy_(nullptr) {}
+  Blob() noexcept : meta_(), pointer_(nullptr), has_ownership_(false) {}
   ~Blob() { Reset(); }
 
   Blob(Blob&& other) noexcept : Blob() {
@@ -150,12 +148,10 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
    */
   template <class T>
   T* Reset(T* allocated) {
-    if (pointer_ && destroy_) {
-      destroy_(pointer_);
-    }
+    free_();
     meta_ = TypeMeta::Make<T>();
     pointer_ = static_cast<void*>(allocated);
-    destroy_ = &Destroy<T>;
+    has_ownership_ = true;
     return allocated;
   }
 
@@ -178,12 +174,10 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   }
 
   void* ShareExternal(void* allocated, const TypeMeta& meta) {
-    if (pointer_ && destroy_) {
-      destroy_(pointer_);
-    }
+    free_();
     meta_ = meta;
     pointer_ = static_cast<void*>(allocated);
-    destroy_ = nullptr;
+    has_ownership_ = false;
     return allocated;
   }
 
@@ -191,12 +185,10 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
    * Resets the Blob to an empty one.
    */
   inline void Reset() {
-    if (pointer_ && destroy_) {
-      destroy_(pointer_);
-    }
+    free_();
     pointer_ = nullptr;
     meta_ = TypeMeta();
-    destroy_ = nullptr;
+    has_ownership_ = false;
   }
 
   /**
@@ -229,7 +221,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
     using std::swap;
     swap(meta_, rhs.meta_);
     swap(pointer_, rhs.pointer_);
-    swap(destroy_, rhs.destroy_);
+    swap(has_ownership_, rhs.has_ownership_);
   }
 
   /**
@@ -241,16 +233,16 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   void Deserialize(const BlobProto& proto);
 
  private:
-  /**
-   * @brief A destroy call that is used to properly deconstruct objects.
-   */
-  template <class T>
-  static void Destroy(void* pointer) {
-    delete static_cast<T*>(pointer);
+  void free_() {
+   if (has_ownership_) {
+     CAFFE_ENFORCE(pointer_ != nullptr, "Can't have ownership of nullptr");
+     (*meta_.dtor())(pointer_, 1);
+   }
   }
+
   TypeMeta meta_;
   void* pointer_ = nullptr;
-  DestroyCall* destroy_ = nullptr;
+  bool has_ownership_ = false;
 
   AT_DISABLE_COPY_AND_ASSIGN(Blob);
 };
