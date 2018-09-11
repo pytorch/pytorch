@@ -7227,17 +7227,10 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
 
         script = script_template.format(', '.join(formals), call)
         CU = torch.jit.CompilationUnit(script)
-<<<<<<< HEAD
         self.assertExportImport(CU.the_method.graph, tensors)
-
-        return output_process_fn(CU.the_method(*tensors))
-||||||| merged common ancestors
-        return output_process_fn(CU.the_method(*tensors))
-=======
         output = output_process_fn(CU.the_method(*tensors))
         script_fn.last_graph = CU.the_method.graph_for(*tensors)
         return output
->>>>>>> Add tests for shape propagation
     return script_fn
 
 
@@ -7615,31 +7608,15 @@ def add_test(
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
                     if test_name not in EXCLUDE_TRACED:
-<<<<<<< HEAD
                         check_against_reference(self, create_traced_fn(self, fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable)
-||||||| merged common ancestors
-                        check_against_reference(self, create_traced_fn(fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable)
-=======
-                        check_against_reference(self, create_traced_fn(fn),
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
->>>>>>> Add tests for shape propagation
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-<<<<<<< HEAD
                                                 create_script_fn(self, name, 'method', output_process_fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable)
-||||||| merged common ancestors
-                                                create_script_fn(name, 'method', output_process_fn),
-                                                fn, (self_variable,) + args_variable, kwargs_variable)
-=======
-                                                create_script_fn(name, 'method', output_process_fn),
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
->>>>>>> Add tests for shape propagation
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
@@ -7651,28 +7628,14 @@ def add_test(
                     f_args_tensor = (self_tensor,) + args_tensor
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
-<<<<<<< HEAD
-                        check_against_reference(self, create_traced_fn(self, fn), fn, f_args_variable, kwargs_variable)
-||||||| merged common ancestors
-                        check_against_reference(self, create_traced_fn(fn), fn, f_args_variable, kwargs_variable)
-=======
-                        check_against_reference(self, create_traced_fn(fn), fn,
+                        check_against_reference(self, create_traced_fn(self, fn), fn,
                                                 f_args_variable, kwargs_variable, check_types=check_types)
->>>>>>> Add tests for shape propagation
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-<<<<<<< HEAD
                                                 create_script_fn(self, name, 'functional', output_process_fn),
-                                                fn, f_args_variable, kwargs_variable)
-||||||| merged common ancestors
-                                                create_script_fn(name, 'functional', output_process_fn),
-                                                fn, f_args_variable, kwargs_variable)
-=======
-                                                create_script_fn(name, 'functional', output_process_fn),
                                                 fn, f_args_variable, kwargs_variable,
                                                 check_types=check_types)
->>>>>>> Add tests for shape propagation
 
             check(name)
             inplace_name = name + '_'
