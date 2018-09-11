@@ -1280,6 +1280,19 @@ class TestSparse(TestCase):
         self.assertFalse(torch.sparse_coo_tensor(([0, 0],), (-1., 1.), (1,)).is_nonzero())
         self.assertTrue(torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, []).is_nonzero())  # scalar sparse tensor
 
+    def test_unsupported_functions(self):
+        t = self.SparseTensor()
+        with self.assertRaisesRegex(RuntimeError, "This type of tensor does not have strides"):
+            t.stride()
+        with self.assertRaisesRegex(RuntimeError, "This type of tensor does not have strides"):
+            t.stride(0)
+        with self.assertRaisesRegex(RuntimeError, "is_contiguous is not implemented"):
+            t.is_contiguous()
+        with self.assertRaisesRegex(RuntimeError, "This type of tensor does not have storage"):
+            t.storage()
+        with self.assertRaisesRegex(RuntimeError, "storage_offset is not implemented"):
+            t.storage_offset()
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):

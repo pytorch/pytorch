@@ -188,7 +188,7 @@ if(${check_name}.type().is_sparse()) {
 
 BUFFER_DEFINITION = CodeTemplate("""\
 auto ${name}_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-    ${Backend}TensorId(), ScalarType::${ScalarName}, ${THTensor}_new(), false).release();
+    ${Backend}TensorId(), ScalarType::${ScalarName}, ${THTensor}_new(), TensorImplOptions()).release();
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -331,17 +331,17 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), false).release()',
+                 '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), TensorImplOptions()).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(${Backend}TensorId(), ScalarType::Byte, allocator(), false).release()',
+                     '(${Backend}TensorId(), ScalarType::Byte, allocator(), TensorImplOptions()).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                      '(${Backend}TensorId(), ScalarType::Long, allocator(), false).release()',
+                      '(${Backend}TensorId(), ScalarType::Long, allocator(), TensorImplOptions()).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                        '(${Backend}TensorId(), ScalarType::Int, allocator(), false).release()',
+                        '(${Backend}TensorId(), ScalarType::Int, allocator(), TensorImplOptions()).release()',
     'THDenseTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                      '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), false).release()',
+                      '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), TensorImplOptions()).release()',
     'THDenseIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                           '(${Backend}TensorId(), ScalarType::Long, allocator(), false).release()'
+                           '(${Backend}TensorId(), ScalarType::Long, allocator(), TensorImplOptions()).release()'
 }
 
 ALLOC_WRAP = {

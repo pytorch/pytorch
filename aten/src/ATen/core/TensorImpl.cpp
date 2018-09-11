@@ -17,8 +17,8 @@ const Tensor& TensorImpl::grad() const {
   AT_ERROR("grad is not implemented for Tensor");
 }
 
-TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable)
-    : TensorImpl({}, type_id, scalar_type, is_variable) {
+TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, TensorImplOptions options)
+    : TensorImpl({}, type_id, scalar_type, options) {
   // UndefinedTensors and SparseTensors don't have storages.
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
@@ -26,10 +26,10 @@ TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *
   }
 }
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
-    : TensorImpl(std::move(storage), type_id, dataTypeToScalarType(storage.dtype()), is_variable) {}
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, TensorImplOptions options)
+    : TensorImpl(std::move(storage), type_id, dataTypeToScalarType(storage.dtype()), options) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, TensorImplOptions options)
     : storage_(std::move(storage)),
       storage_offset_(0),
       sizes_{0},
@@ -38,13 +38,16 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scala
       numel_(0),
       type_id_(type_id),
       scalar_type_(scalar_type),
-      is_variable_(is_variable) {}
+      options_(options) {}
 
 IntList TensorImpl::sizes() const {
   return sizes_;
 }
 
 IntList TensorImpl::strides() const {
+  if (!options_.has_strides_) {
+    AT_ERROR("This type of tensor does not have strides");
+  }
   return strides_;
 }
 
@@ -82,11 +85,18 @@ int64_t TensorImpl::size(int64_t d) const {
 }
 
 int64_t TensorImpl::stride(int64_t d) const {
+  if (!options_.has_strides_) {
+    AT_ERROR("This type of tensor does not have strides");
+  }
   d = at::maybe_wrap_dim(d, dim(), false);
   return strides_[d];
 }
 
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
+  if (!options_.support_resize_by_maybe_zero_dim_) {
+    AT_CHECK(condition_when_zero_dim == (dim() == 0),
+           "This type of tensor does not support changing dimensionality via maybe_zero_dim");
+  }
   bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
   if (set_zero_dim) {
     resize_dim(0);
@@ -95,6 +105,9 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
 }
 
 const Storage& TensorImpl::storage() const {
+  if (!options_.has_storage_) {
+    AT_ERROR("This type of tensor does not have storage");
+  }
   return storage_;
 }
 

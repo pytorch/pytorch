@@ -22,7 +22,15 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().type_id(), data.type().scalarType(), data.type().allocator(), /* is variable */ true),
+    : TensorImpl(
+        data.type().type_id(),
+        data.type().scalarType(),
+        data.type().allocator(),
+        at::TensorImplOptions(
+          /* is_variable */ true,
+          /* has_storage */ true,
+          /* has_strides */ true,
+          /* support_resize_by_maybe_zero_dim */ true)),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -161,7 +169,7 @@ void Variable::Impl::set_data(Tensor new_data) {
   // Updates metadata
   scalar_type_ = new_data.type().scalarType();
   type_id_ = new_data.type().type_id();
-  is_variable_ = true;
+  options_.is_variable_ = true;
   data_ = std::move(new_data);
 }
 

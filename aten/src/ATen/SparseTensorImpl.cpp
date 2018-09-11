@@ -29,57 +29,22 @@ namespace {
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, at::ScalarType scalar_type)
-    : TensorImpl(type_id, scalar_type, nullptr, false)
-    , size_{0}
+    : TensorImpl(
+        type_id,
+        scalar_type,
+        nullptr,
+        TensorImplOptions(
+          /* is_variable */ false,
+          /* has_storage */ false,
+          /* has_strides */ false,
+          /* support_resize_by_maybe_zero_dim */ false))
     , sparseDims_(1)
     , denseDims_(0)
     , indices_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), ScalarType::Long)->tensor({1, 0}))
     , values_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), scalar_type)->tensor()) {}
 
-IntList SparseTensorImpl::sizes() const {
-  return size_;
-}
-IntList SparseTensorImpl::strides() const {
-  AT_ERROR("sparse tensors do not have strides");
-}
-bool SparseTensorImpl::is_contiguous() const {
-  AT_ERROR("sparse tensors do not have is_contiguous");
-}
-int64_t SparseTensorImpl::size(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return size_[d];
-}
-int64_t SparseTensorImpl::stride(int64_t d) const {
-  AT_ERROR("sparse tensors do not have strides");
-}
-void SparseTensorImpl::resize_dim(int64_t ndim) {
-  AT_ERROR("sparse tensors do not have resize_dim");
-}
-void SparseTensorImpl::set_size(int64_t dim, int64_t new_size) {
-  AT_ERROR("sparse tensors do not have set_size");
-}
-void SparseTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
-  AT_ERROR("sparse tensors do not have set_stride");
-}
-void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
-  AT_ERROR("sparse tensors do not have set_storage_offset");
-}
-
 int64_t SparseTensorImpl::dim() const {
   return sparseDims_ + denseDims_;
-}
-TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  AT_CHECK(condition_when_zero_dim == (dim() == 0),
-           "Attempted to maybe_zero_dim on a SparseTensorImpl to ", condition_when_zero_dim,
-           " but the SparseTensor's dim() is ", dim(), " and SparseTensors do not support"
-           " changing dimensionality via maybe_zero_dim");
-  return this;
-}
-const Storage& SparseTensorImpl::storage() const {
-  AT_ERROR("sparse tensors do not have storage");
-}
-int64_t SparseTensorImpl::storage_offset() const {
-  AT_ERROR("sparse tensors do not have storage");
 }
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
   AT_CHECK(values.type().toSparse() == type(), "values type must match sparse tensor type");

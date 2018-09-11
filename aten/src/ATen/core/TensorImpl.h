@@ -20,10 +20,32 @@ struct Tensor;
 } // namespace at
 
 namespace at {
+struct TensorImplOptions {
+  bool is_variable_;
+  bool has_storage_;
+  bool has_strides_;
+  // Whether this type of tensor supports changing dimensionality via maybe_zero_dim
+  bool support_resize_by_maybe_zero_dim_;
+  TensorImplOptions() : is_variable_(false),
+                        has_storage_(true),
+                        has_strides_(true),
+                        support_resize_by_maybe_zero_dim_(true) {};
+  TensorImplOptions(bool is_variable,
+                    bool has_storage,
+                    bool has_strides,
+                    bool support_resize_by_maybe_zero_dim)
+                    : is_variable_(is_variable),
+                      has_storage_(has_storage),
+                      has_strides_(has_strides),
+                      support_resize_by_maybe_zero_dim_(support_resize_by_maybe_zero_dim) {};
+};
+} // namespace at
+
+namespace at {
 struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
-  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable);
-  TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
+  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, TensorImplOptions options);
+  TensorImpl(Storage&& storage, TensorTypeId type_id, TensorImplOptions options);
 
   virtual void release_resources() override;
 
@@ -50,6 +72,9 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   virtual bool is_contiguous() const {
+    if (!options_.has_strides_) {
+      AT_ERROR("This type of tensor does not have strides, and hence does not have is_contiguous");
+    }
 #ifdef DEBUG
     AT_ASSERT(compute_contiguous() == is_contiguous_);
 #endif
@@ -110,6 +135,9 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   virtual int64_t storage_offset() const {
+    if (!options_.has_storage_) {
+      AT_ERROR("This type of tensor does not have storage, and hence does not have storage_offset");
+    }
     return storage_offset_;
   }
 
@@ -122,50 +150,64 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
     // NB: This is *truly* a resize; calling code (e.g., squeeze)
     // assumes that old values are preserved
     sizes_.resize(ndim);
-    strides_.resize(ndim);
     refresh_numel();
-    refresh_contiguous();
+    if (options_.has_strides_) {
+      strides_.resize(ndim);
+      refresh_contiguous();
+    }
   }
 
   virtual void set_size(int64_t dim, int64_t new_size) {
     sizes_[dim] = new_size;
     refresh_numel();
-    refresh_contiguous();
+    if (options_.has_strides_) {
+      refresh_contiguous();
+    }
   }
 
   virtual void set_stride(int64_t dim, int64_t new_stride) {
+    if (!options_.has_strides_) {
+      AT_ERROR("This type of tensor does not have strides, and hence does not have set_stride");
+    }
     strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
   }
 
   virtual void set_storage_offset(int64_t storage_offset) {
+    if (!options_.has_storage_) {
+      AT_ERROR("This type of tensor does not have storage, and hence does not have set_storage_offset");
+    }
     storage_offset_ = storage_offset;
     refresh_numel();
-    refresh_contiguous();
+    if (options_.has_strides_) {
+      refresh_contiguous();
+    }
   }
 
   // WARNING: This function does not check if the requested
   // sizes/strides are in bounds for the storage that is allocated;
   // this is the responsibility of the caller
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
-    AT_CHECK(
-        new_size.size() == new_stride.size(),
-        "dimensionality of sizes (",
-        new_size.size(),
-        ") must match dimensionality of strides (",
-        new_stride.size(),
-        ")");
+    if (options_.has_strides_) {
+      AT_CHECK(
+          new_size.size() == new_stride.size(),
+          "dimensionality of sizes (",
+          new_size.size(),
+          ") must match dimensionality of strides (",
+          new_stride.size(),
+          ")");
+      strides_ = new_stride.vec();
+      refresh_contiguous();
+    }
     sizes_ = new_size.vec();
-    strides_ = new_stride.vec();
     refresh_numel();
-    refresh_contiguous();
   }
 
   virtual int64_t size(int64_t d) const;
   virtual int64_t stride(int64_t d) const;
 
-  bool is_variable() const { return is_variable_; };
+  bool is_variable() const { return options_.is_variable_; };
 
  private:
   int64_t storage_offset_;
@@ -183,22 +225,22 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
     return n;
   }
   bool compute_contiguous() const;
-
- protected:
   void refresh_numel() {
     numel_ = compute_numel();
   }
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
   }
+
+ protected:
   TensorTypeId type_id_;
   // INVARIANT: When storage is non-null, this scalar type must
   // agree with the scalar type in storage
   ScalarType scalar_type_;
-  bool is_variable_ = false;
+  TensorImplOptions options_;
   bool is_wrapped_number_ = false;
 
  private:
-  TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
+  TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, TensorImplOptions options);
 };
 } // namespace at
