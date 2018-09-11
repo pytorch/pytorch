@@ -14,8 +14,8 @@ import torch
 import common
 from torch import nn
 import torch.nn.functional as F
-from torch.distributed import c10d
-from torch.nn.parallel import distributed_c10d
+import torch.distributed as c10d
+from torch.nn.parallel import DistributedDataParallel
 
 from common import TestCase
 
@@ -570,7 +570,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def _test_ddp_with_process_group(self, process_group):
         gpus = gpus_for_rank(self.world_size)[self.rank]
         model = Net()
-        ddp_model = distributed_c10d._DistributedDataParallelC10d(
+        ddp_model = DistributedDataParallel(
             copy.deepcopy(model).cuda(gpus[0]),
             device_ids=gpus,
             process_group=process_group)
@@ -731,7 +731,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         gpus = gpus_for_rank(self.world_size)[self.rank]
         model = nn.Linear(1, 1, bias=False).cuda(gpus[0]).half()
         nn.init.constant_(model.weight, 1)
-        ddp_model = distributed_c10d._DistributedDataParallelC10d(
+        ddp_model = DistributedDataParallel(
             model,
             device_ids=[gpus[0]],
             process_group=process_group,
