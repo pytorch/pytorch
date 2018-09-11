@@ -7014,7 +7014,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         train(1)
 
         with self.assertLeaksNoCudaTensors():
-            train(10)
+            train(5)
 
     @staticmethod
     def _test_reinforcement_learning(self, device, test_export_import=True):
