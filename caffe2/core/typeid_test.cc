@@ -128,7 +128,7 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
   // clang right now... Disabling it.
   // TODO: figure out the real cause.
   EXPECT_EQ(meta_b.copy(),
-            &(TypeMeta::_CopyNotAllowed<ClassNoAssignment>));
+            &(detail::_CopyNotAllowed<ClassNoAssignment>));
 #endif
 }
 

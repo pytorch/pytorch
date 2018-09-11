@@ -22,17 +22,16 @@
 #include "ATen/core/Macros.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/IdWrapper.h"
+#include "ATen/core/C++17.h"
 
 // TODO: This file is still in the caffe2 namespace, despite living
-// in the ATen directory.  This is because the macro CAFFE_DECLARE_KNOWN_TYPE
+// in the ATen directory.  This is because the macro CAFFE_PREALLOCATED_KNOWN_TYPE
 // defines a template specialization, which relies on the namespace of TypeMeta
 // matching the namespace where the macro is called.  This requires us to
 // fix all of the call-sites, which I want to do later.  So the namespace
 // is not fixed at the moment.
 
 namespace caffe2 {
-
-class TypeMeta;
 
 /**
  * A type id is a unique id for a given C++ type.
@@ -53,6 +52,16 @@ class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, ui
   static constexpr TypeIdentifier uninitialized() {
     return TypeIdentifier(8);
   }
+
+  /**
+   * Returns the unique id for the given type T. The id is unique for the type T
+   * in the sense that for any two different types, their id are different; for
+   * the same type T, the id remains the same over different calls of the
+   * function. However, this is not guaranteed over different runs, as the id
+   * is generated during run-time. Do NOT serialize the id for storage.
+   */
+  template <typename T>
+  AT_CORE_API static TypeIdentifier Get();
 
  private:
   constexpr explicit TypeIdentifier(uint16_t id) : IdWrapper(id) {}
@@ -81,50 +90,144 @@ AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 
 namespace caffe2 {
 
-AT_CORE_API std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
-AT_CORE_API std::unordered_set<std::string>& gRegisteredTypeNames();
 
+namespace detail {
 
-AT_CORE_API std::mutex& gTypeRegistrationMutex();
+struct TypeMetaData final {
+  using PlacementNew = void(void*, size_t);
+  using TypedCopy = void(const void*, void*, size_t);
+  using TypedDestructor = void(void*, size_t);
+
+  size_t itemsize_;
+  PlacementNew* ctor_;
+  TypedCopy* copy_;
+  TypedDestructor* dtor_;
+  TypeIdentifier id_;
+  const char* name_;
+};
+
+// Mechanism for throwing errors which can't be prevented at compile time
+// due to type erasure. E.g. somebody calling TypeMeta::copy() for
+// non-copiable type. Right now just throws exception but is implemented
+// in .cpp to manage dependencies
+void _ThrowRuntimeTypeLogicError(const std::string& msg);
+
+/**
+ * Placement new function for the type.
+ */
+template <typename T>
+inline void _Ctor(void* ptr, size_t n) {
+  T* typed_ptr = static_cast<T*>(ptr);
+  for (size_t i = 0; i < n; ++i) {
+    new (typed_ptr + i) T;
+  }
+}
 
 template <typename T>
-struct TypeNameRegisterer {
-  TypeNameRegisterer(TypeIdentifier id, const std::string& literal_name) {
-    std::lock_guard<std::mutex> guard(gTypeRegistrationMutex());
-#ifdef __GXX_RTTI
-    (void)literal_name;
+inline void _CtorNotDefault(void* /*ptr*/, size_t /*n*/) {
+  _ThrowRuntimeTypeLogicError(
+      "Type " + std::string(at::demangle_type<T>()) +
+      " is not default-constructible.");
+}
 
-    std::string name = at::demangle(typeid(T).name());
-    // If we are in RTTI mode, we will also use this opportunity to do sanity
-    // check if there are duplicated ids registered for the same type. This
-    // usually happens when one does not do RTLD_GLOBAL, which is often the
-    // case in Python. The way we do the check is to make sure that there are
-    // no duplicated names registered - this could be done by checking the
-    // uniqueness of names.
-    if (gRegisteredTypeNames().count(name)) {
-      AT_ERROR("typeid.h: Type name ", name, " was registered twice.  "
-               "This should not happen.  Things to check:\n"
-               "1. Did you add a new CAFFE_KNOWN_TYPE?  If so, check that "
-               "it is not duplicated with an existing CAFFE_KNOWN_TYPE.\n"
-               "2. Did you build and install PyTorch and Caffe2 separately? "
-               "For example, this would be the case if you ran scripts/onnx/install.sh or "
-               "scripts/onnx/install-develop.sh prior to Aug 12, 2018 "
-               "(commit 1756daaa7530d).  If so, rebuild using the environment variable "
-               " FULL_CAFFE2=1 (if you build latest master, the ONNX scripts are "
-               "updated to do this for you.) "
-               "For more context, see https://github.com/pytorch/pytorch/issues/10460");
-    }
-    gRegisteredTypeNames().insert(name);
-    gTypeNames()[id] = name;
-#else // __GXX_RTTI
-    if (literal_name.empty()) {
-      gTypeNames()[id] = "(RTTI disabled, cannot show name)";
-    } else {
-      gTypeNames()[id] = literal_name;
-    }
-#endif // __GXX_RTTI
+template <
+    typename T,
+    typename std::enable_if<std::is_default_constructible<T>::value>::type* =
+        nullptr>
+inline TypeMetaData::PlacementNew* _PickCtor() {
+  return &_Ctor<T>;
+}
+
+template <
+    typename T,
+    typename std::enable_if<!std::is_default_constructible<T>::value>::type* =
+        nullptr>
+inline TypeMetaData::PlacementNew* _PickCtor() {
+  return &_CtorNotDefault<T>;
+}
+
+/**
+ * Typed copy function for classes.
+ */
+template <typename T>
+inline void _Copy(const void* src, void* dst, size_t n) {
+  const T* typed_src = static_cast<const T*>(src);
+  T* typed_dst = static_cast<T*>(dst);
+  for (size_t i = 0; i < n; ++i) {
+    typed_dst[i] = typed_src[i];
   }
+}
+
+/**
+ * A placeholder function for types that do not allow assignment.
+ */
+template <typename T>
+inline void _CopyNotAllowed(
+    const void* /*src*/,
+    void* /*dst*/,
+    size_t /*n*/) {
+  _ThrowRuntimeTypeLogicError(
+      "Type " + std::string(at::demangle_type<T>()) +
+      " does not allow assignment.");
+}
+
+template <
+    typename T,
+    typename std::enable_if<std::is_copy_assignable<T>::value>::type* =
+        nullptr>
+inline TypeMetaData::TypedCopy* _PickCopy() {
+  return &_Copy<T>;
+}
+
+template <
+    typename T,
+    typename std::enable_if<!std::is_copy_assignable<T>::value>::type* =
+        nullptr>
+inline TypeMetaData::TypedCopy* _PickCopy() {
+  return &_CopyNotAllowed<T>;
+}
+
+/**
+ * Destructor for non-fundamental types.
+ */
+template <typename T>
+inline void _Dtor(void* ptr, size_t n) {
+  T* typed_ptr = static_cast<T*>(ptr);
+  for (size_t i = 0; i < n; ++i) {
+    typed_ptr[i].~T();
+  }
+}
+
+template<class T> const char* _TypeName() noexcept;
+
+template<class T, class Enable = void>
+struct TypeMetaDataRegistry final {
+  static_assert(!std::is_same<T, T>::value, "This should never be picked since TypeMetaDataRegistry has specialisations for all cases");
 };
+
+template <typename T>
+struct TypeMetaDataRegistry<T, c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>> final {
+  // This class is not meant for instantiation
+  TypeMetaDataRegistry() = delete;
+
+  static const TypeMetaData data;
+};
+template<class T>
+const TypeMetaData TypeMetaDataRegistry<T, c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>>::data =
+  TypeMetaData {sizeof(T), nullptr, nullptr, nullptr, TypeIdentifier::Get<T>(), _TypeName<T>()};
+
+template <typename T>
+struct TypeMetaDataRegistry<T, c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>> final {
+  // This class is not meant for instantiation
+  TypeMetaDataRegistry() = delete;
+
+  static const TypeMetaData data;
+};
+template<class T>
+const TypeMetaData TypeMetaDataRegistry<T, c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>>::data =
+  TypeMetaData {sizeof(T), _PickCtor<T>(), _PickCopy<T>(), _Dtor<T>, TypeIdentifier::Get<T>(), _TypeName<T>()};
+}
+
 
 /**
  * TypeMeta is a thin class that allows us to store the type of a container such
@@ -134,245 +237,110 @@ struct TypeNameRegisterer {
  */
 class AT_CORE_API TypeMeta {
  public:
-  using PlacementNew = void(void*, size_t);
-  using TypedCopy = void(const void*, void*, size_t);
-  using TypedDestructor = void(void*, size_t);
+  using PlacementNew = detail::TypeMetaData::PlacementNew;
+  using TypedCopy = detail::TypeMetaData::TypedCopy;
+  using TypedDestructor = detail::TypeMetaData::TypedDestructor;
+
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
    */
-  TypeMeta() noexcept
-      : id_(TypeIdentifier::uninitialized()),
-        itemsize_(0),
-        ctor_(nullptr),
-        copy_(nullptr),
-        dtor_(nullptr) {}
+  constexpr TypeMeta() noexcept
+      : data_(&uninitialized_) {}
 
   /**
    * Copy constructor.
    */
-  TypeMeta(const TypeMeta& src) noexcept = default;
+  constexpr TypeMeta(const TypeMeta& src) noexcept = default;
 
   /**
    * Assignment operator.
    */
-  TypeMeta& operator=(const TypeMeta& src) noexcept = default;
+  AT_CPP14_CONSTEXPR TypeMeta& operator=(const TypeMeta& src) noexcept = default;
 
-  TypeMeta(TypeMeta&& rhs) noexcept = default;
+  constexpr TypeMeta(TypeMeta&& rhs) noexcept = default;
 
  private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
-  TypeMeta(
-      TypeIdentifier i,
-      size_t s,
-      PlacementNew* ctor,
-      TypedCopy* copy,
-      TypedDestructor* dtor) noexcept
-      : id_(i), itemsize_(s), ctor_(ctor), copy_(copy), dtor_(dtor) {}
-
-  // Mechanism for throwing errors which can't be prevented at compile time
-  // due to type erasure. E.g. somebody calling TypeMeta::copy() for
-  // non-copiable type. Right now just throws exception but is implemented
-  // in .cpp to manage dependencies
-  static void _ThrowRuntimeTypeLogicError(const std::string& msg);
+  constexpr TypeMeta(const detail::TypeMetaData* data) noexcept
+      : data_(data) {}
 
  public:
   /**
    * Returns the type id.
    */
-  const TypeIdentifier& id() const noexcept {
-    return id_;
+  constexpr TypeIdentifier id() const noexcept {
+    return data_->id_;
   }
   /**
    * Returns the size of the item.
    */
-  const size_t& itemsize() const noexcept {
-    return itemsize_;
+  constexpr size_t itemsize() const noexcept {
+    return data_->itemsize_;
   }
   /**
    * Returns the placement new function pointer for individual items.
    */
-  PlacementNew* ctor() const noexcept {
-    return ctor_;
+  constexpr PlacementNew* ctor() const noexcept {
+    return data_->ctor_;
   }
   /**
    * Returns the typed copy function pointer for individual iterms.
    */
-  TypedCopy* copy() const noexcept {
-    return copy_;
+  constexpr TypedCopy* copy() const noexcept {
+    return data_->copy_;
   }
   /**
    * Returns the destructor function pointer for individual items.
    */
-  TypedDestructor* dtor() const noexcept {
-    return dtor_;
+  constexpr TypedDestructor* dtor() const noexcept {
+    return data_->dtor_;
   }
   /**
    * Returns a printable name for the type.
    */
-  const char* name() const noexcept {
-    auto it = gTypeNames().find(id_);
-    assert(it != gTypeNames().end());
-    return it->second.c_str();
+  constexpr const char* name() const noexcept {
+    return data_->name_;
   }
 
-  friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
+  friend constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
-  bool Match() const noexcept {
-    return (id_ == Id<T>());
+  constexpr bool Match() const noexcept {
+    return (data_ == Make<T>().data_);
   }
 
   // Below are static functions that can be called by passing a specific type.
 
-  /**
-   * Returns the unique id for the given type T. The id is unique for the type T
-   * in the sense that for any two different types, their id are different; for
-   * the same type T, the id remains the same over different calls of the
-   * function. However, this is not guaranteed over different runs, as the id
-   * is generated during run-time. Do NOT serialize the id for storage.
-   */
-  template <typename T>
-  AT_CORE_API static TypeIdentifier Id();
-
-  /**
-   * Returns the item size of the type. This is equivalent to sizeof(T).
-   */
-  template <typename T>
-  static size_t ItemSize() {
-    return sizeof(T);
+  template<class T>
+  static TypeIdentifier Id() noexcept {
+    return TypeIdentifier::Get<T>();
   }
 
-  /**
-   * Returns the registered printable name of the type.
-   *
-   * Works for only the ones registered with CAFFE_KNOWN_TYPE
-   */
-  template <typename T>
-  static const char* TypeName() {
-    auto it = gTypeNames().find(Id<T>());
-    assert(it != gTypeNames().end());
-    return it->second.c_str();
-  }
-
-  /**
-   * Placement new function for the type.
-   */
-  template <typename T>
-  static void _Ctor(void* ptr, size_t n) {
-    T* typed_ptr = static_cast<T*>(ptr);
-    for (size_t i = 0; i < n; ++i) {
-      new (typed_ptr + i) T;
-    }
-  }
-
-  template <typename T>
-  static void _CtorNotDefault(void* /*ptr*/, size_t /*n*/) {
-    _ThrowRuntimeTypeLogicError(
-        "Type " + std::string(at::demangle_type<T>()) +
-        " is not default-constructible.");
-  }
-
-  template <
-      typename T,
-      typename std::enable_if<std::is_default_constructible<T>::value>::type* =
-          nullptr>
-  static inline PlacementNew* _PickCtor() {
-    return _Ctor<T>;
-  }
-
-  template <
-      typename T,
-      typename std::enable_if<!std::is_default_constructible<T>::value>::type* =
-          nullptr>
-  static inline PlacementNew* _PickCtor() {
-    return _CtorNotDefault<T>;
-  }
-
-  /**
-   * Typed copy function for classes.
-   */
-  template <typename T>
-  static void _Copy(const void* src, void* dst, size_t n) {
-    const T* typed_src = static_cast<const T*>(src);
-    T* typed_dst = static_cast<T*>(dst);
-    for (size_t i = 0; i < n; ++i) {
-      typed_dst[i] = typed_src[i];
-    }
-  }
-
-  /**
-   * A placeholder function for types that do not allow assignment.
-   */
-  template <typename T>
-  static void _CopyNotAllowed(
-      const void* /*src*/,
-      void* /*dst*/,
-      size_t /*n*/) {
-    _ThrowRuntimeTypeLogicError(
-        "Type " + std::string(at::demangle_type<T>()) +
-        " does not allow assignment.");
-  }
-
-  template <
-      typename T,
-      typename std::enable_if<std::is_copy_assignable<T>::value>::type* =
-          nullptr>
-  static inline TypedCopy* _PickCopy() {
-    return _Copy<T>;
-  }
-
-  template <
-      typename T,
-      typename std::enable_if<!std::is_copy_assignable<T>::value>::type* =
-          nullptr>
-  static inline TypedCopy* _PickCopy() {
-    return _CopyNotAllowed<T>;
-  }
-
-  /**
-   * Destructor for non-fundamental types.
-   */
-  template <typename T>
-  static void _Dtor(void* ptr, size_t n) {
-    T* typed_ptr = static_cast<T*>(ptr);
-    for (size_t i = 0; i < n; ++i) {
-      typed_ptr[i].~T();
-    }
+  template<class T>
+  static constexpr const char* TypeName() noexcept {
+    return detail::TypeMetaDataRegistry<T>::data.name_;
   }
 
   /**
    * Returns a TypeMeta object that corresponds to the typename T.
    */
   template <typename T>
-  static typename std::enable_if<
-      std::is_fundamental<T>::value || std::is_pointer<T>::value,
-      TypeMeta>::type
-  Make() {
-    return TypeMeta(Id<T>(), ItemSize<T>(), nullptr, nullptr, nullptr);
-  }
-
-  template <typename T>
-  static typename std::enable_if<
-      !(std::is_fundamental<T>::value || std::is_pointer<T>::value),
-      TypeMeta>::type
-  Make() {
-    return TypeMeta(
-        Id<T>(), ItemSize<T>(), _PickCtor<T>(), _PickCopy<T>(), _Dtor<T>);
+  static constexpr TypeMeta Make() {
+    return TypeMeta(&detail::TypeMetaDataRegistry<T>::data);
   }
 
  private:
-  TypeIdentifier id_;
-  size_t itemsize_;
-  PlacementNew* ctor_;
-  TypedCopy* copy_;
-  TypedDestructor* dtor_;
+
+  const detail::TypeMetaData* data_;
+
+  static constexpr detail::TypeMetaData uninitialized_ = detail::TypeMetaData {0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)"};
 };
 
-inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
-  return (lhs.id_ == rhs.id_);
+inline constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+  return (lhs.data_ == rhs.data_);
 }
-inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline constexpr bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
@@ -380,7 +348,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * Register unique id for a type so it can be used in TypeMeta context, e.g. be
  * used as a type for Blob or for Tensor elements.
  *
- * CAFFE_KNOWN_TYPE does explicit instantiation of TypeMeta::Id<T> template
+ * CAFFE_KNOWN_TYPE does explicit instantiation of TypeIdentifier::Get<T> template
  * function and thus needs to be put in a single translation unit (.cpp file)
  * for a given type T. Other translation units that use type T as a type of the
  * caffe2::Blob or element type of caffe2::Tensor need to depend on the
@@ -402,50 +370,62 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_EXPORT TypeIdentifier TypeMeta::Id<T>() {                       \
+  AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
-    static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
+  }                                                                       \
+  namespace detail {                                                      \
+    template<>                                                            \
+    AT_CORE_EXPORT const char* _TypeName<T>() noexcept {                  \
+      return #T;                                                          \
+    }                                                                     \
   }
 #else // _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  TypeIdentifier TypeMeta::Id<T>() {                                      \
+  TypeIdentifier TypeIdentifier::Get<T>() {                               \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
-    static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
+  }                                                                       \
+  namespace detail {                                                      \
+    template<>                                                            \
+    const char* _TypeName<T>() noexcept {                                 \
+      return #T;                                                          \
+    }                                                                     \
   }
 #endif
 
 /**
- * CAFFE_DECLARE_KNOWN_TYPE and CAFFE_DEFINE_KNOWN_TYPE are used
+ * CAFFE_PREALLOCATED_KNOWN_TYPE is used
  * to preallocate ids for types that are queried very often so that they
  * can be resolved at compile time. Please use CAFFE_KNOWN_TYPE() instead
  * for your own types to allocate dynamic ids for them.
  */
 #ifdef _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)       \
-  template <>                                             \
-  inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {   \
-    return TypeIdentifier(PreallocatedId);                \
+#define CAFFE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)         \
+  template <>                                                    \
+  inline AT_CORE_API TypeIdentifier TypeIdentifier::Get<T>() {   \
+    return TypeIdentifier(PreallocatedId);                       \
+  }                                                              \
+  namespace detail {                                             \
+    template<>                                                   \
+    inline AT_CORE_API const char* _TypeName<T>() noexcept {     \
+      return #T;                                                 \
+    }                                                            \
   }
 #else // _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T) \
-  template <>                                       \
-  inline TypeIdentifier TypeMeta::Id<T>() {         \
-    return TypeIdentifier(PreallocatedId);          \
+#define CAFFE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T) \
+  template <>                                            \
+  inline TypeIdentifier TypeIdentifier::Get<T>() {       \
+    return TypeIdentifier(PreallocatedId);               \
+  }                                                      \
+  namespace detail {                                     \
+    template<>                                           \
+    inline const char* _TypeName<T>() noexcept {         \
+      return #T;                                         \
+    }                                                    \
   }
 #endif
-
-#define CONCAT_IMPL(x, y) x##y
-#define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)
-
-#define CAFFE_DEFINE_KNOWN_TYPE(T)                             \
-  namespace {                                                  \
-  TypeNameRegisterer<T> MACRO_CONCAT(registerer, __COUNTER__)( \
-      TypeMeta::Id<T>(),                                       \
-      #T);                                                     \
-  }
 
 class Tensor;
 
@@ -456,37 +436,37 @@ class Tensor;
 
 struct _CaffeHighestPreallocatedTypeId final {};
 
-CAFFE_DECLARE_KNOWN_TYPE(0, uint8_t)
-CAFFE_DECLARE_KNOWN_TYPE(1, int8_t)
-CAFFE_DECLARE_KNOWN_TYPE(2, int16_t)
-CAFFE_DECLARE_KNOWN_TYPE(3, int)
-CAFFE_DECLARE_KNOWN_TYPE(4, int64_t)
-CAFFE_DECLARE_KNOWN_TYPE(5, at::Half)
-CAFFE_DECLARE_KNOWN_TYPE(6, float)
-CAFFE_DECLARE_KNOWN_TYPE(7, double)
-CAFFE_DECLARE_KNOWN_TYPE(8, at::ComplexHalf)
-CAFFE_DECLARE_KNOWN_TYPE(9, std::complex<float>)
-CAFFE_DECLARE_KNOWN_TYPE(10, std::complex<double>)
+CAFFE_PREALLOCATED_KNOWN_TYPE(0, uint8_t)
+CAFFE_PREALLOCATED_KNOWN_TYPE(1, int8_t)
+CAFFE_PREALLOCATED_KNOWN_TYPE(2, int16_t)
+CAFFE_PREALLOCATED_KNOWN_TYPE(3, int)
+CAFFE_PREALLOCATED_KNOWN_TYPE(4, int64_t)
+CAFFE_PREALLOCATED_KNOWN_TYPE(5, at::Half)
+CAFFE_PREALLOCATED_KNOWN_TYPE(6, float)
+CAFFE_PREALLOCATED_KNOWN_TYPE(7, double)
+CAFFE_PREALLOCATED_KNOWN_TYPE(8, at::ComplexHalf)
+CAFFE_PREALLOCATED_KNOWN_TYPE(9, std::complex<float>)
+CAFFE_PREALLOCATED_KNOWN_TYPE(10, std::complex<double>)
 // 10 = undefined type id
 
-CAFFE_DECLARE_KNOWN_TYPE(12, Tensor)
-CAFFE_DECLARE_KNOWN_TYPE(13, std::string)
-CAFFE_DECLARE_KNOWN_TYPE(14, bool)
-CAFFE_DECLARE_KNOWN_TYPE(15, uint16_t)
-CAFFE_DECLARE_KNOWN_TYPE(16, char)
-CAFFE_DECLARE_KNOWN_TYPE(17, std::unique_ptr<std::mutex>)
-CAFFE_DECLARE_KNOWN_TYPE(18, std::unique_ptr<std::atomic<bool>>)
-CAFFE_DECLARE_KNOWN_TYPE(19, std::vector<int32_t>)
-CAFFE_DECLARE_KNOWN_TYPE(20, std::vector<int64_t>)
-CAFFE_DECLARE_KNOWN_TYPE(21, std::vector<unsigned long>)
-CAFFE_DECLARE_KNOWN_TYPE(22, bool*)
-CAFFE_DECLARE_KNOWN_TYPE(23, char*)
-CAFFE_DECLARE_KNOWN_TYPE(24, int*)
+CAFFE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
+CAFFE_PREALLOCATED_KNOWN_TYPE(13, std::string)
+CAFFE_PREALLOCATED_KNOWN_TYPE(14, bool)
+CAFFE_PREALLOCATED_KNOWN_TYPE(15, uint16_t)
+CAFFE_PREALLOCATED_KNOWN_TYPE(16, char)
+CAFFE_PREALLOCATED_KNOWN_TYPE(17, std::unique_ptr<std::mutex>)
+CAFFE_PREALLOCATED_KNOWN_TYPE(18, std::unique_ptr<std::atomic<bool>>)
+CAFFE_PREALLOCATED_KNOWN_TYPE(19, std::vector<int32_t>)
+CAFFE_PREALLOCATED_KNOWN_TYPE(20, std::vector<int64_t>)
+CAFFE_PREALLOCATED_KNOWN_TYPE(21, std::vector<unsigned long>)
+CAFFE_PREALLOCATED_KNOWN_TYPE(22, bool*)
+CAFFE_PREALLOCATED_KNOWN_TYPE(23, char*)
+CAFFE_PREALLOCATED_KNOWN_TYPE(24, int*)
 
 #ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-CAFFE_DECLARE_KNOWN_TYPE(25, long)
-CAFFE_DECLARE_KNOWN_TYPE(26, std::vector<long>)
+CAFFE_PREALLOCATED_KNOWN_TYPE(25, long)
+CAFFE_PREALLOCATED_KNOWN_TYPE(26, std::vector<long>)
 #endif // CAFFE2_UNIQUE_LONG_TYPEMETA
 
-CAFFE_DECLARE_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
+CAFFE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

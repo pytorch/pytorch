@@ -16,8 +16,6 @@ CAFFE2_DEFINE_int64(
 
 namespace caffe2 {
 
-CAFFE_DEFINE_KNOWN_TYPE(Tensor);
-
 UndefinedTensorImpl UndefinedTensorImpl::singleton_;
 
 TensorPrinter::TensorPrinter(

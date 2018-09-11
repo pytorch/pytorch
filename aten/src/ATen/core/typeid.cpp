@@ -11,22 +11,7 @@ using std::string;
 
 namespace caffe2 {
 
-std::unordered_map<TypeIdentifier, string>& gTypeNames() {
-  static std::unordered_map<TypeIdentifier, string> g_type_names;
-  return g_type_names;
-}
-
-std::unordered_set<string>& gRegisteredTypeNames() {
-  static std::unordered_set<string> g_registered_type_names;
-  return g_registered_type_names;
-}
-
-std::mutex& gTypeRegistrationMutex() {
-  static std::mutex g_type_registration_mutex;
-  return g_type_registration_mutex;
-}
-
-void TypeMeta::_ThrowRuntimeTypeLogicError(const std::string& msg) {
+void _ThrowRuntimeTypeLogicError(const string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
   AT_ERROR(msg);
