@@ -43,27 +43,28 @@ TEST(NeuralNetGraph, ReplaceGraph) {
   */
 
   auto mg = NNMatchGraph();
-  // clang-format off
-  auto matchSumOutput = operatorSubgraph(mg,
-      matchOp<Sum>(), {
-        nonTerminalSubgraph(mg, matchTensor(), 2)
-      });;
-  auto pattern = subgraph(mg,
-      matchOp<Relu>(), {
-        matchSumOutput
-      });
-  // clang-format on
+  auto matchSumInput =
+      mg.createNode(std::move(matchExternalTensorNode().count(2)));
+  auto matchSum = mg.createNode(matchOp<Sum>("matchSum"));
+  mg.createEdge(matchSumInput, matchSum);
 
-  EXPECT_FALSE(NNSubgraphMatcher::isSubgraphMatch(sum, pattern).isMatch());
+  auto matchSumOutput = mg.createNode(matchTensor("matchSumOutput"));
+  mg.createEdge(matchSum, matchSumOutput);
+
+  auto matchRelu = mg.createNode(matchOp<Relu>("matchRelu"));
+  mg.createEdge(matchSumOutput, matchRelu);
+
+  auto matchRoot = matchRelu;
+  EXPECT_FALSE(NNSubgraphMatcher::isSubgraphMatch(sum, matchRoot).isMatch());
   EXPECT_FALSE(
-      NNSubgraphMatcher::isSubgraphMatch(reluOutput, pattern).isMatch());
-  EXPECT_FALSE(NNSubgraphMatcher::isSubgraphMatch(input1, pattern).isMatch());
+      NNSubgraphMatcher::isSubgraphMatch(reluOutput, matchRoot).isMatch());
+  EXPECT_FALSE(NNSubgraphMatcher::isSubgraphMatch(input1, matchRoot).isMatch());
 
-  EXPECT_TRUE(NNSubgraphMatcher::isSubgraphMatch(relu, pattern).isMatch());
+  EXPECT_TRUE(NNSubgraphMatcher::isSubgraphMatch(relu, matchRoot).isMatch());
 
   NNSubgraphMatcher::replaceSubgraph(
       graph,
-      pattern,
+      matchRoot,
       [&matchSumOutput](
           NNGraph& g,
           NNGraph::NodeRef relu,
