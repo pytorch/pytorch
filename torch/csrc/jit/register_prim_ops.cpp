@@ -377,7 +377,6 @@ RegisterOperators reg({
           auto tup = pop(stack).toTuple();
           const auto & elems = tup->elements();
           // index is normalized to be positive at compile time
-          JIT_ASSERT(index < elems.size());
           stack.push_back(elems.at(index));
           return 0;
         };

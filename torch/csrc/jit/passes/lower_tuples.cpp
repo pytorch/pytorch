@@ -19,10 +19,6 @@ std::unordered_set<Symbol> white_list = {
   prim::Return,
 };
 
-int64_t indexVal(Value * index) {
-  return index->node()->i(attr::value);
-}
-
 
 } //anonymous namespace
 
@@ -53,11 +49,11 @@ static void VisitNode(Node* n, Node* insert_point) {
   if (n->kind() == prim::TupleIndex) {
     auto construct = n->inputs().at(0)->node();
     JIT_ASSERTM(construct->kind() == prim::TupleConstruct, "tuple index not matched to tuple construct");
-    auto idx = indexVal(n->inputs().at(1));
+    JIT_ASSERT(n->inputs().at(1)->node()->kind() == prim::Constant);
+    auto idx = n->inputs().at(1)->node()->i(attr::value);
     n->output()->replaceAllUsesWith(construct->inputs()[idx]);
     return;
   }
-
 
   // flatten the input list  op(a, tup, b) --> op(a, t0, t1, b)
   for(size_t i = 0; i < n->inputs().size();) {
@@ -157,7 +153,7 @@ static void LowerSimpleTuples(Block* block) {
     } else if (n->kind() == prim::TupleIndex) {
       auto construct = n->inputs().at(0)->node();
       if(construct->kind() == prim::TupleConstruct) {
-        auto idx = indexVal(n->inputs().at(1));
+        auto idx = n->inputs().at(1)->node()->i(attr::value);
         n->output()->replaceAllUsesWith(construct->inputs().at(idx));
       }
     }

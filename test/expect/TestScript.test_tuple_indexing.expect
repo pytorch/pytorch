@@ -13,5 +13,6 @@ graph(%a : Dynamic) {
       -> (%b.2)
     }
   %8 : int = prim::TupleIndex(%b, %1)
-  return (%8);
+  %9 : int = prim::TupleIndex(%b, %3)
+  return (%8, %9);
 }

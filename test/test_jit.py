@@ -6952,12 +6952,12 @@ a")
                 b = (1, 2)
             else:
                 b = (0, 2)
-            return b[-2]
+            return b[-2], b[1]
 
         self.assertExpectedGraph(tuple_index.graph)
-        self.assertEqual(tuple_index(torch.tensor([1])), 1)
+        self.assertEqual(tuple_index(torch.tensor([1])), (1, 2))
         self.run_pass('lower_all_tuples', tuple_index.graph)
-        self.assertEqual(tuple_index(torch.tensor([1])), 1)
+        self.assertEqual(tuple_index(torch.tensor([1])), (1, 2))
 
         with self.assertRaisesRegex(RuntimeError, "Indexing on tuples only supported with integer constants:"):
             @torch.jit.script
@@ -6971,9 +6971,15 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "Tuple index out of range."):
             @torch.jit.script
-            def test_indexing_out_of_bounds():
+            def test_indexing_out_of_bounds_pos():
                 c = (1,)
                 return c[1]
+
+        with self.assertRaisesRegex(RuntimeError, "Tuple index out of range."):
+            @torch.jit.script
+            def test_indexing_out_of_bounds_neg():
+                c = (1,)
+                return c[-3]
 
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
