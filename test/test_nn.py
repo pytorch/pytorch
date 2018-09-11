@@ -3459,6 +3459,21 @@ class TestNN(NNTestCase):
             self.assertEqual(conv1.bias.grad.data, conv2.bias.grad.data, prec=0.0)
             self.assertEqual(conv1.weight.grad.data, conv2.weight.grad.data, prec=0.0)
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_errorMsg_on_determinstic_and_benchmark_flag(self):
+        def fn():
+            with cudnn.flags(benchmark=True, deterministic=True):
+                pass
+
+        import warnings
+        import re
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            fn()
+            msg = str(ws[-1].message)
+            self.assertTrue(re.search(r'torch.backends.cudnn.deterministic=True will be ignored', msg))
+
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
         self.assertRaises(TypeError, lambda: c(None))

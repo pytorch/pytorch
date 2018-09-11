@@ -353,6 +353,13 @@ PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_deterministic_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
+  if (arg == Py_True && at::globalContext().benchmarkCuDNN() == true) {
+    std::ostringstream ss;
+    ss << "torch.backends.cudnn.deterministic=True will be ignored when "
+       << "torch.backends.cudnn.benchmark=True.",
+    PyErr_WarnEx(PyExc_UserWarning, ss.str().c_str(), 1);
+  }
+
   at::globalContext().setDeterministicCuDNN(arg == Py_True);
   Py_RETURN_NONE;
 }
@@ -367,6 +374,13 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
+  if (arg == Py_True && at::globalContext().deterministicCuDNN() == true) {
+    std::ostringstream ss;
+    ss << "torch.backends.cudnn.deterministic=True will be ignored when "
+       << "torch.backends.cudnn.benchmark=True.",
+    PyErr_WarnEx(PyExc_UserWarning, ss.str().c_str(), 1);
+  }
+
   at::globalContext().setBenchmarkCuDNN(arg == Py_True);
   Py_RETURN_NONE;
 }
