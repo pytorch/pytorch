@@ -179,8 +179,8 @@ def try_real_annotations(fn):
 
     arg_types = [ann_to_type(as_ann(p.annotation))
                  for p in sig.parameters.values()]
-    return_types = flatten_return_type(ann_to_type(as_ann(sig.return_annotation)))
-    return arg_types, return_types
+    return_type = ann_to_type(as_ann(sig.return_annotation))
+    return arg_types, return_type
 
 
 def ann_to_type(ann):

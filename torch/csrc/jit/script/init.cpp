@@ -77,7 +77,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       for (auto &arg_type : arg_types) {
         args.push_back(Argument(std::to_string(idx++), std::move(arg_type), {}, {}, false));
       }
-      rets.push_back(Argument(std::to_string(0), std::move(ret_type), {}, {}, false));
+      rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
     } else {
       // Create a default signature using what information we have
 
@@ -101,7 +101,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
         std::vector<TypePtr> tuple_values(n_binders, ret_type);
         ret_type = TupleType::create(std::move(tuple_values));
       }
-      rets.push_back(Argument(std::to_string(0), ret_type, {}, {}, false));
+      rets.push_back(Argument("0", ret_type, {}, {}, false));
     }
     return FunctionSchema("", std::move(args), std::move(rets));
   }

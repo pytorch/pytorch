@@ -18,6 +18,12 @@
 
 namespace torch { namespace jit {
 namespace detail {
+
+// error reporting: when reporting user-caused errors, these functions should
+// not use AT_ERROR macros, since these macros add stack trace information
+// that is confusing to display to the end user since it always reports
+// locations in libtorch code rather than user code.
+
 inline void findErrorInKwargs(
     const FunctionSchema& schema,
     py::kwargs kwargs) {
