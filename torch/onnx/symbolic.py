@@ -959,36 +959,6 @@ for k, v in cast_pytorch_to_onnx.items():
     globals()[name] = parse_args('v', 'i')(partial(_cast_func_template, v))
 
 
-dtype_to_onnx = [
-    cast_pytorch_to_onnx["Byte"],
-    cast_pytorch_to_onnx["Char"],
-    cast_pytorch_to_onnx["Short"],
-    cast_pytorch_to_onnx["Int"],
-    cast_pytorch_to_onnx["Long"],
-    cast_pytorch_to_onnx["Half"],
-    cast_pytorch_to_onnx["Float"],
-    cast_pytorch_to_onnx["Double"],
-]
-
-
-# layout and device info is not needed for factory methods
-# like zeros/ones in ONNX, ignoring here.
-def zeros(g, size, dtype, layout, device):
-    shape = _maybe_get_const(size, 'is')
-    dtype = _maybe_get_const(dtype, 'i')
-    return g.op("ConstantFill", shape_i=shape, dtype_i=dtype_to_onnx[dtype], value_f=0)
-
-
-def ones(g, size, dtype, layout, device):
-    shape = _maybe_get_const(size, 'is')
-    dtype = _maybe_get_const(dtype, 'i')
-    return g.op("ConstantFill", shape_i=shape, dtype_i=dtype_to_onnx[dtype], value_f=1)
-
-
-def zeros_like(g, input):
-    return g.op("Sub", input, input).setType(input.type().contiguous())
-
-
 scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Byte"],
     cast_pytorch_to_onnx["Char"],
@@ -1001,21 +971,29 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('v', 'i', 'v', 'v')
-def zeros(g, shape, scalar_type, layout, device):
-    # NOTE: no way to set device in ONNX, so we ignore it
-    return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
-                input_as_shape_i=1, value_f=0)
+@parse_args('is', 'i', 'v', 'v')
+def zeros(g, sizes, dtype, layout, device):
+    # NOTE: no way to set device and layout in ONNX, so we ignore it
+    return g.op("ConstantFill", shape_i=sizes, dtype_i=scalar_type_to_onnx[dtype], value_f=0)
 
 
-def full(g, shape, value, scalar_type, layout, device):
+@parse_args('is', 'i', 'v', 'v')
+def ones(g, sizes, dtype, layout, device):
+    return g.op("ConstantFill", shape_i=sizes, dtype_i=scalar_type_to_onnx[dtype], value_f=1)
+
+
+def zeros_like(g, input):
+    return g.op("Sub", input, input).setType(input.type().contiguous())
+
+
+def full(g, sizes, value, dtype, layout, device):
     const_value = _maybe_get_const(value, 't')
     if _is_value(const_value):
-        tmp = zeros(shape, scalar_type, layout, device)
+        tmp = zeros(sizes, dtype, layout, device)
         return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
     else:
-        scalar_type = _get_const(scalar_type, 'i', 'dtype')
-        return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
+        dtype = _get_const(dtype, 'i', 'dtype')
+        return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype],
                     input_as_shape_i=1, value_f=const_value)
 
 
