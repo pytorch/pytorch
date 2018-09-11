@@ -374,7 +374,7 @@
 
 - func: conv3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1, int64_t groups=1) -> Tensor
 
-- func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad) -> Tensor
+- func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad=0) -> Tensor
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
 

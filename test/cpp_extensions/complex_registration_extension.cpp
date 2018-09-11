@@ -10,7 +10,7 @@
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/TensorImpl.h"
-#include "ATen/UndefinedTensor.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Half.h"
@@ -53,7 +53,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
         numel,
         getCPUAllocator(),
         /* resizable */ true)};
-    Tensor t{c10::make_intrusive<TensorImpl, UndefinedTensor>(
+    Tensor t{c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
         std::move(s),
         at::CPUTensorId(),
         /* is_variable */ false)};

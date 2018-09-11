@@ -1,3 +1,4 @@
+import torch
 from torch.distributions import constraints
 from torch.distributions.transforms import ExpTransform
 from torch.distributions.normal import Normal
@@ -27,7 +28,16 @@ class LogNormal(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, loc, scale, validate_args=None):
-        super(LogNormal, self).__init__(Normal(loc, scale), ExpTransform(), validate_args=validate_args)
+        base_dist = Normal(loc, scale)
+        super(LogNormal, self).__init__(base_dist, ExpTransform(), validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(LogNormal, _instance)
+        batch_shape = torch.Size(batch_shape)
+        base_dist = self.base_dist.expand(batch_shape)
+        super(LogNormal, new).__init__(base_dist, ExpTransform(), validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @property
     def loc(self):

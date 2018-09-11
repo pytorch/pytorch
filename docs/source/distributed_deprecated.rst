@@ -1,58 +1,64 @@
 .. role:: hidden
     :class: hidden-section
 
-Distributed communication package - torch.distributed
-=====================================================
+Distributed communication package (deprecated) - torch.distributed.deprecated
+=============================================================================
 
-.. automodule:: torch.distributed
-.. currentmodule:: torch.distributed
+.. warning::
+    torch.distributed.deprecated is the older version of torch.distributed and
+    currently deprecated. It will be removed soon. Please use and refer the doc
+    for torch.distributed, which is the latest distributed communication
+    package for PyTorch
 
-Currently torch.distributed supports three backends, each with
+.. automodule:: torch.distributed.deprecated
+.. currentmodule:: torch.distributed.deprecated
+
+Currently torch.distributed.deprecated supports four backends, each with
 different capabilities. The table below shows which functions are available
 for use with CPU / CUDA tensors.
 MPI supports cuda only if the implementation used to build PyTorch supports it.
 
 
-+------------+-----------+-----------+-----------+
-| Backend    | ``gloo``  | ``mpi``   | ``nccl``  |
-+------------+-----+-----+-----+-----+-----+-----+
-| Device     | CPU | GPU | CPU | GPU | CPU | GPU |
-+============+=====+=====+=====+=====+=====+=====+
-| send       | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+
-| recv       | ✓   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+
-| broadcast  | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+
-| all_reduce | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+
-| reduce     | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+
-| all_gather | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
-+------------+-----+-----+-----+-----+-----+-----+
-| gather     | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+
-| scatter    | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+
-| barrier    | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
-+------------+-----+-----+-----+-----+-----+-----+
++------------+-----------+-----------+-----------+-----------+
+| Backend    | ``tcp``   | ``gloo``  | ``mpi``   | ``nccl``  |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| Device     | CPU | GPU | CPU | GPU | CPU | GPU | CPU | GPU |
++============+=====+=====+=====+=====+=====+=====+=====+=====+
+| send       | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| recv       | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| broadcast  | ✓   | ✘   | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| all_reduce | ✓   | ✘   | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| reduce     | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| all_gather | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✓   |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| gather     | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| scatter    | ✓   | ✘   | ✘   | ✘   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| barrier    | ✓   | ✘   | ✓   | ✓   | ✓   | ?   | ✘   | ✘   |
++------------+-----+-----+-----+-----+-----+-----+-----+-----+
 
-.. _distributed-basics:
+.. _distributed-deprecated-basics:
 
 Basics
 ------
 
-The `torch.distributed` package provides PyTorch support and communication primitives
+The `torch.distributed.deprecated` package provides PyTorch support and communication primitives
 for multiprocess parallelism across several computation nodes running on one or more
-machines. The class :func:`torch.nn.parallel.DistributedDataParallel` builds on this
+machines. The class :func:`torch.nn.parallel.deprecated.DistributedDataParallel` builds on this
 functionality to provide synchronous distributed training as a wrapper around any
 PyTorch model. This differs from the kinds of parallelism provided by
 :doc:`multiprocessing` and :func:`torch.nn.DataParallel` in that it supports
 multiple network-connected machines and in that the user must explicitly launch a separate
 copy of the main training script for each process.
 
-In the single-machine synchronous case, `torch.distributed` or the
-:func:`torch.nn.parallel.DistributedDataParallel` wrapper may still have advantages over other
+In the single-machine synchronous case, `torch.distributed.deprecated` or the
+:func:`torch.nn.parallel.deprecated.DistributedDataParallel` wrapper may still have advantages over other
 approaches to data-parallelism, including :func:`torch.nn.DataParallel`:
 
 * Each process maintains its own optimizer and performs a complete optimization step with each
@@ -69,7 +75,7 @@ approaches to data-parallelism, including :func:`torch.nn.DataParallel`:
 Initialization
 --------------
 
-The package needs to be initialized using the :func:`torch.distributed.init_process_group`
+The package needs to be initialized using the :func:`torch.distributed.deprecated.init_process_group`
 function before calling any other methods. This blocks until all processes have
 joined.
 
@@ -78,14 +84,6 @@ joined.
 .. autofunction:: get_rank
 
 .. autofunction:: get_world_size
-
-.. autofunction:: is_initialized
-
-.. autofunction:: get_default_group
-
-.. autofunction:: is_mpi_available
-
-.. autofunction:: is_nccl_available
 
 --------------------------------------------------------------------------------
 
@@ -99,15 +97,21 @@ reachable from all processes and a desired ``world_size``. The first way
 requires specifying an address that belongs to the rank 0 process. This
 initialization method requires that all processes have manually specified ranks.
 
-Note that multicast address is not supported anymore in the latest distributed
-package. ``group_name`` is deprecated as well.
+Alternatively, the address has to be a valid IP multicast address, in which case
+ranks can be assigned automatically. Multicast initialization also supports
+a ``group_name`` argument, which allows you to use the same address for multiple
+jobs, as long as they use different group names.
 
 ::
 
-    import torch.distributed as dist
+    import torch.distributed.deprecated as dist
 
     # Use address of one of the machines
     dist.init_process_group(backend, init_method='tcp://10.1.1.20:23456', rank=args.rank, world_size=4)
+
+    # or a multicast address - rank will be assigned automatically if unspecified
+    dist.init_process_group(backend, init_method='tcp://[ff15:1e18:5d4c:4cf0:d02d:b659:53ba:b0a7]:23456',
+                            world_size=4)
 
 Shared file-system initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -115,34 +119,21 @@ Shared file-system initialization
 Another initialization method makes use of a file system that is shared and
 visible from all machines in a group, along with a desired ``world_size``. The URL should start
 with ``file://`` and contain a path to a non-existent file (in an existing
-directory) on a shared file system. File-system initialization will automatically
-create that file if it doesn't exist, but will not delete the file. Therefore, it
-is your responsibility to make sure that the file is cleaned up before the next
-init_process_group call on the same file path/name.
-
-Note that automatic rank assignment is not supported anymore in the latest
-distributed package and ``group_name`` is deprecated as well.
+directory) on a shared file system. This initialization method also supports a
+``group_name`` argument, which allows you to use the same shared file path for
+multiple jobs, as long as they use different group names.
 
 .. warning::
     This method assumes that the file system supports locking using ``fcntl`` - most
     local systems and NFS support it.
 
-.. warning::
-    This method does not clean up and remove the file and it is your responsibility
-    to remove the file at the end of the training. This is especially important
-    if you plan to call init_process_group multiple times on the same file name.
-    In other words, if the file is not removed/cleaned up and you call
-    init_process_group again on that file, it is unexpected behavior and will cause
-    failures. The rule of thumb here is that, make sure that the file is non-existent or
-    empty everytime init_process_group is called.
-
 ::
 
-    import torch.distributed as dist
+    import torch.distributed.deprecated as dist
 
-    # rank should always be specified
+    # Rank will be assigned automatically if unspecified
     dist.init_process_group(backend, init_method='file:///mnt/nfs/sharedfile',
-                            world_size=4, rank=args.rank)
+                            world_size=4, group_name=args.group)
 
 Environment variable initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -167,7 +158,7 @@ Groups
 By default collectives operate on the default group (also called the world) and
 require all processes to enter the distributed function call. However, some workloads can benefit
 from more fine-grained communication. This is where distributed groups come
-into play. :func:`~torch.distributed.new_group` function can be
+into play. :func:`~torch.distributed.deprecated.new_group` function can be
 used to create new groups, with arbitrary subsets of all processes. It returns
 an opaque group handle that can be given as a ``group`` argument to all collectives
 (collectives are distributed functions to exchange information in certain well-known programming patterns).
@@ -181,7 +172,7 @@ Point-to-point communication
 
 .. autofunction:: recv
 
-:func:`~torch.distributed.isend` and :func:`~torch.distributed.irecv`
+:func:`~torch.distributed.deprecated.isend` and :func:`~torch.distributed.deprecated.irecv`
 return distributed request objects when used. In general, the type of this object is unspecified
 as they should never be created manually, but they are guaranteed to support two methods:
 
@@ -189,28 +180,13 @@ as they should never be created manually, but they are guaranteed to support two
 * ``wait()`` - will block the process until the operation is finished.
   ``is_completed()`` is guaranteed to return True once it returns.
 
+When using the MPI backend, :func:`~torch.distributed.deprecated.isend` and :func:`~torch.distributed.deprecated.irecv`
+support non-overtaking, which has some guarantees on supporting message order. For more detail, see
+http://mpi-forum.org/docs/mpi-2.2/mpi22-report/node54.htm#Node54
+
 .. autofunction:: isend
 
 .. autofunction:: irecv
-
-Synchronous and asynchornous collective operations
---------------------------------------------------
-Every collective operation function supports the following two kinds of operations:
-
-synchronous operation - the default mode, when ``async_op`` is set to False.
-when the function returns, it is guaranteed that
-the collective operation is performed (not necessarily completed if it's a CUDA op since all
-CUDA ops are asynchornous), and any further function calls depending on the data of the
-collective operation can be called. In the synchronous mode, the collective function does not
-return anything
-
-asynchornous operation - when ``async_op`` is set to True. The collective operation function
-returns a distributed request object. In general, you don't need to create it manually and it
-is guaranteed to support two methods:
-
-* ``is_completed()`` - returns True if the operation has finished
-* ``wait()`` - will block the process until the operation is finished.
-
 
 Collective functions
 --------------------
@@ -232,11 +208,11 @@ Collective functions
 Multi-GPU collective functions
 ------------------------------
 
-If you have more than one GPU on each node, when using the NCCL and Gloo backend,
-:func:`~torch.distributed.broadcast_multigpu`
-:func:`~torch.distributed.all_reduce_multigpu`
-:func:`~torch.distributed.reduce_multigpu` and
-:func:`~torch.distributed.all_gather_multigpu` support distributed collective
+If you have more than one GPU on each node, when using the NCCL backend,
+:func:`~torch.distributed.deprecated.broadcast_multigpu`
+:func:`~torch.distributed.deprecated.all_reduce_multigpu`
+:func:`~torch.distributed.deprecated.reduce_multigpu` and
+:func:`~torch.distributed.deprecated.all_gather_multigpu` support distributed collective
 operations among multiple GPUs within each node. These functions can potentially
 improve the overall distributed training performance and be easily used by
 passing a list of tensors. Each Tensor in the passed tensor list needs
@@ -254,7 +230,7 @@ Code running on Node 0
 ::
 
     import torch
-    import torch.distributed as dist
+    import torch.distributed.deprecated as dist
 
     dist.init_process_group(backend="nccl",
                             init_method="file:///distributed_test",
@@ -271,7 +247,7 @@ Code running on Node 1
 ::
 
     import torch
-    import torch.distributed as dist
+    import torch.distributed.deprecated as dist
 
     dist.init_process_group(backend="nccl",
                             init_method="file:///distributed_test",
@@ -298,7 +274,7 @@ of 16
 Launch utility
 --------------
 
-The `torch.distributed` package also provides a launch utility in
-`torch.distributed.launch`.
+The `torch.distributed.deprecated` package also provides a launch utility in
+`torch.distributed.deprecated.launch`.
 
 .. automodule:: torch.distributed.launch

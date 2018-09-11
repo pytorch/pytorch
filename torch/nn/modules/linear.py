@@ -17,17 +17,17 @@ class Linear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, in\_features)` where :math:`*` means any number of
+        - Input: :math:`(N, *, \text{in\_features})` where :math:`*` means any number of
           additional dimensions
-        - Output: :math:`(N, *, out\_features)` where all but the last dimension
+        - Output: :math:`(N, *, \text{out\_features})` where all but the last dimension
           are the same shape as the input.
 
     Attributes:
         weight: the learnable weights of the module of shape
-            `(out_features x in_features)`. The values are initialized from
-            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`(\text{out\_features}, \text{in\_features})`. The values are
+            initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
             :math:`k = \frac{1}{\text{in\_features}}`
-        bias:   the learnable bias of the module of shape :math:`(out_features)`.
+        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized from
                 :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
                 :math:`k = \frac{1}{\text{in\_features}}`
@@ -38,6 +38,7 @@ class Linear(Module):
         >>> input = torch.randn(128, 20)
         >>> output = m(input)
         >>> print(output.size())
+        torch.Size([128, 30])
     """
 
     def __init__(self, in_features, out_features, bias=True):
@@ -87,12 +88,12 @@ class Bilinear(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            `(out_features x in1_features x in2_features)`. The values are initialized from
-            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`(\text{out\_features} x \text{in1\_features} x \text{in2\_features})`.
+            The values are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
             :math:`k = \frac{1}{\text{in1\_features}}`
-        bias:   the learnable bias of the module of shape `(out_features)`
+        bias:   the learnable bias of the module of shape :math:`(\text{out\_features})`
                 If :attr:`bias` is ``True``, the values are initialized from
-                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`, where
                 :math:`k = \frac{1}{\text{in1\_features}}`
 
     Examples::
@@ -102,6 +103,7 @@ class Bilinear(Module):
         >>> input2 = torch.randn(128, 30)
         >>> output = m(input1, input2)
         >>> print(output.size())
+        torch.Size([128, 40])
     """
 
     def __init__(self, in1_features, in2_features, out_features, bias=True):

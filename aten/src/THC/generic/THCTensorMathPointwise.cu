@@ -229,9 +229,9 @@ THCTensor_(lerp)(THCState *state, THCTensor *result, THCTensor *a, THCTensor *b,
 #endif
 
 namespace {
-c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensor> retainTensorImpl(THCTensor* self) {
+c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl> retainTensorImpl(THCTensor* self) {
   c10::raw::intrusive_ptr::incref(self);
-  return c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensor>::reclaim(self);
+  return c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::reclaim(self);
 }
 }
 
