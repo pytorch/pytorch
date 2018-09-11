@@ -844,18 +844,18 @@ const static auto cf_examples = R"JIT(
       # FIXME: use 0 instead of a.
       # c = 0
       c = a
-      if a < b:
+      if bool(a < b):
         c = b
       else:
         c = a
       return c
   def if_one(a, b):
     c = b
-    if a < b:
+    if bool(a < b):
       c = a
     return c
   def while_test(a, i):
-    while i < 3:
+    while bool(i < 3):
       a *= a
       i += 1
     return a
