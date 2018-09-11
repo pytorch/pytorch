@@ -358,6 +358,35 @@ DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 
 #undef DEFINE_TO
 
+#define DEFINE_TO_WITH_BODY(type, body) \
+template<> \
+inline type IValue::to<type>() && { \
+  body(std::move(*this)); \
+} \
+template<> \
+inline type IValue::to<type>() const & { \
+  body((*this)); \
+}
+
+#define SCALAR_TYPE_BODY(this) return static_cast<at::ScalarType>(this.toInt());
+#define LAYOUT_BODY(this) return static_cast<at::Layout>(this.toInt());
+#define DEVICE_BODY(this) \
+  /* NB: const_list might be a move of the vector, so we need to */ \
+  /*     assign it to prevent its deallocation.                  */ \
+  auto && const_list = this.toIntList(); \
+  const auto & elems = const_list->elements(); \
+  JIT_ASSERT(elems.size() == 2); \
+  return at::Device(static_cast<at::Device::Type>(elems[0]), elems[1]);
+
+DEFINE_TO_WITH_BODY(at::ScalarType, SCALAR_TYPE_BODY)
+DEFINE_TO_WITH_BODY(at::Layout, LAYOUT_BODY)
+DEFINE_TO_WITH_BODY(at::Device, DEVICE_BODY)
+
+#undef DEFINE_TO_WITH_BODY
+#undef SCALAR_TYPE_BODY
+#undef LAYOUT_BODY
+#undef DEVICE_BODY
+
 inline IValue::IValue(c10::intrusive_ptr<Tuple> v)
 : tag(Tag::Tuple), is_intrusive_ptr(true) {
   as_intrusive_ptr = v.release();

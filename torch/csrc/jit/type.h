@@ -270,7 +270,7 @@ struct TORCH_API CompleteTensorType : public TensorType {
     if (rhs->kind() == TypeKind::DynamicType)
       return true;
     if (rhs->kind() == TypeKind::TensorType)
-      return *dynamic_cast<const TensorType*>(this) == *rhs;
+      return *expect<TensorType>() ==  *rhs;
     return *this == *rhs;
   }
   std::string str() const override {
