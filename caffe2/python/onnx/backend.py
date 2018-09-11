@@ -25,6 +25,7 @@ import onnx.backend
 
 import caffe2
 from caffe2.python import core, workspace, rnn_cell, gru_cell
+from caffe2.python.compatibility import container_abcs
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 import caffe2.python.utils
@@ -778,7 +779,7 @@ class Caffe2Backend(Backend):
         ops = translator(init_model, pred_model, OnnxNode(node_def), opset_version)
         if isinstance(ops, Caffe2Ops):
             return ops
-        if not isinstance(ops, collections.Iterable):
+        if not isinstance(ops, container_abcs.Iterable):
             ops = [ops]
         return Caffe2Ops(ops, [], [])
 
