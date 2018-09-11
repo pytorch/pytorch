@@ -226,7 +226,7 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  USE_OPENCV=1 BUILD_BINARY=1 python setup.py install --user
+  USE_LEVELDB=1 USE_LMDB=1 USE_OPENCV=1 BUILD_BINARY=1 python setup.py install --user
 
   # This is to save test binaries for testing
   cp -r torch/lib/tmp_install $INSTALL_PREFIX

@@ -346,11 +346,11 @@ class TestCaffe2Backend(unittest.TestCase):
         mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
-            assert len(prepared.init_net.op) == 1038
-            assert len(prepared.predict_net.op) == 101
+            assert len(prepared.init_net.op) == 1019
+            assert len(prepared.predict_net.op) == 142
         else:
-            assert len(prepared.init_net.op) == 27
-            assert len(prepared.predict_net.op) == 1112
+            assert len(prepared.init_net.op) == 8
+            assert len(prepared.predict_net.op) == 1153
 
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)

@@ -50,10 +50,6 @@ std::array<bool, N> as_bool_array(at::ArrayRef<int64_t> vec) {
   return res;
 }
 
-at::Device as_device(ArrayRef<int64_t> elements) {
-  return at::Device(static_cast<at::Device::Type>(elements[0]), elements[1]);
-}
-
 RegisterOperators reg({
   ${constructors}
 });

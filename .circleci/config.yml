@@ -5,11 +5,37 @@ docker_config_defaults: &docker_config_defaults
     aws_access_key_id: AKIAJ2J6FIG5OSZTQ3IA
     aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_ONLY}
 
+# NOTE: We only perform the merge in build step and not in test step, because
+# all source files will be shared from build to test
+merge_pull_request_onto_master: &merge_pull_request_onto_master
+  name: Merge Onto Master
+  no_output_timeout: "10h"
+  command: |
+    if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
+      git config --global user.email "circleci.ossci@gmail.com"
+      git config --global user.name "CircleCI"
+
+      git config remote.origin.url https://github.com/pytorch/pytorch.git
+      git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
+      git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=50 --quiet
+
+      export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
+      echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
+      export GIT_COMMIT=${CIRCLE_SHA1}
+      echo "GIT_COMMIT: " ${GIT_COMMIT}
+
+      git checkout -f ${GIT_COMMIT}
+      git reset --hard ${GIT_COMMIT}
+      git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
+    fi
+
 pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
   resource_class: large
   working_directory: /var/lib/jenkins/workspace
   steps:
   - checkout
+  - run:
+      <<: *merge_pull_request_onto_master
   - run:
       name: Build
       no_output_timeout: "10h"
@@ -22,7 +48,7 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
         # This IAM user allows write access to S3 bucket for sccache
         export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
-        git submodule update --init
+        git submodule sync && git submodule update --init
         .jenkins/pytorch/build.sh
         .jenkins/pytorch/test.sh
 
@@ -31,6 +57,8 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   working_directory: /var/lib/jenkins/workspace
   steps:
   - checkout
+  - run:
+      <<: *merge_pull_request_onto_master
   - run:
       name: Build
       no_output_timeout: "10h"
@@ -46,16 +74,18 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         # This IAM user allows write access to S3 bucket for sccache
         export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
-        git submodule update --init || git submodule update --init || git submodule update --init
+        git submodule sync && git submodule update --init
         .jenkins/pytorch/build.sh
-        mkdir -p pytorch-ci-env/
-        cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch pytorch-ci-env/torch
-        cp -r build/bin pytorch-ci-env/cpp_test_bin
+        export PYTORCH_CI_ENV_DIR=/var/lib/jenkins/pytorch-ci-env
+        mkdir -p ${PYTORCH_CI_ENV_DIR}
+        cp -r /var/lib/jenkins/workspace ${PYTORCH_CI_ENV_DIR}/build_workspace  # This copies all source files from build step to the next step
+        cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch ${PYTORCH_CI_ENV_DIR}/torch
+        cp -r build/bin ${PYTORCH_CI_ENV_DIR}/cpp_test_bin
         if [ -d "../cpp-build" ]; then
-          cp -r ../cpp-build pytorch-ci-env/cpp-build
+          cp -r ../cpp-build ${PYTORCH_CI_ENV_DIR}/cpp-build
         fi
   - persist_to_workspace:
-      root: /var/lib/jenkins/workspace/pytorch-ci-env
+      root: /var/lib/jenkins/pytorch-ci-env
       paths:
         - "*"
 
@@ -63,7 +93,6 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   machine:
     image: default
   steps:
-  - checkout
   - run:
       name: Prepare workspace
       command: |
@@ -107,12 +136,16 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
           id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         fi
         pwd
+
+        cp -r /opt/workspace/build_workspace/. /home/circleci/project  # This copies all source files from build step to the current step
+
         echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
         echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
         echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
         # This IAM user allows write access to S3 bucket for sccache
         echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
         echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
+
         mkdir -p /home/circleci/project/build
         cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
@@ -122,9 +155,9 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
           docker cp "/opt/workspace/cpp-build" "$id:/var/lib/jenkins/cpp-build"
         fi
         if [ -n "${MULTI_GPU}" ]; then
-          (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && (git submodule update --init || git submodule update --init || git submodule update --init) && .jenkins/pytorch/multigpu-test.sh') | docker exec -u jenkins -i "$id" bash
+          (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && .jenkins/pytorch/multigpu-test.sh') | docker exec -u jenkins -i "$id" bash
         else
-          (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && (git submodule update --init || git submodule update --init || git submodule update --init) && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
+          (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && .jenkins/pytorch/test.sh') | docker exec -u jenkins -i "$id" bash
         fi
 
 caffe2_linux_build_defaults: &caffe2_linux_build_defaults
@@ -132,6 +165,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   working_directory: /var/lib/jenkins/workspace
   steps:
   - checkout
+  - run:
+      <<: *merge_pull_request_onto_master
   - run:
       name: Build
       no_output_timeout: "10h"
@@ -152,7 +187,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         cd third_party/onnx && git fetch --tags --progress origin +refs/pull/*:refs/remotes/origin/pr/* && cd -
 
         # Reinitialize submodules
-        git submodule update --init --recursive
+        git submodule sync && git submodule update --init --recursive
 
         # Ensure jenkins can write to the ccache root dir.
         sudo chown jenkins:jenkins "${HOME}/.ccache"
@@ -189,16 +224,18 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         fi
 
         # Copy all necessary binaries to shared workspace
-        mkdir -p caffe2-ci-env
-        cp -r third_party/onnx caffe2-ci-env/onnx
+        export CAFFE2_CI_ENV_DIR=/var/lib/jenkins/caffe2-ci-env
+        mkdir -p ${CAFFE2_CI_ENV_DIR}
+        cp -r /var/lib/jenkins/workspace ${CAFFE2_CI_ENV_DIR}/build_workspace  # This copies all source files from build step to the next step
+        cp -r third_party/onnx ${CAFFE2_CI_ENV_DIR}/onnx
         if [ -d "/usr/local/caffe2" ]; then
-          cp -r /usr/local/caffe2 caffe2-ci-env/caffe2
+          cp -r /usr/local/caffe2 ${CAFFE2_CI_ENV_DIR}/caffe2
         fi
         if [ -d "/opt/conda" ]; then
-          cp -r /opt/conda caffe2-ci-env/conda_env
+          cp -r /opt/conda ${CAFFE2_CI_ENV_DIR}/conda_env
         fi
   - persist_to_workspace:
-      root: /var/lib/jenkins/workspace/caffe2-ci-env
+      root: /var/lib/jenkins/caffe2-ci-env
       paths:
         - "*"
 
@@ -206,7 +243,6 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
     image: default
   steps:
-  - checkout
   - run:
       name: Prepare workspace
       command: |
@@ -250,6 +286,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
           id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         fi
         pwd
+        cp -r /opt/workspace/build_workspace/. /home/circleci/project  # This copies all source files from build step to the current step
         echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
         echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
         # This IAM user allows write access to S3 bucket for sccache
@@ -316,6 +353,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
   steps:
     - checkout
     - run:
+        <<: *merge_pull_request_onto_master
+    - run:
         name: Build
         no_output_timeout: "10h"
         command: |
@@ -326,7 +365,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           brew install cmake
 
           # Reinitialize submodules
-          git submodule update --init --recursive
+          git submodule sync && git submodule update --init --recursive
 
           # Reinitialize path (see man page for path_helper(8))
           eval `/usr/libexec/path_helper -s`
@@ -526,6 +565,8 @@ jobs:
     steps:
       - checkout
       - run:
+          <<: *merge_pull_request_onto_master
+      - run:
           name: Build
           environment:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
@@ -544,9 +585,12 @@ jobs:
             export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
 
-            git submodule update --init
+            git submodule sync && git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
+
+            # TODO: need to share source files from build to test, when macOS builds are enabled
+
       - persist_to_workspace:
           root: /Users/distiller/pytorch-ci-env
           paths:
@@ -556,7 +600,6 @@ jobs:
     macos:
       xcode: "9.0"
     steps:
-      - checkout
       - run:
           name: Prepare workspace
           command: |
@@ -570,9 +613,9 @@ jobs:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
           no_output_timeout: "10h"
           command: |
+            # TODO: need to share source files from build to test, when macOS builds are enabled
             set -ex
             export IN_CIRCLECI=1
-            git submodule update --init
             chmod a+x .jenkins/pytorch/macos-test.sh
             .jenkins/pytorch/macos-test.sh
 
@@ -581,6 +624,8 @@ jobs:
       xcode: "9.0"
     steps:
       - checkout
+      - run:
+          <<: *merge_pull_request_onto_master
       - run:
           name: Build
           environment:
@@ -616,7 +661,7 @@ jobs:
             export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
 
-            git submodule update --init
+            git submodule sync && git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
             .jenkins/pytorch/macos-build.sh
 
@@ -845,36 +890,36 @@ workflows:
   version: 2
   build:
     jobs:
-      - pytorch_linux_trusty_py2_7_9_build_test
-      - pytorch_linux_trusty_py2_7_build_test
-      - pytorch_linux_trusty_py3_5_build_test
-      - pytorch_linux_trusty_py3_6_gcc4_8_build_test
-      - pytorch_linux_trusty_py3_6_gcc5_4_build_test
-      - pytorch_linux_trusty_py3_6_gcc7_build_test
-      - pytorch_linux_trusty_pynightly_build_test
-      - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_py3_clang5_asan_test:
-          requires:
-            - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
-          requires:
-            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
-          requires:
-            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      # - pytorch_linux_trusty_py2_7_9_build_test
+      # - pytorch_linux_trusty_py2_7_build_test
+      # - pytorch_linux_trusty_py3_5_build_test
+      # - pytorch_linux_trusty_py3_6_gcc4_8_build_test
+      # - pytorch_linux_trusty_py3_6_gcc5_4_build_test
+      # - pytorch_linux_trusty_py3_6_gcc7_build_test
+      # - pytorch_linux_trusty_pynightly_build_test
+      # - pytorch_linux_xenial_py3_clang5_asan_build
+      # - pytorch_linux_xenial_py3_clang5_asan_test:
+      #     requires:
+      #       - pytorch_linux_xenial_py3_clang5_asan_build
+      # - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      # - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      # - pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      # - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      # - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
 
       # - pytorch_macos_10_13_py3_build
       # - pytorch_macos_10_13_py3_test:
@@ -882,48 +927,48 @@ workflows:
       #       - pytorch_macos_10_13_py3_build
       # - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
 
-      - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_aten_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_aten_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda9_0_cudnn7_aten_ubuntu16_04_build
-      - caffe2_py2_mkl_ubuntu16_04_build
-      - caffe2_py2_mkl_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_mkl_ubuntu16_04_build
-      - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
-      - caffe2_py2_gcc4_8_ubuntu14_04_build
-      - caffe2_py2_gcc4_8_ubuntu14_04_test:
-          requires:
-            - caffe2_py2_gcc4_8_ubuntu14_04_build
-      - caffe2_onnx_py2_gcc5_ubuntu16_04_build
-      - caffe2_onnx_py2_gcc5_ubuntu16_04_test:
-          requires:
-            - caffe2_onnx_py2_gcc5_ubuntu16_04_build
-      - caffe2_conda2_ubuntu16_04_build
-      - caffe2_conda2_ubuntu16_04_test:
-          requires:
-            - caffe2_conda2_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_gcc4_9_ubuntu14_04_build
-      - caffe2_py2_clang3_8_ubuntu16_04_build
-      - caffe2_py2_clang3_9_ubuntu16_04_build
-      - caffe2_py2_gcc6_ubuntu16_04_build
-      - caffe2_py2_gcc7_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn7_aten_ubuntu16_04_build
-      - caffe2_py2_android_ubuntu16_04_build
-      - caffe2_conda3_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_centos7_build
+      # - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
+      # - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
+      # - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_cuda9_0_cudnn7_aten_ubuntu16_04_build
+      # - caffe2_py2_cuda9_0_cudnn7_aten_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_cuda9_0_cudnn7_aten_ubuntu16_04_build
+      # - caffe2_py2_mkl_ubuntu16_04_build
+      # - caffe2_py2_mkl_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_mkl_ubuntu16_04_build
+      # - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_gcc4_8_ubuntu14_04_build
+      # - caffe2_py2_gcc4_8_ubuntu14_04_test:
+      #     requires:
+      #       - caffe2_py2_gcc4_8_ubuntu14_04_build
+      # - caffe2_onnx_py2_gcc5_ubuntu16_04_build
+      # - caffe2_onnx_py2_gcc5_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_onnx_py2_gcc5_ubuntu16_04_build
+      # - caffe2_conda2_ubuntu16_04_build
+      # - caffe2_conda2_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_conda2_ubuntu16_04_build
+      # - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_gcc4_9_ubuntu14_04_build
+      # - caffe2_py2_clang3_8_ubuntu16_04_build
+      # - caffe2_py2_clang3_9_ubuntu16_04_build
+      # - caffe2_py2_gcc6_ubuntu16_04_build
+      # - caffe2_py2_gcc7_ubuntu16_04_build
+      # - caffe2_py2_cuda8_0_cudnn7_aten_ubuntu16_04_build
+      # - caffe2_py2_android_ubuntu16_04_build
+      # - caffe2_conda3_cuda9_0_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_cuda9_0_cudnn7_centos7_build
 
       # - caffe2_py2_ios_macos10_13_build
       # - caffe2_py2_system_macos10_13_build

@@ -78,6 +78,15 @@ class InstanceNorm1d(_InstanceNorm):
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
+    .. note::
+        :class:`InstanceNorm1d` and :class:`LayerNorm` are very similar, but
+        have some subtle differences. :class:`InstanceNorm1d` is applied
+        on each channel of channeled data like multidimensional time series, but
+        :class:`LayerNorm` is usually applied on entire sample and often in NLP
+        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        transform, while :class:`InstanceNorm1d` usually don't apply affine
+        transform.
+
     Args:
         num_features: :math:`C` from an expected input of size
             :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
@@ -143,6 +152,15 @@ class InstanceNorm2d(_InstanceNorm):
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
+    .. note::
+        :class:`InstanceNorm2d` and :class:`LayerNorm` are very similar, but
+        have some subtle differences. :class:`InstanceNorm2d` is applied
+        on each channel of channeled data like RGB images, but
+        :class:`LayerNorm` is usually applied on entire sample and often in NLP
+        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        transform, while :class:`InstanceNorm2d` usually don't apply affine
+        transform.
+
     Args:
         num_features: :math:`C` from an expected input of size
             :math:`(N, C, H, W)`
@@ -207,6 +225,15 @@ class InstanceNorm3d(_InstanceNorm):
         :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
+
+    .. note::
+        :class:`InstanceNorm3d` and :class:`LayerNorm` are very similar, but
+        have some subtle differences. :class:`InstanceNorm3d` is applied
+        on each channel of channeled data like 3D models with RGB color, but
+        :class:`LayerNorm` is usually applied on entire sample and often in NLP
+        tasks. Additionaly, :class:`LayerNorm` applies elementwise affine
+        transform, while :class:`InstanceNorm3d` usually don't apply affine
+        transform.
 
     Args:
         num_features: :math:`C` from an expected input of size
