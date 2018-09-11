@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.2 FATAL_ERROR)
 
 # Find modules.
 list(APPEND CMAKE_MODULE_PATH
-  /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/public
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules_CUDA_fix)
@@ -136,6 +135,10 @@ endif()
 if(MPI_FOUND)
   target_include_directories(c10d PUBLIC ${MPI_INCLUDE_PATH})
   copy_header(ProcessGroupMPI.hpp)
+  file(WRITE ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path "")
+  foreach(MPI_INC ${MPI_INCLUDE_PATH})
+    file(APPEND ${CMAKE_BINARY_DIR}/include/c10d/mpi_include_path ${MPI_INC}\n)
+  endforeach()
 endif()
 
 target_link_libraries(c10d PUBLIC ${C10D_LIBS})

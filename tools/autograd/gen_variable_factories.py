@@ -51,13 +51,14 @@ def process_function(decl, has_tensor_options):
         formals.append("{} {}{}".format(type, argument["name"], default))
         actual = argument["name"]
         if argument["simple_type"] == "TensorOptions":
-            # We want to discard the runtime type so that `at::{name}` always returns a
+            # We want to make `at::{name}` always return a
             # tensor and not a variable, since we create a variable right after.
-            actual += ".discard_runtime_type()"
+            actual = "at::TensorOptions({}).is_variable(false)".format(actual)
         actuals.append(actual)
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
     if decl['name'].endswith('_like') and not has_tensor_options:
-        actuals.append('at::TensorOptions({}, /*discard_runtime_type=*/true)'.format(actuals[0]))
+        # it's a tensor
+        actuals.append('{}.options().is_variable(false)'.format(actuals[0]))
 
     pre_record_trace, post_record_trace = format_trace(decl)
 

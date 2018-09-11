@@ -45,8 +45,7 @@ CAFFE2_API Workspace makeWorkspace(std::shared_ptr<PredictorParameters> paramete
 CAFFE2_API PredictorConfig makePredictorConfig(
     const MetaNetDef& net,
     Workspace* parent = nullptr,
-    bool run_init = true,
-    const std::string& net_name = "");
+    bool run_init = true);
 
 CAFFE2_API PredictorConfig makePredictorConfig(
     const NetDef& init_net,

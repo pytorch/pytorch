@@ -26,7 +26,7 @@ SKIP_PYTHON_BINDINGS = [
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
-    'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice',
+    'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice', 'randint(_out)?',
     '_local_scalar', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear'
 ]
@@ -151,10 +151,10 @@ def should_generate_python_binding(declaration):
     # TODO: fix handling of SparseTensor. We don't want to generate Python
     # bindings to SparseTensor overloads, such as add(Tensor, SparseTensorRef),
     # since the Tensor-based signature already dynamically dispatches correctly.
-    # However, _sparse_mask only has a SparseTensor signature so we need to bind
+    # However, sparse_mask only has a SparseTensor signature so we need to bind
     # that function.
     for arg in declaration['arguments']:
-        if arg['type'] == 'SparseTensorRef' and declaration['name'] != '_sparse_mask':
+        if arg['type'] == 'SparseTensorRef' and declaration['name'] != 'sparse_mask':
             return False
 
     return True
@@ -400,7 +400,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                         # The device actual is the corresponding AutoGPU index for the Device.
                         formal_args.append(parsed_type_args[1])
                         formal_args.append(device_type)
-                        actuals.append("torch::getType({}, {}, {})".format(parsed_type_args[0], layout, device))
+                        actuals.append("torch::getVariableType({}, {}, {})".format(parsed_type_args[0], layout, device))
                         actuals.append('{}.index()'.format(device))
 
                     has_device_bind = True
@@ -427,7 +427,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['actuals'] = actuals
 
         if has_tensor_options:
-            env['initialize_cuda'] = 'maybe_initialize_cuda(options.type());'
+            env['initialize_cuda'] = 'maybe_initialize_cuda(at::getType(options));'
         else:
             env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(type_args[0]['name']) if type_args else ''
 

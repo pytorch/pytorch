@@ -18,7 +18,7 @@ class IDEEPContext final : public BaseContext {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), IDEEP);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_IDEEP);
   }
 
   ~IDEEPContext() noexcept override {}
@@ -189,6 +189,11 @@ class IDEEPStaticContext : public BaseStaticContext {
 
   DeviceType GetDeviceType() override {
     return IDEEP;
+  }
+
+  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
+      override {
+    device->set_device_type(TypeToProto(GetDeviceType()));
   }
 };
 

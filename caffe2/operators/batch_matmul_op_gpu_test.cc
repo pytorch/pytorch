@@ -15,14 +15,14 @@ class BatchMatMulOpGPUTest : public testing::Test {
     if (!HasCudaGPU()) {
       return;
     }
-    option_.set_device_type(CUDA);
+    option_.set_device_type(PROTO_CUDA);
     cuda_context_ = make_unique<CUDAContext>(option_);
     def_.set_name("test");
     def_.set_type("BatchMatMul");
     def_.add_input("A");
     def_.add_input("B");
     def_.add_output("Y");
-    def_.mutable_device_option()->set_device_type(CUDA);
+    def_.mutable_device_option()->set_device_type(PROTO_CUDA);
   }
 
   void AddConstInput(

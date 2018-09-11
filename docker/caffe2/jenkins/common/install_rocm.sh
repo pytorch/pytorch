@@ -5,6 +5,7 @@ set -ex
 install_ubuntu() {
     apt-get update
     apt-get install -y wget
+    apt-get install -y libopenblas-dev
 
     DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
     # Add rocm repository
@@ -49,18 +50,35 @@ install_hip_thrust() {
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
 }
 
-# This will be removed after merging an upcoming PR.
-install_hcsparse() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb 
-    dpkg -i /opt/rocm/debians/hcsparse.deb
-}
-
 # Install an updated version of rocRand that's PyTorch compatible.
 install_rocrand() {
     mkdir -p /opt/rocm/debians
     curl https://s3.amazonaws.com/ossci-linux/rocrand-1.8.0-Linux.deb -o /opt/rocm/debians/rocrand.deb 
     dpkg -i /opt/rocm/debians/rocrand.deb
+}
+
+# Install rocSPARSE/hipSPARSE that will be released soon - can co-exist w/ hcSPARSE which will be removed soon
+install_hipsparse() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/rocsparse-0.1.1.0.deb -o /opt/rocm/debians/rocsparse.deb
+    curl https://s3.amazonaws.com/ossci-linux/hipsparse-0.1.1.0.deb -o /opt/rocm/debians/hipsparse.deb
+    dpkg -i /opt/rocm/debians/rocsparse.deb
+    dpkg -i /opt/rocm/debians/hipsparse.deb
+}
+
+# Install custom hcc containing two compiler fixes relevant to PyTorch
+install_customhcc() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/hcc-1.2.18272-Linux.deb -o /opt/rocm/debians/hcc-1.2.18272-Linux.deb
+    curl https://s3.amazonaws.com/ossci-linux/hip_base-1.5.18276.deb -o /opt/rocm/debians/hip_base-1.5.18276.deb
+    curl https://s3.amazonaws.com/ossci-linux/hip_doc-1.5.18276.deb -o /opt/rocm/debians/hip_doc-1.5.18276.deb
+    curl https://s3.amazonaws.com/ossci-linux/hip_samples-1.5.18276.deb -o /opt/rocm/debians/hip_samples-1.5.18276.deb
+    curl https://s3.amazonaws.com/ossci-linux/hip_hcc-1.5.18276.deb -o /opt/rocm/debians/hip_hcc-1.5.18276.deb
+    dpkg -i /opt/rocm/debians/hcc-1.2.18272-Linux.deb
+    dpkg -i /opt/rocm/debians/hip_base-1.5.18276.deb
+    dpkg -i /opt/rocm/debians/hip_doc-1.5.18276.deb
+    dpkg -i /opt/rocm/debians/hip_samples-1.5.18276.deb
+    dpkg -i /opt/rocm/debians/hip_hcc-1.5.18276.deb
 }
 
 # Install Python packages depending on the base OS
@@ -75,4 +93,5 @@ fi
 
 install_hip_thrust
 install_rocrand
-install_hcsparse
+install_hipsparse
+install_customhcc

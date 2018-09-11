@@ -4,7 +4,7 @@
 
 #define EPS 1e-12
 
-static inline real safe_log(real a) {
+static inline scalar_t safe_log(scalar_t a) {
   if (a == 0.) {
     return log(EPS);
   }
@@ -24,9 +24,9 @@ void THNN_(BCECriterion_updateOutput)(
 
   if (reduction == Reduction::None) {
     THTensor_(resizeAs)(output, input);
-    TH_TENSOR_APPLY3(real, input, real, target, real, output,
-        real x = *input_data;
-        real y = *target_data;
+    TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
+        scalar_t x = *input_data;
+        scalar_t y = *target_data;
         THAssertMsg(x >= 0. && x <= 1.,
           "input value should be between 0~1, but got %f",
 		      (double) x);
@@ -39,22 +39,22 @@ void THNN_(BCECriterion_updateOutput)(
   }
 
 	THTensor_(resize1d)(output, 1);
-  real sum = 0;
+  scalar_t sum = 0;
 
   if (weights) {
-    TH_TENSOR_APPLY3(real, input, real, target, real, weights,
-      real x = *input_data;
-      real y = *target_data;
-      real w = *weights_data;
+    TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, weights,
+      scalar_t x = *input_data;
+      scalar_t y = *target_data;
+      scalar_t w = *weights_data;
       THAssertMsg(x >= 0. && x <= 1.,
         "input value should be between 0~1, but got %f",
 		  (double) x);
       sum -= (safe_log(x) * y + safe_log(1. - x) * (1. - y)) * w;
     );
   } else {
-    TH_TENSOR_APPLY2(real, input, real, target,
-      real x = *input_data;
-      real y = *target_data;
+    TH_TENSOR_APPLY2(scalar_t, input, scalar_t, target,
+      scalar_t x = *input_data;
+      scalar_t y = *target_data;
       THAssertMsg(x >= 0. && x <= 1.,
         "input value should be between 0~1, but got %f",
 		  (double) x);
@@ -84,14 +84,14 @@ void THNN_(BCECriterion_updateGradInput)(
 
   if (reduction == Reduction::None) {
     THNN_CHECK_NELEMENT(gradOutput, input);
-    TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
-      real x = *input_data;
-      real y = *target_data;
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
+      scalar_t x = *input_data;
+      scalar_t y = *target_data;
       *gradInput_data = -(y - x) / ((1. - x + EPS) * (x + EPS));
     );
 
     if (weights) {
-      TH_TENSOR_APPLY3(real, gradInput, real, weights, real, gradOutput,
+      TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, weights, scalar_t, gradOutput,
         *gradInput_data = *gradInput_data * *weights_data * *gradOutput_data;
       );
     } else {
@@ -101,11 +101,11 @@ void THNN_(BCECriterion_updateGradInput)(
   }
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-  real norm = (reduction == Reduction::ElementwiseMean ? 1./((real)THTensor_(nElement)(input)) : 1.);
+  scalar_t norm = (reduction == Reduction::ElementwiseMean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
 
-  TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
-    real x = *input_data;
-    real y = *target_data;
+  TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
+    scalar_t x = *input_data;
+    scalar_t y = *target_data;
     *gradInput_data = - norm * (y - x) / ((1. - x + EPS) * (x + EPS)) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
   );
 

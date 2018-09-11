@@ -1,8 +1,8 @@
 #ifndef THC_NUMERICS_INC
 #define THC_NUMERICS_INC
 
+#include <limits>
 #include <cuda.h>
-#include <limits.h>
 #include <assert.h>
 #include "THCHalf.h"
 #include "ATen/ATen.h"
@@ -21,10 +21,10 @@ template <typename T>
 struct THCNumerics {
 };
 
-template <typename scalar_t>
-static inline __host__ __device__ scalar_t powi(scalar_t a, scalar_t b) {
-  assert(THCNumerics<scalar_t>::ge(b, 0));
-  scalar_t result = 1;
+template <typename T>
+static inline __host__ __device__ T powi(T a, T b) {
+  assert(THCNumerics<T>::ge(b, 0));
+  T result = 1;
   while (b) {
     if (b & 1) {
        result *= a;
@@ -35,12 +35,14 @@ static inline __host__ __device__ scalar_t powi(scalar_t a, scalar_t b) {
   return result;
 }
 
-// DEPRECATED: For integral types, use math functions from std and NumericLimits.cuh. 
+// DEPRECATED: For integral types, use math functions from std and NumericLimits.cuh.
 //             Use binary_kernel or CUDA_apply_utils for arithmetic
 template <>
 struct THCNumerics<uint8_t> {
   static inline __host__ __device__ uint8_t min() { return at::numeric_limits<uint8_t>::lowest(); }
   static inline __host__ __device__ uint8_t max() { return at::numeric_limits<uint8_t>::max(); }
+  static inline __host__ __device__ uint8_t lower_bound() { return at::numeric_limits<uint8_t>::lower_bound(); }
+  static inline __host__ __device__ uint8_t upper_bound() { return at::numeric_limits<uint8_t>::upper_bound(); }
 
   static inline __host__ __device__ bool lt(uint8_t a, uint8_t b) { return a < b; }
   static inline __host__ __device__ bool le(uint8_t a, uint8_t b) { return a <= b; }
@@ -64,6 +66,8 @@ template <>
 struct THCNumerics<int8_t> {
   static inline __host__ __device__ int8_t min() { return at::numeric_limits<int8_t>::lowest(); }
   static inline __host__ __device__ int8_t max() { return at::numeric_limits<int8_t>::max(); }
+  static inline __host__ __device__ int8_t lower_bound() { return at::numeric_limits<int8_t>::lower_bound(); }
+  static inline __host__ __device__ int8_t upper_bound() { return at::numeric_limits<int8_t>::upper_bound(); }
 
   static inline __host__ __device__ bool lt(int8_t a, int8_t b) { return a < b; }
   static inline __host__ __device__ bool le(int8_t a, int8_t b) { return a <= b; }
@@ -87,6 +91,8 @@ template <>
 struct THCNumerics<int16_t> {
   static inline __host__ __device__ int16_t min() { return at::numeric_limits<int16_t>::lowest(); }
   static inline __host__ __device__ int16_t max() { return at::numeric_limits<int16_t>::max(); }
+  static inline __host__ __device__ int16_t lower_bound() { return at::numeric_limits<int16_t>::lower_bound(); }
+  static inline __host__ __device__ int16_t upper_bound() { return at::numeric_limits<int16_t>::upper_bound(); }
 
   static inline __host__ __device__ bool lt(int16_t a, int16_t b) { return a < b; }
   static inline __host__ __device__ bool le(int16_t a, int16_t b) { return a <= b; }
@@ -110,6 +116,8 @@ template <>
 struct THCNumerics<int32_t> {
   static inline __host__ __device__ int32_t min() { return at::numeric_limits<int32_t>::lowest(); }
   static inline __host__ __device__ int32_t max() { return at::numeric_limits<int32_t>::max(); }
+  static inline __host__ __device__ int32_t lower_bound() { return at::numeric_limits<int32_t>::lower_bound(); }
+  static inline __host__ __device__ int32_t upper_bound() { return at::numeric_limits<int32_t>::upper_bound(); }
 
   static inline __host__ __device__ bool lt(int32_t a, int32_t b) { return a < b; }
   static inline __host__ __device__ bool le(int32_t a, int32_t b) { return a <= b; }
@@ -133,6 +141,8 @@ template <>
 struct THCNumerics<int64_t> {
   static inline __host__ __device__ int64_t min() { return at::numeric_limits<int64_t>::lowest(); }
   static inline __host__ __device__ int64_t max() { return at::numeric_limits<int64_t>::max(); }
+  static inline __host__ __device__ int64_t lower_bound() { return at::numeric_limits<int64_t>::lower_bound(); }
+  static inline __host__ __device__ int64_t upper_bound() { return at::numeric_limits<int64_t>::upper_bound(); }
 
   static inline __host__ __device__ bool lt(int64_t a, int64_t b) { return a < b; }
   static inline __host__ __device__ bool le(int64_t a, int64_t b) { return a <= b; }
@@ -158,6 +168,8 @@ template <>
 struct THCNumerics<half> {
   static inline __host__ __device__ half min() { return at::numeric_limits<at::Half>::lowest(); }
   static inline __host__ __device__ half max() { return at::numeric_limits<at::Half>::max(); }
+  static inline __host__ __device__ half lower_bound() { return at::numeric_limits<at::Half>::lower_bound(); }
+  static inline __host__ __device__ half upper_bound() { return at::numeric_limits<at::Half>::upper_bound(); }
 
   static inline __host__ __device__ bool lt(half a, half b) {
     return static_cast<at::Half>(a) < static_cast<at::Half>(b);
@@ -190,8 +202,8 @@ struct THCNumerics<half> {
   static inline __host__ __device__ half exp(half a) {
     return static_cast<at::Half>(std::exp(static_cast<at::Half>(a)));
   }
-  
-  // note that exp10 is not in the std namespace. 
+
+  // note that exp10 is not in the std namespace.
   static inline __host__ __device__ half exp10(half a) {
     return static_cast<at::Half>(::exp10(static_cast<at::Half>(a)));
   }
@@ -232,7 +244,7 @@ struct THCNumerics<half> {
     return static_cast<at::Half>(::sqrt(static_cast<at::Half>(a)));
   }
 
-  // note that rsqrt is not in the std namespace. 
+  // note that rsqrt is not in the std namespace.
   static inline __host__ __device__ half rsqrt(half a) {
     return static_cast<at::Half>(::rsqrt(static_cast<at::Half>(a)));
   }
@@ -369,6 +381,8 @@ template <>
 struct THCNumerics<float> {
   static inline __host__ __device__ float min() { return at::numeric_limits<float>::lowest(); }
   static inline __host__ __device__ float max() { return at::numeric_limits<float>::max(); }
+  static inline __host__ __device__ float lower_bound() { return at::numeric_limits<float>::lower_bound(); }
+  static inline __host__ __device__ float upper_bound() { return at::numeric_limits<float>::upper_bound(); }
 
   static inline __host__ __device__ bool lt(float a, float b) { return a < b; }
   static inline __host__ __device__ bool le(float a, float b) { return a <= b; }
@@ -426,6 +440,8 @@ template <>
 struct THCNumerics<double> {
   static inline __host__ __device__ double min() { return at::numeric_limits<double>::lowest(); }
   static inline __host__ __device__ double max() { return at::numeric_limits<double>::max(); }
+  static inline __host__ __device__ double lower_bound() { return at::numeric_limits<double>::lower_bound(); }
+  static inline __host__ __device__ double upper_bound() { return at::numeric_limits<double>::upper_bound(); }
 
   static inline __host__ __device__ bool lt(double a, double b) { return a < b; }
   static inline __host__ __device__ bool le(double a, double b) { return a <= b; }

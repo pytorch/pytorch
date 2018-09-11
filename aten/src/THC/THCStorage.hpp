@@ -8,8 +8,6 @@
 #include <TH/THStorageFunctions.hpp>
 
 #include "ATen/ScalarType.h"
-#include "ATen/ScalarTypeUtils.h"
-#include <atomic>
 
 namespace at {
 

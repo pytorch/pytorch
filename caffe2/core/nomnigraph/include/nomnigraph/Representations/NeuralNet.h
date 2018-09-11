@@ -168,7 +168,7 @@ class CAFFE2_API Tensor : public NeuralNetData {
       : NeuralNetData(NNDataKind::Tensor),
         name_(name),
         type_(DataType::Generic) {}
-  CAFFE2_API static bool classof(const NeuralNetData* D) {
+  static bool classof(const NeuralNetData* D) {
     return D->getKind() == NNDataKind::Tensor;
   }
 
@@ -195,10 +195,10 @@ class CAFFE2_API Tensor : public NeuralNetData {
 };
 
 #define NOMNIGRAPH_DEFINE_NN_RTTI(op)                                 \
-  CAFFE2_API static bool classof(const NeuralNetOperator* N) {        \
+  static bool classof(const NeuralNetOperator* N) {        \
     return N->getKind() == NNKind::op;                                \
   }                                                                   \
-  CAFFE2_API static bool classof(const Value* N) {                    \
+  static bool classof(const Value* N) {                    \
     if (isa<NeuralNetOperator>(N)) {                                  \
       return dyn_cast<NeuralNetOperator>(N)->getKind() == NNKind::op; \
     }                                                                 \
@@ -262,7 +262,7 @@ template <bool B, class T = void>
 using enable_if_t = typename std::enable_if<B, T>::type;
 
 template <typename T, typename U>
-struct CAFFE2_API inheritedFrom {
+struct CAFFE2_EXPORT inheritedFrom {
   static constexpr bool value =
       std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
 };
@@ -270,14 +270,14 @@ struct CAFFE2_API inheritedFrom {
 // This is just a way to fix issues when the isa<> implementation
 // can't automatically downcast.
 template <typename T, typename N, typename = void>
-struct CAFFE2_API is_impl {
+struct CAFFE2_EXPORT is_impl {
   inline static bool impl(N n) {
     return isa<T>(n->data());
   }
 };
 
 template <typename T, typename N>
-struct CAFFE2_API is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
+struct CAFFE2_EXPORT is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetOperator>(n->data().get())) {
       return false;
@@ -288,7 +288,7 @@ struct CAFFE2_API is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>:
 };
 
 template <typename T, typename N>
-struct CAFFE2_API is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
+struct CAFFE2_EXPORT is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetData>(n->data().get())) {
       return false;
@@ -306,14 +306,14 @@ inline bool is(N n) {
 // This is just a way to fix issues when the dyn_cast<> implementation
 // can't automatically downcast.
 template <typename T, typename N, typename = void>
-struct CAFFE2_API get_impl {
+struct CAFFE2_EXPORT get_impl {
   inline static T* impl(N n) {
     return dyn_cast<T>(n->data().get());
   }
 };
 
 template <typename T, typename N>
-struct CAFFE2_API get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
+struct CAFFE2_EXPORT get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
@@ -325,7 +325,7 @@ struct CAFFE2_API get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>
 };
 
 template <typename T, typename N>
-struct CAFFE2_API get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
+struct CAFFE2_EXPORT get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
@@ -342,7 +342,7 @@ inline T* get(N n) {
 }
 
 template <typename T, typename G>
-CAFFE2_API std::vector<typename G::NodeRef> nodeIterator(G& g) {
+std::vector<typename G::NodeRef> nodeIterator(G& g) {
   std::vector<typename G::NodeRef> out;
   for (auto node : g.getMutableNodes()) {
     if (!is<T>(node)) {
@@ -354,7 +354,7 @@ CAFFE2_API std::vector<typename G::NodeRef> nodeIterator(G& g) {
 }
 
 template <typename T, typename G>
-CAFFE2_API std::vector<std::pair<T*, typename G::NodeRef>> dataIterator(G& g) {
+std::vector<std::pair<T*, typename G::NodeRef>> dataIterator(G& g) {
   std::vector<std::pair<T*, typename G::NodeRef>> out;
   for (auto node : g.getMutableNodes()) {
     if (!is<T>(node)) {
@@ -367,7 +367,7 @@ CAFFE2_API std::vector<std::pair<T*, typename G::NodeRef>> dataIterator(G& g) {
 }
 
 template <typename T, typename... Args>
-CAFFE2_API void insertOp(
+void insertOp(
     NNGraph& g,
     NNGraph::NodeRef a,
     NNGraph::NodeRef b,
@@ -397,7 +397,7 @@ CAFFE2_API void insertOp(
 }
 
 template <typename NewT, typename OldT>
-CAFFE2_API NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
+NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
   assert(is<OldT>(node) && "Cannot get type from node.");
 
   NeuralNetOperator* nnOpPtr =
@@ -425,16 +425,21 @@ CAFFE2_API std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
 CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 
 template <NNGraph* G>
-struct CAFFE2_API NodeHelper {};
+struct CAFFE2_EXPORT NodeHelper {};
 
 struct CAFFE2_API NNNodeMatchCriteria {
-  const std::function<bool(NNGraph::NodeRef)> predicate;
-  const std::string debugString;
+  std::function<bool(NNGraph::NodeRef)> predicate;
+  std::string debugString;
 
   NNNodeMatchCriteria(
       const std::function<bool(NNGraph::NodeRef)>& predicate,
       const std::string& debugString = "No debug string specified")
       : predicate(predicate), debugString(debugString){};
+
+  NNNodeMatchCriteria() = default;
+  NNNodeMatchCriteria(const NNNodeMatchCriteria&) = default;
+  NNNodeMatchCriteria& operator=(const NNNodeMatchCriteria&) = default;
+  NNNodeMatchCriteria(NNNodeMatchCriteria&&) = default;
 
   NNNodeMatchCriteria andCriteria(const NNNodeMatchCriteria& other) {
     auto thisPredicate = predicate;
@@ -447,7 +452,7 @@ struct CAFFE2_API NNNodeMatchCriteria {
   }
 };
 
-std::ostream& operator<<(
+CAFFE2_API std::ostream& operator<<(
     std::ostream& oss,
     const NNNodeMatchCriteria& criteria);
 
@@ -463,20 +468,18 @@ CAFFE2_API NNNodeMatchCriteria criteriaSingleOutputAndConsumer();
 CAFFE2_API NNNodeMatchCriteria criteriaSingleConsumer();
 
 template <typename NodeType>
-CAFFE2_API NNNodeMatchCriteria matchOp(const std::string& debugString = "matchOp") {
+NNNodeMatchCriteria matchOp(const std::string& debugString = "matchOp") {
   return NNNodeMatchCriteria(
       [](NNGraph::NodeRef nodeRef) { return is<NodeType>(nodeRef); },
       debugString);
 }
 
-CAFFE2_API NNNodeMatchCriteria matchTensor();
-
 template <typename NodeType>
-CAFFE2_API NNNodeMatchCriteria matchOp(
+NNNodeMatchCriteria matchOp(
     const std::function<bool(const NodeType&)> predicate,
     const std::string& debugString = "matchOpWithPredicate") {
   return NNNodeMatchCriteria(
-      [&predicate](NNGraph::NodeRef nodeRef) {
+      [predicate](NNGraph::NodeRef nodeRef) {
         NOM_REQUIRE_OR_RET_FALSE(is<NodeType>(nodeRef));
         NodeType* node = get<NodeType>(nodeRef);
         return predicate(*node);
@@ -484,8 +487,14 @@ CAFFE2_API NNNodeMatchCriteria matchOp(
       debugString);
 };
 
+CAFFE2_API NNNodeMatchCriteria
+matchTensor(const std::string& debugString = "matchTensor");
+
+CAFFE2_API NNMatchNode
+matchExternalTensorNode(const std::string& debugString = "matchExternalTensor");
+
 struct CAFFE2_API NNNodeMatch {
-  CAFFE2_API static bool isMatch(
+  static bool isMatch(
       const NNGraph::NodeRef& node,
       const NNNodeMatchCriteria& criteria) {
     return criteria.predicate(node);
@@ -494,15 +503,6 @@ struct CAFFE2_API NNNodeMatch {
 
 using NNSubgraphMatcher =
     nom::matcher::SubgraphMatcher<NNGraph, NNNodeMatchCriteria, NNNodeMatch>;
-
-// This helper method makes it easy to create matching criteria in NNGraph.
-// For example, operatorSubgraph(opMatch, ...) will refer to a tree like this:
-// ... -> opMatch -> opMatch_Output
-CAFFE2_API NNMatchGraph::NodeRef operatorSubgraph(
-    NNMatchGraph& g,
-    const NNNodeMatchCriteria& root,
-    const std::vector<NNMatchGraph::NodeRef>& childrenCriteria = {},
-    int count = 1);
 
 } // namespace nn
 

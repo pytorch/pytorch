@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().type_id(), data.type().scalarType(), /* is variable */ true),
+    : TensorImpl(data.type().type_id(), data.type().scalarType(), data.type().allocator(), /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -85,10 +85,6 @@ void Variable::Impl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("variable impl does not have set_storage_offset");
 }
 
-const char* Variable::Impl::typeString() {
-  return "VariableType";
-}
-
 const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
 }
@@ -112,12 +108,14 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   if (result)
     return result;
 
-  result = std::make_shared<AccumulateGrad>(Variable(this, true));
+  c10::raw::intrusive_ptr::incref(this);
+  auto intrusive_from_this = c10::intrusive_ptr<Variable::Impl>::reclaim(this);
+  result = std::make_shared<AccumulateGrad>(Variable(std::move(intrusive_from_this)));
   grad_accumulator_ = result;
   return result;
 }
 
-Tensor Variable::Impl::detach() const {
+Variable Variable::Impl::detach() const {
   auto detached = make_variable(data_, /*requires_grad=*/false);
   detached.set_version_counter(version_counter_);
   return detached;

@@ -13,8 +13,8 @@ TH_EXTERNC void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, doub
 TH_EXTERNC void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
 TH_EXTERNC void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
 TH_EXTERNC void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
-TH_EXTERNC void dgesvd_(char *jobu, char *jobvt, int *m, int *n, double *a, int *lda, double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *info);
-TH_EXTERNC void sgesvd_(char *jobu, char *jobvt, int *m, int *n, float *a, int *lda, float *s, float *u, int *ldu, float *vt, int *ldvt, float *work, int *lwork, int *info);
+TH_EXTERNC void dgesdd_(char *jobz, int *m, int *n, double *a, int *lda, double *s, double *u, int *ldu, double *vt, int *ldvt, double *work, int *lwork, int *iwork, int *info);
+TH_EXTERNC void sgesdd_(char *jobz, int *m, int *n, float *a, int *lda, float *s, float *u, int *ldu, float *vt, int *ldvt, float *work, int *lwork, int *iwork, int *info);
 TH_EXTERNC void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *info);
 TH_EXTERNC void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
 TH_EXTERNC void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
@@ -38,7 +38,7 @@ TH_EXTERNC void dpstrf_(char *uplo, int *n, double *a, int *lda, int *piv, int *
 
 
 /* Compute the solution to a real system of linear equations  A * X = B */
-void THLapack_(gesv)(int n, int nrhs, real *a, int lda, int *ipiv, real *b, int ldb, int* info)
+void THLapack_(gesv)(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int* info)
 {
 #ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -53,7 +53,7 @@ void THLapack_(gesv)(int n, int nrhs, real *a, int lda, int *ipiv, real *b, int 
 }
 
 /* Solve a triangular system of the form A * X = B  or A^T * X = B */
-void THLapack_(trtrs)(char uplo, char trans, char diag, int n, int nrhs, real *a, int lda, real *b, int ldb, int* info)
+void THLapack_(trtrs)(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int* info)
 {
 #ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -69,7 +69,7 @@ void THLapack_(trtrs)(char uplo, char trans, char diag, int n, int nrhs, real *a
 
 /* Solve overdetermined or underdetermined real linear systems involving an
 M-by-N matrix A, or its transpose, using a QR or LQ factorization of A */
-void THLapack_(gels)(char trans, int m, int n, int nrhs, real *a, int lda, real *b, int ldb, real *work, int lwork, int *info)
+void THLapack_(gels)(char trans, int m, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, scalar_t *work, int lwork, int *info)
 {
 #ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -84,7 +84,7 @@ void THLapack_(gels)(char trans, int m, int n, int nrhs, real *a, int lda, real 
 
 /* Compute all eigenvalues and, optionally, eigenvectors of a real symmetric
 matrix A */
-void THLapack_(syev)(char jobz, char uplo, int n, real *a, int lda, real *w, real *work, int lwork, int *info)
+void THLapack_(syev)(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info)
 {
 #ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -99,7 +99,7 @@ void THLapack_(syev)(char jobz, char uplo, int n, real *a, int lda, real *w, rea
 
 /* Compute for an N-by-N real nonsymmetric matrix A, the eigenvalues and,
 optionally, the left and/or right eigenvectors */
-void THLapack_(geev)(char jobvl, char jobvr, int n, real *a, int lda, real *wr, real *wi, real* vl, int ldvl, real *vr, int ldvr, real *work, int lwork, int *info)
+void THLapack_(geev)(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *wr, scalar_t *wi, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int *info)
 {
 #ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -114,21 +114,21 @@ void THLapack_(geev)(char jobvl, char jobvr, int n, real *a, int lda, real *wr, 
 
 /* Compute the singular value decomposition (SVD) of a real M-by-N matrix A,
 optionally computing the left and/or right singular vectors */
-void THLapack_(gesvd)(char jobu, char jobvt, int m, int n, real *a, int lda, real *s, real *u, int ldu, real *vt, int ldvt, real *work, int lwork, int *info)
+void THLapack_(gesdd)(char jobz, int m, int n, scalar_t *a, int lda, scalar_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *iwork, int *info)
 {
 #ifdef USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
-  dgesvd_( &jobu,  &jobvt,  &m,  &n,  a,  &lda,  s,  u,  &ldu,  vt,  &ldvt,  work,  &lwork,  info);
+  dgesdd_( &jobz,  &m,  &n,  a,  &lda,  s,  u,  &ldu,  vt,  &ldvt,  work,  &lwork,  iwork,  info);
 #else
-  sgesvd_( &jobu,  &jobvt,  &m,  &n,  a,  &lda,  s,  u,  &ldu,  vt,  &ldvt,  work,  &lwork,  info);
+  sgesdd_( &jobz,  &m,  &n,  a,  &lda,  s,  u,  &ldu,  vt,  &ldvt,  work,  &lwork,  iwork,  info);
 #endif
 #else
-  THError("gesvd : Lapack library not found in compile time\n");
+  THError("gesdd : Lapack library not found in compile time\n");
 #endif
 }
 
 /* LU decomposition */
-void THLapack_(getrf)(int m, int n, real *a, int lda, int *ipiv, int *info)
+void THLapack_(getrf)(int m, int n, scalar_t *a, int lda, int *ipiv, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -141,7 +141,7 @@ void THLapack_(getrf)(int m, int n, real *a, int lda, int *ipiv, int *info)
 #endif
 }
 
-void THLapack_(getrs)(char trans, int n, int nrhs, real *a, int lda, int *ipiv, real *b, int ldb, int *info)
+void THLapack_(getrs)(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -155,7 +155,7 @@ void THLapack_(getrs)(char trans, int n, int nrhs, real *a, int lda, int *ipiv, 
 }
 
 /* Matrix Inverse */
-void THLapack_(getri)(int n, real *a, int lda, int *ipiv, real *work, int lwork, int* info)
+void THLapack_(getri)(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwork, int* info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -169,7 +169,7 @@ void THLapack_(getri)(int n, real *a, int lda, int *ipiv, real *work, int lwork,
 }
 
 /* Cholesky factorization */
-void THLapack_(potrf)(char uplo, int n, real *a, int lda, int *info)
+void THLapack_(potrf)(char uplo, int n, scalar_t *a, int lda, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -183,7 +183,7 @@ void THLapack_(potrf)(char uplo, int n, real *a, int lda, int *info)
 }
 
 /* Solve A*X = B with a symmetric positive definite matrix A using the Cholesky factorization */
-void THLapack_(potrs)(char uplo, int n, int nrhs, real *a, int lda, real *b, int ldb, int *info)
+void THLapack_(potrs)(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -197,7 +197,7 @@ void THLapack_(potrs)(char uplo, int n, int nrhs, real *a, int lda, real *b, int
 }
 
 /* Cholesky factorization based Matrix Inverse */
-void THLapack_(potri)(char uplo, int n, real *a, int lda, int *info)
+void THLapack_(potri)(char uplo, int n, scalar_t *a, int lda, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -211,7 +211,7 @@ void THLapack_(potri)(char uplo, int n, real *a, int lda, int *info)
 }
 
 /* Cholesky factorization with complete pivoting */
-void THLapack_(pstrf)(char uplo, int n, real *a, int lda, int *piv, int *rank, real tol, real *work, int *info)
+void THLapack_(pstrf)(char uplo, int n, scalar_t *a, int lda, int *piv, int *rank, scalar_t tol, scalar_t *work, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -225,7 +225,7 @@ void THLapack_(pstrf)(char uplo, int n, real *a, int lda, int *piv, int *rank, r
 }
 
 /* QR decomposition */
-void THLapack_(geqrf)(int m, int n, real *a, int lda, real *tau, real *work, int lwork, int *info)
+void THLapack_(geqrf)(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -239,7 +239,7 @@ void THLapack_(geqrf)(int m, int n, real *a, int lda, real *tau, real *work, int
 }
 
 /* Build Q from output of geqrf */
-void THLapack_(orgqr)(int m, int n, int k, real *a, int lda, real *tau, real *work, int lwork, int *info)
+void THLapack_(orgqr)(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)
@@ -253,7 +253,7 @@ void THLapack_(orgqr)(int m, int n, int k, real *a, int lda, real *tau, real *wo
 }
 
 /* Multiply Q with a matrix using the output of geqrf */
-void THLapack_(ormqr)(char side, char trans, int m, int n, int k, real *a, int lda, real *tau, real *c, int ldc, real *work, int lwork, int *info)
+void THLapack_(ormqr)(char side, char trans, int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *c, int ldc, scalar_t *work, int lwork, int *info)
 {
 #ifdef  USE_LAPACK
 #if defined(TH_REAL_IS_DOUBLE)

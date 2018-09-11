@@ -346,11 +346,11 @@ class TestCaffe2Backend(unittest.TestCase):
         mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
-            assert len(prepared.init_net.op) == 1038
-            assert len(prepared.predict_net.op) == 101
+            assert len(prepared.init_net.op) == 1019
+            assert len(prepared.predict_net.op) == 142
         else:
-            assert len(prepared.init_net.op) == 27
-            assert len(prepared.predict_net.op) == 1112
+            assert len(prepared.init_net.op) == 8
+            assert len(prepared.predict_net.op) == 1153
 
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
@@ -488,6 +488,11 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.BatchNorm1d(224)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
+    def test_batchnorm2d_noaffine(self):
+        c = Variable(torch.randn(128, 128, 1, 1))
+        model = nn.BatchNorm2d(128, affine=False)
+        self.run_model_test(model, train=False, input=c, batch_size=BATCH_SIZE)
+
     def test_constant(self):
         c = Variable(torch.randn(BATCH_SIZE, 3, 224, 224))
 
@@ -546,7 +551,7 @@ class TestCaffe2Backend(unittest.TestCase):
             def forward(self, input):
                 # TODO: Why index? This returns a tuple and test runner doesn't
                 # support tuple comparison.
-                return input.chunk(20, dim=2)[-1]
+                return input.chunk(8, dim=2)[-1]
         self.run_model_test(MyModel(), train=False, batch_size=BATCH_SIZE)
 
     def test_sqrt(self):

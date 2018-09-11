@@ -31,14 +31,14 @@ op = core.CreateOperator(
     ["is_empty"],
 )
 
-# Use a not-empty tensor
+// Use a not-empty tensor
 workspace.FeedBlob("tensor", np.random.randn(2, 2).astype(np.float32))
 print("tensor:\n", workspace.FetchBlob("tensor"))
 
 workspace.RunOperatorOnce(op)
 print("is_empty: ", workspace.FetchBlob("is_empty"),"\n")
 
-# Use an empty tensor
+// Use an empty tensor
 workspace.FeedBlob("tensor", np.empty(0))
 print("tensor:\n", workspace.FetchBlob("tensor"))
 

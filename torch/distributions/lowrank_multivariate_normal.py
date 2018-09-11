@@ -62,7 +62,7 @@ class LowRankMultivariateNormal(Distribution):
 
     Example:
 
-        >>> m = MultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
+        >>> m = LowRankMultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
         >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[1,0]`, cov_diag=`[1,1]`
         tensor([-0.2102, -0.5429])
 
@@ -116,11 +116,25 @@ class LowRankMultivariateNormal(Distribution):
         super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
                                                         validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(LowRankMultivariateNormal, _instance)
+        batch_shape = torch.Size(batch_shape)
+        loc_shape = batch_shape + self.event_shape
+        new.loc = self.loc.expand(loc_shape)
+        new.cov_diag = self.cov_diag.expand(loc_shape)
+        new.cov_factor = self.cov_factor.expand(loc_shape + self.cov_factor.shape[-1:])
+        new._capacitance_tril = self._capacitance_tril.expand(batch_shape + self._capacitance_tril.shape[-2:])
+        super(LowRankMultivariateNormal, new).__init__(batch_shape,
+                                                       self.event_shape,
+                                                       validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @property
     def mean(self):
         return self.loc
 
-    @property
+    @lazy_property
     def variance(self):
         return self.cov_factor.pow(2).sum(-1) + self.cov_diag
 

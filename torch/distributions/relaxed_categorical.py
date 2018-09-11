@@ -29,7 +29,8 @@ class ExpRelaxedCategorical(Distribution):
     [2] Categorical Reparametrization with Gumbel-Softmax
     (Jang et al, 2017)
     """
-    arg_constraints = {'probs': constraints.simplex}
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real}
     support = constraints.real
     has_rsample = True
 
@@ -39,6 +40,15 @@ class ExpRelaxedCategorical(Distribution):
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
         super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(ExpRelaxedCategorical, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.temperature = self.temperature
+        new._categorical = self._categorical.expand(batch_shape)
+        super(ExpRelaxedCategorical, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
@@ -93,13 +103,25 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         probs (Tensor): event probabilities
         logits (Tensor): the log probability of each event.
     """
-    arg_constraints = {'probs': constraints.simplex}
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real}
     support = constraints.simplex
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
-        super(RelaxedOneHotCategorical, self).__init__(ExpRelaxedCategorical(temperature, probs, logits),
-                                                       ExpTransform(), validate_args=validate_args)
+        base_dist = ExpRelaxedCategorical(temperature, probs, logits)
+        super(RelaxedOneHotCategorical, self).__init__(base_dist,
+                                                       ExpTransform(),
+                                                       validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(RelaxedOneHotCategorical, _instance)
+        base_dist = self.base_dist.expand(batch_shape)
+        super(RelaxedOneHotCategorical, new).__init__(base_dist,
+                                                      ExpTransform(),
+                                                      validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @property
     def temperature(self):

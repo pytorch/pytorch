@@ -48,7 +48,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), CPU);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_CPU);
   }
 
   ~CPUContext() noexcept override {}
@@ -203,6 +203,11 @@ class CAFFE2_API CPUStaticContext : public BaseStaticContext {
 
   DeviceType GetDeviceType() override {
     return CPU;
+  }
+
+  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
+      override {
+    device->set_device_type(TypeToProto(GetDeviceType()));
   }
 
  protected:

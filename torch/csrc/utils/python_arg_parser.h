@@ -55,6 +55,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/autograd/variable.h"
 
 #include <ATen/ATen.h>
 
@@ -210,7 +211,7 @@ inline at::Tensor PythonArgs::tensor(int i) {
       throw TypeError("expected Tensor as argument %d, but got %s", i,
           Py_TYPE(obj)->tp_name);
     }
-    auto tensor = scalar.toTensor();
+    auto tensor = scalar_to_tensor(scalar);
     tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
     return autograd::make_variable(tensor);
   }
@@ -226,7 +227,7 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
   // handle most NumPy scalar types except np.float64.
   if (THPVariable_Check(args[i])) {
-    return ((THPVariable*)args[i])->cdata._local_scalar();
+    return at::_local_scalar(((THPVariable*)args[i])->cdata);
   }
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
@@ -291,7 +292,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
     try {
       // Elements of torch.Size are tensors during tracing, and we need to record extra
       // information before they are turned into an IntList
-      if (traceable && THPVariable_Check(obj)) {
+      if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
         auto & var = THPVariable_Unpack(obj);
         jit::tracer::ArgumentStash::stashIntListElem(
             signature.params[i].name, size, idx, var);

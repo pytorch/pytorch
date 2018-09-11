@@ -10,6 +10,9 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
 at::Tensor tensor_from_numpy(PyObject* obj) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
+bool is_numpy_scalar(PyObject* obj) {
+  throw std::runtime_error("PyTorch was compiled without NumPy support");
+}
 }}
 #else
 
@@ -68,7 +71,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
       0,
       NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE,
       nullptr));
-  if (!array) return NULL;
+  if (!array) return nullptr;
 
   // TODO: This attempts to keep the underlying memory alive by setting the base
   // object of the ndarray to the tensor and disabling resizes on the storage.
@@ -77,7 +80,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   PyObject* py_tensor = THPVariable_Wrap(make_variable(tensor, false));
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
-    return NULL;
+    return nullptr;
   }
   // Use the private storage API
   tensor.storage().unsafeGetStorageImpl()->set_resizable(false);
@@ -178,6 +181,11 @@ ScalarType numpy_dtype_to_aten(int dtype) {
       "can't convert np.ndarray of type %s. The only supported types are: "
       "double, float, float16, int64, int32, and uint8.",
       ((PyTypeObject*)pytype.get())->tp_name);
+}
+
+bool is_numpy_scalar(PyObject* obj) {
+  return (PyArray_IsIntegerScalar(obj) ||
+	  PyArray_IsScalar(obj, Floating));
 }
 
 }} // namespace torch::utils

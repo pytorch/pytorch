@@ -1,5 +1,5 @@
 #include "ATen/cuda/CUDAContext.h"
-#include "THC/THCGeneral.h"
+#include "THC/THCGeneral.hpp"
 
 namespace at { namespace cuda { 
 
@@ -16,6 +16,10 @@ int64_t current_device() {
   return cur_device;
 }
 
+void set_device(int64_t device) {
+  AT_CUDA_CHECK(cudaSetDevice((int)device));
+}
+
 cudaDeviceProp* getCurrentDeviceProperties() {
   return THCState_getCurrentDeviceProperties(at::globalContext().getTHCState());
 }
@@ -25,43 +29,28 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
 }
 
 /* Streams */
-CUDAStream createCUDAStream() {
-  return detail::CUDAStream_createAndRetainWithOptions(
-    CUDAStream::DEFAULT_FLAGS
-  , CUDAStream::DEFAULT_PRIORITY
-  );
+CUDAStream createCUDAStream(
+  const bool isHighPriority
+, int64_t device) {
+  return detail::CUDAStream_createStream(isHighPriority, device);
 }
 
-CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority) {
-  return detail::CUDAStream_createAndRetainWithOptions(flags, priority);
+CUDAStream getDefaultCUDAStream(int64_t device) {
+  return detail::CUDAStream_getDefaultStream(device);
 }
-
-CUDAStream getDefaultCUDAStream() {
-  return detail::CUDAStream_getDefaultStream();
-}
-
-CUDAStream getDefaultCUDAStreamOnDevice(int64_t device) {
-  return detail::CUDAStream_getDefaultStreamOnDevice(device);
-}
-
-CUDAStream getCurrentCUDAStream() {
-  return detail::CUDAStream_getAndRetainCurrentStream();
-}
-
-CUDAStream getCurrentCUDAStreamOnDevice(int64_t device) {
-  return detail::CUDAStream_getAndRetainCurrentStreamOnDevice(device);
+CUDAStream getCurrentCUDAStream(int64_t device) {
+  return detail::CUDAStream_getCurrentStream(device);
 }
 
 void setCurrentCUDAStream(CUDAStream stream) {
-  return detail::CUDAStream_setStream(stream.internals());
+  detail::CUDAStream_setStream(stream.internals());
+}
+void uncheckedSetCurrentCUDAStream(CUDAStream stream) {
+  detail::CUDAStream_uncheckedSetStream(stream.internals());
 }
 
-void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream) {
-  return detail::CUDAStream_setStreamOnDevice(device, stream.internals());
-}
-
-void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream) {
-  return detail::CUDAStream_uncheckedSetStreamOnDevice(device, stream.internals());
+Allocator* getCUDADeviceAllocator() {
+  return at::globalContext().getTHCState()->cudaDeviceAllocator;
 }
 
 /* Handles */

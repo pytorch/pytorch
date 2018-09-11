@@ -9,6 +9,8 @@ from future.utils import viewitems, viewkeys, viewvalues
 import logging
 import copy
 
+from multiprocessing import cpu_count
+
 from caffe2.python import \
     model_helper, dyndep, scope, workspace, core, memonger, utils
 from caffe2.proto import caffe2_pb2
@@ -133,7 +135,10 @@ def Parallelize(
         device scope was: {}".format(scope.CurrentDeviceScope())
 
     if devices is None:
-        devices = list(range(0, workspace.NumCudaDevices())),
+        if not cpu_device:
+            devices = list(range(0, workspace.NumCudaDevices()))
+        else:
+            devices = list(range(0, cpu_count()))
 
     if not cpu_device:
         for gpu in devices:

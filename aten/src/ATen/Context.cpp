@@ -2,6 +2,8 @@
 
 #include "Context.h"
 
+#include <ATen/core/TensorOptions.h>
+
 #include <thread>
 #include <mutex>
 #include <sstream>
@@ -104,5 +106,34 @@ bool Context::setFlushDenormal(bool on) {
   return false;
 #endif
 }
+
+Type& getType(TensorOptions options) {
+  return globalContext().getType(
+            options.backend(), options.dtype(), options.is_variable());
+}
+
+Type& getType(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getType(
+            backend, impl->scalar_type(), impl->is_variable());
+}
+
+Allocator* getCPUAllocator() {
+  return getTHDefaultAllocator();
+}
+
+struct LegacyTypeInit : public LegacyTypeInitInterface {
+  LegacyTypeInit(LegacyTypeInitArgs) {}
+  void initCPU() const override {
+    globalContext();
+  }
+  void initCUDA() const override {
+    globalContext().lazyInitCUDA();
+  }
+  void initComplex() const override {
+    globalContext().lazyInitComplex();
+  }
+};
+REGISTER_LEGACY_TYPE_INIT(LegacyTypeInit);
 
 }

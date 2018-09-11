@@ -5,13 +5,13 @@
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/stack.h"
+#include "torch/csrc/jit/tracing_state.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/WindowsTorchApiMacro.h"
-
 #include <ATen/Backtrace.h>
 
 #include <memory>
@@ -28,74 +28,6 @@ using variable_list = std::vector<Variable>;
 
 TORCH_API void recordSourceLocation(Node* n);
 TORCH_API void setRecordSourceLocation(void (*v)(Node*));
-
-struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState> {
-  TracingState();
-  ~TracingState();
-
-  using WeakTensor = at::WeakTensor;
-
-  struct WeakTensorHasher {
-    size_t operator()(const WeakTensor& t) const {
-      return std::hash<void*>()(t.unsafeGetTensorImpl());
-    }
-  };
-
-  struct WeakTensorEq {
-    bool operator()(const WeakTensor& t1, const WeakTensor& t2) const {
-      return t1.is_same(t2);
-    }
-  };
-
-  std::unordered_map<WeakTensor, Value*, WeakTensorHasher, WeakTensorEq> value_map;
-  std::shared_ptr<Graph> graph;
-};
-
-
-// This is meant to be used as a thread local place, where we can store extra
-// info that gets lost when we call into ATen from Python bindings. One example
-// for when this happens is when we get an IntList argument with e.g. sizes for
-// view. When tracing, those might be tensors, which let us encode extra data
-// dependencies, but once they get to the ATen call where we actually have the
-// tracing logic, they get converted into a raw IntList, and we loose all
-// information. To prevent this, we temporarily stash it in here.
-struct ArgumentStash {
-  struct IntListTrace : std::vector<Value*> {
-    IntListTrace(int size)
-      : std::vector<Value*>(size, nullptr) {}
-  };
-
-  static bool empty() {
-    return stash.intlists.empty();
-  }
-
-  TORCH_API static void stashIntListElem(const std::string& arg_name,
-                                         size_t size,
-                                         size_t idx,
-                                         const Variable& var);
-
-  static bool hasIntList(const std::string& arg_name) {
-    return stash.intlists.count(arg_name) > 0;
-  }
-
-  static IntListTrace popIntList(const std::string& arg_name) {
-    auto info = std::move(stash.intlists.at(arg_name));
-    stash.intlists.erase(arg_name);
-    return info;
-  }
-
-private:
-  static thread_local ArgumentStash stash;
-  std::unordered_map<std::string, IntListTrace> intlists;
-};
-
-// Retrieve or set the current tracing state. Returns a nullptr if tracing is disabled.
-TORCH_API const std::shared_ptr<TracingState>& getTracingState();
-TORCH_API void setTracingState(std::shared_ptr<TracingState> state);
-
-inline bool isTracing() {
-  return static_cast<bool>(getTracingState());
-}
 
 // Having finished adding a new 'node' to the graph IR 'setValueTrace' associates
 // this node with an output variable, so that further operations involving this
@@ -240,29 +172,28 @@ TORCH_API void addInputs(Node *n, const char * name, const ArrayRef<double>& val
 TORCH_API void addInputs(Node *n, const char * name, const std::string& value);
 TORCH_API void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
 TORCH_API void addInputs(Node *n, const char * name, const at::TensorOptions& value);
+TORCH_API void addInputs(Node *n, const char * name, at::Generator * value);
+TORCH_API void addInputs(Node *n, const char * name, at::ScalarType value);
 
 template<size_t N>
 void addInputs(Node *n, const char * name, std::array<bool, N> value) {
   throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
-TORCH_API void postRecordTrace(Node* node, at::ArrayRef<Variable> outputs);
-
-inline void postRecordTrace(Node* node, at::ArrayRef<at::Tensor> tensors) {
-  postRecordTrace(node, fmap<Variable>(tensors));
-}
+TORCH_API void ensureUnique(const char * name, const at::Tensor& tensor);
 
 template <
     typename T,
     typename = torch::enable_if_t<
-        (!std::is_convertible<torch::decay_t<T>, ArrayRef<Variable>>::value &&
-         !std::is_convertible<torch::decay_t<T>, ArrayRef<at::Tensor>>::value &&
-         !std::is_convertible<torch::decay_t<T>, Variable>::value)>>
-void postRecordTrace(Node* node, T&&) {
+        (!std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
+         !std::is_convertible<torch::decay_t<T>, at::Tensor>::value)>>
+void addOutput(Node* node, T&&) {
   AT_ERROR(
       "Found an unsupported argument type ", at::demangle_type<T>(),
       " in the JIT tracer. File a bug report.");
 }
+TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
+TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
 
 TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
 

@@ -3,7 +3,7 @@
 #else
 
 static void THNN_(SpatialReplicationPadding_updateOutput_frame)(
-  real *input_p, real *output_p,
+  scalar_t *input_p, scalar_t *output_p,
   int64_t nslices,
   int64_t iwidth, int64_t iheight,
   int64_t owidth, int64_t oheight,
@@ -40,8 +40,8 @@ static void THNN_(SpatialReplicationPadding_updateOutput_frame)(
         }
         ip_y = ip_y - oStartY + iStartY;
 
-        real *dest_p = output_p + k*owidth*oheight + i * owidth + j;
-        real *src_p = input_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
+        scalar_t *dest_p = output_p + k*owidth*oheight + i * owidth + j;
+        scalar_t *src_p = input_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
         *dest_p = *src_p;
       }
     }
@@ -63,8 +63,8 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
   int64_t iwidth;
   int64_t oheight;
   int64_t owidth;
-  real *input_data;
-  real *output_data;
+  scalar_t *input_data;
+  scalar_t *output_data;
 
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
 		"3D or 4D (batch mode) tensor expected for input, but got: %s");
@@ -98,8 +98,8 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
   {
     THTensor_(resize3d)(output, nslices, oheight, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
     THNN_(SpatialReplicationPadding_updateOutput_frame)(input_data, output_data,
                                                     nslices,
@@ -114,8 +114,8 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
 
     THTensor_(resize4d)(output, nbatch, nslices, oheight, owidth);
 
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<scalar_t>();
+    output_data = output->data<scalar_t>();
 
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
@@ -132,11 +132,11 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 static void THNN_(SpatialReplicationPadding_updateGradInput_frame)(
-  real *ginput_p, real *goutput_p,
+  scalar_t *ginput_p, scalar_t *goutput_p,
   int64_t nslices,
   int64_t iwidth, int64_t iheight,
   int64_t owidth, int64_t oheight,
@@ -173,8 +173,8 @@ static void THNN_(SpatialReplicationPadding_updateGradInput_frame)(
         }
         ip_y = ip_y - oStartY + iStartY;
 
-        real *src_p = goutput_p + k*owidth*oheight + i * owidth + j;
-        real *dest_p = ginput_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
+        scalar_t *src_p = goutput_p + k*owidth*oheight + i * owidth + j;
+        scalar_t *dest_p = ginput_p + k*iwidth*iheight + ip_y * iwidth + ip_x;
         *dest_p += *src_p;
       }
     }
@@ -230,8 +230,8 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
   /* backprop */
   if (input->dim() == 3) {
     THNN_(SpatialReplicationPadding_updateGradInput_frame)(
-      THTensor_(data)(gradInput),
-      THTensor_(data)(gradOutput),
+      gradInput->data<scalar_t>(),
+      gradOutput->data<scalar_t>(),
       nslices,
       iwidth, iheight,
       owidth, oheight,
@@ -242,8 +242,8 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
       THNN_(SpatialReplicationPadding_updateGradInput_frame)(
-        THTensor_(data)(gradInput) + p * nslices * iheight * iwidth,
-        THTensor_(data)(gradOutput) + p * nslices * oheight * owidth,
+        gradInput->data<scalar_t>() + p * nslices * iheight * iwidth,
+        gradOutput->data<scalar_t>() + p * nslices * oheight * owidth,
         nslices,
         iwidth, iheight,
         owidth, oheight,
@@ -253,7 +253,7 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 

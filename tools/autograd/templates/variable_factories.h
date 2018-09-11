@@ -16,7 +16,7 @@ namespace torch {
 #define TENSOR(T, S, _1)                                                    \
   inline at::Tensor tensor(                                                 \
       at::ArrayRef<T> values, const at::TensorOptions& options) {           \
-    at::Tensor result = at::tensor(values, options.discard_runtime_type()); \
+    at::Tensor result = at::tensor(values, at::TensorOptions(options).is_variable(false)); \
     return autograd::make_variable(result, options.requires_grad());        \
   }                                                                         \
   inline at::Tensor tensor(                                                 \
@@ -44,7 +44,7 @@ inline at::Tensor from_blob(
     const std::function<void(void*)>& deleter,
     const at::TensorOptions& options = {}) {
   at::Tensor tensor =
-      at::from_blob(data, sizes, deleter, options.discard_runtime_type());
+      at::from_blob(data, sizes, deleter, at::TensorOptions(options).is_variable(false));
   return autograd::make_variable(
       tensor, /*requires_grad=*/options.requires_grad());
 }

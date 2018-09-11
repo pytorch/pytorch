@@ -6,6 +6,7 @@
 
 #include "torch/csrc/utils/functional.h"
 #include <torch/csrc/jit/assertions.h>
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 #include <ATen/ATen.h>
 #include <ATen/core/optional.h>
@@ -43,11 +44,14 @@ std::string getNodeStackTraceString(const Node* n) {
   return ss.str();
 }
 
-void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExportTypes operator_export_type) {
-  for (auto node : graph->nodes()) {
-      // Macro'ed so we get a marginally better line number on failed export
+void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_type) {
+  for (auto node : b->nodes()) {
+    for (Block *sub_block : node->blocks()) {
+      validateBlock(sub_block, operator_export_type);
+    }
+    // Macro'ed so we get a marginally better line number on failed export
 #define FAIL_EXPORT(name) \
-      throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
+      throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
     IR_IF(node, PythonOp)
       auto py_node = static_cast<torch::jit::PythonOp*>(value);
       FAIL_EXPORT(
@@ -56,9 +60,19 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExpo
     IR_ELSE()
       // Special error messages for certain types of operators
       if (node->kind() == aten::expand) {
-        FAIL_EXPORT(
-            "Could not export a broadcasted operation; ONNX likely does not support this form of broadcasting.\n\nBroadcast occurred at:\n" +
-            getNodeStackTraceString(node));
+        if (operator_export_type == onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+          WithInsertPoint guard(node);
+          auto* new_node = b->owningGraph()->insertNode(
+            b->owningGraph()->create(Symbol(::torch::jit::onnx::ATen), node->inputs(), node->outputs().size()));
+          for (size_t i = 0; i < node->outputs().size(); ++i) {
+            node->output(i)->replaceAllUsesWith(new_node->output(i));
+          }
+          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
+        } else {
+          FAIL_EXPORT(
+              "Could not export a broadcasted operation; ONNX likely does not support this form of broadcasting.\n\nBroadcast occurred at:\n" +
+              getNodeStackTraceString(node));
+        }
       }
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
         FAIL_EXPORT(
@@ -74,6 +88,11 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExpo
     IR_END()
 #undef FAIL_EXPORT
   }
+}
+
+void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExportTypes operator_export_type) {
+  validateBlock(graph->block(), operator_export_type);
+  EliminateDeadCode(graph);
 }
 
 class EncoderBase {
@@ -493,17 +512,18 @@ void ModuleEncoder::EncodeTypeInfo(
   } else if (kind == TypeKind::CompleteTensorType) {
     type_proto->set_denotation("CompleteTensorType");
     CompleteTensorTypePtr node_type = type->cast<CompleteTensorType>();
-    const std::vector<std::int64_t>& sizes = node_type->sizes();
 
     // store the sizes and strides in the dims field of TensorShapeProto
-    for (size_t i = 0; i < sizes.size(); i++) {
+    size_t i = 0;
+    for (auto &size : node_type->sizes()) {
       shape_proto->add_dim();
-      shape_proto->mutable_dim(i)->set_dim_value(sizes[i]);
+      shape_proto->mutable_dim(i)->set_dim_value(size);
+      i++;
     }
-    const std::vector<std::int64_t>& strides = node_type->strides();
-    for (size_t i = 0; i < strides.size(); i++) {
+    for (auto &stride : node_type->strides()) {
       shape_proto->add_dim();
-      shape_proto->mutable_dim(i)->set_dim_value(strides[i]);
+      shape_proto->mutable_dim(i)->set_dim_value(stride);
+      i++;
     }
     tensortype_proto->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
   } else if (kind == TypeKind::TupleType) {
@@ -537,8 +557,9 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("IntType");
   } else if (kind == TypeKind::NoneType) {
     type_proto->set_denotation("NoneType");
-  }
-  else {
+  } else if (kind == TypeKind::GeneratorType) {
+    type_proto->set_denotation("GeneratorType");
+  } else {
     throw std::runtime_error("unexpected type kind");
   }
 }
@@ -612,6 +633,10 @@ void ModuleEncoder::EncodeMethod(
     script::Method &method,
     const std::string prefix) {
   node_proto->set_name(prefix + method.name());
+  if (method.is_optimized()) {
+    // mark that this method was optimized
+    node_proto->set_domain("optimized");
+  }
 
   // We store the schema string in the docstring.
   node_proto->set_doc_string(getExportableSchemaStringForMethod(method));

@@ -386,6 +386,10 @@ class TestOperators(TestCase):
         x = Variable(torch.rand(3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.acos(), x)
 
+    def test_slice(self):
+        x = Variable(torch.rand(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x[:, 1:2], x)
+
     def test_atan(self):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.atan(), x)
@@ -431,6 +435,10 @@ class TestOperators(TestCase):
     def test_unsqueeze(self):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.unsqueeze(len(x.shape)), x)
+
+    def test_batchnorm_noaffine(self):
+        x = Variable(torch.randn(128, 128, 1, 1), requires_grad=True)
+        self.assertONNX(nn.BatchNorm2d(128, affine=False), x)
 
     def test_symbolic_override(self):
         """Lifted from fast-neural-style: custom implementation of instance norm

@@ -25,7 +25,8 @@ class Geometric(Distribution):
         probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
-    arg_constraints = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval,
+                       'logits': constraints.real}
     support = constraints.nonnegative_integer
 
     def __init__(self, probs=None, logits=None, validate_args=None):
@@ -43,6 +44,17 @@ class Geometric(Distribution):
         else:
             batch_shape = probs_or_logits.size()
         super(Geometric, self).__init__(batch_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Geometric, _instance)
+        batch_shape = torch.Size(batch_shape)
+        if 'probs' in self.__dict__:
+            new.probs = self.probs.expand(batch_shape)
+        else:
+            new.logits = self.logits.expand(batch_shape)
+        super(Geometric, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @property
     def mean(self):

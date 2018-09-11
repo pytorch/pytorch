@@ -208,7 +208,7 @@ void testGather(int iter = 10000) {
         allOutputTensors[i][0][j] = at::zeros({16, 16});
       }
     } else {
-      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>();
+      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
     }
   }
 
@@ -265,7 +265,7 @@ void testScatter(int iter = 1) {
         allInputTensors[i][0][j] = at::ones({16, 16}) * rank * i;
       }
     } else {
-      allInputTensors[i] = std::vector<std::vector<at::Tensor>>();
+      allInputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
     }
   }
 

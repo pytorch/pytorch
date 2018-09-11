@@ -223,29 +223,29 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
 }
 
 THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
-  return at::cuda::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
+  return at::cuda::detail::CUDAStream_getCurrentStream(device);
 }
 
 void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
-  at::cuda::detail::CUDAStream_setStreamOnDevice(device, stream);
+  at::cuda::detail::CUDAStream_setStream(stream);
+}
+
+THC_API void THCState_setStream(THCState *state, THCStream* stream) {
+  at::cuda::detail::CUDAStream_setStream(stream);
 }
 
 cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
   return at::cuda::detail::CUDAStream_stream(
-    at::cuda::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device));
+    at::cuda::detail::CUDAStream_getCurrentStream(device));
 }
 
 cudaStream_t THCState_getCurrentStream(THCState *state) {
   return at::cuda::detail::CUDAStream_stream(
-    at::cuda::detail::CUDAStream_getCurrentStreamUnsafe());
+    at::cuda::detail::CUDAStream_getCurrentStream());
 }
 
 THCStream* THCState_getStream(THCState *state) {
-  return at::cuda::detail::CUDAStream_getCurrentStreamUnsafe();
-}
-
-void THCState_setStream(THCState *state, THCStream *stream) {
-  at::cuda::detail::CUDAStream_setStream(stream);
+  return at::cuda::detail::CUDAStream_getCurrentStream();
 }
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)

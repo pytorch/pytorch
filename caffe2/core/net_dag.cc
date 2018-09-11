@@ -72,10 +72,10 @@ DAGNetBase::DAGNetBase(
       task_timers_[idx] = caffe2::make_unique<Timer>();
     }
   }
-  stats_.reserve(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
-  for (auto device_idx = 0;
-       device_idx < DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES;
-       ++device_idx) {
+  constexpr auto MAX_DEVICE_TYPES =
+      DeviceTypeProto::PROTO_COMPILE_TIME_MAX_DEVICE_TYPES;
+  stats_.reserve(MAX_DEVICE_TYPES);
+  for (auto device_idx = 0; device_idx < MAX_DEVICE_TYPES; ++device_idx) {
     stats_.emplace_back(
         "dag_net/stats/" + net_def->name() + "/" +
         caffe2::DeviceTypeName(device_idx));

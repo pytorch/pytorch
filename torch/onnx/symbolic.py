@@ -391,8 +391,7 @@ def view(g, self, size):
     return g.op("Reshape", self, shape)
 
 
-@parse_args('v', 'i', 'i')
-def split(g, self, split_size, dim):
+def prim_ConstantSplit(g, self, split_size, dim):
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
@@ -405,10 +404,9 @@ def split(g, self, split_size, dim):
 # less sensitive to changes in input size.
 # TODO: Once we have proper scoping, stop reimplementing chunk, delete this
 # method, and use the desugared version
-@parse_args('v', 'i', 'i')
-def chunk(g, self, chunks, dim):
+def prim_ConstantChunk(g, self, chunks, dim):
     split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
-    return split(g, self, split_size, dim)
+    return prim_ConstantSplit(g, self, split_size, dim)
 
 
 @parse_args('v', 'i', 'v')
@@ -689,6 +687,16 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
         input = g.op("Unsqueeze", input, axes_i=[2])
 
+    if weight is None or weight.node().kind() == "prim::Undefined":
+        assert len(input_sizes) > 1
+        weight_value = torch.tensor([1.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or bias.node().kind() == "prim::Undefined":
+        assert len(input_sizes) > 1
+        bias_value = torch.tensor([0.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        bias = g.op("Constant", value_t=bias_value)
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
                epsilon_f=eps,
                momentum_f=1 - momentum,
@@ -928,6 +936,25 @@ def zeros_like(g, input):
     return g.op("Sub", input, input).setType(input.type().contiguous())
 
 
+scalar_type_to_onnx = [
+    cast_pytorch_to_onnx["Byte"],
+    cast_pytorch_to_onnx["Char"],
+    cast_pytorch_to_onnx["Short"],
+    cast_pytorch_to_onnx["Int"],
+    cast_pytorch_to_onnx["Long"],
+    cast_pytorch_to_onnx["Half"],
+    cast_pytorch_to_onnx["Float"],
+    cast_pytorch_to_onnx["Double"],
+]
+
+
+@parse_args('v', 'i', 'i', 'v')
+def zeros(g, shape, scalar_type, layout, device):
+    # NOTE: no way to set device in ONNX, so we ignore it
+    return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
+                input_as_shape_i=1, value_f=0)
+
+
 def full_like(g, input, fill_value):
     # TODO: a more efficient implementation (ConstantFill?)
     return add(g, zeros_like(g, input), fill_value, g.op("Constant", value_t=torch.tensor(1)))
@@ -1089,11 +1116,11 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
             # The ONNX RNN/GRU/LSTM produce an output of dimensions
             #   seq_len, num_directions, batch, hidden_size
             # We have to convert to match pytorch's expected
-            #   seq_len, batch, hidden_size * num_directions
-            # by first moving num_directions to the end with
+            #   seq_len, batch, num_directions * hidden_size
+            # by first moving num_directions before hidden_size with
             # Transpose, and then combining it with hidden_size
             # with Reshape.
-            prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 3, 1])
+            prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 1, 3])
             prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 0, -1])))
         else:
             prev_output = g.op('Squeeze', prev_output, axes_i=[1])
@@ -1160,3 +1187,36 @@ rnn_relu = _one_hidden_rnn('RNN_RELU')
 @parse_args('v', 'i')
 def _dim_arange(g, like, dim):
     return g.op('ATen', like, dim_i=dim, operator_s='_dim_arange')
+
+
+def detach(g, input):
+    # Erase aten::detach nodes because ONNX is inference only
+    return input
+
+
+@parse_args('v', 'v', 'i')
+def _pack_padded_sequence(g, input, lengths, batch_first):
+    # There currently is no PackPadded operator in ONNX. We rely on an
+    # optimization pass to remove this later. It is an error if all
+    # PackPadded operators cannot be optimized out.
+    if batch_first:
+        input = g.op('Transpose', input, perm_i=[1, 0, 2])
+    if not lengths.type().isSubtypeOf(torch._C.DynamicType.get()):
+        raise RuntimeError("Lengths must be a Tensor for ONNX export")
+    # We know it's a TensorType so this check is now safe.
+    # It's really only necessary beacuse those operators expand to something that
+    # only works with int32 types in Caffe2...
+    if lengths.type().scalarType() != 'Int':
+        lengths = _cast_Int(g, lengths, False)
+    return g.op("prim::PackPadded", input, lengths, outputs=2)
+
+
+@parse_args('v', 'v', 'i', 't', 'i')
+def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total_length):
+    # Ignore total_length as it is not supported in _symbolic_pad_packed_sequence
+    # It is only useful/used when training using data_parallel model, so
+    # It shouldn't be relevant for ONNX anyway
+    data, lengths = g.op("prim::PadPacked", data, batch_sizes, outputs=2)
+    if batch_first:
+        data = g.op('Transpose', data, perm_i=[1, 0, 2])
+    return data, lengths
