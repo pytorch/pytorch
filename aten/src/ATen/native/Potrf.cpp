@@ -60,7 +60,7 @@ Tensor _potrf_helper_cpu(const Tensor& A, bool upper) {
 
 // Supports arbitrary batch dimensions for self and A
 Tensor potrf(const Tensor& A, bool upper) {
- if (A.dim() <= 2 && A.dim() <= 2) {
+ if (A.dim() >= 0 && A.dim() <= 2) {
    int64_t n = A.size(0);
    std::vector<int64_t> s = {1, n, n};
    IntList size(s);
