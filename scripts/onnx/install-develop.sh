@@ -15,4 +15,4 @@ pip install -e "$tp2_dir/onnx"
 # Install caffe2 and pytorch
 pip install -r "$top_dir/caffe2/requirements.txt"
 pip install -r "$top_dir/requirements.txt"
-USE_OPENCV=1 BUILD_BINARY=1 python setup.py build_deps develop
+USE_LEVELDB=1 USE_LMDB=1 USE_OPENCV=1 BUILD_BINARY=1 python setup.py build_deps develop

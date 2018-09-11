@@ -63,7 +63,7 @@ scalar_t *THCTensor_(data)(THCState *state, const THCTensor *self)
 /* Empty init */
 THCTensor *THCTensor_(new)(THCState *state)
 {
-  return c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(
+  return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
     at::CUDATensorId(),
     false
@@ -73,7 +73,7 @@ THCTensor *THCTensor_(new)(THCState *state)
 /* Pointer-copy init */
 THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 {
-  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
     at::CUDATensorId(),
     false
@@ -93,7 +93,7 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
   if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
-  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
     at::CUDATensorId(),
     false

@@ -34,7 +34,7 @@ using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
   auto c10d_module =
-      THPObjectPtr(PyImport_ImportModule("torch.distributed.c10d"));
+      THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
   }
