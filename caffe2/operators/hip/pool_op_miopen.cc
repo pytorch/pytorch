@@ -202,8 +202,14 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     W_out = Y.ndim() > 3 ? Y.dim32(3) : 1;
     D_out = Y.ndim() > 4 ? Y.dim32(4) : 1;
 
-    if(global_pooling_){
-      kernel_ = {H, W};
+    if (kernel_.size() == 1) {
+      ConvPoolOpBase<HIPContext>::ComputePads({H});
+    } else if (kernel_.size() == 2) {
+      ConvPoolOpBase<HIPContext>::ComputePads({H, W});
+    } else if (kernel_.size() == 3) {
+      ConvPoolOpBase<HIPContext>::ComputePads({H, W, D});
+    } else {
+      CAFFE_THROW("Unsupported kernel size :", kernel_.size());
     }
 
     CAFFE_ENFORCE(kernel_.size() == 2, "MIOpen supports only 2D pooling");
