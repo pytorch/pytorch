@@ -1297,9 +1297,10 @@ def create_derived(backend_type_env, declarations):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
             tensor_arg = ('{}_ == nullptr ? (TensorImpl*)UndefinedTensorImpl::singleton() : (TensorImpl*){}_'
                           .format(name, name))
+        intrusive_ptr_type = 'c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>'
         return [
             'auto {}_ = {};'.format(name, allocation),
-            'auto {} = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim({}));'.format(name, tensor_arg),
+            'auto {} = Tensor({}::reclaim({}));'.format(name, intrusive_ptr_type, tensor_arg),
         ]
 
     def resize_arg(arg):
@@ -1509,7 +1510,8 @@ def create_derived(backend_type_env, declarations):
                     env, arguments=[call])
                 return_tensor = (
                     "return Tensor(" +
-                    "c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim((${wrapped_tensor})${maybe_scalar}));")
+                    "c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(" +
+                    "(${wrapped_tensor})${maybe_scalar}));")
                 body.append(CodeTemplate(return_tensor).substitute(
                     env, wrapped_tensor=wrapped_tensor, maybe_scalar=maybe_scalar))
             # return the same underlying Tensor type for both real and accreal; this ensures
