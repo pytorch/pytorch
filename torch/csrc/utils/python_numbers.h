@@ -128,10 +128,6 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
 }
 
 inline std::complex<double> THPUtils_unpackComplexDouble(PyObject *obj) {
-  if (!PyComplex_Check(obj)) {
-    throw python_error();
-  }
-
   Py_complex value = PyComplex_AsCComplex(obj);
   if (value.real == -1.0 && PyErr_Occurred()) {
     throw python_error();
