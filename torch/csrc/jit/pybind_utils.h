@@ -54,9 +54,26 @@ inline void findErrorInKwargs(
 }
 } // namespace detail
 
+struct ConvertError : public std::exception {
+    ConvertError(std::string msg)
+    : msg_(std::move(msg)) {}
+    const char* what() const noexcept override  {
+        return msg_.c_str();
+    }
+private:
+    std::string msg_;
+};
+
+#define TORCH_CONVERT_ERROR(...) \
+  throw ConvertError(at::str(__VA_ARGS__))
+
 inline IValue toIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
-    return py::cast<at::Tensor>(input);
+    auto ten = py::cast<at::Tensor>(input);
+    if (ten.is_sparse()) {
+      TORCH_CONVERT_ERROR("Inputting sparse tensors not supported");
+    }
+    return ten;
   } else if (py::isinstance<py::tuple>(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
     Stack s;
@@ -89,8 +106,13 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::TensorType:
-      case TypeKind::CompleteTensorType:
-        return py::cast<autograd::Variable>(obj);
+      case TypeKind::CompleteTensorType: {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.is_sparse()) {
+          TORCH_CONVERT_ERROR("Inputting sparse tensors not supported");
+        }
+        return var;
+      }
       case TypeKind::FloatType:
         return py::cast<double>(obj);
       case TypeKind::IntType:
@@ -174,6 +196,9 @@ inline py::object toPyObject(IValue&& ivalue) {
   if (ivalue.isNone()) {
     return py::none();
   } else if (ivalue.isTensor()) {
+    if (ivalue.toTensor().is_sparse()) {
+      TORCH_CONVERT_ERROR("Returning sparse tensors not supported");
+    }
     return py::cast(autograd::Variable(ivalue.toTensor()));
   } else if (ivalue.isDouble()) {
     return py::cast(ivalue.toDouble());
