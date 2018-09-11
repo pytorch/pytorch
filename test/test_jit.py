@@ -1700,6 +1700,19 @@ class TestJit(JitTestCase):
         x = torch.rand(5, 6)
         self.assertEqual(random_foo(x), random_foo_traced(x))
 
+    def test_trace_slice_expr_complete_type(self):
+        def random_foo(x):
+            return x + 1.0
+
+        random_foo_traced = torch.jit.trace(random_foo, (torch.rand(3, 4),))
+
+        @torch.jit.script
+        def random_bar(x):
+            return random_foo_traced(x)[0:1]
+
+        x = torch.rand(3, 4)
+        self.assertEqual(random_bar(x), (x + 1)[0:1])
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
