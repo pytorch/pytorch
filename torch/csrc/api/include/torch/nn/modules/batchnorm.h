@@ -27,9 +27,10 @@ struct BatchNormOptions {
   /// The epsilon value added for numerical stability.
   /// Changing this parameter after construction __is effective__.
   TORCH_ARG(double, eps) = 1e-5;
-  /// A momentum multiplier for the mean and variance.
-  /// Changing this parameter after construction __is effective__.
-  TORCH_ARG(double, momentum) = 0.1;
+  /// A multiplier to exponentially decay the running mean and variance
+  /// (`momentum` in PyTorch). Changing this parameter after construction __is
+  /// effective__.
+  TORCH_ARG(double, exp_avg_factor) = 0.1;
 };
 
 /// Applies [Batch Normalization](https://arxiv.org/abs/1502.03167) to an input.

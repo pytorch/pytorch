@@ -57,7 +57,7 @@ Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
       mean,
       variance,
       is_training(),
-      options.momentum_,
+      options.exp_avg_factor_,
       options.eps_,
       torch::cuda::cudnn_is_available());
 }
