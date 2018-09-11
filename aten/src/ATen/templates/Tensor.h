@@ -202,6 +202,8 @@ struct AT_API Tensor {
   AT_FORALL_SCALAR_TYPES(TO_C_TYPE)
   #undef TO_C_TYPE
 
+  // Return a `TensorAccessor` for CPU `Tensor`s. You have to specify scalar type and
+  // dimension.
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
@@ -211,6 +213,11 @@ struct AT_API Tensor {
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
 
+  // Return a `PackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
+  // dimension. You can optionally specify RestrictPtrTraits as a template parameter to
+  // cast the data pointer to a __restrict__ pointer.
+  // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
+  // as an argument.
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
     PackedTensorAccessor<T,N,PtrTraits> packed_accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
