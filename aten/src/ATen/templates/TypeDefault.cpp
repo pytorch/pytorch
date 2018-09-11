@@ -110,8 +110,8 @@ Storage TypeDefault::storageWithAllocator(int64_t size, Allocator* allocator) co
     return Storage(scalarType(), size, allocator);
 }
 Tensor TypeDefault::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  auto tensor_impl = c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim(static_cast<TensorImpl*>(th_pointer));
-  if (retain && tensor_impl.get() != UndefinedTensor::singleton()) {
+  auto tensor_impl = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(static_cast<TensorImpl*>(th_pointer));
+  if (retain && tensor_impl.get() != UndefinedTensorImpl::singleton()) {
     c10::raw::intrusive_ptr::incref(tensor_impl.get());
   }
   return Tensor(std::move(tensor_impl));
