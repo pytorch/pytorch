@@ -1727,7 +1727,7 @@ private:
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
     auto * sliceable = emitExpr(subscript.value());
     at::optional<int64_t> maybe_dim;
-    if (sliceable->type()->kind() == TypeKind::DynamicType) {
+    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
       maybe_dim = 0;
     }

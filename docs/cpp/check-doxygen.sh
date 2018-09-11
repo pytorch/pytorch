@@ -20,6 +20,7 @@ ignore_warning "warning: no uniquely matching class member found for"
 ignore_warning "warning: source ../../build/aten/src/ is not a readable file"
 ignore_warning "warning: source ../../build/aten/src/ATen/Tensor.h is not a readable file"
 ignore_warning "warning: source ../../build/aten/src/ATen/Functions.h is not a readable file"
+ignore_warning "warning: documented symbol \`torch::nn::FunctionalImpl::FunctionalImpl' was not declared or defined"
 
 # Count the number of remaining warnings.
 warnings=$(grep 'warning:' doxygen-log.txt | wc -l)

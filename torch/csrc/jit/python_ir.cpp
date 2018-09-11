@@ -440,6 +440,11 @@ void initPythonIRBindings(PyObject * module_) {
     .def("__repr__",[](Type & t) {
       return t.python_str();
     })
+    .def("str",[](Type & t) {
+      std::ostringstream s;
+      s << t;
+      return s.str();
+    })
     .def("kind",[](Type& t_) {
       Type * t = &t_;
       switch(t->kind()) {
@@ -486,7 +491,8 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
         return self->isSubtypeOf(other);
-    });
+    })
+    .def_static("inferFrom", inferTypeFrom);
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
     .def_static("get", &NumberType::get);

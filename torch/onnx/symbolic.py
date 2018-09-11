@@ -936,6 +936,25 @@ def zeros_like(g, input):
     return g.op("Sub", input, input).setType(input.type().contiguous())
 
 
+scalar_type_to_onnx = [
+    cast_pytorch_to_onnx["Byte"],
+    cast_pytorch_to_onnx["Char"],
+    cast_pytorch_to_onnx["Short"],
+    cast_pytorch_to_onnx["Int"],
+    cast_pytorch_to_onnx["Long"],
+    cast_pytorch_to_onnx["Half"],
+    cast_pytorch_to_onnx["Float"],
+    cast_pytorch_to_onnx["Double"],
+]
+
+
+@parse_args('v', 'i', 'i', 'v')
+def zeros(g, shape, scalar_type, layout, device):
+    # NOTE: no way to set device in ONNX, so we ignore it
+    return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
+                input_as_shape_i=1, value_f=0)
+
+
 def full_like(g, input, fill_value):
     # TODO: a more efficient implementation (ConstantFill?)
     return add(g, zeros_like(g, input), fill_value, g.op("Constant", value_t=torch.tensor(1)))

@@ -55,6 +55,6 @@ _locals = locals()
 _tensors = [_locals[t + 'Tensor'] for t in _type_names]
 _storages = [_locals[t + 'Storage'] for t in _type_names]
 for cls in _tensors + _storages:
-    cls.__module__ = 'torch.distributed'
+    cls.__module__ = 'torch.distributed.deprecated'
 torch._C._init_names(_tensors + _storages)
 del _locals, _type_names, _tensors, _storages

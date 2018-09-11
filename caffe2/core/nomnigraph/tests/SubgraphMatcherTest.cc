@@ -41,25 +41,20 @@ TestMatchGraph::NodeRef Tree(
     const Criteria& root,
     const std::vector<TestMatchGraph::NodeRef>& children = {},
     int count = 1) {
-  return subgraph(graph, root, children, count);
+  auto result = graph.createNode(std::move(TestMatchNode(root).count(count)));
+  for (auto& child : children) {
+    graph.createEdge(result, child);
+  }
+  return result;
 }
 
 TestMatchGraph::NodeRef NonTerminal(const Criteria& root, int count = 1) {
-  return nonTerminalSubgraph(graph, root, count);
+  return graph.createNode(
+      std::move(TestMatchNode(root).count(count).nonTerminal()));
 }
 
 Criteria any() {
   return Criteria("*");
-}
-
-// Make it more concise to create matching criteria in dataflow graph.
-// For example, operatorTree("opA", ...) will refer to a tree like this:
-// ... -> opA -> opA_Output
-TestMatchGraph::NodeRef operatorTree(
-    const Criteria& root,
-    const std::vector<TestMatchGraph::NodeRef>& childrenCriteria = {},
-    int count = 1) {
-  return Tree(any(), {Tree(root, childrenCriteria)}, count);
 }
 
 std::map<std::string, std::string> TestGraphNodePrinter(
@@ -185,20 +180,35 @@ struct DataFlowTestGraphCriteria {
   TestMatchGraph::NodeRef matchOpG;
 
   DataFlowTestGraphCriteria() {
-    // clang-format off
-    matchOpCOutput = operatorTree("opC", {
-      NonTerminal(Criteria("input"), TestMatchNode::kStarCount)
-    });
-    matchOpG = Tree(
-      Criteria("opG"),{
-        operatorTree("opF", {
-            operatorTree("opB", {
-              matchOpCOutput, matchOpCOutput,
-            })
-        }),
-        NonTerminal(any()) // matches dataI
-      });
-    // clang-format on
+    auto matchOpCInputs =
+        graph.createNode(std::move(TestMatchNode(Criteria("input"))
+                                       .starCount()
+                                       .nonTerminal()
+                                       .excludeFromSubgraph()));
+    auto matchOpC = graph.createNode(Criteria("opC"));
+    graph.createEdge(matchOpCInputs, matchOpC);
+
+    matchOpCOutput = graph.createNode(any());
+    graph.createEdge(matchOpC, matchOpCOutput);
+
+    auto matchOpB = graph.createNode(Criteria("opB"));
+    graph.createEdge(matchOpCOutput, matchOpB);
+    graph.createEdge(matchOpCOutput, matchOpB);
+
+    auto matchOpBOutput = graph.createNode(any());
+    graph.createEdge(matchOpB, matchOpBOutput);
+
+    auto matchOpF = graph.createNode(Criteria("opF"));
+    graph.createEdge(matchOpBOutput, matchOpF);
+
+    auto matchOpFOutput = graph.createNode(any());
+    graph.createEdge(matchOpF, matchOpFOutput);
+
+    matchOpG = graph.createNode(Criteria("opG"));
+    auto matchDataI = graph.createNode(
+        std::move(TestMatchNode(any()).nonTerminal().excludeFromSubgraph()));
+    graph.createEdge(matchOpFOutput, matchOpG);
+    graph.createEdge(matchDataI, matchOpG);
   }
 };
 

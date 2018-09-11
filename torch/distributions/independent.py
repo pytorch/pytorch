@@ -46,6 +46,16 @@ class Independent(Distribution):
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
         super(Independent, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Independent, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.base_dist = self.base_dist.expand(batch_shape +
+                                              self.event_shape[:self.reinterpreted_batch_ndims])
+        new.reinterpreted_batch_ndims = self.reinterpreted_batch_ndims
+        super(Independent, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @property
     def has_rsample(self):
         return self.base_dist.has_rsample
