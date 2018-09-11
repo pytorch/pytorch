@@ -230,6 +230,9 @@ class JitTestCase(TestCase):
             os.unlink(f.name)
         return imported
 
+    def assertGraphContains(self, graph, kind):
+        self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
+
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
@@ -1321,6 +1324,18 @@ class TestJit(JitTestCase):
 
         x = torch.randn(5, 5)
         self.assertEqual(foo(x), x + x + x)
+
+    def test_einsum(self):
+        def outer(x, y):
+            return torch.einsum('i,j->ij', (x, y))
+
+        traced = torch.jit.trace(outer, (torch.randn(4), torch.randn(5)))
+        script = torch.jit.script(outer)
+        fns = [traced, script]
+        x, y = torch.randn(10), torch.randn(2)
+        for fn in [traced, script]:
+            self.assertGraphContains(fn.graph, kind='aten::einsum')
+            self.assertEqual(fn(x, y), outer(x, y))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")

@@ -125,7 +125,7 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
         printPrimList(out,n->is(name));
         break;
       case AttributeKind::s:
-        out << escapeString(n->s(name));
+        out << "\"" << escapeString(n->s(name)) << "\"";
         break;
       case AttributeKind::ss:
         printPrimList(out,n->ss(name));

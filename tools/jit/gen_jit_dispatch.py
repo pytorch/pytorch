@@ -25,6 +25,7 @@ TYPE_MAP = {
     'std::array<bool,2>': 'bool[2]',
     'std::array<bool,3>': 'bool[3]',
     'std::array<bool,4>': 'bool[4]',
+    'std::string': 'str',
     'Scalar': 'Scalar',
     'Tensor': 'Tensor',
     'TensorList': 'Tensor[]',
@@ -66,6 +67,7 @@ FROM_IVALUE = {
     'bool': 'bool({}.toInt())',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
+    'std::string': '{}.toString()->string()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toIntList()->elements())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toIntList()->elements())',
@@ -121,7 +123,7 @@ def is_magic_method(api_name):
     return api_name.startswith('__') and api_name.endswith('__')
 
 
-blacklisted_types = {'SparseTensorRef', 'Storage', 'ScalarType', 'optional<ScalarType>', 'std::string', 'void*'}
+blacklisted_types = {'SparseTensorRef', 'Storage', 'ScalarType', 'optional<ScalarType>', 'void*'}
 default_only_types = {'Generator'}
 
 
