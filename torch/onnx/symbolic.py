@@ -316,6 +316,9 @@ def _reduce_op_symbolic(onnx_op_name):
         else:
             # dim-reduce path
             dim, keepdim = _get_const(dim, 'i', 'dim'), _get_const(keepdim, 'i', 'keepdim')
+            dims = self.type().sizes()
+            if dim < 0:
+                dim = dim + len(dims)
             return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
     return symbolic
 
