@@ -27,7 +27,15 @@ TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *
 }
 
 TensorImpl::TensorImpl(Storage storage, TensorTypeId type_id, bool is_variable)
-    : TensorImpl(std::move(storage), type_id, dataTypeToScalarType(storage.dtype()), is_variable) {}
+    :storage_(std::move(storage)),
+    storage_offset_(0),
+    sizes_{0},
+    strides_{1},
+    is_contiguous_(true),
+    numel_(0),
+    type_id_(type_id),
+    scalar_type_(dataTypeToScalarType(storage_.dtype())),
+    is_variable_(is_variable) {}
 
 TensorImpl::TensorImpl(Storage storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
     : storage_(std::move(storage)),
