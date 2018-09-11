@@ -908,7 +908,7 @@ class TestSparse(TestCase):
         x = self.SparseTensor(i, v, torch.Size([5, 4, 0])).coalesce()
         dense = self.ValueTensor(5, 4, 0)
         exp_v = self.ValueTensor(4, 0)
-        res = dense._sparse_mask(x)
+        res = dense.sparse_mask(x)
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 0]))
         self.assertEqual(res, expected)
 
@@ -954,7 +954,7 @@ class TestSparse(TestCase):
         v = self.ValueTensor(4, 2, 0)
         x = self.SparseTensor(i, v, torch.Size([5, 4, 2, 0])).coalesce()
         dense = self.ValueTensor(5, 4, 2, 0)
-        res = dense._sparse_mask(x)
+        res = dense.sparse_mask(x)
         exp_v = self.ValueTensor(4, 2, 0)
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2, 0]))
         self.assertEqual(res, expected)
