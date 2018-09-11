@@ -44,14 +44,14 @@ public:
 
   AT_HOSTDEVICE TensorAccessorBase(PtrType data_, const int64_t * sizes_, const int64_t * strides_)
   : data_(data_), sizes_(sizes_), strides_(strides_) {}
-  AT_HOST IntList sizes() {
+  AT_HOST IntList sizes() const {
     return IntList(sizes_,N);
   }
-  AT_HOST IntList strides() {
+  AT_HOST IntList strides() const {
     return IntList(strides_,N);
   }
-  AT_HOSTDEVICE int64_t stride(int64_t i) { return strides_[i]; }
-  AT_HOSTDEVICE int64_t size(int64_t i) { return sizes_[i]; }
+  AT_HOSTDEVICE int64_t stride(int64_t i) const { return strides_[i]; }
+  AT_HOSTDEVICE int64_t size(int64_t i) const { return sizes_[i]; }
   AT_HOSTDEVICE T *data() { return data_; }
   AT_HOSTDEVICE const T *data() const { return data_; }
 protected:
@@ -76,7 +76,7 @@ public:
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 
-  const TensorAccessor<T,N-1> operator[](int64_t i) const {
+  AT_HOSTDEVICE const TensorAccessor<T,N-1> operator[](int64_t i) const {
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 };
@@ -112,8 +112,8 @@ public:
     std::copy(sizes_, sizes_ + N, std::begin(this->sizes_));
     std::copy(strides_, strides_ + N, std::begin(this->strides_));
   }
-  AT_HOSTDEVICE int64_t stride(int64_t i) { return strides_[i]; }
-  AT_HOSTDEVICE int64_t size(int64_t i) { return sizes_[i]; }
+  AT_HOSTDEVICE int64_t stride(int64_t i) const { return strides_[i]; }
+  AT_HOSTDEVICE int64_t size(int64_t i) const { return sizes_[i]; }
 protected:
   PtrType data_;
   int64_t sizes_[N];
@@ -133,6 +133,12 @@ public:
     int64_t* new_strides = this->strides_+1;
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
   }
+
+  AT_DEVICE const TensorAccessor<T,N-1> operator[](int64_t i) const {
+    int64_t* new_sizes = this->sizes_+1;
+    int64_t* new_strides = this->strides_+1;
+    return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
+  }
 };
 
 template<typename T, template <typename U> class PtrTraits>
@@ -145,7 +151,7 @@ public:
   AT_DEVICE T & operator[](int64_t i) {
     return this->data_[this->strides_[0]*i];
   }
-  const T& operator[](int64_t i) const {
+  AT_DEVICE const T& operator[](int64_t i) const {
     return this->data_[this->strides_[0]*i];
   }
 };
