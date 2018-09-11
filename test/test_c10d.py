@@ -731,7 +731,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         gpus = gpus_for_rank(self.world_size)[self.rank]
         model = nn.Linear(1, 1, bias=False).cuda(gpus[0]).half()
         nn.init.constant_(model.weight, 1)
-        ddp_model = distributed_c10d._DistributedDataParallelC10d(
+        ddp_model = DistributedDataParallel(
             model,
             device_ids=[gpus[0]],
             process_group=process_group,
