@@ -408,6 +408,17 @@ def build_libs(libs):
         sys.exit(1)
 
 
+# Copy Caffe2's Python proto files (generated during the build with the
+# protobuf python compiler) from the build folder to the root folder
+# cp root/build/caffe2/proto/proto.py root/caffe2/proto/proto.py
+def copy_protos():
+    for src in glob.glob(
+            os.path.join(caffe2_build_dir, 'caffe2', 'proto', '*.py')):
+        dst = os.path.join(
+            cwd, os.path.relpath(src, caffe2_build_dir))
+        shutil.copyfile(src, dst)
+
+
 # Build all dependent libraries
 class build_deps(PytorchCommand):
     def run(self):
@@ -509,15 +520,7 @@ class develop(setuptools.command.develop.develop):
         self.run_command('create_version_file')
         setuptools.command.develop.develop.run(self)
         self.create_compile_commands()
-
-        # Copy Caffe2's Python proto files (generated during the build with the
-        # protobuf python compiler) from the build folder to the root folder
-        # cp root/build/caffe2/proto/proto.py root/caffe2/proto/proto.py
-        for src in glob.glob(
-                os.path.join(caffe2_build_dir, 'caffe2', 'proto', '*.py')):
-            dst = os.path.join(
-                cwd, os.path.relpath(src, caffe2_build_dir))
-            self.copy_file(src, dst)
+        copy_protos()
 
     def create_compile_commands(self):
         def load(filename):
@@ -713,6 +716,7 @@ class install(setuptools.command.install.install):
     def run(self):
         if not self.skip_build:
             self.run_command('build_deps')
+        copy_protos()
 
         setuptools.command.install.install.run(self)
 
