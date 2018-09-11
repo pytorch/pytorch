@@ -28,11 +28,8 @@ class no_grad(object):
         >>> z.requires_grad
         False
     """
-
-    def __init__(self):
-        self.prev = torch.is_grad_enabled()
-
     def __enter__(self):
+        self.prev = torch.is_grad_enabled()
         torch._C.set_grad_enabled(False)
 
     def __exit__(self, *args):
@@ -42,7 +39,7 @@ class no_grad(object):
     def __call__(self, func):
         @functools.wraps(func)
         def decorate_no_grad(*args, **kwargs):
-            with torch.no_grad():
+            with self:
                 return func(*args, **kwargs)
         return decorate_no_grad
 
@@ -75,11 +72,8 @@ class enable_grad(object):
         True
 
     """
-
-    def __init__(self):
-        self.prev = torch.is_grad_enabled()
-
     def __enter__(self):
+        self.prev = torch.is_grad_enabled()
         torch._C.set_grad_enabled(True)
 
     def __exit__(self, *args):
@@ -89,7 +83,7 @@ class enable_grad(object):
     def __call__(self, func):
         @functools.wraps(func)
         def decorate_enable_grad(*args, **kwargs):
-            with torch.no_grad():
+            with self:
                 return func(*args, **kwargs)
         return decorate_enable_grad
 

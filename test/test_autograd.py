@@ -724,7 +724,7 @@ class TestAutograd(TestCase):
         self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
         self.assertIsNone(z.grad_fn)
 
-        # test nested decorator and with-statement
+        # test nested decorator and with-statement on no_grad
         with torch.no_grad():
             self.assertFalse(torch.is_grad_enabled())
             w = adder(x, y)
