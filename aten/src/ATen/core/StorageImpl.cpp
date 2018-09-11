@@ -12,7 +12,14 @@ StorageImpl::StorageImpl(
       data_ptr_(std::move(data_ptr)),
       numel_(numel),
       resizable_(resizable),
-      allocator_(allocator) {}
+      allocator_(allocator) {
+  // if (numel > 0) {
+  //   CAFFE_ENFORCE(
+  //       data_type.id() != TypeIdentifier::uninitialized(),
+  //       "Constructing a storage with meta of unknown type and non-zero
+  //       numel");
+  // }
+}
 
 StorageImpl::StorageImpl(
     caffe2::TypeMeta data_type,

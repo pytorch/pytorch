@@ -12,24 +12,50 @@ struct Type;
 
 struct AT_API StorageImpl : public c10::intrusive_ptr_target {
  public:
-  StorageImpl() = delete;
-  ~StorageImpl() {};
   StorageImpl(
       caffe2::TypeMeta data_type,
       int64_t numel,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable);
+
   StorageImpl(
       caffe2::TypeMeta data_type,
       int64_t numel,
       at::Allocator* allocator,
       bool resizable);
+
+  explicit StorageImpl(at::DeviceType device_type)
+      : StorageImpl(device_type, TypeMeta()) {}
+
+  StorageImpl(at::DeviceType device_type, caffe2::TypeMeta data_type)
+      : StorageImpl(
+            data_type,
+            0,
+            at::DataPtr(nullptr, at::Device(device_type)),
+            nullptr,
+            true) {}
+
+  StorageImpl& operator=(StorageImpl&& other) = default;
+  StorageImpl& operator=(const StorageImpl&) = delete;
+  StorageImpl() = delete;
+  StorageImpl(StorageImpl&& other) = default;
   StorageImpl(StorageImpl&) = delete;
   StorageImpl(const StorageImpl&) = delete;
-  // NB: Don't move ref count!
-  StorageImpl(StorageImpl&& other) = default;
-  StorageImpl& operator=(StorageImpl&& other) = default;
+  ~StorageImpl() = default;
+
+  void reset() {
+    data_ptr_.clear();
+    numel_ = 0;
+  }
+
+  template <typename T>
+  inline bool IsType() const {
+    return data_type_.Match<T>();
+  }
+
+
+
 
   template <typename T>
   inline T* data() const {
@@ -53,17 +79,19 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_.clear();
   }
 
-  void operator=(const StorageImpl&) = delete;
-
   size_t itemsize() const {
     return data_type_.itemsize();
   }
 
   Type& type();
 
+  size_t capacity() const {
+    return numel_ * itemsize();
+  }
   int64_t numel() const {
     return numel_;
   };
+  // TODO: remove later
   void set_numel(int64_t numel) {
     numel_ = numel;
   };
@@ -81,6 +109,15 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
     std::swap(data_ptr_, data_ptr);
     return std::move(data_ptr);
   };
+  // XXX: TERRIBLE! DONT USE UNLESS YOU HAVE TO! AND EVEN DONT JUST DONT!
+  void set_dtype(const caffe2::TypeMeta& data_type) {
+    int64_t capacity = numel_ * data_type_.itemsize();
+    data_type_ = data_type;
+    numel_ = capacity / data_type_.itemsize();
+  }
+  void* data() const {
+    return data_ptr_.get();
+  }
   void* data() {
     return data_ptr_.get();
   };
@@ -111,6 +148,39 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   }
   void set_resizable(bool resizable) {
     resizable_ = resizable;
+  }
+
+  /**
+   * Can only be called when use_count is 1
+   */
+  void UniqueStorageShareExternalPointer(
+      void* src,
+      const caffe2::TypeMeta& data_type,
+      size_t capacity,
+      MemoryDeleter d = nullptr) {
+    UniqueStorageShareExternalPointer(
+        at::DataPtr(src, src, d, data_ptr_.device()), data_type, capacity);
+  }
+
+  /**
+   * Can only be called when use_count is 1
+   */
+  void UniqueStorageShareExternalPointer(
+      at::DataPtr&& data_ptr,
+      const caffe2::TypeMeta& data_type,
+      size_t capacity) {
+    data_type_ = data_type;
+    CAFFE_ENFORCE_WITH_CALLER(
+        data_type_.id() != TypeIdentifier::uninitialized(),
+        "To share with a raw external pointer you need to have meta "
+        "already set.");
+    data_ptr_ = std::move(data_ptr);
+    // NOTE: data_type might change and so it's also possible that capacity
+    // might not be divisible by itemsize. There is no way for us to keep track
+    // of the exact capacity if we're not explicity storing is. More conrectely
+    // capacity() might not return the value that was set here, if itemsize does
+    // not evenly divide it.
+    numel_ = capacity / data_type_.itemsize();
   }
 
  private:
