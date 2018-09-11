@@ -10,6 +10,7 @@
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/pybind_utils.h"
 
 #include "torch/csrc/variable_tensor_functions.h"
 
@@ -45,9 +46,7 @@ Operation createPythonOperation(Node* op_) {
         py_inputs[i] = py::reinterpret_borrow<py::object>(
             op->scalar_args[next_scalar++].get());
       } else if (arg_type == 't') {
-        auto var = std::move(peek(stack, next_tensor, num_inputs)).toTensor();
-        py_inputs[i] =
-            py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
+        py_inputs[i] = toPyObject(std::move(peek(stack, next_tensor, num_inputs)));
         next_tensor++;
       }
       i++;
@@ -56,14 +55,8 @@ Operation createPythonOperation(Node* op_) {
     py::object py_outputs(func(*py_inputs));
 
     auto num_outputs = op->outputs().size();
-    auto addOutput = [&](py::handle entry) {
-      if (!THPVariable_Check(entry.ptr())) {
-        throw std::runtime_error(
-            "Function application returned a non-Variable output");
-      }
-      THPVariable* var = (THPVariable*)entry.ptr();
-      auto cdata = var->cdata;
-      stack.push_back(std::move(cdata));
+    auto addOutput = [&](py::handle entry, size_t pos) {
+      stack.push_back(returnToIValue(pos, op->outputs().at(pos)->type(), entry));
     };
 
     if (!PyTuple_Check(py_outputs.ptr())) {
@@ -71,15 +64,16 @@ Operation createPythonOperation(Node* op_) {
         throw std::runtime_error(
             "Function.apply returned the wrong number of outputs.");
       }
-      addOutput(py_outputs);
+      addOutput(py_outputs, 0);
     } else {
       auto output_tuple = py::tuple(py_outputs);
       if (output_tuple.size() != num_outputs) {
         throw std::runtime_error(
             "Function application returned the wrong number of outputs.");
       }
-      for (py::handle entry : py::tuple(py_outputs)) {
-        addOutput(entry);
+      size_t i = 0;
+      for (py::handle entry : output_tuple) {
+        addOutput(entry, i++);
       }
     }
     return 0;

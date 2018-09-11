@@ -4484,6 +4484,32 @@ a")
             f = io.BytesIO()
             torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
+    def test_python_call_non_tensor(self):
+        def foo(a, b, c):
+            d, e = c
+            # type: (Tensor, int, Tuple[Tensor, int]) -> Tuple[int, Tensor]
+            return b + e, a + d
+
+        @torch.jit.script
+        def bar():
+            x = torch.ones(3, 4)
+            a, b = foo(x, 3, (x, 3))
+            return a, b
+
+        self.assertEqual((6, torch.ones(3, 4) + 1), bar())
+
+    def test_python_call_non_tensor_wrong(self):
+        with self.assertRaisesRegex(RuntimeError, r"but instead got value of type tuple"):
+            def foo():
+                # type: () -> Tensor
+                return ((3, 4),)
+
+            @torch.jit.script
+            def bar():
+                return foo()
+
+            bar()
+
     def test_tuples(self):
         @torch.jit.script
         def foo(i):
@@ -5816,7 +5842,7 @@ a")
                 return foo(torch.full([1], 1), torch.full([1], 2), torch.full([1], 3))
 
     def test_wrong_return_type(self):
-        with self.assertRaisesRegex(RuntimeError, 'Python functions can currently only return Tensors'):
+        with self.assertRaisesRegex(RuntimeError, 'Function application returned the wrong number of outputs.'):
             def somefunc():
                 # type: () -> Tuple[Tuple[Tensor, Tensor]]
                 return torch.zeros(3, 4), torch.zeros(4, 5)
@@ -5824,6 +5850,7 @@ a")
             @torch.jit.script
             def wrong_return_type():
                 return somefunc()
+            wrong_return_type()
 
     # Tests for calling between different front-end modes
     def test_call_python_fn_from_tracing_fn(self):

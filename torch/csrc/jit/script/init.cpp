@@ -127,20 +127,10 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for(auto &i : *all_inputs)
       new_node->addInput(i);
 
-    // This is really dumb, but relaxing the constraints on return types would
-    // require us to change the implementation of PythonOps in the interpreter.
-    // Note that this effectively makes the return type of Tuple[Tensor] and Tensor
-    // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
-    // to do it.
-    for (auto & ret_arg : schema.returns) {
-      if (!ret_arg.type->isSubtypeOf(DynamicType::get())) {
-        throw ErrorReport(loc) << "Python functions can currently only return Tensors";
-      }
-    }
-
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < schema.returns.size(); ++i)
-      outputs.push_back(new_node->addOutput());
+    for(auto & ret_arg : schema.returns) {
+      outputs.push_back(new_node->addOutput()->setType(ret_arg.type));
+    }
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
 
