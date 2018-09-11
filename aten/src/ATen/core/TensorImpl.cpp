@@ -22,7 +22,7 @@ TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *
   // UndefinedTensors and SparseTensors don't have storages.
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
-    storage_ = Storage(scalar_type, 0, allocator, true);
+    storage_ = Storage(scalarTypeToTypeMeta(scalar_type), 0, allocator, true);
   }
 }
 
