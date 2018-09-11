@@ -4577,11 +4577,11 @@ class TestTorch(TestCase):
 
         # four batches
         M = cast(random_fullrank_matrix_distinct_singular_value(5, [4]))
-        MI = torch.inverse(M)
         expected_inv_list = []
         for i in range(0, 4):
             expected_inv_list.append(torch.inverse(M[i]))
         expected_inv = torch.stack(expected_inv_list)
+        MI = torch.inverse(M)
         self.assertEqual(MI, expected_inv)
 
         # correctness test
