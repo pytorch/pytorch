@@ -17,20 +17,12 @@
 #include <memory>
 #include <mutex>
 
+#include <ATen/core/Registry.h>
+
 #include "caffe2/core/common.h"
 #include "caffe2/core/typeid.h"
 
 namespace caffe2 {
-
-template <typename KeyType>
-inline void PrintOffendingKey(const KeyType& /*key*/) {
-  printf("[key type printing not supported]\n");
-}
-
-template <>
-inline void PrintOffendingKey(const string& key) {
-  printf("Offending key: %s.\n", key.c_str());
-}
 
 /**
  * @brief A template class that allows one to register classes by keys.
@@ -59,7 +51,7 @@ class CAFFE2_API Registry {
     std::lock_guard<std::mutex> lock(register_mutex_);
     if (registry_.count(key) != 0) {
       printf("Key already registered.\n");
-      PrintOffendingKey(key);
+      at::PrintOffendingKey(key);
       std::exit(1);
     }
     registry_[key] = creator;
