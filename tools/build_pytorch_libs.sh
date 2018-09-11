@@ -12,7 +12,7 @@ set -ex
 
 SYNC_COMMAND="cp"
 if [ -x "$(command -v rsync)" ]; then
-    SYNC_COMMAND="time rsync -lptgoD"
+    SYNC_COMMAND="rsync -lptgoD"
 fi
 
 # Options for building only a subset of the libraries
