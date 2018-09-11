@@ -233,9 +233,11 @@ void addNomnigraphMethods(pybind11::module& m) {
                   auto nnOp = nn::get<NeuralNetOperator>(node);
                   return opName == nnOp->getName();
                 });
-            return g->createNode(
-                nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(
-                    match, true, 1, !strict));
+            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            if (!strict) {
+              node.nonTerminal();
+            }
+            return g->createNode(std::move(node));
           },
           py::return_value_policy::reference_internal,
           py::arg("node"),
@@ -243,9 +245,11 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "createNode",
           [](nn::NNMatchGraph* g, nom::repr::Tensor& tensor, bool strict) {
-            return g->createNode(
-                nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(
-                    nn::matchTensor(), true, 1, !strict));
+            auto node = nn::NNMatchNode(nn::matchTensor());
+            if (!strict) {
+              node.nonTerminal();
+            }
+            return g->createNode(std::move(node));
           },
           py::return_value_policy::reference_internal,
           py::arg("tensor"),
@@ -255,9 +259,11 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](nn::NNMatchGraph* g, bool strict) {
             auto match = nn::NNNodeMatchCriteria(
                 [](NNGraph::NodeRef node) { return true; });
-            return g->createNode(
-                nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(
-                    match, true, 1, !strict));
+            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            if (!strict) {
+              node.nonTerminal();
+            }
+            return g->createNode(std::move(node));
           },
           py::return_value_policy::reference_internal,
           py::arg("strict") = false)
