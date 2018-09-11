@@ -2,13 +2,13 @@
 
 // ${generated_comment}
 
-#include "ATen/Type.h"
+#include "ATen/TypeInternalInterface.h"
 
 namespace at {
 
-struct AT_API TypeDefault : public Type {
+struct AT_API TypeDefault : public TypeInternalInterface {
   explicit TypeDefault(TensorTypeId type_id, bool is_variable, bool is_undefined)
-      : Type(type_id, is_variable, is_undefined) {}
+      : TypeInternalInterface(type_id, is_variable, is_undefined) {}
 
   // Make sure overload resolution considers the nullary virtual method.
   // (A single argument overload is generated in the list.)
