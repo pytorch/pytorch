@@ -6949,10 +6949,10 @@ a")
         @torch.jit.script
         def tuple_index(a):
             if a:
-                b = (1,)
+                b = (1, 2)
             else:
-                b = (0,)
-            return b[0]
+                b = (0, 2)
+            return b[-2]
 
         self.assertExpectedGraph(tuple_index.graph)
         self.assertEqual(tuple_index(torch.tensor([1])), 1)

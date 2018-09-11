@@ -20,7 +20,7 @@ std::unordered_set<Symbol> white_list = {
 };
 
 int64_t indexVal(Value * index) {
-  return (*toIValue(index->node()->output())).toInt();
+  return index->node()->i(attr::value);
 }
 
 
@@ -52,8 +52,8 @@ static void VisitNode(Node* n, Node* insert_point) {
   // undo TupleUnpack(TupleIndex)
   if (n->kind() == prim::TupleIndex) {
     auto construct = n->inputs().at(0)->node();
-    auto idx = indexVal(n->inputs().at(1));
     JIT_ASSERTM(construct->kind() == prim::TupleConstruct, "tuple index not matched to tuple construct");
+    auto idx = indexVal(n->inputs().at(1));
     n->output()->replaceAllUsesWith(construct->inputs()[idx]);
     return;
   }
@@ -146,7 +146,7 @@ void LowerAllTuples(std::shared_ptr<Graph>& graph) {
 static void LowerSimpleTuples(Block* block) {
   for(auto n : block->nodes()) {
     // make any TupleUnpack dead by undoing TupleUnpack(TupleConstruct())
-    // and TupleIndex(TupleIndex)
+    // and TupleIndex(TupleConstruct())
     if(n->kind() == prim::TupleUnpack) {
       auto construct = n->input()->node();
       if(construct->kind() == prim::TupleConstruct) {
@@ -154,12 +154,11 @@ static void LowerSimpleTuples(Block* block) {
           n->outputs()[i]->replaceAllUsesWith(construct->inputs()[i]);
         }
       }
-    }
-    if (n->kind() == prim::TupleIndex) {
+    } else if (n->kind() == prim::TupleIndex) {
       auto construct = n->inputs().at(0)->node();
       if(construct->kind() == prim::TupleConstruct) {
         auto idx = indexVal(n->inputs().at(1));
-        n->output()->replaceAllUsesWith(construct->inputs()[idx]);
+        n->output()->replaceAllUsesWith(construct->inputs().at(idx));
       }
     }
     for(auto b : n->blocks()) {

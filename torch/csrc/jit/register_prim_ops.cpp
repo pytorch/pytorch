@@ -371,13 +371,14 @@ RegisterOperators reg({
     Operator(
       prim::TupleIndex,
       [](Node* node) {
-        return [](Stack& stack) {
+        return [=](Stack& stack) {
           int64_t index;
           pop(stack, index);
           auto tup = pop(stack).toTuple();
           const auto & elems = tup->elements();
-          // index in-bounds check at compile time
-          stack.insert(stack.end(), elems.begin() + index, elems.begin() + index + 1);
+          // index is normalized to be positive at compile time
+          JIT_ASSERT(index < elems.size());
+          stack.push_back(elems.at(index));
           return 0;
         };
       }),
