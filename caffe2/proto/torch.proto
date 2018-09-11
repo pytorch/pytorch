@@ -1,5 +1,7 @@
 syntax = "proto2";
 
+import "caffe2/proto/caffe2.proto";
+
 package torch;
 
 // Overview
@@ -178,8 +180,9 @@ message NodeProto {
   //    string debug_info
   repeated AttributeProto annotations = 8;
 
-  // Node type, like PythonOp, etc, purely for PyTorch
-  optional string node_type = 51;
+  // Besides the node type, PyTorhc also serialize ATen function signature
+  optional caffe2.DeviceOption device_option = 51;
+  optional string aten_function = 52;
 }
 
 // Models
@@ -314,9 +317,6 @@ message GraphProto {
   // optional int64 producer_version = 7;
   // optional string producer_tag = 8;
   // optional string domain = 9;
-
-  // Graph type, equivalent to Caffe2's NetDef.type
-  optional string type = 51;
 }
 
 // Tensors
@@ -451,7 +451,7 @@ message TensorProto {
   repeated AttributeProto annotations = 17;
 
   // Device info
-  optional DeviceOption device_detail = 51;
+  optional caffe2.DeviceOption device_option = 51;
 
   // For PyTorch serialized tensor.
   optional int64 require_gradient = 52;
@@ -534,13 +534,6 @@ message TypeProto {
   optional string denotation = 6;
 }
 
-// TensorProtos stores multiple TensorProto objects in one single proto. This
-// is useful for small tensors; For anything big, consider using a DB for
-// storage.
-message TensorProtos {
-  repeated TensorProto protos = 1;
-}
-
 // Operator Sets
 //
 // OperatorSets are uniquely identified by a (domain, opset_version) pair.
@@ -554,46 +547,4 @@ message OperatorSetIdProto {
   // The version of the operator set being identified.
   // This field MUST be present in this version of the IR.
   optional int64 version = 2;
-}
-
-// DeviceType that Caffe2 currently supports.
-// Note: if you add a device type, make sure you add the corresponding device
-// line in the DeviceTypeName() function in caffe2/utils/proto_utils.cc
-// and update ATen/core/DeviceType.h
-enum DeviceType {
-  CPU = 0;                    // In default, we will use CPU.
-  CUDA = 1;                   // CUDA.
-  MKLDNN = 2;                 // Reserved for explicit MKLDNN
-  OPENGL = 3;                 // OpenGL
-  OPENCL = 4;                 // OpenCL
-  IDEEP = 5;                  // IDEEP.
-  HIP = 6;                    // AMD HIP
-  // Change the following number if you add more devices in the code.
-  COMPILE_TIME_MAX_DEVICE_TYPES = 7;
-  ONLY_FOR_TEST = 20901701;   // This device type is only for test.
-}
-
-// Device-specific options. We do not distinguish DeviceOption protos for
-// different DeviceTypes, so currently all devices share the same DeviceOption
-// proto. Fields that are specific to a device type is ignored if the type does
-// not match.
-// Note: if you add fields to the DeviceOption, make sure you add the
-// corresponding changes to IsSameDevice() function in utils/proto_utils.{h,cc}.
-message DeviceOption {
-  // [general] Options that need to be carried out before running the execution.
-  // optional DeviceType device_type = 1 [ default = CPU ];
-  optional int32 device_type = 1 [ default = 0 ]; // 0 is CPU.
-  // [CUDA specific] the cuda gpu id.
-  optional int32 cuda_gpu_id = 2;
-  // [general] The random seed to start the device random number generator with.
-  optional uint32 random_seed = 3;
-  // [general] What node this op should execute on.
-  // Used for net transformation purposes. Must be empty at execution time.
-  optional string node_name = 4;
-  // [CPU and Linux specific] NUMA node id
-  optional int32 numa_node_id = 5 [default = -1];
-  // [general] Extra information passed, not used at execution time currently.
-  repeated string extra_info = 6;
-  // [HIP specific] the hip gpu id.
-  optional int32 hip_gpu_id = 7;
 }
