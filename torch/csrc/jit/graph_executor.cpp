@@ -379,6 +379,10 @@ private:
 
     // Phase 2. Propagate detailed information about the spec through the
     //          graph (enabled more specializations in later passes).
+    //          Shape propagation sometimes depends on certain arguments being
+    //          constants, and constant propagation doesn't need shape information
+    //          anyway, so it's better to run it first.
+    ConstantPropagation(opt_graph);
     PropagateInputShapes(*opt_graph, spec);
 
     // Phase 3. Run differentiable optimizations (i.e. simple graph rewrites that
@@ -427,7 +431,6 @@ private:
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
     UnrollLoops(graph);
-    ConstantPropagation(graph);
     PeepholeOptimize(graph);
     CheckInplace(graph);
     BatchMM(graph);

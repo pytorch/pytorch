@@ -29,7 +29,7 @@ namespace {
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
 SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, at::ScalarType scalar_type)
-    : TensorImpl(type_id, scalar_type, false)
+    : TensorImpl(type_id, scalar_type, nullptr, false)
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)

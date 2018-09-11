@@ -124,10 +124,7 @@ FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
 TYPE_REGISTER = CodeTemplate("""\
-context->type_registry[static_cast<int>(Backend::${backend})]
-                      [static_cast<int>(ScalarType::${scalar_type})]
-                      .reset(new ${type_name}());
-detail::getVariableHooks().registerVariableTypeFor(context, Backend::${backend}, ScalarType::${scalar_type});
+context->registerType(Backend::${backend}, ScalarType::${scalar_type}, new ${type_name}());
 """)
 
 file_manager = FileManager()
@@ -239,7 +236,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['DenseBackend'] = backend
     env['storage_tensor_headers'] = []
     if density != 'Sparse':
-        env['storage_tensor_headers'] = ['#include "ATen/TensorImpl.h"']
+        env['storage_tensor_headers'] = ['#include "ATen/core/TensorImpl.h"']
 
     # used for generating switch logic for external functions
     tag = density_tag + backend + scalar_name

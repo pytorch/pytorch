@@ -226,6 +226,7 @@ TEST_CASE("modules") {
       REQUIRE(output.equal(torch::ones(5, torch::requires_grad())));
 
       was_called = false;
+      // Use the call operator overload here.
       output = functional(torch::ones(5, torch::requires_grad()));
       REQUIRE(was_called);
       REQUIRE(output.equal(torch::ones(5, torch::requires_grad())));

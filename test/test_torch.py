@@ -189,6 +189,7 @@ class TestTorch(TestCase):
                        'is_coalesced',
                        'is_distributed',
                        'is_floating_point',
+                       'is_complex',
                        'is_nonzero',
                        'is_same_size',
                        'is_signed',
@@ -2944,6 +2945,20 @@ class TestTorch(TestCase):
                                    torch.tensor(1, dtype=torch.int16)).dtype)
         torch.set_default_dtype(saved_dtype)
 
+    def test_randint_inference(self):
+        size = (2, 1)
+        for args in [(3,), (1, 3)]:  # (low,) and (low, high)
+            self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, layout=torch.strided).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.default_generator).dtype)
+            self.assertIs(torch.float32, torch.randint(*args, size=size, dtype=torch.float32).dtype)
+            out = torch.empty(size, dtype=torch.float32)
+            self.assertIs(torch.float32, torch.randint(*args, size=size, out=out).dtype)
+            self.assertIs(torch.float32, torch.randint(*args, size=size, out=out, dtype=torch.float32).dtype)
+            out = torch.empty(size, dtype=torch.int64)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, out=out).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size, out=out, dtype=torch.int64).dtype)
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         # select full dimensionality
@@ -4580,6 +4595,49 @@ class TestTorch(TestCase):
     @skipIfNoLapack
     def test_pinverse(self):
         self._test_pinverse(self, conv_fn=lambda x: x)
+
+    @staticmethod
+    def _test_matrix_power(self, conv_fn):
+        def run_test(M, sign=1):
+            if sign == -1:
+                M = M.inverse()
+            MP2 = torch.matrix_power(M, 2)
+            self.assertEqual(MP2, torch.matmul(M, M))
+
+            MP3 = torch.matrix_power(M, 3)
+            self.assertEqual(MP3, torch.matmul(MP2, M))
+
+            MP4 = torch.matrix_power(M, 4)
+            self.assertEqual(MP4, torch.matmul(MP2, MP2))
+
+            MP6 = torch.matrix_power(M, 6)
+            self.assertEqual(MP6, torch.matmul(MP3, MP3))
+
+            MP0 = torch.matrix_power(M, 0)
+            self.assertEqual(MP0, torch.eye(M.size(-2)).expand_as(M))
+
+        # Single matrix
+        M = conv_fn(torch.randn(5, 5))
+        run_test(M)
+
+        # Batch matrices
+        M = conv_fn(torch.randn(3, 3, 3))
+        run_test(M)
+
+        # Many batch matrices
+        M = conv_fn(torch.randn(2, 3, 3, 3))
+        run_test(M)
+
+        # Single matrix, but full rank
+        # This is for negative powers
+        from test_autograd import random_fullrank_matrix_distinct_singular_value
+        M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
+        run_test(M)
+        run_test(M, sign=-1)
+
+    @skipIfNoLapack
+    def test_matrix_power(self):
+        self._test_matrix_power(self, conv_fn=lambda x: x)
 
     @staticmethod
     def _test_det_logdet_slogdet(self, conv_fn):

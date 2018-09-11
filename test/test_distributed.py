@@ -12,7 +12,7 @@ from functools import reduce, wraps
 
 import torch
 import torch.cuda
-import torch.distributed.c10d as dist
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -271,7 +271,6 @@ class _DistTestBase(object):
         self.assertEqual(dist.get_rank(group_id), dist.get_rank())
 
     # SEND RECV
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support send/recv")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
     def test_send_recv(self):
         rank = dist.get_rank()
@@ -294,9 +293,6 @@ class _DistTestBase(object):
         self._barrier()
 
     # SEND RECV ANY SOURCE
-    @unittest.skipIf(
-        BACKEND == "gloo", "Gloo does not support send/recv from any source"
-    )
     @unittest.skipIf(
         BACKEND == "nccl", "Nccl does not support send/recv from any source"
     )
@@ -327,7 +323,6 @@ class _DistTestBase(object):
         self._barrier()
 
     # ISEND
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support isend")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
     def test_isend(self):
         rank = dist.get_rank()
@@ -349,7 +344,6 @@ class _DistTestBase(object):
         self._barrier()
 
     # IRECV
-    @unittest.skipIf(BACKEND == "gloo", "Gloo does not support irecv")
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support irecv")
     def test_irecv(self):
         rank = dist.get_rank()
@@ -1155,7 +1149,7 @@ class _DistTestBase(object):
         # DDP training setup
         model_DDP = copy.deepcopy(model)
         model_DDP.cuda(gpu_subset[0])
-        model_DDP = nn.parallel._DistributedDataParallelC10d(
+        model_DDP = nn.parallel.DistributedDataParallel(
             model_DDP, device_ids=gpu_subset
         )
 
@@ -1189,7 +1183,7 @@ class _DistTestBase(object):
 
         # DDP-CPU training setup
         model_DDP = copy.deepcopy(model_base)
-        model_DDP = nn.parallel._DistributedDataParallelC10dCPU(model_DDP)
+        model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
 
         # dummy data initialization
         local_bs = 2
