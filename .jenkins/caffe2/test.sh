@@ -62,18 +62,19 @@ for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
     */mkl_utils_test|*/aten/integer_divider_test)
       continue
       ;;
-    */aten/*)
-      # ATen uses test framework Catch2
-      # NB: We do NOT use the xml test reporter, because
-      # Catch doesn't support multiple reporters
+    *)
+      # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
+      # planning to migrate to gtest as the common PyTorch c++ test suite, we
+      # currently do NOT use the xml test reporter, because Catch doesn't
+      # support multiple reporters
       # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
       # which means that enabling XML output means you lose useful stdout
       # output for Jenkins.  It's more important to have useful console
       # output than it is to have XML output for Jenkins.
+      # Note: in the future, if we want to use xml test reporter once we switch
+      # to all gtest, one can simply do:
+      # "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
       "$test"
-      ;;
-    *)
-      "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
       ;;
   esac
 done
