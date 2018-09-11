@@ -467,6 +467,7 @@ class build_deps(PytorchCommand):
 
 
 build_dep_cmds = {}
+rebuild_dep_cmds = {}
 
 for lib in dep_libs:
     # wrap in function to capture lib
@@ -477,6 +478,16 @@ for lib in dep_libs:
             build_libs([self.lib])
     build_dep.lib = lib
     build_dep_cmds['build_' + lib.lower()] = build_dep
+
+    class rebuild_dep(build_deps):
+        description = 'Rebuild {} external library'.format(lib)
+
+        def run(self):
+            global RERUN_CMAKE
+            RERUN_CMAKE = False
+            build_libs([self.lib])
+    rebuild_dep.lib = lib
+    rebuild_dep_cmds['rebuild_' + lib.lower()] = rebuild_dep
 
 
 class build_module(PytorchCommand):
@@ -1143,6 +1154,7 @@ cmdclass = {
     'clean': clean,
 }
 cmdclass.update(build_dep_cmds)
+cmdclass.update(rebuild_dep_cmds)
 
 entry_points = {
     'console_scripts': [
