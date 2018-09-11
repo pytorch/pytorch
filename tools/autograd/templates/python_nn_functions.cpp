@@ -7,6 +7,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 
 #include "python_nn_functions_dispatch.h"
@@ -16,29 +17,6 @@ using at::Scalar;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
-
-static std::tuple<at::optional<at::Device>, at::optional<at::ScalarType>, bool>
-parse_to_conversion(PyObject *args, PyObject *kwargs) {
-  static PythonArgParser parser({
-    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False)",
-    "to(ScalarType dtype, bool non_blocking=False)",
-    "to(Tensor tensor, bool non_blocking=False)",
-  });
-  ParsedArgs<3> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    return std::make_tuple(r.deviceOptional(0), r.scalartypeOptional(1), r.toBool(2));
-  } else if (r.idx == 1) {
-    return std::make_tuple(at::nullopt, r.scalartype(0), r.toBool(1));
-  } else {
-    auto tensor = r.tensor(0);
-    return std::make_tuple(
-      torch::tensors::getDevice(tensor),
-      tensor.type().scalarType(),
-      r.toBool(1)
-    );
-  }
-}
 
 static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObject* kwargs)
 {

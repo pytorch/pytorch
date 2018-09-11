@@ -8,6 +8,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/python_error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/jit/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -247,11 +248,9 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto device_obj = r.device(0);
-  if (!r.isNone(0) && device_obj.is_cpu()) {
-    throw std::runtime_error("Invalid device, must be cuda device");
-  }
-  return THPVariable_Wrap(self_.to(device_obj, r.toBool(1)));
+  auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
+  AT_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
+  return THPVariable_Wrap(self_.to(device, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -480,6 +479,28 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  auto parsed = parse_to_conversion(args, kwargs);
+  auto& device = std::get<0>(parsed);
+  auto& scalarType = std::get<1>(parsed);
+  auto non_blocking = std::get<2>(parsed);
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (!device && !scalarType) {
+    Py_INCREF(self);
+    return self;
+  } else if (!device) {
+    return THPVariable_Wrap(self_.to(*scalarType, non_blocking));
+  } else if (!scalarType) {
+    return THPVariable_Wrap(self_.to(*device, non_blocking));
+  } else {
+    return THPVariable_Wrap(self_.to(*device, *scalarType, non_blocking));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -588,6 +609,7 @@ PyMethodDef variable_methods[] = {
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
   {"storage_type", (PyCFunction)THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"to", (PyCFunction)THPVariable_to, METH_VARARGS | METH_KEYWORDS, NULL},
   {"tolist", (PyCFunction)THPVariable_tolist, METH_NOARGS, NULL},
   {"type", (PyCFunction)THPVariable_type, METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
