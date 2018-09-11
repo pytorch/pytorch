@@ -6957,7 +6957,7 @@ a")
         self.assertExpectedGraph(tuple_index.graph)
         self.assertEqual(tuple_index(torch.tensor([1])), 1)
         self.run_pass('lower_all_tuples', tuple_index.graph)
-        self.assertTrue("Tuple" not in str(tuple_index.graph))
+        self.assertEqual(tuple_index(torch.tensor([1])), 1)
 
         with self.assertRaisesRegex(RuntimeError, "Indexing on tuples only supported with integer constants:"):
             @torch.jit.script
