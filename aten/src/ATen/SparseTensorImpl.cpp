@@ -36,8 +36,7 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, at::ScalarType scal
         TensorImplOptions(
           /* is_variable */ false,
           /* has_storage */ false,
-          /* has_strides */ false,
-          /* support_resize_by_maybe_zero_dim */ false))
+          /* has_strides */ false))
     , sparseDims_(1)
     , denseDims_(0)
     , indices_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), ScalarType::Long)->tensor({1, 0}))

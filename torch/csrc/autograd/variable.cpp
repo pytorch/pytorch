@@ -29,8 +29,7 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
         at::TensorImplOptions(
           /* is_variable */ true,
           /* has_storage */ true,
-          /* has_strides */ true,
-          /* support_resize_by_maybe_zero_dim */ true)),
+          /* has_strides */ true)),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
