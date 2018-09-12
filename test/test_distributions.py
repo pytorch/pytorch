@@ -796,8 +796,6 @@ class TestDistributions(TestCase):
     def test_distribution_expand(self):
         shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
         for Dist, params in EXAMPLES:
-            if Dist.__name__ == "TransformedDistribution":
-                continue
             for param in params:
                 for shape in shapes:
                     d = Dist(**param)
@@ -811,12 +809,20 @@ class TestDistributions(TestCase):
                     self.assertEqual(d.sample().shape, original_shape)
                     self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
                     self.assertEqual(actual_shape, expected_shape)
+                    print(d.__class__)
+                    try:
+                        self.assertEqual(expanded.mean,
+                                         d.mean.expand(expanded_shape + d.event_shape),
+                                         allow_inf=True)
+                        self.assertEqual(expanded.variance,
+                                         d.variance.expand(expanded_shape + d.event_shape),
+                                         allow_inf=True)
+                    except NotImplementedError:
+                        pass
 
     def test_distribution_subclass_expand(self):
         expand_by = torch.Size((2,))
         for Dist, params in EXAMPLES:
-            if Dist.__name__ == "TransformedDistribution":
-                continue
 
             class SubClass(Dist):
                 pass
@@ -2221,8 +2227,6 @@ class TestDistributions(TestCase):
 
     def test_independent_expand(self):
         for Dist, params in EXAMPLES:
-            if Dist.__name__ == "TransformedDistribution":
-                continue
             for param in params:
                 base_dist = Dist(**param)
                 for reinterpreted_batch_ndims in range(len(base_dist.batch_shape) + 1):

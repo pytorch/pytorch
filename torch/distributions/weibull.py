@@ -39,9 +39,12 @@ class Weibull(TransformedDistribution):
         batch_shape = torch.Size(batch_shape)
         new.scale = self.scale.expand(batch_shape)
         new.concentration = self.concentration.expand(batch_shape)
+        new.concentration_reciprocal = new.concentration.reciprocal()
         base_dist = self.base_dist.expand(batch_shape)
+        transforms = [PowerTransform(exponent=new.concentration_reciprocal),
+                      AffineTransform(loc=0, scale=new.scale)]
         super(Weibull, new).__init__(base_dist,
-                                     self.transforms,
+                                     transforms,
                                      validate_args=False)
         new._validate_args = self._validate_args
         return new
