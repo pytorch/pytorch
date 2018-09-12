@@ -24,20 +24,16 @@ struct TensorImplOptions {
   bool is_variable_;
   bool has_storage_;
   bool has_strides_;
-  // Whether this type of tensor supports changing dimensionality via maybe_zero_dim
-  bool support_resize_by_maybe_zero_dim_;
-  TensorImplOptions() : is_variable_(false),
-                        has_storage_(true),
-                        has_strides_(true),
-                        support_resize_by_maybe_zero_dim_(true) {};
+  TensorImplOptions(bool is_variable)
+                    : is_variable_(is_variable),
+                      has_storage_(true),
+                      has_strides_(true) {};
   TensorImplOptions(bool is_variable,
                     bool has_storage,
-                    bool has_strides,
-                    bool support_resize_by_maybe_zero_dim)
+                    bool has_strides)
                     : is_variable_(is_variable),
                       has_storage_(has_storage),
-                      has_strides_(has_strides),
-                      support_resize_by_maybe_zero_dim_(support_resize_by_maybe_zero_dim) {};
+                      has_strides_(has_strides) {};
 };
 } // namespace at
 

@@ -93,7 +93,8 @@ int64_t TensorImpl::stride(int64_t d) const {
 }
 
 TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  if (!options_.support_resize_by_maybe_zero_dim_) {
+  // We only allow this operation on dense tensors
+  if (!(options_.has_storage_ && options_.has_strides_)) {
     AT_CHECK(condition_when_zero_dim == (dim() == 0),
            "This type of tensor does not support changing dimensionality via maybe_zero_dim");
   }
