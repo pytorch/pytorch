@@ -76,11 +76,8 @@ void deleteFunction(Function* function) {
   while (!stack.empty()) {
     auto& curr_func = stack.back();
 
-    if (curr_func.use_count() == 1) {
-      // If this is the last reference, gather function references
-      // that will be recursively decremented.
-      gatherFunctions(curr_func.get(), stack);
-    }
+    // Gather function references that will be recursively decremented.
+    gatherFunctions(curr_func.get(), stack);
 
     stack.pop_back();
   }
