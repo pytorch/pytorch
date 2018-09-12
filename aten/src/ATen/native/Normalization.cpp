@@ -15,7 +15,7 @@ namespace {
              arg_name, " should contain ", expected, " elements not ", actual);
   }
 
-  Tensor repeat_if_defined(const Tensor& t, int64_t repeat) {
+  static inline Tensor repeat_if_defined(const Tensor& t, int64_t repeat) {
     if (t.defined()) {
       return t.repeat(repeat);
     }
@@ -91,9 +91,8 @@ Tensor instance_norm(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool use_input_stats, double momentum, double eps, bool cudnn_enabled) {
-  if (!use_input_stats && (!running_mean.defined() || !running_var.defined())) {
-    throw std::runtime_error("Expected running_mean and running_var to be defined when use_input_stats is false");
-  }
+  AT_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
+           "Expected running_mean and running_var to be defined when use_input_stats is false");
   std::vector<int64_t> shape = input.sizes().vec();
   int64_t b = input.size(0);
   int64_t c = input.size(1);
