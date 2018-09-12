@@ -1,6 +1,7 @@
 #include <torch/optim/sgd.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/serialize/base.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
@@ -42,5 +43,14 @@ void SGD::step() {
   }
   iteration_ += 1;
 }
+
+void SGD::save(serialize::Writer& writer) const {
+  writer("momentum_buffers", momentum_buffers_);
+}
+
+void SGD::load(serialize::Reader& reader) {
+  reader("momentum_buffers", momentum_buffers_);
+}
+
 } // namespace optim
 } // namespace torch

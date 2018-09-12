@@ -1,6 +1,7 @@
 #include <torch/optim/adagrad.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/serialize/base.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
@@ -37,6 +38,14 @@ void Adagrad::step() {
     NoGradGuard guard;
     p.addcdiv_(p.grad(), std, -clr);
   }
+}
+
+void Adagrad::save(serialize::Writer& writer) const {
+  serialize(*this, writer);
+}
+
+void Adagrad::load(serialize::Reader& reader) {
+  serialize(*this, reader);
 }
 } // namespace optim
 } // namespace torch

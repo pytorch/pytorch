@@ -150,7 +150,7 @@ std::string join_name(const std::string& prefix, const std::string& name) {
   full_name.reserve(total_size);
   if (!prefix.empty()) {
     full_name += prefix;
-    full_name.push_back('.');
+    full_name.push_back('_');
   }
   full_name += name;
   return full_name;

@@ -119,6 +119,24 @@ void Module::zero_grad() {
   }
 }
 
+void Module::save(serialize::Writer& writer) const {
+  for (const auto& parameter : parameters()) {
+    writer.write(parameter.key, parameter.value);
+  }
+  for (const auto& buffer : buffers()) {
+    writer.write(buffer.key, buffer.value, /*is_buffer=*/true);
+  }
+}
+
+void Module::load(serialize::Reader& reader) {
+  for (const auto& parameter : parameters()) {
+    reader.read(parameter.key, parameter.value);
+  }
+  for (const auto& buffer : buffers()) {
+    reader.read(buffer.key, buffer.value);
+  }
+}
+
 Tensor& Module::register_parameter(
     std::string name,
     Tensor tensor,

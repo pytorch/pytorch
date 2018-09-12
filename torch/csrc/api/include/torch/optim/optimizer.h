@@ -1,17 +1,32 @@
 #pragma once
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/utils/variadic.h>
 #include <torch/nn/cursor.h>
+#include <torch/serialize/base.h>
 #include <torch/tensor.h>
 
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace torch {
 namespace optim {
 namespace detail {
+/// Utility function to save a vector of step buffers.
+void serialize(
+    serialize::Writer& writer,
+    const std::string& key,
+    const std::vector<int64_t>& steps);
+
+/// Utility function to load a vector of step buffers.
+void serialize(
+    serialize::Reader& reader,
+    const std::string& key,
+    std::vector<int64_t>& steps);
 
 /// Base class for all optimizers, that does not yet define a `step()`
 /// mechanism. All it specifies is that optimizers must be supplied with a
@@ -47,6 +62,9 @@ class OptimizerBase {
 
   /// Returns the number of parameters referenced by the optimizer.
   size_t size() const noexcept;
+
+  virtual void save(serialize::Writer& writer) const {}
+  virtual void load(serialize::Reader& reader) {}
 
  protected:
   OptimizerBase() = default;

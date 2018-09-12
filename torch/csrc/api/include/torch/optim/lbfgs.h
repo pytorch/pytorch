@@ -3,9 +3,7 @@
 #include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialization.h>
-
-#include <ATen/ATen.h>
+#include <torch/serialize/base.h>
 
 #include <deque>
 #include <functional>
@@ -38,33 +36,29 @@ class LBFGS : public LossClosureOptimizer {
 
   LBFGSOptions options;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-#if defined(TORCH_USE_CEREAL)
-    ar(CEREAL_NVP(d));
-    ar(CEREAL_NVP(t));
-    ar(CEREAL_NVP(H_diag));
-    ar(CEREAL_NVP(prev_flat_grad));
-    ar(CEREAL_NVP(prev_loss));
-    ar(CEREAL_NVP(old_dirs));
-    ar(CEREAL_NVP(old_stps));
-#endif // defined(TORCH_USE_CEREAL)
-  }
+  void save(serialize::Writer& writer) const override;
+  void load(serialize::Reader& reader) override;
 
  private:
-#if defined(TORCH_USE_CEREAL)
-  friend class cereal::access;
-#endif // defined(TORCH_USE_CEREAL)
   LBFGS() : options(0) {}
 
   Tensor gather_flat_grad();
-  void add_grad(const torch::Scalar& step_size, const Tensor& update);
+  void add_grad(const torch::Tensor& step_size, const Tensor& update);
+
+  template <typename Self, typename Serializer>
+  static void serialize(Self& self, Serializer& serializer) {
+    serializer("d", self.d, /*is_buffer=*/true);
+    serializer("t", self.t, /*is_buffer=*/true);
+    serializer("H_diag", self.H_diag, /*is_buffer=*/true);
+    serializer("prev_flat_grad", self.prev_flat_grad, /*is_buffer=*/true);
+    serializer("prev_loss", self.prev_loss, /*is_buffer=*/true);
+  }
 
   Tensor d{torch::empty({0})};
   Tensor H_diag{torch::empty({0})};
   Tensor prev_flat_grad{torch::empty({0})};
-  torch::Scalar t{0};
-  torch::Scalar prev_loss{0};
+  Tensor t{torch::zeros(1)};
+  Tensor prev_loss{torch::zeros(1)};
   std::vector<Tensor> ro;
   std::vector<Tensor> al;
   std::deque<Tensor> old_dirs;

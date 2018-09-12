@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/variable.h>
 #include <torch/nn/module.h>
+#include <torch/serialize/base.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
@@ -11,7 +12,6 @@
 
 namespace torch {
 namespace optim {
-
 AdamOptions::AdamOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
@@ -52,6 +52,14 @@ void Adam::step() {
     NoGradGuard guard;
     p.addcdiv_(exp_average, denom.sqrt() + options.eps_, -step_size);
   }
+}
+
+void Adam::save(serialize::Writer& writer) const {
+  serialize(*this, writer);
+}
+
+void Adam::load(serialize::Reader& reader) {
+  serialize(*this, reader);
 }
 
 } // namespace optim

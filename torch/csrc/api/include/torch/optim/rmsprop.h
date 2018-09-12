@@ -3,9 +3,7 @@
 #include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialization.h>
-
-#include <ATen/ATen.h>
+#include <torch/serialize/base.h>
 
 #include <functional>
 #include <memory>
@@ -38,20 +36,22 @@ class RMSprop : public Optimizer {
 
   RMSpropOptions options;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-#if defined(TORCH_USE_CEREAL)
-    ar(CEREAL_NVP(square_average_buffers_));
-    ar(CEREAL_NVP(momentum_buffers_));
-    ar(CEREAL_NVP(grad_average_buffers_));
-#endif // defined(TORCH_USE_CEREAL)
-  }
+  void save(serialize::Writer& writer) const override;
+  void load(serialize::Reader& reader) override;
 
  private:
-#if defined(TORCH_USE_CEREAL)
-  friend class cereal::access;
-#endif // defined(TORCH_USE_CEREAL)
   RMSprop() : options(0) {}
+
+  template <typename Self, typename Serializer>
+  static void serialize(Self& self, Serializer& serializer) {
+    serializer(
+        "square_average_buffers",
+        self.square_average_buffers_,
+        /*is_buffer=*/true);
+    serializer("momentum_buffers", self.momentum_buffers_, /*is_buffer=*/true);
+    serializer(
+        "grad_average_buffers", self.grad_average_buffers_, /*is_buffer=*/true);
+  }
 
   std::vector<Tensor> square_average_buffers_;
   std::vector<Tensor> momentum_buffers_;
@@ -59,10 +59,3 @@ class RMSprop : public Optimizer {
 };
 } // namespace optim
 } // namespace torch
-
-#if defined(TORCH_USE_CEREAL)
-CEREAL_REGISTER_TYPE(torch::optim::RMSprop);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::Optimizer,
-    torch::optim::RMSprop);
-#endif // defined(TORCH_USE_CEREAL)

@@ -220,8 +220,8 @@ CONFIGURE_FILE(
 
 if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
@@ -232,14 +232,22 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/default.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/reader.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/writer.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
     )
+
+  if (TORCH_USE_CEREAL)
+    list(APPEND TORCH_SRCS ${TORCH_SRC_DIR}/csrc/api/src/serialize/cereal.cpp)
+  endif()
 endif()
 
 
@@ -445,6 +453,7 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/any.cpp
     ${TORCH_API_TEST_DIR}/cursor.cpp
     ${TORCH_API_TEST_DIR}/integration.cpp
+    ${TORCH_API_TEST_DIR}/jit.cpp
     ${TORCH_API_TEST_DIR}/main.cpp
     ${TORCH_API_TEST_DIR}/misc.cpp
     ${TORCH_API_TEST_DIR}/module.cpp
@@ -453,15 +462,15 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/parallel.cpp
     ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/sequential.cpp
+    ${TORCH_API_TEST_DIR}/serialization.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
-    ${TORCH_API_TEST_DIR}/tensor.cpp
-    ${TORCH_API_TEST_DIR}/jit.cpp
-    ${TORCH_API_TEST_DIR}/tensor_options.cpp
     ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
+    ${TORCH_API_TEST_DIR}/tensor_options.cpp
+    ${TORCH_API_TEST_DIR}/tensor.cpp
   )
 
   if (TORCH_USE_CEREAL)
-    list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/serialization.cpp)
+    list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/cereal.cpp)
   endif()
 
   add_executable(test_api ${TORCH_API_TEST_SOURCES})

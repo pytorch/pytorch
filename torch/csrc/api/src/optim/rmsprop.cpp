@@ -1,6 +1,7 @@
 #include <torch/optim/rmsprop.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/serialize/base.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
@@ -50,6 +51,14 @@ void RMSprop::step() {
       p.addcdiv_(p.grad(), average, -options.learning_rate_);
     }
   }
+}
+
+void RMSprop::save(serialize::Writer& writer) const {
+  serialize(*this, writer);
+}
+
+void RMSprop::load(serialize::Reader& reader) {
+  serialize(*this, reader);
 }
 } // namespace optim
 } // namespace torch

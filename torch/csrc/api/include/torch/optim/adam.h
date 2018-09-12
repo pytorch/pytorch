@@ -3,9 +3,7 @@
 #include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialization.h>
-
-#include <ATen/ATen.h>
+#include <torch/serialize/base.h>
 
 #include <utility>
 #include <vector>
@@ -32,23 +30,28 @@ class Adam : public Optimizer {
 
   void step() override;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-#if defined(TORCH_USE_CEREAL)
-    ar(CEREAL_NVP(step_buffers_),
-       CEREAL_NVP(exp_average_buffers_),
-       CEREAL_NVP(exp_average_sq_buffers_),
-       CEREAL_NVP(max_exp_average_sq_buffers_));
-#endif // defined(TORCH_USE_CEREAL)
-  }
+  void save(serialize::Writer& writer) const override;
+  void load(serialize::Reader& reader) override;
 
   AdamOptions options;
 
  private:
-#if defined(TORCH_USE_CEREAL)
-  friend class cereal::access;
-#endif // defined(TORCH_USE_CEREAL)
   Adam() : options(0) {}
+
+  template <typename Self, typename Serializer>
+  static void serialize(Self& self, Serializer& serializer) {
+    optim::detail::serialize(serializer, "step_buffers", self.step_buffers_);
+    serializer(
+        "exp_average_buffers", self.exp_average_buffers_, /*is_buffer=*/true);
+    serializer(
+        "exp_average_sq_buffers",
+        self.exp_average_sq_buffers_,
+        /*is_buffer=*/true);
+    serializer(
+        "max_exp_average_sq_buffers",
+        self.max_exp_average_sq_buffers_,
+        /*is_buffer=*/true);
+  }
 
   std::vector<int64_t> step_buffers_;
   std::vector<Tensor> exp_average_buffers_;
@@ -57,10 +60,3 @@ class Adam : public Optimizer {
 };
 } // namespace optim
 } // namespace torch
-
-#if defined(TORCH_USE_CEREAL)
-CEREAL_REGISTER_TYPE(torch::optim::Adam);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::Optimizer,
-    torch::optim::Adam);
-#endif // defined(TORCH_USE_CEREAL)
