@@ -66,8 +66,8 @@ class ExpRelaxedCategorical(Distribution):
         return self._categorical.probs
 
     def rsample(self, sample_shape=torch.Size()):
-        sample_shape = torch.Size(sample_shape)
-        uniforms = clamp_probs(self.logits.new(self._extended_shape(sample_shape)).uniform_())
+        shape = self._extended_shape(sample_shape)
+        uniforms = clamp_probs(torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device))
         gumbels = -((-(uniforms.log())).log())
         scores = (self.logits + gumbels) / self.temperature
         return scores - scores.logsumexp(dim=-1, keepdim=True)

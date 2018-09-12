@@ -65,7 +65,9 @@ class StudentT(Distribution):
         #   Z ~ Chi2(df)
         #   Y = X / sqrt(Z / df) ~ StudentT(df)
         shape = self._extended_shape(sample_shape)
-        X = self.df.new(shape).normal_()
+        zero = self.df.new_tensor(0.).expand(shape)
+        one = self.df.new_tensor(1.).expand(shape)
+        X = torch.normal(zero, one)
         Z = self._chi2.rsample(sample_shape)
         Y = X * torch.rsqrt(Z / self.df)
         return self.loc + self.scale * Y

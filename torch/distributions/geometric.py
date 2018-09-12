@@ -75,7 +75,8 @@ class Geometric(Distribution):
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
-            u = self.probs.new(shape).uniform_(_finfo(self.probs).tiny, 1)
+            u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
+            u = u.clamp(min=_finfo(self.probs).tiny)
             return (u.log() / (-self.probs).log1p()).floor()
 
     def log_prob(self, value):

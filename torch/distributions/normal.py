@@ -64,7 +64,9 @@ class Normal(ExponentialFamily):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps = self.loc.new(shape).normal_()
+        zero = self.loc.new_tensor(0.).expand(shape)
+        one = self.loc.new_tensor(1.).expand(shape)
+        eps = torch.normal(zero, one)
         return self.loc + eps * self.scale
 
     def log_prob(self, value):

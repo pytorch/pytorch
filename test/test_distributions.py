@@ -3971,6 +3971,29 @@ class TestTransforms(TestCase):
             except NotImplementedError:
                 continue
 
+    def test_jit(self):
+        for transform in self.unique_transforms:
+            print('testing {}'.format(type(transform).__name__))
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
+            y = transform(x).clone()  # bypass the cache
+
+            def fwd(x):
+                return transform(x)
+
+            def inv(y):
+                return transform.inv(y)
+
+            def fwd_jacobian(x):
+                y = transform(x)
+                return transform.log_abs_det_jacobian(x, y)
+
+            try:
+                traced_fwd = torch.jit.trace(fwd, (x,))
+                traced_inv = torch.jit.trace(inv, (y,))
+                traced_fwd_jacobian = torch.jit.trace(fwd_jacobian, (x,))
+            except NotImplementedError:
+                continue
+
 
 class TestConstraintRegistry(TestCase):
     def get_constraints(self, is_cuda=False):
@@ -4118,20 +4141,8 @@ class TestJit(TestCase):
             # FIXME Schema not found for node
             xfail = [
                 Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
-                Exponential,  # aten::exponential(Double(5, 5), float, Generator)
-                Geometric,  # aten::uniform(Double(3), float, float, Generator)
-                Gumbel,  # aten::uniform(Double(5, 5), float, float, Generator)
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
-                Laplace,  # aten::uniform(Double(5, 5), float, float, Generator)
-                LowRankMultivariateNormal,  # aten::normal(Dynamic, float, float, Generator)
-                MultivariateNormal,  # aten::normal(Dynamic, float, float, Generator)
-                OneHotCategorical,  # aten::scatter(Double(2, 3), int, Dynamic, int)
-                Pareto,  # aten::exponential(Double(5, 5), float, Generator)
-                RelaxedBernoulli,  # aten::uniform(Double(3), float, float, Generator)
-                RelaxedOneHotCategorical,  # aten::uniform(Double(2, 3), float, float, Generator)
-                StudentT,  # aten::normal(Double(2, 3), float, float, Generator)
-                Uniform,  # aten::uniform(Double(5, 5), float, float, Generator)
-                Weibull,  # aten::exponential(Double(5, 5), float, Generator)
+                OneHotCategorical,  # aten::scatter(Dynamic, int, Dynamic, int)
             ]
             if Dist in xfail:
                 print('        xfail reproducibility')
@@ -4164,24 +4175,7 @@ class TestJit(TestCase):
             # FIXME Schema not found for node
             xfail = [
                 Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
-                Exponential,  # aten::exponential(Double(5, 5), float, Generator)
-                Geometric,  # aten::uniform(Double(3), float, float, Generator)
-                Gumbel,  # aten::uniform(Double(5, 5), float, float, Generator)
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
-                HalfNormal,  # aten::normal(Double(5, 5), float, float, Generator)
-                Laplace,  # aten::uniform(Double(5, 5), float, float, Generator)
-                LogNormal,  # aten::normal(Double(5, 5), float, float, Generator)
-                LogisticNormal,  # aten::normal(Double(5, 5), float, float, Generator)
-                LowRankMultivariateNormal,  # aten::normal(Dynamic, float, float, Generator)
-                MultivariateNormal,  # aten::normal(Dynamic, float, float, Generator)
-                Normal,  # aten::normal(Double(5, 5), float, float, Generator)
-                OneHotCategorical,  # aten::scatter(Double(2, 3), int, Dynamic, int)
-                Pareto,  # aten::exponential(Double(5, 5), float, Generator)
-                RelaxedBernoulli,  # aten::uniform(Double(3), float, float, Generator)
-                RelaxedOneHotCategorical,  # aten::uniform(Double(2, 3), float, float, Generator)
-                StudentT,  # aten::normal(Double(2, 3), float, float, Generator)
-                Uniform,  # aten::uniform(Double(5, 5), float, float, Generator)
-                Weibull,  # aten::exponential(Double(5, 5), float, Generator)
             ]
             if Dist in xfail:
                 print('        xfail reproducibility')
