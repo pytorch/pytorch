@@ -390,7 +390,7 @@ if(BUILD_PYTHON)
     pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       SET(PYTHON_LIBRARY "${_py_lib}")
-      if (MSVC) 
+      if (MSVC)
         STRING(REPLACE "Lib" "libs" _py_static_lib ${_py_lib})
         link_directories(${_py_static_lib})
       endif()
@@ -810,10 +810,10 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
   include_directories(${ONNX_INCLUDE_DIRS})
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
-  if (MSVC AND BUILD_SHARED_LIBS)
-    # ONNX is linked statically, but needs to be exported from this library
+  if (MSVC AND TEMP_BUILD_SHARED_LIBS)
+    # ONNX is linked statically and needs to be exported from this library
     # to be used externally.
-    target_compile_options(onnx PRIVATE "-DONNX_BUILD_SHARED_LIBS")
+    target_compile_options(onnx_proto PRIVATE "-DONNX_BUILD_MAIN_LIB")
   endif()
   # In mobile build we care about code size, and so we need drop
   # everything (e.g. checker, optimizer) in onnx but the pb definition.

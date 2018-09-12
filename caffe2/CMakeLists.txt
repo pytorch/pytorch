@@ -292,9 +292,9 @@ if (MSVC AND NOT BUILD_SHARED_LIBS)
   target_compile_definitions(caffe2 PUBLIC "AT_CORE_STATIC_WINDOWS=1")
 endif()
 if (MSVC AND BUILD_SHARED_LIBS)
-  # ONNX is linked statically, but needs to be exported from this library
+  # ONNX is linked statically and needs to be exported from this library
   # to be used externally.
-  target_compile_options(caffe2 PRIVATE "-DONNX_BUILD_SHARED_LIBS")
+  target_compile_options(caffe2 PRIVATE "-DONNX_BUILD_MAIN_LIB")
 endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
