@@ -1118,6 +1118,17 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(traced_fn.graph)
         self.assertExportImport(traced_fn.graph, (x, y))
 
+    def test_trace_random(self):
+        def f(mean, std):
+            return torch.normal(mean, std)
+
+        traced = torch.jit.trace(f, (torch.zeros(2, 3), torch.ones(2, 3)), check_trace=False)
+        mean, std = torch.zeros(5, 5), torch.ones(5, 5)
+        with torch.random.fork_rng(devices=[]):
+            output = f(mean, std)
+        traced_output = traced(mean, std)
+        self.assertEqual(output, traced_output)
+
     def test_trace_tensor_factory(self):
         def run(**kwargs):
             inputs_require_grads = kwargs.pop('inputs_require_grads', True)
@@ -2562,6 +2573,18 @@ a")
 
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.checkScript(func, [x], optimize=True)
+
+    def test_random(self):
+        @torch.jit.script
+        def f(mean, std):
+            return torch.normal(mean, std)
+
+        mean, std = torch.zeros(5, 5), torch.ones(5, 5)
+        with torch.random.fork_rng(devices=[]):
+            output = torch.normal(mean, std)
+        with torch.random.fork_rng(devices=[]):
+            script_output = f(mean, std)
+        self.assertEqual(output, script_output)
 
     def _check_code(self, code_str, fn_name, inputs):
         scope = {}
