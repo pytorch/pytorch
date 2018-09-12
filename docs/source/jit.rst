@@ -760,10 +760,10 @@ Tracer Warnings
 
     Produces several warnings and a graph which simply returns the input::
 
-        update_view.py:4: TracerWarning: There are 2 live references to the tensor being modified when tracing in-place operator copy_ (possibly due to an assignment) which  might cause the trace to be incorrect. We can't record the data flow of  Python values, which means the trace might not generalize to other inputs.
+        fill_row_zero.py:4: TracerWarning: There are 2 live references to the data region being modified when tracing in-place operator copy_ (possibly due to an assignment). This might cause the trace to be incorrect, because all other views that also reference this data will not not reflect this change in the trace! On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. are outputs of torch.split), this might still be safe.
           x[0] = torch.rand(*x.shape[1:2])
-        update_view.py:7: TracerWarning: Output nr 1. of the traced function does not match the corresponding output of the Python function. Detailed error:
-        Not within tolerance rtol=1e-05 atol=1e-05 at input[0, 1] (0.8348613381385803 vs. 0.09187901020050049) and 3 other locations (33.00%)
+        fill_row_zero.py:6: TracerWarning: Output nr 1. of the traced function does not match the corresponding output of the Python function. Detailed error:
+        Not within tolerance rtol=1e-05 atol=1e-05 at input[0, 1] (0.09115803241729736 vs. 0.6782537698745728) and 3 other locations (33.00%)
           traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
         graph(%0 : Float(3, 4)) {
           return (%0);
