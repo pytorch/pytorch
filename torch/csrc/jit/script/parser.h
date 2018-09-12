@@ -177,7 +177,7 @@ struct Parser {
     int binary_prec;
     while (shared.isBinary(L.cur().kind, &binary_prec)) {
       if (binary_prec <= precedence) // not allowed to parse something which is
-        // not greater than 'precedenc'
+        // not greater than 'precedence'
         break;
 
       int kind = L.cur().kind;
