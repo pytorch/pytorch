@@ -146,7 +146,7 @@ RegisterOperators reg({
         prim::NoneGenerator,
         [](Node* node) {
           return [](Stack& stack) {
-            stack.push_back(at::Tensor());
+            stack.emplace_back();
             return 0;
           };
         }),
