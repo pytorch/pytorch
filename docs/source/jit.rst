@@ -33,6 +33,10 @@ Creating Torch Script Code
        To be able to save a module, it must not make any calls to native python functions.
        This means that all submodules must be subclasses of ScriptModules as well.
 
+       .. DANGER::
+          All modules, no matter their device, are always loaded onto the CPU during loading.
+          This is different from :func:`torch.load`'s semantics and may change in the future.
+
 
 .. autofunction:: load
 
