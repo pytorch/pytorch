@@ -507,13 +507,32 @@ class TestCase(unittest.TestCase):
         if subname:
             expected_file += "-" + subname
             subname_output = " ({})".format(subname)
-        expected_file += ".expect"
+        # In some cases the test output from ppc64le is isomorphic to 
+        # x86_64 output. But the output may contain subtle differences 
+        # and the test will fail. This ensures that if the test outputs 
+        # are different and a ppc expect file exists, the test 
+        # output is compared to it instead. If the test output is the 
+        # same for both x86_64 and ppc64le then there is no need for a 
+        # separate ppc expect file.
+        if IS_PPC:
+            ppc_expected_file = expected_file + ".ppc.expect"
+            if os.path.exists(ppc_expected_file):
+                expected_file += ".ppc.expect"
+            else:
+                expected_file += ".expect"
+        else:
+            expected_file += ".expect"
         expected = None
 
         def accept_output(update_type):
             print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
-            with open(expected_file, 'w') as f:
-                f.write(s)
+            # This allows for the creation of a ppc expect file if running on a ppc64le system.
+            if IS_PPC:
+                with open(ppc_expected_file, 'w') as f:
+                    f.write(s)
+            else:
+                with open(expected_file, 'w') as f:
+                    f.write(s)
 
         try:
             with open(expected_file) as f:
