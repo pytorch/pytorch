@@ -309,7 +309,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];
           if (curr == prev) {
-            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to add up
+            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
               THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
             }
           } else {
@@ -317,7 +317,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
             for (int64_t d = 0; d < sparseDims; d++) {
               newIndicesAccessor[d][i] = indicesAccessor[d][pos];
             }
-            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to add up
+            if (values.numel() > 0) {  // if values is an empty tensor, there are no elements to copy
               THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
             }
           }

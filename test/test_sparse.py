@@ -216,7 +216,7 @@ class TestSparse(TestCase):
     @skipIfRocm
     def test_to_dense(self):
         def test_tensor(x, res):
-            x.to_dense()  # Tests double to_dense for memory corruption
+            x.to_dense()  # Tests triple to_dense for memory corruption
             x.to_dense()
             x.to_dense()
             self.assertEqual(res, x.to_dense())
