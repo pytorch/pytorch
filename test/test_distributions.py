@@ -4191,13 +4191,14 @@ class TestJit(TestCase):
             except NotImplementedError:
                 continue
 
-    def test_icdf(self):
+    def test_cdf(self):
         for Dist, keys, values, sample in self._examples():
 
             def f(sample, *values):
                 param = dict(zip(keys, values))
                 dist = Dist(**param)
-                return dist.icdf(sample)
+                cdf = dist.cdf(sample)
+                return dist.icdf(cdf)
 
             try:
                 torch.jit.trace(f, (sample,) + values)
