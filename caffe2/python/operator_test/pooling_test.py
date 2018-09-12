@@ -308,14 +308,12 @@ class TestPooling(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            op_type=st.sampled_from(["MaxPool", "AveragePool", "LpPool"]),
-           engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN"]),
+           engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
     def test_global_pooling(self, size, input_channels, batch_size,
                             order, op_type, engine, gc, dc):
         # CuDNN 5 does not support deterministic max pooling.
         assume(workspace.GetCuDNNVersion() >= 6000 or op_type != "MaxPool")
-        if engine == 'MIOPEN':
-            assume(op_type != "LpPool" and order == "NCHW")
         op = core.CreateOperator(
             op_type,
             ["X"],
