@@ -59,7 +59,7 @@ class TransformedDistribution(Distribution):
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(TransformedDistribution, _instance)
         batch_shape = torch.Size(batch_shape)
-        base_dist_batch_shape = batch_shape + self.base_dist.batch_shape[len(batch_shape):]
+        base_dist_batch_shape = batch_shape + self.base_dist.batch_shape[len(self.batch_shape):]
         new.base_dist = self.base_dist.expand(base_dist_batch_shape)
         new.transforms = self.transforms
         super(TransformedDistribution, new).__init__(batch_shape, self.event_shape, validate_args=False)

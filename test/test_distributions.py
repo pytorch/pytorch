@@ -809,7 +809,6 @@ class TestDistributions(TestCase):
                     self.assertEqual(d.sample().shape, original_shape)
                     self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
                     self.assertEqual(actual_shape, expected_shape)
-                    print(d.__class__)
                     try:
                         self.assertEqual(expanded.mean,
                                          d.mean.expand(expanded_shape + d.event_shape),
