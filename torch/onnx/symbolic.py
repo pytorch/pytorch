@@ -721,6 +721,11 @@ def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
+@parse_args('v', 'v', 'i')
+def _weight_norm(graph, v, g, dim):
+    return graph.op("ATen", v, g, dim_i=dim, operator_s="_weight_norm")
+
+
 @parse_args('v', 't', 't', 't')
 def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.:
