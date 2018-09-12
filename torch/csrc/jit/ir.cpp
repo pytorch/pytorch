@@ -22,8 +22,6 @@ namespace torch { namespace jit {
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 constexpr Symbol PythonOp::Kind;
 
-constexpr int max_tensor_display_size = 10;
-
 void printValueRef(std::ostream & out, const Value * n) {
   out << "%" << n->uniqueName();
 }
@@ -89,7 +87,6 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
     // bug by printing it out.
     out << name.toUnqualString() << "=";
 
-    // printAttributeValue(out, name, n);
     n->printValue(out, name);
   }
   out << "]";

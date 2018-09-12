@@ -12,6 +12,8 @@
 
 namespace torch { namespace jit {
 
+constexpr int max_tensor_display_size = 10;
+
 enum class AttributeKind {
   f,fs,i,is,s,ss,t,ts,g,gs
 };
@@ -232,16 +234,16 @@ struct Attributes {
         out << f(name);
         break;
       case AttributeKind::fs:
-        printPrimList(out,fs(name));
+        printPrimList(out, fs(name));
         break;
       case AttributeKind::i:
         out << i(name);
         break;
       case AttributeKind::is:
-        printPrimList(out,is(name));
+        printPrimList(out, is(name));
         break;
       case AttributeKind::s:
-        out << escapeString(s(name));
+        out << "\"" << escapeString(s(name)) << "\"";
         break;
       case AttributeKind::ss:
         printPrimList(out,ss(name));
@@ -259,7 +261,7 @@ struct Attributes {
               out << scalar_tensor.toLong();
             }
             out << "}";
-          } else if (tensor.numel() <= 10) {
+          } else if (tensor.numel() <= max_tensor_display_size) {
             // TODO: This is awful code.  Also it doesn't work on Windows.
             std::ostringstream tensor_ss;
             tensor_ss << tensor;
