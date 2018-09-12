@@ -212,7 +212,7 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::StoreWorld,
+        prim::LoadWorld,
         [](Node* node) {
           return [](Stack& stack) {
             push(stack, World());

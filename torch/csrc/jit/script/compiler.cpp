@@ -1879,9 +1879,9 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& originalCallee, ArrayRef<Value
   // TODO(suo): a cleaner way to handle this might be to have inlined graphs
   // be a special prim::Inlined node, so that we can clone the entire block's
   // metadata and don't need to expose EntryWorld and ExitWorld like this.
-  auto* storeWorld = g.insertNode(g.create(prim::StoreWorld));
-  storeWorld->output()->setType(WorldType::get());
-  value_map[callee->entryWorld()] = storeWorld->output();
+  auto* loadWorld = g.insertNode(g.create(prim::LoadWorld));
+  loadWorld->output()->setType(WorldType::get());
+  value_map[callee->entryWorld()] = loadWorld->output();
 
   for (auto* node : callee->nodes()) {
     auto* new_node =
@@ -1891,8 +1891,8 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& originalCallee, ArrayRef<Value
     }
   }
 
-  auto* loadWorld = g.insertNode(g.create(prim::LoadWorld, 0));
-  loadWorld->addInput(value_map[callee->exitWorld()]);
+  auto* storeWorld = g.insertNode(g.create(prim::StoreWorld, 0));
+  storeWorld->addInput(value_map[callee->exitWorld()]);
 
   std::vector<Value*> outputs;
   for (auto* output : callee->outputs()) {

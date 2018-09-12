@@ -63,13 +63,13 @@ class AnnotateEffectsImpl {
     // Handle inlined functions. Inlined functions will expose their Entry and
     // Exit tokens as regular nodes. These exposed nodes provide fixed points
     // to thread the current world token through.
-    if (node->kind() == prim::StoreWorld) {
+    if (node->kind() == prim::LoadWorld) {
       auto inlinedEntryToken = node->output();
       inlinedEntryToken->replaceAllUsesWith(curToken);
       return curToken;
     }
 
-    if (node->kind() == prim::LoadWorld) {
+    if (node->kind() == prim::StoreWorld) {
       return node->input();
     }
 
