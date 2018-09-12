@@ -54,24 +54,11 @@ inline void findErrorInKwargs(
 }
 } // namespace detail
 
-struct ConvertError : public std::exception {
-    ConvertError(std::string msg)
-    : msg_(std::move(msg)) {}
-    const char* what() const noexcept override  {
-        return msg_.c_str();
-    }
-private:
-    std::string msg_;
-};
-
-#define TORCH_CONVERT_ERROR(...) \
-  throw ConvertError(at::str(__VA_ARGS__))
-
 inline IValue toIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
     auto ten = py::cast<at::Tensor>(input);
     if (ten.is_sparse()) {
-      TORCH_CONVERT_ERROR("Inputting sparse tensors not supported");
+      AT_ERROR("sparse tensors not supported");
     }
     return ten;
   } else if (py::isinstance<py::tuple>(input)) {
@@ -109,7 +96,7 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
       case TypeKind::CompleteTensorType: {
         auto var = py::cast<autograd::Variable>(obj);
         if (var.is_sparse()) {
-          TORCH_CONVERT_ERROR("Inputting sparse tensors not supported");
+          AT_ERROR("sparse tensors not supported");
         }
         return var;
       }
@@ -196,10 +183,11 @@ inline py::object toPyObject(IValue&& ivalue) {
   if (ivalue.isNone()) {
     return py::none();
   } else if (ivalue.isTensor()) {
-    if (ivalue.toTensor().is_sparse()) {
-      TORCH_CONVERT_ERROR("Returning sparse tensors not supported");
+    auto tensor = std::move(ivalue).toTensor();
+    if (tensor.is_sparse()) {
+      AT_ERROR("sparse tensors not supported");
     }
-    return py::cast(autograd::Variable(ivalue.toTensor()));
+    return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(ivalue.toDouble());
   } else if (ivalue.isInt()) {

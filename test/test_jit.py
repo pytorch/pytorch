@@ -1580,15 +1580,15 @@ class TestJit(JitTestCase):
             output = get_sparse()
             return output, input
 
-        with self.assertRaisesRegex(RuntimeError, "Inputting sparse tensors not supported"):
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
             sparse(get_sparse())
 
         # has a different entry point than calling sparse directly
-        with self.assertRaisesRegex(RuntimeError, "Inputting sparse tensors not supported"):
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
             torch._C._jit_pass_shape_analysis(
                 sparse.graph, (get_sparse(),), False)
 
-        with self.assertRaisesRegex(RuntimeError, "Returning sparse tensors not supported"):
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
             sparse(torch.tensor([1]))
 
     def test_constant_prop_simple(self):
