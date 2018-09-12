@@ -29,6 +29,7 @@ using at::TensorList;
 using at::Type;
 using at::ScalarType;
 using at::optional;
+using at::Device;
 
 void register_variable_type_for(at::Type* baseType);
 
