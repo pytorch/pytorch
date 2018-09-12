@@ -68,6 +68,7 @@ FROM_IVALUE = {
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'std::string': '{}.toString()->string()',
+    'Generator': 'nullptr',
     'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toIntList()->elements())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toIntList()->elements())',
@@ -197,12 +198,9 @@ def gen_jit_dispatch(declarations, out, template_path):
 
         real_inputs = 0
         for arg in decl['arguments']:
-            if arg['simple_type'] in default_only_types:
-                arguments.append(arg['default'])
-            else:
-                value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, num_inputs)
-                arguments.append(from_ivalue(arg, value))
-                real_inputs += 1
+            value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, num_inputs)
+            arguments.append(from_ivalue(arg, value))
+            real_inputs += 1
 
         call = get_invocation(decl, arguments, num_inputs)
 

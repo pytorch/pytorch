@@ -14,61 +14,61 @@ at::Tensor cudnn_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_bias(
     const at::Tensor& grad_output) {
-  throw std::runtime_error("cudnn_convolution_backward_bias: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_backward_bias: ATen not compiled with cuDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  throw std::runtime_error("cudnn_convolution_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_backward: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList output_padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_transpose: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_transpose: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose_backward_input(
     const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
-  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
 }}
@@ -194,16 +194,12 @@ Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
 // Used on pad, stride and dilation
 static void check_args(CheckedFrom c, IntList args, size_t expected_size, const char* arg_name)
 {
-  if (args.size() > expected_size){
-    std::stringstream ss;
-    ss << "Too many " << arg_name << " values (" << args.size() << ") supplied, expecting " << expected_size << " (while checking arguments for " << c << ")";
-    throw std::runtime_error(ss.str());
-  }
-  else if (args.size() < expected_size){
-    std::stringstream ss;
-    ss << "Not enough " << arg_name << " values (" << args.size() << ") supplied, expecting " << expected_size << " (while checking arguments for " << c << ")";
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(args.size() <= expected_size,
+           "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
+           expected_size, " (while checking arguments for ", c, ")");
+  AT_CHECK(args.size() >= expected_size,
+           "Not enough ", arg_name, " values (", args.size(), ") supplied, expecting ",
+           expected_size, " (while checking arguments for ", c, ")");
 
   auto num_negative_values = std::count_if(args.begin(), args.end(), [](int x){return x < 0;});
   if (num_negative_values > 0){
@@ -211,7 +207,7 @@ static void check_args(CheckedFrom c, IntList args, size_t expected_size, const 
     ss << arg_name << " should be greater than zero but got (";
     std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
     ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
 }
 
@@ -449,7 +445,7 @@ perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
         return perfResults[i];
       }
     }
-    throw std::runtime_error("no deterministic convolution algorithms available in CuDNN");
+    AT_ERROR("no deterministic convolution algorithms available in CuDNN");
   } else {
     return perfResults[0];
   }
