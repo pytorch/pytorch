@@ -6,8 +6,6 @@
 
 #include <ATen/core/intrusive_ptr.h>
 
-#include <caffe2/core/logging.h>
-
 namespace at {
 
 struct Type;
@@ -112,6 +110,8 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
     return std::move(data_ptr);
   };
   // XXX: TERRIBLE! DONT USE UNLESS YOU HAVE TO! AND EVEN THEN DONT, JUST DONT!
+  // Setting the data_type will require you to audit many other parts of the
+  // struct again to make sure it's still valid.
   void set_dtype(const caffe2::TypeMeta& data_type) {
     int64_t capacity = numel_ * data_type_.itemsize();
     data_type_ = data_type;
@@ -169,7 +169,9 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
       const caffe2::TypeMeta& data_type,
       size_t capacity) {
     data_type_ = data_type;
-    CAFFE_ENFORCE_WITH_CALLER(
+    // TODO: Use CAFFE_ENFORCE_WITH_CALLER equivalent
+    // For now causes lots of redefine issues if caffe2/core/logging.h is used
+    AT_ERROR(
         data_type_.id() != caffe2::TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to have meta "
         "already set.");
