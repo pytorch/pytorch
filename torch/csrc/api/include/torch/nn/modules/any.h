@@ -454,7 +454,7 @@ AnyModule::Value AnyModule::any_forward(ArgumentTypes&&... arguments) {
 template <typename ReturnType, typename... ArgumentTypes>
 ReturnType AnyModule::forward(ArgumentTypes&&... arguments) {
   return any_forward(std::forward<ArgumentTypes>(arguments)...)
-      .get<ReturnType>();
+      .template get<ReturnType>();
 }
 
 template <typename T, typename>
