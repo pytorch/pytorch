@@ -50,7 +50,18 @@ void addInputs(Node *n, const char * name, at::Generator * value)            {
   Value * undef_gen = g->insertNode(g->createNoneGenerator())->output();
   n->addInput(undef_gen);
 }
-void addInputs(Node *n, const char * name, at::ScalarType value)             { detail::badArgType(value); }
+void addInputs(Node *n, const char * name, at::Device value) {
+  std::vector<int64_t> device = {
+      static_cast<int64_t>(value.type()),
+      static_cast<int64_t>(value.index())};
+  detail::genericAddInput(n, std::move(device));
+}
+void addInputs(Node *n, const char * name, at::Layout value) {
+  detail::genericAddInput(n, static_cast<int64_t>(value));
+}
+void addInputs(Node *n, const char * name, at::ScalarType value) {
+  detail::genericAddInput(n, static_cast<int64_t>(value));
+}
 
 void addInputs(Node *n, const char * name, at::TensorList value) {
   Graph *g = n->owningGraph();
@@ -60,12 +71,9 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
 
 void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize TensorOptions
-  detail::genericAddInput(n, static_cast<int64_t>(options.dtype()));
-  detail::genericAddInput(n, static_cast<int64_t>(options.layout()));
-  std::vector<int64_t> device = {
-      static_cast<int64_t>(options.device().type()),
-      static_cast<int64_t>(options.device().index())};
-  detail::genericAddInput(n, std::move(device));
+  addInputs(n, name, options.dtype());
+  addInputs(n, name, options.layout());
+  addInputs(n, name, options.device());
 }
 
 void addInputs(Node *n, const char * name, at::IntList value) {

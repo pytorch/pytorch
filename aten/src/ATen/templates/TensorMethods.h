@@ -43,45 +43,6 @@ inline TensorOptions Tensor::options() const {
                         .is_variable(is_variable());
 }
 
-namespace detail {
-inline Tensor to(
-    const Tensor& tensor,
-    const TensorOptions& options,
-    bool non_blocking) {
-  // Don't copy if the options match.
-  if (tensor.options() == options) {
-    return tensor;
-  }
-  AT_CHECK(tensor.is_variable() == options.is_variable(),
-           "cannot change is_variable, from: ", tensor.is_variable(),
-           " to: ", options.is_variable());
-  return tensor.type().toBackend(options.backend()).toScalarType(options.dtype())
-               .copy(tensor, non_blocking, options.device());
-}
-} // namespace detail
-
-inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking)
-    const {
-  if (this->device() == device && this->dtype() == dtype) {
-    return *this;
-  }
-  return detail::to(*this, options().device(device).dtype(dtype), non_blocking);
-}
-
-inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) const {
-  if (this->dtype() == dtype) {
-    return *this;
-  }
-  return detail::to(*this, options().dtype(dtype), non_blocking);
-}
-
-inline Tensor Tensor::to(Device device, bool non_blocking) const {
-  if (this->device() == device) {
-    return *this;
-  }
-  return detail::to(*this, options().device(device), non_blocking);
-}
-
 inline void Tensor::backward(
     at::optional<Tensor> gradient,
     bool keep_graph,
