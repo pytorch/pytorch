@@ -1126,24 +1126,15 @@ class _DistTestBase(object):
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(batch_size)]
 
-    @unittest.skipIf(
-        BACKEND != "nccl" and BACKEND != "gloo",
-        "Only Nccl & Gloo backend support DistributedDataParallel",
-    )
-    @skip_if_no_cuda_distributed
-    @skip_if_no_gpu
-    def test_DistributedDataParallel(self):
+    def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None):
         # Run a simple end to end DDP model, use result of single node model
         # as baseline
-        group, group_id, rank = self._init_global_test()
-        rank_to_GPU = self._init_multigpu_helper()
 
         # cpu training setup
         model = self._create_Net()
 
         # single gpu training setup
         model_gpu = copy.deepcopy(model)
-        gpu_subset = list(rank_to_GPU[rank])
         model_gpu.cuda(gpu_subset[0])
 
         # DDP training setup
@@ -1195,6 +1186,22 @@ class _DistTestBase(object):
         )
         self._barrier()
 
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        gpus = list(rank_to_GPU[rank])
+        self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank)
+
+        # test output_device
+        self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+        # test device_ids
+        gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+        self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
