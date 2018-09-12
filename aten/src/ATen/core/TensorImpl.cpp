@@ -1,19 +1,13 @@
-#include <ATen/TensorImpl.h>
+#include <ATen/core/TensorImpl.h>
 
-#include "ATen/Context.h"
-#include <ATen/Tensor.h>
 #include <ATen/core/optional.h>
-#include <ATen/Context.h>
 #include <ATen/core/Backend.h>
 #include <ATen/core/WrapDimMinimal.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 
-#include <ATen/detail/VariableHooksInterface.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 namespace at {
-
-Type& TensorImpl::type() const {
-  return at::getMaybeVariableType(this);
-}
 
 Tensor& TensorImpl::grad() {
   AT_ERROR("grad is not implemented for Tensor");
@@ -23,35 +17,12 @@ const Tensor& TensorImpl::grad() const {
   AT_ERROR("grad is not implemented for Tensor");
 }
 
-Tensor TensorImpl::detach() const {
-  AT_ERROR("detach is not implemented for Tensor");
-}
-
-void TensorImpl::backward(
-    at::optional<Tensor> gradient,
-    bool keep_graph,
-    bool create_graph) {
-  AT_ERROR("backward is not implemented for Tensor");
-}
-
-void TensorImpl::set_data(Tensor new_data) {
-  AT_ERROR("set_type is not implemented for Tensor");
-}
-
-void Tensor::backward(
-    at::optional<Tensor> gradient,
-    bool keep_graph,
-    bool create_graph) {
-  tensor_impl_->backward(std::move(gradient), keep_graph, create_graph);
-}
-
-TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
+TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable)
     : TensorImpl({}, type_id, scalar_type, is_variable) {
   // UndefinedTensors and SparseTensors don't have storages.
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
-    auto type = &globalContext().getNonVariableType(tensorTypeIdToBackend(type_id), scalar_type);
-    storage_ = type->storage(true);
+    storage_ = Storage(scalar_type, 0, allocator, true);
   }
 }
 

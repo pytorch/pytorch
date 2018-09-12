@@ -26,8 +26,9 @@ void genericAddInput(Node *n, T value) {
   n->addInput(v);
 }
 
-void badArgType() {
-  AT_ERROR("Found an unsupported argument type in the JIT tracer. File a bug report.");
+template<typename T>
+void badArgType(const T& v) {
+  AT_ERROR("Found an unsupported argument type in the JIT tracer: ", at::demangle_type<T>(), ". File a bug report.");
 }
 
 thread_local std::shared_ptr<TracingState> tracing_state;
@@ -38,9 +39,29 @@ void addInputs(Node *n, const char * name, int64_t value)            { detail::g
 void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const std::string& value) { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
-void addInputs(Node *n, const char * name, const std::string& value)         { detail::badArgType(); }
-void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(); }
+void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { detail::badArgType(value); }
+void addInputs(Node *n, const char * name, at::Generator * value)            {
+  if (value) {
+    detail::badArgType(value);
+  }
+  Graph * g = n->owningGraph();
+  Value * undef_gen = g->insertNode(g->createNoneGenerator())->output();
+  n->addInput(undef_gen);
+}
+void addInputs(Node *n, const char * name, at::Device value) {
+  std::vector<int64_t> device = {
+      static_cast<int64_t>(value.type()),
+      static_cast<int64_t>(value.index())};
+  detail::genericAddInput(n, std::move(device));
+}
+void addInputs(Node *n, const char * name, at::Layout value) {
+  detail::genericAddInput(n, static_cast<int64_t>(value));
+}
+void addInputs(Node *n, const char * name, at::ScalarType value) {
+  detail::genericAddInput(n, static_cast<int64_t>(value));
+}
 
 void addInputs(Node *n, const char * name, at::TensorList value) {
   Graph *g = n->owningGraph();
@@ -50,12 +71,9 @@ void addInputs(Node *n, const char * name, at::TensorList value) {
 
 void addInputs(Node* n, const char * name, const at::TensorOptions& options) {
   // [TensorOptions in script] - update this when you change how we schematize TensorOptions
-  detail::genericAddInput(n, static_cast<int64_t>(options.dtype()));
-  detail::genericAddInput(n, static_cast<int64_t>(options.layout()));
-  std::vector<int64_t> device = {
-      static_cast<int64_t>(options.device().type()),
-      static_cast<int64_t>(options.device().index())};
-  detail::genericAddInput(n, std::move(device));
+  addInputs(n, name, options.dtype());
+  addInputs(n, name, options.layout());
+  addInputs(n, name, options.device());
 }
 
 void addInputs(Node *n, const char * name, at::IntList value) {
@@ -172,28 +190,27 @@ void setRecordSourceLocation(void (*v)(Node*)) {
 void defaultWarn(const std::string& str) { AT_WARN(str); }
 std::atomic<warn_fn_type> warn_callback { defaultWarn };
 
-void _do_warn(const char * _reason) {
+const char * WARN_PYTHON_DATAFLOW =
+  " might cause the trace to be incorrect. We can't record the data flow of "
+  "Python values, so this value will be treated as a constant in the future. "
+  "This means that the trace might not generalize to other inputs!";
+const char * WARN_CONSTRUCTOR =
+  " results are registered as constants in the trace. You can safely ignore this "
+  "warning if you use this function to create tensors out of constant variables "
+  "that would be the same every time you call this function. In any other case, "
+  "this might cause the trace to be incorrect.";
+
+// XXX: _kind can be a nullptr
+void _do_warn(const char * _reason, const char * _kind) {
   std::string reason { _reason };
+  std::string kind { _kind ? _kind : "" };
   std::ostringstream s;
-  s << std::string(reason);
-  s << " might cause the trace to be incorrect. We can't record the data flow of "
-       " Python values, which means the trace might not generalize to other inputs.";
+  s << reason << kind;
   warn_callback.load()(s.str());
 }
 
 void setWarn(warn_fn_type fn) {
   warn_callback.store(fn);
-}
-
-void ensureUnique(const char * name, const at::Tensor& tensor) {
-  auto aliases = tensor.storage().use_count();
-  if (aliases > 1) {
-    std::stringstream ss;
-    ss << "There are " << aliases
-       << " live references to the tensor being modified when tracing in-place operator "
-       << name << " which ";
-    warn(ss.str().c_str());
-  }
 }
 
 }}}

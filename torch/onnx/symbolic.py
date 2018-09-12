@@ -936,6 +936,25 @@ def zeros_like(g, input):
     return g.op("Sub", input, input).setType(input.type().contiguous())
 
 
+scalar_type_to_onnx = [
+    cast_pytorch_to_onnx["Byte"],
+    cast_pytorch_to_onnx["Char"],
+    cast_pytorch_to_onnx["Short"],
+    cast_pytorch_to_onnx["Int"],
+    cast_pytorch_to_onnx["Long"],
+    cast_pytorch_to_onnx["Half"],
+    cast_pytorch_to_onnx["Float"],
+    cast_pytorch_to_onnx["Double"],
+]
+
+
+@parse_args('v', 'i', 'i', 'v')
+def zeros(g, shape, scalar_type, layout, device):
+    # NOTE: no way to set device in ONNX, so we ignore it
+    return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
+                input_as_shape_i=1, value_f=0)
+
+
 def full_like(g, input, fill_value):
     # TODO: a more efficient implementation (ConstantFill?)
     return add(g, zeros_like(g, input), fill_value, g.op("Constant", value_t=torch.tensor(1)))
@@ -970,6 +989,24 @@ def topk(g, self, k, dim, largest, sorted, out=None):
         _unimplemented("TopK", "Ascending TopK is not supported")
 
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
+
+
+def to(g, self, *args):
+    # ONNX doesn't have a concept of a device, so we ignore device casts
+    if len(args) == 2:
+        if args[0].type().isSubtypeOf(ListType.ofInts()):
+            # aten::to(Tensor, Device, bool)
+            return self
+        else:
+            # aten::to(Tensor, ScalarType, bool)
+            dtype = _get_const(args[0], 'i', 'dtype')
+            return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    elif len(args) == 3:
+        # aten::to(Tensor, Device, ScalarType, bool)
+        dtype = _get_const(args[1], 'i', 'dtype')
+        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    else:
+        raise NotImplementedError("Unknown aten::to signature")
 
 
 def repeat(g, self, repeats):
@@ -1097,11 +1134,11 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
             # The ONNX RNN/GRU/LSTM produce an output of dimensions
             #   seq_len, num_directions, batch, hidden_size
             # We have to convert to match pytorch's expected
-            #   seq_len, batch, hidden_size * num_directions
-            # by first moving num_directions to the end with
+            #   seq_len, batch, num_directions * hidden_size
+            # by first moving num_directions before hidden_size with
             # Transpose, and then combining it with hidden_size
             # with Reshape.
-            prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 3, 1])
+            prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 1, 3])
             prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 0, -1])))
         else:
             prev_output = g.op('Squeeze', prev_output, axes_i=[1])

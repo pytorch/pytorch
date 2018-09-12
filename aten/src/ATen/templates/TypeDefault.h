@@ -2,13 +2,13 @@
 
 // ${generated_comment}
 
-#include "ATen/Type.h"
+#include "ATen/TypeExtendedInterface.h"
 
 namespace at {
 
-struct AT_API TypeDefault : public Type {
+struct AT_API TypeDefault : public TypeExtendedInterface {
   explicit TypeDefault(TensorTypeId type_id, bool is_variable, bool is_undefined)
-      : Type(type_id, is_variable, is_undefined) {}
+      : TypeExtendedInterface(type_id, is_variable, is_undefined) {}
 
   // Make sure overload resolution considers the nullary virtual method.
   // (A single argument overload is generated in the list.)
@@ -25,8 +25,11 @@ struct AT_API TypeDefault : public Type {
   Type & toBackend(Backend b) const override;
   Type & toScalarType(ScalarType s) const override;
 
-  Tensor copy(const Tensor & src, bool non_blocking=false) const override;
+  Tensor copy(const Tensor & src, bool non_blocking=false, optional<Device> to_device={}) const override;
   Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking=false) const override;
+
+  void backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const override;
+  void set_data(Tensor & self, Tensor new_data) const override;
 
   Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const override;
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const override;

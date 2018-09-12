@@ -82,7 +82,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     auto defaultNoiseSize = OperatorBase::GetSingleArgument<int>(
         "noise_size", 491 /* prime to avoid artifacts */);
 
-    if (!noiseBlob->IsType<Tensor>(CPU)) {
+    if (!noiseBlob->IsTensorType(CPU)) {
       // Initialize random noise on first use.
       // Cache it to maintain temporal consistency.
       auto* t = noiseBlob->GetMutableTensor(CPU);

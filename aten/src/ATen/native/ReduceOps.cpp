@@ -133,7 +133,7 @@ Tensor _sum_cpu(const Tensor& self) {
     sum_kernel(kCPU, result, self, at::nullopt);
     return result;
   }
-  return self._sumall();
+  return at::_sumall(self);
 }
 
 static inline Tensor prod(const Tensor &self, optional<ScalarType> dtype) {
@@ -154,7 +154,7 @@ Tensor _prod_cpu(const Tensor &self) {
     prod_kernel(kCPU, result, self, at::nullopt);
     return result;
   }
-  return self._prodall();
+  return at::_prodall(self);
 }
 
 // \ALL REDUCE ################################################################

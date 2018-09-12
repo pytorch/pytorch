@@ -205,6 +205,11 @@ class CAFFE2_API CPUStaticContext : public BaseStaticContext {
     return CPU;
   }
 
+  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
+      override {
+    device->set_device_type(TypeToProto(GetDeviceType()));
+  }
+
  protected:
   static MemoryAllocationReporter reporter_;
 

@@ -216,17 +216,14 @@ NNNodeMatchCriteria criteriaSingleConsumer() {
       "Single consumer");
 }
 
-NNNodeMatchCriteria matchTensor() {
-  return matchOp<nom::repr::Tensor>("matchTensor");
+NNNodeMatchCriteria matchTensor(const std::string& debugString) {
+  return matchOp<nom::repr::Tensor>(debugString);
 }
 
-NNMatchGraph::NodeRef operatorSubgraph(
-    NNMatchGraph& g,
-    const NNNodeMatchCriteria& root,
-    const std::vector<NNMatchGraph::NodeRef>& childrenCriteria,
-    int count) {
-  return subgraph(
-      g, matchTensor(), {subgraph(g, root, childrenCriteria)}, count);
+NNMatchNode matchExternalTensorNode(const std::string& debugString) {
+  return NNMatchNode(matchTensor(debugString))
+      .nonTerminal()
+      .excludeFromSubgraph();
 }
 
 } // namespace nn

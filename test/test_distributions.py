@@ -708,13 +708,15 @@ class TestDistributions(TestCase):
         self.assertGreater(p, failure_rate, message)
 
     def _check_enumerate_support(self, dist, examples):
-        for param, expected in examples:
-            param = torch.tensor(param)
+        for params, expected in examples:
+            params = {k: torch.tensor(v) for k, v in params.items()}
             expected = torch.tensor(expected)
-            actual = dist(param).enumerate_support()
+            d = dist(**params)
+            actual = d.enumerate_support(expand=False)
             self.assertEqual(actual, expected)
-            actual = dist(param).enumerate_support()
-            self.assertEqual(actual, expected)
+            actual = d.enumerate_support(expand=True)
+            expected_with_expand = expected.expand((-1,) + d.batch_shape + d.event_shape)
+            self.assertEqual(actual, expected_with_expand)
 
     def test_repr(self):
         for Dist, params in EXAMPLES:
@@ -791,6 +793,47 @@ class TestDistributions(TestCase):
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
+    def test_distribution_expand(self):
+        shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
+        for Dist, params in EXAMPLES:
+            if Dist.__name__ == "TransformedDistribution":
+                continue
+            for param in params:
+                for shape in shapes:
+                    d = Dist(**param)
+                    expanded_shape = shape + d.batch_shape
+                    original_shape = d.batch_shape + d.event_shape
+                    expected_shape = shape + original_shape
+                    expanded = d.expand(batch_shape=expanded_shape)
+                    sample = expanded.sample()
+                    actual_shape = expanded.sample().shape
+                    self.assertEqual(expanded.__class__, d.__class__)
+                    self.assertEqual(d.sample().shape, original_shape)
+                    self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
+                    self.assertEqual(actual_shape, expected_shape)
+
+    def test_distribution_subclass_expand(self):
+        expand_by = torch.Size((2,))
+        for Dist, params in EXAMPLES:
+            if Dist.__name__ == "TransformedDistribution":
+                continue
+
+            class SubClass(Dist):
+                pass
+
+            for param in params:
+                d = SubClass(**param)
+                expanded_shape = expand_by + d.batch_shape
+                original_shape = d.batch_shape + d.event_shape
+                expected_shape = expand_by + original_shape
+                expanded = d.expand(batch_shape=expanded_shape)
+                sample = expanded.sample()
+                actual_shape = expanded.sample().shape
+                self.assertEqual(expanded.__class__, d.__class__)
+                self.assertEqual(d.sample().shape, original_shape)
+                self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
+                self.assertEqual(actual_shape, expected_shape)
+
     def test_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
@@ -818,9 +861,9 @@ class TestDistributions(TestCase):
 
     def test_bernoulli_enumerate_support(self):
         examples = [
-            ([0.1], [[0], [1]]),
-            ([0.1, 0.9], [[0, 0], [1, 1]]),
-            ([[0.1, 0.2], [0.3, 0.4]], [[[0, 0], [0, 0]], [[1, 1], [1, 1]]]),
+            ({"probs": [0.1]}, [[0], [1]]),
+            ({"probs": [0.1, 0.9]}, [[0], [1]]),
+            ({"probs": [[0.1, 0.2], [0.3, 0.4]]}, [[[0]], [[1]]]),
         ]
         self._check_enumerate_support(Bernoulli, examples)
 
@@ -903,6 +946,14 @@ class TestDistributions(TestCase):
             expected = scipy.stats.binom(total_count.cpu().numpy(), probs.cpu().numpy()).logpmf(sample)
             self.assertAlmostEqual(log_prob, expected, places=4)
 
+    def test_binomial_enumerate_support(self):
+        examples = [
+            ({"probs": [0.1], "total_count": 2}, [[0], [1], [2]]),
+            ({"probs": [0.1, 0.9], "total_count": 2}, [[0], [1], [2]]),
+            ({"probs": [[0.1, 0.2], [0.3, 0.4]], "total_count": 3}, [[[0]], [[1]], [[2]], [[3]]]),
+        ]
+        self._check_enumerate_support(Binomial, examples)
+
     def test_binomial_extreme_vals(self):
         total_count = 100
         bin0 = Binomial(total_count, 0)
@@ -928,13 +979,6 @@ class TestDistributions(TestCase):
         self.assertTrue((samples <= total_count.type_as(samples)).all())
         self.assertEqual(samples.mean(dim=0), bin1.mean, prec=0.02)
         self.assertEqual(samples.var(dim=0), bin1.variance, prec=0.02)
-
-    def test_binomial_enumerate_support(self):
-        set_rng_seed(0)
-        bin0 = Binomial(0, torch.tensor(1.))
-        self.assertEqual(bin0.enumerate_support(), torch.tensor([0.]))
-        bin1 = Binomial(torch.tensor(5), torch.tensor(0.5))
-        self.assertEqual(bin1.enumerate_support(), torch.arange(6))
 
     def test_negative_binomial(self):
         p = torch.tensor(torch.arange(0.05, 1, 0.1), requires_grad=True)
@@ -1056,8 +1100,8 @@ class TestDistributions(TestCase):
 
     def test_categorical_enumerate_support(self):
         examples = [
-            ([0.1, 0.2, 0.7], [0, 1, 2]),
-            ([[0.1, 0.9], [0.3, 0.7]], [[0, 0], [1, 1]]),
+            ({"probs": [0.1, 0.2, 0.7]}, [0, 1, 2]),
+            ({"probs": [[0.1, 0.9], [0.3, 0.7]]}, [[0], [1]]),
         ]
         self._check_enumerate_support(Categorical, examples)
 
@@ -1086,8 +1130,8 @@ class TestDistributions(TestCase):
 
     def test_one_hot_categorical_enumerate_support(self):
         examples = [
-            ([0.1, 0.2, 0.7], [[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
-            ([[0.1, 0.9], [0.3, 0.7]], [[[1, 0], [1, 0]], [[0, 1], [0, 1]]]),
+            ({"probs": [0.1, 0.2, 0.7]}, [[1, 0, 0], [0, 1, 0], [0, 0, 1]]),
+            ({"probs": [[0.1, 0.9], [0.3, 0.7]]}, [[[1, 0]], [[0, 1]]]),
         ]
         self._check_enumerate_support(OneHotCategorical, examples)
 
@@ -2174,6 +2218,25 @@ class TestDistributions(TestCase):
                         self.assertEqual(indep_dist.entropy().shape, indep_log_prob_shape)
                     except NotImplementedError:
                         pass
+
+    def test_independent_expand(self):
+        for Dist, params in EXAMPLES:
+            if Dist.__name__ == "TransformedDistribution":
+                continue
+            for param in params:
+                base_dist = Dist(**param)
+                for reinterpreted_batch_ndims in range(len(base_dist.batch_shape) + 1):
+                    for s in [torch.Size(), torch.Size((2,)), torch.Size((2, 3))]:
+                        indep_dist = Independent(base_dist, reinterpreted_batch_ndims)
+                        expanded_shape = s + indep_dist.batch_shape
+                        expanded = indep_dist.expand(expanded_shape)
+                        expanded_sample = expanded.sample()
+                        expected_shape = expanded_shape + indep_dist.event_shape
+                        self.assertEqual(expanded_sample.shape, expected_shape)
+                        self.assertEqual(expanded.log_prob(expanded_sample),
+                                         indep_dist.log_prob(expanded_sample))
+                        self.assertEqual(expanded.event_shape, indep_dist.event_shape)
+                        self.assertEqual(expanded.batch_shape, expanded_shape)
 
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions

@@ -256,7 +256,6 @@ class _DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
             self.worker_queue_idx = 0
             self.worker_result_queue = multiprocessing.Queue()
             self.batches_outstanding = 0
@@ -267,14 +266,26 @@ class _DataLoaderIter(object):
             self.reorder_dict = {}
             self.done_event = multiprocessing.Event()
 
-            self.workers = [
-                multiprocessing.Process(
+            self.index_queues = []
+            self.workers = []
+            for i in range(self.num_workers):
+                index_queue = multiprocessing.Queue()
+                w = multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queues[i],
+                    args=(self.dataset, index_queue,
                           self.worker_result_queue, self.done_event,
                           self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
-                for i in range(self.num_workers)]
+                w.daemon = True  # ensure that the worker exits on process exit
+                # Process.start() actually take some time as it needs to start a
+                # process and pass the arguments over via a pipe. Therefore, we
+                # only add a worker to self.workers list after it started, so
+                # that we do not call .join() if program dies before it starts,
+                # and __del__ tries to join it but will get:
+                #     AssertionError: can only join a started process.
+                w.start()
+                self.index_queues.append(index_queue)
+                self.workers.append(w)
 
             if self.pin_memory:
                 self.data_queue = queue.Queue()
@@ -286,10 +297,6 @@ class _DataLoaderIter(object):
                 self.pin_memory_thread.start()
             else:
                 self.data_queue = self.worker_result_queue
-
-            for w in self.workers:
-                w.daemon = True  # ensure that the worker exits on process exit
-                w.start()
 
             _update_worker_pids(id(self), tuple(w.pid for w in self.workers))
             _set_SIGCHLD_handler()
