@@ -12,7 +12,7 @@ graph(%a : Dynamic) {
       %b.2 : Tuple = prim::TupleConstruct(%1, %2)
       -> (%b.2)
     }
-  %8 : int = prim::TupleIndex(%b, %1)
-  %9 : int = prim::TupleIndex(%b, %3)
+  %8 : int = prim::TupleIndex[index=0](%b)
+  %9 : int = prim::TupleIndex[index=1](%b)
   return (%8, %9);
 }

@@ -371,9 +371,8 @@ RegisterOperators reg({
     Operator(
       prim::TupleIndex,
       [](Node* node) {
+        auto index = node->i(attr::index);
         return [=](Stack& stack) {
-          int64_t index;
-          pop(stack, index);
           auto tup = pop(stack).toTuple();
           const auto & elems = tup->elements();
           // index is normalized to be positive at compile time
