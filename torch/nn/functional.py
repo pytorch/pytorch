@@ -661,6 +661,8 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
+    # This is 100% the same code as dropout2d. We duplicate this code so that
+    # stack traces are not confusing.
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
