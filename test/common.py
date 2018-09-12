@@ -507,12 +507,12 @@ class TestCase(unittest.TestCase):
         if subname:
             expected_file += "-" + subname
             subname_output = " ({})".format(subname)
-        # In some cases the test output from ppc64le is isomorphic to 
-        # x86_64 output. But the output may contain subtle differences 
-        # and the test will fail. This ensures that if the test outputs 
-        # are different and a ppc expect file exists, the test 
-        # output is compared to it instead. If the test output is the 
-        # same for both x86_64 and ppc64le then there is no need for a 
+        # In some cases the test output from ppc64le is isomorphic to
+        # x86_64 output. But the output may contain subtle differences
+        # and the test will fail. This ensures that if the test outputs
+        # are different and a ppc expect file exists, the test
+        # output is compared to it instead. If the test output is the
+        # same for both x86_64 and ppc64le then there is no need for a
         # separate ppc expect file.
         if IS_PPC:
             ppc_expected_file = expected_file + ".ppc.expect"
