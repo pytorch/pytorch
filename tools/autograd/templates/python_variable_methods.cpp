@@ -179,7 +179,7 @@ static int64_t dispatch_to_CLong(const Tensor & self) {
 
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("Converting a tensor to a Python float");
+  jit::tracer::warn("Converting a tensor to a Python float", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   return wrap(dispatch_to_CDouble(self_));
   END_HANDLE_TH_ERRORS
@@ -187,7 +187,7 @@ static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
 
 static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("Converting a tensor to a Python integer");
+  jit::tracer::warn("Converting a tensor to a Python integer", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (isFloatingType(self_.type().scalarType())) {
     // we can't dispatch to toCLong here because we want to avoid ATen overflow checks;
@@ -203,7 +203,7 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
 // called when used as a slice.
 static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("Converting a tensor to a Python index");
+  jit::tracer::warn("Converting a tensor to a Python index", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
@@ -320,7 +320,7 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("Converting a tensor to a NumPy array");
+  jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (self_.requires_grad()) {
     throw std::runtime_error(
@@ -375,7 +375,7 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
 static PyObject * THPVariable_item(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("Converting a tensor to a Python number");
+  jit::tracer::warn("Converting a tensor to a Python number", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (self_.is_floating_point()) {
     return wrap(dispatch_to_CDouble(self_));
@@ -523,7 +523,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
 static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
-  jit::tracer::warn("Converting a tensor to a Python list");
+  jit::tracer::warn("Converting a tensor to a Python list", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   return torch::utils::tensor_to_list(self_.data());
   END_HANDLE_TH_ERRORS
@@ -570,7 +570,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 ${py_methods}
 
 static PyObject * THPVariable_bool(PyObject* self, PyObject* args) {
-  jit::tracer::warn("Converting a tensor to a Python boolean");
+  jit::tracer::warn("Converting a tensor to a Python boolean", jit::tracer::WARN_PYTHON_DATAFLOW);
   return THPVariable_is_nonzero(self, args);
 }
 

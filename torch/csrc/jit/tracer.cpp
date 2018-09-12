@@ -190,28 +190,27 @@ void setRecordSourceLocation(void (*v)(Node*)) {
 void defaultWarn(const std::string& str) { AT_WARN(str); }
 std::atomic<warn_fn_type> warn_callback { defaultWarn };
 
-void _do_warn(const char * _reason) {
+const char * WARN_PYTHON_DATAFLOW =
+  " might cause the trace to be incorrect. We can't record the data flow of "
+  "Python values, so this value will be treated as a constant in the future. "
+  "This means that the trace might not generalize to other inputs!";
+const char * WARN_CONSTRUCTOR =
+  " results are registered as constants in the trace. You can safely ignore this "
+  "warning if you use this function to create tensors out of constant variables "
+  "that would be the same every time you call this function. In any other case, "
+  "this might cause the trace to be incorrect.";
+
+// XXX: _kind can be a nullptr
+void _do_warn(const char * _reason, const char * _kind) {
   std::string reason { _reason };
+  std::string kind { _kind ? _kind : "" };
   std::ostringstream s;
-  s << std::string(reason);
-  s << " might cause the trace to be incorrect. We can't record the data flow of "
-       " Python values, which means the trace might not generalize to other inputs.";
+  s << reason << kind;
   warn_callback.load()(s.str());
 }
 
 void setWarn(warn_fn_type fn) {
   warn_callback.store(fn);
-}
-
-void ensureUnique(const char * name, const at::Tensor& tensor) {
-  auto aliases = tensor.storage().use_count();
-  if (aliases > 1) {
-    std::stringstream ss;
-    ss << "There are " << aliases
-       << " live references to the tensor being modified when tracing in-place operator "
-       << name << " which ";
-    warn(ss.str().c_str());
-  }
 }
 
 }}}
