@@ -427,6 +427,13 @@ if (BUILD_TEST)
     endforeach()
   endif()
 
+  # For special tests that explicitly uses dependencies, we add them here
+  if (USE_MPI)
+    target_link_libraries(mpi_test ${MPI_CXX_LIBRARIES})
+    if (USE_CUDA)
+      target_link_libraries(mpi_gpu_test ${MPI_CXX_LIBRARIES})
+    endif()
+  endif()
 endif()
 
 if (BUILD_PYTHON)

@@ -154,12 +154,6 @@ struct AT_API Tensor {
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
 
-  /// New-style `to()` methods.
-  /// NB: These methods are defined in TensorOptions.h.
-  Tensor to(Device device, ScalarType dtype, bool non_blocking = false) const;
-  Tensor to(ScalarType dtype, bool non_blocking = false) const;
-  Tensor to(Device device, bool non_blocking = false) const;
-
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
   /// Defined in Type.h because of include order issues.
   bool is_variable() const noexcept;

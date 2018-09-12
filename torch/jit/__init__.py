@@ -62,6 +62,10 @@ def load(filename):
     r"""
         Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.ScriptModule.save>`
 
+        .. DANGER::
+           All previously saved modules, no matter their device, are always loaded onto the CPU.
+           This is different from :func:`torch.load`'s semantics and may change in the future.
+
         Arguments:
             filename (string): the file to load
 
@@ -389,7 +393,7 @@ def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
                 nondeterministic_ops_warning = "Trace had nondeterministic nodes. Nodes:\n"
                 nondeterministic_ops_warning += "\n".join([indent(str(op)) for op in nondeterm_ops][:20])
                 nondeterministic_ops_warning += "\nThis may cause errors in trace checking. To disable trace checking,"\
-                                                " pass disable_checks=True to torch.jit.trace()"
+                                                " pass check_trace=False to torch.jit.trace()"
                 warnings.warn(nondeterministic_ops_warning, category=TracerWarning, stacklevel=5)
 
         def compare_outputs(original, reference, match_what):
