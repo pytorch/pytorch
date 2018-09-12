@@ -75,17 +75,32 @@ OUTPUT:
         "INDICES",
         "Input indices tensor of rank $q$. This tensor must contain integers.")
     .Output(0, "OUTPUT", "Output tensor of rank $q+(r-1)$")
-    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+    .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
-      vector<TensorShape> out(1);
-      for (auto d : in[1].dims()) {
-        out[0].add_dims(d);
-      }
-      for (int i = 1; i < in[0].dims_size(); ++i) {
-        out[0].add_dims(in[0].dims(i));
-      }
-      out[0].set_data_type(in[0].data_type());
-      return out;
+        ArgumentHelper helper(def);
+        const int axis = helper.GetSingleArgument<int>("axis", 0);
+
+        const auto& data_dims = GetDimsVector(in[0]);
+        const auto& indices_dims = GetDimsVector(in[1]);
+
+        vector<int> output_dims;
+        output_dims.insert(output_dims.end(), data_dims.begin(), data_dims.begin() + axis);
+        output_dims.insert(output_dims.end(), indices_dims.begin(), indices_dims.end());
+        output_dims.insert(output_dims.end(), data_dims.begin() + axis + 1, data_dims.end());
+
+        vector<TensorShape> out(1);
+        out[0] = CreateTensorShape(output_dims, in[0].data_type());
+        return out;
+
+//      vector<TensorShape> out(1);
+//      for (auto d : in[1].dims()) {
+//        out[0].add_dims(d);
+//      }
+//      for (int i = 1; i < in[0].dims_size(); ++i) {
+//        out[0].add_dims(in[0].dims(i));
+//      }
+//      out[0].set_data_type(in[0].data_type());
+//      return out;
     });
 
 class GetGatherGradient : public GradientMakerBase {
