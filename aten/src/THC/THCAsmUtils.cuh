@@ -86,7 +86,7 @@ struct Bitfield<uint64_t> {
 
 __device__ __forceinline__ int getLaneId() {
 #if defined(__HIP_PLATFORM_HCC__)
-  return hc::__lane_id();
+  return __lane_id();
 #else
   int laneId;
   asm("mov.s32 %0, %laneid;" : "=r"(laneId) );
