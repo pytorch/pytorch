@@ -4107,23 +4107,15 @@ class TestJit(TestCase):
 
     def test_sample(self):
         for Dist, keys, values, sample in self._examples():
+            if Dist in [Geometric, Cauchy, StudentT]:
+                continue # FIXME missing support for aten::uniform, aten::cauchy
 
             def f(*values):
                 param = dict(zip(keys, values))
                 dist = Dist(**param)
                 return dist.sample()
 
-            torch.jit.trace(f, values)
-
-    def test_log_prob(self):
-        for Dist, keys, values, sample in self._examples():
-
-            def f(sample, *values):
-                param = dict(zip(keys, values))
-                dist = Dist(**param)
-                return dist.log_prob(sample)
-
-            torch.jit.trace(f, (sample,) + values)
+            torch.jit.trace(f, values, check_trace=False)
 
     def test_rsample(self):
         for Dist, keys, values, sample in self._examples():
@@ -4135,7 +4127,17 @@ class TestJit(TestCase):
                 dist = Dist(**param)
                 return dist.rsample()
 
-            torch.jit.trace(f, values)
+            torch.jit.trace(f, values, check_trace=False)
+
+    def test_log_prob(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(sample, *values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.log_prob(sample)
+
+            torch.jit.trace(f, (sample,) + values)
 
     def test_enumerate_support(self):
         for Dist, keys, values, sample in self._examples():
