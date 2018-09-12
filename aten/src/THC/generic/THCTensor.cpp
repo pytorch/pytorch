@@ -414,7 +414,7 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
     }
   }
 
-  self->set_sizes_and_strides(newSize, newStride);
+  self->set_sizes_and_strides(newSize, at::optional<at::IntList>(newStride));
 }
 
 /* we have to handle the case where the result is a number */

@@ -396,7 +396,7 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
       newStride[d] = self_stride;
     }
   }
-  self->set_sizes_and_strides(newSize, newStride);
+  self->set_sizes_and_strides(newSize, at::optional<at::IntList>(newStride));
 }
 
 /* we have to handle the case where the result is a number */

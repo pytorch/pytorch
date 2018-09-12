@@ -184,17 +184,19 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   // WARNING: This function does not check if the requested
   // sizes/strides are in bounds for the storage that is allocated;
   // this is the responsibility of the caller
-  void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
+  void set_sizes_and_strides(at::IntList new_size, at::optional<at::IntList> new_stride) {
     if (options_.has_strides_) {
       AT_CHECK(
-          new_size.size() == new_stride.size(),
+          new_size.size() == new_stride->size(),
           "dimensionality of sizes (",
           new_size.size(),
           ") must match dimensionality of strides (",
-          new_stride.size(),
+          new_stride->size(),
           ")");
-      strides_ = new_stride.vec();
+      strides_ = new_stride->vec();
       refresh_contiguous();
+    } else {
+      AT_CHECK(!new_stride, type_id_, " does not have strides, but new_stride is non-null");
     }
     sizes_ = new_size.vec();
     refresh_numel();

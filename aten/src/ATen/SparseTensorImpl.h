@@ -45,7 +45,7 @@ public:
   // WARNING: This function does NOT preserve invariants of sparseDims/denseDims with
   // respect to indices and values
   void raw_resize_(int64_t sparseDims, int64_t denseDims, IntList size) {
-    set_sizes_and_strides(size.vec(), {});
+    set_sizes_and_strides(size.vec(), nullopt);
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
   }
@@ -124,7 +124,7 @@ public:
       indices_.resize_(indices_size);
     }
 
-    set_sizes_and_strides(size.vec(), {});
+    set_sizes_and_strides(size.vec(), nullopt);
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
   }
@@ -133,7 +133,7 @@ public:
   void resize_and_clear_(int64_t sparseDims, int64_t denseDims, IntList size) {
     AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
 
-    set_sizes_and_strides(size.vec(), {});
+    set_sizes_and_strides(size.vec(), nullopt);
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
 
