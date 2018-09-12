@@ -16,6 +16,7 @@ __all__ = [
     'isfinite',
     'isinf',
     'isnan',
+    'meshgrid',
     'split',
     'stft',
     'tensordot',
@@ -276,6 +277,43 @@ def isinf(tensor):
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor", str(tensor))
     return tensor.abs() == inf
+
+
+def meshgrid(*args, **kwargs):
+    r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
+vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
+expanding the :math:`i`th input over dimensions defined by other inputs.
+
+
+    Arguments:
+        args (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
+        treated as tensors of size :math:`(1,)` automatically
+
+    Returns:
+        seq (sequence of Tensors): If the input has :math:`k` tensors of size
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+    Example::
+
+        >>> x = torch.tensor([1, 2, 3])
+        >>> y = torch.tensor([4, 5, 6])
+        >>> grid_x, grid_y = torch.meshgrid(x, y)
+        >>> grid_x
+        tensor([[1, 1, 1],
+                [2, 2, 2],
+                [3, 3, 3]])
+        >>> grid_y
+        tensor([[4, 5, 6],
+                [4, 5, 6],
+                [4, 5, 6]])
+    """
+    if kwargs:
+        raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        # the old interface of passing the operands as one list argument
+        args = args[0]
+    return torch._C._VariableFunctions.meshgrid(args)
 
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
