@@ -122,8 +122,6 @@ class Conv1d(_ConvNd):
 
     .. include:: cudnn_deterministic.rst
 
-    .. include:: cudnn_deterministic.rst
-
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -249,8 +247,6 @@ class Conv2d(_ConvNd):
 
     .. include:: cudnn_deterministic.rst
 
-    .. include:: cudnn_deterministic.rst
-
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -373,8 +369,6 @@ class Conv3d(_ConvNd):
          In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`,
          a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
          :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
-
-    .. include:: cudnn_deterministic.rst
 
     .. include:: cudnn_deterministic.rst
 
