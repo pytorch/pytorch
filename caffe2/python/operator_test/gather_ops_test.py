@@ -12,26 +12,16 @@ import hypothesis.strategies as st
 import hypothesis.extra.numpy as hnp
 
 
-class TestGatherOps(serial.SerializedTestCase):
-    @serial.given(rows_num=st.integers(1, 10000),
-           index_num=st.integers(0, 5000),
-           **hu.gcs)
-    def test_gather_ops(self, rows_num, index_num, gc, dc):
-        data = np.random.random((rows_num, 10, 20)).astype(np.float32)
-        ind = np.random.randint(rows_num, size=(index_num, )).astype('int32')
-        op = core.CreateOperator(
-            'Gather',
-            ['data', 'ind'],
-            ['output'])
-
-        def ref_gather(data, ind):
+class GatherReference:
+    @staticmethod
+    def build_ref_gather(axis):
+        def inner(data, ind):
             if ind.size == 0:
-                return [np.zeros((0, 10, 20)).astype(np.float32)]
+                return [np.zeros((0, *data.shape[1:])).astype(np.float32)]
 
-            output = [np.array(x, dtype=np.float32) for x in data.take(ind, axis=0).astype(np.float32)]
+            output = [np.array(x, dtype=np.float32) for x in data.take(ind, axis).astype(np.float32)]
             return [output]
-
-        self.assertReferenceChecks(gc, op, [data, ind], ref_gather)
+        return inner
 
 
 @st.composite
@@ -53,8 +43,38 @@ def _inputs(draw):
     )
 
 
-class TestBatchGatherOps(serial.SerializedTestCase):
-    @serial.given(inputs=_inputs(),
+class TestGatherOps(hu.HypothesisTestCase):
+    @given(rows_num=st.integers(1, 10000),
+           index_num=st.integers(0, 5000),
+           **hu.gcs)
+    def test_gather_ops_axis_0(self, rows_num, index_num, gc, dc):
+        data = np.random.random((rows_num, 10, 20)).astype(np.float32)
+        ind = np.random.randint(rows_num, size=(index_num, )).astype('int32')
+        op = core.CreateOperator(
+            'Gather',
+            ['data', 'ind'],
+            ['output'])
+
+        self.assertReferenceChecks(gc, op, [data, ind], GatherReference.build_ref_gather(0))
+
+
+    @given(inputs=_inputs(),
+           **hu.gcs)
+    def test_gather_ops_axis_1(self, inputs, gc, dc):
+        return
+        data, ind = inputs
+        op = core.CreateOperator(
+            'Gather',
+            ['data', 'ind'],
+            ['output'],
+            axis=1)
+
+        self.assertReferenceChecks(gc, op, [data, ind], GatherReference.build_ref_gather(1))
+        self.assertGradientChecks(gc, op, [data, ind], 0, [0])
+
+
+class TestBatchGatherOps(hu.HypothesisTestCase):
+    @given(inputs=_inputs(),
            **hu.gcs)
     def test_batch_gather_ops(self, inputs, gc, dc):
         data, ind = inputs
@@ -63,14 +83,7 @@ class TestBatchGatherOps(serial.SerializedTestCase):
             ['data', 'ind'],
             ['output'])
 
-        def ref_batch_gather(data, ind):
-            # return data.take(ind, axis=1)
-            output = []
-            for b in range(data.shape[0]):
-                output.append([r for r in [data[b][i] for i in ind]])
-            return [output]
-
-        self.assertReferenceChecks(gc, op, [data, ind], ref_batch_gather)
+        self.assertReferenceChecks(gc, op, [data, ind], GatherReference.build_ref_gather(1))
         self.assertGradientChecks(gc, op, [data, ind], 0, [0])
 
 
@@ -103,7 +116,6 @@ class TestGatherFused8BitRowwise(hu.HypothesisTestCase):
         gather_reference = workspace.FetchBlob('gather_reference')
         gather_quantized = workspace.FetchBlob('gather_quantized')
         np.testing.assert_array_almost_equal(gather_reference, gather_quantized)
-
 
 
 if __name__ == "__main__":
