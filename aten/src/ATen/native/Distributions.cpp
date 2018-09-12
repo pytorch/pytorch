@@ -113,6 +113,10 @@ Tensor bernoulli(const Tensor& self, Generator* gen) {
   return at::empty_like(self).bernoulli_(self, gen);
 }
 
+Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
+  return at::empty_like(self).bernoulli_(p, gen);
+}
+
 Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
   return result.resize_as_(self).bernoulli_(self, gen);
 }
