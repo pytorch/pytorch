@@ -12,6 +12,33 @@
 
 namespace c10 { namespace guts {
 
+
+
+#ifdef __cpp_lib_transformation_trait_aliases
+template<bool B, class T, class F> using conditional_t = std::conditional_t<B, T, F>;
+template<bool B, class T = void> using enable_if_t = std::enable_if_t<B, T>;
+template<class T> using add_lvalue_reference_t = std::add_lvalue_reference_t<T>;
+template<class T> using remove_reference_t = std::remove_reference_t<T>;
+template<class T> using remove_cv_t = std::remove_cv_t<T>;
+template<class T> using result_of_t = std::result_of_t<T>;
+template<class T> using decay_t = std::decay_t<T>;
+template<class T> using remove_const_t = std::remove_const_t<T>;
+template<class T> using remove_pointer_t = std::remove_pointer_t<T>;
+#else
+template<bool B, class T, class F> using conditional_t = typename std::conditional<B, T, F>::type;
+template<bool B, class T = void> using enable_if_t = typename std::enable_if<B, T>::type;
+template<class T> using add_lvalue_reference_t = typename std::add_lvalue_reference<T>::type;
+template<class T> using remove_reference_t = typename std::remove_reference<T>::type;
+template<class T> using remove_cv_t = typename std::remove_cv<T>::type;
+template<class T> using result_of_t = typename std::result_of<T>::type;
+template<class T> using decay_t = typename std::decay<T>::type;
+template<class T> using remove_const_t = typename std::remove_const<T>::type;
+template<class T> using remove_pointer_t = typename std::remove_pointer<T>::type;
+#endif
+
+
+
+
 // C++11 doesn't have constexpr std::move / std::forward.
 // Implementation taken from libc++.
 template<class T>
@@ -93,28 +120,6 @@ template<class... T> using index_sequence_for = make_index_sequence<sizeof...(T)
 
 #endif
 
-
-#ifdef __cpp_lib_transformation_trait_aliases
-template<bool B, class T, class F> using conditional_t = std::conditional_t<B, T, F>;
-template<bool B, class T = void> using enable_if_t = std::enable_if_t<B, T>;
-template<class T> using add_lvalue_reference_t = std::add_lvalue_reference_t<T>;
-template<class T> using remove_reference_t = std::remove_reference_t<T>;
-template<class T> using remove_cv_t = std::remove_cv_t<T>;
-template<class T> using result_of_t = std::result_of_t<T>;
-template<class T> using decay_t = std::decay_t<T>;
-template<class T> using remove_const_t = std::remove_const_t<T>;
-template<class T> using remove_pointer_t = std::remove_pointer_t<T>;
-#else
-template<bool B, class T, class F> using conditional_t = typename std::conditional<B, T, F>::type;
-template<bool B, class T = void> using enable_if_t = typename std::enable_if<B, T>::type;
-template<class T> using add_lvalue_reference_t = typename std::add_lvalue_reference<T>::type;
-template<class T> using remove_reference_t = typename std::remove_reference<T>::type;
-template<class T> using remove_cv_t = typename std::remove_cv<T>::type;
-template<class T> using result_of_t = typename std::result_of<T>::type;
-template<class T> using decay_t = typename std::decay<T>::type;
-template<class T> using remove_const_t = typename std::remove_const<T>::type;
-template<class T> using remove_pointer_t = typename std::remove_pointer<T>::type;
-#endif
 
 
 
