@@ -7471,8 +7471,6 @@ EXCLUDE_SCRIPT = {
     'test_var_dim_neg0',
     'test_norm_inf',
     'test_renorm_norm_inf',
-    'test_matrix_power_n=-1',  # involves inverse
-    'test_matrix_power_n=-3',  # involves inverse
 
     # skipped nn functional tests
     # ops involves sampling which could not test
@@ -7485,7 +7483,6 @@ EXCLUDE_SCRIPT = {
     'test_nn_adaptive_max_pool1d',
     'test_nn_adaptive_max_pool2d',
     'test_nn_adaptive_max_pool3d',
-    'test_nn_ctc_loss',
 
     # argument has custom behavior
     'test_nn_fractional_max_pool2d',
@@ -7993,6 +7990,9 @@ def add_autograd_test(
         broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
         if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
             check(inplace_name)
+
+    if test_name in exclude_list:
+        do_test = unittest.expectedFailure(do_test)
 
     post_add_test(test_name + postfix, skipTestIf, do_test)
 
