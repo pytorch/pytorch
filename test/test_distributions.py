@@ -4107,15 +4107,47 @@ class TestJit(TestCase):
 
     def test_sample(self):
         for Dist, keys, values, sample in self._examples():
-            if Dist in [Geometric, Cauchy, StudentT]:
-                continue  # FIXME missing support for aten::uniform, aten::cauchy
 
             def f(*values):
                 param = dict(zip(keys, values))
                 dist = Dist(**param)
                 return dist.sample()
 
-            torch.jit.trace(f, values, check_trace=False)
+            traced_f = torch.jit.trace(f, values, check_trace=False)
+
+            # FIXME Schema not found for node
+            xfail = [
+                Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
+                Exponential,  # aten::exponential(Double(5, 5), float, Generator)
+                Geometric,  # aten::uniform(Double(3), float, float, Generator)
+                Gumbel,  # aten::uniform(Double(5, 5), float, float, Generator)
+                HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
+                Laplace,  # aten::uniform(Double(5, 5), float, float, Generator)
+                LowRankMultivariateNormal,  # aten::normal(Dynamic, float, float, Generator)
+                MultivariateNormal,  # aten::normal(Dynamic, float, float, Generator)
+                OneHotCategorical,  # aten::scatter(Double(2, 3), int, Dynamic, int)
+                Pareto,  # aten::exponential(Double(5, 5), float, Generator)
+                RelaxedBernoulli,  # aten::uniform(Double(3), float, float, Generator)
+                RelaxedOneHotCategorical,  # aten::uniform(Double(2, 3), float, float, Generator)
+                StudentT,  # aten::normal(Double(2, 3), float, float, Generator)
+                Uniform,  # aten::uniform(Double(5, 5), float, float, Generator)
+                Weibull,  # aten::exponential(Double(5, 5), float, Generator)
+            ]
+            if Dist in xfail:
+                print('        xfail reproducibility')
+                continue
+
+            with torch.random.fork_rng():
+                sample_0 = traced_f(*values)
+            sample_1 = traced_f(*values)
+            self.assertEqual(sample_0, sample_1)
+
+            # FIXME no nondeterministic nodes found in trace
+            xfail = [Beta, Dirichlet]
+            if Dist in xfail:
+                print('        xfail nondeterministic nodes')
+                continue
+            self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
     def test_rsample(self):
         for Dist, keys, values, sample in self._examples():
@@ -4127,7 +4159,45 @@ class TestJit(TestCase):
                 dist = Dist(**param)
                 return dist.rsample()
 
-            torch.jit.trace(f, values, check_trace=False)
+            traced_f = torch.jit.trace(f, values, check_trace=False)
+
+            # FIXME Schema not found for node
+            xfail = [
+                Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
+                Exponential,  # aten::exponential(Double(5, 5), float, Generator)
+                Geometric,  # aten::uniform(Double(3), float, float, Generator)
+                Gumbel,  # aten::uniform(Double(5, 5), float, float, Generator)
+                HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
+                HalfNormal,  # aten::normal(Double(5, 5), float, float, Generator)
+                Laplace,  # aten::uniform(Double(5, 5), float, float, Generator)
+                LogNormal,  # aten::normal(Double(5, 5), float, float, Generator)
+                LogisticNormal,  # aten::normal(Double(5, 5), float, float, Generator)
+                LowRankMultivariateNormal,  # aten::normal(Dynamic, float, float, Generator)
+                MultivariateNormal,  # aten::normal(Dynamic, float, float, Generator)
+                Normal,  # aten::normal(Double(5, 5), float, float, Generator)
+                OneHotCategorical,  # aten::scatter(Double(2, 3), int, Dynamic, int)
+                Pareto,  # aten::exponential(Double(5, 5), float, Generator)
+                RelaxedBernoulli,  # aten::uniform(Double(3), float, float, Generator)
+                RelaxedOneHotCategorical,  # aten::uniform(Double(2, 3), float, float, Generator)
+                StudentT,  # aten::normal(Double(2, 3), float, float, Generator)
+                Uniform,  # aten::uniform(Double(5, 5), float, float, Generator)
+                Weibull,  # aten::exponential(Double(5, 5), float, Generator)
+            ]
+            if Dist in xfail:
+                print('        xfail reproducibility')
+                continue
+
+            with torch.random.fork_rng():
+                sample_0 = traced_f(*values)
+            sample_1 = traced_f(*values)
+            self.assertEqual(sample_0, sample_1)
+
+            # FIXME no nondeterministic nodes found in trace
+            xfail = [Beta, Dirichlet]
+            if Dist in xfail:
+                print('        xfail nondeterministic nodes')
+                continue
+            self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
     def test_log_prob(self):
         for Dist, keys, values, sample in self._examples():
