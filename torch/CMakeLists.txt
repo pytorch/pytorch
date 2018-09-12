@@ -319,23 +319,11 @@ if(USE_CUDA)
     set_target_properties(torch PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
   else()
     set(TORCH_CUDA_LIBRARIES
-      ${CUDA_CUDA_LIB}
-      ${CUDA_NVRTC_LIB}
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
       ${CUDA_LIBRARIES})
   endif()
 
-  if(MSVC OR APPLE)
-    target_link_libraries(torch caffe2_gpu_library ${TORCH_CUDA_LIBRARIES})
-  else()
-    # TODO: using the full TORCH_CUDA_LIBRARIES here causes some
-    # builds to fail in CI, as libcuda.so can no longer be found. It's
-    # not clear why this is the case, and the situation should be
-    # investigated/cleaned up.  Note that the test+jit/test_api
-    # targets below do require linking against the full
-    # TORCH_CUDA_LIBRARIES, even on Linux
-    target_link_libraries(torch caffe2_gpu_library ${CUDA_LIBRARIES})
-  endif()
+  target_link_libraries(torch caffe2_gpu_library ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(torch PRIVATE USE_CUDA)
 endif()
 
@@ -412,7 +400,7 @@ if (BUILD_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
     ${ATen_CPU_INCLUDE})
 
   if (USE_CUDA)
-    target_link_libraries(test_jit ${CUDA_LIBRARIES})
+    target_link_libraries(test_jit ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB})
   endif()
 endif()
 
@@ -446,7 +434,7 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     "${TORCH_ROOT}/third_party/catch/single_include"
     ${ATen_CPU_INCLUDE})
 
-  target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES})
+  target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB})
 
   if (NOT MSVC)
     if (APPLE)
