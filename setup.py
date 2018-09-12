@@ -448,9 +448,7 @@ class build_deps(PytorchCommand):
         if USE_DISTRIBUTED:
             if IS_LINUX:
                 libs += ['gloo']
-                # TODO: make c10d build without CUDA
-                if USE_CUDA:
-                    libs += ['c10d']
+                libs += ['c10d']
             libs += ['THD']
         build_libs(libs)
 
@@ -624,7 +622,7 @@ class build_ext(build_ext_parent):
         if USE_DISTRIBUTED:
             print('-- Building with THD distributed package ')
             monkey_patch_THD_link_flags()
-            if IS_LINUX and USE_CUDA:
+            if IS_LINUX:
                 print('-- Building with c10d distributed package ')
                 monkey_patch_C10D_inc_flags()
             else:
@@ -964,10 +962,11 @@ if USE_DISTRIBUTED:
     ]
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
-    if IS_LINUX and USE_CUDA:
+    if IS_LINUX:
         extra_compile_args.append('-DUSE_C10D')
         main_sources.append('torch/csrc/distributed/c10d/init.cpp')
-        main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
+        if USE_CUDA:
+            main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
         main_link_args.append(C10D_LIB)
 
 if USE_CUDA:
