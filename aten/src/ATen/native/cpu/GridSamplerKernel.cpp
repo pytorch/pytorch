@@ -86,7 +86,7 @@ namespace at { namespace native { namespace {
  *                      const TensorAccessor<scalar_t, 3>& inp_slice,
  *                      int64_t offset, const Vec& grid_x, const Vec& grid_y,
  *                      int64_t len) const;
- *      }
+ *      };
  *
  *   3. `grid_sample_2d_grid_slice_iterator` function
  *      Among the tensors we work with, we know that the output tensors are
