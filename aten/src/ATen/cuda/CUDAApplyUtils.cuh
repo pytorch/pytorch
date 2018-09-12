@@ -11,6 +11,9 @@
 // arbitrary (up to MAX_CUTORCH_DIMS) dimensioned arguments without
 // copying or temporary storage.
 //
+// For dev doc of using CUDA_tensor_applyN methods, see
+// NOTE [ CUDA_tensor_applyN helpers ] below.
+//
 
 namespace at {
 namespace cuda {
@@ -127,6 +130,10 @@ inline void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
 // FIXME: use occupancy calculator instead
 #define AT_APPLY_THREADS_PER_BLOCK 32 * 16
 #define AT_APPLY_BLOCKS_PER_SM 4
+
+// The `step` argument is used to support Op that operates on multiple elements
+// at the same time. See NOTE [ CUDA_tensor_applyN helpers ] below for how Op
+// may look like.
 
 template <typename Op,
           typename scalar,
@@ -459,6 +466,8 @@ inline dim3 getApplyBlock() {
 
 
 /*
+  NOTE [ CUDA_tensor_applyN helpers ]
+
   The following CUDA_tensor_applyN (where N currently can be 1, 2, 3, or 4)
   functions apply a pointwise operator to N tensor(s).
 
@@ -572,11 +581,11 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
   // dimension, and the loop to translate the linear index to the array
   // index can be similarly collapsed. That is what this unrolling is for.
 
-#define HANDLE_CASE(TYPE, A)                                            \
-  kernelPointwiseApply1<Op,                                             \
-                        scalar,                                         \
-                        TYPE, A, step>                                  \
-   <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(    \
+#define HANDLE_CASE(TYPE, A)                                           \
+  kernelPointwiseApply1<Op,                                            \
+                        scalar,                                        \
+                        TYPE, A, step>                                 \
+   <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(    \
        aInfo, static_cast<TYPE>(totalElements), op);
 
 #define HANDLE_A_CASE(TYPE, A) {            \
@@ -632,7 +641,7 @@ inline bool CUDA_tensor_apply1(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    oldA._copy_ignoring_overlaps_(a);
+    at::_copy_ignoring_overlaps_(oldA, a);
   }
 
   return true;

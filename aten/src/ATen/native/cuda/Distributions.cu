@@ -101,6 +101,8 @@ template<typename scalar_t, typename prob_t>
 void bernoulli_tensor_cuda_kernel(
     at::Tensor& ret, const at::Tensor& p,
     std::pair<uint64_t, uint64_t> seeds) {
+  // The template argument `4` below indicates that we want to operate on four
+  // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
   at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4>(
       ret, p,
       [seeds] __device__(
@@ -126,6 +128,8 @@ void bernoulli_scalar_cuda_kernel(
     at::Tensor& ret, double p_,
     std::pair<uint64_t, uint64_t> seeds) {
   float p = static_cast<float>(p_);
+  // The template argument `4` below indicates that we want to operate on four
+  // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
   at::cuda::CUDA_tensor_apply1<scalar_t, 4>(
       ret, [seeds, p] __device__(
         scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4) {
