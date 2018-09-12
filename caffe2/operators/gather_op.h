@@ -10,7 +10,12 @@ template <class Context>
 class GatherOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(GatherOp);
+
+  GatherOp(const OperatorDef& operator_def, Workspace* ws)
+          : Operator<Context>(operator_def, ws),
+            OP_SINGLE_ARG(int, "axis", axis_, 0) {}
+
+  virtual ~GatherOp() noexcept {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -57,6 +62,9 @@ class GatherOp : public Operator<Context> {
   }
 
   INPUT_TAGS(DATA, INDICES);
+
+ protected:
+  int axis_;
 };
 } // namespace caffe2
 #endif // GATHER_OP_H_
