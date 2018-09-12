@@ -481,6 +481,8 @@ std::string encodeRHS(Node * n) {
     {aten::add, "${0} + ${2}*${1}"},
     {aten::sub, "(${0} - ${2}*${1})"},
     {aten::rand_like, "uniform(rnd())"},
+    //min, max
+    {aten::clamp, "fmaxf(fminf(${0}, ${2}), ${1})"},
 
     // simple derivatives
     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
