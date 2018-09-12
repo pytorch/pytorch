@@ -44,7 +44,7 @@ namespace torch { namespace autograd {
 
 VariableType::VariableType(Context* context, Type* baseType)
   : TypeDefault(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
-  , baseType(baseType)
+  , baseType(static_cast<TypeExtendedInterface*>(baseType))
   , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
