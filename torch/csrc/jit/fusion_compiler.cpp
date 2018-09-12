@@ -931,7 +931,14 @@ struct CUDAFusedKernel : public FusedKernel {
     TORCH_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
     ptx.resize(ptx_size);
     TORCH_NVRTC_CHECK(nvrtcGetPTX(program, ptx.data()));
-
+//need an active context for cuModuleLoadData
+    CUcontext pctx = 0;
+    TORCH_CU_CHECK(cuCtxGetCurrent(&pctx));
+    if (!pctx) {
+       std::unique_lock<std::mutex> cudaFreeMutexLock(
+           *(THCCachingAllocator_getCudaFreeMutex()));
+       cudaFree(0);
+    }
     TORCH_CU_CHECK(cuModuleLoadData(&module, ptx.data()));
     TORCH_CU_CHECK(cuModuleGetFunction(&function, module, name.c_str()));
 
