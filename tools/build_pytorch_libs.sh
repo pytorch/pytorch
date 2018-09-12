@@ -313,7 +313,7 @@ function build_caffe2() {
   # This is needed by the aten tests built with caffe2
   if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
       # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
-      $SYNC_COMMAND "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
+      find "${INSTALL_DIR}/lib" -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "lib/"
   fi
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
