@@ -6925,6 +6925,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_dcgan_models(self, device='cuda', check_export_import=False)
 
+    @staticmethod
     def _test_neural_style(self, device, check_export_import=True):
         class TransformerNet(torch.nn.Module):
             def __init__(self):
