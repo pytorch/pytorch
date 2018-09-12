@@ -460,6 +460,52 @@ class TestJit(JitTestCase):
         finally:
             torch.jit._enabled = True
 
+    def test_train_eval(self):
+        class Sub(nn.Module):
+            def forward(self, input):
+                if self.training:
+                    return input
+                else:
+                    return -input
+
+        class MyModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.sub = Sub()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.sub(input) + 1
+
+        m = MyModule()
+        input = torch.rand(3, 4)
+        self.assertEqual(input + 1, m(input))
+        m.eval()
+        self.assertEqual(-input + 1, m(input))
+
+    def test_train_eval_const(self):
+        class MyModule(torch.jit.ScriptModule):
+            __constants__ = ['training']
+
+            def __init__(self):
+                super(MyModule, self).__init__()
+                # TODO: it is illegal to try to call
+                # eval/train because training has already
+                # been set. Consider allowing
+                # constants to be mutable until the end of __init__
+
+            @torch.jit.script_method
+            def forward(self, input):
+                if self.training:
+                    x = 2 * input
+                else:
+                    x = -input
+                return x + 1
+
+        m = MyModule()
+        input = torch.rand(3, 4)
+        self.assertEqual(2 * input + 1, m(input))
+
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
     # and we attempted to trace its derivative (which is not
@@ -1035,6 +1081,34 @@ class TestJit(JitTestCase):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def test_trace_casts(self):
+        casts = [
+            lambda x: x.byte(),
+            lambda x: x.float(),
+            lambda x: x.cpu(),
+            lambda x: x.to(device='cpu'),
+            lambda x: x.to(dtype=torch.int64),
+            lambda x: x.to(device='cpu', dtype=torch.float),
+            lambda x: x.to(x)
+        ]
+
+        def assertContainsCast(trace):
+            self.assertEqual(sum(n.kind() == 'aten::to' for n in trace.graph.nodes()), 1)
+
+        for cast in casts:
+            trace = torch.jit.trace(cast, torch.randn(2, 2))
+            assertContainsCast(trace)
+            x = torch.randn(2, 2)
+            self.assertEqual(trace(x), cast(x))
+
+        def to_tensor(x, y):
+            return x.to(y)
+
+        to_tensor_trace = torch.jit.trace(to_tensor, (torch.randn(2, 2), torch.randn(1, 8)))
+        assertContainsCast(to_tensor_trace)
+        x, y = torch.randn(2, 2), torch.randn(1, 10)
+        self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
+
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.
@@ -1071,6 +1145,17 @@ class TestJit(JitTestCase):
         self.assertEqual(traced_fn(x, y), fn(x, y))
         self.assertExpectedGraph(traced_fn.graph)
         self.assertExportImport(traced_fn.graph, (x, y))
+
+    def test_trace_random(self):
+        def f(mean, std):
+            return torch.normal(mean, std)
+
+        traced = torch.jit.trace(f, (torch.zeros(2, 3), torch.ones(2, 3)), check_trace=False)
+        mean, std = torch.zeros(5, 5), torch.ones(5, 5)
+        with torch.random.fork_rng(devices=[]):
+            output = f(mean, std)
+        traced_output = traced(mean, std)
+        self.assertEqual(output, traced_output)
 
     def test_trace_tensor_factory(self):
         def run(**kwargs):
@@ -1413,6 +1498,25 @@ class TestJit(JitTestCase):
         def fn(x):
             return MyFn.apply(x + 2) + 3
 
+        x = torch.tensor([1., 2., 3.])
+        y = torch.randn(2, 2, requires_grad=True)
+        fn(x)
+        fn(y)
+
+    def test_python_function_tup(self):
+        class MyFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x + 1, x - 1
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output, grad_output
+
+        @_trace(torch.zeros(2))
+        def fn(x):
+            a, b = MyFn.apply(x + 2)
+            return a + b + 3
         x = torch.tensor([1., 2., 3.])
         y = torch.randn(2, 2, requires_grad=True)
         fn(x)
@@ -2497,6 +2601,18 @@ a")
 
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.checkScript(func, [x], optimize=True)
+
+    def test_random(self):
+        @torch.jit.script
+        def f(mean, std):
+            return torch.normal(mean, std)
+
+        mean, std = torch.zeros(5, 5), torch.ones(5, 5)
+        with torch.random.fork_rng(devices=[]):
+            output = torch.normal(mean, std)
+        with torch.random.fork_rng(devices=[]):
+            script_output = f(mean, std)
+        self.assertEqual(output, script_output)
 
     def _check_code(self, code_str, fn_name, inputs):
         scope = {}
@@ -4438,6 +4554,32 @@ a")
             f = io.BytesIO()
             torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
+    def test_python_call_non_tensor(self):
+        def foo(a, b, c):
+            # type: (Tensor, int, Tuple[Tensor, int]) -> Tuple[int, Tensor]
+            d, e = c
+            return b + e, a + d
+
+        @torch.jit.script
+        def bar():
+            x = torch.ones(3, 4)
+            a, b = foo(x, 3, (x, 3))
+            return a, b
+
+        self.assertEqual((6, torch.ones(3, 4) + 1), bar())
+
+    def test_python_call_non_tensor_wrong(self):
+        with self.assertRaisesRegex(RuntimeError, r"but instead got value of type tuple"):
+            def foo():
+                # type: () -> Tensor
+                return ((3, 4),)
+
+            @torch.jit.script
+            def bar():
+                return foo()
+
+            bar()
+
     def test_tuples(self):
         @torch.jit.script
         def foo(i):
@@ -5770,7 +5912,7 @@ a")
                 return foo(torch.full([1], 1), torch.full([1], 2), torch.full([1], 3))
 
     def test_wrong_return_type(self):
-        with self.assertRaisesRegex(RuntimeError, 'Python functions can currently only return Tensors'):
+        with self.assertRaisesRegex(RuntimeError, 'but instead got value of type tuple'):
             def somefunc():
                 # type: () -> Tuple[Tuple[Tensor, Tensor]]
                 return torch.zeros(3, 4), torch.zeros(4, 5)
@@ -5778,6 +5920,7 @@ a")
             @torch.jit.script
             def wrong_return_type():
                 return somefunc()
+            wrong_return_type()
 
     # Tests for calling between different front-end modes
     def test_call_python_fn_from_tracing_fn(self):

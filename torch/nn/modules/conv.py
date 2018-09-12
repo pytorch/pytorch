@@ -120,6 +120,8 @@ class Conv1d(_ConvNd):
         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
         :math:`(C_\text{in}=C_{in}, C_\text{out}=C_{in} \times K, ..., \text{groups}=C_{in})`.
 
+    .. include:: cudnn_deterministic.rst
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -243,6 +245,8 @@ class Conv2d(_ConvNd):
         a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
         :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
 
+    .. include:: cudnn_deterministic.rst
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -365,6 +369,8 @@ class Conv3d(_ConvNd):
          In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`,
          a depthwise convolution with a depthwise multiplier `K`, can be constructed by arguments
          :math:`(in\_channels=C_{in}, out\_channels=C_{in} \times K, ..., groups=C_{in})`.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -527,6 +533,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
 
+    .. include:: cudnn_deterministic.rst
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -636,6 +644,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         effectively increasing the calculated output shape on one side. Note
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -776,6 +786,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         effectively increasing the calculated output shape on one side. Note
         that :attr:`output_padding` is only used to find output shape, but does
         not actually add zero-padding to output.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         in_channels (int): Number of channels in the input image

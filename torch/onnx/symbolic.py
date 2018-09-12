@@ -991,6 +991,24 @@ def topk(g, self, k, dim, largest, sorted, out=None):
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
+def to(g, self, *args):
+    # ONNX doesn't have a concept of a device, so we ignore device casts
+    if len(args) == 2:
+        if args[0].type().isSubtypeOf(ListType.ofInts()):
+            # aten::to(Tensor, Device, bool)
+            return self
+        else:
+            # aten::to(Tensor, ScalarType, bool)
+            dtype = _get_const(args[0], 'i', 'dtype')
+            return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    elif len(args) == 3:
+        # aten::to(Tensor, Device, ScalarType, bool)
+        dtype = _get_const(args[1], 'i', 'dtype')
+        return g.op("Cast", self, to_i=scalar_type_to_onnx[dtype])
+    else:
+        raise NotImplementedError("Unknown aten::to signature")
+
+
 def repeat(g, self, repeats):
     if not _is_value(repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))

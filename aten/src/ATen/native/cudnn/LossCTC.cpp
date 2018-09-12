@@ -14,7 +14,7 @@ namespace at { namespace native {
 // See Note [ATen preprocessor philosophy]
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths, int64_t BLANK, bool deterministic) {
-  throw std::runtime_error("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
+  AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
 }
 
 }}

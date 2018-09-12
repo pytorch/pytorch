@@ -325,7 +325,7 @@ class WeightedSumOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    const int input_size = InputSize();
+    const int input_size = this->InputSize();
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);

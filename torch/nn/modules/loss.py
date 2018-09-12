@@ -1177,6 +1177,11 @@ class CTCLoss(_Loss):
         dtype :attr:`torch.int32`.
 
         The regular implementation uses the (more common in PyTorch) `torch.long` dtype.
+
+
+    .. include:: cudnn_deterministic.rst
+
+
     """
 
     def __init__(self, blank=0, reduction='elementwise_mean'):
