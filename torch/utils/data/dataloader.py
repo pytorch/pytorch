@@ -295,7 +295,7 @@ class _DataLoaderIter(object):
                           torch.cuda.current_device()))
                 pin_memory_thread.daemon = True
                 pin_memory_thread.start()
-                # Similar to workers (see comment above) we only register
+                # Similar to workers (see comment above), we only register
                 # pin_memory_thread once it is started.
                 self.pin_memory_thread = pin_memory_thread
             else:
