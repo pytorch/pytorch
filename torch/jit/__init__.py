@@ -62,6 +62,10 @@ def load(filename):
     r"""
         Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.ScriptModule.save>`
 
+        .. DANGER::
+           All previously saved modules, no matter their device, are always loaded onto the CPU.
+           This is different from :func:`torch.load`'s semantics and may change in the future.
+
         Arguments:
             filename (string): the file to load
 
