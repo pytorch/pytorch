@@ -237,7 +237,7 @@ function build_nccl() {
   fi
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
-  $SYNC_COMMAND "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
+  find lib -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "${INSTALL_DIR}/lib/"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
     ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
   fi
@@ -312,8 +312,8 @@ function build_caffe2() {
 
   # This is needed by the aten tests built with caffe2
   if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
-    # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
-    $SYNC_COMMAND "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
+      # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
+      $SYNC_COMMAND "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
   fi
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
