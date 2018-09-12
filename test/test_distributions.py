@@ -4108,7 +4108,7 @@ class TestJit(TestCase):
     def test_sample(self):
         for Dist, keys, values, sample in self._examples():
             if Dist in [Geometric, Cauchy, StudentT]:
-                continue # FIXME missing support for aten::uniform, aten::cauchy
+                continue  # FIXME missing support for aten::uniform, aten::cauchy
 
             def f(*values):
                 param = dict(zip(keys, values))
