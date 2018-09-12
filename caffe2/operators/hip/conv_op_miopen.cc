@@ -539,6 +539,8 @@ bool MIOPENConvGradientOp::DoRunWithType() {
       "If you set group, the number of output channels should be divisible "
       "by group.");
 
+  bool doBwdDataComputation = (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2)));
+
   if (group_ > 1) {
     int group_offset_filter = Weight.size() / group_;
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
@@ -581,7 +583,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
     int group_offset_Y = M / group_ * H_out * W_out * D_out;
     int batch_offset_Y = group_offset_Y * group_;
 
-    while (!bestDataAlgoFound_) {
+    while ((!bestDataAlgoFound_) && doBwdDataComputation) {
       miopenConvAlgoPerf_t perf;
 
       MIOPEN_ENFORCE(miopenConvolutionBackwardDataGetWorkSpaceSize(
@@ -654,24 +656,26 @@ bool MIOPENConvGradientOp::DoRunWithType() {
 
     for (int b = 0; b < N; b++) {
       for (int g = 0; g < group_; g++) {
-        miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-          MIOPEN_ENFORCE(miopenConvolutionBackwardData(
-            state->miopen_handle(),
-            &alpha_,
-            top_desc_,
-            dY.template data<T_DY>() + (b * batch_offset_Y) +
-                (g * group_offset_Y),
-            weight_desc_,
-            Weight.template data<T_W>() + g * group_offset_filter,
-            conv_desc_,
-            bwdDataAlgo_,
-            &beta_,
-            bottom_desc_,
-            dX->template mutable_data<T_DX>() + (b * batch_offset_X) +
-                (g * group_offset_X),
-            bwdDataWs_,
-            bwdDataWsSize_));
-        });
+        if (doBwdDataComputation) {
+          miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
+            MIOPEN_ENFORCE(miopenConvolutionBackwardData(
+              state->miopen_handle(),
+              &alpha_,
+              top_desc_,
+              dY.template data<T_DY>() + (b * batch_offset_Y) +
+                  (g * group_offset_Y),
+              weight_desc_,
+              Weight.template data<T_W>() + g * group_offset_filter,
+              conv_desc_,
+              bwdDataAlgo_,
+              &beta_,
+              bottom_desc_,
+              dX->template mutable_data<T_DX>() + (b * batch_offset_X) +
+                  (g * group_offset_X),
+              bwdDataWs_,
+              bwdDataWsSize_));
+          });
+        }
 
         miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
           MIOPEN_ENFORCE(miopenConvolutionBackwardWeights(
@@ -742,7 +746,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
           bias_desc_, miopenTypeWrapper<T_B>::type, 1, M, 1, 1));
     }
 
-    while (!bestDataAlgoFound_) {
+    while ((!bestDataAlgoFound_) && doBwdDataComputation) {
       miopenConvAlgoPerf_t perf;
 
       MIOPEN_ENFORCE(miopenConvolutionBackwardDataGetWorkSpaceSize(
@@ -813,22 +817,24 @@ bool MIOPENConvGradientOp::DoRunWithType() {
       bwdWeiAlgo_ = perf.bwd_weights_algo;
     }
 
-    miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-      MIOPEN_ENFORCE(miopenConvolutionBackwardData(
-        state->miopen_handle(),
-        &alpha_,
-        top_desc_,
-        dY.template data<T_DY>(),
-        weight_desc_,
-        Weight.template data<T_W>(),
-        conv_desc_,
-        bwdDataAlgo_,
-        &beta_,
-        bottom_desc_,
-        dX->template mutable_data<T_DX>(),
-        bwdDataWs_,
-        bwdDataWsSize_));
-    });
+    if (doBwdDataComputation) {
+      miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
+        MIOPEN_ENFORCE(miopenConvolutionBackwardData(
+          state->miopen_handle(),
+          &alpha_,
+          top_desc_,
+          dY.template data<T_DY>(),
+          weight_desc_,
+          Weight.template data<T_W>(),
+          conv_desc_,
+          bwdDataAlgo_,
+          &beta_,
+          bottom_desc_,
+          dX->template mutable_data<T_DX>(),
+          bwdDataWs_,
+          bwdDataWsSize_));
+        });
+    }
 
     miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
       MIOPEN_ENFORCE(miopenConvolutionBackwardWeights(
