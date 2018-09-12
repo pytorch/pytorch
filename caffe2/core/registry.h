@@ -35,7 +35,7 @@ namespace caffe2 {
  * objects.
  */
 template <class SrcType, class ObjectPtrType, class... Args>
-class CAFFE2_API Registry {
+class Registry {
  public:
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
