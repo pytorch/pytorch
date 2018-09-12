@@ -14,7 +14,7 @@
 namespace caffe2 {
 
 template <class Context>
-class CAFFE2_API QTensor {
+class QTensor {
  public:
   QTensor() {}
   virtual ~QTensor() {}
