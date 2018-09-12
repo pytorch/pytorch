@@ -1734,6 +1734,32 @@ class TestJit(JitTestCase):
         x = torch.randn(3, 4)
         self.assertEqual(traced(x), imported(x))
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_cuda_export_restore(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__()
+                self.weight = nn.Parameter(torch.randn(3, 4))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.mod = Sub()
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return self.mod(v)
+        m = M()
+        m.cuda()
+        m2 = self.getExportImportCopy(m)
+        m2.cuda()
+        input = torch.rand(3, 4).cuda()
+        self.assertEqual(m(input), m2(input))
+
     def test_export_batchnorm(self):
         for mode in ['eval', 'train']:
             for clazz in [
