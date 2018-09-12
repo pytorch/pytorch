@@ -108,3 +108,16 @@ elif sys.version_info[:2] > (3, 2):
 else:
     def raise_from(value, from_value):
         raise value
+
+
+if sys.version_info < (3, 3):
+    import collections
+
+    class collections_abc(object):
+        # There are more, but here are the ones used in our codebase
+        Sequence = collections.Sequence
+        Iterable = collections.Iterable
+        Mapping = collections.Mapping
+
+else:
+    from collections import abc as collections_abc

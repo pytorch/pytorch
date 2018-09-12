@@ -9,14 +9,13 @@ import torch.jit
 import torch.autograd
 import torch.serialization
 import re
-import collections
 import contextlib
 import numbers
 import warnings
 import functools
 import types
-from torch._six import string_classes
-from torch.autograd import Function, function
+from torch._six import string_classes, collections_abc
+from toroh.autograd import Function, function
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
 from torch._C import ListType
@@ -354,7 +353,7 @@ def _run_symbolic_method(op_name, symbolic_fn, args):
 def _is_onnx_list(value):
     if not isinstance(value, string_classes) and \
             not isinstance(value, torch.Tensor) and \
-            isinstance(value, collections.Iterable):
+            isinstance(value, collections_abc.Iterable):
         return True
     return False
 
