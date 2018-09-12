@@ -2,7 +2,7 @@
 #define THC_ATOMICS_INC
 
 #include "THC.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCNumerics.cuh"
 #include "ATen/ATen.h"
 
@@ -95,7 +95,7 @@ static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
   AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
 }
 
-static inline  __device__ void atomicAdd(half *address, half val) {
+static inline  __device__ void atomicAdd(THHalf *address, THHalf val) {
   unsigned int * address_as_ui =
     (unsigned int *) ((char *)address - ((size_t)address & 2));
   unsigned int old = *address_as_ui;
@@ -103,15 +103,12 @@ static inline  __device__ void atomicAdd(half *address, half val) {
 
   do {
     assumed = old;
-    THCHalf hsum;
+    THHalf hsum;
     hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    hsum = THCNumerics<THCHalf>::add(hsum, val);
+    hsum = THCNumerics<THHalf>::add(hsum, val);
     old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
     old = atomicCAS(address_as_ui, assumed, old);
   } while (assumed != old);
-}
-static inline __device__ void atomicAdd(THCHalf *address, THCHalf val) {
-  atomicAdd(reinterpret_cast<half*>(address), val);
 }
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)

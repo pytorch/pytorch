@@ -1,6 +1,6 @@
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCTensorCopy.h"
 #include "THCApply.cuh"
 #include "THCNumerics.cuh"
@@ -21,26 +21,6 @@ struct TensorAddConstantOp {
   const T val;
 };
 
-template <>
-struct TensorAddConstantOp<half> {
-  TensorAddConstantOp(half v) : fval(THC_half2float(v)) {}
-
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-    float fin = __half2float(*in);
-    float fout = fin + fval;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void operator()(half* v) {
-    float fv = __half2float(*v);
-    fv += fval;
-    *v = __float2half(fv);
-  }
-
-  const float fval;
-};
-
-
 template <typename T>
 struct TensorSubConstantOp {
   TensorSubConstantOp(T v) : val(v) {}
@@ -55,27 +35,6 @@ struct TensorSubConstantOp {
   const T val;
 };
 
-
-template <>
-struct TensorSubConstantOp<half> {
-  TensorSubConstantOp(half v): fval(-(THC_half2float(v))) {}
-
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-    float fin = __half2float(*in);
-    float fout = fin + fval;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void operator()(half* v) {
-    float fv = __half2float(*v);
-    fv += fval;
-    *v = __float2half(fv);
-  }
-
-  const float fval;
-};
-
-
 template <typename T>
 struct TensorMulConstantOp {
   TensorMulConstantOp(T v) : val(v) {}
@@ -88,25 +47,6 @@ struct TensorMulConstantOp {
   }
 
   const T val;
-};
-
-template <>
-struct TensorMulConstantOp<half> {
-  TensorMulConstantOp(half v) : fval(THC_half2float(v)) {}
-
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-    float fin = __half2float(*in);
-    float fout = fin * fval;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void operator()(half* v) {
-    float fv = __half2float(*v);
-    fv *= fval;
-    *v = __float2half(fv);
-  }
-
-  const float fval;
 };
 
 template <typename T>
@@ -149,24 +89,6 @@ struct TensorDivConstantOp<double> {
   }
 
   const double val;
-};
-
-template <>
-struct TensorDivConstantOp<half> {
-  TensorDivConstantOp(half v) : fval(1.f / THC_half2float(v)) {}
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-    float fin = __half2float(*in);
-    float fout = fin * fval;
-    *out = __float2half(fout);
-  }
-
-  __device__ __forceinline__ void operator()(half* v) {
-    float fv = __half2float(*v);
-    fv *= fval;
-    *v = __float2half(fv);
-  }
-
-  const float fval;
 };
 
 template<typename T>
@@ -232,18 +154,18 @@ struct TensorRemainderOp<double> {
 };
 
 template <>
-struct TensorRemainderOp<THCHalf> {
-  TensorRemainderOp(THCHalf v): val(v) {}
+struct TensorRemainderOp<THHalf> {
+  TensorRemainderOp(THHalf v): val(v) {}
 
-  __device__ __forceinline__ void operator()(THCHalf* out, THCHalf* in) {
+  __device__ __forceinline__ void operator()(THHalf* out, THHalf* in) {
     *out = *in - val * floorf(*in / val);
   }
 
-  __device__ __forceinline__ void operator()(THCHalf* v) {
+  __device__ __forceinline__ void operator()(THHalf* v) {
     *v = *v - val * floorf(*v / val);
   }
 
-  const THCHalf val;
+  const THHalf val;
 };
 
 template <typename T>
@@ -272,21 +194,6 @@ struct TensorFmodOp<double> {
   }
 
   const double val;
-};
-
-template <>
-struct TensorFmodOp<half> {
-  TensorFmodOp(half v): fval(THC_half2float(v)) {}
-
-  __device__ __forceinline__ void operator()(half* out, half* in) {
-    *out = __float2half(fmodf(__half2float(*in), fval));
-  }
-
-  __device__ __forceinline__ void operator()(half* v) {
-    *v = __float2half(fmodf(__half2float(*v), fval));
-  }
-
-  const float fval;
 };
 
 template <typename T, int Upper>

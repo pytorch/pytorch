@@ -284,7 +284,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     if scalar_name == "Half":
         env['SparseTensor'] = 'Tensor'
         if backend == "CUDA":
-            env['AS_REAL'] = 'convert<THCHalf,double>'
+            env['AS_REAL'] = 'convert<THHalf,double>'
 
     declarations, definitions = function_wrapper.create_derived(
         env, declarations)
