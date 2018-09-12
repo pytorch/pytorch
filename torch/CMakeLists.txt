@@ -302,9 +302,8 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
 
-  option(TORCH_WITH_CEREAL "Build the C++ API with Cereal for serialization support" OFF)
-  if (TORCH_WITH_CEREAL)
-    target_compile_definitions(torch PUBLIC TORCH_WITH_CEREAL)
+  if (TORCH_USE_CEREAL)
+    target_compile_definitions(torch PUBLIC TORCH_USE_CEREAL)
     # SYSTEM headers are included with -isystem and thus do not trigger warnings.
     target_include_directories(torch SYSTEM PUBLIC
       "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
@@ -430,7 +429,7 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
   )
 
-  if (TORCH_WITH_CEREAL)
+  if (TORCH_USE_CEREAL)
     list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/serialization.cpp)
   endif()
 

@@ -39,7 +39,7 @@ class LBFGS : public LossClosureOptimizer {
 
   template <class Archive>
   void serialize(Archive& ar) {
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
     ar(CEREAL_NVP(d));
     ar(CEREAL_NVP(t));
     ar(CEREAL_NVP(H_diag));
@@ -47,13 +47,13 @@ class LBFGS : public LossClosureOptimizer {
     ar(CEREAL_NVP(prev_loss));
     ar(CEREAL_NVP(old_dirs));
     ar(CEREAL_NVP(old_stps));
-#endif // defined(TORCH_WITH_CEREAL)
+#endif // defined(TORCH_USE_CEREAL)
   }
 
  private:
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
   friend class cereal::access;
-#endif // defined(TORCH_WITH_CEREAL)
+#endif // defined(TORCH_USE_CEREAL)
   LBFGS() : options(0) {}
 
   Tensor gather_flat_grad();

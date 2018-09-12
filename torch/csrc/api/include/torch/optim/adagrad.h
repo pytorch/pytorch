@@ -35,16 +35,16 @@ class Adagrad : public Optimizer {
 
   template <class Archive>
   void serialize(Archive& ar) {
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
     ar(CEREAL_NVP(sum_));
     ar(CEREAL_NVP(step_));
-#endif // defined(TORCH_WITH_CEREAL)
+#endif // defined(TORCH_USE_CEREAL)
   }
 
  private:
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
   friend class cereal::access;
-#endif // defined(TORCH_WITH_CEREAL)
+#endif // defined(TORCH_USE_CEREAL)
   Adagrad() : options(0) {}
 
   std::vector<Tensor> sum_;
@@ -53,9 +53,9 @@ class Adagrad : public Optimizer {
 } // namespace optim
 } // namespace torch
 
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
 CEREAL_REGISTER_TYPE(torch::optim::Adagrad);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
     torch::optim::Optimizer,
     torch::optim::Adagrad);
-#endif // defined(TORCH_WITH_CEREAL)
+#endif // defined(TORCH_USE_CEREAL)

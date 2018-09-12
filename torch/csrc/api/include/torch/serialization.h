@@ -5,7 +5,7 @@
 #include <torch/tensor.h>
 #include <torch/utils.h>
 
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
 #include <cereal/access.hpp>
 #include <cereal/cereal.hpp>
 #include <cereal/types/polymorphic.hpp>
@@ -15,13 +15,13 @@
 #include "cereal/types/string.hpp"
 #include "cereal/types/unordered_map.hpp"
 #include "cereal/types/vector.hpp"
-#endif // defined(TORCH_WITH_CEREAL)
+#endif // defined(TORCH_USE_CEREAL)
 
 namespace torch {
 // Some convenience functions for saving and loading
 template <typename T>
 void save(std::ostream& stream, T const& obj) {
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
   cereal::BinaryOutputArchive archive(stream);
   archive(*obj);
 #else
@@ -31,7 +31,7 @@ void save(std::ostream& stream, T const& obj) {
 
 template <typename T>
 void load(std::istream& stream, T& obj) {
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
   cereal::BinaryInputArchive archive(stream);
   archive(*obj);
 #else
@@ -41,7 +41,7 @@ void load(std::istream& stream, T& obj) {
 
 template <typename T>
 void save(std::ostream& stream, T const* obj) {
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
   cereal::BinaryOutputArchive archive(stream);
   archive(*obj);
 #else
@@ -51,7 +51,7 @@ void save(std::ostream& stream, T const* obj) {
 
 template <typename T>
 void load(std::istream& stream, T* obj) {
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
   cereal::BinaryInputArchive archive(stream);
   archive(*obj);
 #else
@@ -164,7 +164,7 @@ inline at::Backend backendFromId(int32_t id) {
 } // namespace detail
 } // namespace torch
 
-#if defined(TORCH_WITH_CEREAL)
+#if defined(TORCH_USE_CEREAL)
 namespace cereal {
 namespace agimpl {
 
@@ -273,4 +273,4 @@ void load(Archive& archive, torch::Tensor& tensor) {
   }
 }
 } // namespace cereal
-#endif // defined(TORCH_WITH_CEREAL)
+#endif // defined(TORCH_USE_CEREAL)
