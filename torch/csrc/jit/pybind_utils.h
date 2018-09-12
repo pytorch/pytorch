@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/utils/pybind.h"
+#include "torch/csrc/utils/auto_gil.h"
 
 #include <ATen/Error.h>
 
@@ -279,7 +280,10 @@ inline py::object invokeScriptMethodFromPython(
     script::Method& method,
     py::args args, py::kwargs kwargs) {
   auto stack = createStackForSchema(method.getSchema(), std::move(args), std::move(kwargs));
-  method.run(stack);
+  {
+    AutoNoGIL no_gil_guard;
+    method.run(stack);
+  }
   return createPyObjectForStack(std::move(stack));
 }
 
