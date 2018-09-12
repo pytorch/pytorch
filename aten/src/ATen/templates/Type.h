@@ -1,7 +1,5 @@
 #pragma once
 
-// ${generated_comment}
-
 #include "ATen/core/ATenGeneral.h"
 #include "ATen/core/Allocator.h"
 #include "ATen/core/Deprecated.h"
@@ -10,7 +8,7 @@
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Tensor.h"
+#include "ATen/core/Tensor.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"

@@ -1,11 +1,9 @@
 #pragma once
 
-// ${generated_comment}
-
-#include "ATen/Tensor.h"
+#include "ATen/core/Tensor.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Type.h"
+#include "ATen/core/Type.h"
 #include "ATen/core/TensorOptions.h"
 
 namespace at {
