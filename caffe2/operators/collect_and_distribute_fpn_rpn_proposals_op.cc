@@ -1,8 +1,8 @@
 #include "caffe2/operators/collect_and_distribute_fpn_rpn_proposals_op.h"
 
-#ifdef CAFFE2_USE_MKL
+#ifdef CAFFE2_USE_MKLML
 #include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
+#endif // CAFFE2_USE_MKLML
 
 namespace caffe2 {
 

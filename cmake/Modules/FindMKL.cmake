@@ -142,7 +142,7 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES _name _list _flags)
       IF(${_library} STREQUAL "gomp")
           FIND_PACKAGE(OpenMP)
           IF(OPENMP_FOUND)
-	      SET(${_prefix}_${_library}_LIBRARY ${OpenMP_C_FLAGS})
+            SET(${_prefix}_${_library}_LIBRARY ${OpenMP_C_FLAGS})
           ENDIF(OPENMP_FOUND)
       ELSE(${_library} STREQUAL "gomp")
           FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${_library})
@@ -305,12 +305,7 @@ IF(NOT MKL_FIND_QUIETLY)
   ENDIF(MKL_FOUND)
 ENDIF(NOT MKL_FIND_QUIETLY)
 
-# MKLML is included in the MKL package
-if (USE_MKL AND USE_MKLML)
-  set(CAFFE2_USE_MKL 1)
-endif()
-
-if (USE_MKL AND USE_IDEEP)
+if (USE_IDEEP)
   set(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   set(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
   find_path(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
@@ -323,11 +318,18 @@ if (USE_MKL AND USE_IDEEP)
   if (MKLDNN_INCLUDE_DIR)
     list(APPEND IDEEP_INCLUDE_DIR ${MKLDNN_INCLUDE_DIR})
     list(APPEND __ideep_looked_for MKLDNN_INCLUDE_DIR)
-    # to avoid adding conflicting submodels
-    set(ORIG_WITH_TEST ${WITH_TEST})
-    set(WITH_TEST OFF)
-    add_subdirectory(${IDEEP_ROOT})
-    set(WITH_TEST ${ORIG_WITH_TEST})
+
+    if (NOT IS_DIRECTORY ${MKLDNN_ROOT}/external)
+      if (UNIX)
+        execute_process(COMMAND "${MKLDNN_ROOT}/scripts/prepare_mkl.sh" RESULT_VARIABLE __result)
+      else ()
+        execute_process(COMMAND "${MKLDNN_ROOT}/scripts/prepare_mkl.bat" RESULT_VARIABLE __result)
+      endif()
+    endif()
+
+    if (NOT MKLDNN_LIBRARY_TYPE)
+      set(MKLDNN_LIBRARY_TYPE STATIC CACHE STRING "Build mkl-dnn as static lib")
+    endif()
 
     # If we cannot find MKL, we will use the Intel MKL Small library comes with ${MKLDNN_ROOT}/external
     file(GLOB_RECURSE MKLML_INNER_INCLUDE_DIR ${MKLDNN_ROOT}/external/*/mkl_vsl.h)
@@ -351,7 +353,6 @@ if (USE_MKL AND USE_IDEEP)
         set(__mklml_inner_libs mklml_intel iomp5)
       endif()
 
-      set(IDEEP_LIBRARIES "")
       foreach (__mklml_inner_lib ${__mklml_inner_libs})
         string(TOUPPER ${__mklml_inner_lib} __mklml_inner_lib_upper)
         find_library(${__mklml_inner_lib_upper}_LIBRARY
@@ -368,9 +369,13 @@ if (USE_MKL AND USE_IDEEP)
     find_package_handle_standard_args(IDEEP DEFAULT_MSG ${__ideep_looked_for})
 
     if(IDEEP_FOUND)
-      set(MKLDNN_LIB "${CMAKE_SHARED_LIBRARY_PREFIX}mkldnn${CMAKE_SHARED_LIBRARY_SUFFIX}")
+      if (MKLDNN_LIBRARY_TYPE STREQUAL STATIC)
+        set(MKLDNN_LIB "${CMAKE_STATIC_LIBRARY_PREFIX}mkldnn${CMAKE_STATIC_LIBRARY_SUFFIX}")
+      else()
+        set(MKLDNN_LIB "${CMAKE_SHARED_LIBRARY_PREFIX}mkldnn${CMAKE_SHARED_LIBRARY_SUFFIX}")
+      endif()
       list(APPEND IDEEP_LIBRARIES "${PROJECT_BINARY_DIR}/lib/${MKLDNN_LIB}")
-      message(STATUS "Found IDEEP (include: ${IDEEP_INCLUDE_DIR}, lib: ${IDEEP_LIBRARIES})")
+      # message(STATUS "Found IDEEP (include: ${IDEEP_INCLUDE_DIR}, lib: ${IDEEP_LIBRARIES})")
       set(CAFFE2_USE_IDEEP 1)
       list(APPEND MKL_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
       list(APPEND MKL_LIBRARIES ${IDEEP_LIBRARIES})
@@ -378,9 +383,26 @@ if (USE_MKL AND USE_IDEEP)
       message(FATAL_ERROR "Did not find IDEEP files!")
     endif()
 
+    add_subdirectory(${MKLDNN_ROOT})
+
     caffe_clear_vars(__ideep_looked_for __mklml_inner_libs)
+  else()
+    message(FATAL_ERROR "Can not find MKL-DNN files")
   endif() # MKLDNN_INCLUDE_DIR
 endif() # USE_IDEEP
+
+if (MKL_FOUND)
+  set(CAFFE2_USE_MKL 1)
+  if (USE_MKLML)
+    set(CAFFE2_USE_MKLML 1)
+  endif()
+endif()
+
+if (MKL_FOUND OR IDEEP_FOUND)
+  set(USE_MKL ON)
+else()
+  set(USE_MKL OFF)
+endif()
 
 # Do nothing if MKL_FOUND was set before!
 ENDIF (NOT MKL_FOUND)
