@@ -46,7 +46,7 @@ IntList TensorImpl::sizes() const {
 
 IntList TensorImpl::strides() const {
   if (!options_.has_strides_) {
-    AT_ERROR("This type of tensor does not have strides");
+    AT_ERROR(type_id_, " does not have strides");
   }
   return strides_;
 }
@@ -86,7 +86,7 @@ int64_t TensorImpl::size(int64_t d) const {
 
 int64_t TensorImpl::stride(int64_t d) const {
   if (!options_.has_strides_) {
-    AT_ERROR("This type of tensor does not have strides");
+    AT_ERROR(type_id_, " does not have strides");
   }
   d = at::maybe_wrap_dim(d, dim(), false);
   return strides_[d];
@@ -96,7 +96,7 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   // We only allow this operation on dense tensors
   if (!(options_.has_storage_ && options_.has_strides_)) {
     AT_CHECK(condition_when_zero_dim == (dim() == 0),
-           "This type of tensor does not support changing dimensionality via maybe_zero_dim");
+           type_id_, " does not support changing dimensionality via maybe_zero_dim");
   }
   bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
   if (set_zero_dim) {
@@ -107,7 +107,7 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
 
 const Storage& TensorImpl::storage() const {
   if (!options_.has_storage_) {
-    AT_ERROR("This type of tensor does not have storage");
+    AT_ERROR(type_id_, " does not have storage");
   }
   return storage_;
 }

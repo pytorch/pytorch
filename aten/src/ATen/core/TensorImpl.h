@@ -69,7 +69,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual bool is_contiguous() const {
     if (!options_.has_strides_) {
-      AT_ERROR("This type of tensor does not have strides, and hence does not have is_contiguous");
+      AT_ERROR(type_id_, " does not have strides, and hence does not have is_contiguous");
     }
 #ifdef DEBUG
     AT_ASSERT(compute_contiguous() == is_contiguous_);
@@ -132,7 +132,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual int64_t storage_offset() const {
     if (!options_.has_storage_) {
-      AT_ERROR("This type of tensor does not have storage, and hence does not have storage_offset");
+      AT_ERROR(type_id_, " does not have storage, and hence does not have storage_offset");
     }
     return storage_offset_;
   }
@@ -163,7 +163,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual void set_stride(int64_t dim, int64_t new_stride) {
     if (!options_.has_strides_) {
-      AT_ERROR("This type of tensor does not have strides, and hence does not have set_stride");
+      AT_ERROR(type_id_, " does not have strides, and hence does not have set_stride");
     }
     strides_[dim] = new_stride;
     refresh_numel();
@@ -172,7 +172,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual void set_storage_offset(int64_t storage_offset) {
     if (!options_.has_storage_) {
-      AT_ERROR("This type of tensor does not have storage, and hence does not have set_storage_offset");
+      AT_ERROR(type_id_, " does not have storage, and hence does not have set_storage_offset");
     }
     storage_offset_ = storage_offset;
     refresh_numel();
