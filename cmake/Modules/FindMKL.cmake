@@ -3,10 +3,6 @@
 # This module finds the Intel Mkl libraries.
 #
 #   USE_IDEEP                         : use IDEEP interface
-#   USE_MKLML                         : use MKLML interface
-#   MKLML_USE_SINGLE_DYNAMIC_LIBRARY  : use single dynamic library interface
-#   MKLML_USE_STATIC_LIBS             : use static libraries
-#   MKLML_MULTI_THREADED              : use multi-threading
 #
 # This module sets the following variables:
 #  MKL_FOUND - set to true if a library implementing the CBLAS interface is found
@@ -17,6 +13,8 @@
 #  MKL_SCALAPACK_LIBRARIES - list of libraries to add for scalapack
 #  MKL_SOLVER_LIBRARIES - list of libraries to add for the solvers
 #  MKL_CDFT_LIBRARIES - list of libraries to add for the solvers
+#  CAFFE2_USE_MKL - set to ON if MKL_FOUND is true
+#  CAFFE2_USE_IDEEP - set to ON if use IDEEP interfaces
 
 # Do nothing if MKL_FOUND was set before!
 IF (NOT MKL_FOUND)
@@ -28,6 +26,8 @@ SET(MKL_LAPACK_LIBRARIES)
 SET(MKL_SCALAPACK_LIBRARIES)
 SET(MKL_SOLVER_LIBRARIES)
 SET(MKL_CDFT_LIBRARIES)
+SET(CAFFE2_USE_MKL OFF)
+SET(CAFFE2_USE_IDEEP OFF)
 
 # Includes
 INCLUDE(CheckTypeSize)
@@ -142,7 +142,7 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES _name _list _flags)
       IF(${_library} STREQUAL "gomp")
           FIND_PACKAGE(OpenMP)
           IF(OPENMP_FOUND)
-	      SET(${_prefix}_${_library}_LIBRARY ${OpenMP_C_FLAGS})
+            SET(${_prefix}_${_library}_LIBRARY ${OpenMP_C_FLAGS})
           ENDIF(OPENMP_FOUND)
       ELSE(${_library} STREQUAL "gomp")
           FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${_library})
@@ -286,7 +286,9 @@ SET(CMAKE_LIBRARY_PATH ${saved_CMAKE_LIBRARY_PATH})
 SET(CMAKE_INCLUDE_PATH ${saved_CMAKE_INCLUDE_PATH})
 IF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
   SET(MKL_FOUND TRUE)
-  set(MKL_cmake_included true)
+  SET(CAFFE2_USE_MKL ON)
+  SET(MKL_cmake_included true)
+  ENDIF()
 ELSE (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
   SET(MKL_FOUND FALSE)
   SET(MKL_VERSION)
@@ -301,86 +303,115 @@ IF(NOT MKL_FIND_QUIETLY)
     MESSAGE(STATUS "MKL library found")
   ELSE(MKL_FOUND)
     MESSAGE(STATUS "MKL library not found")
-    return()
   ENDIF(MKL_FOUND)
 ENDIF(NOT MKL_FIND_QUIETLY)
 
-# MKLML is included in the MKL package
-if (USE_MKL AND USE_MKLML)
-  set(CAFFE2_USE_MKL 1)
-endif()
+# Do nothing if MKL_FOUND was set before!
+ENDIF (NOT MKL_FOUND)
 
-if (USE_MKL AND USE_IDEEP)
-  set(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
-  set(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
-  find_path(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
-  find_path(MKLDNN_INCLUDE_DIR_HACK mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
-  if (NOT MKLDNN_INCLUDE_DIR_HACK)
-    execute_process(COMMAND git submodule update --init mkl-dnn WORKING_DIRECTORY ${IDEEP_ROOT})
-    find_path(MKLDNN_INCLUDE_DIR_HACK mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
-  endif()
+IF (USE_IDEEP AND NOT IDEEP_FOUND)
 
-  if (MKLDNN_INCLUDE_DIR_HACK)
-    list(APPEND IDEEP_INCLUDE_DIR ${MKLDNN_INCLUDE_DIR_HACK})
-    list(APPEND __ideep_looked_for MKLDNN_INCLUDE_DIR_HACK)
-    # to avoid adding conflicting submodels
-    set(ORIG_WITH_TEST ${WITH_TEST})
-    set(WITH_TEST OFF)
-    add_subdirectory(${IDEEP_ROOT})
-    set(WITH_TEST ${ORIG_WITH_TEST})
+SET(IDEEP_LIBRARIES)
+SET(IDEEP_MKLDNN_INCLUDE_DIR)
+SET(CAFFE2_USE_IDEEP OFF)
 
-    # If we cannot find MKL, we will use the Intel MKL Small library comes with ${MKLDNN_ROOT}/external
-    file(GLOB_RECURSE MKLML_INNER_INCLUDE_DIR ${MKLDNN_ROOT}/external/*/mkl_vsl.h)
-    if(NOT MKL_FOUND AND MKLML_INNER_INCLUDE_DIR)
+IF(MSVC)
+  MESSAGE(STATUS "MKL-DNN needs omp 3+ which is not supported in MSVC so far")
+  RETURN()
+ENDIF(MSVC)
+
+SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
+SET(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
+
+FIND_PATH(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
+FIND_PATH(IDEEP_MKLDNN_INCLUDE_DIR mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
+IF (NOT IDEEP_MKLDNN_INCLUDE_DIR)
+  EXECUTE_PROCESS(COMMAND git submodule update --init mkl-dnn WORKING_DIRECTORY ${IDEEP_ROOT})
+  FIND_PATH(IDEEP_MKLDNN_INCLUDE_DIR mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
+ENDIF(NOT IDEEP_MKLDNN_INCLUDE_DIR)
+
+IF (NOT IDEEP_INCLUDE_DIR OR NOT IDEEP_MKLDNN_INCLUDE_DIR)
+  MESSAGE(STATUS "MKLDNN source files not found!")
+
+ELSE(NOT IDEEP_INCLUDE_DIR OR NOT IDEEP_MKLDNN_INCLUDE_DIR)
+  LIST(APPEND IDEEP_MKLDNN_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
+
+  IF(MKL_FOUND)
+    LIST(APPEND IDEEP_LIBRARIES ${MKL_LIBRARIES})
+    LIST(APPEND IDEEP_MKLDNN_INCLUDE_DIR ${MKL_INCLUDE_DIR})
+
+  ELSE(MKL_FOUND)
+    # If we cannot find MKL, we will use the Intel MKL Small library
+    # comes with ${MKLDNN_ROOT}/external
+    IF(NOT IS_DIRECTORY ${MKLDNN_ROOT}/external)
+      IF(UNIX)
+        EXECUTE_PROCESS(COMMAND "${MKLDNN_ROOT}/scripts/prepare_mkl.sh" RESULT_VARIABLE __result)
+      ELSE(UNIX)
+        EXECUTE_PROCESS(COMMAND "${MKLDNN_ROOT}/scripts/prepare_mkl.bat" RESULT_VARIABLE __result)
+      ENDIF(UNIX)
+    ENDIF(NOT IS_DIRECTORY ${MKLDNN_ROOT}/external)
+
+    FILE(GLOB_RECURSE MKLML_INNER_INCLUDE_DIR ${MKLDNN_ROOT}/external/*/mkl.h)
+    IF(MKLML_INNER_INCLUDE_DIR)
       # if user has multiple version under external/ then guess last
       # one alphabetically is "latest" and warn
-      list(LENGTH MKLML_INNER_INCLUDE_DIR MKLINCLEN)
-      if(MKLINCLEN GREATER 1)
-        list(SORT MKLML_INNER_INCLUDE_DIR)
-        list(REVERSE MKLML_INNER_INCLUDE_DIR)
-        list(GET MKLML_INNER_INCLUDE_DIR 0 MKLINCLST)
-        set(MKLML_INNER_INCLUDE_DIR "${MKLINCLST}")
-      endif()
-      get_filename_component(MKLML_INNER_INCLUDE_DIR ${MKLML_INNER_INCLUDE_DIR} DIRECTORY)
-      list(APPEND IDEEP_INCLUDE_DIR ${MKLML_INNER_INCLUDE_DIR})
-      list(APPEND __ideep_looked_for MKLML_INNER_INCLUDE_DIR)
+      LIST(LENGTH MKLML_INNER_INCLUDE_DIR MKLINCLEN)
+      IF(MKLINCLEN GREATER 1)
+        LIST(SORT MKLML_INNER_INCLUDE_DIR)
+        LIST(REVERSE MKLML_INNER_INCLUDE_DIR)
+        LIST(GET MKLML_INNER_INCLUDE_DIR 0 MKLINCLST)
+        SET(MKLML_INNER_INCLUDE_DIR "${MKLINCLST}")
+      ENDIF(MKLINCLEN GREATER 1)
+      GET_FILENAME_COMPONENT(MKLML_INNER_INCLUDE_DIR ${MKLML_INNER_INCLUDE_DIR} DIRECTORY)
+      LIST(APPEND IDEEP_MKLDNN_INCLUDE_DIR ${MKLML_INNER_INCLUDE_DIR})
 
-      if(APPLE)
-        set(__mklml_inner_libs mklml iomp5)
-      else()
-        set(__mklml_inner_libs mklml_intel iomp5)
-      endif()
+      IF(APPLE)
+        SET(__mklml_inner_libs mklml iomp5)
+      ELSE(APPLE)
+        SET(__mklml_inner_libs mklml_intel iomp5)
+      ENDIF(APPLE)
 
-      set(IDEEP_LIBRARIES "")
-      foreach (__mklml_inner_lib ${__mklml_inner_libs})
-        string(TOUPPER ${__mklml_inner_lib} __mklml_inner_lib_upper)
-        find_library(${__mklml_inner_lib_upper}_LIBRARY
+      FOREACH(__mklml_inner_lib ${__mklml_inner_libs})
+        STRING(TOUPPER ${__mklml_inner_lib} __mklml_inner_lib_upper)
+        FIND_LIBRARY(${__mklml_inner_lib_upper}_LIBRARY
               NAMES ${__mklml_inner_lib}
               PATHS  "${MKLML_INNER_INCLUDE_DIR}/../lib"
               DOC "The path to Intel(R) MKLML ${__mklml_inner_lib} library")
-        mark_as_advanced(${__mklml_inner_lib_upper}_LIBRARY)
-        list(APPEND IDEEP_LIBRARIES ${${__mklml_inner_lib_upper}_LIBRARY})
-        list(APPEND __ideep_looked_for ${__mklml_inner_lib_upper}_LIBRARY)
-      endforeach()
-    endif() # NOT MKL_FOUND AND MKLML_INNER_INCLUDE_DIR
+        MARK_AS_ADVANCED(${__mklml_inner_lib_upper}_LIBRARY)
+        LIST(APPEND IDEEP_LIBRARIES ${${__mklml_inner_lib_upper}_LIBRARY})
+      ENDFOREACH(__mklml_inner_lib)
+    ENDIF(MKLML_INNER_INCLUDE_DIR)
+  ENDIF(MKL_FOUND)
 
-    include(FindPackageHandleStandardArgs)
-    find_package_handle_standard_args(IDEEP DEFAULT_MSG ${__ideep_looked_for})
+  LIST(APPEND __ideep_looked_for IDEEP_LIBRARIES)
+  LIST(APPEND __ideep_looked_for IDEEP_MKLDNN_INCLUDE_DIR)
+  INCLUDE(FindPackageHandleStandardArgs)
+  find_package_handle_standard_args(IDEEP DEFAULT_MSG ${__ideep_looked_for})
 
-    if(IDEEP_FOUND)
-      set(MKLDNN_LIB "${CMAKE_SHARED_LIBRARY_PREFIX}mkldnn${CMAKE_SHARED_LIBRARY_SUFFIX}")
-      list(APPEND IDEEP_LIBRARIES "${PROJECT_BINARY_DIR}/lib/${MKLDNN_LIB}")
-      message(STATUS "Found IDEEP (include: ${IDEEP_INCLUDE_DIR}, lib: ${IDEEP_LIBRARIES})")
-      set(CAFFE2_USE_IDEEP 1)
-      list(APPEND MKL_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
-      list(APPEND MKL_LIBRARIES ${IDEEP_LIBRARIES})
-    else()
-      message(FATAL_ERROR "Did not find IDEEP files!")
-    endif()
+ENDIF(NOT IDEEP_INCLUDE_DIR OR NOT IDEEP_MKLDNN_INCLUDE_DIR)
 
-    caffe_clear_vars(__ideep_looked_for __mklml_inner_libs)
-  endif() # MKLDNN_INCLUDE_DIR_HACK
-endif() # USE_IDEEP
+if(IDEEP_FOUND)
+  SET(MKL_FOUND TRUE)
+  SET(CAFFE2_USE_IDEEP ON)
+  IF(NOT APPLE AND CMAKE_COMPILER_IS_GNUCC)
+    ADD_COMPILE_OPTIONS(-Wno-maybe-uninitialized)
+  ENDIF(NOT APPLE AND CMAKE_COMPILER_IS_GNUCC)
+  SET(WITH_TEST FALSE CACHE BOOL "build with mkl-dnn test" FORCE)
+  SET(WITH_EXAMPLE FALSE CACHE BOOL "build with mkl-dnn examples" FORCE)
+  ADD_SUBDIRECTORY(${MKLDNN_ROOT})
+  SET(MKLDNN_LIB "${CMAKE_SHARED_LIBRARY_PREFIX}mkldnn${CMAKE_SHARED_LIBRARY_SUFFIX}")
+  IF(MINGW OR MSVC)
+    LIST(APPEND IDEEP_LIBRARIES "${PROJECT_BINARY_DIR}/bin/${MKLDNN_LIB}")
+  ELSE(MINGW OR MSVC)
+    LIST(APPEND IDEEP_LIBRARIES "${PROJECT_BINARY_DIR}/lib/${MKLDNN_LIB}")
+  ENDIF(MINGW OR MSVC)
+  #LIST(APPEND IDEEP_LIBRARIES mkldnn)
+  SET(MKL_LIBRARIES ${IDEEP_LIBRARIES})
+  SET(MKL_INCLUDE_DIR ${IDEEP_MKLDNN_INCLUDE_DIR})
+ELSE(IDEEP_FOUND)
+  MESSAGE(STATUS "MKLDNN source files not found!")
+ENDIF(IDEEP_FOUND)
 
-# Do nothing if MKL_FOUND was set before!
-ENDIF (NOT MKL_FOUND)
+caffe_clear_vars(__mkldnn_looked_for __mklml_inner_libs)
+
+ENDIF(USE_IDEEP AND NOT IDEEP_FOUND)
