@@ -643,6 +643,7 @@ class _DistTestBase(object):
     )
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @unittest.skip("Flaky test, see pytorch#11582")
     def test_all_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
