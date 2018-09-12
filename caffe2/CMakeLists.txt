@@ -291,6 +291,11 @@ if (MSVC AND NOT BUILD_SHARED_LIBS)
   # as the latter is not respected by nvcc
   target_compile_definitions(caffe2 PUBLIC "AT_CORE_STATIC_WINDOWS=1")
 endif()
+if (MSVC AND BUILD_SHARED_LIBS)
+  # ONNX is linked statically, but needs to be exported from this library
+  # to be used externally.
+  target_compile_options(caffe2 PRIVATE "-DONNX_BUILD_SHARED_LIBS")
+endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
