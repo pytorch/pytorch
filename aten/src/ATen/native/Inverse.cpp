@@ -140,7 +140,7 @@ Tensor inverse(const Tensor &self) {
     return at::_getri_single(self);
   }
   checkInputs(self);
-  return self.type()._inverse_helper(self);
+  return at::_inverse_helper(self);
 }
 
 Tensor& inverse_out(Tensor &result, const Tensor &self) {
