@@ -36,6 +36,7 @@ namespace torch { namespace jit {
   _(prim, PadPacked) /* onnx */    \
   _(prim, Placeholder) /* debug */ \
   _(prim, Print)                   \
+  _(prim, List)                    \
   _(prim, PythonOp)                \
   _(prim, Reverse)                 \
   _(prim, Return)                  \
