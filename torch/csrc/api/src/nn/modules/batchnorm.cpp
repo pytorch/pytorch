@@ -34,14 +34,15 @@ void BatchNormImpl::reset() {
 }
 
 Tensor BatchNormImpl::forward(Tensor input) {
-  return pure_forward(input, Tensor(), Tensor());
+  AT_CHECK(
+      options.stateful_,
+      "Calling BatchNorm::forward is only permitted when "
+      "the 'stateful' option is true (was false). "
+      "Use BatchNorm::pure_forward instead.");
+  return pure_forward(input, running_mean, running_variance);
 }
 
 Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
-  auto& running_mean = options.stateful_ ? this->running_mean : mean;
-  auto& running_variance =
-      options.stateful_ ? this->running_variance : variance;
-
   if (is_training()) {
     const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
     AT_CHECK(
@@ -53,8 +54,8 @@ Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
       input,
       weight,
       bias,
-      running_mean,
-      running_variance,
+      mean,
+      variance,
       is_training(),
       options.momentum_,
       options.eps_,

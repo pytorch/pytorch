@@ -91,14 +91,22 @@ private:
   void assignTo(Tensor* dst, const at::Tensor& src_) {
     at::Tensor src = src_.contiguous();
     auto at_sizes = src.sizes();
-    std::vector<int64_t> dims(at_sizes.begin(),at_sizes.end());
+    caffe2::TypeMeta type_meta = typeMetaFor(src);
+    at::Device device = src.device();
+    at::TensorImpl* src_impl = src.unsafeReleaseTensorImpl();
+    std::vector<int64_t> dims(at_sizes.begin(), at_sizes.end());
     dst->Resize(dims);
     dst->ShareExternalPointer(
-        src.data_ptr(), typeMetaFor(src), 0, [src](void* ptr) mutable {
-          // return a closure that holds a handle to t until it is called
-          // to keep the aten memory alive
-          return src.reset();
-        });
+        at::DataPtr(
+            src_impl->data(),
+            static_cast<void*>(src_impl),
+            [](void* t_ptr) -> void {
+              at::TensorImpl* local_impl = static_cast<at::TensorImpl*>(t_ptr);
+              c10::raw::intrusive_ptr::decref(local_impl);
+            },
+            device),
+        type_meta,
+        0);
   }
   void assignListStartingAt(
       size_t offset,
