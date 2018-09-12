@@ -583,8 +583,9 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         IsType<T>(),
         "Tensor type mismatch, caller expects elements to be ",
         TypeMeta::TypeName<T>(),
-        " while tensor contains ",
-        storage_.dtype().name());
+        ", while tensor contains ",
+        storage_.dtype().name(),
+        ". ");
     return static_cast<T*>(storage_.data());
   }
 
