@@ -49,6 +49,8 @@ class Categorical(Distribution):
         else:
             self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
+        if self._param.dim() < 1:
+            raise ValueError("`probs` or `logits` must be at least one-dimensional.")
         self._num_events = self._param.size()[-1]
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
         super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
