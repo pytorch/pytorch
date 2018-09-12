@@ -91,16 +91,6 @@ OUTPUT:
         vector<TensorShape> out(1);
         out[0] = CreateTensorShape(output_dims, in[0].data_type());
         return out;
-
-//      vector<TensorShape> out(1);
-//      for (auto d : in[1].dims()) {
-//        out[0].add_dims(d);
-//      }
-//      for (int i = 1; i < in[0].dims_size(); ++i) {
-//        out[0].add_dims(in[0].dims(i));
-//      }
-//      out[0].set_data_type(in[0].data_type());
-//      return out;
     });
 
 class GetGatherGradient : public GradientMakerBase {
