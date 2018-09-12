@@ -24,9 +24,11 @@
 
 namespace caffe2 {
 
-using StorageImpl = at::StorageImpl
+using StorageImpl = at::StorageImpl;
 
 }
+
+namespace caffe2 {
 
 class CAFFE2_API Storage {
  public:
@@ -91,6 +93,7 @@ class CAFFE2_API Storage {
   const TypeMeta& dtype() const {
     return storage_impl_->dtype();
   }
+
   size_t capacity() const {
     return storage_impl_->capacity();
   }

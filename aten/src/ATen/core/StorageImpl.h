@@ -6,6 +6,8 @@
 
 #include <ATen/core/intrusive_ptr.h>
 
+//TODO: Renable CAFFE_ENFORCE
+
 namespace at {
 
 struct Type;
@@ -26,7 +28,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
       bool resizable);
 
   explicit StorageImpl(at::DeviceType device_type)
-      : StorageImpl(device_type, TypeMeta()) {}
+      : StorageImpl(device_type, caffe2::TypeMeta()) {}
 
   StorageImpl(at::DeviceType device_type, caffe2::TypeMeta data_type)
       : StorageImpl(
@@ -121,16 +123,13 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   void* data() {
     return data_ptr_.get();
   };
-  const void* data() const {
-    return data_ptr_.get();
-  };
   at::DeviceType device_type() const {
     return data_ptr_.device().type();
   }
   at::Allocator* allocator() {
     return allocator_;
   };
-  const caffe2::TypeMeta dtype() const {
+  const caffe2::TypeMeta& dtype() const {
     return data_type_;
   }
   const at::Allocator* allocator() const {
@@ -157,7 +156,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
       void* src,
       const caffe2::TypeMeta& data_type,
       size_t capacity,
-      MemoryDeleter d = nullptr) {
+      DeleterFnPtr d = nullptr) {
     UniqueStorageShareExternalPointer(
         at::DataPtr(src, src, d, data_ptr_.device()), data_type, capacity);
   }
@@ -170,10 +169,10 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
       const caffe2::TypeMeta& data_type,
       size_t capacity) {
     data_type_ = data_type;
-    CAFFE_ENFORCE_WITH_CALLER(
-        data_type_.id() != TypeIdentifier::uninitialized(),
-        "To share with a raw external pointer you need to have meta "
-        "already set.");
+//    CAFFE_ENFORCE_WITH_CALLER(
+//        data_type_.id() != caffe2::TypeIdentifier::uninitialized(),
+//        "To share with a raw external pointer you need to have meta "
+//        "already set.");
     data_ptr_ = std::move(data_ptr);
     // NOTE: data_type might change and so it's also possible that capacity
     // might not be divisible by itemsize. There is no way for us to keep track
