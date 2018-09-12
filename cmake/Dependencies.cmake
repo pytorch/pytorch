@@ -187,20 +187,19 @@ endif()
 if(BUILD_TEST)
   # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-  set(TEMP_CMAKE_DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
 
   # We will build gtest as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
 
   # For gtest, we will simply embed it into our test binaries, so we won't
   # need to install it.
-  set(BUILD_GTEST ON)
-  set(INSTALL_GTEST OFF)
+  set(BUILD_GTEST ON CACHE BOOL "Build gtest" FORCE)
+  set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
   # We currently don't need gmock right now.
-  set(BUILD_GMOCK OFF)
+  set(BUILD_GMOCK OFF CACHE BOOL "Build gmock." FORCE)
   # For Windows, we will check the runtime used is correctly passed in.
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
-    set(gtest_force_shared_crt ON)
+      set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
   include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
@@ -212,10 +211,8 @@ if(BUILD_TEST)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
   include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark/include)
 
-  # Recover build options. Unfortunately gtest modifies CMAKE_DEBUG_POSTFIX
-  # in some versions as detailed at https://github.com/google/googletest/issues/1334
+  # Recover build options.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
-  set(CMAKE_DEBUG_POSTFIX ${TEMP_CMAKE_DEBUG_POSTFIX} CACHE BOOL "Debug postfix" FORCE)
 endif()
 
 # ---[ LMDB
