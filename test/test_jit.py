@@ -2631,7 +2631,7 @@ a")
             y = torch.randn(3, 3, dtype=torch.double, device='cuda', requires_grad=True)
             out = fn(x, y)
             if backward:
-                out.backward()
+                out.sum().backward()
 
         with self.assertLeaksNoCudaTensors():
             test()
@@ -7141,6 +7141,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_snli(self, device='cuda', check_export_import=False)
 
+    @staticmethod
     def _test_super_resolution(self, device, check_export_import=True):
         import torch.nn.init as init
 
@@ -7164,7 +7165,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return x
 
         net = Net(upscale_factor=4).to(device)
-        self.checkTrace(net, (torch.rand(5, 1, 64, 64, device=device),))
+        self.checkTrace(net, (torch.rand(5, 1, 64, 64, device=device),),
+                        export_import=check_export_import)
 
     @skipIfRocm
     def test_super_resolution(self):
