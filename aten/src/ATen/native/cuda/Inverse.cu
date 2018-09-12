@@ -114,19 +114,11 @@ AT_ERROR("inverse: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
-  // Create queue for both getrf and getri per batch
   magma_queue_t inverse_magma_queue = createMagmaQueue(self);
 
   magmaGetrfBatched<scalar_t>(
     n, n, self_array, n, ipiv_array, info_array,
     batch_size, inverse_magma_queue);
-
-  for (int64_t i = 0; i < batch_size; i++) {
-    infos[i] = info_array[i];
-  }
-
-  // This is to pre-emptively stop computation if getrf fails
-  checkErrors(infos, "inverse");
 
   magmaGetriBatched<scalar_t>(
     n, self_array, n, ipiv_array, self_inv_array,

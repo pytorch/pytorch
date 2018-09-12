@@ -9,7 +9,7 @@ static inline void checkInputs(const Tensor& self) {
            "but they are ", self.size(-2), " by ", self.size(-1), " matrices");
 }
 
-static inline void checkErrors(std::vector<int64_t> infos, const char* name) {
+static inline void checkErrors(std::vector<int64_t>& infos, const char* name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
     if (info < 0) {
