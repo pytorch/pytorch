@@ -14,6 +14,21 @@ if(NOT Caffe2_FOUND)
   message(FATAL_ERROR "Caffe2 not found")
 endif()
 
+if(USE_CUDA)
+  find_package(CUDA)
+  if(CUDA_FOUND)
+    set(C10D_USE_CUDA true)
+    message(STATUS "Building C10D with CUDA support")
+    add_definitions(-DUSE_CUDA=1)
+  else()
+    set(C10D_USE_CUDA false)
+    message(STATUS "CUDA not found, building C10D without CUDA support")
+  endif()
+else()
+  set(C10D_USE_CUDA false)
+  message(STATUS "Building C10D without CUDA support")
+endif()
+
 find_package(Gloo REQUIRED)
 if(Gloo_FOUND)
   message(STATUS "Gloo_LIBRARY: ${Gloo_LIBRARY}")
@@ -32,27 +47,24 @@ else()
   message(STATUS "Not able to find MPI, will compile c10d without MPI support")
 endif()
 
-find_package(NCCL)
-if(NCCL_FOUND)
-  message(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
-  message(STATUS "NCCL_INCLUDE_DIRS: ${NCCL_INCLUDE_DIRS}")
-  IF(NCCL_MAJOR_VERSION AND NOT (NCCL_MAJOR_VERSION LESS 2))
-    message(STATUS "NCCL Version 2 or higher found, will "
-                   "compile with NCCL distributed backend")
-    SET(DISTRIBUTED_NCCL_FOUND TRUE)
+if(C10D_USE_CUDA)
+  find_package(NCCL)
+  if(NCCL_FOUND)
+    message(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
+    message(STATUS "NCCL_INCLUDE_DIRS: ${NCCL_INCLUDE_DIRS}")
+    if(NCCL_MAJOR_VERSION AND NOT (NCCL_MAJOR_VERSION LESS 2))
+      message(STATUS "NCCL Version 2 or higher found, will "
+        "compile with NCCL distributed backend")
+      set(DISTRIBUTED_NCCL_FOUND true)
+    else()
+      message(STATUS "Found NCCL, but the NCCL version is either not 2+ or not "
+        "determinable, will not compile with NCCL distributed "
+        "backend")
+    endif()
   else()
-    message(STATUS "Found NCCL, but the NCCL version is either not 2+ or not "
-                   "determinable, will not compile with NCCL distributed "
-                   "backend")
+    message(STATUS "Not able to find NCCL, will not "
+      "compile with NCCL distributed backend")
   endif()
-else()
-  message(STATUS "Not able to find NCCL, will not "
-                 "compile with NCCL distributed backend")
-endif()
-
-find_package(CUDA REQUIRED)
-if(NOT CUDA_FOUND)
-  message(FATAL_ERROR "CUDA not found")
 endif()
 
 function(copy_header file)
@@ -68,7 +80,6 @@ endif()
 configure_file(cmake/Def.hpp.in ${CMAKE_BINARY_DIR}/include/c10d/Def.hpp @ONLY)
 
 set(C10D_SRCS
-  CUDAUtils.cpp
   FileStore.cpp
   ProcessGroup.cpp
   Store.cpp
@@ -78,11 +89,21 @@ set(C10D_SRCS
   ProcessGroupGloo.cpp
   )
 
-set(C10D_LIBS
-  caffe2_gpu
-  ${Gloo_LIBRARY}
-  ${Gloo_NATIVE_LIBRARY}
-  )
+if(C10D_USE_CUDA)
+  list(APPEND C10D_SRCS CUDAUtils.cpp)
+  set(C10D_LIBS
+    caffe2_gpu
+    ${Gloo_LIBRARY}
+    ${Gloo_NATIVE_LIBRARY}
+    )
+else()
+  set(C10D_LIBS
+    caffe2
+    ${Gloo_LIBRARY}
+    ${Gloo_NATIVE_LIBRARY}
+    )
+endif()
+
 
 if(DISTRIBUTED_NCCL_FOUND)
   list(APPEND C10D_SRCS ProcessGroupNCCL.cpp)
@@ -108,7 +129,11 @@ target_compile_options(c10d PUBLIC
 
 # c10d links to Caffe2/ATen, but the targets don't add TH/THC to the include path
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/TH)
-target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/THC)
+
+if(C10D_USE_CUDA)
+  target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../tmp_install/include/THC)
+endif()
+
 # For <c10d/...>
 target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # For torch/csrc/utils/hash.h and torch/csrc/utils/functional.h
@@ -116,7 +141,10 @@ target_include_directories(c10d PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
 # For <gloo/...>
 target_include_directories(c10d PUBLIC ${GLOO_INCLUDE_DIR})
 
-copy_header(CUDAUtils.hpp)
+if(C10D_USE_CUDA)
+  copy_header(CUDAUtils.hpp)
+endif()
+
 copy_header(FileStore.hpp)
 copy_header(PrefixStore.hpp)
 copy_header(ProcessGroup.hpp)

@@ -1081,6 +1081,34 @@ class TestJit(JitTestCase):
     def test_trace_size_with_grad(self):
         self.do_trace_size(True)
 
+    def test_trace_casts(self):
+        casts = [
+            lambda x: x.byte(),
+            lambda x: x.float(),
+            lambda x: x.cpu(),
+            lambda x: x.to(device='cpu'),
+            lambda x: x.to(dtype=torch.int64),
+            lambda x: x.to(device='cpu', dtype=torch.float),
+            lambda x: x.to(x)
+        ]
+
+        def assertContainsCast(trace):
+            self.assertEqual(sum(n.kind() == 'aten::to' for n in trace.graph.nodes()), 1)
+
+        for cast in casts:
+            trace = torch.jit.trace(cast, torch.randn(2, 2))
+            assertContainsCast(trace)
+            x = torch.randn(2, 2)
+            self.assertEqual(trace(x), cast(x))
+
+        def to_tensor(x, y):
+            return x.to(y)
+
+        to_tensor_trace = torch.jit.trace(to_tensor, (torch.randn(2, 2), torch.randn(1, 8)))
+        assertContainsCast(to_tensor_trace)
+        x, y = torch.randn(2, 2), torch.randn(1, 10)
+        self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
+
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.
@@ -1705,6 +1733,32 @@ class TestJit(JitTestCase):
         imported = self.getExportImportCopy(traced)
         x = torch.randn(3, 4)
         self.assertEqual(traced(x), imported(x))
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_cuda_export_restore(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__()
+                self.weight = nn.Parameter(torch.randn(3, 4))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.mod = Sub()
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return self.mod(v)
+        m = M()
+        m.cuda()
+        m2 = self.getExportImportCopy(m)
+        m2.cuda()
+        input = torch.rand(3, 4).cuda()
+        self.assertEqual(m(input), m2(input))
 
     def test_export_batchnorm(self):
         for mode in ['eval', 'train']:
@@ -2591,6 +2645,29 @@ a")
         exec(code_str, globals(), scope)
         cu = torch.jit.CompilationUnit(code_str)
         self.assertEqual(cu.func(*inputs), scope[fn_name](*inputs))
+
+    @unittest.skipIf(not RUN_CUDA, 'no CUDA')
+    def test_scriptmodule_releases_tensors_cuda(self):
+        @torch.jit.script
+        def fn(x, y):
+            return x.sigmoid() * y.tanh()
+
+        def test(backward=False):
+            x = torch.randn(3, 3, dtype=torch.double, device='cuda', requires_grad=True)
+            y = torch.randn(3, 3, dtype=torch.double, device='cuda', requires_grad=True)
+            out = fn(x, y)
+            if backward:
+                out.sum().backward()
+
+        with self.assertLeaksNoCudaTensors():
+            test()
+            test()
+            test()
+
+        with self.assertLeaksNoCudaTensors():
+            test(backward=True)
+            test(backward=True)
+            test(backward=True)
 
     def test_index(self):
         def consec(size, start=0):
@@ -3714,19 +3791,32 @@ a")
         template = dedent('''
         # int, int -> int
         def func1():
-            return 8 {op} 2
+            return 7 {op} 2
 
         def func2():
-            return 2 {op} 2
+            return 3 {op} 2
 
-        # float, float -> float
         def func3():
-            return 3.14 {op} 0.125
+            return -7 {op} 3
 
         def func4():
+            return 7 {op} -3
+
+        # float, float -> float
+        def func5():
+            return 3.14 {op} 0.125
+
+        def func6():
             return 3.14 {op} 3.14
+
+        def func7():
+            return -0.5 {op} 2.0
+
+        def func8():
+            return 3.5 {op} -2.0
+
         ''')
-        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
 
         for op in ops:
             code = template.format(op=op)
@@ -3738,6 +3828,10 @@ a")
             self.assertEqual(cu.func2(), scope['func2']())
             self.assertEqual(cu.func3(), scope['func3']())
             self.assertEqual(cu.func4(), scope['func4']())
+            self.assertEqual(cu.func5(), scope['func5']())
+            self.assertEqual(cu.func6(), scope['func6']())
+            self.assertEqual(cu.func7(), scope['func7']())
+            self.assertEqual(cu.func8(), scope['func8']())
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -3789,10 +3883,10 @@ a")
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(cu.func(tensor), scope['func'](tensor))
 
-        var_int = 2
-        var_float = 1.4321
+        var_int = [2, -2]
+        var_float = [1.4321, -1.2]
 
-        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
         # TODO: turn this on for py3 (and add PY3 division semantics)
         ops_py2_only = ['/']
         if PY2:
@@ -3804,12 +3898,16 @@ a")
         long_tensor[long_tensor == 0] = 2
 
         tensors = [float_tensor, double_tensor, long_tensor]
-        consts = [var_int, var_float]
+        consts = var_int + var_float
 
         for op, tensor, const, swap_args in product(ops, tensors, consts, [True, False]):
             # FIXME: things like 2 / long_tensor are not implemented correctly
             # Look in torch/tensor.py to see how pytorch implements it.
             if op == '/' and tensor.data_ptr() == long_tensor.data_ptr():
+                continue
+
+            # % operator does not take: const % tensor
+            if op == '%' and swap_args is True:
                 continue
 
             test(op, const, swap_args)
@@ -6732,9 +6830,29 @@ a")
         self.assertEqual(foo(input), input)
 
 
+class MnistNet(nn.Module):
+    def __init__(self):
+        super(MnistNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+        self.conv2_drop = nn.Dropout2d()
+        self.fc1 = nn.Linear(320, 50)
+        self.fc2 = nn.Linear(50, 10)
+
+    def forward(self, x):
+        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+        x = x.view(-1, 320)
+        x = F.relu(self.fc1(x))
+        x = F.dropout(x, training=self.training)
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=1)
+
+
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
-    def test_dcgan_models(self):
+    @staticmethod
+    def _test_dcgan_models(self, device, check_export_import=True):
         class DCGANGenerator(nn.Module):
             def __init__(self, nz, ngf, nc):
                 super(DCGANGenerator, self).__init__()
@@ -6792,10 +6910,22 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return self.main(input).view(-1, 1).squeeze(1)
 
         bs, nz, ngf, nc, ndf = 5, 6, 9, 3, 10
-        self.checkTrace(DCGANGenerator(nz, ngf, nc), (torch.rand(bs, nz, 1, 1),))
-        example_input = DCGANGenerator(nz, ngf, nc)(torch.rand(bs, nz, 1, 1))
-        self.checkTrace(DCGANDiscriminator(nc, ndf), (example_input,))
+        self.checkTrace(DCGANGenerator(nz, ngf, nc).to(device),
+                        (torch.rand(bs, nz, 1, 1, device=device),),
+                        export_import=check_export_import)
+        example_input = DCGANGenerator(nz, ngf, nc).to(device)(torch.rand(bs, nz, 1, 1, device=device))
+        self.checkTrace(DCGANDiscriminator(nc, ndf).to(device), (example_input,),
+                        export_import=check_export_import)
 
+    def test_dcgan_models(self):
+        self._test_dcgan_models(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_dcgan_models_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_dcgan_models(self, device='cuda', check_export_import=False)
+
+    # XXX: When this is fixed, write a CUDA test for this.
     @unittest.skip('https://github.com/pytorch/pytorch/issues/8439 InstanceNormalization bug')
     def test_neural_style(self):
         class TransformerNet(torch.nn.Module):
@@ -6896,29 +7026,45 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         self.checkTrace(TransformerNet(), (torch.rand(5, 3, 224, 224),))
 
-    def test_mnist(self):
-        class Net(nn.Module):
-            def __init__(self):
-                super(Net, self).__init__()
-                self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-                self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-                self.conv2_drop = nn.Dropout2d()
-                self.fc1 = nn.Linear(320, 50)
-                self.fc2 = nn.Linear(50, 10)
-
-            def forward(self, x):
-                x = F.relu(F.max_pool2d(self.conv1(x), 2))
-                x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-                x = x.view(-1, 320)
-                x = F.relu(self.fc1(x))
-                x = F.dropout(x, training=self.training)
-                x = self.fc2(x)
-                return F.log_softmax(x, dim=1)
-
+    @staticmethod
+    def _test_mnist(self, device, check_export_import=True):
         # eval() is present because dropout makes this nondeterministic
-        self.checkTrace(Net().eval(), (torch.rand(5, 1, 28, 28),))
+        self.checkTrace(MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),),
+                        export_import=check_export_import)
 
-    def test_reinforcement_learning(self):
+    def test_mnist(self):
+        self._test_mnist(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_mnist_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_mnist(self, device='cuda', check_export_import=False)
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_mnist_training_leaks_no_memory_cuda(self):
+        net = MnistNet().cuda()
+        traced_net = torch.jit.trace(net, [torch.randn(5, 1, 28, 28, device='cuda')])
+
+        def train(iters):
+            for _ in range(iters):
+                # Get some fake data
+                inp = torch.randn(5, 1, 28, 28, device='cuda')
+                out = traced_net(inp)
+
+                # Here's some fake loss
+                out.sum().backward()
+
+                # Zero out grads
+                traced_net.zero_grad()
+
+        # Set it up so the params have .grad fields so they are not reported as leaks
+        train(1)
+
+        with self.assertLeaksNoCudaTensors():
+            train(5)
+
+    @staticmethod
+    def _test_reinforcement_learning(self, device, test_export_import=True):
         class Policy(nn.Module):
             def __init__(self):
                 super(Policy, self).__init__()
@@ -6930,10 +7076,19 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 action_scores = self.affine2(x)
                 return F.softmax(action_scores, dim=1)
 
-        self.checkTrace(Policy(), (torch.rand(1, 4),))
+        self.checkTrace(Policy().to(device), (torch.rand(1, 4, device=device),),
+                        export_import=test_export_import)
 
-    @skipIfRocm
-    def test_snli(self):
+    def test_reinforcement_learning(self):
+        self._test_reinforcement_learning(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_reinforcement_learning_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_reinforcement_learning(self, device='cuda', test_export_import=False)
+
+    @staticmethod
+    def _test_snli(self, device, check_export_import=True):
         class Bottle(nn.Module):
 
             def forward(self, input):
@@ -7017,13 +7172,24 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
             n_layers = 2
             n_cells = 4  # 2 * n_layers because birnn = True
 
-        premise = torch.LongTensor(48, 128).random_(0, 100)
-        hypothesis = torch.LongTensor(24, 128).random_(0, 100)
+        premise = torch.LongTensor(48, 128).random_(0, 100).to(device)
+        hypothesis = torch.LongTensor(24, 128).random_(0, 100).to(device)
 
-        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False)
+        self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
+                        inputs_require_grads=False, export_import=check_export_import)
 
     @skipIfRocm
-    def test_super_resolution(self):
+    def test_snli(self):
+        self._test_snli(self, device='cpu')
+
+    @skipIfRocm
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_snli_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_snli(self, device='cuda', check_export_import=False)
+
+    @staticmethod
+    def _test_super_resolution(self, device, check_export_import=True):
         import torch.nn.init as init
 
         class Net(nn.Module):
@@ -7045,8 +7211,19 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 x = self.pixel_shuffle(self.conv4(x))
                 return x
 
-        net = Net(upscale_factor=4)
-        self.checkTrace(net, (torch.rand(5, 1, 64, 64),))
+        net = Net(upscale_factor=4).to(device)
+        self.checkTrace(net, (torch.rand(5, 1, 64, 64, device=device),),
+                        export_import=check_export_import)
+
+    @skipIfRocm
+    def test_super_resolution(self):
+        self._test_super_resolution(self, device='cpu')
+
+    @skipIfRocm
+    @unittest.skipIf(not RUN_CUDA, 'no CUDA')
+    def test_super_resolution_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_super_resolution(self, device='cuda', check_export_import=False)
 
     @suppress_warnings
     def test_time_sequence_prediction(self):
@@ -7103,9 +7280,11 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return outputs
 
         # TODO: toggle export_import once above issues are fixed
-        self.checkTrace(Sequence(), (torch.rand(3, 4),), export_import=False)
+        self.checkTrace(Sequence(), (torch.rand(3, 4),),
+                        export_import=False)
 
-    def test_vae(self):
+    @staticmethod
+    def _test_vae(self, device, check_export_import=True):
         class VAE(nn.Module):
             def __init__(self):
                 super(VAE, self).__init__()
@@ -7138,7 +7317,16 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return self.decode(z), mu, logvar
 
         # eval() is present because randn_like makes this nondeterministic
-        self.checkTrace(VAE().eval(), (torch.rand(128, 1, 28, 28),))
+        self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
+                        export_import=check_export_import)
+
+    def test_vae(self):
+        self._test_vae(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_vae_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_vae(self, device='cuda', check_export_import=False)
 
 
 # Smoke tests for export methods

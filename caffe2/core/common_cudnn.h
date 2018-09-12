@@ -4,8 +4,6 @@
 #include <array>
 #include <mutex>
 
-#include <cudnn.h>
-
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -15,6 +13,8 @@
 #ifndef CAFFE2_USE_CUDNN
 #error("This Caffe2 install is not built with cudnn, so you should not include this file.");
 #endif
+
+#include <cudnn.h>
 
 static_assert(
     CUDNN_VERSION >= 5000,
