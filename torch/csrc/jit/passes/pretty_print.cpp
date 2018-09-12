@@ -116,24 +116,21 @@ class PrettyPrintPass {
       const Node* node,
       const size_t level) {
     const auto body_block = node->blocks()[0];
-    aliases_[body_block->inputs()[0]] = body_block->inputs()[0];
-
-    // Add temporaries for loop-carried dependencies
+    // Add aliases for loop-carried dependencies
     zipWith<const Value*>(
-        node->inputs().slice(1),
-        body_block->inputs(),
-        [&](const Value* node_input, const Value* param_output) {
-          if (isValueUsedLater(param_output)) {
-            printAssignment(out, param_output, node_input, level);
-          }
+        body_block->inputs().slice(1), // Start at 1 to ignore condition
+        node->outputs(),
+        [&](const Value* block_input, const Value* node_output) {
+          aliases_[block_input] = node_output;
         });
 
+    // Print initial assignments of loop node outputs = loop node inputs
     zipWith<const Value*>(
         node->outputs(),
         node->inputs().slice(2),
-        [&](const Value* node_output, const Value* return_input) {
+        [&](const Value* node_output, const Value* node_input) {
           if (isValueUsedLater(node_output)) {
-            printAssignment(out, node_output, return_input, level);
+            printAssignment(out, node_output, node_input, level);
           }
         });
 
@@ -146,27 +143,15 @@ class PrettyPrintPass {
     // Loop body
     printBlock(out, body_block, level + 1);
 
-    // Re-assign block outputs to inputs for next iteration
+    // Update block outputs to block inputs for next loop iteration
     zipWith<const Value*>(
         body_block->inputs(),
         body_block->outputs(),
-        [&](const Value* param_output, const Value* return_input) {
-          if (isValueUsedLater(param_output)) {
-            printAssignment(out, param_output, return_input, level + 1);
+        [&](const Value* block_input, const Value* block_output) {
+          if (isValueUsedLater(block_input)) {
+            printAssignment(out, block_input, block_output, level + 1);
           }
         });
-
-    // The block outputs are not live after the end of the block, so we can use
-    // them as the value names and avoid printing assignments
-    zipWith<const Value*>(
-        node->outputs(),
-        body_block->outputs().slice(1),
-        [&](const Value* node_output, const Value* return_input) {
-          if (isValueUsedLater(node_output)) {
-            printAssignment(out, node_output, return_input, level + 1);
-          }
-        });
-
     return out;
   }
 
