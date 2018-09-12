@@ -28,7 +28,7 @@ class TestGatherOps(serial.SerializedTestCase):
             if ind.size == 0:
                 return [np.zeros((0, 10, 20)).astype(np.float32)]
 
-            output = [r for r in [data[i] for i in ind]]
+            output = [np.array(x, dtype=np.float32) for x in data.take(ind, axis=0).astype(np.float32)]
             return [output]
 
         self.assertReferenceChecks(gc, op, [data, ind], ref_gather)
@@ -64,6 +64,7 @@ class TestBatchGatherOps(serial.SerializedTestCase):
             ['output'])
 
         def ref_batch_gather(data, ind):
+            # return data.take(ind, axis=1)
             output = []
             for b in range(data.shape[0]):
                 output.append([r for r in [data[b][i] for i in ind]])
