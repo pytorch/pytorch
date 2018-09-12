@@ -408,6 +408,7 @@ class _DistTestBase(object):
     )
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @unittest.skip("Flaky test, see pytorch#11582")
     def test_broadcast_cuda(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -642,6 +643,7 @@ class _DistTestBase(object):
     )
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @unittest.skip("Flaky test, see pytorch#11582")
     def test_all_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -930,6 +932,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
     @unittest.skipIf(BACKEND == "nccl", "NCCL broadcast multigpu skipped")
     @skip_if_no_gpu
+    @unittest.skip("Flaky test, see pytorch#11582")
     def test_broadcast_multigpu(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1190,6 +1193,7 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @unittest.skip("Flaky test, see pytorch#11582")
     def test_DistributedDataParallel(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
