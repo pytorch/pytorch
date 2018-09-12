@@ -2030,6 +2030,22 @@
   variants: function, method
   device_guard: False
 
+- func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
+- func: to(Tensor self, ScalarType dtype, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
+- func: to(Tensor self, Device device, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
+- func: to(Tensor self, Tensor other, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
 - func: meshgrid(TensorList tensors) -> TensorList
 
 # This has a method dispatch to work around circular include problems

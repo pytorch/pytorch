@@ -230,13 +230,26 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking) {
+  AutoNoGIL no_gil;
+  return self.to(device, non_blocking);
+}
+
+static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking) {
+  AutoNoGIL no_gil;
+  return self.to(dtype, non_blocking);
+}
+
+static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking) {
+  AutoNoGIL no_gil;
+  return self.to(device, dtype, non_blocking);
+}
+
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-   auto backend = self_.is_sparse() ? Backend::SparseCPU : Backend::CPU;
-   auto& type = self_.type().toBackend(backend);
-   return wrap(torch::utils::dispatch_type_conversion(self_, type));
+   return THPVariable_Wrap(dispatch_to(self_, at::Device(at::DeviceType::CPU), false));
    END_HANDLE_TH_ERRORS
 }
 
@@ -250,25 +263,17 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto backend = self_.is_sparse() ? at::Backend::SparseCUDA : at::Backend::CUDA;
-  auto& type = self_.type().toBackend(backend);
-  auto device_obj = r.device(0);
-  if (!r.isNone(0) && device_obj.is_cpu()) {
-    throw std::runtime_error("Invalid device, must be cuda device");
-  }
-  int32_t device_index = -1;
-  if (device_obj.has_index() && device_obj.is_cuda()) {
-    device_index = device_obj.index();
-  }
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, r.toBool(1)));
+  auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
+  AT_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
+  torch::utils::cuda_lazy_init();
+  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  auto& type = self_.type().toScalarType(scalarType);
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
+  return THPVariable_Wrap(dispatch_to(self_, scalarType, false));
   END_HANDLE_TH_ERRORS
 }
 static PyObject * THPVariable_byte(PyObject* self, PyObject* args) {
@@ -497,18 +502,19 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto& device = std::get<0>(parsed);
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
-  if (!device) {
-    // device not given
-    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-    auto& type = self_.type().toScalarType(scalarType.value_or(self_.type().scalarType()));
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (device && device->is_cuda()) {
+    torch::utils::cuda_lazy_init();
+  }
+  if (!device && !scalarType) {
+    Py_INCREF(self);
+    return self;
+  } else if (!device) {
+    return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking));
+  } else if (!scalarType) {
+    return THPVariable_Wrap(dispatch_to(self_, *device, non_blocking));
   } else {
-    // device and maybe dtype are given
-    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-    auto& layout = *torch::getLayout(self_.type().backend());
-    auto& type = torch::getVariableType(scalarType.value_or(self_.type().scalarType()), layout, device->type());
-    const int32_t device_index = type.is_cuda() ? device->index() : -1;
-    return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, non_blocking));
+    return THPVariable_Wrap(dispatch_to(self_, *device, *scalarType, non_blocking));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

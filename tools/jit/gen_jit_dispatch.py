@@ -124,7 +124,7 @@ def is_magic_method(api_name):
     return api_name.startswith('__') and api_name.endswith('__')
 
 
-blacklisted_types = {'SparseTensorRef', 'Storage', 'ScalarType', 'optional<ScalarType>', 'void*'}
+blacklisted_types = {'SparseTensorRef', 'Storage', 'void*'}
 default_only_types = {'Generator'}
 
 
