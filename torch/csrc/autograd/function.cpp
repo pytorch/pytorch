@@ -47,7 +47,7 @@ static void gatherFunctions(Function* func,
 
 /*
   * Fix for #5534: prevent stack overflow on deletion of deep computation graph
-  * 
+  *
   * Sometimes one can end up with a very big computation graph of Functions
   * and Edges. Each std::shared_ptr<Function> contains a list of Edge, and
   * each Edge contains a std::shared_ptr<Function>. Deleting a
@@ -76,11 +76,9 @@ void deleteFunction(Function* function) {
   while (!stack.empty()) {
     auto& curr_func = stack.back();
 
-    if (curr_func.use_count() == 1) {
-      // If this is the last reference, gather function references
-      // that will be recursively decremented.
-      gatherFunctions(curr_func.get(), stack);
-    }
+    // This has to be the last reference due to the check in `gatherFunctions`.
+    // So gather function references that will be recursively decremented.
+    gatherFunctions(curr_func.get(), stack);
 
     stack.pop_back();
   }
