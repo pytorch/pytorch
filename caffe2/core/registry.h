@@ -104,7 +104,7 @@ class Registry {
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
-class CAFFE2_API Registerer {
+class Registerer {
  public:
   Registerer(
       const SrcType& key,
