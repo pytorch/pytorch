@@ -20,6 +20,8 @@ if(C10D_USE_CUDA)
   if(DISTRIBUTED_NCCL_FOUND)
     c10d_add_test(ProcessGroupNCCLTest.cpp c10d c10d_cuda_test)
   endif()
+else()
+  c10d_add_test(ProcessGroupGlooTest.cpp c10d c10d)
 endif()
 
 if(MPI_FOUND)
