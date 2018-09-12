@@ -13,12 +13,12 @@ StorageImpl::StorageImpl(
       numel_(numel),
       resizable_(resizable),
       allocator_(allocator) {
-  // if (numel > 0) {
-  //   CAFFE_ENFORCE(
-  //       data_type.id() != TypeIdentifier::uninitialized(),
-  //       "Constructing a storage with meta of unknown type and non-zero
-  //       numel");
-  // }
+  if (numel > 0) {
+    AT_ERROR(
+        data_type.id() != caffe2::TypeIdentifier::uninitialized(),
+        "Constructing a storage with meta of unknown type and non-zero \
+        numel");
+  }
 }
 
 StorageImpl::StorageImpl(

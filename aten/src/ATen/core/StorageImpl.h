@@ -6,7 +6,7 @@
 
 #include <ATen/core/intrusive_ptr.h>
 
-//TODO: Renable CAFFE_ENFORCE
+#include <caffe2/core/logging.h>
 
 namespace at {
 
@@ -111,7 +111,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
     std::swap(data_ptr_, data_ptr);
     return std::move(data_ptr);
   };
-  // XXX: TERRIBLE! DONT USE UNLESS YOU HAVE TO! AND EVEN DONT JUST DONT!
+  // XXX: TERRIBLE! DONT USE UNLESS YOU HAVE TO! AND EVEN THEN DONT, JUST DONT!
   void set_dtype(const caffe2::TypeMeta& data_type) {
     int64_t capacity = numel_ * data_type_.itemsize();
     data_type_ = data_type;
@@ -169,10 +169,10 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
       const caffe2::TypeMeta& data_type,
       size_t capacity) {
     data_type_ = data_type;
-//    CAFFE_ENFORCE_WITH_CALLER(
-//        data_type_.id() != caffe2::TypeIdentifier::uninitialized(),
-//        "To share with a raw external pointer you need to have meta "
-//        "already set.");
+    CAFFE_ENFORCE_WITH_CALLER(
+        data_type_.id() != caffe2::TypeIdentifier::uninitialized(),
+        "To share with a raw external pointer you need to have meta "
+        "already set.");
     data_ptr_ = std::move(data_ptr);
     // NOTE: data_type might change and so it's also possible that capacity
     // might not be divisible by itemsize. There is no way for us to keep track
