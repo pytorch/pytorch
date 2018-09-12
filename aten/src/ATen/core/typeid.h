@@ -55,7 +55,7 @@ class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, ui
 
   /**
    * Returns the unique id for the given type T. The id is unique for the type T
-   * in the sense that for any two different types, their id are different; for
+   * in the sense that for any two different types, their ids are different; for
    * the same type T, the id remains the same over different calls of the
    * function. However, this is not guaranteed over different runs, as the id
    * is generated during run-time. Do NOT serialize the id for storage.
@@ -108,7 +108,7 @@ struct TypeMetaData final {
 
 // Mechanism for throwing errors which can't be prevented at compile time
 // due to type erasure. E.g. somebody calling TypeMeta::copy() for
-// non-copiable type. Right now just throws exception but is implemented
+// non-copyable type. Right now just throws exception but is implemented
 // in .cpp to manage dependencies
 void _ThrowRuntimeTypeLogicError(const std::string& msg);
 
