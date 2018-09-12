@@ -24,6 +24,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <pybind11/functional.h>
+
 
 namespace torch {
 namespace jit {
@@ -370,10 +372,6 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
       .def("save", &Module::save)
-      .def("_load", [](const std::shared_ptr<script::Module> module,
-                       const std::string& filename) {
-        ImportIRModule(module, filename);
-      })
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
@@ -529,7 +527,7 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
-
+  m.def("import_ir_module", import_ir_module);
 }
 
 } // namespace script

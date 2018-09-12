@@ -73,7 +73,16 @@ def load(filename):
             A ``ScriptModule`` object.
     """
     m = ScriptModule()
-    m._load(filename)
+
+    def module_lookup(names):
+        curr = m
+        for name in names:
+            if not hasattr(curr, name):
+                setattr(curr, name, ScriptModule())
+            curr = getattr(curr, name)
+        return curr
+
+    torch._C.import_ir_module(module_lookup, filename)
     return m
 
 
