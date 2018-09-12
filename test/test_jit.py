@@ -3791,19 +3791,32 @@ a")
         template = dedent('''
         # int, int -> int
         def func1():
-            return 8 {op} 2
+            return 7 {op} 2
 
         def func2():
-            return 2 {op} 2
+            return 3 {op} 2
 
-        # float, float -> float
         def func3():
-            return 3.14 {op} 0.125
+            return -7 {op} 3
 
         def func4():
+            return 7 {op} -3
+
+        # float, float -> float
+        def func5():
+            return 3.14 {op} 0.125
+
+        def func6():
             return 3.14 {op} 3.14
+
+        def func7():
+            return -0.5 {op} 2.0
+
+        def func8():
+            return 3.5 {op} -2.0
+
         ''')
-        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
 
         for op in ops:
             code = template.format(op=op)
@@ -3815,6 +3828,10 @@ a")
             self.assertEqual(cu.func2(), scope['func2']())
             self.assertEqual(cu.func3(), scope['func3']())
             self.assertEqual(cu.func4(), scope['func4']())
+            self.assertEqual(cu.func5(), scope['func5']())
+            self.assertEqual(cu.func6(), scope['func6']())
+            self.assertEqual(cu.func7(), scope['func7']())
+            self.assertEqual(cu.func8(), scope['func8']())
 
     def test_number_div(self):
         self.checkScript(div_int_future, (), optimize=True)
@@ -3866,10 +3883,10 @@ a")
             cu = torch.jit.CompilationUnit(code)
             self.assertEqual(cu.func(tensor), scope['func'](tensor))
 
-        var_int = 2
-        var_float = 1.4321
+        var_int = [2, -2]
+        var_float = [1.4321, -1.2]
 
-        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        ops = ['+', '-', '*', '%', '<', '<=', '>', '>=', '==', '!=']
         # TODO: turn this on for py3 (and add PY3 division semantics)
         ops_py2_only = ['/']
         if PY2:
@@ -3881,12 +3898,16 @@ a")
         long_tensor[long_tensor == 0] = 2
 
         tensors = [float_tensor, double_tensor, long_tensor]
-        consts = [var_int, var_float]
+        consts = var_int + var_float
 
         for op, tensor, const, swap_args in product(ops, tensors, consts, [True, False]):
             # FIXME: things like 2 / long_tensor are not implemented correctly
             # Look in torch/tensor.py to see how pytorch implements it.
             if op == '/' and tensor.data_ptr() == long_tensor.data_ptr():
+                continue
+
+            # % operator does not take: const % tensor
+            if op == '%' and swap_args is True:
                 continue
 
             test(op, const, swap_args)

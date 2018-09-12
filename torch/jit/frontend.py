@@ -303,6 +303,7 @@ class ExprBuilder(Builder):
         ast.Mult: '*',
         ast.Div: '/',
         ast.Pow: '**',
+        ast.Mod: '%',
     }
 
     if not PY2:

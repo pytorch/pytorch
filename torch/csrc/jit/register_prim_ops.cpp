@@ -390,14 +390,14 @@ RegisterOperators reg({
 });
 
 // define implementations for primitive number ops
-#define DEFINE_GENERIC_OP(aten_op, op, float_result)                        \
+#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, float_result)          \
   Operator(                                                                 \
       #aten_op "(int a, int b) -> int",                                     \
       [](Node* node) {                                                      \
         return [=](Stack& stack) {                                          \
           int64_t a, b;                                                     \
           pop(stack, a, b);                                                 \
-          push(stack, op);                                                  \
+          push(stack, int_op);                                                  \
           return 0;                                                         \
         };                                                                  \
       }),                                                                   \
@@ -406,7 +406,7 @@ RegisterOperators reg({
         return [=](Stack& stack) {                                          \
           double a, b;                                                      \
           pop(stack, a, b);                                                 \
-          push(stack, op);                                                  \
+          push(stack, float_op);                                                  \
           return 0;                                                         \
         };                                                                  \
       }),
@@ -421,8 +421,8 @@ RegisterOperators reg({
     };                                                        \
   }),
 
-#define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, float)
-#define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, int)
+#define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, float)
+#define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, int)
 
 // define helpers for where aten is missing scalar overloads
 // note: it would be better to define these in a standard library as
@@ -617,6 +617,11 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::sub, a - b)
     DEFINE_BINARY_OP(aten::mul, a * b)
     DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b)))
+
+    // Pass in two ops for handling int and float separately as % in C++ only works for int
+    // The modulus calculation is different between C++ and Python (on negative), we preserve
+    // the python behavior as it's more common and match python syntax, hence the conversion.
+    DEFINE_GENERIC_OP(aten::remainder, (b + (a % b)) % b, fmod((b + fmod(a, b)), b), float)
 
     // TODO: Support python floordiv (//)
     // Right now aten::floordiv is only used by loop unrolling
