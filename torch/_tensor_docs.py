@@ -482,7 +482,7 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 
 .. math::
 
-    f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - median)^2 + \sigma^2}
+    f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - \text{median})^2 + \sigma^2}
 """)
 
 add_docstr_all('ceil',
@@ -1229,17 +1229,18 @@ log2_() -> Tensor
 In-place version of :meth:`~Tensor.log2`
 """)
 
-add_docstr_all('log_normal_', u"""
+add_docstr_all('log_normal_', r"""
 log_normal_(mean=1, std=2, *, generator=None)
 
 Fills :attr:`self` tensor with numbers samples from the log-normal distribution
-parameterized by the given mean (\u00B5) and standard deviation (\u03C3).
-Note that :attr:`mean` and :attr:`stdv` are the mean and standard deviation of
-the underlying normal distribution, and not of the returned distribution:
+parameterized by the given mean :math:`\mu` and standard deviation
+:math:`\sigma`. Note that :attr:`mean` and :attr:`std` are the mean and
+standard deviation of the underlying normal distribution, and not of the
+returned distribution:
 
 .. math::
 
-    f(x) = \\dfrac{1}{x \\sigma \\sqrt{2\\pi}}\ e^{-\\dfrac{(\\ln x - \\mu)^2}{2\\sigma^2}}
+    f(x) = \dfrac{1}{x \sigma \sqrt{2\pi}}\ e^{-\frac{(\ln x - \mu)^2}{2\sigma^2}}
 """)
 
 add_docstr_all('logsumexp',
@@ -1412,14 +1413,7 @@ add_docstr_all('narrow',
                r"""
 narrow(dimension, start, length) -> Tensor
 
-Returns a new tensor that is a narrowed version of :attr:`self` tensor. The
-dimension :attr:`dim` is narrowed from :attr:`start` to :attr:`start + length`. The
-returned tensor and :attr:`self` tensor share the same underlying storage.
-
-Args:
-    dimension (int): the dimension along which to narrow
-    start (int): the starting dimension
-    length (int): the distance to the ending dimension
+See :func:`torch.narrow`
 
 Example::
 
@@ -1752,13 +1746,16 @@ add_docstr_all('reshape',
                r"""
 reshape(*shape) -> Tensor
 
-Returns a tensor with the same data and number of elements as :attr:`self`,
-but with the specified shape.
+Returns a tensor with the same data and number of elements as :attr:`self`
+but with the specified shape. This method returns a view if :attr:`shape` is
+compatible with the current shape. See :meth:`torch.Tensor.view` on when it is
+possible to return a view.
+
+See :func:`torch.reshape`
 
 Args:
     shape (tuple of ints or int...): the desired shape
 
-See :func:`torch.reshape`
 """)
 
 add_docstr_all('reshape_as',
@@ -1767,8 +1764,10 @@ reshape_as(other) -> Tensor
 
 Returns this tensor as the same shape as :attr:`other`.
 ``self.reshape_as(other)`` is equivalent to ``self.reshape(other.sizes())``.
+This method returns a view if ``other.sizes()`` is compatible with the current
+shape. See :meth:`torch.Tensor.view` on when it is possible to return a view.
 
-Please see :meth:`~Tensor.reshape` for more information about ``reshape``.
+Please see :meth:`reshape` for more information about ``reshape``.
 
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same shape
@@ -2531,10 +2530,10 @@ See :func:`torch.var`
 
 add_docstr_all('view',
                r"""
-view(*args) -> Tensor
+view(*shape) -> Tensor
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
-different size.
+different :attr:`shape`.
 
 The returned tensor shares the same data and must have the same number
 of elements, but may have a different size. For a tensor to be viewed, the new
@@ -2545,13 +2544,14 @@ contiguity-like condition that :math:`\forall i = 0, \dots, k-1`,
 
 .. math::
 
-  stride[i] = stride[i+1] \times size[i+1]
+  \text{stride}[i] = \text{stride}[i+1] \times \text{size}[i+1]
 
-Otherwise, :func:`contiguous` needs to be called before the tensor can be
-viewed.
+Otherwise, :meth:`contiguous` needs to be called before the tensor can be
+viewed. See also: :meth:`reshape`, which returns a view if the shapes are
+compatible, and copies (equivalent to calling :meth:`contiguous`) otherwise.
 
 Args:
-    args (torch.Size or int...): the desired size
+    shape (torch.Size or int...): the desired size
 
 Example::
 

@@ -187,6 +187,12 @@ struct TORCH_API Variable : public at::Tensor {
   /// this. If this `Variable` is a view, throws an `std::runtime_error()`.
   void detach_();
 
+  /// Computes the gradient of current tensor w.r.t. graph leaves.
+  void backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const;
+
+  /// Sets the type of the Variable.
+  void set_data(Tensor new_data) const;
+
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.
   /// NOTE: This will always set the `grad_fn`, even if this is a leaf variable,
@@ -259,7 +265,7 @@ struct TORCH_API Variable : public at::Tensor {
   // Private Methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  Variable(Variable::Impl* self, bool retain);
+  Variable(c10::intrusive_ptr<Variable::Impl> self);
   Impl* get() const;
 };
 
@@ -324,14 +330,12 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   Variable detach() const;
   void detach_();
 
-  /// Sets the type of the Variable.
-  void set_data(Tensor new_data) override;
+  void set_data(Tensor new_data);
 
-  /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
       at::optional<at::Tensor> gradient,
       bool keep_graph,
-      bool create_graph) override;
+      bool create_graph);
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
@@ -413,7 +417,7 @@ inline Variable make_variable_view(
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
     return Variable(c10::make_intrusive<Variable::ViewImpl>(
-            std::move(base), std::move(data), std::move(gradient_edge)).release(), false);
+            std::move(base), std::move(data), std::move(gradient_edge)));
   }
   return Variable();
 }
@@ -423,7 +427,7 @@ inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    return Variable(c10::make_intrusive<Variable::Impl>(data, requires_grad).release(), false);
+    return Variable(c10::make_intrusive<Variable::Impl>(data, requires_grad));
   }
   return Variable();
 }
@@ -433,7 +437,7 @@ inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    return Variable(c10::make_intrusive<Variable::Impl>(data, false, std::move(gradient_edge)).release(), false);
+    return Variable(c10::make_intrusive<Variable::Impl>(data, false, std::move(gradient_edge)));
   }
   return Variable();
 }
@@ -498,6 +502,14 @@ inline Variable Variable::detach() const {
 
 inline void Variable::detach_() {
   get()->detach_();
+}
+
+inline void Variable::backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  get()->backward(gradient, keep_graph, create_graph);
+}
+
+inline void Variable::set_data(Tensor new_data) const {
+  get()->set_data(new_data);
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
@@ -582,8 +594,8 @@ inline PyObject* Variable::pyobj() const noexcept {
 // Private Methods
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline Variable::Variable(Variable::Impl* self, bool retain)
-    : at::Tensor(self, retain) {}
+inline Variable::Variable(c10::intrusive_ptr<Variable::Impl> self)
+    : at::Tensor(std::move(self)) {}
 
 inline Variable::Impl* Variable::get() const {
   AT_CHECK(defined(), "Called Variable::get() on an undefined Variable");

@@ -374,7 +374,7 @@
 
 - func: conv3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1, int64_t groups=1) -> Tensor
 
-- func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad) -> Tensor
+- func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad=0) -> Tensor
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
 
@@ -2028,6 +2028,22 @@
 
 - func: get_device(Tensor self) -> int64_t
   variants: function, method
+  device_guard: False
+
+- func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
+- func: to(Tensor self, ScalarType dtype, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
+- func: to(Tensor self, Device device, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
+- func: to(Tensor self, Tensor other, bool non_blocking=false) -> Tensor
+  variants: method
   device_guard: False
 
 - func: meshgrid(TensorList tensors) -> TensorList

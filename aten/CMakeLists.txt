@@ -1,19 +1,5 @@
-if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
-  project(ATen CXX C)
-  include(CMakeDependentOption)
-  option(USE_CUDA "Use CUDA" ON)
-  option(USE_ROCM "Use ROCm" OFF)
-  option(USE_CUDNN "Use cuDNN" ON)
-  option(USE_MKLDNN "Use MKLDNN" ON)
-  cmake_dependent_option(
-      USE_CUDNN "Use cuDNN" ON
-      "USE_CUDA" OFF)
-  option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
-else()
-  if (BUILD_ATEN_MOBILE)
-    return()
-  endif()
+if (BUILD_ATEN_MOBILE)
+  return()
 endif()
 
 # Find modules
@@ -41,32 +27,6 @@ set(ATen_PUBLIC_CUDA_DEPENDENCY_LIBS)
 SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
 SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
 SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
-
-if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  # ---[ Build variables set within the cmake tree
-  include(../cmake/BuildVariables.cmake)
-  set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
-
-  # ---[ Misc checks to cope with various compiler modes
-  include(../cmake/MiscCheck.cmake)
-
-  # External projects
-  include(ExternalProject)
-
-  # ---[ Utils
-  # TODO: merge the following 3 files into cmake/public/utils.cmake.
-  include(../cmake/Utils.cmake)
-  include(../cmake/public/utils.cmake)
-
-  # ---[ Dependencies
-  include(../cmake/Dependencies.cmake)
-  list(APPEND ATen_CPU_INCLUDE ${Caffe2_CPU_INCLUDE})
-  list(APPEND ATen_CUDA_INCLUDE ${Caffe2_GPU_INCLUDE})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS})
-  list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${Caffe2_CUDA_DEPENDENCY_LIBS})
-  list(APPEND ATen_PUBLIC_CUDA_DEPENDENCY_LIBS
-    ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-endif()
 
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CUDA_INCLUDE_DIRS})
@@ -132,16 +92,14 @@ list(APPEND ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 add_subdirectory(src/ATen)
 
-if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  # Pass source, includes, and libs to parent
-  set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
-  set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
-  set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
-  set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
-  set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
-  set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
-  set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)
-  set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
-  set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
-  set(ATen_CORE_TEST_SRCS ${ATen_CORE_TEST_SRCS} PARENT_SCOPE)
-endif()
+# Pass source, includes, and libs to parent
+set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
+set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
+set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE} PARENT_SCOPE)
+set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE} PARENT_SCOPE)
+set(ATen_THIRD_PARTY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE} PARENT_SCOPE)
+set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
+set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
+set(ATen_CORE_TEST_SRCS ${ATen_CORE_TEST_SRCS} PARENT_SCOPE)
