@@ -107,6 +107,7 @@ TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.cpp")
 SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDerived.cpp")
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
+TYPE_EXTENDED_INTERFACE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtendedInterface.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 
@@ -165,6 +166,7 @@ top_env = {
     'cuda_type_registrations': [],
     'cuda_type_headers': [],
     'pure_virtual_type_method_declarations': [],
+    'pure_virtual_extended_type_method_declarations': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'type_method_inline_definitions': [],
@@ -330,7 +332,7 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    files = ['Declarations.yaml', 'Type.h', 'TypeDefault.cpp', 'TypeDefault.h', 'Tensor.h',
+    files = ['Declarations.yaml', 'Type.h', 'TypeExtendedInterface.h', 'TypeDefault.cpp', 'TypeDefault.h', 'Tensor.h',
              'TensorMethods.h', 'Functions.h',
              'CPUCopy.cpp', 'NativeFunctions.h',
              'RegisterCPU.cpp', 'RegisterCPU.h']
@@ -400,6 +402,7 @@ def generate_outputs():
             backend, density, scalar_type, declarations))
 
     file_manager.write('Type.h', TYPE_H, top_env)
+    file_manager.write('TypeExtendedInterface.h', TYPE_EXTENDED_INTERFACE_H, top_env)
     file_manager.write('TypeDefault.h', TYPE_DEFAULT_H, top_env)
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
 
