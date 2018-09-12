@@ -219,7 +219,7 @@ protected:
     : TensorType(tensor.type().scalarType(),
                  tensor.type().is_cuda() ? tensor.get_device() : -1,
                  tensor.dim(),
-                 tensor.requires_grad(),
+                 tensor.is_variable() && tensor.requires_grad(),
                  kind) {}
   TensorType(at::ScalarType scalar_type, int device, int dim, bool requires_grad=true, TypeKind kind=TypeKind::TensorType)
     : Type(kind)

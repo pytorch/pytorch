@@ -119,9 +119,9 @@ def canonical(graph):
 
 
 def get_lstm_inputs(device, training=False):
-    input = torch.randn(3, 10, dtype=torch.float, device=device)
-    hx = torch.randn(3, 20, dtype=torch.float, device=device)
-    cx = torch.randn(3, 20, dtype=torch.float, device=device)
+    input = torch.randn(3, 10, dtype=torch.float, device=device, requires_grad=training)
+    hx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
+    cx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
     module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
     if training:
         params = tuple(module.parameters())

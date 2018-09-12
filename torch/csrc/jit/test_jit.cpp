@@ -26,6 +26,7 @@ using Catch::StartsWith;
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/operator.h"
@@ -34,7 +35,6 @@ using Catch::StartsWith;
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
 
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
@@ -668,17 +668,20 @@ void testDifferentiate(std::ostream & out) {
 }
 
 void testDifferentiateWithRequiresGrad(std::ostream & out) {
-  auto graph = std::make_shared<Graph>();
-  at::ScalarType s = at::ScalarType::Float;
-  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
-
   // Build up a fake graph
-  auto a = SymbolicVariable::asNewInput(*graph, type);
-  auto b = SymbolicVariable::asNewInput(*graph, type->withRequiresGrad(false));
+  auto graph = std::make_shared<Graph>();
+  auto a = SymbolicVariable::asNewInput(*graph);
+  auto b = SymbolicVariable::asNewInput(*graph);
   auto d = b * b + b;
   auto e = (d + a) * a + b;
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
+
+  auto a_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), true);
+  auto b_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), false);
+  ArgumentSpec spec (true, {a_var, b_var});
+  PropagateInputShapes(*graph, spec);
+  PropagateRequiresGrad(graph, spec);
 
   auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
