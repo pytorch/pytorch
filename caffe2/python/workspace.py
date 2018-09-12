@@ -18,6 +18,7 @@ import socket
 import tempfile
 
 from caffe2.proto import caffe2_pb2
+from caffe2.proto import plan_pb2
 from caffe2.python import scope, utils
 
 import caffe2.python._import_c_extension as C
@@ -614,7 +615,7 @@ def _Workspace_create_net_with_exception_intercept(ws, net, overwrite=False):
 def _Workspace_run(ws, obj):
     if hasattr(obj, 'Proto'):
         obj = obj.Proto()
-    if isinstance(obj, caffe2_pb2.PlanDef):
+    if isinstance(obj, plan_pb2.PlanDef):
         return ws._run_plan(obj.SerializeToString())
     if isinstance(obj, caffe2_pb2.NetDef):
         return CallWithExceptionIntercept(

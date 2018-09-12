@@ -12,6 +12,7 @@ from itertools import chain
 from six import binary_type, string_types, text_type
 
 from caffe2.proto import caffe2_pb2
+from caffe2.proto import plan_pb2
 from caffe2.python import scope, utils, workspace
 from caffe2.python.control_ops_grad import \
     gen_do_gradient, gen_if_gradient, gen_while_gradient
@@ -2575,7 +2576,7 @@ class ExecutionStep(object):
         return name
 
     def __init__(self, name, nets=None, num_iter=None):
-        self._step = caffe2_pb2.ExecutionStep()
+        self._step = plan_pb2.ExecutionStep()
         self._step.name = name or ExecutionStep._get_next_step_name('step')
         self._net_dict = OrderedDict()
         self._is_used = False
@@ -2706,7 +2707,7 @@ class ExecutionStep(object):
         """
         Create ExecutionStep from ExecutionStep protobuf recursively
         """
-        assert isinstance(step_proto, caffe2_pb2.ExecutionStep)
+        assert isinstance(step_proto, plan_pb2.ExecutionStep)
         assert (len(step_proto.network) > 0 and len(step_proto.substep) == 0) or \
             (len(step_proto.network) == 0 and len(step_proto.substep) > 0)
 
@@ -2770,7 +2771,7 @@ def add_nets_in_order(step, net_list):
 class Plan(object):
 
     def __init__(self, name_or_step):
-        self._plan = caffe2_pb2.PlanDef()
+        self._plan = plan_pb2.PlanDef()
         self._net_dict = OrderedDict()
         self._steps = []    # A list of ExecutionStep
         if isinstance(name_or_step, ExecutionStep):
@@ -2824,7 +2825,7 @@ class Plan(object):
 
     @classmethod
     def create_from_proto(cls, plan_proto):
-        assert isinstance(plan_proto, caffe2_pb2.PlanDef)
+        assert isinstance(plan_proto, plan_pb2.PlanDef)
         plan = Plan(plan_proto.name)
         plan._plan.CopyFrom(plan_proto)
         del plan._plan.network[:]

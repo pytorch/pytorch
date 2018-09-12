@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
 from caffe2.proto import metanet_pb2
+from caffe2.proto import plan_pb2
 from caffe2.python import workspace, core, scope
 from caffe2.python.predictor_constants import predictor_constants
 import caffe2.python.predictor.serde as serde
@@ -82,7 +83,7 @@ class PredictorExportMeta(collections.namedtuple(
         if isinstance(predict_net, (core.Net, core.Plan)):
             predict_net = predict_net.Proto()
 
-        assert isinstance(predict_net, (caffe2_pb2.NetDef, caffe2_pb2.PlanDef))
+        assert isinstance(predict_net, (caffe2_pb2.NetDef, plan_pb2.PlanDef))
         return super(PredictorExportMeta, cls).__new__(
             cls, predict_net, parameters, inputs, outputs, shapes, name,
             extra_init_net, net_type, num_workers, trainer_prefix)

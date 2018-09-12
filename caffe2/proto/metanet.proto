@@ -1,6 +1,7 @@
 syntax = "proto2";
 
 import "caffe2/proto/caffe2.proto";
+import "caffe2/proto/plan.proto";
 
 package caffe2;
 

@@ -30,6 +30,7 @@ except ImportError:
     pydot = None
 
 from caffe2.proto import caffe2_pb2
+from caffe2.proto import plan_pb2
 
 OP_STYLE = {
     'shape': 'box',
@@ -369,7 +370,7 @@ def main():
         content = fid.read()
         graphs = utils.GetContentFromProtoString(
             content, {
-                caffe2_pb2.PlanDef: lambda x: GetOperatorMapForPlan(x),
+                plan_pb2.PlanDef: lambda x: GetOperatorMapForPlan(x),
                 caffe2_pb2.NetDef: lambda x: {x.name: x.op},
             }
         )

@@ -15,6 +15,7 @@
 #include "caffe2/core/registry.h"
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/plan.pb.h"
 #include "caffe2/utils/signal_handler.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
