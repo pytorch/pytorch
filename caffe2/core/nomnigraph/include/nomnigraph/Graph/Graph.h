@@ -152,7 +152,7 @@ class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
 /// for example.
 ///
 template <typename T, typename... U>
-class CAFFE2_API Subgraph {
+class Subgraph {
  public:
   Subgraph() {
     DEBUG_PRINT("Creating instance of Subgraph: %p\n", this);
