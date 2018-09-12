@@ -416,7 +416,7 @@ if (BUILD_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
   endif()
 endif()
 if (BUILD_TORCH_TEST)
-	set(TORCH_API_GTEST_DIR "${TORCH_ROOT}/test/cpp/api/gtest")
+	set(TORCH_API_GTEST_DIR "${TORCH_ROOT}/test/cpp/api")
 	add_executable(gtest_api
 		${TORCH_API_GTEST_DIR}/main.cpp
 		${TORCH_API_GTEST_DIR}/static.cpp
@@ -426,8 +426,6 @@ if (BUILD_TORCH_TEST)
 	target_include_directories(gtest_api PUBLIC ${ATen_CPU_INCLUDE})
 	target_link_libraries(gtest_api torch ${TORCH_CUDA_LIBRARIES})
 endif()
-if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
-
 if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
   set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
 
