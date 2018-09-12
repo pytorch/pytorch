@@ -4092,5 +4092,118 @@ class TestValidation(TestCase):
         super(TestCase, self).tearDown()
         Distribution.set_default_validate_args(False)
 
+
+class TestJit(TestCase):
+    def _examples(self):
+        for Dist, params in EXAMPLES:
+            for param in params:
+                print('testing {}'.format(Dist.__name__))
+                keys = param.keys()
+                values = tuple(param[key] for key in keys)
+                if not all(isinstance(x, torch.Tensor) for x in values):
+                    continue
+                sample = Dist(**param).sample()
+                yield Dist, keys, values, sample
+
+    def test_sample(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.sample()
+
+            torch.jit.trace(f, values)
+
+    def test_log_prob(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(sample, *values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.log_prob(sample)
+
+            torch.jit.trace(f, (sample,) + values)
+
+    def test_rsample(self):
+        for Dist, keys, values, sample in self._examples():
+            if not Dist.has_rsample:
+                continue
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.rsample()
+
+            torch.jit.trace(f, values)
+
+    def test_enumerate_support(self):
+        for Dist, keys, values, sample in self._examples():
+            if not Dist.has_enumerate_support:
+                continue
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.enumerate_support()
+
+            try:
+                torch.jit.trace(f, values)
+            except NotImplementedError:
+                continue
+
+    def test_mean(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.mean
+
+            try:
+                torch.jit.trace(f, values)
+            except NotImplementedError:
+                continue
+
+    def test_variance(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.variance
+
+            try:
+                torch.jit.trace(f, values)
+            except NotImplementedError:
+                continue
+
+    def test_entropy(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.entropy()
+
+            try:
+                torch.jit.trace(f, values)
+            except NotImplementedError:
+                continue
+
+    def test_icdf(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(sample, *values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.icdf(sample)
+
+            try:
+                torch.jit.trace(f, (sample,) + values)
+            except NotImplementedError:
+                continue
+
+
 if __name__ == '__main__':
     run_tests()
