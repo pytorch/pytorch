@@ -1,9 +1,9 @@
 #include "bbox_transform_op.h"
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 
-#ifdef CAFFE2_USE_MKL
+#ifdef CAFFE2_USE_MKLML
 #include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
+#endif // CAFFE2_USE_MKLML
 
 namespace caffe2 {
 namespace {

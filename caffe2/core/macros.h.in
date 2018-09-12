@@ -44,6 +44,7 @@ static_assert(
 #cmakedefine CAFFE2_USE_LITE_PROTO
 #cmakedefine CAFFE2_USE_MKL
 #cmakedefine CAFFE2_USE_IDEEP
+#cmakedefine CAFFE2_USE_MKLML
 #cmakedefine CAFFE2_USE_NVTX
 #cmakedefine CAFFE2_USE_TRT
 #cmakedefine CAFFE2_DISABLE_NUMA
@@ -77,6 +78,8 @@ static_assert(
   {"USE_EIGEN_FOR_BLAS", "${CAFFE2_USE_EIGEN_FOR_BLAS}"}, \
   {"USE_LITE_PROTO", "${CAFFE2_USE_LITE_PROTO}"}, \
   {"USE_MKL", "${CAFFE2_USE_MKL}"}, \
+  {"USE_IDEEP", "${CAFFE2_USE_IDEEP}"}, \
+  {"USE_MKLML", "${CAFFE2_USE_MKLML}"}, \
   {"USE_NVTX", "${CAFFE2_USE_NVTX}"}, \
   {"USE_TRT", "${CAFFE2_USE_TRT}"}, \
   {"DISABLE_NUMA", "${CAFFE2_DISABLE_NUMA}"}, \

@@ -2,9 +2,9 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "generate_proposals_op_util_nms.h"
 
-#ifdef CAFFE2_USE_MKL
+#ifdef CAFFE2_USE_MKLML
 #include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
+#endif // CAFFE2_USE_MKLML
 
 namespace caffe2 {
 

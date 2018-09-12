@@ -14,7 +14,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
-#include "caffe2/mkl/mkl_utils.h"
 #include "caffe2/observers/runcnt_observer.h"
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
