@@ -50,7 +50,7 @@ double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, doub
   return 0;
 }
 
-THHalf THCudaBlas_Hdot(THCState *state, int64_t n, THHalf *x, int64_t incx, THHalf *y, int64_t incy)
+at::Half THCudaBlas_Hdot(THCState *state, int64_t n, at::Half *x, int64_t incx, at::Half *y, int64_t incy)
 {
 #if CUDA_VERSION >= 8000
   if (n == 1) {
@@ -59,7 +59,7 @@ THHalf THCudaBlas_Hdot(THCState *state, int64_t n, THHalf *x, int64_t incx, THHa
   }
 
   if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
-    THHalf result;
+    at::Half result;
     cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
     cublasSetStream(handle, THCState_getCurrentStream(state));
     THCublasCheck(cublasDotEx(handle, n,
@@ -267,7 +267,7 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
 #  define CUDA_R_16F CUBLAS_DATA_HALF
 #endif
 
-void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, THHalf alpha, THHalf *a, int64_t lda, THHalf *b, int64_t ldb, THHalf beta, THHalf *c, int64_t ldc)
+void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::Half alpha, at::Half *a, int64_t lda, at::Half *b, int64_t ldb, at::Half beta, at::Half *c, int64_t ldc)
 {
   adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
@@ -347,8 +347,8 @@ void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int6
 
 #if CUDA_VERSION >= 9010
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
-                             THHalf alpha, const THHalf *a, int64_t lda, int64_t strideA, const THHalf *b, int64_t ldb, int64_t strideB,
-                             THHalf beta, THHalf *c, int64_t ldc, int64_t strideC, int64_t batchCount)
+                             at::Half alpha, const at::Half *a, int64_t lda, int64_t strideA, const at::Half *b, int64_t ldb, int64_t strideB,
+                             at::Half beta, at::Half *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 

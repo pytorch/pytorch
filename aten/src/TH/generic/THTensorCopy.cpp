@@ -210,6 +210,6 @@ IMPLEMENT_THTensor_COPY(Int, int32_t)
 IMPLEMENT_THTensor_COPY(Long, int64_t)
 IMPLEMENT_THTensor_COPY(Float, float)
 IMPLEMENT_THTensor_COPY(Double, double)
-IMPLEMENT_THTensor_COPY(Half, THHalf)
+IMPLEMENT_THTensor_COPY(Half, at::Half)
 
 #endif

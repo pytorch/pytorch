@@ -95,7 +95,7 @@ static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
   AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
 }
 
-static inline  __device__ void atomicAdd(THHalf *address, THHalf val) {
+static inline  __device__ void atomicAdd(at::Half *address, at::Half val) {
   unsigned int * address_as_ui =
     (unsigned int *) ((char *)address - ((size_t)address & 2));
   unsigned int old = *address_as_ui;
@@ -103,9 +103,9 @@ static inline  __device__ void atomicAdd(THHalf *address, THHalf val) {
 
   do {
     assumed = old;
-    THHalf hsum;
+    at::Half hsum;
     hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
-    hsum = THCNumerics<THHalf>::add(hsum, val);
+    hsum = THCNumerics<at::Half>::add(hsum, val);
     old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
     old = atomicCAS(address_as_ui, assumed, old);
   } while (assumed != old);

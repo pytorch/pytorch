@@ -107,11 +107,11 @@ __device__ inline T reverse_bounds(T value) {
 }
 
 
-__device__ inline THHalf half_uniform_scale_and_shift(float x, double a, double b) {
-  THHalf width = ScalarConvert<double, THHalf>::to(b - a);
-  THHalf start = ScalarConvert<double, THHalf>::to(a);
-  THHalf scaled = THCNumerics<THHalf>::mul(reverse_bounds(ScalarConvert<float, THHalf>::to(x)), width);
-  return THCNumerics<THHalf>::add(scaled, start);
+__device__ inline at::Half half_uniform_scale_and_shift(float x, double a, double b) {
+  at::Half width = ScalarConvert<double, at::Half>::to(b - a);
+  at::Half start = ScalarConvert<double, at::Half>::to(a);
+  at::Half scaled = THCNumerics<at::Half>::mul(reverse_bounds(ScalarConvert<float, at::Half>::to(x)), width);
+  return THCNumerics<at::Half>::add(scaled, start);
 }
 
 #define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)      \
@@ -181,10 +181,10 @@ GENERATE_KERNEL1(generate_exponential, double, double lambda, double, curand_uni
 GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, curand_uniform, (float)(median + sigma * tan(M_PI*(x-0.5))))
 GENERATE_KERNEL2(generate_cauchy, double, double median, double sigma, double, curand_uniform_double, (double)(median + sigma * tan(M_PI*(x-0.5))))
 
-GENERATE_KERNEL2(generate_uniform, THHalf, double a, double b, float, curand_uniform, (half_uniform_scale_and_shift(x, a, b)))
-GENERATE_KERNEL2(generate_normal, THHalf, double mean, double stdv, float, curand_normal, (ScalarConvert<float, THHalf>::to((x * stdv) + mean)))
-GENERATE_KERNEL1(generate_exponential, THHalf, double lambda, float, curand_uniform, (ScalarConvert<float, THHalf>::to((float)(-1. / lambda * log(x)))))
-GENERATE_KERNEL2(generate_cauchy, THHalf, double median, double sigma, float, curand_uniform, (ScalarConvert<float, THHalf>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
+GENERATE_KERNEL2(generate_uniform, at::Half, double a, double b, float, curand_uniform, (half_uniform_scale_and_shift(x, a, b)))
+GENERATE_KERNEL2(generate_normal, at::Half, double mean, double stdv, float, curand_normal, (ScalarConvert<float, at::Half>::to((x * stdv) + mean)))
+GENERATE_KERNEL1(generate_exponential, at::Half, double lambda, float, curand_uniform, (ScalarConvert<float, at::Half>::to((float)(-1. / lambda * log(x)))))
+GENERATE_KERNEL2(generate_cauchy, at::Half, double median, double sigma, float, curand_uniform, (ScalarConvert<float, at::Half>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
 
 #include "generic/THCTensorRandom.cu"
 #include "THCGenerateAllTypes.h"
