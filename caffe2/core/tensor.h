@@ -349,7 +349,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       return;
     }
     // Old data is discarded
-    storage_.data_ptr().reset();
+    storage_.data_ptr().clear();
     auto oldSize = numel_;
     auto oldDims = dims_;
     Resize(newCapacity);
@@ -509,17 +509,34 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * using it. If a Deleter object is passed in, when this tensor is reallocated
    * or freed, the deleter function is going to be called.
    */
-  template <typename T, typename Deleter = MemoryDeleter>
-  void ShareExternalPointer(T* src, size_t capacity = 0, Deleter d = nullptr) {
-    ShareExternalPointer(src, TypeMeta::Make<T>(), capacity, d);
+  template <typename T>
+  void
+  ShareExternalPointer(T* src, size_t capacity = 0, MemoryDeleter d = nullptr) {
+    ShareExternalPointer((void*)src, TypeMeta::Make<T>(), capacity, d);
   }
 
-  template <typename Deleter = MemoryDeleter>
+  template <typename T>
+  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t capacity = 0) {
+    ShareExternalPointer(std::move(data_ptr), TypeMeta::Make<T>(), capacity);
+  }
+
   void ShareExternalPointer(
       void* src,
       const TypeMeta& data_type,
       size_t capacity = 0,
-      Deleter d = nullptr) {
+      MemoryDeleter d = nullptr) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        data_type.id() != TypeIdentifier::uninitialized(),
+        "To share with a raw external pointer you need to pass in an "
+        "initialized data_type(TypeMeta).");
+    ShareExternalPointer(
+        at::DataPtr(src, src, d, GetDeviceType()), data_type, capacity);
+  }
+
+  void ShareExternalPointer(
+      at::DataPtr&& data_ptr,
+      const TypeMeta& data_type,
+      size_t capacity) {
     CAFFE_ENFORCE_WITH_CALLER(
         data_type.id() != TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to pass in an "
@@ -531,10 +548,12 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       CAFFE_ENFORCE_WITH_CALLER(
           numel_ >= 0,
           "To share data with a raw pointer, you need to set shape first.");
-      storage_.UniqueStorageShareExternalPointer(src, data_type, capacity, d);
+      storage_.UniqueStorageShareExternalPointer(
+          std::move(data_ptr), data_type, capacity);
     } else {
+      int64_t numel = capacity / data_type.itemsize();
       // Create a new Storage
-      storage_ = Storage(src, GetDeviceType(), data_type, capacity, d);
+      storage_ = Storage(data_type, numel, std::move(data_ptr), nullptr, true);
     }
   }
 
@@ -585,50 +604,61 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (storage_.dtype() == meta && (storage_.data() || numel_ == 0)) {
       return storage_.data();
     } else {
+      CAFFE_ENFORCE_WITH_CALLER(
+          numel_ >= 0,
+          "Tensor is not initialized. You probably need to call Resize() "
+          "before calling mutable_data()");
       bool had_special_dtor = storage_.dtype().dtor() != nullptr;
       if (storage_.unique()) {
         storage_.set_dtype(meta);
-        // TODO: recalcuate numel when we store numel instead of capacity in
-        // Storage
       } else {
         if (storage_.dtype() != meta) {
           storage_ = Storage(storage_.device_type(), meta);
         }
       }
-      CAFFE_ENFORCE_WITH_CALLER(
-          numel_ >= 0,
-          "Tensor is not initialized. You probably need to call Resize() "
-          "before calling mutable_data()");
 
       // We can reuse the existing buffer if the current data does not have
       // a special destructor and the new data doesn't have a special
       // constructor.
       if (numel_ == 0 ||
           (meta.ctor() == nullptr && !had_special_dtor &&
-           storage_.capacity() >= numel_ * storage_.itemsize())) {
+           storage_.numel() >= numel_)) {
         return storage_.data();
       }
+      const at::Allocator* allocator = storage_.allocator();
+      // TODO: Get rid of StaticContext
+      CAFFE_ENFORCE(
+          allocator == nullptr,
+          "Allocator is not used within Caffe2 functions, please use StaticContext instead.");
       if (meta.ctor()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
         // destruction procedure.
         auto size = numel_;
         auto dtor = storage_.dtype().dtor();
-        auto ptr_and_deleter =
-            GetStaticContext()->New(numel_ * storage_.itemsize());
-        auto deleter = ptr_and_deleter.second;
-        storage_.data_ptr().reset(
-            ptr_and_deleter.first, [size, dtor, deleter](void* ptr) -> void {
-              dtor(ptr, size);
-              deleter(ptr);
-            });
+        void* ptr;
+        at::DeleterFnPtr deleter;
+        auto ptr_and_deleter = GetStaticContext()->New(
+            numel_ * storage_.itemsize()); // Removing this can get rid of
+                                           // InefficientStdFunctionContext
+        ptr = ptr_and_deleter.first;
+        deleter = ptr_and_deleter.second;
+        storage_.set_data_ptr(at::InefficientStdFunctionContext::makeDataPtr(
+            ptr,
+            [size, dtor, deleter](void* local_ptr) -> void {
+              dtor(local_ptr, size);
+              deleter(local_ptr);
+            },
+            at::Device(storage_.device_type())));
         storage_.dtype().ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
         auto ptr_and_deleter =
             GetStaticContext()->New(numel_ * storage_.itemsize());
-        storage_.data_ptr().reset(
-            ptr_and_deleter.first, ptr_and_deleter.second);
+        storage_.set_data_ptr(at::InefficientStdFunctionContext::makeDataPtr(
+            ptr_and_deleter.first,
+            ptr_and_deleter.second,
+            at::Device(storage_.device_type())));
       }
       storage_.set_numel(numel_);
       return storage_.data();
@@ -1026,19 +1056,32 @@ class CAFFE2_API Tensor final {
     impl_.get()->ShareData(*src.impl_.get());
   }
 
-  template <typename T, typename Deleter = MemoryDeleter>
-  void ShareExternalPointer(T* src, size_t capacity = 0, Deleter d = nullptr)
-      const {
-    impl_.get()->ShareExternalPointer<T, Deleter>(src, capacity, d);
+  template <typename T>
+  void ShareExternalPointer(
+      T* src,
+      size_t capacity = 0,
+      MemoryDeleter d = nullptr) const {
+    impl_.get()->ShareExternalPointer<T>(src, capacity, d);
   }
 
-  template <typename Deleter = MemoryDeleter>
+  template <typename T>
+  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t capacity = 0) const {
+    impl_.get()->ShareExternalPointer<T>(std::move(data_ptr), capacity);
+  }
+
   void ShareExternalPointer(
       void* src,
       const TypeMeta& meta,
       size_t capacity = 0,
-      Deleter d = nullptr) const {
-    impl_.get()->ShareExternalPointer<Deleter>(src, meta, capacity, d);
+      MemoryDeleter d = nullptr) const {
+    impl_.get()->ShareExternalPointer(src, meta, capacity, d);
+  }
+
+  void ShareExternalPointer(
+      at::DataPtr&& data_ptr,
+      const TypeMeta& data_type,
+      size_t capacity) {
+    impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, capacity);
   }
 
   inline const void* raw_data() const {
