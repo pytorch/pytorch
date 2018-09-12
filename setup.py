@@ -532,6 +532,14 @@ class develop(setuptools.command.develop.develop):
                         for f in ninja_files + cmake_files
                         for entry in load(f)]
 
+        # cquery does not like c++ compiles that start with gcc.
+        # It forgets to include the c++ header directories.
+        # We can work around this by replacing the gcc calls that python
+        # setup.py generates with g++ calls instead
+        for command in all_commands:
+            if command['command'].startswith("gcc "):
+                command['command'] = "g++ " + command['command'][4:]
+
         new_contents = json.dumps(all_commands, indent=2)
         contents = ''
         if os.path.exists('compile_commands.json'):
@@ -540,6 +548,7 @@ class develop(setuptools.command.develop.develop):
         if contents != new_contents:
             with open('compile_commands.json', 'w') as f:
                 f.write(new_contents)
+
         if not USE_NINJA:
             print("WARNING: 'develop' is not building C++ code incrementally")
             print("because ninja is not installed. Run this to enable it:")

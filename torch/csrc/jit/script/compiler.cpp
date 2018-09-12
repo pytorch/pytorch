@@ -12,7 +12,6 @@
 
 #include "ATen/core/optional.h"
 
-
 #include <climits>
 #include <set>
 
