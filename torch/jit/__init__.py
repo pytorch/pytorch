@@ -6,7 +6,7 @@ from torch.jit.frontend import get_jit_ast
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 import torch.testing
-from collections import defaultdict, OrderedDict, namedtuple, Iterable
+from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
 import itertools

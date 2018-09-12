@@ -1,10 +1,10 @@
-import collections
+from torch._six import collections_abc
 from itertools import repeat
 
 
 def _ntuple(n):
     def parse(x):
-        if isinstance(x, collections.Iterable):
+        if isinstance(x, collections_abc.Iterable):
             return x
         return tuple(repeat(x, n))
     return parse
