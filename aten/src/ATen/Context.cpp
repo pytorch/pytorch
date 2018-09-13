@@ -119,8 +119,8 @@ TypeExtendedInterface& getType(const TensorImpl* impl) {
             backend, impl->scalar_type(), impl->is_variable());
 }
 
-TypeExtendedInterface& getType(const Tensor& impl) {
-  return getType(impl.unsafeGetTensorImpl());
+TypeExtendedInterface& getType(const Tensor& t) {
+  return getType(t.unsafeGetTensorImpl());
 }
 
 Allocator* getCPUAllocator() {

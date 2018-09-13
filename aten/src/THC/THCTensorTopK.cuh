@@ -113,10 +113,10 @@ struct TopKTypeConfig<double> {
 };
 
 template <>
-struct TopKTypeConfig<half> {
+struct TopKTypeConfig<at::Half> {
   typedef uint32_t RadixType;
 
-  static inline __device__ RadixType convert(half v) {
+  static inline __device__ RadixType convert(at::Half v) {
 #if CUDA_VERSION >= 8000
     RadixType x = __half_as_ushort(v);
     RadixType mask = -((x >> 15)) | 0x8000;
@@ -127,16 +127,16 @@ struct TopKTypeConfig<half> {
 #endif
   }
 
-  static inline __device__ half deconvert(RadixType v) {
+  static inline __device__ at::Half deconvert(RadixType v) {
 #if CUDA_VERSION >= 8000
     RadixType mask = ((v >> 15) - 1) | 0x8000;
     return __ushort_as_half(v ^ mask);
 #else
     assert(false);
-    return ScalarConvert<int, half>::to(0);
+    return ScalarConvert<int, at::Half>::to(0);
 #endif
   }
-}; 
+};
 
 // This function counts the distribution of all input values in a
 // slice we are selecting by radix digit at `radixDigitPos`, but only
@@ -214,7 +214,7 @@ __device__ DataType findPattern(DataType* smem,
                              BitDataType desired,
                              BitDataType desiredMask) {
 #ifdef __HIP_PLATFORM_HCC__
-  if (threadIdx.x < 64) { 
+  if (threadIdx.x < 64) {
 #else
   if (threadIdx.x < 32) {
 #endif

@@ -25,11 +25,11 @@ namespace detail {
 
 static inline TypeExtendedInterface & infer_type(const Tensor & t) {
   AT_CHECK(t.defined(), "undefined Tensor");
-  return getType(t.unsafeGetTensorImpl());
+  return getType(t);
 }
 static inline TypeExtendedInterface & infer_type(const TensorList & tl) {
   AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return getType(tl[0].unsafeGetTensorImpl());
+  return getType(tl[0]);
 }
 
 } // namespace detail

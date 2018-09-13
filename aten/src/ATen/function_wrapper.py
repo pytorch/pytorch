@@ -202,8 +202,6 @@ if (${name}.defined()) {
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
-HALF_CONVERSION = CodeTemplate("convert<half>(${value})")
-
 
 class NYIError(Exception):
     """Indicates we don't support this declaration yet"""
@@ -1202,8 +1200,6 @@ def create_derived(backend_type_env, declarations):
 
     is_cuda = 'CUDA' in backend_type_env['Backend']
 
-    real_is_half = backend_type_env['ScalarName'] == 'Half'
-
     def replace_with_null(argument):
         # type: (THFormal) -> bool
         return (argument['type'] == 'THGenerator*' and
@@ -1230,8 +1226,6 @@ def create_derived(backend_type_env, declarations):
         elif requires_checked_cast(argument):
             checked_use = CHECKED_USE.get(
                 argument['type'], '{}_').format(argument['name'])
-            if real_is_half and argument['type'] == 'real':
-                checked_use = HALF_CONVERSION.substitute(value=checked_use)
             if nullable_argument(argument):
                 checked_use = CHECKED_USE_NULLABLE.substitute(
                     env={}, arg_name=argument['name'], usage=checked_use)
