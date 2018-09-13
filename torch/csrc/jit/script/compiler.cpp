@@ -721,6 +721,24 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
       emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, true));
 }
 
+inline bool isSupportedListElementType(TypePtr type) {
+  return type->isSubtypeOf(DynamicType::get()) ||
+      type->isSubtypeOf(NumberType::get());
+}
+
+// guard for List types we do not currently have operations for
+inline void ensureLegalType(const SourceRange& range, TypePtr ptr) {
+  if(TupleTypePtr tt = ptr->cast<TupleType>()) {
+    for(auto elem : tt->elements()) {
+      ensureLegalType(range, elem);
+    }
+  } else if(ListTypePtr lt = ptr->cast<ListType>()) {
+    if(!isSupportedListElementType(lt->getElementType())) {
+        throw ErrorReport(range) << "Lists can only contain numbers or Tensors, but found " << lt->getElementType()->str();
+    }
+  }
+}
+
 struct to_ir {
   to_ir(
       Def def,
@@ -771,6 +789,7 @@ struct to_ir {
       // Record the type for the schema and set the Type on the Value*
       arguments.push_back(schema.arguments.at(arg_annotation_idx++));
       new_input->setType(arguments.back().type);
+      ensureLegalType((*it).ident().range(), arguments.back().type);
     }
     // body
     auto stmts = def.statements();
@@ -1550,8 +1569,10 @@ private:
                 << *elem_type << " but found " << *v->type() << " instead";
           }
         }
-        return graph->insertNode(graph->createList(elem_type, values))
+        Value* result = graph->insertNode(graph->createList(elem_type, values))
             ->output();
+        ensureLegalType(tree->range(), result->type());
+        return result;
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);

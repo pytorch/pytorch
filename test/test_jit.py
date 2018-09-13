@@ -2529,6 +2529,19 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
+    def test_nested_list_error(self):
+        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
+            @torch.jit.script
+            def foo(x):
+                # type: (Tuple[List[List[int]]]) -> int
+                return 4
+
+    def test_nested_list_construct_error(self):
+        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
+            @torch.jit.script
+            def foo(x):
+                return [[4]]
+
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
             def foo(a):
@@ -5507,10 +5520,10 @@ a")
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, 'argument \'tensors\' but found Tensor[][]'):
+        with self.assertRaisesRegex(RuntimeError, 'argument \'tensors\' but found int\[\]'):
             @torch.jit.script
             def f5(a):
-                torch.cat([[a]])
+                torch.cat([3])
 
         with self.assertRaisesRegex(RuntimeError, 'Lists must contain only a single type'):
             @torch.jit.script
