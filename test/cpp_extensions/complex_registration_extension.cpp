@@ -33,6 +33,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
             /*is_undefined=*/false) {}
 
   ScalarType scalarType() const override;
+  caffe2::TypeMeta typeMeta() const override;
   Backend backend() const override;
   const char* toString() const override;
   size_t elementSizeInBytes() const override;
@@ -49,7 +50,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
       numel *= s;
     }
     Storage s{c10::make_intrusive<StorageImpl>(
-        scalarTypeToDataType(ScalarType::ComplexFloat),
+        scalarTypeToTypeMeta(ScalarType::ComplexFloat),
         numel,
         getCPUAllocator(),
         /* resizable */ true)};
@@ -73,6 +74,10 @@ ScalarType CPUComplexFloatType::scalarType() const {
   return ScalarType::ComplexFloat;
 }
 
+caffe2::TypeMeta CPUComplexFloatType::typeMeta() const {
+  return scalarTypeToTypeMeta(ScalarType::ComplexFloat);
+}
+
 Backend CPUComplexFloatType::backend() const {
   return Backend::CPU;
 }
@@ -80,6 +85,7 @@ Backend CPUComplexFloatType::backend() const {
 const char* CPUComplexFloatType::toString() const {
   return "CPUComplexFloatType";
 }
+
 TypeID CPUComplexFloatType::ID() const {
   return TypeID::CPUComplexFloat;
 }

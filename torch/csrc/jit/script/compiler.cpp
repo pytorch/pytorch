@@ -12,7 +12,6 @@
 
 #include "ATen/core/optional.h"
 
-
 #include <climits>
 #include <set>
 
@@ -1339,6 +1338,8 @@ private:
         return prim::Starred;
       case '/':
         return aten::div;
+      case '%':
+        return aten::remainder;
       case TK_NE:
         return aten::ne;
       case TK_EQ:
@@ -1480,6 +1481,7 @@ private:
       case '/':
       case '+':
       case '-':
+      case '%':
       case TK_UNARY_MINUS: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
@@ -1727,7 +1729,7 @@ private:
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
     auto * sliceable = emitExpr(subscript.value());
     at::optional<int64_t> maybe_dim;
-    if (sliceable->type()->kind() == TypeKind::DynamicType) {
+    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
       maybe_dim = 0;
     }

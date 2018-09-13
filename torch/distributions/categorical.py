@@ -120,10 +120,8 @@ class Categorical(Distribution):
 
     def enumerate_support(self, expand=True):
         num_events = self._num_events
-        values = torch.arange(num_events).long()
+        values = torch.arange(num_events, dtype=torch.long, device=self._param.device)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         if expand:
             values = values.expand((-1,) + self._batch_shape)
-        if self._param.is_cuda:
-            values = values.cuda(self._param.get_device())
         return values

@@ -1,7 +1,5 @@
 #pragma once
 
-// ${generated_comment}
-
 #include "ATen/core/ATenGeneral.h"
 #include "ATen/core/Allocator.h"
 #include "ATen/core/Deprecated.h"
@@ -10,7 +8,7 @@
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Tensor.h"
+#include "ATen/core/Tensor.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
@@ -55,6 +53,7 @@ struct AT_API Type {
 
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
+  virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;

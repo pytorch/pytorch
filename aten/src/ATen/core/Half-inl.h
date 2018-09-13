@@ -43,6 +43,14 @@ inline AT_HOSTDEVICE Half::operator __half() const {
 }
 #endif
 
+// CUDA intrinsics
+
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 350)
+inline __device__ Half __ldg(const Half* ptr) {
+    return __ldg(reinterpret_cast<const __half*>(ptr));
+}
+#endif
+
 /// Arithmetic
 
 inline AT_HOSTDEVICE Half operator+(const Half& a, const Half& b) {
