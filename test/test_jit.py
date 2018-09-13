@@ -6870,6 +6870,25 @@ a")
 
         self.assertEqual(foo(input), input)
 
+    def test_export_dynamic_slice(self):
+        class DynamicSliceExportMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                retval = x[0]
+                for i in range(x.size(1)):
+                    retval += torch.sum(x[0:i], dim=0)
+                return retval
+
+        mod = DynamicSliceExportMod()
+
+        input = torch.rand(3, 4, 5)
+        example_outs = mod(input)
+
+        f = io.BytesIO()
+        exported = torch.onnx.export_to_pretty_string(
+            DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
+        self.assertExpected(exported)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
