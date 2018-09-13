@@ -3,12 +3,10 @@
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
+#include <torch/serialization.h>
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
-
-#include <cereal/access.hpp>
-#include <cereal/cereal.hpp>
 
 #include <cstddef>
 #include <utility>
@@ -37,13 +35,17 @@ class SGD : public Optimizer {
 
   template <class Archive>
   void serialize(Archive& ar) {
+#if defined(TORCH_USE_CEREAL)
     ar(CEREAL_NVP(momentum_buffers_));
+#endif // defined(TORCH_USE_CEREAL)
   }
 
   SGDOptions options;
 
  private:
+#if defined(TORCH_USE_CEREAL)
   friend class cereal::access;
+#endif // defined(TORCH_USE_CEREAL)
   SGD() : options(0) {}
 
   std::vector<Tensor> momentum_buffers_;
@@ -52,3 +54,10 @@ class SGD : public Optimizer {
 };
 } // namespace optim
 } // namespace torch
+
+#if defined(TORCH_USE_CEREAL)
+CEREAL_REGISTER_TYPE(torch::optim::SGD);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::SGD);
+#endif // defined(TORCH_USE_CEREAL)

@@ -94,6 +94,9 @@ vector<TIndex> GetTensorInfo(
     size_t* capacity,
     DeviceOption* device) {
   const Tensor* tc = static_cast<const Tensor*>(c);
+  CHECK(tc);
+  CHECK(tc->unsafeGetTensorImpl());
+  CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImp());
   *capacity = tc->capacity_nbytes();
   tc->ExtractDeviceOption(device);
   return tc->dims();

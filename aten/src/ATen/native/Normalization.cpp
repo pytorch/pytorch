@@ -11,11 +11,8 @@ namespace at { namespace native {
 
 namespace {
   void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
-    if (actual != expected){
-      std::stringstream ss;
-      ss << arg_name << " should contain " << expected << " elements not " << actual ;
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(actual == expected,
+             arg_name, " should contain ", expected, " elements not ", actual);
   }
 }
 
@@ -28,12 +25,12 @@ Tensor batch_norm(
   if (running_mean.defined()) {
     check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
   } else if (!training) {
-    throw std::runtime_error("running_mean must be defined in evaluation mode");
+    AT_ERROR("running_mean must be defined in evaluation mode");
   }
   if (running_var.defined()) {
     check_dims_match_num_input_features("running_var", num_features, running_var.numel());
   } else if (!training) {
-    throw std::runtime_error("running_var must be defined in evaluation mode");
+    AT_ERROR("running_var must be defined in evaluation mode");
   }
   if (weight.defined()) {
     check_dims_match_num_input_features("weight", num_features, weight.numel());
@@ -89,29 +86,19 @@ Tensor layer_norm(const Tensor& input, IntList normalized_shape,
 
     int64_t normalized_ndim = normalized_shape.size();
 
-    if (normalized_ndim < 1) {
-      std::stringstream ss;
-      ss << "Expected normalized_shape to be at least 1-dimensional, i.e., "
-         << "containing at least one element, but got normalized_shape="
-         << normalized_shape;
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(normalized_ndim >= 1,
+             "Expected normalized_shape to be at least 1-dimensional, i.e., ",
+             "containing at least one element, but got normalized_shape=",
+             normalized_shape);
 
-    if (weight.defined() && !weight.sizes().equals(normalized_shape)) {
-      std::stringstream ss;
-      ss << "Expected weight to be of same shape as normalized_shape, but got "
-         << "weight of shape " << weight.sizes() << " and normalized_shape="
-         << normalized_shape;
-      throw std::runtime_error(ss.str());
-    }
-
-    if (bias.defined() && !bias.sizes().equals(normalized_shape)) {
-      std::stringstream ss;
-      ss << "Expected bias to be of same shape as normalized_shape, but got "
-         << "bias of shape " << bias.sizes() << " and normalized_shape="
-         << normalized_shape;
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(!weight.defined() || weight.sizes().equals(normalized_shape),
+             "Expected weight to be of same shape as normalized_shape, but got ",
+             "weight of shape ", weight.sizes(), " and normalized_shape=",
+             normalized_shape);
+    AT_CHECK(!bias.defined() || bias.sizes().equals(normalized_shape),
+             "Expected bias to be of same shape as normalized_shape, but got ",
+             "bias of shape ", bias.sizes(), " and normalized_shape=",
+             normalized_shape);
 
     auto input_shape = input.sizes();
     auto input_ndim = input.dim();
@@ -125,7 +112,7 @@ Tensor layer_norm(const Tensor& input, IntList normalized_shape,
         ss << ", " << size;
       }
       ss << "], but got input of size" << input_shape;
-      throw std::runtime_error(ss.str());
+      AT_ERROR(ss.str());
     }
 
     int64_t n = 1;
@@ -159,29 +146,19 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
     int64_t b = input.size(0);
     int64_t c = input.size(1);
 
-    if (c % num_groups != 0) {
-      std::stringstream ss;
-      ss << "Expected number of channels in input to be divisible by "
-         << "num_groups, but got input of shape " << input.sizes() << " and "
-         << "num_groups=" << num_groups;
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(c % num_groups == 0,
+             "Expected number of channels in input to be divisible by ",
+             "num_groups, but got input of shape ", input.sizes(), " and "
+             "num_groups=", num_groups);
 
-    if (weight.defined() && (weight.dim() != 1 || weight.numel() != c)) {
-      std::stringstream ss;
-      ss << "Expected weight to be a vector of size equal to the number of "
-         << "channels in input, but got weight of shape " << weight.sizes()
-         << " and input of shape " <<  input.sizes();
-      throw std::runtime_error(ss.str());
-    }
-
-    if (bias.defined() && (bias.dim() != 1 || bias.numel() != c)) {
-      std::stringstream ss;
-      ss << "Expected bias to be a vector of size equal to the number of "
-         << "channels in input, but got bias of shape " << weight.sizes()
-         << " and input of shape " <<  input.sizes();
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(!weight.defined() || (weight.dim() == 1 && weight.numel() == c),
+             "Expected weight to be a vector of size equal to the number of ",
+             "channels in input, but got weight of shape ", weight.sizes(),
+             " and input of shape ", input.sizes());
+    AT_CHECK(!bias.defined() || (bias.dim() == 1 && bias.numel() == c),
+             "Expected bias to be a vector of size equal to the number of ",
+             "channels in input, but got bias of shape ", weight.sizes(),
+             " and input of shape ", input.sizes());
 
     // Apply group norm
     auto input_reshaped = input.contiguous().view({1, b * num_groups, -1});

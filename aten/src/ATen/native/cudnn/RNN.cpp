@@ -22,7 +22,7 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers, bool batch_first,
     bool fn_bidirectional
     ) {
-  throw std::runtime_error("_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
+  AT_ERROR("_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
@@ -34,7 +34,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_train, bool fn_bidirectional, IntList fn_batch_sizes,
     const Tensor& fn_dropout_state
     ) {
-  throw std::runtime_error("_cudnn_rnn: ATen not compiled with cuDNN support");
+  AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
@@ -47,11 +47,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& dropout_state, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
-  throw std::runtime_error("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
 Tensor _cudnn_init_dropout_state(const Type& ty, double dropout, bool train, int64_t dropout_seed) {
-  throw std::runtime_error("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
+  AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
 }} // namespace at::native
@@ -123,7 +123,7 @@ namespace {
         {
           std::ostringstream oss;
           oss << "unrecognized cuDNN RNN mode " << fn_mode;
-          throw std::runtime_error(oss.str());
+          AT_ERROR(oss.str());
         }
       }
     }
@@ -131,7 +131,7 @@ namespace {
     void set_bidirectional(bool fn_bidirectional) {
       bidirectional = fn_bidirectional ? CUDNN_BIDIRECTIONAL : CUDNN_UNIDIRECTIONAL;
     }
-     
+
     void set_algo(cudnnRNNAlgo_t algo){
       this->algo = algo;
     }
@@ -570,7 +570,7 @@ namespace {
       if (prop->major == 7 && rnn.datatype == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
           if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && tensors.input_size <=1024 && rnn.num_directions() == 1 &&
                   rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
-              //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf, 
+              //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
               //weed them out
               if ((bsize % 16 == 0 && bsize != 80 && bsize !=112) || bsize == 8){
                   if ((tensors.seq_length >=40 && bsize <=128) ||
@@ -599,9 +599,8 @@ Tensor _cudnn_rnn_flatten_weight(
     bool fn_bidirectional
     ) {
 
-  if (weight_arr.size() == 0) {
-    throw std::runtime_error("_cudnn_rnn_flatten_weight_: cannot flatten empty weight list");
-  }
+  AT_CHECK(weight_arr.size() > 0,
+           "_cudnn_rnn_flatten_weight_: cannot flatten empty weight list");
 
   auto any_param = weight_arr[0];
 
@@ -671,9 +670,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   // TODO: Set device to input
 
   if (fn.rnn.mode != CUDNN_LSTM) {
-    if (cx.defined()) {
-      throw std::runtime_error("rnn: illegal defined cx for non-LSTM RNN");
-    }
+    AT_CHECK(!cx.defined(),
+             "rnn: illegal defined cx for non-LSTM RNN");
   }
 
   // TODO: can batch_first be a wrapper around this function?
@@ -685,12 +683,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
-  if (!hx.is_contiguous()) {
-    throw std::runtime_error("rnn: hx is not contiguous");
-  }
-  if (cx.defined() && !cx.is_contiguous()) {
-    throw std::runtime_error("rnn: cx is not contiguous");
-  }
+  AT_CHECK(hx.is_contiguous(),
+           "rnn: hx is not contiguous");
+  AT_CHECK(!cx.defined() || cx.is_contiguous(),
+           "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
   auto output = input.type().tensor(output_size);
@@ -723,11 +719,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     w_desc.set(weight_buf, 3);
   }
 
-  if (cx.defined() && !cx.sizes().equals(hidden_size)) {
-    std::ostringstream oss;
-    oss << "Expected cell size " << IntList{hidden_size} << ", got " << cx.sizes();
-    throw std::runtime_error(oss.str());
-  }
+  AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+           "Expected cell size ", IntList{hidden_size}, ", got ", cx.sizes());
 
   size_t workspace_size;
   auto x_descs_arr = descs.get_x_descs();
@@ -817,9 +810,8 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto handle = getCudnnHandle();
 
   if (fn.rnn.mode != CUDNN_LSTM) {
-    if (cx.defined()) {
-      throw std::runtime_error("rnn: illegal defined cx for non-LSTM RNN");
-    }
+    AT_CHECK(!cx.defined(),
+             "rnn: illegal defined cx for non-LSTM RNN");
   }
 
   auto is_input_packed = fn_batch_sizes.size() != 0;
@@ -833,12 +825,10 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
-  if (!hx.is_contiguous()) {
-    throw std::runtime_error("rnn: hx is not contiguous");
-  }
-  if (cx.defined() && !cx.is_contiguous()) {
-    throw std::runtime_error("rnn: cx is not contiguous");
-  }
+  AT_CHECK(hx.is_contiguous(),
+           "rnn: hx is not contiguous");
+  AT_CHECK(!cx.defined() || cx.is_contiguous(),
+           "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
   auto dy = grad_output.contiguous();
@@ -851,42 +841,25 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
   auto dcx = cx.defined() ? cx.type().tensor(hidden_size) : Tensor();
 
-  if (!fn_train) {
-    throw std::runtime_error("cudnn RNN backward can only be called in training mode");
-  }
-  if (!input.sizes().equals(input_size)) {
-    std::ostringstream oss;
-    oss << "Expected input size " << IntList{input_size} << ", got " << input.sizes();
-    throw std::runtime_error(oss.str());
-  }
-  if (!output.sizes().equals(output_size)) {
-    std::ostringstream oss;
-    oss << "Expected output size " << IntList{output_size} << ", got " << output.sizes();
-    throw std::runtime_error(oss.str());
-  }
-  if (hx.defined() && !hx.sizes().equals(hidden_size)) {
-    std::ostringstream oss;
-    oss << "Expected hidden size " << IntList{hidden_size} << ", got " << hx.sizes();
-    throw std::runtime_error(oss.str());
-  }
-  if (cx.defined() && !cx.sizes().equals(hidden_size)) {
-    std::ostringstream oss;
-    oss << "Expected cell size " << IntList{hidden_size} << ", got " << cx.sizes();
-    throw std::runtime_error(oss.str());
-  }
-  if (dhy.defined() && !dhy.sizes().equals(hidden_size)) {
-    std::ostringstream oss;
-    oss << "Expected d_hidden size " << IntList{hidden_size} << ", got " << dhy.sizes();
-    throw std::runtime_error(oss.str());
-  }
-  if (dcy.defined() && !dcy.sizes().equals(hidden_size)) {
-    std::ostringstream oss;
-    oss << "Expected d_cell size " << IntList{hidden_size} << ", got " << dcy.sizes();
-    throw std::runtime_error(oss.str());
-  }
-  if (!dhy.is_cuda() || !dy.is_cuda() || (dcy.defined() && !dcy.is_cuda())) {
-    throw std::runtime_error("Gradients aren't CUDA tensors");
-  }
+  AT_CHECK(fn_train,
+           "cudnn RNN backward can only be called in training mode");
+
+  AT_CHECK(input.sizes().equals(input_size),
+           "Expected input size ", IntList{input_size}, ", got ", input.sizes());
+  AT_CHECK(output.sizes().equals(output_size),
+           "Expected output size ", IntList{output_size}, ", got ", output.sizes());
+
+  AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+           "Expected hidden size ", IntList{hidden_size}, ", got ", hx.sizes());
+  AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+           "Expected cell size ", IntList{hidden_size}, ", got ", cx.sizes());
+  AT_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
+           "Expected d_hidden size ", IntList{hidden_size}, ", got ", dhy.sizes());
+  AT_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
+           "Expected d_cell size ", IntList{hidden_size}, ", got ", dcy.sizes());
+
+  AT_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
+           "Gradients aren't CUDA tensors");
 
   cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors);
   fn.rnn.set_algo(algo);
@@ -959,9 +932,8 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto handle = getCudnnHandle();
 
   if (fn.rnn.mode != CUDNN_LSTM) {
-    if (cx.defined()) {
-      throw std::runtime_error("rnn: illegal defined cx for non-LSTM RNN");
-    }
+    AT_CHECK(!cx.defined(),
+             "rnn: illegal defined cx for non-LSTM RNN");
   }
 
   auto is_input_packed = fn_batch_sizes.size() != 0;
@@ -973,28 +945,21 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto input_size = _input_size(fn.tensors);
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
 
-  if (!fn_train) {
-    throw std::runtime_error("cudnn RNN backward can only be called in training mode");
-  }
-  if (!input.sizes().equals(input_size)) {
-    std::ostringstream oss;
-    oss << "Expected input size " << IntList{input_size} << ", got " << input.sizes();
-    throw std::runtime_error(oss.str());
-  }
-  if (hx.defined() && !hx.sizes().equals(hidden_size)) {
-    std::ostringstream oss;
-    oss << "Expected hidden size " << IntList{hidden_size} << ", got " << hx.sizes();
-    throw std::runtime_error(oss.str());
-  }
+  AT_CHECK(fn_train,
+           "cudnn RNN backward can only be called in training mode");
+
+  AT_CHECK(input.sizes().equals(input_size),
+           "Expected input size ", IntList{input_size}, ", got ", input.sizes());
+  AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+           "Expected hidden size ", IntList{hidden_size}, ", got ", hx.sizes());
+
   // TODO: the above were the only checks in rnn.py, but it doesn't seem
   // like these checks are enough
 
-  if (!hx.is_contiguous()) {
-    throw std::runtime_error("rnn: hx is not contiguous");
-  }
-  if (cx.defined() && !cx.is_contiguous()) {
-    throw std::runtime_error("rnn: cx is not contiguous");
-  }
+  AT_CHECK(hx.is_contiguous(),
+           "rnn: hx is not contiguous");
+  AT_CHECK(!cx.defined() || cx.is_contiguous(),
+           "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
   const auto& y = output;
@@ -1059,9 +1024,9 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     std::array<bool, 4> output_mask
     ) {
 
-  auto grad_output = grad_output_r.defined() ? grad_output_r : output.type().zeros_like(output);
-  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : hx.type().zeros_like(hx);
-  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : cx.type().zeros_like(cx)) : grad_cy_r;
+  auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output);
+  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx);
+  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx)) : grad_cy_r;
 
   Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve

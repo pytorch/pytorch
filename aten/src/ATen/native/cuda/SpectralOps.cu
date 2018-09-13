@@ -206,7 +206,7 @@ static inline Tensor _run_cufft(
         CUFFT_CHECK(hipfftExecR2C(plan, static_cast<hipfftReal*>(input.data_ptr()),
           static_cast<hipfftComplex*>(output.data_ptr())));
       } else {
-        throw std::runtime_error("hipFFT doesn't support r2r (float)");
+        AT_ERROR("hipFFT doesn't support r2r (float)");
       }
     } else if (input.type().scalarType() == ScalarType::Double) {
       if (complex_input && complex_output) {
@@ -220,13 +220,13 @@ static inline Tensor _run_cufft(
         CUFFT_CHECK(hipfftExecD2Z(plan, static_cast<hipfftDoubleReal*>(input.data_ptr()),
           static_cast<hipfftDoubleComplex*>(output.data_ptr())));
       } else {
-        throw std::runtime_error("hipFFT doesn't support r2r (double)");
+        AT_ERROR("hipFFT doesn't support r2r (double)");
       }
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
          << at::toString(input.type().scalarType());
-      throw std::runtime_error(ss.str());
+      AT_ERROR(ss.str());
     }
 #else
   CUFFT_CHECK(cufftXtExec(plan, input.data_ptr(), output.data_ptr(),
