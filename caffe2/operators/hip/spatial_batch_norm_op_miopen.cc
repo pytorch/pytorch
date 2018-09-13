@@ -115,6 +115,7 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   auto& X = Input(INPUT);
   auto& scale = Input(SCALE);
   auto& bias = Input(BIAS);
+  auto* Y = Output(OUTPUT);
 
   // Only 2D BatchNorm is supported in MIopen for now
   // @petrex will follow up on adding 1D and 3D support
@@ -131,6 +132,10 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   CAFFE_ENFORCE_EQ(bias.ndim(), 1);
   CAFFE_ENFORCE_EQ(scale.dim32(0), C);
   CAFFE_ENFORCE_EQ(bias.dim32(0), C);
+
+  Y->ResizeLike(X);
+  T* Y_data = Y->template mutable_data<T>();
+
   // See if we need to reshape.
   if (N > 0 && X.dims() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors.";
@@ -154,9 +159,6 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
     CAFFE_ENFORCE_EQ(est_mean.dim32(0), C);
     CAFFE_ENFORCE_EQ(est_var.dim32(0), C);
 
-    auto* Y = Output(OUTPUT);
-    Y->ResizeLike(X);
-    T* Y_data = Y->template mutable_data<T>();
     if (N == 0) {
       return true;
     }
@@ -178,9 +180,6 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
         epsilon_));
   } else {
     // Run training mode.
-    auto* Y = Output(OUTPUT);
-    Y->ResizeLike(X);
-    T* Y_data = Y->template mutable_data<T>();
     // obtain running mean and running inv var, and see if we need to
     // initialize them.
     auto* running_mean = Output(RUNNING_MEAN);
