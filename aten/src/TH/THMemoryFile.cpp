@@ -343,11 +343,11 @@ READ_WRITE_METHODS(float, Float,
                    nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%.9g", data[i]),
                    1)
 
-READ_WRITE_METHODS(THHalf, Half,
+READ_WRITE_METHODS(at::Half, Half,
                    int nByteRead_; float buf; \
                    int ret = sscanf((char*) THCharStorage_data(mfself->storage)+mfself->position, "%g%n", &buf, &nByteRead_); \
-                   data[i] = TH_float2half(buf); nByteRead = nByteRead_; if(ret <= 0) break; else nread++,
-                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%.9g", TH_half2float(data[i])),
+                   data[i] = static_cast<at::Half>(buf); nByteRead = nByteRead_; if(ret <= 0) break; else nread++,
+                   nByteWritten = snprintf((char*) THCharStorage_data(mfself->storage)+mfself->position, mfself->storage->numel()-mfself->position, "%.9g", static_cast<float>(data[i])),
                    1)
 
 READ_WRITE_METHODS(double, Double,

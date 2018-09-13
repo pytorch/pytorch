@@ -100,6 +100,12 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_.data<T>() + storage_offset_;
   }
 
+  inline void* data() const {
+    return static_cast<void*>(
+        static_cast<char*>(storage_.data()) +
+        at::elementSize(scalar_type_) * storage_offset_);
+  }
+
   template <typename T>
   inline T * unsafe_data() const {
     return storage_.unsafe_data<T>() + storage_offset_;
