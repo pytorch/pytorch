@@ -1571,6 +1571,26 @@ class TestJit(JitTestCase):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
+    def test_sparse_tensors_error(self):
+        def get_sparse():
+            return torch.sparse.FloatTensor(2, 3)
+
+        @torch.jit.script
+        def sparse(input):
+            output = get_sparse()
+            return output, input
+
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
+            sparse(get_sparse())
+
+        # has a different entry point than calling sparse directly
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
+            torch._C._jit_pass_shape_analysis(
+                sparse.graph, (get_sparse(),), False)
+
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
+            sparse(torch.tensor([1]))
+
     def test_constant_prop_simple(self):
         @torch.jit.script
         def constant_prop(input_tensor):
