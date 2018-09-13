@@ -99,6 +99,6 @@ template<> \
 inline T Scalar::to<T>() { \
   return to##name(); \
 }
-AT_FORALL_SCALAR_TYPES(DEFINE_TO)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 #undef DEFINE_TO
 }
