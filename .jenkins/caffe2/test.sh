@@ -59,10 +59,15 @@ mkdir -p "$gtest_reports_dir" "$junit_reports_dir"
 for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
   case "$test" in
     # skip tests we know are hanging or bad
-    */mkl_utils_test|*/aten/integer_divider_test|*/scalar_tensor_test)
+    */mkl_utils_test|*/aten/integer_divider_test)
       continue
       ;;
-    *)
+    */scalar_tensor_test)
+	  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+		continue
+	  fi
+	  ;;
+	*)
       # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
       # planning to migrate to gtest as the common PyTorch c++ test suite, we
       # currently do NOT use the xml test reporter, because Catch doesn't
