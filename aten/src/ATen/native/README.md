@@ -74,9 +74,18 @@ signature.
 - `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
   this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
   argument parser both in ATen and in PyTorch.)
+- `TensorOptions`.  Tensor options provide information about how a
+  tensor should be constructed; it is most useful when you are writing a
+  factory function, where you have no `Tensor` inputs and thus
+  cannot otherwise determine how to construct a `Tensor`.
 - `*` is a special sentinel argument, which doesn't translate into an actual
   argument, but indicates that in the Python bindings, any subsequent arguments
   must be specified as keyword arguments (and cannot be provided positionally).
+
+Functions with no tensor inputs are called *factory functions*, and
+are handled specially by code generation.  If your function is behaving
+differently than another example, check first and see if one is a
+factory while another is not.
 
 **Return types.** These types are permissible as ReturnType:
 
@@ -218,8 +227,9 @@ direct consequences on valid implementations:
 
 * Never create a `Tensor` directly (e.g., `at::CPU` or `at::CUDA`), as a
   caller will be expecting to get `Variable`s out if it passes `Variable`.
-  Instead, create tensors from the `type()` of one of the input tensors, e.g.,
-  `input.type().tensor()`  or `input.type().toScalarType(kByte)` if you need
+  Instead, create tensors using the `options()` of one of the input
+  tensors.  E.g., `at::empty(sizes, input.options())` or
+  `at::ones(input.options().dtype(kByte))`, if you need
   a different scalar type.
 
 * If you need to call other ATen functions, be sure to qualify the call

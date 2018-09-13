@@ -1,4 +1,5 @@
 #include "torch/csrc/utils/pybind.h"
+#include "torch/csrc/utils/auto_gil.h"
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
@@ -206,7 +207,10 @@ void initJITBindings(PyObject *module) {
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         const auto & graph = ge.graph();
         auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
-        ge.run(stack);
+        {
+          AutoNoGIL no_gil_guard;
+          ge.run(stack);
+        }
         return createPyObjectForStack(std::move(stack));
       });
 

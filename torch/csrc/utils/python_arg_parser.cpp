@@ -106,6 +106,7 @@ bool FunctionParameter::check(PyObject* obj) {
       if (PyComplex_Check(obj)) {
         return true;
       }
+      // fallthrough
     case ParameterType::DOUBLE: {
       if (THPUtils_checkDouble(obj)) {
         return true;

@@ -203,28 +203,6 @@ void THTensor_(copy##TYPENAMESRC)(THTensor *tensor, TH##TYPENAMESRC##Tensor *src
                        static_cast<inter_copy_type_t<scalar_t>>(*src_data));) \
 }
 
-#define IMPLEMENT_THTensor_COPY_TO_HALF(TYPENAMESRC, TYPE_SRC) \
-void THTensor_(copy##TYPENAMESRC)(THTensor *tensor, TH##TYPENAMESRC##Tensor *src) \
-{ \
- TH_TENSOR_APPLY2(scalar_t, tensor, TYPE_SRC, src, *tensor_data = TH_float2half((float)*src_data);) \
-}
-
-#define IMPLEMENT_THTensor_COPY_FROM_HALF(TYPENAMESRC, TYPE_SRC) \
-void THTensor_(copy##TYPENAMESRC)(THTensor *tensor, TH##TYPENAMESRC##Tensor *src) \
-{ \
- TH_TENSOR_APPLY2(scalar_t, tensor, TYPE_SRC, src, \
-                  *tensor_data = static_cast<scalar_t>( \
-                      static_cast<inter_copy_type_t<scalar_t>>( \
-                          TH_half2float(*src_data)));) \
-}
-
-#define IMPLEMENT_THTensor_COPY_TO_FROM_HALF(TYPENAMESRC, TYPE_SRC) \
-void THTensor_(copy##TYPENAMESRC)(THTensor *tensor, TH##TYPENAMESRC##Tensor *src) \
-{ \
- TH_TENSOR_APPLY2(scalar_t, tensor, TYPE_SRC, src, *tensor_data = *src_data;) \
-}
-
-#ifndef TH_REAL_IS_HALF
 IMPLEMENT_THTensor_COPY(Byte, uint8_t)
 IMPLEMENT_THTensor_COPY(Char, int8_t)
 IMPLEMENT_THTensor_COPY(Short, int16_t)
@@ -232,18 +210,6 @@ IMPLEMENT_THTensor_COPY(Int, int32_t)
 IMPLEMENT_THTensor_COPY(Long, int64_t)
 IMPLEMENT_THTensor_COPY(Float, float)
 IMPLEMENT_THTensor_COPY(Double, double)
-IMPLEMENT_THTensor_COPY_FROM_HALF(Half, THHalf)
-#else
-/* only allow pass-through for Half */
-IMPLEMENT_THTensor_COPY_TO_FROM_HALF(Half, THHalf)
-IMPLEMENT_THTensor_COPY_TO_HALF(Byte, uint8_t)
-IMPLEMENT_THTensor_COPY_TO_HALF(Char, int8_t)
-IMPLEMENT_THTensor_COPY_TO_HALF(Short, int16_t)
-IMPLEMENT_THTensor_COPY_TO_HALF(Int, int32_t)
-IMPLEMENT_THTensor_COPY_TO_HALF(Long, int64_t)
-IMPLEMENT_THTensor_COPY_TO_HALF(Float, float)
-IMPLEMENT_THTensor_COPY_TO_HALF(Double, double)
-
-#endif /* REAL_IS_HALF */
+IMPLEMENT_THTensor_COPY(Half, at::Half)
 
 #endif

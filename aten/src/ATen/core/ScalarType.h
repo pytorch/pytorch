@@ -80,6 +80,18 @@ static inline DataType scalarTypeToDataType(ScalarType scalar_type) {
 #undef DEFINE_CASE
 }
 
+static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
+#define DEFINE_CASE(ctype,name,_) \
+  case ScalarType:: name : return caffe2::TypeMeta::Make<ctype>();
+
+  switch(scalar_type) {
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
+    case ScalarType::Undefined: return caffe2::TypeMeta();
+    default: AT_ERROR("Unrecognized Scalartype ", scalar_type, " (please report this error)");
+  }
+#undef DEFINE_CASE
+}
+
 static inline ScalarType dataTypeToScalarType(DataType dtype) {
 #define DEFINE_IF(ctype,name,_) \
   if (dtype == caffe2::TypeMeta::Id<ctype>()) { \
