@@ -6966,9 +6966,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_dcgan_models(self, device='cuda', check_export_import=False)
 
-    # XXX: When this is fixed, write a CUDA test for this.
-    @unittest.skip('https://github.com/pytorch/pytorch/issues/8439 InstanceNormalization bug')
-    def test_neural_style(self):
+    @staticmethod
+    def _test_neural_style(self, device, check_export_import=True):
         class TransformerNet(torch.nn.Module):
             def __init__(self):
                 super(TransformerNet, self).__init__()
@@ -7065,7 +7064,15 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 out = self.conv2d(out)
                 return out
 
-        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 224, 224),))
+        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 64, 64),), export_import=check_export_import)
+
+    def test_neural_style(self):
+        self._test_neural_style(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_neural_style_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_neural_style(self, device='cuda', check_export_import=False)
 
     @staticmethod
     def _test_mnist(self, device, check_export_import=True):
