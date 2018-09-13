@@ -40,7 +40,6 @@ class Gumbel(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Gumbel, _instance)
-        batch_shape = torch.Size(batch_shape)
         new.loc = self.loc.expand(batch_shape)
         new.scale = self.scale.expand(batch_shape)
         return super(Gumbel, self).expand(batch_shape, _instance=new)

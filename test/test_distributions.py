@@ -802,13 +802,14 @@ class TestDistributions(TestCase):
                     expanded_shape = shape + d.batch_shape
                     original_shape = d.batch_shape + d.event_shape
                     expected_shape = shape + original_shape
-                    expanded = d.expand(batch_shape=expanded_shape)
+                    expanded = d.expand(batch_shape=list(expanded_shape))
                     sample = expanded.sample()
                     actual_shape = expanded.sample().shape
                     self.assertEqual(expanded.__class__, d.__class__)
                     self.assertEqual(d.sample().shape, original_shape)
                     self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
                     self.assertEqual(actual_shape, expected_shape)
+                    self.assertEqual(expanded.batch_shape, expanded_shape)
                     try:
                         self.assertEqual(expanded.mean,
                                          d.mean.expand(expanded_shape + d.event_shape),

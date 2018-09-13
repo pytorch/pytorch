@@ -41,7 +41,6 @@ class LogisticNormal(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LogisticNormal, _instance)
-        batch_shape = torch.Size(batch_shape)
         return super(LogisticNormal, self).expand(batch_shape, _instance=new)
 
     @property

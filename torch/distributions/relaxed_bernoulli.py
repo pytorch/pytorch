@@ -120,7 +120,6 @@ class RelaxedBernoulli(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RelaxedBernoulli, _instance)
-        batch_shape = torch.Size(batch_shape)
         return super(RelaxedBernoulli, self).expand(batch_shape, _instance=new)
 
     @property

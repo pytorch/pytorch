@@ -36,7 +36,6 @@ class Weibull(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Weibull, _instance)
-        batch_shape = torch.Size(batch_shape)
         new.scale = self.scale.expand(batch_shape)
         new.concentration = self.concentration.expand(batch_shape)
         new.concentration_reciprocal = new.concentration.reciprocal()
