@@ -3513,6 +3513,7 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    @skipIfRocm
     def test_topk_noncontiguous_gpu(self):
         t = torch.randn(20, device="cuda")[::2]
         top1, idx1 = t.topk(5)
@@ -7425,6 +7426,14 @@ class TestTorch(TestCase):
         if TEST_NUMPY:
             self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
             self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
+
+        # fail parse with additional positional args after intlist arg
+        self.assertRaisesRegex(TypeError,
+                               "received an invalid combination of arguments",
+                               lambda: torch.LongTensor((6, 0), 1, 1, 0))
+        self.assertRaisesRegex(TypeError,
+                               "missing 1 required positional arguments",
+                               lambda: torch.tensor().new_zeros((5, 5), 0))
 
     def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]

@@ -2,12 +2,10 @@
 
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
+#include <torch/serialization.h>
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
-
-#include <cereal/access.hpp>
-#include <cereal/cereal.hpp>
 
 #include <utility>
 #include <vector>
@@ -37,12 +35,16 @@ class Adagrad : public Optimizer {
 
   template <class Archive>
   void serialize(Archive& ar) {
+#if defined(TORCH_USE_CEREAL)
     ar(CEREAL_NVP(sum_));
     ar(CEREAL_NVP(step_));
+#endif // defined(TORCH_USE_CEREAL)
   }
 
  private:
+#if defined(TORCH_USE_CEREAL)
   friend class cereal::access;
+#endif // defined(TORCH_USE_CEREAL)
   Adagrad() : options(0) {}
 
   std::vector<Tensor> sum_;
@@ -50,3 +52,10 @@ class Adagrad : public Optimizer {
 };
 } // namespace optim
 } // namespace torch
+
+#if defined(TORCH_USE_CEREAL)
+CEREAL_REGISTER_TYPE(torch::optim::Adagrad);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::Adagrad);
+#endif // defined(TORCH_USE_CEREAL)

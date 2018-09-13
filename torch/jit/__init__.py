@@ -62,6 +62,10 @@ def load(filename):
     r"""
         Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.ScriptModule.save>`
 
+        .. DANGER::
+           All previously saved modules, no matter their device, are always loaded onto the CPU.
+           This is different from :func:`torch.load`'s semantics and may change in the future.
+
         Arguments:
             filename (string): the file to load
 
@@ -69,7 +73,16 @@ def load(filename):
             A ``ScriptModule`` object.
     """
     m = ScriptModule()
-    m._load(filename)
+
+    def module_lookup(names):
+        curr = m
+        for name in names:
+            if not hasattr(curr, name):
+                setattr(curr, name, ScriptModule())
+            curr = getattr(curr, name)
+        return curr
+
+    torch._C.import_ir_module(module_lookup, filename)
     return m
 
 

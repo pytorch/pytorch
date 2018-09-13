@@ -211,7 +211,6 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     )
-
 endif()
 
 
@@ -302,6 +301,13 @@ if (NOT NO_API AND NOT USE_ROCM)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
+
+  if (TORCH_USE_CEREAL)
+    target_compile_definitions(torch PUBLIC TORCH_USE_CEREAL)
+    # SYSTEM headers are included with -isystem and thus do not trigger warnings.
+    target_include_directories(torch SYSTEM PUBLIC
+      "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
+  endif()
 endif()
 
 if(USE_CUDA)
@@ -369,10 +375,6 @@ target_include_directories(torch PRIVATE ${ATen_CPU_INCLUDE})
 target_include_directories(torch PUBLIC
   ${TORCH_SRC_DIR}/csrc)
 
-# SYSTEM headers are included with -isystem and thus do not trigger warnings.
-target_include_directories(torch SYSTEM PUBLIC
-  "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
-
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
@@ -407,7 +409,7 @@ endif()
 if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
   set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
 
-  add_executable(test_api
+  set(TORCH_API_TEST_SOURCES
     ${TORCH_API_TEST_DIR}/any.cpp
     ${TORCH_API_TEST_DIR}/cursor.cpp
     ${TORCH_API_TEST_DIR}/integration.cpp
@@ -419,15 +421,19 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/parallel.cpp
     ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/sequential.cpp
-    ${TORCH_API_TEST_DIR}/serialization.cpp
     ${TORCH_API_TEST_DIR}/static.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
     ${TORCH_API_TEST_DIR}/tensor.cpp
     ${TORCH_API_TEST_DIR}/jit.cpp
-    # Temporary until ATen tests are built with Caffe2
     ${TORCH_API_TEST_DIR}/tensor_options.cpp
     ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
-    )
+  )
+
+  if (TORCH_USE_CEREAL)
+    list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/serialization.cpp)
+  endif()
+
+  add_executable(test_api ${TORCH_API_TEST_SOURCES})
 
   target_include_directories(test_api
     PUBLIC

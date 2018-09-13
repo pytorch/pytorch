@@ -32,6 +32,9 @@ ${Type}::${Type}()
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
+caffe2::TypeMeta ${Type}::typeMeta() const {
+  AT_ERROR("typeMeta not defined for SparseType");
+}
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
