@@ -16,7 +16,7 @@ struct CTypeToScalarType<__half> : public CTypeToScalarType<Half> {};
 
 }
 
-THC_API THCStorage* THCStorage_new(THCState* state, at::ScalarType);
+THC_API THCStorage* THCStorage_new(THCState* state, caffe2::TypeMeta);
 
 THC_API void THCStorage_retain(THCState *state, THCStorage *storage);
 

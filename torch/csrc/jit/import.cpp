@@ -315,7 +315,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
     int64_t size;
     std::tie(storage_ptr, size) = file_reader_.getRecordWithKey(record_number);
     auto storage = std::make_shared<at::Storage>(
-      at::CPU(type).scalarType(),
+      at::CPU(type).typeMeta(),
       std::move(storage_ptr),
       size,
       nullptr);
