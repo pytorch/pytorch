@@ -18,6 +18,8 @@ void _ThrowRuntimeTypeLogicError(const string& msg) {
 }
 }
 
+constexpr detail::TypeMetaData TypeMeta::uninitialized_;
+
 TypeIdentifier TypeIdentifier::createTypeId() {
   static std::atomic<TypeIdentifier::underlying_type> counter(
       TypeMeta::Id<_CaffeHighestPreallocatedTypeId>().underlyingId());
