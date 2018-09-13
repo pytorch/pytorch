@@ -56,7 +56,11 @@ inline void findErrorInKwargs(
 
 inline IValue toIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {
-    return py::cast<at::Tensor>(input);
+    auto ten = py::cast<at::Tensor>(input);
+    if (ten.is_sparse()) {
+      AT_ERROR("sparse tensors not supported");
+    }
+    return ten;
   } else if (py::isinstance<py::tuple>(input)) {
     py::tuple input_tuple = py::cast<py::tuple>(input);
     Stack s;
@@ -89,8 +93,13 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::TensorType:
-      case TypeKind::CompleteTensorType:
-        return py::cast<autograd::Variable>(obj);
+      case TypeKind::CompleteTensorType: {
+        auto var = py::cast<autograd::Variable>(obj);
+        if (var.is_sparse()) {
+          AT_ERROR("sparse tensors not supported");
+        }
+        return var;
+      }
       case TypeKind::FloatType:
         return py::cast<double>(obj);
       case TypeKind::IntType:
@@ -174,7 +183,11 @@ inline py::object toPyObject(IValue&& ivalue) {
   if (ivalue.isNone()) {
     return py::none();
   } else if (ivalue.isTensor()) {
-    return py::cast(autograd::Variable(ivalue.toTensor()));
+    auto tensor = std::move(ivalue).toTensor();
+    if (tensor.is_sparse()) {
+      AT_ERROR("sparse tensors not supported");
+    }
+    return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(ivalue.toDouble());
   } else if (ivalue.isInt()) {
