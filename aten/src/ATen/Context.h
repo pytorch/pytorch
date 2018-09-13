@@ -1,13 +1,14 @@
 #pragma once
 
 #include <ATen/CPUGeneral.h>
-#include "ATen/ATenGeneral.h"
+#include "ATen/core/ATenGeneral.h"
 #include "ATen/CUDAStream.h"
-#include "ATen/Generator.h"
+#include "ATen/core/Generator.h"
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
 #include "ATen/core/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
+#include "ATen/detail/VariableHooksInterface.h"
 
 // This is temporary
 #include "ATen/core/ATenCoreTest.h"
@@ -21,35 +22,51 @@ namespace at {
 class AT_API Context {
 public:
   Context();
-  Type* getTypeRaw(Backend p, ScalarType s) {
+  Type* getNonVariableTypeRaw(Backend p, ScalarType s) {
     return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
   }
-  Type * getTypeOpt(Backend p, ScalarType s) {
-    initCUDAIfNeeded(p);
-    auto type = getTypeRaw(p, s);
+  Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
+    if (p != Backend::Undefined) initCUDAIfNeeded(backendToDeviceType(p));
+    auto type = getNonVariableTypeRaw(p, s);
 
     if(!type) {
       // there is only a single Undefined Type.
       if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        return getTypeRaw(Backend::Undefined, ScalarType::Undefined);
+        return getNonVariableTypeRaw(Backend::Undefined, ScalarType::Undefined);
       }
     }
 
     return type;
   }
-  Type & getType(Backend p, ScalarType s) {
-    auto* type = getTypeOpt(p, s);
+  Type & getNonVariableType(Backend p, ScalarType s) {
+    auto* type = getNonVariableTypeOpt(p, s);
     if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }
-  Generator & defaultGenerator(Backend p) {
-    initCUDAIfNeeded(p);
-    auto & generator = generator_registry[static_cast<int>(p)];
+  Type & getVariableType(Backend p, ScalarType s) {
+    auto& baseType = getNonVariableType(p, s);
+    return detail::getVariableHooks().getVariableTypeFromBaseType(baseType);
+  }
+  Type & getMaybeVariableType(Backend p, ScalarType s, bool is_variable) {
+    if (is_variable) {
+      return getVariableType(p, s);
+    } else {
+      return getNonVariableType(p, s);
+    }
+  }
+
+  Generator & defaultGenerator(DeviceType device_type) {
+    initCUDAIfNeeded(device_type);
+    auto & generator = generator_registry[static_cast<int>(device_type)];
     if(!generator)
-      AT_ERROR(toString(p), " backend type not enabled.");
+      AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
     return *generator;
   }
   bool hasMKL() const;
+  bool hasLAPACK() const;
+  bool hasMAGMA() const {
+    return detail::getCUDAHooks().hasMAGMA();
+  }
   bool hasCUDA() const {
     return detail::getCUDAHooks().hasCUDA();
   }
@@ -59,12 +76,12 @@ public:
   int64_t current_device() const {
     return detail::getCUDAHooks().current_device();
   }
-  // defined in header so that getType has ability to inline
-  // call_once check. getType is called fairly frequently
+  // defined in header so that getNonVariableType has ability to inline
+  // call_once check. getNonVariableType is called fairly frequently
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
-      generator_registry[static_cast<int>(Backend::CUDA)] =
+      generator_registry[static_cast<int>(DeviceType::CUDA)] =
         detail::getCUDAHooks().initCUDAGenerator(this);
       detail::getCUDAHooks().registerCUDATypes(this);
     });
@@ -95,16 +112,17 @@ public:
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
   std::unique_ptr<Generator>
-    generator_registry[static_cast<int>(Backend::NumOptions)];
+    generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
-  void initCUDAIfNeeded(Backend p) {
-    if(p == Backend::CUDA)
+  void initCUDAIfNeeded(DeviceType p) {
+    if (p == DeviceType::CUDA) {
       lazyInitCUDA();
+    }
   }
   std::once_flag thc_init;
   bool enabled_cudnn = true;
@@ -113,6 +131,7 @@ private:
   std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   friend struct Type;
+  friend void register_cpu_types(Context * context);
   friend void register_cuda_types(Context * context);
 };
 
@@ -128,16 +147,23 @@ static inline void init() {
   }
 }
 
-static inline Type& getType(Backend p, ScalarType s) {
-  return globalContext().getType(p, s);
+static inline Type& getNonVariableType(Backend p, ScalarType s) {
+  return globalContext().getNonVariableType(p, s);
 }
 
+static inline Type& getNonVariableType(DeviceType p, ScalarType s) {
+  return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
+}
+
+AT_API Type& getMaybeVariableType(TensorOptions options);
+AT_API Type& getMaybeVariableType(const TensorImpl*);
+
 static inline Type& CPU(ScalarType s) {
-  return getType(Backend::CPU, s);
+  return getNonVariableType(Backend::CPU, s);
 }
 
 static inline Type& CUDA(ScalarType s) {
-  return getType(Backend::CUDA, s);
+  return getNonVariableType(Backend::CUDA, s);
 }
 
 static inline bool hasCUDA() {
@@ -150,6 +176,14 @@ static inline bool hasCuDNN() {
 
 static inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+static inline bool hasLAPACK() {
+  return globalContext().hasLAPACK();
+}
+
+static inline bool hasMAGMA() {
+  return globalContext().hasMAGMA();
 }
 
 static inline int64_t current_device() {

@@ -25,10 +25,10 @@ std::string getPythonInterpreterStackTrace() {
   std::stringstream stack_trace;
   AutoGIL gil;
   PyThreadState *tstate = PyThreadState_GET();
-  if (NULL != tstate && NULL != tstate->frame) {
+  if (nullptr != tstate && nullptr != tstate->frame) {
     PyFrameObject *frame = tstate->frame;
 
-    while (NULL != frame) {
+    while (nullptr != frame) {
       int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
       std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
       std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
@@ -39,27 +39,23 @@ std::string getPythonInterpreterStackTrace() {
   return stack_trace.str();
 }
 
-// This is a temporary constructor so that we can write python tests of
-// the executor. It does not have most of the functionality of CompiledFunction
-// such as being able to hold parameters...
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
         py::function func,
-        tracer::variable_list trace_inputs,
-        size_t num_func_inputs) {
+        Stack trace_inputs,
+        at::optional<size_t> num_real_inputs) {
+  size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
   try {
+
     py::tuple py_inputs(num_func_inputs);
     for(size_t i = 0; i < num_func_inputs; ++i) {
       py_inputs[i] = py::cast(enter_info.second[i]);
     }
     auto out = func(*py_inputs);
-    std::vector<autograd::Variable> outputs;
-    if(PyTuple_Check(out.ptr())) {
-      outputs = py::cast<std::vector<autograd::Variable>>(out);
-    } else {
-      outputs.push_back(py::cast<autograd::Variable>(out));
+    if(!PyTuple_Check(out.ptr())) {
+      out = py::make_tuple(out);
     }
-    tracer::exit(outputs);
+    tracer::exit(toStack(out));
     auto graph = enter_info.first->graph;
     EliminateDeadCode(graph);
     return graph;
@@ -99,6 +95,11 @@ void pythonRecordSourceLocation(Node* n) {
   n->setSourceLocation(sl);
 }
 
+void pythonWarn(const std::string& reason) {
+  auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
+  PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);
+}
+
 void initPythonTracerBindings(PyObject* module) {
   setRecordSourceLocation(pythonRecordSourceLocation);
 
@@ -128,11 +129,14 @@ void initPythonTracerBindings(PyObject* module) {
       return s.graph;
     });
 
-  m.def("_tracer_enter", [](variable_list trace_inputs) {
-    return tracer::enter(std::move(trace_inputs));
+  m.def("_tracer_warn_use_python", []() {
+    tracer::setWarn(pythonWarn);
   });
-  m.def("_tracer_exit", [](variable_list var_outputs) {
-    tracer::exit(var_outputs);
+  m.def("_tracer_enter", [](py::args trace_inputs) {
+    return tracer::enter(toStack(trace_inputs));
+  });
+  m.def("_tracer_exit", [](py::tuple var_outputs) {
+    tracer::exit(toStack(var_outputs));
   });
   m.def("_tracer_abandon", []() {
     tracer::abandon();

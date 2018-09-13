@@ -37,6 +37,7 @@ Checks: '
   ,-performance-unnecessary-value-param
   ,-readability-braces-around-statements
   ,-readability-else-after-return
+  ,-readability-implicit-bool-conversion
   ,-readability-named-parameter
   '
 WarningsAsErrors: ''

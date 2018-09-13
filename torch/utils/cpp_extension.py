@@ -63,10 +63,15 @@ for instructions on how to install GCC 4.9 or higher.
                               !! WARNING !!
 '''
 CUDA_HOME = _find_cuda_home()
+CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
+
+
+def is_binary_build():
+    return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -81,7 +86,7 @@ def check_compiler_abi_compatibility(compiler):
         False if the compiler is (likely) ABI-incompatible with PyTorch,
         else True.
     '''
-    if BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__):
+    if not is_binary_build():
         return True
     try:
         check_cmd = '{}' if sys.platform == 'win32' else '{} --version'
@@ -138,6 +143,7 @@ class BuildExtension(build_ext):
         self._check_abi()
         for extension in self.extensions:
             self._define_torch_extension_name(extension)
+            self._add_gnu_abi_flag_if_binary(extension)
 
         # Register .cu and .cuh as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh']
@@ -270,6 +276,21 @@ class BuildExtension(build_ext):
         else:
             extension.extra_compile_args.append(define)
 
+    def _add_gnu_abi_flag_if_binary(self, extension):
+        # If the version string looks like a binary build,
+        # we know that PyTorch was compiled with gcc 4.9.2.
+        # if the extension is compiled with gcc >= 5.1,
+        # then we have to define _GLIBCXX_USE_CXX11_ABI=0
+        # so that the std::string in the API is resolved to
+        # non-C++11 symbols
+        define = '-D_GLIBCXX_USE_CXX11_ABI=0'
+        if is_binary_build():
+            if isinstance(extension.extra_compile_args, dict):
+                for args in extension.extra_compile_args.values():
+                    args.append(define)
+            else:
+                extension.extra_compile_args.append(define)
+
 
 def CppExtension(name, sources, *args, **kwargs):
     '''
@@ -387,6 +408,8 @@ def include_paths(cuda=False):
     ]
     if cuda:
         paths.append(_join_cuda_home('include'))
+        if CUDNN_HOME is not None:
+            paths.append(os.path.join(CUDNN_HOME, 'include'))
     return paths
 
 
@@ -412,6 +435,8 @@ def library_paths(cuda=False):
     if cuda:
         lib_dir = 'lib/x64' if sys.platform == 'win32' else 'lib64'
         paths.append(_join_cuda_home(lib_dir))
+        if CUDNN_HOME is not None:
+            paths.append(os.path.join(CUDNN_HOME, lib_dir))
     return paths
 
 
@@ -712,9 +737,13 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             extra_ldflags.append('/LIBPATH:{}'.format(
                 _join_cuda_home('lib/x64')))
             extra_ldflags.append('cudart.lib')
+            if CUDNN_HOME is not None:
+                extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
         else:
             extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
             extra_ldflags.append('-lcudart')
+            if CUDNN_HOME is not None:
+                extra_ldflags.append('-L{}'.format(os.path.join(CUDNN_HOME, 'lib64')))
 
     return extra_ldflags
 
@@ -791,6 +820,9 @@ def _write_ninja_file(path,
 
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
     common_cflags += ['-I{}'.format(include) for include in includes]
+
+    if is_binary_build():
+        common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=0']
 
     cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
     if sys.platform == 'win32':
@@ -869,6 +901,7 @@ def _write_ninja_file(path,
         object_files.append(target)
         if sys.platform == 'win32':
             source_file = source_file.replace(':', '$:')
+        source_file = source_file.replace(" ", "$ ")
         build.append('build {}: {} {}'.format(target, rule, source_file))
 
     ext = '.pyd' if sys.platform == 'win32' else '.so'

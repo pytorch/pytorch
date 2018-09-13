@@ -10,6 +10,7 @@ else()
 endif()
 
 option(BUILD_TORCH_TEST "Build torch test binaries" ON)
+option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
 
 # TODO: Unify with version from setup.py
 set(TORCH_VERSION_MAJOR 0)
@@ -19,8 +20,6 @@ set(TORCH_VERSION "${TORCH_VERSION_MAJOR}.${TORCH_VERSION_MINOR}.${TORCH_VERSION
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(TORCH_ROOT "${TORCH_SRC_DIR}/..")
-
-add_subdirectory(../third_party/nanopb protobuf-nanopb)
 
 if(NOT TORCH_INSTALL_BIN_DIR)
   set(TORCH_INSTALL_BIN_DIR bin)
@@ -113,10 +112,16 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
   "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
   "${TOOLS_PATH}/autograd/templates/variable_factories.h"
-  "${TOOLS_PATH}/autograd/gen_autograd.py"
-  "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
-  "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/autograd/deprecated.yaml"
   "${TOOLS_PATH}/autograd/derivatives.yaml"
+  "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
+  "${TOOLS_PATH}/autograd/gen_autograd.py"
+  "${TOOLS_PATH}/autograd/gen_python_functions.py"
+  "${TOOLS_PATH}/autograd/gen_variable_factories.py"
+  "${TOOLS_PATH}/autograd/gen_variable_type.py"
+  "${TOOLS_PATH}/autograd/load_derivatives.py"
+  "${TOOLS_PATH}/autograd/nested_dict.py"
+  "${TOOLS_PATH}/autograd/utils.py"
   "${TOOLS_PATH}/jit/gen_jit_dispatch.py"
   "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
@@ -157,8 +162,9 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/create_autodiff_subgraphs.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/inline_autodiff_subgraphs.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/dead_code_elimination.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/passes/decompose_addmm.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/erase_number_types.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
@@ -207,7 +213,12 @@ if (NOT NO_API AND NOT USE_ROCM)
 
 endif()
 
-add_library(torch ${TORCH_SRCS})
+
+if (TORCH_STATIC)
+  add_library(torch STATIC ${TORCH_SRCS})
+else()
+  add_library(torch SHARED ${TORCH_SRCS})
+endif()
 
 target_compile_definitions(torch PRIVATE _THP_CORE)
 
@@ -276,8 +287,7 @@ if (MSVC)
 endif()
 
 target_link_libraries(torch
-  caffe2_library
-  protobuf-nanopb)
+  caffe2_library)
 
 find_package(OpenMP)
 if(OPENMP_FOUND)
@@ -373,8 +383,7 @@ target_include_directories(torch PUBLIC
 
 # SYSTEM headers are included with -isystem and thus do not trigger warnings.
 target_include_directories(torch SYSTEM PUBLIC
-  "${TORCH_ROOT}/third_party/cereal/include" # For cereal/
-  "${TORCH_ROOT}/third_party/nanopb")
+  "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
 
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 

@@ -9,8 +9,8 @@ from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_
 
 class LogitRelaxedBernoulli(Distribution):
     r"""
-    Creates a LogitRelaxedBernoulli distribution parameterized by `probs` or `logits`,
-    which is the logit of a RelaxedBernoulli distribution.
+    Creates a LogitRelaxedBernoulli distribution parameterized by :attr:`probs` or :attr:`logits`
+    (but not both), which is the logit of a RelaxedBernoulli distribution.
 
     Samples are logits of values in (0, 1). See [1] for more details.
 
@@ -76,9 +76,9 @@ class LogitRelaxedBernoulli(Distribution):
 
 class RelaxedBernoulli(TransformedDistribution):
     r"""
-    Creates a RelaxedBernoulli distribution, parametrized by `temperature`, and either
-    `probs` or `logits`. This is a relaxed version of the `Bernoulli` distribution, so
-    the values are in (0, 1), and has reparametrizable samples.
+    Creates a RelaxedBernoulli distribution, parametrized by :attr:`temperature`, and either
+    :attr:`probs` or :attr:`logits` (but not both). This is a relaxed version of the `Bernoulli`
+    distribution, so the values are in (0, 1), and has reparametrizable samples.
 
     Example::
 

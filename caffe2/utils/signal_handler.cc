@@ -21,6 +21,7 @@
 #include <unordered_set>
 
 #include "caffe2/core/init.h"
+#include "caffe2/core/workspace.h"
 
 #if CAFFE2_ANDROID
 #ifndef SYS_gettid
@@ -162,6 +163,11 @@ std::vector<uintptr_t> getBacktrace() {
   return pcs;
 }
 
+void printBlobSizes() {
+  ::caffe2::Workspace::ForEach(
+      [&](::caffe2::Workspace* ws) { ws->PrintBlobSizes(); });
+}
+
 void printStacktrace() {
   std::vector<uintptr_t> pcs = getBacktrace();
   Dl_info info;
@@ -276,6 +282,7 @@ void fatalSignalHandler(int signum) {
   } else {
     perror("Failed to open /proc/self/task");
   }
+  printBlobSizes();
   sigaction(signum, getPreviousSigaction(signum), nullptr);
   raise(signum);
 }

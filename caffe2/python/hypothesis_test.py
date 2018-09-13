@@ -319,11 +319,11 @@ class TestOperators(hu.HypothesisTestCase):
         for param, _ in enumerate(inputs):
             self.assertGradientChecks(gc, op, inputs, param, [0])
 
-    @unittest.skipIf(not workspace.has_gpu_support,
+    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support,
                      "Skipping test due to no gpu present.")
     @given(hidden_size=st.integers(min_value=1, max_value=3),
            num_layers=st.integers(min_value=1, max_value=3),
-           bidirectional=st.just(False),  # TODO
+           bidirectional=st.booleans(),
            rnn_mode=st.sampled_from(["lstm"]),   # TODO: "gru"
            input_mode=st.sampled_from(["linear"]),
            dropout=st.floats(min_value=1.0, max_value=1.0),
@@ -332,13 +332,23 @@ class TestOperators(hu.HypothesisTestCase):
            D=st.integers(min_value=1, max_value=4))
     def test_recurrent(self, hidden_size, num_layers, bidirectional, rnn_mode,
                        input_mode, dropout, T, N, D):
-
+        #there's a bug in miopen for N=1 which would be resolved in the next release.
+        if workspace.has_hip_support:
+            assume(N>1)
         # Random seed, this one happens to pass
         seed = 1234
         np.random.seed(seed)
-
+        # set device option
+        if workspace.has_hip_support:
+           device_option = hu.hip_do
+           engine = 'MIOPEN'
+        else:
+           device_option = hu.gpu_do
+           engine = 'CUDNN'
         input_weight_size = hidden_size * D
         upper_layer_input_weight_size = hidden_size * hidden_size
+        if bidirectional:
+            upper_layer_input_weight_size *= 2
         recurrent_weight_size = hidden_size * hidden_size
         input_bias_size = hidden_size
         recurrent_bias_size = hidden_size
@@ -352,7 +362,7 @@ class TestOperators(hu.HypothesisTestCase):
         total_sz *= num_directions
 
         W = np.random.rand(total_sz).astype(np.float32)
-        self.ws.create_blob("WEIGHT").feed(W, device_option=hu.gpu_do)
+        self.ws.create_blob("WEIGHT").feed(W, device_option=device_option)
 
         op = core.CreateOperator(
             "Recurrent",
@@ -366,9 +376,9 @@ class TestOperators(hu.HypothesisTestCase):
             input_mode=input_mode,
             num_layers=num_layers,
             seed=seed,
-            engine="CUDNN")
+            engine=engine)
         X = np.random.randn(T, N, D).astype(np.float32)
-        self.ws.create_blob("INPUT").feed(X, device_option=hu.gpu_do)
+        self.ws.create_blob("INPUT").feed(X, device_option=device_option)
         W = self.ws.blobs["WEIGHT"].fetch()
         H = np.random.randn(
             num_layers, N, hidden_size * num_directions).astype(
@@ -380,10 +390,9 @@ class TestOperators(hu.HypothesisTestCase):
         inputs = [X, H, C, W]
         input_idxs = [i for (i, _) in enumerate(inputs)] \
             if rnn_mode == "lstm" else [0, 1, 3]  # ignore C
-
         for input_idx in input_idxs:
             self.assertGradientChecks(
-                hu.gpu_do, op, inputs, input_idx, [0],
+                device_option, op, inputs, input_idx, [0],
                 stepsize=0.01, threshold=0.01)
 
     @given(ndim=st.integers(1, 4),

@@ -8,6 +8,7 @@
 
 #include <functional>
 #include <thread>
+#include <unordered_set>
 
 /*
 Tests related to ATen streams.
@@ -72,14 +73,6 @@ TEST_CASE("Getting and Setting Streams", "Verifies streams are set properly") {
   REQUIRE(curStream == defaultStream);
 }
 
-TEST_CASE("Stream API retain/free", "Ensures streams are destroyed properly") {
-  auto ptr = at::cuda::detail::CUDAStream_createAndRetainWithOptions(
-      at::cuda::CUDAStream::DEFAULT_FLAGS, at::cuda::CUDAStream::DEFAULT_PRIORITY);
-
-  at::cuda::detail::CUDAStream_free(ptr);
-  REQUIRE(ptr == nullptr);
-}
-
 void thread_fun(at::cuda::CUDAStream& cur_thread_stream) {
   auto new_stream = at::cuda::createCUDAStream();
   at::cuda::setCurrentCUDAStream(new_stream);
@@ -119,7 +112,7 @@ TEST_CASE("CUDAGuard") {
       at::cuda::createCUDAStream()};
   REQUIRE(streams0[0].device() == 0);
   REQUIRE(streams0[1].device() == 0);
-  at::cuda::setCurrentCUDAStreamOnDevice(0, streams0[0]);
+  at::cuda::setCurrentCUDAStream(streams0[0]);
 
   std::vector<at::cuda::CUDAStream> streams1;
   {
@@ -129,7 +122,7 @@ TEST_CASE("CUDAGuard") {
   }
   REQUIRE(streams1[0].device() == 1);
   REQUIRE(streams1[1].device() == 1);
-  at::cuda::setCurrentCUDAStreamOnDevice(1, streams1[0]);
+  at::cuda::setCurrentCUDAStream(streams1[0]);
 
   REQUIRE(at::cuda::current_device() == 0);
 
@@ -151,23 +144,23 @@ TEST_CASE("CUDAGuard") {
     at::cuda::CUDAGuard guard(streams1[1]);
     REQUIRE(guard.last_device() == 1);
     REQUIRE(at::cuda::current_device() == 1);
-    REQUIRE(at::cuda::getCurrentCUDAStreamOnDevice(1) == streams1[1]);
+    REQUIRE(at::cuda::getCurrentCUDAStream(1) == streams1[1]);
   }
 
   // Device and stream are now reset
   REQUIRE(at::cuda::current_device() == 0);
-  REQUIRE(at::cuda::getCurrentCUDAStreamOnDevice(1) == streams1[0]);
+  REQUIRE(at::cuda::getCurrentCUDAStream(1) == streams1[0]);
 
   // Setting only the device changes only the current device and not the stream
   {
     at::cuda::CUDAGuard guard(/*device=*/1);
     REQUIRE(guard.last_device() == 1);
     REQUIRE(at::cuda::current_device() == 1);
-    REQUIRE(at::cuda::getCurrentCUDAStreamOnDevice(1) == streams1[0]);
+    REQUIRE(at::cuda::getCurrentCUDAStream(1) == streams1[0]);
   }
 
   REQUIRE(at::cuda::current_device() == 0);
-  REQUIRE(at::cuda::getCurrentCUDAStreamOnDevice(0) == streams0[0]);
+  REQUIRE(at::cuda::getCurrentCUDAStream(0) == streams0[0]);
 
   // Setting the stream first, and then the device, first changes the devices
   // back, and then resets the stream on the initial device.
@@ -178,8 +171,8 @@ TEST_CASE("CUDAGuard") {
   }
 
   REQUIRE(at::cuda::current_device() == 0);
-  REQUIRE(at::cuda::getCurrentCUDAStreamOnDevice(0) == streams0[0]);
-  REQUIRE(at::cuda::getCurrentCUDAStreamOnDevice(1) == streams1[0]);
+  REQUIRE(at::cuda::getCurrentCUDAStream(0) == streams0[0]);
+  REQUIRE(at::cuda::getCurrentCUDAStream(1) == streams1[0]);
 }
 
 TEST_CASE("CUDAGuardIsMovable") {
@@ -199,4 +192,37 @@ TEST_CASE("CUDAGuardIsMovable") {
   REQUIRE(third.original_streams().size() == device_count);
   REQUIRE(third.original_device() == 0);
   REQUIRE(third.last_device() == 1);
+}
+
+TEST_CASE("Streampool Round Robin") {
+  std::vector<at::cuda::CUDAStream> streams{};
+  for (int i = 0; i < 200; ++i) {
+    streams.emplace_back(at::cuda::detail::CUDAStream_createStream());
+  }
+
+  std::unordered_set<cudaStream_t> stream_set{};
+  bool hasDuplicates = false;
+  for (auto i = decltype(streams.size()){0}; i < streams.size(); ++i) {
+    cudaStream_t cuda_stream = streams[i];
+    auto result_pair = stream_set.insert(cuda_stream);
+    if (!result_pair.second) hasDuplicates = true;
+  }
+
+  REQUIRE(hasDuplicates);
+}
+
+// Note: to be expanded once CUDAEvent PR is accepted
+TEST_CASE("Multi-GPU") {
+  if (at::cuda::getNumGPUs() < 2) return;
+
+  at::cuda::CUDAStream s0 = at::cuda::createCUDAStream(true, 0);
+  at::cuda::CUDAStream s1 = at::cuda::createCUDAStream(false, 1);
+
+  at::cuda::setCurrentCUDAStream(s0);
+  at::cuda::setCurrentCUDAStream(s1);
+
+  REQUIRE(s0 == at::cuda::getCurrentCUDAStream());
+
+  at::DeviceGuard device_guard{1};
+  REQUIRE(s1 == at::cuda::getCurrentCUDAStream());
 }

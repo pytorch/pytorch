@@ -95,8 +95,8 @@ struct TreeToken {
     token.tree_size = 1;
     Value *lhs = mm->inputs()[0];
     Value *rhs = mm->inputs()[1];
-    token.lhs_sizes = as_array(lhs->type()->expect<TensorType>()->sizes());
-    token.rhs_sizes = as_array(rhs->type()->expect<TensorType>()->sizes());
+    token.lhs_sizes = as_array(lhs->type()->expect<CompleteTensorType>()->sizes());
+    token.rhs_sizes = as_array(rhs->type()->expect<CompleteTensorType>()->sizes());
     token.node = mm;
     token.is_root = true;
     return token;
@@ -150,8 +150,8 @@ void BatchMMBlock(Block* block) {
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : block->nodes()) {
     if (node->kind() == aten::mm &&
-        node->input(0)->type()->cast<TensorType>() &&
-        node->input(1)->type()->cast<TensorType>()) {
+        node->input(0)->type()->cast<CompleteTensorType>() &&
+        node->input(1)->type()->cast<CompleteTensorType>()) {
       tokens[node] = TreeToken::fromMM(node);
     } else if (node->kind() == aten::add) {
       // NOTE: x + 2 is add[other={2}](%x)
@@ -185,7 +185,7 @@ void BatchMMBlock(Block* block) {
       continue;
     auto matmuls = root.gatherMatMuls();
     auto type_ = root.node->output()->type();
-    auto type = type_->expect<TensorType>();
+    auto type = type_->expect<CompleteTensorType>();
 
     auto batch_inputs = [&](Side s, std::array<int64_t, 2> cat_sizes) -> Value* {
       int inputs_off = s == Side::LHS ? 0 : 1;

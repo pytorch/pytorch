@@ -298,11 +298,11 @@ op_2 = core.CreateOperator(
     input_as_shape=1
 )
 
-# Test arg-based op
+// Test arg-based op
 workspace.RunOperatorOnce(op_1)
 print("output (op_1):\n", workspace.FetchBlob("output"))
 
-# Test input-based op
+// Test input-based op
 workspace.ResetWorkspace()
 workspace.FeedBlob("shape", np.array([5,5]))
 workspace.FeedBlob("min", np.array(13.8, dtype=np.float32))
@@ -389,11 +389,11 @@ op_2 = core.CreateOperator(
     input_as_shape=1
 )
 
-# Test arg-based op
+// Test arg-based op
 workspace.RunOperatorOnce(op_1)
 print("output (op_1):\n", workspace.FetchBlob("output"))
 
-# Test input-based op
+// Test input-based op
 workspace.ResetWorkspace()
 workspace.FeedBlob("shape", np.array([5,5]))
 workspace.FeedBlob("min", np.array(13, dtype=np.int32))

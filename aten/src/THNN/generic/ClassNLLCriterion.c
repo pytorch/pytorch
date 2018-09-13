@@ -65,11 +65,11 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   target = THIndexTensor_(newContiguous)(target);
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
 
-  real *input_data = THTensor_(data)(input);
+  real *input_data = input->data<real>();
   THIndex_t *target_data = THIndexTensor_(data)(target);
-  real *weights_data = weights ? THTensor_(data)(weights) : NULL;
-  real *output_data = THTensor_(data)(output);
-  real *total_weight_data = THTensor_(data)(total_weight);
+  real *weights_data = weights ? weights->data<real>() : NULL;
+  real *output_data = output->data<real>();
+  real *total_weight_data = total_weight->data<real>();
 
   output_data[0] = total_weight_data[0] = 0.0;
 
@@ -104,9 +104,9 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   }
 
   if (weights) {
-    THTensor_(free)(weights);
+    c10::raw::intrusive_ptr::decref(weights);
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
   THIndexTensor_(free)(target);
 }
 
@@ -161,7 +161,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     return;
   }
 
-  real *total_weight_data = THTensor_(data)(total_weight);
+  real *total_weight_data = total_weight->data<real>();
   if (*total_weight_data <= 0) {
     return;
   }
@@ -172,8 +172,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   weights = weights ? THTensor_(newContiguous)(weights) : NULL;
 
   THIndex_t *target_data = THIndexTensor_(data)(target);
-  real *weights_data = weights ? THTensor_(data)(weights) : NULL;
-  real *gradInput_data = THTensor_(data)(gradInput);
+  real *weights_data = weights ? weights->data<real>() : NULL;
+  real *gradInput_data = gradInput->data<real>();
 
   real gradOutput_value = THTensor_(get1d)(gradOutput, 0);
 
@@ -212,7 +212,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   THIndexTensor_(free)(target);
   if (weights) {
-    THTensor_(free)(weights);
+    c10::raw::intrusive_ptr::decref(weights);
   }
 }
 

@@ -9,11 +9,11 @@ from torch.distributions.utils import broadcast_all
 
 class Multinomial(Distribution):
     r"""
-    Creates a Multinomial distribution parameterized by `total_count` and
-    either `probs` or `logits` (but not both). The innermost dimension of
-    `probs` indexes over categories. All other dimensions index over batches.
+    Creates a Multinomial distribution parameterized by :attr:`total_count` and
+    either :attr:`probs` or :attr:`logits` (but not both). The innermost dimension of
+    :attr:`probs` indexes over categories. All other dimensions index over batches.
 
-    Note that `total_count` need not be specified if only :meth:`log_prob` is
+    Note that :attr:`total_count` need not be specified if only :meth:`log_prob` is
     called (see example below)
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,

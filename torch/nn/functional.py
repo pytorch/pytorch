@@ -1576,7 +1576,7 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='elementwise
         reduction = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction = _Reduction.get_enum(reduction)
-    return torch._C._nn.kl_div(input, target, reduction)
+    return torch.kl_div(input, target, reduction)
 
 
 def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-100,
@@ -2297,6 +2297,30 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
     See :class:`torch.nn.PairwiseDistance` for details
     """
     return torch.pairwise_distance(x1, x2, p, eps, keepdim)
+
+
+pdist = _add_docstr(torch.pdist, r"""
+pdist(input, p=2) -> Tensor
+
+Computes the p-norm distance between every pair of row vectors in the input.
+This is identical to the upper triangular portion, excluding the diagonal, of
+`torch.norm(input[:, None] - input, dim=2, p=p)`. This function will be faster
+if the rows are contiguous.
+
+If input has shape :math:`N \times M` then the output will have shape
+:math:`\frac{1}{2} N (N - 1)`.
+
+This function is equivalent to `scipy.spatial.distance.pdist(input,
+'minkowski', p=p)` if :math:`p \in (0, \infty)`. When :math:`p = 0` it is
+equivalent to `scipy.spatial.distance.pdist(input, 'hamming') * M`.
+When :math:`p = \infty`, the closest scipy function is
+`scipy.spatial.distance.pdist(xn, lambda x, y: np.abs(x - y).max())`.
+
+Args:
+    input: input tensor of shape :math:`N \times M`.
+    p: p value for the p-norm distance to calculate between each vector pair
+        :math:`\in [0, \infty]`.
+""")
 
 
 def cosine_similarity(x1, x2, dim=1, eps=1e-8):

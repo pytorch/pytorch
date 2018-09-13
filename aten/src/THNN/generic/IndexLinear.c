@@ -55,18 +55,18 @@ void THNN_(IndexLinear_updateOutput)(
   if (maxNormalize)
   {
     THTensor_(resize1d)(normalizedValues, keysSize);
-    normalizedValuesData = THTensor_(data)(normalizedValues);
+    normalizedValuesData = normalizedValues->data<real>();
   }
 
   /* Resize the output */
   THTensor_(resize2d)(output, batchSize, outDim);
 
   /* Access the storage data/strides */
-  real* outputData = THTensor_(data)(output);
-  real* valuesData = THTensor_(data)(values);
-  real* weightData = THTensor_(data)(weight);
+  real* outputData = output->data<real>();
+  real* valuesData = values->data<real>();
+  real* weightData = weight->data<real>();
   int64_t weightStride0 = weight->stride(0);
-  real* biasData = THTensor_(data)(bias);
+  real* biasData = bias->data<real>();
   int64_t* keysData = THLongTensor_data(keys);
 
   /* Make sure these inputs are contiguous to accelerate computations */
@@ -256,11 +256,11 @@ void THNN_(IndexLinear_updateParameters)(
   int64_t keysSize = THLongTensor_size(runningKeys, 0);
 
   /* Access the storage data/strides */
-  real* gradWeightData = THTensor_(data)(gradWeight);
-  real* weightData = THTensor_(data)(weight);
+  real* gradWeightData = gradWeight->data<real>();
+  real* weightData = weight->data<real>();
   int64_t weightStride0 = weight->stride(0);
-  real* gradBiasData = THTensor_(data)(gradBias);
-  real* biasData = THTensor_(data)(bias);
+  real* gradBiasData = gradBias->data<real>();
+  real* biasData = bias->data<real>();
   int64_t* keysData = THLongTensor_data(runningKeys);
 
   /* Make sure these inputs are contiguous to accelerate computations */
@@ -402,10 +402,10 @@ void THNN_(IndexLinear_accUpdateGradParameters)(
   THArgCheck(THNN_(checkKeysValues)(keys, values), 1, "Keys and values should have the same number of elements");
 
   /* Access the storage data/strides */
-  real* gradOutputData = THTensor_(data)(gradOutput);
-  real* valuesData =THTensor_(data)(values);
-  real* weightData = THTensor_(data)(weight);
-  real* biasData = THTensor_(data)(bias);
+  real* gradOutputData = gradOutput->data<real>();
+  real* valuesData =values->data<real>();
+  real* weightData = weight->data<real>();
+  real* biasData = bias->data<real>();
   int64_t weightStride0 = weight->stride(0);
   int64_t* keysData = THLongTensor_data(keys);
   int64_t* sizesData = THLongTensor_data(sizes);
@@ -614,10 +614,10 @@ void THNN_(IndexLinear_accGradParameters)(
   THTensor_(resize2d)(gradWeight, keysSize, outDim * (maxNormalize>0?2:1));
 
   /* Access the storage data/strides */
-  real* gradOutputData = THTensor_(data)(gradOutput);
-  real* valuesData =THTensor_(data)(values);
-  real* gradWeightData = THTensor_(data)(gradWeight);
-  real* gradBiasData = THTensor_(data)(gradBias);
+  real* gradOutputData = gradOutput->data<real>();
+  real* valuesData =values->data<real>();
+  real* gradWeightData = gradWeight->data<real>();
+  real* gradBiasData = gradBias->data<real>();
 
   /* Make sure these inputs are contiguous to accelerate computations */
   THArgCheck(THLongTensor_isContiguous(keys), 1, "keys vector must be contiguous");

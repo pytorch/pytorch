@@ -618,9 +618,9 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   nelem = THTensor_(nElement)(r_);
   THTensor_(resize4d)(r_,nKernelPlane, nInputPlane, nOutputRows, nOutputCols);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
@@ -672,8 +672,8 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
       /* output_data += nOutputCols*nOutputRows; */
     }
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 
@@ -728,9 +728,9 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
   nelem = THTensor_(nElement)(r_);
   THTensor_(resize4d)(r_,nKernelPlane, nInputPlane, nOutputRows, nOutputCols);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
@@ -785,8 +785,8 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
       }
     }
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 
@@ -843,9 +843,9 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   nelem = THTensor_(nElement)(r_);
   THTensor_(resize4d)(r_, nKernelPlane, nInputPlane, nOutputRows, nOutputCols);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
@@ -917,8 +917,8 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
       /* output_data += nOutputCols*nOutputRows; */
     }
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 
@@ -981,9 +981,9 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   nelem = THTensor_(nElement)(r_);
   THTensor_(resize3d)(r_, nOutputPlane, nOutputRows, nOutputCols);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
@@ -1054,8 +1054,8 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
     /* Next output plane */
     /* output_data += nOutputCols*nOutputRows;*/
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 
@@ -1119,9 +1119,9 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   nelem = THTensor_(nElement)(r_);
   THTensor_(resize4d)(r_, nbatch, nOutputPlane, nOutputRows, nOutputCols);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   if (nelem == 0 || beta == 0 || nelem != THTensor_(nElement)(r_))
   {
@@ -1204,8 +1204,8 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
       /* output_data += nOutputCols*nOutputRows;*/
     }
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 
@@ -1253,9 +1253,9 @@ void THTensor_(conv2Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  ptr_input = THTensor_(data)(input);
-  ptr_weight = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  ptr_input = input->data<real>();
+  ptr_weight = kernel->data<real>();
+  output_data = r_->data<real>();
 
 
   /* do image, kernel convolution */
@@ -1264,8 +1264,8 @@ void THTensor_(conv2Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
                     ptr_input, nInputRows, nInputCols,
                     ptr_weight, nKernelRows, nKernelCols,
                     srow, scol, vf, xc);
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 /*
@@ -1321,9 +1321,9 @@ void THTensor_(conv2Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   for(k = 0; k < nOutputPlane; k++)
   {
@@ -1341,8 +1341,8 @@ void THTensor_(conv2Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
     /* Next output plane */
     output_data += nOutputCols*nOutputRows;
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 /*
@@ -1401,9 +1401,9 @@ void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   nmaps = map->size(0);
 
@@ -1427,8 +1427,8 @@ void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
                       ptr_weight, nKernelRows, nKernelCols,
                       srow, scol, vf, xc);
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 /*
@@ -1490,9 +1490,9 @@ void THTensor_(conv3DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   for(k = 0; k < nKernelPlane; k++)
   {
@@ -1514,8 +1514,8 @@ void THTensor_(conv3DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
       output_data += nOutputDepth*nOutputCols*nOutputRows;
     }
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 
@@ -1581,9 +1581,9 @@ void THTensor_(conv3Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   for(k = 0; k < nKernelPlane; k++)
   {
@@ -1606,8 +1606,8 @@ void THTensor_(conv3Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
       output_data += nOutputDepth*nOutputCols*nOutputRows;
     }
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 /*
@@ -1676,9 +1676,9 @@ void THTensor_(conv3Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   for(k = 0; k < nOutputPlane; k++)
   {
@@ -1699,8 +1699,8 @@ void THTensor_(conv3Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
     /* Next output plane */
     output_data += nOutputDepth*nOutputCols*nOutputRows;
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 /*
@@ -1756,9 +1756,9 @@ void THTensor_(conv3Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  ptr_input = THTensor_(data)(input);
-  ptr_weight = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  ptr_input = input->data<real>();
+  ptr_weight = kernel->data<real>();
+  output_data = r_->data<real>();
 
 
   /* do image, kernel convolution */
@@ -1767,8 +1767,8 @@ void THTensor_(conv3Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
                     ptr_input,  nInputDepth, nInputRows,  nInputCols,
                     ptr_weight, nKernelDepth, nKernelRows, nKernelCols,
                     sdepth, srow, scol, vf, xc);
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 /*
@@ -1831,9 +1831,9 @@ void THTensor_(conv3Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   for(k = 0; k < nOutputPlane; k++)
   {
@@ -1852,8 +1852,8 @@ void THTensor_(conv3Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
     /* Next output plane */
     output_data += nOutputDepth*nOutputCols*nOutputRows;
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 
 /*
@@ -1921,9 +1921,9 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   else if (beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  input_data = THTensor_(data)(input);
-  weight_data = THTensor_(data)(kernel);
-  output_data = THTensor_(data)(r_);
+  input_data = input->data<real>();
+  weight_data = kernel->data<real>();
+  output_data = r_->data<real>();
 
   nmaps = map->size(0);
 
@@ -1947,7 +1947,7 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
                       ptr_weight, nKernelDepth, nKernelRows, nKernelCols,
                       sdepth, srow, scol, vf, xc);
   }
-  THTensor_(free)(input);
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(kernel);
 }
 #endif

@@ -9,7 +9,7 @@
 
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,

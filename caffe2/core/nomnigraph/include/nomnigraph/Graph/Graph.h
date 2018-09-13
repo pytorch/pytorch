@@ -12,6 +12,7 @@
 #ifndef NOM_GRAPH_GRAPH_H
 #define NOM_GRAPH_GRAPH_H
 
+#include "caffe2/core/common.h"
 #include "nomnigraph/Support/Common.h"
 
 #include <algorithm>
@@ -87,6 +88,9 @@ class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
   }
   /// \brief Create an empty node.
   explicit Node() : StorageType<T>() {}
+  Node(Node&&) = default;
+  Node(const Node&) = delete;
+  Node& operator=(const Node&) = delete;
 
   /// \brief Adds an edge by reference to known in-edges.
   /// \p e A reference to an edge that will be added as an in-edge.
@@ -321,6 +325,28 @@ class Graph {
     }
   }
 
+  // All out-edges oldNode -> V will be replaced with newNode -> V
+  void replaceOutEdges(const NodeRef& oldNode, const NodeRef& newNode) {
+    const auto edges = oldNode->getOutEdges();
+
+    for (const auto& edge : edges) {
+      edge->setTail(newNode);
+      oldNode->removeOutEdge(edge);
+      newNode->addOutEdge(edge);
+    }
+  }
+
+  // All in-edges V -> oldNode  will be replaced with V -> newNode
+  void replaceInEdges(const NodeRef& oldNode, const NodeRef& newNode) {
+    const auto edges = oldNode->getInEdges();
+
+    for (const auto& edge : edges) {
+      edge->setHead(newNode);
+      oldNode->removeInEdge(edge);
+      newNode->addInEdge(edge);
+    }
+  }
+
   /// \brief Creates a directed edge and retains ownership of it.
   /// \p tail The node that will have this edge as an out-edge.
   /// \p head The node that will have this edge as an in-edge.
@@ -352,6 +378,9 @@ class Graph {
   /// \param deleteEdges (optional) Whether or not to delete the edges
   /// related to the node.
   void deleteNode(NodeRef n, bool deleteEdges = true) {
+    if (!hasNode(n)) {
+      return;
+    }
     if (deleteEdges) {
       auto inEdges = n->inEdges_;
       for (auto& edge : inEdges) {
@@ -368,6 +397,15 @@ class Graph {
         nodes_.erase(i);
         break;
       }
+    }
+  }
+
+  // Delete all nodes in the set.
+  void deleteNodes(
+      const std::unordered_set<NodeRef>& nodes,
+      bool deleteEdges = true) {
+    for (auto node : nodes) {
+      deleteNode(node, deleteEdges);
     }
   }
 
@@ -410,6 +448,10 @@ class Graph {
       result.emplace_back(&e);
     }
     return result;
+  }
+
+  size_t getEdgesCount() const {
+    return (size_t)edges_.size();
   }
 
  private:

@@ -5,89 +5,87 @@
 
 #include "cuda_runtime_api.h"
 
-#include <ATen/ATenGeneral.h>
+#include <ATen/cuda/ATenCUDAGeneral.h>
 
 /*
-* A CUDA stream interface with no CUDA build dependency.
+* A CUDAStream interface. See CUDAStream.cpp for implementation details.
 *
-* Includes the CUDAStream RAII class and a pointer-based stream API.
+* Includes the CUDAStream convenience class and a pointer-based stream API.
 *
-* The ATen Context interface should be preferred when working with streams.
+* The ATen/cuda/CUDAContext interface should be preferred when working with streams.
 */
 
-// Forward-declares internals
+/*
+* Stream pool note.
+*
+* A CUDAStream is an abstraction of an actual cuStream on the GPU. CUDAStreams
+* are backed by cuStreams, but they use several pools to minimize the costs
+* associated with creating, retaining, and destroying cuStreams.
+*
+* There are three pools per device, and a device's pools are lazily created.
+*
+* The first pool contains only the default stream. When the default stream
+* is requested it's returned.
+*
+* The second pool is the "low priority" or "default priority" streams. In
+* HIP builds there is no distinction between streams in this pool and streams
+* in the third pool (below). There are 32 of these streams per device, and
+* when a stream is requested one of these streams is returned round-robin.
+* That is, the first stream requested is at index 0, the second at index 1...
+* to index 31, then index 0 again.
+*
+* This means that if 33 low priority streams are requested, the first and
+* last streams requested are actually the same stream (under the covers)
+* and kernels enqueued on them cannot run concurrently.
+*
+* The third pool is the "high priority" streams. The third pool acts like
+* the second pool except the streams are created with a higher priority.
+*
+* These pools suggest that stream users should prefer many short-lived streams,
+* as the cost of acquiring and releasing streams is effectively zero. If
+* many longer-lived streams are required in performance critical scenarios
+* then the functionality here may need to be extended to allow, for example,
+* "reserving" a subset of the pool so that other streams do not accidentally
+* overlap the performance critical streams.
+*/
+
 struct CUDAStreamInternals;
 
 namespace at {
 namespace cuda {
 
+struct CUDAEvent;
+
 namespace detail {
 
 // Pointer-based API (for internal use)
-// Note: ATen/Context is preferred to work with streams safely
-AT_API CUDAStreamInternals* CUDAStream_getDefaultStreamOnDevice(int64_t device);
-AT_API CUDAStreamInternals* CUDAStream_getDefaultStream();
+AT_CUDA_API CUDAStreamInternals* CUDAStream_getDefaultStream(int64_t device = -1);
 
-AT_API CUDAStreamInternals* CUDAStream_createAndRetainWithOptions(int32_t flags, int32_t priority);
+AT_CUDA_API CUDAStreamInternals* CUDAStream_createStream(
+  const bool isHighPriority = false
+, int64_t device = -1);
 
-AT_API CUDAStreamInternals* CUDAStream_getAndRetainCurrentStreamOnDevice(int64_t device);
-AT_API CUDAStreamInternals* CUDAStream_getAndRetainCurrentStream();
+AT_CUDA_API CUDAStreamInternals* CUDAStream_getCurrentStream(int64_t device = -1);
 
-// Note: these Unsafe gets should NEVER be used and are only here for legacy
-// purposes. Once those uses are gone they should be removed.
-AT_API CUDAStreamInternals* CUDAStream_getCurrentStreamOnDeviceUnsafe(int64_t device);
-AT_API CUDAStreamInternals* CUDAStream_getCurrentStreamUnsafe();
+AT_CUDA_API void CUDAStream_setStream(CUDAStreamInternals* internals);
+AT_CUDA_API void CUDAStream_uncheckedSetStream(CUDAStreamInternals* internals);
 
-AT_API void CUDAStream_setStreamOnDevice(int64_t device, CUDAStreamInternals* internals);
-AT_API void CUDAStream_uncheckedSetStreamOnDevice(
-    int64_t device,
-    CUDAStreamInternals* internals);
-AT_API void CUDAStream_setStream(CUDAStreamInternals* internals);
-
-AT_API cudaStream_t CUDAStream_stream(CUDAStreamInternals*);
-AT_API int64_t CUDAStream_device(CUDAStreamInternals*);
-
-AT_API bool CUDAStream_retain(CUDAStreamInternals*);
-AT_API void CUDAStream_free(CUDAStreamInternals*&);
-AT_API void CUDAStream_uncheckedFree(CUDAStreamInternals*&);
+AT_CUDA_API cudaStream_t CUDAStream_stream(CUDAStreamInternals*);
+AT_CUDA_API int64_t CUDAStream_device(CUDAStreamInternals*);
 
 } // namespace detail
 
 // RAII for a CUDA stream
 // Allows use as a cudaStream_t, copying, moving, and metadata access.
 struct CUDAStream {
-  // Constants
-  static constexpr int32_t DEFAULT_FLAGS = cudaStreamNonBlocking;
-  static constexpr int32_t DEFAULT_PRIORITY = 0;
 
   // Constructors
   CUDAStream() = default;
-  /* implicit */ CUDAStream(CUDAStreamInternals* internals, bool retain = false)
-      : internals_{internals} {
-    if (retain) {
-      detail::CUDAStream_retain(internals_);
-    }
-  }
-
-  // Destructor
-  ~CUDAStream() { detail::CUDAStream_uncheckedFree(internals_); }
-
-  // Copy constructor
-  AT_API CUDAStream(const CUDAStream& other);
-
-  // Move constructor
-  AT_API CUDAStream(CUDAStream&& other);
-
-  // Assignment operator
-  CUDAStream& operator=(CUDAStream other) noexcept {
-    std::swap(internals_, other.internals_);
-    return *this;
-  }
+  /* implicit */ CUDAStream(CUDAStreamInternals* internals_in)
+  : internals_{internals_in} { }
 
   // Returns true if the CUDAStream is not null.
-  explicit operator bool() const noexcept {
-    return internals_ != nullptr;
-  }
+  explicit operator bool() const noexcept { return internals_ != nullptr; }
 
   // Implicit conversion to cudaStream_t
   operator cudaStream_t() const { return detail::CUDAStream_stream(internals_); }
@@ -101,6 +99,8 @@ struct CUDAStream {
   int64_t device() const { return detail::CUDAStream_device(internals_); }
   cudaStream_t stream() const { return detail::CUDAStream_stream(internals_); }
   CUDAStreamInternals* internals() const { return internals_; }
+
+  void synchronize_with(const CUDAEvent& event) const;
 
 private:
   CUDAStreamInternals* internals_ = nullptr;

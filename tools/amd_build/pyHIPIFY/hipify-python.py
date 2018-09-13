@@ -760,8 +760,8 @@ def preprocessor(filepath, stats, hipify_caffe2):
         output_source = processKernelLaunches(output_source, stats)
 
         # Disable asserts
-        if not filepath.endswith("THCGeneral.h.in"):
-            output_source = disable_asserts(output_source)
+        # if not filepath.endswith("THCGeneral.h.in"):
+        #    output_source = disable_asserts(output_source)
 
         # Replace std:: with non-std:: versions
         output_source = replace_math_functions(output_source)

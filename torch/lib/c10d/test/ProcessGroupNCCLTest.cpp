@@ -45,18 +45,16 @@ class NCCLTest : public NCCLTestBase {
         numDevices_(cudaNumDevices()),
         state_(::at::globalContext().lazyInitCUDA()),
         worldSize_(worldSize) {
-    const auto& type = at::getType(at::kCUDA, at::kFloat);
-
     // Each device has a single tensor to perf the NCCL op
     inputs_.resize(numDevices_);
     outputs_.resize(numDevices_);
     at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numDevices_; ++i) {
       deviceGuard.set_index(i);
-      inputs_[i] = type.tensor({3, 3});
-      outputs_[i].resize(worldSize_);
-      for (auto j = 0; j < worldSize_; ++j) {
-        outputs_[i][j] = type.tensor({3, 3});
+      inputs_[i] = at::empty({3, 3}, at::kCUDA);
+      outputs_[i].resize(worldSize_ * numDevices_);
+      for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
+        outputs_[i][j] = at::empty({3, 3}, at::kCUDA);
       }
     }
 
@@ -96,7 +94,7 @@ class NCCLTest : public NCCLTestBase {
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; i++) {
       cudaStreamSynchronize(streams_[i].getStream());
-      outputs[i] = inputs_[i].toBackend(at::kCPU);
+      outputs[i] = inputs_[i].cpu();
     }
 
     return outputs;
@@ -105,7 +103,7 @@ class NCCLTest : public NCCLTestBase {
   std::vector<std::vector<at::Tensor>> getOutputTensors() {
     std::vector<std::vector<at::Tensor>> outputs(numDevices_);
     for (size_t i = 0; i < outputs.size(); ++i) {
-      outputs[i] = std::vector<at::Tensor>(worldSize_);
+      outputs[i] = std::vector<at::Tensor>(worldSize_ * numDevices_);
     }
 
     // For the duration of this function, make THC use our streams
@@ -114,8 +112,8 @@ class NCCLTest : public NCCLTestBase {
     // Copy inputs to outputs
     for (auto i = 0; i < numDevices_; ++i) {
       cudaStreamSynchronize(streams_[i].getStream());
-      for (auto j = 0; j < worldSize_; ++j) {
-        outputs[i][j] = outputs_[i][j].toBackend(at::kCPU);
+      for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
+        outputs[i][j] = outputs_[i][j].cpu();
       }
     }
     return outputs;
@@ -341,7 +339,7 @@ void testAllgather(const std::string& path, int rank, int size) {
   for (size_t i = 0; i < tensors.size(); ++i) {
     // rank index
     for (size_t j = 0; j < tensors[i].size(); ++j) {
-      const auto expected = j * size + i;
+      const auto expected = j;
       auto& tensor = tensors[i][j];
       auto data = tensor.data<float>();
       for (auto k = 0; k < tensor.numel(); k++) {

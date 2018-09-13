@@ -163,7 +163,7 @@ bool test_mnist(
       }
     }
 
-    return data.toBackend(useGPU ? torch::kCUDA : torch::kCPU);
+    return data.toBackend(useGPU ? torch::Backend::CUDA : torch::Backend::CPU);
   };
 
   auto readLabels = [&](std::string fn) {
@@ -177,7 +177,7 @@ bool test_mnist(
     for (int i = 0; i < label_count; ++i) {
       a_data[i] = static_cast<int64_t>(rd.read_byte());
     }
-    return data.toBackend(useGPU ? torch::kCUDA : torch::kCPU);
+    return data.toBackend(useGPU ? torch::Backend::CUDA : torch::Backend::CPU);
   };
 
   auto trdata = readData("test/cpp/api/mnist/train-images-idx3-ubyte");

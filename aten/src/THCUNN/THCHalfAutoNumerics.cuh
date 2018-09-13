@@ -4,6 +4,9 @@
 #include "THCHalf.h"
 #include "THCNumerics.cuh"
 
+// WARNING: THCNumerics is being deprecated. Read the comments and function usage 
+//          in THCNumerics to learn about the deprecation
+//      
 // Half numerics functions defined as free functions, so cunn code can be
 //written generically, i.e. without excessive calling of THCNumerics<half> functions.
 

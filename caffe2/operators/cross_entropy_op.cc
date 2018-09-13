@@ -401,22 +401,22 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X: Sample softmax output for 5-class model
+// Create X: Sample softmax output for 5-class model
 X = np.array([[.01, .05, .02, .02, .9],[.03, .1, .42, .05, .4]])
 print("X:\n",X)
 
-# Create label: Sample 1-hot ground truth label vectors
+// Create label: Sample 1-hot ground truth label vectors
 label = np.array([4,2])
 print("label:\n",label)
 
-# Feed X & label into workspace
+// Feed X & label into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("label", label.astype(np.int32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```
@@ -635,22 +635,22 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X: Sample softmax output for 5-class model
+// Create X: Sample softmax output for 5-class model
 X = np.array([[.01, .05, .02, .02, .9],[.03, .1, .42, .05, .4]])
 print("X:\n",X)
 
-# Create label: Sample 1-hot ground truth label vectors
+// Create label: Sample 1-hot ground truth label vectors
 label = np.array([[0.,0.,0.,0.,1.],[0.,0.,1.,0.,0.]])
 print("label:\n",label)
 
-# Feed X & label into workspace
+// Feed X & label into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("label", label.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```

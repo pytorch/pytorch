@@ -6,6 +6,7 @@
 #include <thread>
 
 #include <c10d/FileStore.hpp>
+#include <c10d/PrefixStore.hpp>
 
 std::string tmppath() {
   const char* tmpdir = getenv("TMPDIR");
@@ -27,13 +28,14 @@ std::string tmppath() {
   return std::string(tmp.data(), tmp.size());
 }
 
-int main(int argc, char** argv) {
+void testHelper(const std::string prefix = "") {
   auto path = tmppath();
   std::cout << "Using temporary file: " << path << std::endl;
 
   // Basic set/get
   {
-    c10d::FileStore store(path);
+    c10d::FileStore fileStore(path);
+    c10d::PrefixStore store(prefix, fileStore);
     c10d::test::set(store, "key0", "value0");
     c10d::test::set(store, "key1", "value1");
     c10d::test::set(store, "key2", "value2");
@@ -44,7 +46,8 @@ int main(int argc, char** argv) {
 
   // Perform get on new instance
   {
-    c10d::FileStore store(path);
+    c10d::FileStore fileStore(path);
+    c10d::PrefixStore store(prefix, fileStore);
     c10d::test::check(store, "key0", "value0");
   }
 
@@ -55,7 +58,8 @@ int main(int argc, char** argv) {
   c10d::test::Semaphore sem1, sem2;
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(std::move(std::thread([&] {
-      c10d::FileStore store(path);
+      c10d::FileStore fileStore(path);
+      c10d::PrefixStore store(prefix, fileStore);
       sem1.post();
       sem2.wait();
       for (auto j = 0; j < numIterations; j++) {
@@ -71,12 +75,17 @@ int main(int argc, char** argv) {
 
   // Check that the counter has the expected value
   {
-    c10d::FileStore store(path);
+    c10d::FileStore fileStore(path);
+    c10d::PrefixStore store(prefix, fileStore);
     std::string expected = std::to_string(numThreads * numIterations);
     c10d::test::check(store, "counter", expected);
   }
 
   unlink(path.c_str());
+}
+
+int main(int argc, char** argv) {
+  testHelper();
+  testHelper("testPrefix");
   std::cout << "Test succeeded" << std::endl;
-  return 0;
 }

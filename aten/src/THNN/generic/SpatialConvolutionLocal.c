@@ -60,7 +60,7 @@ static THTensor* THNN_(view_weight_local)(THTensor *_weight)
     weight = THTensor_(newWithStorage3d)(THTensor_getStoragePtr(weight),
                        weight->storage_offset(),
                        s1, -1, s2, -1, s3, -1);
-    THTensor_(free)(old_weight);
+    c10::raw::intrusive_ptr::decref(old_weight);
   }
   return weight;
 }
@@ -98,8 +98,8 @@ static void THNN_(SpatialConvolutionLocal_updateOutput_frame)
   THTensor_(baddbmm)(output3d, 1.0, output3d, 1.0, weight, finput3d);
   // output3d:  oH*oW x nOutputPlane x 1
 
-  THTensor_(free)(output3d);
-  THTensor_(free)(finput3d);
+  c10::raw::intrusive_ptr::decref(output3d);
+  c10::raw::intrusive_ptr::decref(finput3d);
 }
 
 void THNN_(SpatialConvolutionLocal_updateOutput)(
@@ -159,14 +159,14 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
      nInputPlane, inputWidth, inputHeight,
      nOutputPlane, outputWidth, outputHeight);
 
-      THTensor_(free)(input_t);
-      THTensor_(free)(output_t);
-      THTensor_(free)(finput_t);
+      c10::raw::intrusive_ptr::decref(input_t);
+      c10::raw::intrusive_ptr::decref(output_t);
+      c10::raw::intrusive_ptr::decref(finput_t);
     }
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 
@@ -191,8 +191,8 @@ static void THNN_(SpatialConvolutionLocal_updateGradInput_frame)
   THTensor_(baddbmm)(fgradInput3d, 0.0, fgradInput3d, 1.0, weight, gradOutput3d);
   // fgradInput3d:  oH*oW x nInputPlane*kH*kW x 1
 
-  THTensor_(free)(gradOutput3d);
-  THTensor_(free)(fgradInput3d);
+  c10::raw::intrusive_ptr::decref(gradOutput3d);
+  c10::raw::intrusive_ptr::decref(fgradInput3d);
 
   THTensor_(zero)(gradInput);
 
@@ -259,16 +259,16 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
      nInputPlane, inputWidth, inputHeight,
      nOutputPlane, outputWidth, outputHeight);
 
-      THTensor_(free)(gradInput_t);
-      THTensor_(free)(gradOutput_t);
-      THTensor_(free)(fgradInput_t);
+      c10::raw::intrusive_ptr::decref(gradInput_t);
+      c10::raw::intrusive_ptr::decref(gradOutput_t);
+      c10::raw::intrusive_ptr::decref(fgradInput_t);
     }
   }
 
-  THTensor_(free)(tweight);
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
-  THTensor_(free)(weight);
+  c10::raw::intrusive_ptr::decref(tweight);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
+  c10::raw::intrusive_ptr::decref(weight);
 }
 
 static void THNN_(SpatialConvolutionLocal_accGradParameters_frame)
@@ -295,8 +295,8 @@ static void THNN_(SpatialConvolutionLocal_accGradParameters_frame)
 
   THTensor_(cadd)(gradBias, gradBias, scale, gradOutput);
 
-  THTensor_(free)(gradOutput3d);
-  THTensor_(free)(finput3d);
+  c10::raw::intrusive_ptr::decref(gradOutput3d);
+  c10::raw::intrusive_ptr::decref(finput3d);
 }
 
 void THNN_(SpatialConvolutionLocal_accGradParameters)(
@@ -353,14 +353,14 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
      nInputPlane, inputWidth, inputHeight,
      nOutputPlane, outputWidth, outputHeight);
 
-      THTensor_(free)(gradOutput_t);
-      THTensor_(free)(finput_t);
+      c10::raw::intrusive_ptr::decref(gradOutput_t);
+      c10::raw::intrusive_ptr::decref(finput_t);
     }
   }
 
-  THTensor_(free)(input);
-  THTensor_(free)(gradOutput);
-  THTensor_(free)(gradWeight);
+  c10::raw::intrusive_ptr::decref(input);
+  c10::raw::intrusive_ptr::decref(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradWeight);
 }
 
 #endif

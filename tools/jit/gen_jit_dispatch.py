@@ -262,7 +262,8 @@ def gen_jit_dispatch(declarations, out, template_path):
                 arguments.extend([
                     # XXX - until we actually have first-class interpreter types for these
                     # concepts, the default values to be encoded in Tensors
-
+                    # If you change this, you also need to update [TensorOptions in script]
+                    # in the tracer code.
                     # dtype is specified as an int64_t of at::ScalarType
                     {'name': 'dtype', 'simple_type': 'ScalarType', 'default': 'float', 'kwarg_only': True},
                     # layout is specified as an int64_t of at::Layout

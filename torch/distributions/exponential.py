@@ -8,7 +8,7 @@ from torch.distributions.utils import broadcast_all
 
 class Exponential(ExponentialFamily):
     r"""
-    Creates a Exponential distribution parameterized by `rate`.
+    Creates a Exponential distribution parameterized by :attr:`rate`.
 
     Example::
 

@@ -19,13 +19,13 @@ void trace() {
     trace += foo_a[i][i];
   }
 
-  REQUIRE(Scalar(foo.trace()).toFloat() == Approx(trace));
+  REQUIRE(foo.trace().toCFloat() == Approx(trace));
 }
 
 TEST_CASE( "atest", "[]" ) {
 
-  manual_seed(123, at::Backend::CPU);
-  manual_seed(123, at::Backend::CUDA);
+  manual_seed(123, at::kCPU);
+  manual_seed(123, at::kCUDA);
 
   auto foo = rand({12,6});
   REQUIRE(foo.data<float>() == foo.toFloatData());

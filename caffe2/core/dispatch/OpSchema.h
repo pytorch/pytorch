@@ -1,7 +1,7 @@
 #pragma once
 
 #include "caffe2/core/dispatch/DispatchKey.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/Array.h"
 #include "caffe2/utils/Metaprogramming.h"
 

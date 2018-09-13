@@ -1,14 +1,27 @@
 #!/bin/bash
 
+# For distributed, four environmental configs:
+# (1) build with only NCCL
+# (2) build with NCCL and MPI
+# (3) build with only MPI
+# (4) build with neither
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+  # TODO: move this to Docker
+  sudo apt-get update
+  sudo apt-get install libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
+  # TODO: move this to Docker
+  sudo apt-get update
+  sudo apt-get install openmpi-bin libopenmpi-dev
+  sudo apt-get install -y --no-install-recommends openssh-client openssh-server
+  sudo mkdir -p /var/run/sshd
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
 fi
-
-# TODO: move this to Docker
-# TODO: add both NCCL and MPI in CI test by fixing these test first
-# sudo apt-get update
-# sudo apt-get install libnccl-dev libnccl2
-# sudo apt-get install openmpi-bin libopenmpi-dev
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -30,7 +43,6 @@ cmake --version
 pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export MAX_JOBS=4
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export HCC_AMDGPU_TARGET=gfx900
 
@@ -48,6 +60,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo apt-get install libc++abi1
 
   python tools/amd_build/build_pytorch_amd.py
+  python tools/amd_build/build_caffe2_amd.py
   USE_ROCM=1 python setup.py install --user
   exit 0
 fi

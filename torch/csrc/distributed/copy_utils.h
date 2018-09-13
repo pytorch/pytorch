@@ -10,7 +10,7 @@ void THDPInsertCopyFunctionFromWorker(
   auto wrapper = [copyFunc](PyObject* dst_, PyObject* src_) {
     TensorSrc* src = THPTypeInfo<TensorSrc>::cdata(src_);
 
-    PyThreadState *_save = NULL;
+    PyThreadState *_save = nullptr;
     try {
       Py_UNBLOCK_THREADS;
       copyFunc(LIBRARY_STATE THDPModule_makeDescriptor(dst_), src);
@@ -36,7 +36,7 @@ void THDPInsertCopyFunctionFromMaster(
   auto wrapper = [copyFunc](PyObject* dst_, PyObject* src_) {
     TensorDst* dst = THPTypeInfo<TensorDst>::cdata(dst_);
 
-    PyThreadState *_save = NULL;
+    PyThreadState *_save = nullptr;
     try {
       Py_UNBLOCK_THREADS;
       copyFunc(LIBRARY_STATE dst, THDPModule_makeDescriptor(src_));

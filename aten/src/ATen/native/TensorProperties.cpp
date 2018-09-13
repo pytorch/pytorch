@@ -40,5 +40,14 @@ bool cudnn_is_acceptable(const Tensor& self) {
   return true;
 }
 
+Tensor detach(const Tensor& self) {
+  return self.unsafeGetTensorImpl()->detach();
+}
+
+Tensor & detach_(Tensor & self) {
+  self.unsafeGetTensorImpl()->detach_();
+  return self;
+}
+
 }
 }

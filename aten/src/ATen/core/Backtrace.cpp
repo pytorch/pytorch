@@ -87,6 +87,7 @@ struct FrameInformation {
 
 bool is_python_frame(const FrameInformation& frame) {
   return frame.object_file == "python" ||
+         frame.object_file == "python3" ||
       (frame.object_file.find("libpython") != std::string::npos);
 }
 

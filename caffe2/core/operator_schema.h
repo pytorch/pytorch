@@ -12,7 +12,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/registry.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/filler.h"
 
 namespace caffe2 {
@@ -324,7 +324,11 @@ class CAFFE2_API OpSchema {
     return std::numeric_limits<int>::max();
   }
 
-  friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
+  bool inplace_enforced(int x, int y) const {
+    return inplace_enforced_(x, y);
+  }
+
+  CAFFE2_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
     return args_;

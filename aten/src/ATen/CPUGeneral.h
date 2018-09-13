@@ -4,7 +4,7 @@
 // linking errors using MSVC
 // See https://msdn.microsoft.com/en-us/library/a90k134d.aspx
 // This header adds this if using AT_API
-#include "ATen/ATenGeneral.h"
+#include "ATen/core/ATenGeneral.h"
 
 namespace at {
 AT_API void set_num_threads(int);

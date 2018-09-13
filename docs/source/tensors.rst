@@ -157,6 +157,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addmv_
    .. automethod:: addr
    .. automethod:: addr_
+   .. automethod:: allclose
    .. automethod:: apply_
    .. automethod:: argmax
    .. automethod:: argmin

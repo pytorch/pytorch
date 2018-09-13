@@ -323,7 +323,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
                         scalar1,                                        \
                         scalar2,                                        \
                         TYPE, A, B>                                     \
-   <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(    \
+   <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(    \
        aInfo, bInfo, (TYPE) totalElements, op);
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
@@ -503,7 +503,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
                         scalar2,                                        \
                         scalar3,                                        \
                         TYPE, A, B, C>                                  \
-    <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
+    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(   \
       aInfo, bInfo, cInfo, (TYPE) totalElements, op);
 
 #define HANDLE_C_CASE(TYPE, A, B, C) {      \
@@ -731,7 +731,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
                         scalar3,                                        \
                         scalar4,                                        \
                         TYPE, A, B, C, D>                               \
-    <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
+    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(   \
     aInfo, bInfo, cInfo, dInfo, (TYPE) totalElements, op);
 
 #define HANDLE_D_CASE(TYPE, A, B, C, D) {       \

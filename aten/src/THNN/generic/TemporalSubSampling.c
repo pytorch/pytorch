@@ -75,8 +75,8 @@ void THNN_(TemporalSubSampling_updateOutput)(
     THTensor_(cadd)(outputFrame, outputFrame, 1, bias);
   }
 
-  THTensor_(free)(outputFrame);
-  THTensor_(free)(inputWindow);
+  c10::raw::intrusive_ptr::decref(outputFrame);
+  c10::raw::intrusive_ptr::decref(inputWindow);
 }
 
 void THNN_(TemporalSubSampling_updateGradInput)(
@@ -113,10 +113,10 @@ void THNN_(TemporalSubSampling_updateGradInput)(
     THTensor_(addr)(gradInputWindow, 1, gradInputWindow, 1, kwunit, buffer);
   }
 
-  THTensor_(free)(gradOutputFrame);
-  THTensor_(free)(gradInputWindow);
-  THTensor_(free)(buffer);
-  THTensor_(free)(kwunit);
+  c10::raw::intrusive_ptr::decref(gradOutputFrame);
+  c10::raw::intrusive_ptr::decref(gradInputWindow);
+  c10::raw::intrusive_ptr::decref(buffer);
+  c10::raw::intrusive_ptr::decref(kwunit);
 }
 
 void THNN_(TemporalSubSampling_accGradParameters)(
@@ -148,9 +148,9 @@ void THNN_(TemporalSubSampling_accGradParameters)(
     THTensor_(cadd)(gradBias, gradBias, scale, gradOutputFrame);
   }
 
-  THTensor_(free)(gradOutputFrame);
-  THTensor_(free)(inputWindow);
-  THTensor_(free)(buffer);
+  c10::raw::intrusive_ptr::decref(gradOutputFrame);
+  c10::raw::intrusive_ptr::decref(inputWindow);
+  c10::raw::intrusive_ptr::decref(buffer);
 }
 
 #endif

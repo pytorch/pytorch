@@ -3,7 +3,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/python/dlpack.h"
 
 #include <pybind11/pybind11.h>

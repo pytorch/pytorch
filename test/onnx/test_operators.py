@@ -42,7 +42,9 @@ def export_to_pb(model, inputs, *args, **kwargs):
 
 
 class FuncModule(Module):
-    def __init__(self, f, params=tuple()):
+    def __init__(self, f, params=None):
+        if params is None:
+            params = ()
         super(FuncModule, self).__init__()
         self.f = f
         self.params = nn.ParameterList(list(params))
@@ -53,7 +55,9 @@ class FuncModule(Module):
 
 class TestOperators(TestCase):
 
-    def assertONNX(self, f, args, params=tuple(), **kwargs):
+    def assertONNX(self, f, args, params=None, **kwargs):
+        if params is None:
+            params = ()
         if isinstance(f, nn.Module):
             m = f
         else:
@@ -97,14 +101,18 @@ class TestOperators(TestCase):
                     with open(os.path.join(data_dir, "output_{}.pb".format(index)), 'wb') as file:
                         file.write(tensor.SerializeToString())
 
-    def assertONNXRaises(self, err, f, args, params=tuple(), **kwargs):
+    def assertONNXRaises(self, err, f, args, params=None, **kwargs):
+        if params is None:
+            params = ()
         if isinstance(f, nn.Module):
             m = f
         else:
             m = FuncModule(f, params)
         self.assertExpectedRaises(err, lambda: export_to_pbtxt(m, args, **kwargs))
 
-    def assertONNXRaisesRegex(self, err, reg, f, args, params=tuple(), **kwargs):
+    def assertONNXRaisesRegex(self, err, reg, f, args, params=None, **kwargs):
+        if params is None:
+            params = ()
         if isinstance(f, nn.Module):
             m = f
         else:
@@ -330,18 +338,18 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.sqrt(x), x)
 
     def test_equal(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        x = Variable(torch.randn(1, 2, 3, 1).int(), requires_grad=False)
+        y = Variable(torch.randn(1, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x == y, (x, y))
 
     def test_lt(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        x = Variable(torch.randn(1, 2, 3, 1).int(), requires_grad=False)
+        y = Variable(torch.randn(1, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x < y, (x, y))
 
     def test_gt(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        x = Variable(torch.randn(1, 2, 3, 1).int(), requires_grad=False)
+        y = Variable(torch.randn(1, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x > y, (x, y))
 
     def test_le(self):
@@ -357,6 +365,34 @@ class TestOperators(TestCase):
     def test_exp(self):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.exp(), x)
+
+    def test_sin(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.sin(), x)
+
+    def test_cos(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.cos(), x)
+
+    def test_tan(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.tan(), x)
+
+    def test_asin(self):
+        x = Variable(torch.rand(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.asin(), x)
+
+    def test_acos(self):
+        x = Variable(torch.rand(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.acos(), x)
+
+    def test_slice(self):
+        x = Variable(torch.rand(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x[:, 1:2], x)
+
+    def test_atan(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.atan(), x)
 
     def test_flatten(self):
         # Flatten is a special case of Reshape when the output is a 2-D tensor.
@@ -391,6 +427,14 @@ class TestOperators(TestCase):
     def test_norm(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
         self.assertONNX(lambda x: x.norm(dim=2), (x))
+
+    def test_upsample(self):
+        x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
+        self.assertONNX(lambda x: nn.functional.interpolate(x, scale_factor=2., mode='bilinear'), x)
+
+    def test_unsqueeze(self):
+        x = Variable(torch.randn(3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.unsqueeze(len(x.shape)), x)
 
     def test_symbolic_override(self):
         """Lifted from fast-neural-style: custom implementation of instance norm

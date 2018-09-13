@@ -45,7 +45,7 @@ class ConstTensorView {
 // anchors: predefined anchors, size(A, 4)
 // Return: all_anchors_vec: (H * W, A * 4)
 // Need to reshape to (H * W * A, 4) to match the format in python
-ERMatXf ComputeAllAnchors(
+CAFFE2_API ERMatXf ComputeAllAnchors(
     const TensorCPU& anchors,
     int height,
     int width,

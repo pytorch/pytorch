@@ -60,8 +60,8 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THTensor_(zero)(output);
-  real *idata = THTensor_(data)(input);
-  real *odata = THTensor_(data)(output);
+  real *idata = input->data<real>();
+  real *odata = output->data<real>();
 
   // special case: just copy
   if (inputDepth == outputDepth && inputHeight == outputHeight && inputWidth == outputWidth) {
@@ -81,7 +81,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
         }
       }
     }
-    THTensor_(free)(input);
+    c10::raw::intrusive_ptr::decref(input);
     return;
   }
 
@@ -101,7 +101,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
       }
     }
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
@@ -121,8 +121,8 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   THTensor_(resize5d)(gradInput, nbatch, channels, inputDepth, inputHeight, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  real *idata = THTensor_(data)(gradInput);
-  real *odata = THTensor_(data)(gradOutput);
+  real *idata = gradInput->data<real>();
+  real *odata = gradOutput->data<real>();
   channels = nbatch * channels;
   const float depth_scale = (float) inputDepth / (float) outputDepth;
   const float height_scale = (float) inputHeight / (float)outputHeight;
@@ -146,7 +146,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
         }
       }
     }
-    THTensor_(free)(gradOutput);
+    c10::raw::intrusive_ptr::decref(gradOutput);
     return;
   }
 
@@ -167,7 +167,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
     }
   }
 
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

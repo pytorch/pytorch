@@ -5,7 +5,7 @@
 
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/registry.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 namespace db {
@@ -19,7 +19,7 @@ enum Mode { READ, WRITE, NEW };
 /**
  * An abstract class for the cursor of the database while reading.
  */
-class Cursor {
+class CAFFE2_API Cursor {
  public:
   Cursor() { }
   virtual ~Cursor() { }
@@ -58,7 +58,7 @@ class Cursor {
 /**
  * An abstract class for the current database transaction while writing.
  */
-class Transaction {
+class CAFFE2_API Transaction {
  public:
   Transaction() { }
   virtual ~Transaction() { }
@@ -77,7 +77,7 @@ class Transaction {
 /**
  * An abstract class for accessing a database of key-value pairs.
  */
-class DB {
+class CAFFE2_API DB {
  public:
   DB(const string& /*source*/, Mode mode) : mode_(mode) {}
   virtual ~DB() { }
@@ -141,7 +141,7 @@ inline bool DBExists(const string& db_type, const string& full_db_name) {
 /**
  * A reader wrapper for DB that also allows us to serialize it.
  */
-class DBReader {
+class CAFFE2_API DBReader {
  public:
 
   friend class DBReaderSerializer;
@@ -288,7 +288,7 @@ class DBReader {
   AT_DISABLE_COPY_AND_ASSIGN(DBReader);
 };
 
-class DBReaderSerializer : public BlobSerializerBase {
+class CAFFE2_API DBReaderSerializer : public BlobSerializerBase {
  public:
   /**
    * Serializes a DBReader. Note that this blob has to contain DBReader,
@@ -300,7 +300,7 @@ class DBReaderSerializer : public BlobSerializerBase {
       BlobSerializerBase::SerializationAcceptor acceptor) override;
 };
 
-class DBReaderDeserializer : public BlobDeserializerBase {
+class CAFFE2_API DBReaderDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override;
 };

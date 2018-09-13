@@ -25,6 +25,9 @@ aten/src/ATen/cuda/CUDAConfig.h
 build/
 dist/
 docs/src/**/*
+docs/cpp/xml/
+docs/cpp/html/
+docs/cpp/api/
 test/.coverage
 test/cpp/api/mnist
 test/data/gpu_tensors.pt
@@ -61,6 +64,7 @@ torch/lib/pkgconfig
 torch/lib/protoc
 torch/lib/tmp_install
 torch/lib/torch_shm_manager
+torch/lib/python*
 torch/version.py
 
 # IPython notebook checkpoints

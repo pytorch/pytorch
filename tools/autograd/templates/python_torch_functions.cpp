@@ -50,7 +50,7 @@ static void check_out_type_matches(Tensor result,
   auto scalarType_arg = scalarType_is_none ? result.type().scalarType() : scalarType;
   auto layout_arg = layout_is_none ? *torch::getLayout(result.type().backend()) : layout;
   auto device_type_arg = device_is_none ? torch::getDeviceType(result.type()) : device.type();
-  const auto& type = torch::getType(scalarType_arg, layout_arg, device_type_arg);
+  const auto& type = torch::getVariableType(scalarType_arg, layout_arg, device_type_arg);
   if (result.type() != type) {
     AT_ERROR(
         "type corresponding to %s does not match type of out parameter (%s)",
@@ -59,31 +59,31 @@ static void check_out_type_matches(Tensor result,
   }
 }
 
-inline Tensor & dispatch_arange(Scalar end, Tensor result) {
+inline Tensor dispatch_arange(Scalar end, Tensor result) {
   AutoNoGIL no_gil;
   return at::arange_out(result, end);
 }
 
 inline Tensor dispatch_arange(Scalar end, const TensorOptions& options) {
-  maybe_initialize_cuda(options.type());
+  maybe_initialize_cuda(at::getMaybeVariableType(options));
   AutoNoGIL no_gil;
   return torch::arange(end, options);
 }
 
-inline Tensor & dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor result) {
+inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor result) {
   AutoNoGIL no_gil;
   return at::arange_out(result, start, end, step);
 }
 
 inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
-  maybe_initialize_cuda(options.type());
+  maybe_initialize_cuda(at::getMaybeVariableType(options));
   AutoNoGIL no_gil;
   return torch::arange(start, end, step, options);
 }
 
 static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
   for (Scalar& s : l) {
-    if (!(s.isIntegral() || (s.isBackedByTensor() && at::isIntegralType(s.toTensor().type().scalarType())))) {
+    if (!s.isIntegral()) {
       return false;
     }
   }
@@ -140,14 +140,14 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
-inline Tensor & dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
+inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
   AutoNoGIL no_gil;
   DeviceGuard device_guard(result);
   return at::range_out(result, start, end, step);
 }
 
 inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
-  maybe_initialize_cuda(options.type());
+  maybe_initialize_cuda(at::getMaybeVariableType(options));
   AutoNoGIL no_gil;
   DeviceGuard device_guard(options.device());
   return torch::range(start, end, step, options);

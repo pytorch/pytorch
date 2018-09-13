@@ -37,7 +37,6 @@ REGISTER_CPU_OPERATOR(
 REGISTER_CPU_OPERATOR(Copy, CopyOp<CPUContext, CPUContext, CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToShape, LengthsToShapeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(HasElements, HasElementsOp<CPUContext>);
-REGISTER_CPU_OPERATOR(IsEmpty, IsEmptyOp<CPUContext>);
 REGISTER_CPU_OPERATOR(GatherRanges, GatherRangesOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsGather, LengthsGatherOp<CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsToSegmentIds, LengthsToSegmentIdsOp<CPUContext>);
@@ -104,17 +103,17 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X: Sample softmax output for 5-class model
+// Create X: Sample softmax output for 5-class model
 X = np.array([2,2,2,2,2,2,2,2,2,2])
 print("X:\n",X)
 
-# Feed X into workspace
+// Feed X into workspace
 workspace.FeedBlob("X", X.astype(np.int32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```
@@ -509,14 +508,14 @@ op = core.CreateOperator(
     ["has_elements"],
 )
 
-# Use a not-empty tensor
+// Use a not-empty tensor
 workspace.FeedBlob("tensor", np.random.randn(2, 2).astype(np.float32))
 print("tensor:\n", workspace.FetchBlob("tensor"))
 
 workspace.RunOperatorOnce(op)
 print("has_elements: ", workspace.FetchBlob("has_elements"),"\n")
 
-# Use an empty tensor
+// Use an empty tensor
 workspace.FeedBlob("tensor", np.empty(0))
 print("tensor:\n", workspace.FetchBlob("tensor"))
 
@@ -545,72 +544,6 @@ has_elements:  False
 )DOC")
     .Input(0, "tensor", "Input data tensor to check for elements.")
     .Output(0, "has_elements", "Output scalar boolean tensor. True if input has size > 0.");
-
-OPERATOR_SCHEMA(IsEmpty)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .SetDoc(R"DOC(
-The *IsEmpty* op accepts a single input $tensor$, and produces a single boolean output $is\_empty$. The output is *True* if and only if $tensor$ has size == 0.
-
-Github Links:
-
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.cc
-- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/utility_ops.h
-
-
-<details>
-
-<summary> <b>Example</b> </summary>
-
-**Code**
-
-```
-
-workspace.ResetWorkspace()
-
-op = core.CreateOperator(
-    "IsEmpty",
-    ["tensor"],
-    ["is_empty"],
-)
-
-# Use a not-empty tensor
-workspace.FeedBlob("tensor", np.random.randn(2, 2).astype(np.float32))
-print("tensor:\n", workspace.FetchBlob("tensor"))
-
-workspace.RunOperatorOnce(op)
-print("is_empty: ", workspace.FetchBlob("is_empty"),"\n")
-
-# Use an empty tensor
-workspace.FeedBlob("tensor", np.empty(0))
-print("tensor:\n", workspace.FetchBlob("tensor"))
-
-workspace.RunOperatorOnce(op)
-print("is_empty: ", workspace.FetchBlob("is_empty"))
-
-```
-
-**Result**
-
-```
-
-tensor:
- [[ 0.26018378  0.6778789 ]
- [-1.3097627  -0.40083608]]
-is_empty:  False
-
-tensor:
- []
-is_empty:  True
-
-```
-
-</details>
-
-)DOC")
-    .ScalarType(::caffe2::TensorProto_DataType::TensorProto_DataType_BOOL)
-    .Input(0, "tensor", "Input data tensor to check if empty.")
-    .Output(0, "is_empty", "Output scalar boolean tensor. True if input has size == 0.");
 
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)

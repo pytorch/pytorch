@@ -36,7 +36,7 @@ def batch_neg_scalar(data):
 @torch.jit.script
 def batch_add(data1, mask1, dims1, data2, mask2, dims2, alpha_):
     alpha = float(alpha_)
-    data = torch.add(data1, data2, alpha)
+    data = torch.add(data1, data2, alpha=alpha)
     mask = mask1 * mask2
     dims = dims1 or dims2
     return data, mask, dims
@@ -45,14 +45,14 @@ def batch_add(data1, mask1, dims1, data2, mask2, dims2, alpha_):
 @torch.jit.script
 def batch_add_scalar(data, mask, dims, other, alpha_):
     alpha = float(alpha_)
-    data = torch.add(data, other.type_as(data), alpha)
+    data = torch.add(data, other.type_as(data), alpha=alpha)
     return data, mask, dims
 
 
 @torch.jit.script
 def batch_sub(data1, mask1, dims1, data2, mask2, dims2, alpha_):
     alpha = float(alpha_)
-    data = torch.sub(data1, data2, alpha)
+    data = torch.sub(data1, data2, alpha=alpha)
     mask = mask1 * mask2
     dims = dims1 or dims2
     return data, mask, dims

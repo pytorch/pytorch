@@ -4,7 +4,7 @@
 #include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/operators/utility_ops.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 

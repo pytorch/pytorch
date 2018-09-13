@@ -127,7 +127,7 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
 #if AT_MKLDNN_ENABLED()
-  return input.type().backend() == kCPU &&
+  return input.type().backend() == at::Backend::CPU &&
          input.type().scalarType() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // doesn't support dilation
          !transposed && // or transposed tensors
@@ -165,6 +165,13 @@ static void check_input_shape_forward(const at::Tensor& input,
   if (weight.size(0) < groups) {
     std::stringstream ss;
     ss << "Given groups=" << groups << ", expected weight to be at least "
+       << groups << " at dimension 0, but got weight of size " << weight.sizes()
+       << " instead";
+    throw std::runtime_error(ss.str());
+  }
+  if (weight.size(0) % groups != 0) {
+    std::stringstream ss;
+    ss << "Given groups=" << groups << ", expected weight to be divisible by "
        << groups << " at dimension 0, but got weight of size " << weight.sizes()
        << " instead";
     throw std::runtime_error(ss.str());

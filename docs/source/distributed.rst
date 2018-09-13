@@ -88,8 +88,8 @@ TCP initialization
 
 There are two ways to initialize using TCP, both requiring a network address
 reachable from all processes and a desired ``world_size``. The first way
-requires specifying an address that belongs to the rank 0 process. This first way of
-initialization requires that all processes have manually specified ranks.
+requires specifying an address that belongs to the rank 0 process. This
+initialization method requires that all processes have manually specified ranks.
 
 Alternatively, the address has to be a valid IP multicast address, in which case
 ranks can be assigned automatically. Multicast initialization also supports
@@ -101,10 +101,10 @@ jobs, as long as they use different group names.
     import torch.distributed as dist
 
     # Use address of one of the machines
-    dist.init_process_group(init_method='tcp://10.1.1.20:23456', rank=args.rank, world_size=4)
+    dist.init_process_group(backend, init_method='tcp://10.1.1.20:23456', rank=args.rank, world_size=4)
 
     # or a multicast address - rank will be assigned automatically if unspecified
-    dist.init_process_group(init_method='tcp://[ff15:1e18:5d4c:4cf0:d02d:b659:53ba:b0a7]:23456',
+    dist.init_process_group(backend, init_method='tcp://[ff15:1e18:5d4c:4cf0:d02d:b659:53ba:b0a7]:23456',
                             world_size=4)
 
 Shared file-system initialization
@@ -126,8 +126,8 @@ multiple jobs, as long as they use different group names.
     import torch.distributed as dist
 
     # Rank will be assigned automatically if unspecified
-    dist.init_process_group(init_method='file:///mnt/nfs/sharedfile', world_size=4,
-                            group_name=args.group)
+    dist.init_process_group(backend, init_method='file:///mnt/nfs/sharedfile',
+                            world_size=4, group_name=args.group)
 
 Environment variable initialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

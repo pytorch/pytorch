@@ -3,7 +3,10 @@ file(GLOB_RECURSE NOMNI_SRCS *.cc)
 file(GLOB_RECURSE NOMNI_TEST_SRCS *test.cc)
 exclude(NOMNI_SRCS "${NOMNI_SRCS}" "${NOMNI_TEST_SRCS}")
 
+# TODO(orionr): The nomnigraph source should likely just be included
+# in the Caffe2 source list, since this won't live separately
 add_library(nomnigraph STATIC "${NOMNI_SRCS}")
+target_compile_options(nomnigraph PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 add_dependencies(nomnigraph Caffe2_PROTO)
 
 target_include_directories(nomnigraph PUBLIC

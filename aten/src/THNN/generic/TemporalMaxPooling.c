@@ -94,8 +94,8 @@ void THNN_(TemporalMaxPooling_updateOutput)(
     THIndexTensor_(resize2d)(indices, noframe, framesize);
 
     /* get raw pointers */
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
     for(t = 0; t < noframe; t++)
@@ -139,8 +139,8 @@ void THNN_(TemporalMaxPooling_updateOutput)(
     THIndexTensor_(resize3d)(indices, nbframe, noframe, framesize);
 
     /* get raw pointers */
-    input_data = THTensor_(data)(input);
-    output_data = THTensor_(data)(output);
+    input_data = input->data<real>();
+    output_data = output->data<real>();
     indices_data = THIndexTensor_(data)(indices);
 
     for(i = 0; i < nbframe; i++)
@@ -181,7 +181,7 @@ void THNN_(TemporalMaxPooling_updateOutput)(
   }
 
   /* cleanup */
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 
 }
 
@@ -226,8 +226,8 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   framesize = gradOutput->size(dimF);
 
   /* get raw pointers */
-  gradInput_data = THTensor_(data)(gradInput);
-  gradOutput_data = THTensor_(data)(gradOutput);
+  gradInput_data = gradInput->data<real>();
+  gradOutput_data = gradOutput->data<real>();
   indices_data = THIndexTensor_(data)(indices);
 
   if (input->dim() == 2)
@@ -277,7 +277,7 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   }
 
   /* cleanup */
-  THTensor_(free)(gradOutput);
+  c10::raw::intrusive_ptr::decref(gradOutput);
 }
 
 #endif

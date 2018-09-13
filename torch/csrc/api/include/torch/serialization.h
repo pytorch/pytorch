@@ -211,7 +211,7 @@ void save(Archive& archive, const torch::Tensor& tensor) {
   for (auto s : tensor.sizes()) {
     sizes.push_back(s);
   }
-  auto contig = tensor.toBackend(torch::kCPU).contiguous();
+  auto contig = tensor.cpu().contiguous();
   int32_t backend = ::torch::detail::backendId(tensor.type().backend());
 
   archive(CEREAL_NVP(backend), CEREAL_NVP(sizes));
@@ -246,7 +246,7 @@ void load(Archive& archive, torch::Tensor& tensor) {
 
   at::Backend backend = ::torch::detail::backendFromId(backendId);
   if (!tensor.defined() || tensor.dtype() != type) {
-    tensor = torch::empty({}, torch::getType(backend, type));
+    tensor = torch::empty({}, at::TensorOptions(backend).dtype(type));
   }
   const auto required_grad = tensor.requires_grad();
   tensor.set_requires_grad(false);

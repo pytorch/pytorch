@@ -33,15 +33,15 @@ CUDA_INCLUDES = """\
 
 COPY = CodeTemplate("""\
 ${THTensor}_copy${cuda}${src_scalar_name}(${state,}\
-static_cast<TensorImpl*>(dst.pImpl), \
-static_cast<TensorImpl*>(src.pImpl));
+dst.unsafeGetTensorImpl(), \
+src.unsafeGetTensorImpl());
 """)
 
 COPY_ASYNC_CPU = CodeTemplate("""\
 if (non_blocking) {
     ${THTensor}_copyAsyncCPU(${state,}\
-static_cast<TensorImpl*>(dst.pImpl), \
-static_cast<TensorImpl*>(src.pImpl));
+dst.unsafeGetTensorImpl(), \
+src.unsafeGetTensorImpl());
     break;
 }
 """)
@@ -49,8 +49,8 @@ static_cast<TensorImpl*>(src.pImpl));
 COPY_ASYNC_CUDA = CodeTemplate("""\
 if (non_blocking) {
     ${THTensor}_copyAsyncCuda(${state,}\
-static_cast<TensorImpl*>(dst.pImpl), \
-static_cast<TensorImpl*>(src.pImpl));
+dst.unsafeGetTensorImpl(), \
+src.unsafeGetTensorImpl());
     break;
 }
 """)
@@ -70,7 +70,7 @@ Tensor & ${Type}::s_copy_(Tensor & dst, const Tensor & src, bool non_blocking) c
     default:
       ${function_fallthrough}
   }
-  dst.pImpl->maybe_zero_dim(src.pImpl->dim() == 0);
+  dst.unsafeGetTensorImpl()->maybe_zero_dim(src.dim() == 0);
   return dst;
 }
 """)
@@ -91,7 +91,7 @@ Tensor & ${Type}::_s_copy_from(const Tensor & src, Tensor & dst, bool non_blocki
       AT_ERROR("copy does not support ", toString(), " to ", dst.type().toString(), " copy.");
       break;
   }
-  dst.pImpl->maybe_zero_dim(src.pImpl->dim() == 0);
+  dst.unsafeGetTensorImpl()->maybe_zero_dim(src.dim() == 0);
   return dst; // NB! dst
 }
 """)
@@ -160,7 +160,7 @@ def create_one_copy(dst_type, all_types):
     checked_cast_dst = ''
     if dst_type['Density'] == 'Dense':
         checked_cast_dst = \
-            'checked_cast_tensor<TensorImpl>(dst.pImpl, "dst", 0, false, Backend::{}, ScalarType::{});' \
+            'checked_tensor_unwrap(dst, "dst", 0, false, Backend::{}, ScalarType::{});' \
             .format(dst_type['Backend'],
                     dst_type['ScalarName'])
 
@@ -212,7 +212,7 @@ def create_one_copy_from(src_type, all_types):
     checked_cast_src = ''
     if src_type['Density'] != 'Sparse':
         checked_cast_src = \
-            'checked_cast_tensor<TensorImpl>(src.pImpl, "src", 0, false, Backend::{}, ScalarType::{});' \
+            'checked_tensor_unwrap(src, "src", 0, false, Backend::{}, ScalarType::{});' \
             .format(src_type['Backend'], src_type['ScalarName'])
 
     return FUNCTION_FROM.substitute(src_type, copy_body=copy_body, checked_cast_src=checked_cast_src)

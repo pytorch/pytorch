@@ -55,7 +55,10 @@ CAFFE2_DEFINE_bool(
 
 namespace caffe2 {
 
-thread_local std::vector<int> AsyncNetBase::stream_counters_;
+std::vector<int>& AsyncNetBase::getStreamCounters() {
+  static thread_local std::vector<int> stream_counters_;
+  return stream_counters_;
+}
 
 AsyncNetBase::AsyncNetBase(
     const std::shared_ptr<const NetDef>& net_def,
@@ -142,11 +145,16 @@ TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
       ONLY_FOR_TEST,
   };
   if (cpu_types.find(device_option.device_type()) != cpu_types.end()) {
-    auto numa_node_id = device_option.numa_node_id();
-    CAFFE_ENFORCE(
-        numa_node_id >= -1 &&
-            numa_node_id < FLAGS_caffe2_net_async_max_numa_nodes,
-        "Invalid NUMA node id: " + caffe2::to_string(numa_node_id));
+    auto numa_node_id = -1;
+    if (device_option.has_numa_node_id()) {
+      numa_node_id = device_option.numa_node_id();
+      CAFFE_ENFORCE_GE(numa_node_id, 0, "Invalid NUMA node id: ", numa_node_id);
+    }
+    CAFFE_ENFORCE_LT(
+        numa_node_id,
+        FLAGS_caffe2_net_async_max_numa_nodes,
+        "Invalid NUMA node id: ",
+        numa_node_id);
     return pool_getter(cpu_pools_, CPU, numa_node_id, num_workers_);
   } else if (device_option.device_type() == CUDA) {
     auto gpu_id = device_option.cuda_gpu_id();
@@ -167,12 +175,12 @@ int AsyncNetBase::stream(int task_id) {
   if (device_option.device_type() == CUDA) {
     int gpu_id = device_option.cuda_gpu_id();
     CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
-    if ((unsigned)gpu_id >= stream_counters_.size()) {
-      stream_counters_.resize(gpu_id + 1, 0);
+    if ((unsigned)gpu_id >= getStreamCounters().size()) {
+      getStreamCounters().resize(gpu_id + 1, 0);
     }
     do {
-      stream_id = stream_counters_[gpu_id]++;
-      stream_counters_[gpu_id] %= streams_per_gpu_;
+      stream_id = getStreamCounters().at(gpu_id)++;
+      getStreamCounters().at(gpu_id) %= streams_per_gpu_;
     } while (check_stream_status_ && !isStreamFree(task_id, stream_id));
   }
   return stream_id;
@@ -412,8 +420,7 @@ CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
 /* static */
 std::shared_ptr<TaskThreadPool>
 GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new) {
-  // Note: numa_node_id = -1 (DeviceOption's default value) corresponds to
-  // no NUMA used
+  // Note: numa_node_id = -1 corresponds to no NUMA used
   static std::
       unordered_map<int, std::unordered_map<int, std::weak_ptr<TaskThreadPool>>>
           pools;
