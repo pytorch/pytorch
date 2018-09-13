@@ -6577,8 +6577,10 @@ a")
 
         self.assertEqual(foo(input), input)
 
-
-class TestEndToEndHybridFrontendModels(JitTestCase):
+# XXX: the 'Z' in the test name makes this test run last
+# This is necessary because these tests have high peak memory usage that
+# cause unrelated CPU fuser test failures. This is being tracked in #11360.
+class TestZEndToEndHybridFrontendModels(JitTestCase):
 
     def test_dcgan_models(self):
         class DCGANGenerator(nn.Module):
