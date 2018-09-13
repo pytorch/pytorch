@@ -5115,10 +5115,11 @@ a")
                 self.param1 = torch.nn.Parameter(torch.rand(5, 5))
                 self.param2 = torch.nn.Parameter(self.param1[3])
                 self.param3 = torch.nn.Parameter(torch.rand(5, 5))
+                self.param4 = torch.nn.Parameter(torch.rand(11, 5)[1:6])
 
             @torch.jit.script_method
             def foo(self):
-                return self.param1 + self.param2 + self.param3
+                return self.param1 + self.param2 + self.param3 + self.param4
 
         m_orig = M()
         m_import = self.getExportImportCopy(m_orig)
