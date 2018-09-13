@@ -9,6 +9,10 @@
 
 #include "ATen/ScalarType.h"
 
+#if defined(__HIP_DEVICE_COMPILE__)
+#include <hip/hip_fp16.h>
+#endif
+
 namespace at {
 
 template <>
