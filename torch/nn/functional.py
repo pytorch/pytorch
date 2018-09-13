@@ -1958,8 +1958,6 @@ pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
 Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
 tensor of shape :math:`(C, H \times r, W \times r)`.
 
-This is the inverse operation of :meth:`~torch.nn.functional.pixel_unshuffle`.
-
 See :class:`~torch.nn.PixelShuffle` for details.
 
 Args:
@@ -1972,27 +1970,6 @@ Examples::
     >>> output = torch.nn.functional.pixel_shuffle(input, 3)
     >>> print(output.size())
     torch.Size([1, 1, 12, 12])
-""")
-
-
-pixel_unshuffle = _add_docstr(torch.pixel_unshuffle, r"""
-Rearranges elements in a tensor of shape :math:`(C, H \times r, W \times r)` to a
-tensor of shape :math:`(*, C \times r^2, H, W)`.
-
-This is the inverse operation of :meth:`~torch.nn.functional.pixel_shuffle`.
-
-See :class:`~torch.nn.PixelUnshuffle` for details.
-
-Args:
-    input (Tensor): the input tensor
-    upscale_factor (int): factor to reduce spatial resolution by
-
-Examples::
-
-    >>> input = torch.randn(1, 1, 12, 12)
-    >>> output = torch.nn.functional.pixel_unshuffle(input, 3)
-    >>> print(output.size())
-    torch.Size([1, 9, 4, 4])
 """)
 
 

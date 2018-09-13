@@ -31,30 +31,4 @@ Tensor pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
                        .reshape({b, oc, oh, ow});
 }
 
-Tensor pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
-  AT_ASSERTM(self.dim() == 4,
-            "pixel_unshuffle expects 4D input, but got input with sizes ",self.sizes());
-  int64_t b = self.size(0);
-  int64_t c = self.size(1);
-  int64_t h = self.size(2);
-  int64_t w = self.size(3);
-  AT_ASSERTM(h % downscale_factor == 0,
-             "pixel_shuffle expects input height to be divisible by "
-             "downscale_factor, but got input with sizes ", self.sizes(),
-             ", downscale_factor=", downscale_factor,
-             ", and self.size(2)=", h, " is not divisible by ", downscale_factor);
-  AT_ASSERTM(w % downscale_factor == 0,
-             "pixel_shuffle expects input width to be divisible by "
-             "downscale_factor, but got input with sizes ", self.sizes(),
-             ", downscale_factor=", downscale_factor,
-             ", and self.size(3)=", w, " is not divisible by ", downscale_factor);
-  int64_t oc = c * downscale_factor * downscale_factor;
-  int64_t oh = h / downscale_factor;
-  int64_t ow = w / downscale_factor;
-
-  auto input_reshaped = self.reshape({b, c, oh, downscale_factor, ow, downscale_factor});
-  return input_reshaped.permute({0 /* b */, 1 /* c */, 3 /* 1st upscale_factor */, 5 /* 2nd upscale_factor */, 2 /* oh */, 4 /* ow */})
-                       .reshape({b, oc, oh, ow});
-}
-
 }} // namespace at::native
