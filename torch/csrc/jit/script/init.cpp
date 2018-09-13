@@ -24,6 +24,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <pybind11/functional.h>
+
 
 namespace torch {
 namespace jit {
@@ -69,18 +71,15 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // introspection.
     size_t actual_n_args = n_args;
     if (!signature.is_none()) {
-      std::vector<TypePtr> arg_types, ret_types;
-      std::tie(arg_types, ret_types) = py::cast<std::pair<std::vector<TypePtr>, std::vector<TypePtr>>>(signature);
+      std::vector<TypePtr> arg_types;
+      TypePtr ret_type;
+      std::tie(arg_types, ret_type) = py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
       args.reserve(arg_types.size());
       size_t idx = 0; // Fake argument names by putting in the index
       for (auto &arg_type : arg_types) {
         args.push_back(Argument(std::to_string(idx++), std::move(arg_type), {}, {}, false));
       }
-      rets.reserve(ret_types.size());
-      idx = 0;
-      for (auto &ret_type : ret_types) {
-        rets.push_back(Argument(std::to_string(idx++), std::move(ret_type), {}, {}, false));
-      }
+      rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
     } else {
       // Create a default signature using what information we have
 
@@ -99,10 +98,12 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       for (size_t i=0; i < actual_n_args; ++i) {
         args.push_back(Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
       }
-      rets.reserve(n_binders);
-      for (size_t i = 0; i < n_binders; ++i) {
-        rets.push_back(Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
+      TypePtr ret_type = DynamicType::get();
+      if(n_binders != 1) {
+        std::vector<TypePtr> tuple_values(n_binders, ret_type);
+        ret_type = TupleType::create(std::move(tuple_values));
       }
+      rets.push_back(Argument("0", ret_type, {}, {}, false));
     }
     return FunctionSchema("", std::move(args), std::move(rets));
   }
@@ -120,27 +121,17 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
     // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
-    std::string cconv(inputs.size(), 't');
+    std::string cconv(inputs.size(), 'd');
     Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
       THPObjectPtr(func.release().ptr()), cconv, {}));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
     for(auto &i : *all_inputs)
       new_node->addInput(i);
 
-    // This is really dumb, but relaxing the constraints on return types would
-    // require us to change the implementation of PythonOps in the interpreter.
-    // Note that this effectively makes the return type of Tuple[Tensor] and Tensor
-    // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
-    // to do it.
-    for (auto & ret_arg : schema.returns) {
-      if (!ret_arg.type->isSubtypeOf(DynamicType::get())) {
-        throw ErrorReport(loc) << "Python functions can currently only return Tensors";
-      }
-    }
-
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < schema.returns.size(); ++i)
-      outputs.push_back(new_node->addOutput());
+    for(auto & ret_arg : schema.returns) {
+      outputs.push_back(new_node->addOutput()->setType(ret_arg.type));
+    }
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
 
@@ -381,10 +372,6 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
       .def("save", &Module::save)
-      .def("_load", [](const std::shared_ptr<script::Module> module,
-                       const std::string& filename) {
-        ImportIRModule(module, filename);
-      })
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
@@ -540,7 +527,7 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
-
+  m.def("import_ir_module", import_ir_module);
 }
 
 } // namespace script

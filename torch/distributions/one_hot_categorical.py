@@ -50,6 +50,10 @@ class OneHotCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
+    def _param(self):
+        return self._categorical._param
+
+    @property
     def probs(self):
         return self._categorical.probs
 
@@ -89,8 +93,7 @@ class OneHotCategorical(Distribution):
 
     def enumerate_support(self, expand=True):
         n = self.event_shape[0]
-        values = self._new((n, n))
-        torch.eye(n, out=values)
+        values = torch.eye(n, dtype=self._param.dtype, device=self._param.device)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
         if expand:
             values = values.expand((n,) + self.batch_shape + (n,))
