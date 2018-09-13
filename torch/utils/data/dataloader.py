@@ -365,7 +365,9 @@ class _DataLoaderIter(object):
         self._put_indices()
         if isinstance(batch, ExceptionWrapper):
             raise batch.exc_type(batch.exc_msg)
-        return batch
+        new_batch = self.collate_fn([batch])
+        del batch
+        return new_batch
 
     def __getstate__(self):
         # TODO: add limited pickling support for sharing an iterator
