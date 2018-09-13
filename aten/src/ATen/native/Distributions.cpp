@@ -118,7 +118,10 @@ Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
 }
 
 Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
-  return result.resize_as_(self).bernoulli_(self, gen);
+  // result.resize_as_(self) requires self to have same dtype as result, so we
+  // use resize_ instead.
+  // TODO: Fix resize_as_. See pytorch/pytorch#11665.
+  return result.resize_(self.sizes()).bernoulli_(self, gen);
 }
 
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {

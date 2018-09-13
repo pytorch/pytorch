@@ -1198,6 +1198,9 @@ class TestCuda(TestCase):
         x = torch.tensor([0, 1], dtype=torch.float32, device='cuda')
         self.assertEqual(x.bernoulli().tolist(), [0, 1])
 
+        TestTorch._test_bernoulli(self, torch.double, 'cuda')
+        TestTorch._test_bernoulli(self, torch.half, 'cuda')
+
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()
         y = torch.randn(2, 1, 1).cuda()

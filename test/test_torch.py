@@ -7378,22 +7378,40 @@ class TestTorch(TestCase):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
-    def test_bernoulli(self):
-        t = torch.ByteTensor(10, 10)
+    @staticmethod
+    def _test_bernoulli(self, p_dtype, device):
+        t = torch.empty(10, 10, dtype=torch.uint8, device=device)
 
         def isBinary(t):
-            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum() == 0
+            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
 
         p = 0.5
         t.bernoulli_(p)
         self.assertTrue(isBinary(t))
 
-        p = torch.rand(10, 10)
+        p = torch.rand(10, 10, dtype=p_dtype, device=device)
         t.bernoulli_(p)
         self.assertTrue(isBinary(t))
 
-        q = torch.rand(5, 5)
-        self.assertTrue(isBinary(q.bernoulli()))
+        p = torch.rand(5, 5, dtype=p_dtype, device=device)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, 5, dtype=p_dtype, device=device)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+        p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+        torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
+        self.assertTrue(isBinary(t))
+
+    def test_bernoulli(self):
+        self._test_bernoulli(self, torch.double, 'cpu')
 
     def test_normal(self):
         q = torch.Tensor(100, 100)
