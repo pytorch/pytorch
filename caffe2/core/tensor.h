@@ -188,7 +188,8 @@ class CAFFE2_API Tensor final {
   // swap method swaps the CONTENTS of the tensors, while std::swap
   // swaps the POINTERS.
   void swap(const Tensor& other) const noexcept {
-    impl_.get()->swap(*other.impl_.get());
+    // NB: use get() to get a non-const pointer!
+    std::swap(*impl_.get(), *other.impl_.get());
   }
 
   void ShareData(const Tensor& src) const {
