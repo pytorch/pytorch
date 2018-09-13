@@ -117,9 +117,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda8-cudnn6-py3* ]]; then
   pushd docs
   # TODO: Don't run this here
-  # TODO: Reenable doc build
-  #pip install -r requirements.txt || true
-  #LC_ALL=C make html
+  pip install -r requirements.txt || true
+  LC_ALL=C make html
   popd
 fi
 
