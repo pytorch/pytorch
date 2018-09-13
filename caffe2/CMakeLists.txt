@@ -293,7 +293,7 @@ if (MSVC AND NOT BUILD_SHARED_LIBS)
 endif()
 if (MSVC AND BUILD_SHARED_LIBS)
   # ONNX is linked statically and needs to be exported from this library
-  # to be used externally.
+  # to be used externally. Make sure that references match the export.
   target_compile_options(caffe2 PRIVATE "-DONNX_BUILD_MAIN_LIB")
 endif()
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
