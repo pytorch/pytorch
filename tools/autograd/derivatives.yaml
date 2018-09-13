@@ -762,6 +762,12 @@
   self: where(condition, grad, zeros_like(grad))
   other: where(condition, zeros_like(grad), grad)
 
+# weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
+# to be running backward with create_graph=True, fall back to a backward function that uses 
+# differentiable ops.
+- name: _weight_norm_cuda_interface(Tensor v, Tensor g, int64_t dim) 
+  v, g: "GradMode::is_enabled() ? _weight_norm_differentiable_backward(grad.contiguous(), v, g, result1, dim) : _weight_norm_cuda_interface_backward(grad.contiguous(), v, g, result1, dim)"
+
 - name: zero_(Tensor self)
   self: zeros_like(grad)
 
