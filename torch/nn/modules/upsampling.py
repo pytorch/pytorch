@@ -51,7 +51,7 @@ class Upsample(Module):
         See below for concrete examples on how this affects the outputs.
 
     .. note::
-        If you want down sampling, you should use :func:`~nn.functional.interpolate`.
+        If you want downsampling/general resizing, you should use :func:`~nn.functional.interpolate`.
 
     Examples::
 
