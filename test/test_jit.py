@@ -7084,7 +7084,9 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_mnist_training_leaks_no_memory_cuda(self):
         net = MnistNet().cuda()
-        traced_net = torch.jit.trace(net, [torch.randn(5, 1, 28, 28, device='cuda')])
+        # MnistNet uses dropout, don't check its trace
+        traced_net = torch.jit.trace(net, [torch.randn(5, 1, 28, 28, device='cuda')],
+                                     check_trace=False)
 
         def train(iters):
             for _ in range(iters):
