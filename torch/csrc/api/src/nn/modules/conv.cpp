@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -61,7 +62,7 @@ void ConvImpl<D, Derived>::reset() {
       options.input_channels_,
       std::multiplies<int64_t>{});
   const auto stdv = 1.0 / std::sqrt(number_of_features);
-  NoGradGuard no_grad;;
+  NoGradGuard no_grad;
   for (auto& p : this->parameters()) {
     p->uniform_(-stdv, stdv);
   }
