@@ -53,6 +53,9 @@ template<typename T>
 struct cloneType<false, T> {
   std::shared_ptr<T> operator()(std::shared_ptr<const T> ptr) const {
     auto result = std::make_shared<typename std::remove_const<T>::type>(*ptr);
+    // XXX: the line above will correctly slice the struct, and make its runtype
+    // type exactly equal to T. However, kind_ is a field of Type, so it will simply
+    // be copied, and we need to fix it in here to match the dynamic type.
     result->kind_ = T::Kind;
     return result;
   }
@@ -313,10 +316,10 @@ private:
     : TensorType(tensor, TypeKind::CompleteTensorType)
     , sizes_(tensor.sizes().vec())
     , strides_(tensor.strides().vec()) {}
-  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes)
-    : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes)) {}
-  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides)
-    : TensorType(scalar_type, device, sizes.size(), true, TypeKind::CompleteTensorType)
+  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes, bool requires_grad=true)
+    : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes), requires_grad) {}
+  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides, bool requires_grad=true)
+    : TensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
     , sizes_(sizes.vec())
     , strides_(strides.vec()) {}
 
