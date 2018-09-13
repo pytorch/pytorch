@@ -397,9 +397,10 @@ struct Parser {
     }
     return list;
   }
-  TreeRef parseIf() {
+  TreeRef parseIf(bool expect_if=true) {
     auto r = L.cur().range;
-    L.expect(TK_IF);
+    if (expect_if)
+      L.expect(TK_IF);
     auto cond = parseExp();
     L.expect(':');
     auto true_branch = parseStatements();
@@ -407,6 +408,8 @@ struct Parser {
     if (L.nextIf(TK_ELSE)) {
       L.expect(':');
       false_branch = parseStatements();
+    } else if (L.nextIf(TK_ELIF)) {
+      false_branch = makeList(L.cur().range, {parseIf(false)});
     }
     return If::create(r, Expr(cond), List<Stmt>(true_branch), List<Stmt>(false_branch));
   }

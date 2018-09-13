@@ -6889,6 +6889,24 @@ a")
             DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
         self.assertExpected(exported)
 
+    def test_string_frontend_elif(self):
+        code = '''
+            def elif_test(niter : int):
+                rv = 0
+                for i in range(niter):
+                    if i % 3 == 0 and i % 5 == 0:
+                        rv += 35
+                    elif i % 3 == 0:
+                        rv += 3
+                    elif i % 5 == 0:
+                        rv += 5
+                    else:
+                        rv += i
+                return rv
+        '''
+
+        self.checkScript(code, (101,), name='elif_test', outputs=3028)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
