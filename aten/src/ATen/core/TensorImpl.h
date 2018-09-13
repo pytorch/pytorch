@@ -21,9 +21,9 @@ struct Tensor;
 
 namespace at {
 struct TensorImplOptions {
-  bool is_variable_;
-  bool has_storage_;
-  bool has_strides_;
+  const bool is_variable_;
+  const bool has_storage_;
+  const bool has_strides_;
   TensorImplOptions(bool is_variable)
                     : is_variable_(is_variable),
                       has_storage_(true),
