@@ -13,7 +13,7 @@
 
 namespace at {namespace native {
 
-inline THGenerator* get_generator(at::Generator* gen) {
+static inline THGenerator* get_generator(at::Generator* gen) {
   auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
   auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
   return gen_->generator;
