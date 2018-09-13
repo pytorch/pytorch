@@ -83,9 +83,9 @@ thread_local size_t deleteFunctionRecursionDepth = 0;
  *   times have gotten the following numbers: ~8300, 3669
  */
 #ifdef _WIN32
-constexpr size_t kDeleteFunctionMaxRecursionDepth = 3000;
+size_t deleteFunctionMaxRecursionDepth = 3000;
 #else
-constexpr size_t kDeleteFunctionMaxRecursionDepth = 10000;
+size_t deleteFunctionMaxRecursionDepth = 10000;
 #endif
 
 struct RecursionDepthCounter {
@@ -111,7 +111,7 @@ struct RecursionDepthCounter {
 void deleteFunction(Function* function) {
   RecursionDepthCounter recursion_depth;
 
-  if (recursion_depth.value() > kDeleteFunctionMaxRecursionDepth) {
+  if (recursion_depth.value() > deleteFunctionMaxRecursionDepth) {
     deleteFunctionQueue.push_back(function);
     return;
   }
@@ -121,7 +121,7 @@ void deleteFunction(Function* function) {
   if (deleteFunctionQueue.empty()) {
     return;
   }
-  if (recursion_depth.value() != kDeleteFunctionMaxRecursionDepth) {
+  if (recursion_depth.value() != deleteFunctionMaxRecursionDepth) {
     AT_ERROR("Only one deleter per thread should be able to process "
              "the delete queue. Please open an issue.");
   }

@@ -119,7 +119,7 @@ class IDEEPContext final : public BaseContext {
     return true;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return IDEEP;
   }
 
@@ -189,6 +189,11 @@ class IDEEPStaticContext : public BaseStaticContext {
 
   DeviceType GetDeviceType() override {
     return IDEEP;
+  }
+
+  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
+      override {
+    device->set_device_type(TypeToProto(GetDeviceType()));
   }
 };
 

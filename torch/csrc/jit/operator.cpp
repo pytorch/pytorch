@@ -54,6 +54,7 @@ struct SchemaParser {
       {"Layout", IntType::get() },
       {"Device", ListType::ofInts() },
       {"Scalar", NumberType::get() },
+      {"str", StringType::get() },
       {"float", FloatType::get() },
       {"int", IntType::get() },
       {"bool", IntType::get() }, // TODO: add separate bool type

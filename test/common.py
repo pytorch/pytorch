@@ -128,14 +128,6 @@ def skipCUDAMemoryLeakCheckIf(condition):
     return dec
 
 
-def get_cuda_memory_usage():
-    # we don't need CUDA synchronize because the statistics are not tracked at
-    # actual freeing, but at when marking the block as free.
-    num_devices = torch.cuda.device_count()
-    gc.collect()
-    return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-
-
 def suppress_warnings(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -215,6 +207,38 @@ def is_iterable(obj):
         return False
 
 
+class CudaMemoryLeakCheck():
+    def __init__(self, testcase, name=None):
+        self.name = testcase.id() if name is None else name
+        self.testcase = testcase
+
+        # initialize context & RNG to prevent false positive detections
+        # when the test is the first to initialize those
+        from common_cuda import initialize_cuda_context_rng
+        initialize_cuda_context_rng()
+
+    @staticmethod
+    def get_cuda_memory_usage():
+        # we don't need CUDA synchronize because the statistics are not tracked at
+        # actual freeing, but at when marking the block as free.
+        num_devices = torch.cuda.device_count()
+        gc.collect()
+        return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+    def __enter__(self):
+        self.befores = self.get_cuda_memory_usage()
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # Don't check for leaks if an exception was thrown
+        if exec_type is not None:
+            return
+        afters = self.get_cuda_memory_usage()
+        for i, (before, after) in enumerate(zip(self.befores, afters)):
+            self.testcase.assertEqual(
+                before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                    self.name, after - before, i))
+
+
 class TestCase(unittest.TestCase):
     precision = 1e-5
     maxDiff = None
@@ -232,11 +256,11 @@ class TestCase(unittest.TestCase):
             from common_cuda import TEST_CUDA
             fullname = self.id().lower()  # class_name.method_name
             if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
-                # initialize context & RNG to prevent false positive detections
-                # when the test is the first to initialize those
-                from common_cuda import initialize_cuda_context_rng
-                initialize_cuda_context_rng()
                 setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
+
+    def assertLeaksNoCudaTensors(self, name=None):
+        name = self.id() if name is None else name
+        return CudaMemoryLeakCheck(self, name)
 
     def wrap_with_cuda_memory_check(self, method):
         # Assumes that `method` is the tested function in `self`.
@@ -247,12 +271,8 @@ class TestCase(unittest.TestCase):
         #       call in try-finally and always do the check.
         @wraps(method)
         def wrapper(self, *args, **kwargs):
-            befores = get_cuda_memory_usage()
-            method(*args, **kwargs)
-            afters = get_cuda_memory_usage()
-            for i, (before, after) in enumerate(zip(befores, afters)):
-                self.assertEqual(before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
-                                 self.id(), after - before, i))
+            with self.assertLeaksNoCudaTensors():
+                method(*args, **kwargs)
         return types.MethodType(wrapper, self)
 
     def setUp(self):

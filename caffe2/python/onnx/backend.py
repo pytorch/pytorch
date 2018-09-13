@@ -25,6 +25,7 @@ import onnx.backend
 
 import caffe2
 from caffe2.python import core, workspace, rnn_cell, gru_cell
+from caffe2.python.compatibility import container_abcs
 from caffe2.python.model_helper import ModelHelper
 from caffe2.proto import caffe2_pb2
 import caffe2.python.utils
@@ -140,7 +141,7 @@ class Caffe2Backend(Backend):
     # If you increase this, make SURE you cross-reference all BC-breaking
     # changes from one version to the next, and any that you did not
     # implement, mark as broken in _broken_operators
-    _known_opset_version = 7
+    _known_opset_version = 9
 
     # This dictionary will record operators which are KNOWN to be
     # broken, so we give a good error message rather than do something
@@ -518,7 +519,7 @@ class Caffe2Backend(Backend):
                 pred_mh.net.VariableLengthSequencePadding(
                     [concatted_output, sequence_lens], [concatted_output])
             reshaped_output, _ = pred_mh.net.Reshape(concatted_output, [cls.dummy_name(), cls.dummy_name()], shape=[0,0,-1,2])
-            pred_mh.net.Transpose(reshaped_output, n.outputs[0], axes=[0,3,1,2])
+            pred_mh.net.Transpose(reshaped_output, n.outputs[0], axes=[0,2,1,3])
             for i in range(1, len(n.outputs)):
                 pred_mh.net.Concat([outputs_f[i], outputs_b[i]],
                                    [n.outputs[i], cls.dummy_name()], axis=0)
@@ -778,7 +779,7 @@ class Caffe2Backend(Backend):
         ops = translator(init_model, pred_model, OnnxNode(node_def), opset_version)
         if isinstance(ops, Caffe2Ops):
             return ops
-        if not isinstance(ops, collections.Iterable):
+        if not isinstance(ops, container_abcs.Iterable):
             ops = [ops]
         return Caffe2Ops(ops, [], [])
 

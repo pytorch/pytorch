@@ -2,7 +2,7 @@
 
 #include <ATen/Allocator.h>
 #include <ATen/core/Generator.h>
-#include <ATen/Registry.h>
+#include <ATen/core/Registry.h>
 #include <ATen/core/Error.h>
 
 #include <cstddef>

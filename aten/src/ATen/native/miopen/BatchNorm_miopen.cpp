@@ -14,7 +14,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     const Tensor& input, const Tensor& weight,
     const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
     bool training, double exponential_average_factor, double epsilon) {
-  throw std::runtime_error("miopen_batch_norm: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_batch_norm: ATen not compiled with MIOpen support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
@@ -22,7 +22,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const Tensor& running_mean, const Tensor& running_var,
     const Tensor& save_mean, const Tensor& save_var,
     double epsilon) {
-  throw std::runtime_error("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
+  AT_ERROR("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
 }
 
 }}  // namespace at::native

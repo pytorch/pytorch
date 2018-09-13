@@ -291,7 +291,7 @@ def add_dim3(kernel_string, cuda_kernel):
         elif c == ")":
             closure -= 1
         elif (c == "," or ind == len(kernel_string) - 1) and closure == 0:
-            arg_locs[count]['end'] = ind
+            arg_locs[count]['end'] = ind + (c != ",")
             count += 1
             if count < 2:
                 arg_locs[count]['start'] = ind + 1
@@ -718,7 +718,7 @@ def get_hip_file_path(filepath, hipify_caffe2):
 def is_caffe2_gpu_file(filepath):
     filename = os.path.basename(filepath)
     _, ext = os.path.splitext(filename)
-    return 'gpu' in filename or ext in ['.cu', '.cuh']
+    return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
 def preprocessor(filepath, stats, hipify_caffe2):

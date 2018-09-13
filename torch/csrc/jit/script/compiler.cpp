@@ -12,7 +12,6 @@
 
 #include "ATen/core/optional.h"
 
-
 #include <climits>
 #include <set>
 
@@ -722,6 +721,24 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
       emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, true));
 }
 
+inline bool isSupportedListElementType(TypePtr type) {
+  return type->isSubtypeOf(DynamicType::get()) ||
+      type->isSubtypeOf(NumberType::get());
+}
+
+// guard for List types we do not currently have operations for
+inline void ensureLegalType(const SourceRange& range, TypePtr ptr) {
+  if(TupleTypePtr tt = ptr->cast<TupleType>()) {
+    for(auto elem : tt->elements()) {
+      ensureLegalType(range, elem);
+    }
+  } else if(ListTypePtr lt = ptr->cast<ListType>()) {
+    if(!isSupportedListElementType(lt->getElementType())) {
+        throw ErrorReport(range) << "Lists can only contain numbers or Tensors, but found " << lt->getElementType()->str();
+    }
+  }
+}
+
 struct to_ir {
   to_ir(
       Def def,
@@ -772,6 +789,7 @@ struct to_ir {
       // Record the type for the schema and set the Type on the Value*
       arguments.push_back(schema.arguments.at(arg_annotation_idx++));
       new_input->setType(arguments.back().type);
+      ensureLegalType((*it).ident().range(), arguments.back().type);
     }
     // body
     auto stmts = def.statements();
@@ -970,11 +988,15 @@ private:
 
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond);
-    if(v->type()->isSubtypeOf(DynamicType::get())) {
-      v = typeCast(cond.range(), v, IntType::get());
-    }
-    if(!v->type()->isSubtypeOf(IntType::get())) {
-      throw ErrorReport(cond) << "expected a tensor or integer expression for condition but found " << v->type()->str();
+    if (!v->type()->isSubtypeOf(IntType::get())) {
+      ErrorReport error(cond);
+      error << "expected an integer expression for condition but found "
+            << v->type()->str();
+      if (v->type()->isSubtypeOf(DynamicType::get())) {
+        error << ", to use a tensor in a boolean"
+              << " expression, explicitly cast it with `bool()`";
+      }
+      throw error;
     }
     return v;
   }
@@ -1339,6 +1361,8 @@ private:
         return prim::Starred;
       case '/':
         return aten::div;
+      case '%':
+        return aten::remainder;
       case TK_NE:
         return aten::ne;
       case TK_EQ:
@@ -1480,6 +1504,7 @@ private:
       case '/':
       case '+':
       case '-':
+      case '%':
       case TK_UNARY_MINUS: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
@@ -1548,8 +1573,10 @@ private:
                 << *elem_type << " but found " << *v->type() << " instead";
           }
         }
-        return graph->insertNode(graph->createList(elem_type, values))
+        Value* result = graph->insertNode(graph->createList(elem_type, values))
             ->output();
+        ensureLegalType(tree->range(), result->type());
+        return result;
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
@@ -1727,7 +1754,7 @@ private:
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
     auto * sliceable = emitExpr(subscript.value());
     at::optional<int64_t> maybe_dim;
-    if (sliceable->type()->kind() == TypeKind::DynamicType) {
+    if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
       maybe_dim = 0;
     }

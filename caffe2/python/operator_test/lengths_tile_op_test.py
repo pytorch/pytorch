@@ -15,7 +15,7 @@ class TestLengthsTileOp(hu.HypothesisTestCase):
     @given(
         inputs=st.integers(min_value=1, max_value=20).flatmap(
             lambda size: st.tuples(
-                hu.arrays([size]),
+                hu.arrays([size], dtype=np.float32),
                 hu.arrays([size], dtype=np.int32,
                           elements=st.integers(min_value=0, max_value=20)),
             )
@@ -32,7 +32,7 @@ class TestLengthsTileOp(hu.HypothesisTestCase):
         op = core.CreateOperator(
             "LengthsTile",
             ["data", "lengths"],
-            ["output"]
+            ["output"],
         )
 
         self.assertReferenceChecks(

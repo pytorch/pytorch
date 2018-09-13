@@ -2,7 +2,7 @@
 
 #include "ATen/core/ATenGeneral.h"
 #include "ATen/StorageImpl.h"
-#include "ATen/UndefinedTensor.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 
 #include <ATen/core/ScalarType.h>
 #include "ATen/Formatting.h"
@@ -44,12 +44,12 @@ static inline const Storage& checked_storage(
         name,
         "'");
   }
-  if (expr.dtype() != data_type) {
+  if (expr.dtype().id() != data_type) {
     AT_ERROR(
         "Expected object of data type ",
         data_type,
         " but got data type ",
-        expr.dtype(),
+        expr.dtype().id(),
         " for argument #",
         pos,
         " '",

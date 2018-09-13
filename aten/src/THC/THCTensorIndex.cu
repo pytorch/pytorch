@@ -4,7 +4,7 @@
 #include "THCBlas.h"
 #include "THCTensorCopy.h"
 #include "THCTensorRandom.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCApply.cuh"
 #include "THCReduce.cuh"
 #include "THCDeviceUtils.cuh"

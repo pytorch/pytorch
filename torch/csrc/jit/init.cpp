@@ -1,4 +1,5 @@
 #include "torch/csrc/utils/pybind.h"
+#include "torch/csrc/utils/auto_gil.h"
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
@@ -206,7 +207,10 @@ void initJITBindings(PyObject *module) {
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         const auto & graph = ge.graph();
         auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
-        ge.run(stack);
+        {
+          AutoNoGIL no_gil_guard;
+          ge.run(stack);
+        }
         return createPyObjectForStack(std::move(stack));
       });
 
@@ -253,6 +257,31 @@ void initJITBindings(PyObject *module) {
       throw std::runtime_error(error.what_without_backtrace());
     }
   }, py::arg("qualified_name"));
+
+  py::class_<FunctionSchema>(m, "FunctionSchema")
+  .def_property_readonly("name", [](FunctionSchema& self) { return self.name; })
+  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments; })
+  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns; });
+  py::class_<Argument>(m, "Argument")
+  .def_property_readonly("name", [](Argument& self) { return self.name; })
+  .def_property_readonly("type", [](Argument& self) { return self.type; })
+  .def_property_readonly("N", [](Argument& self) -> py::object {
+    return (self.N) ? py::cast(*self.N) :  py::none();
+  })
+  .def_property_readonly("default_value", [](Argument& self) -> py::object {
+    if(!self.default_value)
+      return py::none();
+    IValue v = *self.default_value;
+    return toPyObject(std::move(v));
+  });
+  m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
+    auto symbol = Symbol::fromQualString(qualified_name);
+    auto operations = getAllOperatorsFor(std::move(symbol));
+    return fmap(operations, [](const std::shared_ptr<Operator>& op) {
+        return op->schema();
+      });
+  });
+
 
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);

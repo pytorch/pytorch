@@ -4,7 +4,6 @@
 
 #include "ATen/CPUTypeDefault.h"
 #include "ATen/Context.h"
-#include "ATen/TensorMethods.h"
 #include "ATen/CheckGenerator.h"
 
 $extra_cuda_headers
@@ -20,6 +19,7 @@ namespace at {
 struct ${Type} final : public ${DenseBackend}TypeDefault {
   explicit ${Type}();
   virtual ScalarType scalarType() const override;
+  virtual caffe2::TypeMeta typeMeta() const override;
   virtual Backend backend() const override;
   virtual const char * toString() const override;
   virtual size_t elementSizeInBytes() const override;
