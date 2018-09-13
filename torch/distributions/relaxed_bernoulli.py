@@ -78,11 +78,7 @@ class LogitRelaxedBernoulli(Distribution):
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
-        if torch._C._get_tracing_state():
-            # [JIT WORKAROUND] lack of support for .uniform_()
-            uniforms = clamp_probs(torch.rand(shape, dtype=probs.dtype, device=probs.device))
-        else:
-            uniforms = clamp_probs(self.probs.new(shape).uniform_())
+        uniforms = clamp_probs(torch.rand(shape, dtype=probs.dtype, device=probs.device))
         return (uniforms.log() - (-uniforms).log1p() + probs.log() - (-probs).log1p()) / self.temperature
 
     def log_prob(self, value):

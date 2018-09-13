@@ -64,11 +64,7 @@ class Uniform(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        if torch._C._get_tracing_state():
-            # [JIT WORKAROUND] lack of support for .uniform_()
-            rand = torch.rand(shape, dtype=self.low.dtype, device=self.low.device)
-        else:
-            rand = self.low.new(shape).uniform_()
+        rand = torch.rand(shape, dtype=self.low.dtype, device=self.low.device)
         return self.low + rand * (self.high - self.low)
 
     def log_prob(self, value):

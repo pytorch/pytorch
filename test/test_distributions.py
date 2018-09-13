@@ -647,7 +647,7 @@ class TestDistributions(TestCase):
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
         if s.is_floating_point():
-            s.detach_().requires_grad_()
+            s = s.detach().requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
         self.assertEqual(s.size(), expected_shape)
@@ -3973,7 +3973,6 @@ class TestTransforms(TestCase):
 
     def test_jit(self):
         for transform in self.unique_transforms:
-            print('testing {}'.format(type(transform).__name__))
             x = torch.tensor(self._generate_data(transform), requires_grad=True)
             y = transform(x).clone()  # bypass the cache
 
@@ -4120,7 +4119,6 @@ class TestJit(TestCase):
     def _examples(self):
         for Dist, params in EXAMPLES:
             for param in params:
-                print('testing {}'.format(Dist.__name__))
                 keys = param.keys()
                 values = tuple(param[key] for key in keys)
                 if not all(isinstance(x, torch.Tensor) for x in values):
@@ -4144,20 +4142,17 @@ class TestJit(TestCase):
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
             ]
             if Dist in xfail:
-                print('        xfail reproducibility')
                 continue
 
             with torch.random.fork_rng():
-                sample_0 = traced_f(*values)
-            sample_1 = traced_f(*values)
-            self.assertEqual(sample_0, sample_1)
+                sample = f(*values)
+            traced_sample = traced_f(*values)
+            self.assertEqual(sample, traced_sample)
 
             # FIXME no nondeterministic nodes found in trace
             xfail = [Beta, Dirichlet]
-            if Dist in xfail:
-                print('        xfail nondeterministic nodes')
-                continue
-            self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
+            if Dist not in xfail:
+                self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
     def test_rsample(self):
         for Dist, keys, values, sample in self._examples():
@@ -4177,20 +4172,17 @@ class TestJit(TestCase):
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
             ]
             if Dist in xfail:
-                print('        xfail reproducibility')
                 continue
 
             with torch.random.fork_rng():
-                sample_0 = traced_f(*values)
-            sample_1 = traced_f(*values)
-            self.assertEqual(sample_0, sample_1)
+                sample = f(*values)
+            traced_sample = traced_f(*values)
+            self.assertEqual(sample, traced_sample)
 
             # FIXME no nondeterministic nodes found in trace
             xfail = [Beta, Dirichlet]
-            if Dist in xfail:
-                print('        xfail nondeterministic nodes')
-                continue
-            self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
+            if Dist not in xfail:
+                self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
     def test_log_prob(self):
         for Dist, keys, values, sample in self._examples():
