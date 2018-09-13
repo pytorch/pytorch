@@ -3,7 +3,7 @@
 namespace at {
 
 StorageImpl::StorageImpl(
-    at::DataType data_type,
+    caffe2::TypeMeta data_type,
     int64_t numel,
     at::DataPtr data_ptr,
     at::Allocator* allocator,
@@ -15,15 +15,14 @@ StorageImpl::StorageImpl(
       allocator_(allocator) {}
 
 StorageImpl::StorageImpl(
-    at::DataType data_type,
+    caffe2::TypeMeta data_type,
     int64_t numel,
     at::Allocator* allocator,
     bool resizable)
     : StorageImpl(
           data_type,
           numel,
-          allocator->allocate(
-              at::elementSize(dataTypeToScalarType(data_type)) * numel),
+          allocator->allocate(data_type.itemsize() * numel),
           allocator,
           resizable) {}
 

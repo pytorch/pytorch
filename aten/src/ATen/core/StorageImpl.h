@@ -15,13 +15,13 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   StorageImpl() = delete;
   ~StorageImpl() {};
   StorageImpl(
-      at::DataType data_type,
+      caffe2::TypeMeta data_type,
       int64_t numel,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable);
   StorageImpl(
-      at::DataType data_type,
+      caffe2::TypeMeta data_type,
       int64_t numel,
       at::Allocator* allocator,
       bool resizable);
@@ -34,10 +34,10 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T* data() const {
     auto data_type_T = at::scalarTypeToDataType(at::CTypeToScalarType<T>::to());
-    if (dtype() != data_type_T) {
+    if (dtype().id() != data_type_T) {
       AT_ERROR(
           "Attempt to access StorageImpl having data type ",
-          dtype(),
+          dtype().id(),
           " as data type ",
           data_type_T);
     }
@@ -56,7 +56,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   void operator=(const StorageImpl&) = delete;
 
   size_t itemsize() const {
-    return at::elementSize(dataTypeToScalarType(data_type_));
+    return data_type_.itemsize();
   }
 
   Type& type();
@@ -93,7 +93,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   at::Allocator* allocator() {
     return allocator_;
   };
-  const DataType dtype() const {
+  const caffe2::TypeMeta dtype() const {
     return data_type_;
   }
   const at::Allocator* allocator() const {
@@ -114,7 +114,7 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
  private:
-  at::DataType data_type_;
+  caffe2::TypeMeta data_type_;
   at::DataPtr data_ptr_;
   int64_t numel_;
   bool resizable_;
