@@ -82,7 +82,7 @@ signature.
   argument, but indicates that in the Python bindings, any subsequent arguments
   must be specified as keyword arguments (and cannot be provided positionally).
 
-Functions with no tensor inputs are called **factory functions**, and
+Functions with no tensor inputs are called *factory functions*, and
 are handled specially by code generation.  If your function is behaving
 differently than another example, check first and see if one is a
 factory while another is not.
@@ -229,7 +229,7 @@ direct consequences on valid implementations:
   caller will be expecting to get `Variable`s out if it passes `Variable`.
   Instead, create tensors using the `options()` of one of the input
   tensors.  E.g., `at::empty(sizes, input.options())` or
-  `at::ones(TensorOptions(input.options()).dtype(kByte))`, if you need
+  `at::ones(input.options().dtype(kByte))`, if you need
   a different scalar type.
 
 * If you need to call other ATen functions, be sure to qualify the call
