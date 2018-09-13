@@ -61,7 +61,7 @@ class AT_CORE_API BaseContext {
   virtual BaseStaticContext* GetStaticContext() const = 0;
 
   /* Sorry for the naming, will get rid of this in future diff */
-  virtual DeviceType GetDevicetype() const = 0;
+  virtual DeviceType device_type() const = 0;
 
   virtual void SwitchToDevice(int /*stream_id*/) = 0;
 
@@ -96,13 +96,13 @@ class AT_CORE_API BaseContext {
       DeviceType type) {
     if (type == DeviceType::CPU) {
       CopyBytesToCPU(nbytes, src, dst);
-    } else if (type == GetDevicetype()) {
+    } else if (type == device_type()) {
       CopyBytesSameDevice(nbytes, src, dst);
     } else {
       AT_ERROR(
           "CopyBytesToDevice can only copy to CPU or between same "
           "device. Can't copy from: ",
-          GetDevicetype(),
+          device_type(),
           " to",
           type);
     }
