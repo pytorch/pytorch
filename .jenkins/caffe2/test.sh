@@ -62,7 +62,7 @@ for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
     */mkl_utils_test|*/aten/integer_divider_test)
       continue
       ;;
-    */scalar_tensor_test)
+    */scalar_tensor_test|*/basic)
 	  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 		continue
 	  else
