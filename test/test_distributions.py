@@ -4142,7 +4142,6 @@ class TestJit(TestCase):
             xfail = [
                 Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
-                OneHotCategorical,  # aten::scatter(Dynamic, int, Dynamic, int)
             ]
             if Dist in xfail:
                 print('        xfail reproducibility')
