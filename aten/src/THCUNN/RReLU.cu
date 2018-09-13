@@ -1,5 +1,5 @@
 #include "THCUNN.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 #include "common.h"
@@ -15,8 +15,8 @@ template<typename T>
 inline T __device__ curand_uniform_type(curandStateMtgp32 *state);
 
 template <>
-inline half __device__ curand_uniform_type<half>(curandStateMtgp32 *state) {
-  return ScalarConvert<float, half>::to(curand_uniform(state));
+inline THHalf __device__ curand_uniform_type<THHalf>(curandStateMtgp32 *state) {
+  return ScalarConvert<float, THHalf>::to(curand_uniform(state));
 }
 
 template <>
