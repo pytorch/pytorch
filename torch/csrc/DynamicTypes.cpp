@@ -71,7 +71,7 @@ PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
   auto attype = at::globalContext().getNonVariableTypeOpt(
       deviceTypeToBackend(storage.device_type()),
-      at::dataTypeToScalarType(storage.dtype()));
+      at::dataTypeToScalarType(storage.dtype().id()));
   auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {
     return it->second;
