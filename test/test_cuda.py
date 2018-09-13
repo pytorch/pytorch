@@ -280,6 +280,7 @@ tests = [
         types, False, "skipIfRocm:HalfTensor"),
     ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars',
         types, False, "skipIfRocm:HalfTensor"),
+    ('bmm', small_3d, lambda t: [small_3d(t)], '', float_types_no_half, False, "skipIfRocm:HalfTensor"),
     ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)], '',
         types, False, "skipIfRocm:HalfTensor"),
     ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t), tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)],
@@ -1954,6 +1955,13 @@ class TestCuda(TestCase):
 
             with self.assertRaisesRegex(AssertionError, r"leaked \d+ bytes CUDA memory on device 1"):
                 leak_gpu1()
+
+    def test_cuda_memory_leak_detection_propagates_errors(self):
+        with self.assertRaisesRegex(RuntimeError, r"The size of tensor a \(3\) must match"):
+            with self.assertLeaksNoCudaTensors():
+                x = torch.randn(3, 1, device='cuda')
+                y = torch.randn(2, 1, device='cuda')
+                z = x + y
 
 
 def load_ignore_file():

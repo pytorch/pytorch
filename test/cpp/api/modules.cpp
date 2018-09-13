@@ -12,6 +12,8 @@
 
 #include <test/cpp/api/util.h>
 
+using Catch::StartsWith;
+
 using namespace torch::nn;
 using namespace torch::test;
 
@@ -226,6 +228,7 @@ TEST_CASE("modules") {
       REQUIRE(output.equal(torch::ones(5, torch::requires_grad())));
 
       was_called = false;
+      // Use the call operator overload here.
       output = functional(torch::ones(5, torch::requires_grad()));
       REQUIRE(was_called);
       REQUIRE(output.equal(torch::ones(5, torch::requires_grad())));
@@ -237,8 +240,65 @@ TEST_CASE("modules") {
       REQUIRE(functional(torch::ones({}) * -1).toCFloat() == 0);
     }
     {
-      auto functional = Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
+      auto functional =
+          Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
       REQUIRE(functional(torch::ones({})).toCFloat() == 0);
+    }
+  }
+
+  SECTION("batchnorm") {
+    {
+      BatchNorm bn(5);
+
+      // Is stateful by default.
+      REQUIRE(bn->options.stateful());
+
+      REQUIRE(bn->running_mean.defined());
+      REQUIRE(bn->running_mean.dim() == 1);
+      REQUIRE(bn->running_mean.size(0) == 5);
+
+      REQUIRE(bn->running_variance.defined());
+      REQUIRE(bn->running_variance.dim() == 1);
+      REQUIRE(bn->running_variance.size(0) == 5);
+
+      // Is affine by default.
+      REQUIRE(bn->options.affine());
+
+      REQUIRE(bn->weight.defined());
+      REQUIRE(bn->weight.dim() == 1);
+      REQUIRE(bn->weight.size(0) == 5);
+
+      REQUIRE(bn->bias.defined());
+      REQUIRE(bn->bias.dim() == 1);
+      REQUIRE(bn->bias.size(0) == 5);
+    }
+    {
+      BatchNorm bn(BatchNormOptions(5).stateful(false).affine(false));
+
+      REQUIRE(!bn->running_mean.defined());
+      REQUIRE(!bn->running_variance.defined());
+      REQUIRE(!bn->weight.defined());
+      REQUIRE(!bn->bias.defined());
+
+      REQUIRE_THROWS_WITH(
+          bn->forward(torch::ones({2, 5})),
+          StartsWith("Calling BatchNorm::forward is only permitted "
+                     "when the 'stateful' option is true (was false). "
+                     "Use BatchNorm::pure_forward instead."));
+    }
+    {
+      BatchNorm bn(BatchNormOptions(5).affine(false));
+      bn->eval();
+
+      // Want to make sure we use the supplied values in `pure_forward` even if
+      // we are stateful.
+      auto input = torch::randn({2, 5});
+      auto mean = torch::randn(5);
+      auto variance = torch::rand(5);
+      auto output = bn->pure_forward(input, mean, variance);
+      auto expected =
+          (input - mean) / torch::sqrt(variance + bn->options.eps());
+      REQUIRE(output.allclose(expected));
     }
   }
 }

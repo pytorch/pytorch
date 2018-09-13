@@ -40,8 +40,9 @@ int64_t THCTensor_strideLegacyNoScalars(THCState *state, const THCTensor *self, 
   return THTensor_strideLegacyNoScalars(self, dim);
 }
 
-THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
-  switch(scalar_type) {
+THCTensor *THCTensor_new(THCState *state, caffe2::TypeMeta type_meta) {
+  auto scalar_type = at::dataTypeToScalarType(type_meta.id());
+  switch (scalar_type) {
     case at::ScalarType::Byte:
       return THCudaByteTensor_new(state);
     case at::ScalarType::Char:
@@ -189,13 +190,12 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = at::dataTypeToScalarType(THTensor_getStoragePtr(self)->dtype());
-
+    auto data_type = THTensor_getStoragePtr(self)->dtype();
     if (storage) {
       c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     } else {
-      THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, scalar_type));
+      THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, data_type));
     }
   }
 

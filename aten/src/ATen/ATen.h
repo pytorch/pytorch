@@ -19,7 +19,7 @@
 #include "ATen/core/Storage.h"
 #include "ATen/Tensor.h"
 #include "ATen/TensorGeometry.h"
-#include "ATen/TensorMethods.h"
+#include "ATen/core/TensorMethods.h"
 #include "ATen/TensorOperators.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/Type.h"

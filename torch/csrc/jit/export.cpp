@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/autograd/symbolic.h"
-#include "onnx/onnx.pb.h"
+#include "onnx/onnx_pb.h"
 #include "torch/csrc/onnx/onnx.h"
 
 #include "torch/csrc/utils/functional.h"
@@ -557,8 +557,9 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("IntType");
   } else if (kind == TypeKind::NoneType) {
     type_proto->set_denotation("NoneType");
-  }
-  else {
+  } else if (kind == TypeKind::GeneratorType) {
+    type_proto->set_denotation("GeneratorType");
+  } else {
     throw std::runtime_error("unexpected type kind");
   }
 }

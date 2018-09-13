@@ -25,6 +25,7 @@ TYPE_MAP = {
     'std::array<bool,2>': 'bool[2]',
     'std::array<bool,3>': 'bool[3]',
     'std::array<bool,4>': 'bool[4]',
+    'std::string': 'str',
     'Scalar': 'Scalar',
     'Tensor': 'Tensor',
     'TensorList': 'Tensor[]',
@@ -56,16 +57,18 @@ def jit_type_of(arg):
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
 FROM_IVALUE = {
-    'Device': 'as_device({}.toIntList()->elements())',
+    'Device': '{}.to<at::Device>()',
     'IntList': '{}.toIntList()->elements()',
-    'Layout': 'static_cast<at::Layout>({}.toInt())',
+    'Layout': '{}.to<at::Layout>()',
     'Scalar': '{}.toScalar()',
-    'ScalarType': 'static_cast<at::ScalarType>({}.toInt())',
+    'ScalarType': '{}.to<at::ScalarType>()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
     'bool': 'bool({}.toInt())',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
+    'std::string': '{}.toString()->string()',
+    'Generator': 'nullptr',
     'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
     'std::array<bool,3>': 'as_bool_array<3>({}.toIntList()->elements())',
     'std::array<bool,4>': 'as_bool_array<4>({}.toIntList()->elements())',
@@ -121,7 +124,7 @@ def is_magic_method(api_name):
     return api_name.startswith('__') and api_name.endswith('__')
 
 
-blacklisted_types = {'SparseTensorRef', 'Storage', 'ScalarType', 'optional<ScalarType>', 'std::string', 'void*'}
+blacklisted_types = {'SparseTensorRef', 'Storage', 'void*'}
 default_only_types = {'Generator'}
 
 
@@ -195,12 +198,9 @@ def gen_jit_dispatch(declarations, out, template_path):
 
         real_inputs = 0
         for arg in decl['arguments']:
-            if arg['simple_type'] in default_only_types:
-                arguments.append(arg['default'])
-            else:
-                value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, num_inputs)
-                arguments.append(from_ivalue(arg, value))
-                real_inputs += 1
+            value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, num_inputs)
+            arguments.append(from_ivalue(arg, value))
+            real_inputs += 1
 
         call = get_invocation(decl, arguments, num_inputs)
 

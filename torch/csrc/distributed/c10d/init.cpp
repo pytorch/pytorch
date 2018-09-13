@@ -34,7 +34,7 @@ using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
   auto c10d_module =
-      THPObjectPtr(PyImport_ImportModule("torch.distributed.c10d"));
+      THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
   }
@@ -375,6 +375,7 @@ PyObject* c10d_init(PyObject* _unused) {
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
 
+#ifdef USE_CUDA
   module.def(
       "_dist_broadcast_coalesced",
       &::c10d::distBroadcastCoalesced,
@@ -392,6 +393,7 @@ PyObject* c10d_init(PyObject* _unused) {
       py::arg("broadcast_bucket_size"),
       py::arg("broadcast_buffers"),
       py::call_guard<py::gil_scoped_release>());
+#endif
 
   Py_RETURN_TRUE;
 }

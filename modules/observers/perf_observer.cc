@@ -1,10 +1,41 @@
 #include "observers/perf_observer.h"
 #include "observers/observer_config.h"
+#if !CAFFE2_MOBILE
+#include "caffe2/core/flags.h"
+#include "observers/net_observer_reporter_print.h"
+#endif
 
 #include <random>
 #include "caffe2/core/common.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
+
+#if !CAFFE2_MOBILE
+CAFFE2_DEFINE_int64(
+    aiBench_netInitSampleRate,
+    0,
+    "One in N sampling rate for net delay");
+
+CAFFE2_DEFINE_int64(
+    aiBench_netFollowupSampleRate,
+    0,
+    "One in N sampling rate for net delay");
+
+CAFFE2_DEFINE_int64(
+    aiBench_netFollowupSampleCount,
+    0,
+    "control the following c logs");
+
+CAFFE2_DEFINE_int64(
+    aiBench_operatorNetSampleRatio,
+    0,
+    "One in N sampling rate for operator delay");
+
+CAFFE2_DEFINE_int64(
+    aiBench_skipIters,
+    0,
+    "skip the first N iterations of the net run");
+#endif
 
 namespace caffe2 {
 namespace {
@@ -13,6 +44,20 @@ bool registerGlobalPerfNetObserverCreator(int* /*pargc*/, char*** /*pargv*/) {
   AddGlobalNetObserverCreator([](NetBase* subject) {
     return caffe2::make_unique<PerfNetObserver>(subject);
   });
+
+#if !CAFFE2_MOBILE
+  // for aibench usage
+  caffe2::ObserverConfig::setReporter(
+      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
+
+  caffe2::ObserverConfig::initSampleRate(
+      FLAGS_aiBench_netInitSampleRate,
+      FLAGS_aiBench_netFollowupSampleRate,
+      FLAGS_aiBench_netFollowupSampleCount,
+      FLAGS_aiBench_operatorNetSampleRatio,
+      FLAGS_aiBench_skipIters);
+#endif
+
   return true;
 }
 } // namespace

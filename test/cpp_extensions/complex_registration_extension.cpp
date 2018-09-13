@@ -10,7 +10,7 @@
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/TensorImpl.h"
-#include "ATen/UndefinedTensor.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Half.h"
@@ -33,6 +33,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
             /*is_undefined=*/false) {}
 
   ScalarType scalarType() const override;
+  caffe2::TypeMeta typeMeta() const override;
   Backend backend() const override;
   const char* toString() const override;
   size_t elementSizeInBytes() const override;
@@ -49,11 +50,11 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
       numel *= s;
     }
     Storage s{c10::make_intrusive<StorageImpl>(
-        scalarTypeToDataType(ScalarType::ComplexFloat),
+        scalarTypeToTypeMeta(ScalarType::ComplexFloat),
         numel,
         getCPUAllocator(),
         /* resizable */ true)};
-    Tensor t{c10::make_intrusive<TensorImpl, UndefinedTensor>(
+    Tensor t{c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
         std::move(s),
         at::CPUTensorId(),
         /* is_variable */ false)};
@@ -73,6 +74,10 @@ ScalarType CPUComplexFloatType::scalarType() const {
   return ScalarType::ComplexFloat;
 }
 
+caffe2::TypeMeta CPUComplexFloatType::typeMeta() const {
+  return scalarTypeToTypeMeta(ScalarType::ComplexFloat);
+}
+
 Backend CPUComplexFloatType::backend() const {
   return Backend::CPU;
 }
@@ -80,6 +85,7 @@ Backend CPUComplexFloatType::backend() const {
 const char* CPUComplexFloatType::toString() const {
   return "CPUComplexFloatType";
 }
+
 TypeID CPUComplexFloatType::ID() const {
   return TypeID::CPUComplexFloat;
 }
