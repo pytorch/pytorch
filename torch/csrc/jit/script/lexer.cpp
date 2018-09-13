@@ -10,6 +10,49 @@ namespace torch {
 namespace jit {
 namespace script {
 
+static const std::unordered_map<int, int> binary_prec = {
+    {TK_IF,  1},
+    {TK_AND, 2},
+    {TK_OR,  2},
+    // reserve a level for unary not
+    {'<',    4},
+    {'>',    4},
+    {TK_EQ,  4},
+    {TK_LE,  4},
+    {TK_GE,  4},
+    {TK_NE,  4},
+    {'+',    5},
+    {'-',    5},
+    {'*',    6},
+    {'/',    6},
+    {'%',    6},
+    {'@',    6},
+    {TK_POW, 7},
+};
+
+static const std::unordered_map<int, int> unary_prec = {
+    {TK_NOT, 3},
+    {'-',    8},
+    {'*',    8},
+};
+
+bool SharedParserData::isUnary(int kind, int* prec) {
+  auto it = unary_prec.find(kind);
+  if (it != unary_prec.end()) {
+    *prec = it->second;
+    return true;
+  }
+  return false;
+}
+bool SharedParserData::isBinary(int kind, int* prec) {
+  auto it = binary_prec.find(kind);
+  if (it != binary_prec.end()) {
+    *prec = it->second;
+    return true;
+  }
+  return false;
+}
+
 int stringToKind(std::string str) {
   static std::once_flag init_flag;
   static std::unordered_map<std::string, int> str_to_kind;

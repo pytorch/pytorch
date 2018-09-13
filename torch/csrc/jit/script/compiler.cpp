@@ -12,7 +12,6 @@
 
 #include "ATen/core/optional.h"
 
-
 #include <climits>
 #include <set>
 
@@ -1339,6 +1338,8 @@ private:
         return prim::Starred;
       case '/':
         return aten::div;
+      case '%':
+        return aten::remainder;
       case TK_NE:
         return aten::ne;
       case TK_EQ:
@@ -1480,6 +1481,7 @@ private:
       case '/':
       case '+':
       case '-':
+      case '%':
       case TK_UNARY_MINUS: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());

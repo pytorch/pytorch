@@ -784,7 +784,7 @@ Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
 // sparse, dense -> sparse
 Tensor smm(const Tensor& self, const Tensor& mat2) {
   auto result = self.type().tensor();
-  self.type().sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
+  at::sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
   return result;
 }
 
@@ -792,7 +792,7 @@ Tensor smm(const Tensor& self, const Tensor& mat2) {
 Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
     Scalar beta, Scalar alpha) {
   auto result = self.type().tensor();
-  self.type().sspaddmm_out(result, self, mat1, mat2, beta, alpha);
+  at::sspaddmm_out(result, self, mat1, mat2, beta, alpha);
   return result;
 }
 

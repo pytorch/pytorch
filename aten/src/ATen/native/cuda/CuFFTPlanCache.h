@@ -112,22 +112,16 @@ public:
     if (input.type().scalarType() == ScalarType::Half) {
       // cuFFT on half requires compute capability of at least SM_53
       auto dev_prop = at::cuda::getCurrentDeviceProperties();
-      if (dev_prop->major < 5 || (dev_prop->major == 5 && dev_prop->minor < 3)) {
-        std::ostringstream ss;
-        ss << "cuFFT doesn't support signals of half type with compute "
-           << "capability less than SM_53, but the device containing input half "
-           << "tensor only has SM_" << dev_prop->major << dev_prop->minor;
-        throw std::runtime_error(ss.str());
-      }
+      AT_CHECK(dev_prop->major >= 5 && !(dev_prop->major == 5 && dev_prop->minor < 3),
+               "cuFFT doesn't support signals of half type with compute "
+               "capability less than SM_53, but the device containing input half "
+               "tensor only has SM_", dev_prop->major, dev_prop->minor);
       for (int64_t i = 0; i < signal_ndim; i++) {
         auto signal_size = checked_signal_sizes[i];
-        if (!is_pow_of_two(signal_size)) {
-          std::ostringstream ss;
-          ss << "cuFFT doesn't support signals of half type with size at any "
-             << "dimension that is not a power of two, but got a signal size of "
-             << checked_signal_sizes;
-          throw std::runtime_error(ss.str());
-        }
+        AT_CHECK(is_pow_of_two(signal_size),
+                 "cuFFT doesn't support signals of half type with size at any ",
+                 "dimension that is not a power of two, but got a signal size of ",
+                 checked_signal_sizes);
       }
       clone_input |= input.stride(signal_ndim) != 1;
     }
@@ -212,7 +206,7 @@ public:
       } else if (!complex_input && complex_output) {
         exec_type = HIPFFT_R2C;
       } else {
-        throw std::runtime_error("hipFFT doesn't support r2r (float)");
+        AT_ERROR("hipFFT doesn't support r2r (float)");
       }
     } else if (input.type().scalarType() == ScalarType::Double) {
       if (complex_input && complex_output) {
@@ -222,13 +216,13 @@ public:
       } else if (!complex_input && complex_output) {
         exec_type = HIPFFT_D2Z;
       } else {
-        throw std::runtime_error("hipFFT doesn't support r2r (double)");
+        AT_ERROR("hipFFT doesn't support r2r (double)");
       }
     } else {
       std::ostringstream ss;
       ss << "hipFFT doesn't support tensor of type: "
          << at::toString(input.type().scalarType());
-      throw std::runtime_error(ss.str());
+      AT_ERROR(ss.str());
     }
 
 #else
@@ -249,7 +243,7 @@ public:
       std::ostringstream ss;
       ss << "cuFFT doesn't support tensor of type: "
          << at::toString(input.type().scalarType());
-      throw std::runtime_error(ss.str());
+      AT_ERROR(ss.str());
     }
 #endif
 
