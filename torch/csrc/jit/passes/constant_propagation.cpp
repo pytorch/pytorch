@@ -15,9 +15,8 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
   prim::If,
   prim::Loop, //TODO: handle Loop
-  //FIXME Same problem as in DCE - cpp & python PythonOp and CppOp should be
-  //FIXME treated as having side effects but ONNX depends on them being removed
   prim::Print,
+  prim::PythonOp, //may have side effects
   //all the rand functions from native_functions.yaml
   aten::rand,
   aten::rand_out,
