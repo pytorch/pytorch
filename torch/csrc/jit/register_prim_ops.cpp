@@ -484,6 +484,15 @@ Operation listLen(Node* node) {
 }
 
 template <typename T>
+Operation listList(Node* node) {
+  return [=](Stack& stack) {
+    // TODO: create List from ConstantList here once mutable lists
+    // are finished
+    return 0;
+  };
+}
+
+template <typename T>
 Operation listEq(Node* node) {
   return [=](Stack& stack) {
     T a;
@@ -594,6 +603,11 @@ RegisterOperators reg2({
     Operator("aten::len(int[] a) -> int", listLen<Shared<IntList>>),
     Operator("aten::len(float[] a) -> int", listLen<Shared<DoubleList>>),
     Operator("aten::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
+
+    Operator("aten::list(int[] a) -> int[]", listList<Shared<IntList>>),
+    Operator("aten::list(float[] a) -> float[]", listList<Shared<DoubleList>>),
+    Operator("aten::list(Tensor[] a) -> Tensor[]", listList<Shared<TensorList>>),
+
 
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),

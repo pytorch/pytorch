@@ -6710,11 +6710,14 @@ a")
 
     def test_list_builtin(self):
         @torch.jit.script
-        def fn(x):
-            y = list(x + 1, x + 2, x + 3)
+        def from_tuple(x):
+            tup = (x + 1, x + 2, x + 3)
+            y = list(tup)
+            # TODO: mutate y
+            # y[2] += 10
             return y[2]
 
-        self.assertExpectedGraph(fn.graph)
+        self.assertExpectedGraph(from_tuple.graph)
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):

@@ -8,7 +8,8 @@ graph(%x : Dynamic) {
   %7 : Dynamic = aten::add(%x, %2, %6)
   %8 : int = prim::Constant[value=1]()
   %9 : Dynamic = aten::add(%x, %1, %8)
-  %y : Dynamic[] = prim::ListConstruct(%5, %7, %9)
-  %11 : Dynamic = aten::select(%y, %2)
-  return (%11);
+  %10 : Dynamic[] = prim::ListConstruct(%5, %7, %9)
+  %y : Dynamic[] = aten::list(%10)
+  %12 : Dynamic = aten::select(%y, %2)
+  return (%12);
 }

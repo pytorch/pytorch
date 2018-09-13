@@ -63,37 +63,6 @@ struct PrintValue : public SugaredValue {
   }
 };
 
-struct ListValue : public SugaredValue {
-  std::string kind() const override {
-    return "list";
-  }
-  std::shared_ptr<SugaredValue> call(
-    SourceRange loc,
-    Method & m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) override {
-      auto& g = *m.graph();
-      auto values = toValues(*m.graph(), inputs);
-      if (values.size() == 0) {
-        AT_ERROR("Cannot create empty list");
-      }
-      auto expected_type = values[0]->type();
-      for (const auto* value : values) {
-        if (value->type() != expected_type) {
-          AT_ERROR(
-              "All elements in list must have the same type (expected ",
-              expected_type->str(),
-              " and found ",
-              value->type()->str());
-        }
-      }
-      auto value =
-          g.insertNode(g.createList(values[0]->type(), values))->output();
-      return std::make_shared<SimpleValue>(value);
-  }
-};
-
 static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
   auto& graph = *value->owningGraph();
   const TypePtr orig = value->type();
@@ -349,7 +318,6 @@ struct Environment {
     if(!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
         {"print", std::make_shared<PrintValue>()},
-        {"list", std::make_shared<ListValue>()},
         {"float", std::make_shared<CastValue>(FloatType::get())},
         {"int", std::make_shared<CastValue>(IntType::get())},
         {"bool", std::make_shared<CastValue>(IntType::get())},
