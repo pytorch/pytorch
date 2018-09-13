@@ -164,10 +164,10 @@ public:
       const caffe2::TypeMeta& data_type,
       size_t capacity,
       DeleterFnPtr d = nullptr) {
-    //    CAFFE_ENFORCE_WITH_CALLER(
-    //        storage_impl_.unique(),
-    //        "UniqueStorageShareExternalPointer can only be called when
-    //        use_count == 1");
+    if (!storage_impl_.unique()) {
+      AT_ERROR(
+          "UniqueStorageShareExternalPointer can only be called when use_count == 1");
+    }
     storage_impl_->UniqueStorageShareExternalPointer(
         src, data_type, capacity, d);
   }
@@ -176,10 +176,10 @@ public:
       at::DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,
       size_t capacity) {
-    //    CAFFE_ENFORCE_WITH_CALLER(
-    //        storage_impl_.unique(),
-    //        "UniqueStorageShareExternalPointer can only be called when
-    //        use_count == 1");
+    if (!storage_impl_.unique()) {
+      AT_ERROR(
+          "UniqueStorageShareExternalPointer can only be called when use_count == 1");
+    }
     storage_impl_->UniqueStorageShareExternalPointer(
         std::move(data_ptr), data_type, capacity);
   }
