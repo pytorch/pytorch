@@ -119,9 +119,13 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
 
     } else if (node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor")) {
       // we do two type_as as it's free (hopefully) and the "*" only works with float
-      return {grads.at(0)
-	      * (inputs.at(0) > inputs.at(1)).type_as(inputs.at(0))
-	      * (inputs.at(0) < inputs.at(2)).type_as(inputs.at(0)), nullptr, nullptr};
+      // the "! (val > min)" is chosen such that the gradient is 0 on the
+      // boundary and the factor is 1 when the boundary is NaN
+      // the ! is expressed as "1-" for lack of a "not" function and
+      // the the fuser insisting on float
+      return {(inputs.at(0).isnan() ? inputs.at(0) : grads.at(0))
+	      * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0)))
+	      * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
     } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
       return {grads.at(0) * (outputs.at(0))};
 
