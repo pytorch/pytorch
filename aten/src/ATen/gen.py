@@ -162,7 +162,7 @@ scalar_types = [
     ('Int', 'int', 'Long', 'int32_t', False),
     ('Long', 'int64_t', 'Long', 'int64_t', False),
     ('Short', 'int16_t', 'Long', 'int16_t', False),
-    ('Half', 'Half', 'Double', 'THHalf', True),
+    ('Half', 'Half', 'Double', 'at::Half', True),
 ]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
@@ -292,7 +292,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     if scalar_name == "Half":
         env['SparseTensor'] = 'Tensor'
         if backend == "CUDA":
-            env['AS_REAL'] = 'convert<half,double>'
+            env['AS_REAL'] = 'convert<at::Half,double>'
 
     declarations, definitions = function_wrapper.create_derived(
         env, declarations)

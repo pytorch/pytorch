@@ -1,6 +1,6 @@
 #include "THCBlas.h"
 #include "THCGeneral.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 
 #include <algorithm>
 
@@ -50,7 +50,7 @@ double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, doub
   return 0;
 }
 
-half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y, int64_t incy)
+at::Half THCudaBlas_Hdot(THCState *state, int64_t n, at::Half *x, int64_t incx, at::Half *y, int64_t incy)
 {
 #if CUDA_VERSION >= 8000
   if (n == 1) {
@@ -59,7 +59,7 @@ half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y,
   }
 
   if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
-    half result;
+    at::Half result;
     cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
     cublasSetStream(handle, THCState_getCurrentStream(state));
     THCublasCheck(cublasDotEx(handle, n,
@@ -72,10 +72,10 @@ half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y,
 
   THError("Cublas_Hdot only supports n, incx and incy "
           "up to signed integer limits: %d", INT_MAX);
-  return THC_float2half(0);
+  return 0.0;
 #else
   THError("Cublas_Hdot requires CUDA 8.0+");
-  return THC_float2half(0);
+  return 0.0;
 #endif
 }
 
@@ -267,7 +267,7 @@ void THCudaBlas_Sgemm(THCState *state, char transa, char transb, int64_t m, int6
 #  define CUDA_R_16F CUBLAS_DATA_HALF
 #endif
 
-void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, half alpha, half *a, int64_t lda, half *b, int64_t ldb, half beta, half *c, int64_t ldc)
+void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k, at::Half alpha, at::Half *a, int64_t lda, at::Half *b, int64_t ldb, at::Half beta, at::Half *c, int64_t ldc)
 {
   adjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   cublasOperation_t opa = convertTransToCublasOperation(transa);
@@ -293,8 +293,8 @@ void THCudaBlas_Hgemm(THCState *state, char transa, char transb, int64_t m, int6
 #else
 
       // Simulated Hgemm
-      float fAlpha = THC_half2float(alpha);
-      float fBeta = THC_half2float(beta);
+      float fAlpha = alpha;
+      float fBeta = beta;
 
 #if CUDA_VERSION < 9000
       THCublasCheck(cublasSgemmEx(handle, opa, opb,
@@ -355,8 +355,8 @@ void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int6
 
 #if CUDA_VERSION >= 9010
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
-                             half alpha, const half *a, int64_t lda, int64_t strideA, const half *b, int64_t ldb, int64_t strideB,
-                             half beta, half *c, int64_t ldc, int64_t strideC, int64_t batchCount)
+                             at::Half alpha, const at::Half *a, int64_t lda, int64_t strideA, const at::Half *b, int64_t ldb, int64_t strideB,
+                             at::Half beta, at::Half *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
@@ -371,8 +371,8 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
 
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
-  float fAlpha = THC_half2float(alpha);
-  float fBeta = THC_half2float(beta);
+  float fAlpha = alpha;
+  float fBeta = beta;
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
   THCublasCheck(cublasGemmStridedBatchedEx(handle,
                                    opa, opb, (int)m, (int)n, (int)k,

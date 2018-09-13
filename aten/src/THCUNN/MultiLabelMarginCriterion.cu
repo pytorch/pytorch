@@ -2,7 +2,7 @@
 #include "THCTensor.hpp"
 #include "common.h"
 #include "THCReduceApplyUtils.cuh"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 
 #include <thrust/functional.h>
