@@ -279,14 +279,14 @@ def isinf(tensor):
     return tensor.abs() == inf
 
 
-def meshgrid(*args, **kwargs):
+def meshgrid(*tensors, **kwargs):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
 vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
 expanding the :math:`i`th input over dimensions defined by other inputs.
 
 
-    Arguments:
-        args (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
+    Args:
+        tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
         treated as tensors of size :math:`(1,)` automatically
 
     Returns:
@@ -310,10 +310,10 @@ expanding the :math:`i`th input over dimensions defined by other inputs.
     """
     if kwargs:
         raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
-    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+    if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
-        args = args[0]
-    return torch._C._VariableFunctions.meshgrid(args)
+        tensors = tensors[0]
+    return torch._C._VariableFunctions.meshgrid(tensors)
 
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
