@@ -123,7 +123,11 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       // boundary and the factor is 1 when the boundary is NaN
       // the ! is expressed as "1-" for lack of a "not" function and
       // the the fuser insisting on float
-      return {(inputs.at(0).isnan() ? inputs.at(0) : grads.at(0))
+      // it would be prettier to return NaN as gradient for NaN,
+      // but that is hard to reliably code here, so we have 0 as gradient
+      // when the input is NaN (unless grads is NaN or infinite)
+      return {grads.at(0)
+	      * (1-(inputs.at(0).isnan()).type_as(inputs.at(0)))
 	      * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0)))
 	      * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
     } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
