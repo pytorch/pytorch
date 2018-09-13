@@ -203,10 +203,11 @@ struct AT_API StorageImpl : public c10::intrusive_ptr_target {
     data_type_ = data_type;
     // TODO: Use CAFFE_ENFORCE_WITH_CALLER equivalent
     // For now causes lots of redefine issues if caffe2/core/logging.h is used
-    AT_ERROR(
-        data_type_.id() != caffe2::TypeIdentifier::uninitialized(),
-        "To share with a raw external pointer you need to have meta "
-        "already set.");
+    if (data_type_.id() == caffe2::TypeIdentifier::uninitialized()) {
+      AT_ERROR(
+          "To share with a raw external pointer you need to have meta "
+          "already set.");
+    }
     data_ptr_ = std::move(data_ptr);
     // NOTE: data_type might change and so it's also possible that capacity
     // might not be divisible by itemsize. There is no way for us to keep track
