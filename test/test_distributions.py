@@ -713,7 +713,6 @@ class TestDistributions(TestCase):
             actual = dist(param).enumerate_support()
             self.assertEqual(actual, expected)
 
-    @skipIfRocm
     def test_sample_detached(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -726,7 +725,6 @@ class TestDistributions(TestCase):
                                  msg='{} example {}/{}, .sample() is not detached'.format(
                                      Dist.__name__, i + 1, len(params)))
 
-    @skipIfRocm
     def test_rsample_requires_grad(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -740,7 +738,6 @@ class TestDistributions(TestCase):
                                 msg='{} example {}/{}, .rsample() does not require grad'.format(
                                     Dist.__name__, i + 1, len(params)))
 
-    @skipIfRocm
     def test_enumerate_support_type(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -752,7 +749,6 @@ class TestDistributions(TestCase):
                 except NotImplementedError:
                     pass
 
-    @skipIfRocm
     def test_lazy_property_grad(self):
         x = torch.randn(1, requires_grad=True)
 
@@ -1640,7 +1636,6 @@ class TestDistributions(TestCase):
         self.assertEqual(m1.precision_matrix, m2.precision_matrix)
         self.assertEqual(m1.entropy(), m2.entropy())
 
-    @skipIfRocm
     def test_lowrank_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
@@ -3277,7 +3272,6 @@ class TestKL(TestCase):
         self.assertEqual(kl_divergence(Bernoulli(1), Bernoulli(1)), 0)
         self.assertEqual(kl_divergence(Categorical(torch.tensor([0., 1.])), Categorical(torch.tensor([0., 1.]))), 0)
 
-    @skipIfRocm
     def test_kl_shape(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -3293,7 +3287,6 @@ class TestKL(TestCase):
                     'Actual {}'.format(kl.shape),
                 ]))
 
-    @skipIfRocm
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
