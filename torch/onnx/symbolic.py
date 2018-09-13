@@ -151,7 +151,7 @@ def _unimplemented(op, msg):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 7
+_onnx_opset_version = 9
 
 
 # ---------------------------------------------------------------------
@@ -981,11 +981,21 @@ def full_like(g, input, fill_value):
     return add(g, zeros_like(g, input), fill_value, g.op("Constant", value_t=torch.tensor(1)))
 
 
-@parse_args('v', 'i', 'i', 'i', 'i')
+@parse_args('v', 'v', 'v', 'v', 'i')
 def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
-    return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+    if start.node().kind() != 'onnx::Constant' or \
+            end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
+        start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
+        end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
+        dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
+        return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
+    else:
+        start = _parse_arg(start, 'i')
+        end = _parse_arg(end, 'i')
+        dim = _parse_arg(dim, 'i')
+        return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
 
 
 @parse_args('v', 'f', 'f')
