@@ -9,14 +9,16 @@
 
 #include "ATen/ScalarType.h"
 
-#if defined(__HIP_DEVICE_COMPILE__)
-#include <hip/hip_fp16.h>
-#endif
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
 
 namespace at {
 
+#if defined(__CUDACC__) || defined(__HIP_PLATFORM_HCC__)
 template <>
 struct CTypeToScalarType<__half> : public CTypeToScalarType<Half> {};
+#endif
 
 }
 
