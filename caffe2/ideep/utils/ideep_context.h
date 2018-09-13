@@ -119,7 +119,7 @@ class IDEEPContext final : public BaseContext {
     return true;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return IDEEP;
   }
 
