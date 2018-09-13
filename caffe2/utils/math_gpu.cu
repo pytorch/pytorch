@@ -1514,7 +1514,7 @@ __global__ void SetKernel(const int N, const T alpha, T* Y) {
 
 #define CAFFE2_SPECIALIZED_CUDA_SET(T)                              \
   template <>                                                       \
-  void Set<T, CUDAContext>(                                         \
+  CAFFE2_CUDA_API void Set<T, CUDAContext>(                         \
       const size_t N, const T alpha, T* Y, CUDAContext* context) {  \
     if (N == 0) {                                                   \
       return;                                                       \
