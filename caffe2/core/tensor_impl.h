@@ -4,9 +4,11 @@
 
 #include <ATen/core/context_base.h>
 
+#include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/context_base.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -113,7 +115,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   TensorImpl(
       const TensorImpl& src,
-      BaseContext* context_for_copy,
+      at::BaseContext* context_for_copy,
       at::DeviceType device_type)
       : storage_(device_type) {
     CopyFrom(src, context_for_copy);
@@ -136,7 +138,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(
       const std::vector<TIndex>& dims,
       const std::vector<T>& values,
-      BaseContext* context)
+      at::BaseContext* context)
       : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
     Resize(dims);
     CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), numel_);
@@ -151,7 +153,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   template <
       typename T,
       typename = typename std::enable_if<std::is_scalar<T>::value>::type>
-  TensorImpl(const T& value, BaseContext* context)
+  TensorImpl(const T& value, at::BaseContext* context)
       : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
     Resize(std::vector<TIndex>{});
     context->CopyItemsFromCPU(
@@ -178,7 +180,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * Since we removed template from tensor, we now store a static
    * context pointer in tensor, which indicates the type of the tensor.
    */
-  BaseStaticContext* GetStaticContext() const {
+  at::BaseStaticContext* GetStaticContext() const {
     return get_static_context(GetDeviceType());
   }
 
@@ -189,7 +191,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * TODO(jerryzh): move this to a global registry
    * that can create context for us
    */
-  std::unique_ptr<BaseContext> CreateContext() const {
+  std::unique_ptr<at::BaseContext> CreateContext() const {
     return GetStaticContext()->CreateContext();
   }
 
@@ -201,7 +203,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * @brief Copies the data from a source tensor, with a contex provided to
    * carry out the underlying memcpy operation.
    */
-  void CopyFrom(const TensorImpl& src, BaseContext* context = nullptr) {
+  void CopyFrom(const TensorImpl& src, at::BaseContext* context = nullptr) {
     if ((void*)&src == (void*)this) {
       return;
     }
@@ -254,7 +256,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * @brief Extend the outer-most dimension of this tensor
    *        to dimension of `num`.
    */
-  void ExtendTo(TIndex num, float growthPct, BaseContext* context) {
+  void ExtendTo(TIndex num, float growthPct, at::BaseContext* context) {
     CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
     CAFFE_ENFORCE_GE_WITH_CALLER(growthPct, 0);
     CAFFE_ENFORCE(context != nullptr, "Context must be provided.");
@@ -270,7 +272,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * growthPct. This ensures that Extend runs on an amortized O(1) time
    * complexity.
    */
-  void Extend(TIndex num, float growthPct, BaseContext* context) {
+  void Extend(TIndex num, float growthPct, at::BaseContext* context) {
     CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
     CAFFE_ENFORCE_GE_WITH_CALLER(
         num, 0, "`num` must be non-negative for Extend");
