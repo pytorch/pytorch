@@ -1357,46 +1357,10 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
-    if not use_input_stats and (running_mean is None or running_var is None):
-        raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
-
-    b, c = input.size(0), input.size(1)
-    if weight is not None:
-        weight = weight.repeat(b)
-    if bias is not None:
-        bias = bias.repeat(b)
-
-    import torch.onnx.symbolic
-
-    @torch.onnx.symbolic_override(torch.onnx.symbolic.instance_norm)
-    def _instance_norm(input, running_mean=None, running_var=None, weight=None,
-                       bias=None, use_input_stats=None, momentum=None, eps=None):
-        # Repeat stored stats and affine transform params if necessary
-        if running_mean is not None:
-            running_mean_orig = running_mean
-            running_mean = running_mean_orig.repeat(b)
-        if running_var is not None:
-            running_var_orig = running_var
-            running_var = running_var_orig.repeat(b)
-
-        # Apply instance norm
-        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
-
-        out = batch_norm(
-            input_reshaped, running_mean, running_var, weight=weight, bias=bias,
-            training=use_input_stats, momentum=momentum, eps=eps)
-
-        # Reshape and copy back
-        if running_mean is not None:
-            running_mean_orig.copy_(running_mean.view(b, c).mean(0, keepdim=False))
-        if running_var is not None:
-            running_var_orig.copy_(running_var.view(b, c).mean(0, keepdim=False))
-
-        return out.view(b, c, *input.size()[2:])
-    return _instance_norm(input, running_mean=running_mean,
-                          running_var=running_var, weight=weight, bias=bias,
-                          use_input_stats=use_input_stats, momentum=momentum,
-                          eps=eps)
+    return torch.instance_norm(
+        input, weight, bias, running_mean, running_var,
+        use_input_stats, momentum, eps, torch.backends.cudnn.enabled
+    )
 
 
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
