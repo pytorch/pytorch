@@ -1,112 +1,99 @@
 """
 Experimental. Tools for visualizing the torch.jit.Graph objects.
 """
-import string
 import json
-
-_vis_template = string.Template("""
-<!doctype html>
-<html>
-<head>
-  <title>$name</title>
-
-  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.20.1/vis.min.js"></script>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.20.1/vis.min.css" rel="stylesheet" type="text/css" />
-
-  <style type="text/css">
-    #mynetwork {
-      height: 100vh;
-    }
-  </style>
-</head>
-<body>
-
-<div id="mynetwork"></div>
-
-<script type="text/javascript">
-  // create an array with nodes
-  var nodes = new vis.DataSet(
-    $nodes
-  );
-
-  // create an array with edges
-  var edges = new vis.DataSet(
-    $edges
-  );
-
-  // create a network
-  var container = document.getElementById('mynetwork');
-  var data = {
-    nodes: nodes,
-    edges: edges
-  };
-  var options = $options;
-  var network = new vis.Network(container, data, options);
-</script>
-</body>
-</html>
-""")
+import os
+import string
 
 
-def write(self, filename):
+template_file = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), "_graph_vis_template.html"
+)
+
+
+def write(graph, filename):
     """
     Write an html file that visualizes a torch.jit.Graph using vis.js
     Arguments:
-        self (torch.jit.Graph): the graph.
+        graph (torch.jit.Graph): the graph.
         filename (string): the output filename, an html-file.
     """
 
     nodes = []
     edges = []
     options = {}
-    for n, i in enumerate(self.inputs()):
-        nodes.append({
-            'id': i.unique(),
-            'label': 'input {}'.format(n),
-            'shape': 'square',
-        })
-
-    existing = set()
-
-    def add_edge(i_, n):
-        i = i_ if i_.kind() != 'Select' else i_.input()
-        if (i, n) in existing:
-            return
-        existing.add((i, n))
-        e = {
-            'from': n.unique(),
-            'to': i.unique(),
-            'arrows': 'from',
-        }
-        if i.stage() != n.stage():
-            e['color'] = 'green'
-        edges.append(e)
 
     counts = {}
+    ir_nodes = {}
     offset = 0
-    for n in self.nodes():
-        if len(n.uses()) == 0 or n.kind() == 'Undefined':
-            continue
-        ident = counts.get(n.kind(), 0)
-        counts[n.kind()] = ident + 1
-        d = {
-            'id': n.unique(),
-            'label': '{}_{}'.format(n.kind(), ident),
-            'y': offset,
-            'fixed': {'y': True},
+    colors = {
+        "prim::Constant": "rgb(221, 212, 137)",
+        "prim::Return": "rgb(244, 104, 66)",
+    }
+
+    def get_color(node):
+        return {
+            "background": colors.get(node.kind(), "rgb(140, 184, 255)")
         }
-        if n in self.outputs():
-            d['shape'] = 'triangle'
 
-        for i in n.inputs():
-            add_edge(i, n)
+    id = 0
+    ir_nodes[graph.return_node()] = id
+    nodes.append(
+        {
+            "id": id,
+            "label": graph.return_node().kind(),
+            "shape": "box",
+            "color": get_color(graph.return_node()),
+        }
+    )
+    id += 1
 
+    ir_nodes[graph.param_node()] = id
+    nodes.append(
+        {
+            "id": id,
+            "label": graph.param_node().kind(),
+            "color": get_color(graph.param_node()),
+        }
+    )
+    id += 1
+
+    for node in graph.nodes():
+        d = {"id": id, "label": node.kind(), "color": get_color(node)}
+        ir_nodes[node] = id
         nodes.append(d)
+        id += 1
         offset += 30
 
-    result = _vis_template.substitute(nodes=json.dumps(nodes),
-                                      edges=json.dumps(edges),
-                                      options=json.dumps(options),
-                                      name=filename)
-    with open(filename, 'w') as f:
-        f.write(result)
+    for node in graph.nodes():
+        for output_value in node.outputs():
+            for use in output_value.uses():
+                edge = {
+                    "from": ir_nodes[node],
+                    "to": ir_nodes[use.user],
+                    "label": "%{}".format(output_value.uniqueName()),
+                    "arrows": "to",
+                }
+                edges.append(edge)
+
+    for output_value in graph.param_node().outputs():
+        for use in output_value.uses():
+            edge = {
+                "from": ir_nodes[graph.param_node()],
+                "to": ir_nodes[use.user],
+                "label": "%{}".format(output_value.uniqueName()),
+                "arrows": "to",
+            }
+            edges.append(edge)
+
+    with open(template_file, "r") as content_file:
+        _vis_template = string.Template(content_file.read())
+        result = _vis_template.substitute(
+            raw_graph="{}".format(graph),
+            nodes=json.dumps(nodes),
+            edges=json.dumps(edges),
+            options=json.dumps(options),
+            name=filename,
+        )
+        with open(filename, "w") as f:
+            f.write(result)
