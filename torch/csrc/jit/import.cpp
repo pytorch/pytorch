@@ -1,6 +1,6 @@
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/serialization.h"
-#include "onnx/onnx.pb.h"
+#include "onnx/onnx_pb.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/jit/assertions.h"
