@@ -1571,6 +1571,26 @@ class TestJit(JitTestCase):
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
+    def test_sparse_tensors_error(self):
+        def get_sparse():
+            return torch.sparse.FloatTensor(2, 3)
+
+        @torch.jit.script
+        def sparse(input):
+            output = get_sparse()
+            return output, input
+
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
+            sparse(get_sparse())
+
+        # has a different entry point than calling sparse directly
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
+            torch._C._jit_pass_shape_analysis(
+                sparse.graph, (get_sparse(),), False)
+
+        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
+            sparse(torch.tensor([1]))
+
     def test_constant_prop_simple(self):
         @torch.jit.script
         def constant_prop(input_tensor):
@@ -7428,28 +7448,6 @@ EXCLUDE_SCRIPT = {
     'test_var_dim_neg0',
     'test_norm_inf',
     'test_renorm_norm_inf',
-    'test_split',
-    'test_expand',
-    'test_expand_1_element',
-    'test_expand_new_dim',
-    'test_expand_new_dim_front_old_front_1',
-    'test_expand_scalar_to_dims',
-    'test_expand_size',
-    'test_permute',
-    'test_permute_neg_dim',
-    'test_repeat',
-    'test_repeat_scalar',
-    'test_repeat_single_number',
-    'test_repeat_unsqueeze',
-    'test_reshape_1d',
-    'test_reshape_scalar_to_1d',
-    'test_view',
-    'test_view_1d',
-    'test_view_scalar_to_1d',
-    'test_split_dim',
-    'test_split_dim_neg0',
-    'test_gesv',
-    'test_inverse',
     'test_matrix_power_n=-1',  # involves inverse
     'test_matrix_power_n=-3',  # involves inverse
     # skipped nn functional tests
