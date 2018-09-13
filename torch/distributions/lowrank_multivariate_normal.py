@@ -5,7 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import (_batch_diag, _batch_mahalanobis, _batch_mv,
                                                      _batch_potrf_lower, _batch_trtrs_lower)
-from torch.distributions.utils import lazy_property
+from torch.distributions.utils import _standard_normal, lazy_property
 
 
 def _batch_vector_diag(bvec):
@@ -169,11 +169,9 @@ class LowRankMultivariateNormal(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        zero = self.loc.new_tensor(0.)
-        one = self.loc.new_tensor(1.)
         W_shape = shape[:-1] + self.cov_factor.shape[-1:]
-        eps_W = torch.normal(zero.expand(W_shape), one.expand(W_shape))
-        eps_D = torch.normal(zero.expand(shape), one.expand(shape))
+        eps_W = _standard_normal(W_shape, dtype=self.loc.dtype, device=self.loc.device)
+        eps_D = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + _batch_mv(self.cov_factor, eps_W) + self.cov_diag.sqrt() * eps_D
 
     def log_prob(self, value):

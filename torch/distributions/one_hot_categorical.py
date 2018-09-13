@@ -78,15 +78,12 @@ class OneHotCategorical(Distribution):
         probs = self._categorical.probs
         indices = self._categorical.sample(sample_shape)
         if torch._C._get_tracing_state():
-            # work around lack of jit support for .scatter_()
+            # [JIT WORKAROUND] lack of support for .scatter_()
             eye = torch.eye(self.event_shape[-1], dtype=self._param.dtype, device=self._param.device)
             return eye[indices].clone()
         one_hot = probs.new_zeros(self._extended_shape(sample_shape))
         if indices.dim() < one_hot.dim():
             indices = indices.unsqueeze(-1)
-        return one_hot
-
-        one_hot = probs.new_zeros(self._extended_shape(sample_shape))
         return one_hot.scatter_(-1, indices, 1.)
 
     def log_prob(self, value):

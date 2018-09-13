@@ -67,7 +67,11 @@ class ExpRelaxedCategorical(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        uniforms = clamp_probs(torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device))
+        if torch._C._get_tracing_state():
+            # [JIT WORKAROUND] lack of support for .uniform_()
+            uniforms = clamp_probs(torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device))
+        else:
+            uniforms = clamp_probs(self.logits.new(shape).uniform_())
         gumbels = -((-(uniforms.log())).log())
         scores = (self.logits + gumbels) / self.temperature
         return scores - scores.logsumexp(dim=-1, keepdim=True)
@@ -77,7 +81,7 @@ class ExpRelaxedCategorical(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        log_scale = (self.temperature.new_tensor(float(K)).lgamma().expand(self.temperature.shape) -
+        log_scale = (self.temperature.new_tensor(float(K)).lgamma() -
                      self.temperature.log().mul(-(K - 1)))
         score = logits - value.mul(self.temperature)
         score = (score - score.logsumexp(dim=-1, keepdim=True)).sum(-1)
