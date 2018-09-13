@@ -15,9 +15,9 @@
 #include "generic/THStorageCopy.cpp"
 #include "THGenerateHalfType.h"
 
-THStorage* THStorage_new(at::ScalarType scalar_type) {
+THStorage* THStorage_new(caffe2::TypeMeta data_type) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(scalar_type),
+      data_type,
       0,
       getTHDefaultAllocator(),
       true).release();
