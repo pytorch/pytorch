@@ -1,6 +1,6 @@
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/serialization.h"
-#include "onnx/onnx.pb.h"
+#include "onnx/onnx_pb.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/jit/assertions.h"
@@ -315,7 +315,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
     int64_t size;
     std::tie(storage_ptr, size) = file_reader_.getRecordWithKey(record_number);
     auto storage = std::make_shared<at::Storage>(
-      at::CPU(type).scalarType(),
+      at::CPU(type).typeMeta(),
       std::move(storage_ptr),
       size,
       nullptr);
