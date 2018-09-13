@@ -65,6 +65,8 @@ for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
     */scalar_tensor_test)
 	  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 		continue
+	  else
+	    "$test"
 	  fi
 	  ;;
 	*)
