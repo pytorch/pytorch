@@ -104,21 +104,24 @@ class PrettyPrintPass {
     return out;
   }
 
-  bool isValueUsedLater(const Value* val) const {
-    if (aliases_.find(val) != aliases_.end()) {
-      return true;
-    }
-    return val->uses().size() > 0;
-  }
-
   std::ostream& printLoop(
       std::ostream& out,
       const Node* node,
       const size_t level) {
+    // Prints assignments between the loop node and body block around the
+    // loop body itself in the following manner:
+    //
+    // (silently) alias block input names to node output names
+    // assign each node input to the corresponding node output
+    // assign condition to loop condition value
+    // while ...:
+    //    print loop body nodes
+    //    assign each block output to the corresponding block input
+
     const auto body_block = node->blocks()[0];
     // Add aliases for loop-carried dependencies
     zipWith<const Value*>(
-        body_block->inputs().slice(1), // Start at 1 to ignore condition
+        body_block->inputs().slice(1), // Start at 1 to ignore trip count
         node->outputs(),
         [&](const Value* block_input, const Value* node_output) {
           aliases_[block_input] = node_output;
@@ -129,10 +132,11 @@ class PrettyPrintPass {
         node->outputs(),
         node->inputs().slice(2),
         [&](const Value* node_output, const Value* node_input) {
-          if (isValueUsedLater(node_output)) {
-            printAssignment(out, node_output, node_input, level);
-          }
+          printAssignment(out, node_output, node_input, level);
         });
+
+    // Print condition initial assignment
+    printAssignment(out, body_block->inputs()[0], node->inputs()[1], level);
 
     // Loop header
     indent(out, level);
@@ -148,9 +152,7 @@ class PrettyPrintPass {
         body_block->inputs(),
         body_block->outputs(),
         [&](const Value* block_input, const Value* block_output) {
-          if (isValueUsedLater(block_input)) {
-            printAssignment(out, block_input, block_output, level + 1);
-          }
+          printAssignment(out, block_input, block_output, level + 1);
         });
     return out;
   }
