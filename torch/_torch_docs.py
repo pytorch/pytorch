@@ -3346,7 +3346,7 @@ triangular such that the returned tensor is
     inv = (u^T u)^{-1}
 
 If :attr:`upper` is ``False``, :attr:`u` is lower triangular
-such that the tensor value is
+such that the returned tensor is
 
 .. math::
     inv = (uu^{T})^{-1}
@@ -3992,6 +3992,8 @@ but with the specified shape. When possible, the returned tensor will be a view
 of :attr:`input`. Otherwise, it will be a copy. Contiguous inputs and inputs
 with compatible strides can be reshaped without copying, but you should not
 depend on the copying vs. viewing behavior.
+
+See :meth:`torch.Tensor.view` on when it is possible to return a view.
 
 A single dimension may be -1, in which case it's inferred from the remaining
 dimensions and the number of elements in :attr:`input`.
@@ -5308,7 +5310,7 @@ The operation is defined as:
 
 .. math::
     out_i = \begin{cases}
-        x_i & \text{if } condition_i \\
+        x_i & \text{if } \text{condition}_i \\
         y_i & \text{otherwise} \\
     \end{cases}
 

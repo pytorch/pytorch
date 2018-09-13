@@ -98,7 +98,7 @@ class Binomial(Distribution):
             shape = self._extended_shape(sample_shape) + (max_count,)
             bernoullis = torch.bernoulli(self.probs.unsqueeze(-1).expand(shape))
             if self.total_count.min() != max_count:
-                arange = torch.arange(max_count, out=self.total_count.new_empty(max_count))
+                arange = torch.arange(max_count, dtype=self._param.dtype, device=self._param.device)
                 mask = arange >= self.total_count.unsqueeze(-1)
                 bernoullis.masked_fill_(mask, 0.)
             return bernoullis.sum(dim=-1)
@@ -119,8 +119,7 @@ class Binomial(Distribution):
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
             raise NotImplementedError("Inhomogeneous total count not supported by `enumerate_support`.")
-        values = self._new(1 + total_count,)
-        torch.arange(1 + total_count, out=values)
+        values = torch.arange(1 + total_count, dtype=self._param.dtype, device=self._param.device)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         if expand:
             values = values.expand((-1,) + self._batch_shape)

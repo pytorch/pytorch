@@ -375,6 +375,7 @@ PyObject* c10d_init(PyObject* _unused) {
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
 
+#ifdef USE_CUDA
   module.def(
       "_dist_broadcast_coalesced",
       &::c10d::distBroadcastCoalesced,
@@ -392,6 +393,7 @@ PyObject* c10d_init(PyObject* _unused) {
       py::arg("broadcast_bucket_size"),
       py::arg("broadcast_buffers"),
       py::call_guard<py::gil_scoped_release>());
+#endif
 
   Py_RETURN_TRUE;
 }
