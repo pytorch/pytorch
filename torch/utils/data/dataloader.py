@@ -289,12 +289,15 @@ class _DataLoaderIter(object):
 
             if self.pin_memory:
                 self.data_queue = queue.Queue()
-                self.pin_memory_thread = threading.Thread(
+                pin_memory_thread = threading.Thread(
                     target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
                           torch.cuda.current_device()))
-                self.pin_memory_thread.daemon = True
-                self.pin_memory_thread.start()
+                pin_memory_thread.daemon = True
+                pin_memory_thread.start()
+                # Similar to workers (see comment above), we only register
+                # pin_memory_thread once it is started.
+                self.pin_memory_thread = pin_memory_thread
             else:
                 self.data_queue = self.worker_result_queue
 
@@ -397,7 +400,7 @@ class _DataLoaderIter(object):
                 q.put(None)
             for w in self.workers:
                 w.join()
-            if self.pin_memory:
+            if hasattr(self, 'pin_memory_thread'):
                 self.pin_memory_thread.join()
 
     def __del__(self):
