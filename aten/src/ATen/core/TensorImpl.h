@@ -23,7 +23,7 @@ namespace at {
 struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
   TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable);
-  TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
+  TensorImpl(Storage storage, TensorTypeId type_id, bool is_variable);
 
   virtual void release_resources() override;
 
@@ -209,8 +209,5 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   ScalarType scalar_type_;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
-
- private:
-  TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
 };
 } // namespace at
