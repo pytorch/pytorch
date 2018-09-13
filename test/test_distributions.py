@@ -3971,27 +3971,54 @@ class TestTransforms(TestCase):
             except NotImplementedError:
                 continue
 
-    def test_jit(self):
+    def test_jit_fwd(self):
         for transform in self.unique_transforms:
             x = torch.tensor(self._generate_data(transform), requires_grad=True)
-            y = transform(x).clone()  # bypass the cache
 
-            def fwd(x):
+            def f(x):
                 return transform(x)
 
-            def inv(y):
+            try:
+                traced_f = torch.jit.trace(f, (x,))
+            except NotImplementedError:
+                continue
+
+            # check on different inputs
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
+            self.assertEqual(f(x), traced_f(x))
+
+    def test_jit_inv(self):
+        for transform in self.unique_transforms:
+            y = torch.tensor(self._generate_data(transform.inv), requires_grad=True)
+
+            def f(y):
                 return transform.inv(y)
 
-            def fwd_jacobian(x):
+            try:
+                traced_f = torch.jit.trace(f, (y,))
+            except NotImplementedError:
+                continue
+
+            # check on different inputs
+            y = torch.tensor(self._generate_data(transform.inv), requires_grad=True)
+            self.assertEqual(f(y), traced_f(y))
+
+    def test_jit_jacobian(self):
+        for transform in self.unique_transforms:
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
+
+            def f(x):
                 y = transform(x)
                 return transform.log_abs_det_jacobian(x, y)
 
             try:
-                traced_fwd = torch.jit.trace(fwd, (x,))
-                traced_inv = torch.jit.trace(inv, (y,))
-                traced_fwd_jacobian = torch.jit.trace(fwd_jacobian, (x,))
+                traced_f = torch.jit.trace(f, (x,))
             except NotImplementedError:
                 continue
+
+            # check on different inputs
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
+            self.assertEqual(f(x), traced_f(x))
 
 
 class TestConstraintRegistry(TestCase):
