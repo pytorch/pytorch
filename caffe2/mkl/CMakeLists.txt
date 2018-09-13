@@ -1,4 +1,4 @@
-if(USE_MKL AND USE_MKLML)
+if(CAFFE2_USE_MKLML)
   message(STATUS "Including MKL operators")
 
   # ---[ CPU files.
