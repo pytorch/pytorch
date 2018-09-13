@@ -88,77 +88,8 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
 class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
  public:
   TensorImpl() = delete;
-  explicit TensorImpl(DeviceType device_type) : storage_(device_type) {}
 
-  /**
-   * @brief Creates a tensor of the given dimension.
-   *
-   * Note that the actual data allocation is not going to be carried out until
-   * the first time mutable_data() is called.
-   */
-  // TODO: here, we create a Storage
-  // and immediately discard it in Resize() since
-  // reset_tensor will be true and FreeMemory will be called,
-  // we might want to avoid creating Storage twice?
-  explicit TensorImpl(const std::vector<TIndex>& dims, at::DeviceType device_type)
-      : storage_(device_type) {
-    Resize(dims);
-  }
-
-  explicit TensorImpl(const std::vector<int>& dims, at::DeviceType device_type)
-      : storage_(device_type) {
-    Resize(dims);
-  }
-
-  /* Now we require that context_for_copy has the same device type as src since
-   * template is removed
-   */
-  TensorImpl(
-      const TensorImpl& src,
-      at::BaseContext* context_for_copy,
-      at::DeviceType device_type)
-      : storage_(device_type) {
-    CopyFrom(src, context_for_copy);
-  }
-
-  /**
-   * @brief: Create a Tensor of at::DeviceType `type` and initialize it with
-   * src Tensor
-   */
-  TensorImpl(const TensorImpl& src, at::DeviceType device_type)
-      : storage_(device_type) {
-    CopyFrom(src);
-  }
-
-  /**
-   * @brief Creates a tensor, and fills its contents with the given values.
-   * The type of tensor will be decided by the context parameter
-   */
-  template <typename T>
-  TensorImpl(
-      const std::vector<TIndex>& dims,
-      const std::vector<T>& values,
-      at::BaseContext* context)
-      : storage_(context->device_type(), TypeMeta::Make<T>()) {
-    Resize(dims);
-    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), numel_);
-    context->CopyItemsFromCPU(
-        storage_.dtype(), numel_, values.data(), mutable_data<T>());
-  }
-
-  /**
-   * @brief Creates a scalar tensor, and fills its content with the given value.
-   * The type of tensor will be decided by the context parameter
-   */
-  template <
-      typename T,
-      typename = typename std::enable_if<std::is_scalar<T>::value>::type>
-  TensorImpl(const T& value, at::BaseContext* context)
-      : storage_(context->device_type(), TypeMeta::Make<T>()) {
-    Resize(std::vector<TIndex>{});
-    context->CopyItemsFromCPU(
-        storage_.dtype(), numel_, &value, mutable_data<T>());
-  }
+  explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)) {}
 
   /**
    * @brief Delete the copy constructor and use Clone explicitly
