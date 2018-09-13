@@ -53,6 +53,7 @@ static_assert(
 #endif
 
 // Useful build settings that are recorded in the compiled binary
+// TODO what should USE_MKL be here? USE_MKLML?
 #define CAFFE2_BUILD_STRINGS { \
   {"GIT_VERSION", "${CAFFE2_GIT_VERSION}"}, \
   {"CXX_FLAGS", "${CMAKE_CXX_FLAGS}"}, \
