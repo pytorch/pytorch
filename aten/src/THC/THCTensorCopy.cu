@@ -1,5 +1,5 @@
 #include "THCApply.cuh"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCNumerics.cuh"
 #include "THCTensorCopy.hpp"
 #include <type_traits>

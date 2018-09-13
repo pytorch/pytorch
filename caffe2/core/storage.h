@@ -214,6 +214,11 @@ class CAFFE2_API Storage {
     storage_impl_->reset();
   }
 
+  // For debugging purpose only, please don't call it
+  StorageImpl* unsafeGetStorageImp() const {
+    return storage_impl_.get();
+  }
+
   template <typename T>
   inline bool IsType() const {
     return storage_impl_->IsType<T>();
