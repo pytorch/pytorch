@@ -9,6 +9,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
 #include "caffe2/proto/caffe2_pb.h"
+#include <ATen/core/Half.h>
 
 namespace caffe2 {
 
@@ -50,7 +51,7 @@ CAFFE2_API const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
 static_assert(sizeof(unsigned short) == 2,
               "Short on this platform is not 16 bit.");
 namespace caffe2 {
-typedef struct CAFFE2_API CAFFE2_ALIGNED(2) __f16 { uint16_t x; } float16;
+typedef at::Half float16;
 
 // Helpers to avoid using typeinfo with -rtti
 template <typename T>
@@ -71,7 +72,7 @@ inline bool fp16_type() {
 // Make __f16 a fundamental type.
 namespace std {
 template<>
-struct is_fundamental<caffe2::__f16> : std::integral_constant<bool, true> {
+struct is_fundamental<caffe2::float16> : std::integral_constant<bool, true> {
 };
 }  // namespace std
 
