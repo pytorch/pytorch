@@ -14,12 +14,12 @@ include(FindPackageHandleStandardArgs)
 set(MKLDNN_ROOT_DIR "" CACHE PATH "Folder contains Intel MKLDNN")
 
 find_path(MKLDNN_INCLUDE_DIR mkldnn.h
-    HINTS ${MKLDNN_ROOT_DIR}
+    HINTS ${MKLDNN_ROOT_DIR} '/usr/local/mkl-dnn'
     PATH_SUFFIXES include)
 
 find_library(MKLDNN_LIBRARY mkldnn
-    HINTS ${MKLDNN_LIB_DIR} ${MKLDNN_ROOT_DIR}
-    PATH_SUFFIXES lib lib64)
+    HINTS ${MKLDNN_LIB_DIR} ${MKLDNN_ROOT_DIR} '/usr/local/mkl-dnn' '/usr'
+    PATH_SUFFIXES lib lib64 lib/x64)
 
 find_package_handle_standard_args(
     MKLDNN DEFAULT_MSG MKLDNN_INCLUDE_DIR MKLDNN_LIBRARY)

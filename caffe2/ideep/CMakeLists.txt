@@ -1,3 +1,5 @@
+message(STATUS "caffe2/ideep/CMakeLists.txt")
+message(STATUS "caffe2/ideep/CMakeLists.txt USE_MKL is ${USE_MKL}")
 if(USE_MKL AND USE_IDEEP AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   message(STATUS "Including IDEEP operators")
 
@@ -15,6 +17,8 @@ if(USE_MKL AND USE_IDEEP AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
       $<TARGET_OBJECTS:Caffe2_ideep_operators>)
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
+elseif(USE_IDEEP AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+  message(STATUS "caffe2/ideep/CMakeLists.txt would've used ideep if not for USE_MKL")
 else()
   message(STATUS "Excluding ideep operators as we are not using ideep")
 endif()

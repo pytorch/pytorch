@@ -21,6 +21,8 @@
 # Do nothing if MKL_FOUND was set before!
 IF (NOT MKL_FOUND)
 
+MESSAGE(STATUS "cmake/Modules/FindMKL.cmake")
+
 SET(MKL_VERSION)
 SET(MKL_INCLUDE_DIR)
 SET(MKL_LIBRARIES)
@@ -306,11 +308,14 @@ IF(NOT MKL_FIND_QUIETLY)
 ENDIF(NOT MKL_FIND_QUIETLY)
 
 # MKLML is included in the MKL package
+message(STATUS "cmake/Modules/FindMKL.cmake USE_MKL is ${USE_MKL}")
 if (USE_MKL AND USE_MKLML)
+  message(STATUS "cmake/Modules/FindMKL.cmake turning on CAFFE2_USE_MKL")
   set(CAFFE2_USE_MKL 1)
 endif()
 
 if (USE_MKL AND USE_IDEEP)
+  message(STATUS "cmake/Modules/FindMKL.cmake both USE_MKL and USE_IDEEP")
   set(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   set(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
   find_path(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
@@ -380,7 +385,11 @@ if (USE_MKL AND USE_IDEEP)
 
     caffe_clear_vars(__ideep_looked_for __mklml_inner_libs)
   endif() # MKLDNN_INCLUDE_DIR
+elseif(USE_IDEEP)
+  message(STATUS "cmake/Modules/FindMKL.cmake would've added ideep files if not for USE_MKL")
 endif() # USE_IDEEP
 
 # Do nothing if MKL_FOUND was set before!
+ELSE(NOT MKL_FOUND)
+  message(STATUS "cmake/Modules/FindMKL.cmake but MKL was already found")
 ENDIF (NOT MKL_FOUND)
