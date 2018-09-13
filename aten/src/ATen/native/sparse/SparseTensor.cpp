@@ -258,13 +258,13 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(!self.is_variable());
   AT_ASSERT(self.is_sparse());
 
+  if (self.is_coalesced()) {
+    return self;
+  }
   if (self._nnz() < 2) {
     SparseTensor dst = self.clone();
     _get_sparse_impl(dst)->set_coalesced(true);
     return dst;
-  }
-  if (self.is_coalesced()) {
-    return self.clone();
   }
 
   LongTensor indices = self._indices();
