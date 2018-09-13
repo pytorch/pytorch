@@ -2613,11 +2613,20 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(l):
-    A = torch.randn(l, l)
-    u, _, v = A.svd()
-    s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-    return u.mm(torch.diag(s)).mm(v.t())
+def random_fullrank_matrix_distinct_singular_value(l, *batches):
+    if len(batches) == 0:
+        A = torch.randn(l, l)
+        u, _, v = A.svd()
+        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+        return u.mm(torch.diag(s)).mm(v.t())
+    else:
+        all_matrices = []
+        for _ in range(0, torch.prod(torch.as_tensor(batches)).item()):
+            A = torch.randn(l, l)
+            u, _, v = A.svd()
+            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+            all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
+        return torch.stack(all_matrices).reshape(*(batches + (l, l)))
 
 
 def uniform_scalar(offset=0, requires_grad=False):
@@ -3151,11 +3160,15 @@ method_tests = [
      'tall_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
      'large', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S, S), ((S, S, S),), 'batched', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('gesv', (2, 3, S, S), ((2, 3, S, S),), 'batched_dims', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('gesv', (2, 2, S, S), ((1, S, S),), 'batched_broadcast_A', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('gesv', (1, S, S), ((2, 2, S, S),), 'batched_broadcast_b', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (S, S), (random_fullrank_matrix_distinct_singular_value(S),), '', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S),),
+     'batched', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 3),),
+     'batched_dims', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (2, 2, S, S), (random_fullrank_matrix_distinct_singular_value(S, 1),),
+     'batched_broadcast_A', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (1, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 2),),
+     'batched_broadcast_b', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t torch.tensor(1)
