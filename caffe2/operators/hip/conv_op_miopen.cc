@@ -259,7 +259,7 @@ bool MIOPENConvOp::DoRunWithType() {
         kernel_w()));
 
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        bottom_desc_, miopenTypeWrapper<T_X>::type, 1, C / group_, H, W));
+        bottom_desc_, miopenTypeWrapper<T_X>::type, N, C / group_, H, W));
 
     MIOPEN_ENFORCE(miopenGetConvolutionForwardOutputDim(
         conv_desc_,
@@ -286,9 +286,7 @@ bool MIOPENConvOp::DoRunWithType() {
     }
 
     int group_offset_X = C / group_ * H * W * D;
-    int batch_offset_X = group_offset_X * group_;
     int group_offset_Y = M / group_ * H_out * W_out * D_out;
-    int batch_offset_Y = group_offset_Y * group_;
 
     while (!bestAlgoFound_) {
       miopenConvAlgoPerf_t perf;
@@ -325,27 +323,23 @@ bool MIOPENConvOp::DoRunWithType() {
       fwdAlgo_ = perf.fwd_algo;
     }
 
-    for (int b = 0; b < N; b++) {
-      for (int g = 0; g < group_; g++) {
-        miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-          MIOPEN_ENFORCE(miopenConvolutionForward(
-            state->miopen_handle(),
-            &alpha_,
-            bottom_desc_,
-            X.template data<T_X>() + (b * batch_offset_X) +
-                (g * group_offset_X),
-            weight_desc_,
-            Weight.template data<T_W>() + g * group_offset_filter,
-            conv_desc_,
-            fwdAlgo_,
-            &beta_,
-            top_desc_,
-            Y->template mutable_data<T_Y>() + (b * batch_offset_Y) +
-                (g * group_offset_Y),
-            fwdConvWs_,
-            fwdConvWsSize_));
-        });
-      }
+    for (int g = 0; g < group_; g++) {
+      miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
+        MIOPEN_ENFORCE(miopenConvolutionForward(
+          state->miopen_handle(),
+          &alpha_,
+          bottom_desc_,
+          X.template data<T_X>() + g * group_offset_X,
+          weight_desc_,
+          Weight.template data<T_W>() + g * group_offset_filter,
+          conv_desc_,
+          fwdAlgo_,
+          &beta_,
+          top_desc_,
+          Y->template mutable_data<T_Y>() + g * group_offset_Y,
+          fwdConvWs_,
+          fwdConvWsSize_));
+      });
     }
     hipDeviceSynchronize();
 
@@ -552,7 +546,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
         kernel_w()));
 
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        bottom_desc_, miopenTypeWrapper<T_X>::type, 1, C / group_, H, W));
+        bottom_desc_, miopenTypeWrapper<T_X>::type, N, C / group_, H, W));
 
     MIOPEN_ENFORCE(miopenGetConvolutionForwardOutputDim(
         conv_desc_,
@@ -579,9 +573,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
     }
 
     int group_offset_X = C / group_ * H * W * D;
-    int batch_offset_X = group_offset_X * group_;
     int group_offset_Y = M / group_ * H_out * W_out * D_out;
-    int batch_offset_Y = group_offset_Y * group_;
 
     while ((!bestDataAlgoFound_) && doBwdDataComputation) {
       miopenConvAlgoPerf_t perf;
@@ -654,48 +646,42 @@ bool MIOPENConvGradientOp::DoRunWithType() {
       bwdWeiAlgo_ = perf.bwd_weights_algo;
     }
 
-    for (int b = 0; b < N; b++) {
-      for (int g = 0; g < group_; g++) {
-        if (doBwdDataComputation) {
-          miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-            MIOPEN_ENFORCE(miopenConvolutionBackwardData(
-              state->miopen_handle(),
-              &alpha_,
-              top_desc_,
-              dY.template data<T_DY>() + (b * batch_offset_Y) +
-                  (g * group_offset_Y),
-              weight_desc_,
-              Weight.template data<T_W>() + g * group_offset_filter,
-              conv_desc_,
-              bwdDataAlgo_,
-              &beta_,
-              bottom_desc_,
-              dX->template mutable_data<T_DX>() + (b * batch_offset_X) +
-                  (g * group_offset_X),
-              bwdDataWs_,
-              bwdDataWsSize_));
-          });
-        }
-
+    for (int g = 0; g < group_; g++) {
+      if (doBwdDataComputation) {
         miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
-          MIOPEN_ENFORCE(miopenConvolutionBackwardWeights(
+          MIOPEN_ENFORCE(miopenConvolutionBackwardData(
             state->miopen_handle(),
             &alpha_,
             top_desc_,
-            dY.template data<T_DY>() + (b * batch_offset_Y) +
-                (g * group_offset_Y),
-            bottom_desc_,
-            X.template data<T_X>() + (b * batch_offset_X) +
-                (g * group_offset_X),
-            conv_desc_,
-            bwdWeiAlgo_,
-            &beta_,
+            dY.template data<T_DY>() + g * group_offset_Y,
             weight_desc_,
-            dW->template mutable_data<T_DW>() + g * group_offset_filter,
-            bwdWeightWs_,
-            bwdWeightWsSize_));
+            Weight.template data<T_W>() + g * group_offset_filter,
+            conv_desc_,
+            bwdDataAlgo_,
+            &beta_,
+            bottom_desc_,
+            dX->template mutable_data<T_DX>() + g * group_offset_X,
+            bwdDataWs_,
+            bwdDataWsSize_));
         });
       }
+
+      miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
+        MIOPEN_ENFORCE(miopenConvolutionBackwardWeights(
+          state->miopen_handle(),
+          &alpha_,
+          top_desc_,
+          dY.template data<T_DY>() + g * group_offset_Y,
+          bottom_desc_,
+          X.template data<T_X>() + g * group_offset_X,
+          conv_desc_,
+          bwdWeiAlgo_,
+          &beta_,
+          weight_desc_,
+          dW->template mutable_data<T_DW>() + g * group_offset_filter,
+          bwdWeightWs_,
+          bwdWeightWsSize_));
+      });
     }
 
     // Synchronize the work across groups.
