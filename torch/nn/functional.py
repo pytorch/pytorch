@@ -1316,7 +1316,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
             raise ValueError("max mode does not support sparse weights")
 
     else:
-        raise ValueError("mode has to be one of sum or mean")
+        raise ValueError("mode has to be one of sum, mean or max")
 
     if max_norm is not None:
         with torch.no_grad():
