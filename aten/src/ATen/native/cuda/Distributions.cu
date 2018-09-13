@@ -108,6 +108,10 @@ void bernoulli_tensor_cuda_kernel(
       [seeds] __device__(
           scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
           const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
+        assert(0 <= p1 && p1 <= 1);
+        assert(0 <= p2 && p2 <= 1);
+        assert(0 <= p3 && p3 <= 1);
+        assert(0 <= p4 && p4 <= 1);
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
@@ -190,6 +194,7 @@ Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
 }
 
 Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
+  AT_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
   AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cuda_", [&] {
     auto seeds = next_philox_seed(gen, 10);
     bernoulli_scalar_cuda_kernel<scalar_t>(self, p, seeds);

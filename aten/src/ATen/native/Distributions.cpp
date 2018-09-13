@@ -15,6 +15,7 @@
 
 #include <type_traits>
 #include <functional>
+#include <assert.h>
 #include <cpuinfo.h>
 
 #include "TH/THRandom.h"
@@ -125,21 +126,25 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
 }
 
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_tensor_cpu_", [&] {
+  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_tensor_cpu_self_", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
-    if (std::is_same<scalar_t, double>::value || p_.type().scalarType() == kDouble) {
-      auto p = std::get<0>(expand_inplace(self, p_.toType(CPU(kDouble))));
-      CPU_tensor_apply2<scalar_t, double>(
-        self, p, [generator](scalar_t& ret_val, double& p_val) {
-          ret_val = static_cast<scalar_t>(THRandom_bernoulli(generator, p_val));
+    using self_t = scalar_t;
+    if (p_.type().scalarType() == kDouble) {
+      auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+      CPU_tensor_apply2<self_t, double>(
+        self, p, [generator](self_t& ret_val, double& p_val) {
+          ret_val = static_cast<self_t>(THRandom_bernoulli(generator, p_val));
         });
     } else {
-      auto p = std::get<0>(expand_inplace(self, p_.toType(CPU(kFloat))));
-      CPU_tensor_apply2<scalar_t, float>(
-        self, p, [generator](scalar_t& ret_val, float& p_val) {
-          ret_val = static_cast<scalar_t>(THRandom_bernoulliFloat(generator, p_val));
-        });
+      AT_DISPATCH_FLOATING_TYPES(p_.type(), "bernoulli_tensor_cpu_p_", [&] {
+        auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+        using p_t = scalar_t;
+        CPU_tensor_apply2<self_t, p_t>(
+          self, p, [generator](self_t& ret_val, p_t& p_val) {
+            ret_val = static_cast<self_t>(THRandom_bernoulliFloat(generator, static_cast<p_t>(p_val)));
+          });
+      });
     }
   });
   return self;
@@ -148,6 +153,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
 DEFINE_DISPATCH(bernoulli_mkl_stub);
 
 Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
+  AT_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
 #if AT_MKL_ENABLED()
   if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
     bernoulli_mkl_stub(kCPU, self, p, gen);
