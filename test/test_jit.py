@@ -909,7 +909,7 @@ class TestJit(JitTestCase):
 
         def fn(x, y):
             z = x
-            if x + y > x:
+            if bool(x + y > x):
                 z = x + y
             return z
 
@@ -1609,12 +1609,11 @@ class TestJit(JitTestCase):
         @torch.jit.script
         def constant_prop(a):
             b = 2 + 1
-            if a < 2:
+            if bool(a < 2):
                 c = b + 2
             else:
                 c = b - 2
             return c
-
         out_ref = constant_prop(torch.tensor(2))
         self.run_pass('constant_propagation', constant_prop.graph)
         out_test = constant_prop(torch.tensor(2))
@@ -1648,8 +1647,8 @@ class TestJit(JitTestCase):
             c0 = 1
             c1 = 1
             c2 = 1
-            if a:  # -> c0, c1
-                if b:  # -> c0
+            if bool(a):  # -> c0, c1
+                if bool(b):  # -> c0
                     if True:  # -> c0
                         c0 = c0 + 1
                         if False:
@@ -2098,7 +2097,7 @@ class TestBatched(TestCase):
 
     def test_if_else(self):
         def single_if(a, b):
-            if a > b:
+            if bool(a > b):
                 a = a + b
             else:
                 a = a - b
@@ -2118,7 +2117,7 @@ class TestBatched(TestCase):
 
     def test_if_else_with_scalar(self):
         def single_if(a, b):
-            if a > 0.1:
+            if bool(a > 0.1):
                 a = a + b
             else:
                 a = a - b
@@ -2138,7 +2137,7 @@ class TestBatched(TestCase):
 
     def test_if_noelse(self):
         def single_if(a, b):
-            if a > b:
+            if bool(a > b):
                 a = a + b
             return a
 
@@ -2156,7 +2155,7 @@ class TestBatched(TestCase):
 
     def test_if_noelse_with_scalar(self):
         def single_if(a, b):
-            if a > 0.1:
+            if bool(a > 0.1):
                 a = a + b
             return a
 
@@ -2174,7 +2173,7 @@ class TestBatched(TestCase):
 
     def test_while(self):
         def single_while(a, b):
-            while a > b:
+            while bool(a > b):
                 a = a - b
             return a
 
@@ -2262,7 +2261,7 @@ class TestBatched(TestCase):
         def greedy(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
                    b_i, b_f, b_o, b_c, w_hs, b_s, iter_num):
             iter_count = torch.zeros_like(iter_num)
-            while(iter_count < iter_num):
+            while bool(iter_count < iter_num):
                 iter_count += 1
                 # LSTM Cell
                 i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
@@ -2328,7 +2327,7 @@ class TestBatched(TestCase):
             vocab_size = embed.size(1)
             iter_count = torch.zeros_like(iter_num)
             max_len = idx.size(2)
-            while(iter_count < iter_num):
+            while bool(iter_count < iter_num):
                 iter_count += 1
                 # LSTM Cell
                 i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
@@ -3441,7 +3440,7 @@ a")
 
     def test_while(self):
         def func(a, b, max):
-            while a < max:
+            while bool(a < max):
                 a = a + 1
                 b = b + 1
             c = a + b
@@ -3458,7 +3457,7 @@ a")
             somenum = 5
             dontmutateme = 3
             third = 0
-            while i < lim:
+            while bool(i < lim):
                 third = first + second
                 first = second
                 second = third
@@ -3480,7 +3479,7 @@ a")
         def func(a, b):
             # type: (int, int) -> int
             d = 3
-            if a > 10:
+            if bool(a > 10):
                 a = 3 + d
             else:
                 b = 3 + d
@@ -3496,7 +3495,7 @@ a")
             # type: (int, int) -> int
             d = 3
             for _ in range(20):
-                if a > 10:
+                if bool(a > 10):
                     a = 3 + d
                 else:
                     b = 3 + d
@@ -3508,7 +3507,7 @@ a")
 
     def test_if_noelse(self):
         def func(a, b):
-            if a > 10:
+            if bool(a > 10):
                 a = 3 + b
             c = a + b
             return c
@@ -3516,11 +3515,19 @@ a")
         inputs = self._make_scalar_vars([-1, 1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_explicit_bool_cast(self):
+        with self.assertRaisesRegex(RuntimeError, "expected an integer"):
+            @torch.jit.script
+            def test_bool_cast(a):
+                if a:
+                    return a + 2
+                return a + 1
+
     def test_while_nonexistent_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
             torch.jit.CompilationUnit('''
             def test_while(a, b):
-                while a < 10:
+                while bool(a < 10):
                     a = a + x
                     b = b + 1
                 return a + b
@@ -3538,7 +3545,7 @@ a")
 
     def test_while_write_outer_then_read(self):
         def func(a, b):
-            while a < 10:
+            while bool(a < 10):
                 a = a + 1
                 b = a + 1
             return a + b
@@ -3687,7 +3694,7 @@ a")
     def test_ternary(self):
         def func(a, b):
             c = 3
-            c = a + b if a > 3 else b
+            c = a + b if bool(a > 3) else b
             return c
 
         inputs_true = self._make_scalar_vars([5, 2], torch.int64)
@@ -3710,18 +3717,18 @@ a")
         @torch.jit.script
         def testNoThrows(t):
             c1 = 1
-            if (False and t[1]) or (True or t[1]):
+            if (False and bool(t[1])) or (True or bool(t[1])):
                 c1 = 0
             return c1
 
         @torch.jit.script
         def throwsOr(t):
-            c0 = False or t[1]
+            c0 = False or bool(t[1])
             print(c0)
 
         @torch.jit.script
         def throwsAnd(t):
-            c0 = True and t[1]
+            c0 = True and bool(t[1])
             print(c0)
 
         t = torch.randn(0)
@@ -3955,7 +3962,7 @@ a")
             step = 1
             while i < 10:
                 b = pyfunc(b)
-                if b > 3.0:
+                if bool(b > 3.0):
                     b = pyfunc(b)
                 i = 11
             return b
@@ -4953,7 +4960,7 @@ a")
         @torch.jit.script
         def foo(a, c):
             b = 0.0
-            if a == 0.0:
+            if bool(a == 0.0):
                 b = 1.0
             return b + c
 
@@ -4972,7 +4979,7 @@ a")
     def test_if_define(self):
         @torch.jit.script
         def foo(a):
-            if a == 0:
+            if bool(a == 0):
                 b = 1
             else:
                 b = 0
@@ -4981,14 +4988,14 @@ a")
         @torch.jit.script
         def foo2(a):
             b = 0
-            if a == 0:
+            if bool(a == 0):
                 b = 1
             return b + 1
 
         @torch.jit.script
         def foo3(a):
             b = 1
-            if a == 0:
+            if bool(a == 0):
                 c = 4
             else:
                 b = 0
@@ -5273,7 +5280,7 @@ a")
 
             @torch.jit.script_method
             def forward(self, x):
-                if torch.sum(x) > 0:
+                if bool(torch.sum(x) > 0):
                     x = torch.neg(x)
                 return x
 
@@ -5388,8 +5395,8 @@ a")
                 # we cannot use `True` as the condition. Constant prop
                 # would remove the `if` statements.
                 c = sum(x) > 4
-                if c:
-                    if c:
+                if bool(c):
+                    if bool(c):
                         y = self.m(x)
                     else:
                         y = self.m(x)
@@ -5822,7 +5829,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'return statements can appear only at the end of the function body'):
             @torch.jit.script
             def return_stmt_wrong(x):
-                if x > 3:
+                if bool(x > 3):
                     return 3
                 else:
                     return x
