@@ -3,6 +3,7 @@
 #else
 
 #include <ATen/core/intrusive_ptr.h>
+#include <ATen/core/typeid.h>
 
 scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)
 {
@@ -43,7 +44,7 @@ scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t ind
 THCStorage* THCStorage_(new)(THCState *state)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(at::CTypeToScalarType<scalar_t>::to()),
+      caffe2::TypeMeta::Make<scalar_t>(),
       0,
       state->cudaDeviceAllocator,
       true).release();
@@ -53,7 +54,7 @@ THCStorage* THCStorage_(new)(THCState *state)
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(at::CTypeToScalarType<scalar_t>::to()),
+      caffe2::TypeMeta::Make<scalar_t>(),
       size,
       state->cudaDeviceAllocator,
       true).release();
@@ -64,7 +65,7 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           at::Allocator* allocator)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(at::CTypeToScalarType<scalar_t>::to()),
+      caffe2::TypeMeta::Make<scalar_t>(),
       size,
       allocator,
       true).release();
@@ -117,7 +118,7 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
     ptrdiff_t size,
     at::Allocator* allocator) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(at::CTypeToScalarType<scalar_t>::to()),
+      caffe2::TypeMeta::Make<scalar_t>(),
       size,
       std::move(data),
       allocator,
