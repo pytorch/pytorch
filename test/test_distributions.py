@@ -1648,7 +1648,6 @@ class TestDistributions(TestCase):
         empirical_var = samples.var(0)
         self.assertEqual(d.variance, empirical_var, prec=0.02)
 
-    @skipIfRocm
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -1756,7 +1755,6 @@ class TestDistributions(TestCase):
                                     'MultivariateNormal(loc={}, scale_tril={})'.format(mean, scale_tril),
                                     multivariate=True)
 
-    @skipIfRocm
     def test_multivariate_normal_properties(self):
         loc = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
@@ -3144,7 +3142,6 @@ class TestKL(TestCase):
 
     # Multivariate normal has a separate Monte Carlo based test due to the requirement of random generation of
     # positive (semi) definite matrices. n is set to 5, but can be increased during testing.
-    @skipIfRocm
     def test_kl_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for multivariate_normal
@@ -3170,7 +3167,6 @@ class TestKL(TestCase):
                 'Actual (analytic): {}'.format(actual),
             ]))
 
-    @skipIfRocm
     def test_kl_multivariate_normal_batched(self):
         b = 7  # Number of batches
         loc = [torch.randn(b, 3) for _ in range(0, 2)]
@@ -3182,7 +3178,6 @@ class TestKL(TestCase):
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
         self.assertEqual(expected_kl, actual_kl)
 
-    @skipIfRocm
     def test_kl_multivariate_normal_batched_broadcasted(self):
         b = 7  # Number of batches
         loc = [torch.randn(b, 3) for _ in range(0, 2)]
@@ -3195,7 +3190,6 @@ class TestKL(TestCase):
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
         self.assertEqual(expected_kl, actual_kl)
 
-    @skipIfRocm
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
@@ -3236,7 +3230,6 @@ class TestKL(TestCase):
                 'Actual (analytic): {}'.format(actual_full_lowrank),
             ]))
 
-    @skipIfRocm
     def test_kl_lowrank_multivariate_normal_batched(self):
         b = 7  # Number of batches
         loc = [torch.randn(b, 3) for _ in range(0, 2)]
@@ -4028,7 +4021,6 @@ class TestValidation(TestCase):
         super(TestCase, self).setUp()
         Distribution.set_default_validate_args(True)
 
-    @skipIfRocm
     def test_valid(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
