@@ -139,7 +139,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       const std::vector<TIndex>& dims,
       const std::vector<T>& values,
       at::BaseContext* context)
-      : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
+      : storage_(context->device_type(), TypeMeta::Make<T>()) {
     Resize(dims);
     CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), numel_);
     context->CopyItemsFromCPU(
@@ -154,7 +154,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       typename T,
       typename = typename std::enable_if<std::is_scalar<T>::value>::type>
   TensorImpl(const T& value, at::BaseContext* context)
-      : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
+      : storage_(context->device_type(), TypeMeta::Make<T>()) {
     Resize(std::vector<TIndex>{});
     context->CopyItemsFromCPU(
         storage_.dtype(), numel_, &value, mutable_data<T>());
@@ -236,7 +236,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
                 nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());
           } else {
             CAFFE_ENFORCE(
-                context->GetDevicetype() == src.GetDeviceType(),
+                context->device_type() == src.GetDeviceType(),
                 "Type for provided context does not match the type of source");
             context->CopyBytesToDevice(
                 nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());
