@@ -27,11 +27,10 @@ THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
                                 THCTensor_(data)(state, self), 1,
                                 THCTensor_(data)(state, src), 1);
 #elif defined(THC_REAL_IS_HALF)
-  accreal result = ScalarConvert<half, accreal>::to(
-                   THCudaBlas_Hdot(state,
+  accreal result = THCudaBlas_Hdot(state,
                                 THCTensor_(nElement)(state, self),
                                 THCTensor_(data)(state, self), 1,
-                                THCTensor_(data)(state, src), 1));
+                                THCTensor_(data)(state, src), 1);
 #endif
 
   THCTensor_(free)(state, src);

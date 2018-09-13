@@ -331,9 +331,9 @@ void Node::lint() const {
   IR_ELSEIFM_CONST(PythonOp)
     size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
-      if (c == 's') {
+      if (c == 'c') {
         n_scalars++;
-      } else if (c == 't') {
+      } else if (c == 'd') {
         n_tensors++;
       } else {
         JIT_ASSERT(0);

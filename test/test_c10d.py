@@ -567,8 +567,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _test_ddp_with_process_group(self, process_group):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
+    def _test_ddp_with_process_group(self, process_group, gpus):
         model = Net()
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).cuda(gpus[0]),
@@ -620,14 +619,18 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-        self._test_ddp_with_process_group(process_group)
+        gpus = gpus_for_rank(self.world_size)[self.rank]
+        self._test_ddp_with_process_group(process_group, gpus)
+        self._test_ddp_with_process_group(process_group, list(map(lambda i: torch.device('cuda:' + str(i)), gpus)))
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
     def test_nccl_backend(self):
         store = c10d.TCPStore('localhost', self.port, self.is_master)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        self._test_ddp_with_process_group(process_group)
+        gpus = gpus_for_rank(self.world_size)[self.rank]
+        self._test_ddp_with_process_group(process_group, gpus)
+        self._test_ddp_with_process_group(process_group, list(map(lambda i: torch.device('cuda:' + str(i)), gpus)))
 
     @skip_if_not_multigpu
     def test_dist_broadcast_coalesced(self):

@@ -8,7 +8,7 @@
 #include <vector>
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/source_range.h"
-
+#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
@@ -85,7 +85,7 @@ namespace script {
   _(TK_SLICE_EXPR, "slice expr", "")             \
   _(TK_TYPE_COMMENT, "type comment", "# type:")
 
-static const char* valid_single_char_tokens = "+-*/@()[]:,={}><.?";
+static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -111,34 +111,28 @@ struct TokenTrie {
       kind = tok;
       return;
     }
-    auto& entry = children[*str];
-    if (entry == nullptr) {
-      entry.reset(new TokenTrie());
+
+    for (size_t i = 0, e = child_chars.size(); i < e; ++i) {
+      if (child_chars[i] == *str) {
+        child_tries[i]->insert(str + 1, tok);
+        return;
+      }
     }
-    entry->insert(str + 1, tok);
+
+    child_chars.emplace_back(*str);
+    child_tries.emplace_back(torch::make_unique<TokenTrie>());
+    child_tries.back()->insert(str + 1, tok);
   }
   int kind; // 0 == invalid token
-  std::unordered_map<char, TokenTrieRef> children;
+
+  std::vector<char> child_chars;
+  std::vector<TokenTrieRef> child_tries;
 };
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
 struct SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
-    // listed in increasing order of precedence
-    std::vector<std::vector<int>> binary_ops = {
-        {TK_IF},
-        {TK_AND, TK_OR},
-        {}, // reserve a level for unary not
-        {'<', '>', TK_EQ, TK_LE, TK_GE, TK_NE},
-        {'+', '-'},
-        {'*', '/', '@'},
-        {TK_POW},
-    };
-    std::vector<std::vector<int>> unary_ops = {
-        {'-', '*'},
-    };
-
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
       std::string str(1, *c);
@@ -151,26 +145,6 @@ struct SharedParserData {
   }
     TC_FORALL_TOKEN_KINDS(ADD_CASE)
 #undef ADD_CASE
-
-    // precedence starts at 1 so that there is always a 0 precedence
-    // less than any other precedence
-    int prec = 1;
-    for (auto& group : binary_ops) {
-      for (auto& element : group) {
-        binary_prec[element] = prec;
-      }
-      prec++;
-    }
-    // unary ops
-    for (auto& group : unary_ops) {
-      for (auto& element : group) {
-        unary_prec[element] = prec;
-      }
-      prec++;
-    }
-    // add unary not separately because it slots into the precedence of
-    // binary operators
-    unary_prec[TK_NOT] = binary_prec[TK_AND] + 1;
   }
   // 1. skip whitespace
   // 2. handle comment or newline
@@ -195,7 +169,7 @@ struct SharedParserData {
     return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
   }
 
-  // python conconcatenates all adjacent strings "a" "b" == "ab"
+  // python concatenates all adjacent strings "a" "b" == "ab"
   // strings can be enclosed with 1 or 3 single or double quotes
   // if enclosed with 3 quotes newlines are valid
   // as elsewhere, backslash and new line should be ignored
@@ -314,8 +288,16 @@ struct SharedParserData {
       // rather the
       // identifier 'max'
       if (cur) {
-        auto it = cur->children.find(str[pos + i]);
-        cur = (it == cur->children.end()) ? nullptr : it->second.get();
+        size_t child_offset = 0;
+        for (size_t e = cur->child_chars.size(); child_offset < e; ++child_offset) {
+          if (cur->child_chars[child_offset] == str[pos + i])
+          break;
+        }
+
+        cur = (child_offset == cur->child_chars.size())
+          ? nullptr
+          : cur->child_tries[child_offset].get();
+
         if (cur && cur->kind != 0) {
           matched = true;
           *len = i + 1;
@@ -325,22 +307,8 @@ struct SharedParserData {
     }
     return matched;
   }
-  bool isUnary(int kind, int* prec) {
-    auto it = unary_prec.find(kind);
-    if (it != unary_prec.end()) {
-      *prec = it->second;
-      return true;
-    }
-    return false;
-  }
-  bool isBinary(int kind, int* prec) {
-    auto it = binary_prec.find(kind);
-    if (it != binary_prec.end()) {
-      *prec = it->second;
-      return true;
-    }
-    return false;
-  }
+  bool isUnary(int kind, int* prec);
+  bool isBinary(int kind, int* prec);
   bool isRightAssociative(int kind) {
     switch (kind) {
       case '?':
@@ -356,10 +324,6 @@ struct SharedParserData {
     return isalpha(n) || n == '_' || (i > 0 && isdigit(n));
   }
   TokenTrieRef head;
-  std::unordered_map<int, int>
-      unary_prec; // map from token to its unary precedence
-  std::unordered_map<int, int>
-      binary_prec; // map from token to its binary precedence
 };
 
 SharedParserData& sharedParserData();

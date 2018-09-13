@@ -97,8 +97,7 @@ class Bernoulli(ExponentialFamily):
         return binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none')
 
     def enumerate_support(self, expand=True):
-        values = self._new((2,))
-        torch.arange(2, out=values)
+        values = torch.arange(2, dtype=self._param.dtype, device=self._param.device)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         if expand:
             values = values.expand((-1,) + self._batch_shape)

@@ -281,8 +281,8 @@ TEST_CASE("integration/cartpole") {
     for (auto i = 0U; i < saved_log_probs.size(); i++) {
       auto r = rewards[i] - saved_values[i].toCFloat();
       policy_loss.push_back(-r * saved_log_probs[i]);
-      value_loss.push_back(torch::smooth_l1_loss(
-          saved_values[i], torch::ones(1) * rewards[i]));
+      value_loss.push_back(
+          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * rewards[i]));
     }
 
     auto loss =
@@ -336,7 +336,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto drop = Dropout(0.3);
-  auto drop2d = Dropout2d(0.3);
+  auto drop2d = FeatureDropout(0.3);
   auto linear1 = model->add(Linear(320, 50), "linear1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
@@ -370,12 +370,10 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
-  auto batchnorm2d =
-      model->add(BatchNorm(BatchNormOptions(10).stateful(true)), "batchnorm2d");
+  auto batchnorm2d = model->add(BatchNorm(10), "batchnorm2d");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto linear1 = model->add(Linear(320, 50), "linear1");
-  auto batchnorm1 =
-      model->add(BatchNorm(BatchNormOptions(50).stateful(true)), "batchnorm1");
+  auto batchnorm1 = model->add(BatchNorm(50), "batchnorm1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
