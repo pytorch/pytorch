@@ -15,11 +15,9 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
   prim::If,
   prim::Loop, //TODO: handle Loop
-  //FIXME Same problem as in DCE - cpp & python PythonOp and CppOp should be
-  //FIXME treated as having side effects but ONNX depends on them being removed
   prim::Print,
+  prim::PythonOp, //may have side effects
   //all the rand functions from native_functions.yaml
-  aten::permute,
   aten::rand,
   aten::rand_out,
   aten::rand_like,
@@ -33,6 +31,7 @@ std::unordered_set<Symbol> skip_list = {
   aten::randperm_out,
   prim::Constant,
   prim::Undefined,
+  prim::NoneGenerator,
   // TODO (zach): we should consider skipping tensor factories in the cases
   // where the constant tensor would be large but cheap to create.
  };

@@ -22,6 +22,7 @@ USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
 CAFFE2_STATIC_LINK_CUDA=0
+TORCH_USE_CEREAL=0
 RERUN_CMAKE=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -45,6 +46,9 @@ while [[ $# -gt 0 ]]; do
           ;;
       --cuda-static-link)
           CAFFE2_STATIC_LINK_CUDA=1
+          ;;
+      --use-cereal)
+          TORCH_USE_CEREAL=1
           ;;
       *)
           break
@@ -190,6 +194,7 @@ function build() {
 		       -DTHCUNN_SO_VERSION=1 \
 		       -DTHD_SO_VERSION=1 \
 		       -DUSE_CUDA=$USE_CUDA \
+		       -DTORCH_USE_CEREAL=$TORCH_USE_CEREAL \
 		       -DBUILD_EXAMPLES=OFF \
 		       -DBUILD_TEST=$BUILD_TEST \
 		       -DNO_NNPACK=$((1-$USE_NNPACK)) \
@@ -237,7 +242,7 @@ function build_nccl() {
   fi
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
-  $SYNC_COMMAND "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
+  find lib -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "${INSTALL_DIR}/lib/"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
     ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
   fi
@@ -312,8 +317,8 @@ function build_caffe2() {
 
   # This is needed by the aten tests built with caffe2
   if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
-    # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
-    $SYNC_COMMAND "${INSTALL_DIR}/lib/libnccl.so.1" "lib/libnccl.so.1"
+      # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
+      find "${INSTALL_DIR}/lib" -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "lib/"
   fi
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"

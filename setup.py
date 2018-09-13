@@ -123,6 +123,7 @@ import distutils.unixccompiler
 import distutils.command.build
 import distutils.command.clean
 import distutils.sysconfig
+import filecmp
 import platform
 import subprocess
 import shutil
@@ -448,9 +449,7 @@ class build_deps(PytorchCommand):
         if USE_DISTRIBUTED:
             if IS_LINUX:
                 libs += ['gloo']
-                # TODO: make c10d build without CUDA
-                if USE_CUDA:
-                    libs += ['c10d']
+                libs += ['c10d']
             libs += ['THD']
         build_libs(libs)
 
@@ -459,9 +458,14 @@ class build_deps(PytorchCommand):
         sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
         orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
         for sym_file, orig_file in zip(sym_files, orig_files):
+            same = False
             if os.path.exists(sym_file):
-                os.remove(sym_file)
-            shutil.copyfile(orig_file, sym_file)
+                if filecmp.cmp(sym_file, orig_file):
+                    same = True
+                else:
+                    os.remove(sym_file)
+            if not same:
+                shutil.copyfile(orig_file, sym_file)
 
         # Copy headers necessary to compile C++ extensions.
         #
@@ -624,7 +628,7 @@ class build_ext(build_ext_parent):
         if USE_DISTRIBUTED:
             print('-- Building with THD distributed package ')
             monkey_patch_THD_link_flags()
-            if IS_LINUX and USE_CUDA:
+            if IS_LINUX:
                 print('-- Building with c10d distributed package ')
                 monkey_patch_C10D_inc_flags()
             else:
@@ -964,10 +968,11 @@ if USE_DISTRIBUTED:
     ]
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
-    if IS_LINUX and USE_CUDA:
+    if IS_LINUX:
         extra_compile_args.append('-DUSE_C10D')
         main_sources.append('torch/csrc/distributed/c10d/init.cpp')
-        main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
+        if USE_CUDA:
+            main_sources.append('torch/csrc/distributed/c10d/ddp.cpp')
         main_link_args.append(C10D_LIB)
 
 if USE_CUDA:
