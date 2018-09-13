@@ -4153,6 +4153,36 @@ class TestJit(TestCase):
                 sample = Dist(**param).sample()
                 yield Dist, keys, values, sample
 
+    def _perturb_tensor(self, value, constraint):
+        if isinstance(constraint, constraints._IntegerGreaterThan):
+            return value + 1
+        if isinstance(constraint, constraints._PositiveDefinite):
+            return value + torch.eye(value.shape[-1])
+        if value.dtype in [torch.float, torch.double]:
+            transform = transform_to(constraint)
+            delta = value.new(value.shape).normal_()
+            return transform(transform.inv(value) + delta)
+        if value.dtype == torch.long:
+            result = value.clone()
+            result[value == 0] = 1
+            result[value == 1] = 0
+            return result
+        raise NotImplementedError
+
+    def _perturb(self, Dist, keys, values, sample):
+        with torch.no_grad():
+            if Dist is Uniform:
+                param = dict(zip(keys, values))
+                param['low'] = param['low'] - torch.rand(param['low'].shape)
+                param['high'] = param['high'] + torch.rand(param['high'].shape)
+                values = [param[key] for key in keys]
+            else:
+                values = [self._perturb_tensor(value, Dist.arg_constraints.get(key, constraints.real))
+                          for key, value in zip(keys, values)]
+            param = dict(zip(keys, values))
+            sample = Dist(**param).sample()
+            return values, sample
+
     def test_sample(self):
         for Dist, keys, values, sample in self._examples():
 
@@ -4213,17 +4243,30 @@ class TestJit(TestCase):
 
     def test_log_prob(self):
         for Dist, keys, values, sample in self._examples():
+            # FIXME traced functions produce incorrect results
+            xfail = [LowRankMultivariateNormal, MultivariateNormal]
+            if Dist in xfail:
+                continue
 
             def f(sample, *values):
                 param = dict(zip(keys, values))
                 dist = Dist(**param)
                 return dist.log_prob(sample)
 
-            torch.jit.trace(f, (sample,) + values)
+            traced_f = torch.jit.trace(f, (sample,) + values)
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(sample, *values)
+            actual = traced_f(sample, *values)
+            self.assertEqual(expected, actual,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_enumerate_support(self):
         for Dist, keys, values, sample in self._examples():
-            if not Dist.has_enumerate_support:
+            # FIXME traced functions produce incorrect results
+            xfail = [Binomial]
+            if Dist in xfail:
                 continue
 
             def f(*values):
@@ -4232,9 +4275,16 @@ class TestJit(TestCase):
                 return dist.enumerate_support()
 
             try:
-                torch.jit.trace(f, values)
+                traced_f = torch.jit.trace(f, values)
             except NotImplementedError:
                 continue
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(*values)
+            actual = traced_f(*values)
+            self.assertEqual(expected, actual,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_mean(self):
         for Dist, keys, values, sample in self._examples():
@@ -4245,12 +4295,23 @@ class TestJit(TestCase):
                 return dist.mean
 
             try:
-                torch.jit.trace(f, values)
+                traced_f = torch.jit.trace(f, values)
             except NotImplementedError:
                 continue
 
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(*values)
+            actual = traced_f(*values)
+            expected[expected == float('inf')] = 0.
+            actual[actual == float('inf')] = 0.
+            self.assertEqual(expected, actual, allow_inf=True,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+
     def test_variance(self):
         for Dist, keys, values, sample in self._examples():
+            if Dist in [Cauchy, HalfCauchy]:
+                continue  # infinite variance
 
             def f(*values):
                 param = dict(zip(keys, values))
@@ -4258,12 +4319,25 @@ class TestJit(TestCase):
                 return dist.variance
 
             try:
-                torch.jit.trace(f, values)
+                traced_f = torch.jit.trace(f, values)
             except NotImplementedError:
                 continue
 
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(*values)
+            actual = traced_f(*values)
+            expected[expected == float('inf')] = 0.
+            actual[actual == float('inf')] = 0.
+            self.assertEqual(expected, actual, allow_inf=True,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+
     def test_entropy(self):
         for Dist, keys, values, sample in self._examples():
+            # FIXME traced functions produce incorrect results
+            xfail = [LowRankMultivariateNormal, MultivariateNormal]
+            if Dist in xfail:
+                continue
 
             def f(*values):
                 param = dict(zip(keys, values))
@@ -4271,9 +4345,16 @@ class TestJit(TestCase):
                 return dist.entropy()
 
             try:
-                torch.jit.trace(f, values)
+                traced_f = torch.jit.trace(f, values)
             except NotImplementedError:
                 continue
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(*values)
+            actual = traced_f(*values)
+            self.assertEqual(expected, actual, allow_inf=True,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
     def test_cdf(self):
         for Dist, keys, values, sample in self._examples():
@@ -4285,9 +4366,16 @@ class TestJit(TestCase):
                 return dist.icdf(cdf)
 
             try:
-                torch.jit.trace(f, (sample,) + values)
+                traced_f = torch.jit.trace(f, (sample,) + values)
             except NotImplementedError:
                 continue
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(sample, *values)
+            actual = traced_f(sample, *values)
+            self.assertEqual(expected, actual,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
 
 
 if __name__ == '__main__':
