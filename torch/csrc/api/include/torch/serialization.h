@@ -2,45 +2,69 @@
 
 #include <fstream>
 
-#include <torch/optim.h>
 #include <torch/tensor.h>
 #include <torch/utils.h>
 
+#if defined(TORCH_USE_CEREAL)
+#include <cereal/access.hpp>
+#include <cereal/cereal.hpp>
+#include <cereal/types/polymorphic.hpp>
+
 #include "cereal/archives/binary.hpp"
-#include "cereal/types/polymorphic.hpp"
 
 #include "cereal/types/string.hpp"
 #include "cereal/types/unordered_map.hpp"
 #include "cereal/types/vector.hpp"
+#endif // defined(TORCH_USE_CEREAL)
 
 namespace torch {
-
 // Some convenience functions for saving and loading
 template <typename T>
 void save(std::ostream& stream, T const& obj) {
+#if defined(TORCH_USE_CEREAL)
   cereal::BinaryOutputArchive archive(stream);
   archive(*obj);
+#else
+  AT_ERROR("PyTorch compiled without serialization support");
+#endif
 }
+
 template <typename T>
 void load(std::istream& stream, T& obj) {
+#if defined(TORCH_USE_CEREAL)
   cereal::BinaryInputArchive archive(stream);
   archive(*obj);
+#else
+  AT_ERROR("PyTorch compiled without serialization support");
+#endif
 }
+
 template <typename T>
 void save(std::ostream& stream, T const* obj) {
+#if defined(TORCH_USE_CEREAL)
   cereal::BinaryOutputArchive archive(stream);
   archive(*obj);
+#else
+  AT_ERROR("PyTorch compiled without serialization support");
+#endif
 }
+
 template <typename T>
 void load(std::istream& stream, T* obj) {
+#if defined(TORCH_USE_CEREAL)
   cereal::BinaryInputArchive archive(stream);
   archive(*obj);
+#else
+  AT_ERROR("PyTorch compiled without serialization support");
+#endif
 }
+
 template <typename T>
 void save(std::string const& path, T const& obj) {
   std::ofstream os(path, std::ios::binary);
   torch::save(os, obj);
 }
+
 template <typename T>
 void load(std::string const& path, T& obj) {
   std::ifstream is(path, std::ios::binary);
@@ -74,8 +98,7 @@ inline int32_t scalarTypeId(torch::Dtype type) {
     case torch::Dtype::Undefined:
       return 8;
     default:
-      throw std::runtime_error(
-          "Unknown scalar type: " + std::to_string(static_cast<int>(type)));
+      AT_ERROR("Unknown scalar type: ", static_cast<int>(type));
   }
 }
 
@@ -100,7 +123,7 @@ inline torch::Dtype scalarTypeFromId(int32_t id) {
     case 8:
       return torch::Dtype::Undefined;
     default:
-      throw std::runtime_error("Unknown scalar type id: " + std::to_string(id));
+      AT_ERROR("Unknown scalar type id: ", id);
   }
 }
 
@@ -117,8 +140,7 @@ inline int32_t backendId(at::Backend backend) {
     case at::Backend::Undefined:
       return 4;
     default:
-      throw std::runtime_error(
-          "Unknown backend: " + std::to_string(static_cast<int>(backend)));
+      AT_ERROR("Unknown backend: ", static_cast<int>(backend));
   }
 }
 
@@ -135,33 +157,15 @@ inline at::Backend backendFromId(int32_t id) {
     case 4:
       return at::Backend::Undefined;
     default:
-      throw std::runtime_error("Unknown backend id: " + std::to_string(id));
+      AT_ERROR("Unknown backend id: ", id);
   }
 }
 
 } // namespace detail
 } // namespace torch
 
-// This is super ugly and I don't know how to simplify it
-CEREAL_REGISTER_TYPE(torch::optim::SGD);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::Optimizer,
-    torch::optim::SGD);
-CEREAL_REGISTER_TYPE(torch::optim::Adagrad);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::Optimizer,
-    torch::optim::Adagrad);
-CEREAL_REGISTER_TYPE(torch::optim::RMSprop);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::Optimizer,
-    torch::optim::RMSprop);
-CEREAL_REGISTER_TYPE(torch::optim::Adam);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::Optimizer,
-    torch::optim::Adam);
-
+#if defined(TORCH_USE_CEREAL)
 namespace cereal {
-
 namespace agimpl {
 
 template <class Archive>
@@ -269,3 +273,4 @@ void load(Archive& archive, torch::Tensor& tensor) {
   }
 }
 } // namespace cereal
+#endif // defined(TORCH_USE_CEREAL)

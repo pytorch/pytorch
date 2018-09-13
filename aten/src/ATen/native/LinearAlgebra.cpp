@@ -1,7 +1,10 @@
 #include "ATen/ATen.h"
 #include "ATen/ExpandUtils.h"
+#include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/native/LinearAlgebraUtils.h"
+#include "ATen/TensorUtils.h"
+#include "ATen/Parallel.h"
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -169,14 +172,14 @@ Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
     return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
   }
-  return self.type()._mm(self, mat2);
+  return at::_mm(self, mat2);
 }
 
 Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm_out(result, at::zeros({}, mat2.type()), self, mat2, 0, 1);
+    return at::addmm_out(result, at::zeros({}, mat2.options()), self, mat2, 0, 1);
   }
-  return self.type()._mm_out(result, self, mat2);
+  return at::_mm_out(result, self, mat2);
 }
 
 Tensor mv(const Tensor& self, const Tensor& vec) {
@@ -220,6 +223,153 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
   return at::_addr_out(result, self, vec1, vec2, beta, alpha);
+}
+
+template <typename scalar_t, bool is_bmm>
+inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
+  int64_t bs = result.size(0);
+  int64_t is = result.size(1);
+  int64_t js = result.size(2);
+  int64_t ks = self.size(2);
+
+  scalar_t alpha = alpha_.to<scalar_t>();
+  scalar_t beta = beta_.to<scalar_t>();
+
+  auto r0 = result.accessor<scalar_t, 3>();
+  auto s0 = self.accessor<scalar_t, 3>();
+  auto m0 = mat2.accessor<scalar_t, 3>();
+
+  int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
+      for (int64_t b = b_begin; b < b_end; b++) {
+        auto r1 = r0[b];
+        auto s1 = s0[b];
+        auto m1 = m0[b];
+        for (int64_t i = 0; i < is; i++) {
+          auto r2 = r1[i];
+          auto s2 = s1[i];
+          for (int64_t j = 0; j < js; j++) {
+            scalar_t &r = r2[j];
+            if (is_bmm) {
+              r = 0;
+              for (int64_t k = 0; k < ks; k++) {
+                r += s2[k] * m1[k][j];
+              }
+            } else {
+              r *= beta;
+              for (int64_t k = 0; k < ks; k++) {
+                r += alpha * s2[k] * m1[k][j];
+              }
+            }
+          }
+        }
+      }
+    });
+}
+
+// This tries to apply some optimizations to bmm/baddbmm:
+// - When the operand size is small, computation are parallelized over the batch
+//   dimension using OMP and naive matrix multiplication is applied.
+// - When the operand size is larger than the threshold, if compiled with MKL, MKL's batch gemm is used.
+// - Otherwise, we use a series of matrix multiplications.
+// The threshold of 400 for the first has not been thoroughly benchmarked yet and may have room for further
+// optimization, it likely depends on the characteristics of the CPU, MKL will be different from non-MKL etc.,
+// but this seems to be a first starting point.
+
+static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha, bool is_bmm_out) {
+  // is_bmm_out: true for bmm_out, false for baddbmm_
+  // self_or_result is "self" for baddbmm_ and "result" for bmm_out
+  CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
+  TensorArg self_arg(self_or_result, is_bmm_out ? "self" : "result", 0);
+  TensorArg b1_arg(batch1, "batch1", 1);
+  TensorArg b2_arg(batch2, "batch2", 2);
+  checkDim(c, b1_arg, 3);
+  checkDim(c, b2_arg, 3);
+
+  int64_t bs = batch1.size(0);
+  checkSize(c, b2_arg, 0, bs);
+  int64_t contraction_size = batch1.size(2);
+  int64_t res_rows = batch1.size(1);
+  int64_t res_cols = batch2.size(2);
+  checkSize(c, b2_arg, 1, contraction_size);
+
+  if (is_bmm_out) {
+    self_or_result.resize_({bs, res_rows, res_cols});
+  } else {
+    checkSize(c, self_arg, 0, bs);
+    checkSize(c, self_arg, 1, res_rows);
+    checkSize(c, self_arg, 2, res_cols);
+  }
+
+  // handle pathological cases that blas may not like
+  if (self_or_result.numel() == 0) {
+    return self_or_result;
+  } else if (contraction_size == 0) {
+    return self_or_result.zero_();
+  }
+  
+  auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
+    return (t.stride(2) == 1 && t.stride(1) == t.size(2))
+            || (t.stride(1) == 1 && t.stride(2) == t.size(1));
+  };
+
+  if (contraction_size * res_rows * res_cols < 400) {
+    if (is_bmm_out) {
+      AT_DISPATCH_ALL_TYPES(batch1.type(), "bmm", [&] {
+          baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
+        });
+    } else {
+      AT_DISPATCH_ALL_TYPES(batch1.type(), "baddbmm", [&] {
+          baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
+        });
+    }
+  } else if (at::hasMKL() && at::native::is_floating_point(self_or_result)
+	     && batch_items_contiguous_or_transposed(batch1)
+	     && batch_items_contiguous_or_transposed(batch2)
+	     && self_or_result.is_contiguous()) {
+    at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
+  } else { // split along batch dimension
+    if (is_bmm_out) {
+      for (int64_t b = 0; b < bs; b++) {
+        auto r = self_or_result.select(0, b);
+        at::native::mm_out(r, batch1.select(0, b), batch2.select(0, b));
+      }
+    } else {
+      for (int64_t b = 0; b < bs; b++) {
+        self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
+      }
+    }
+  }
+  return self_or_result;
+}
+
+
+Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor result = self.type().tensor();
+  return at::native::baddbmm_out_cpu(result, self, batch1, batch2, beta, alpha);
+}
+
+Tensor& baddbmm_out_cpu(Tensor &result, const Tensor& self_, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor self;
+  std::tie(self) = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
+}
+
+Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  return bmm_out_or_baddbmm_(self, batch1, batch2, beta, alpha, false);
+}
+
+Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
+  Tensor result = self.type().tensor();
+  return at::native::bmm_out_cpu(result, self, mat2);
+}
+
+Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
+  Scalar beta(0.0);
+  Scalar alpha(1.0);
+  return bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
 }
 
 Tensor dot(const Tensor& self, const Tensor& tensor) {

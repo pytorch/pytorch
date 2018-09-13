@@ -1,7 +1,7 @@
 #include "THCStorage.hpp"
 #include "THCGeneral.h"
 
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 
 #include <new>
 

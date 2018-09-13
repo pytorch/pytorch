@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/detail/static.h>
+#include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/any.h>
 #include <torch/nn/pimpl.h>
@@ -57,10 +58,11 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     AT_CHECK(!is_empty(), "Cannot call forward() on an empty Sequential");
 
     auto iterator = modules_.begin();
-    auto input = iterator->forward(std::forward<ArgumentTypes>(arguments)...);
+    auto input =
+        iterator->any_forward(std::forward<ArgumentTypes>(arguments)...);
 
     for (++iterator; iterator != modules_.end(); ++iterator) {
-      input = iterator->forward(std::move(input));
+      input = iterator->any_forward(std::move(input));
     }
 
     // Check the return value and give a nice error message if the requsted

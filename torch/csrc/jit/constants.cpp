@@ -35,6 +35,10 @@ Value* insertConstant(
   } else if(val.isString()) {
     n->s_(attr::value, val.toString()->string());
     n->output()->setType(StringType::get());
+  } else if(val.isNone()) {
+    n->destroy();
+    n = g.create(prim::None);
+    n->output()->setType(NoneType::get());
   } else {
     throw constant_not_supported_error("Unsupported value kind: " + val.tagKind());
   }

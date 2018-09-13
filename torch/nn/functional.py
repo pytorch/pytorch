@@ -67,6 +67,8 @@ planes.
 
 See :class:`~torch.nn.Conv1d` for details and output shape.
 
+.. include:: cudnn_deterministic.rst
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
     weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kW)`
@@ -94,6 +96,8 @@ Applies a 2D convolution over an input image composed of several input
 planes.
 
 See :class:`~torch.nn.Conv2d` for details and output shape.
+
+.. include:: cudnn_deterministic.rst
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
@@ -124,6 +128,8 @@ planes.
 
 See :class:`~torch.nn.Conv3d` for details and output shape.
 
+.. include:: cudnn_deterministic.rst
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
     weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kT \times kH \times kW)`
@@ -151,6 +157,8 @@ Applies a 1D transposed convolution operator over an input signal
 composed of several input planes, sometimes also called "deconvolution".
 
 See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
+
+.. include:: cudnn_deterministic.rst
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
@@ -182,6 +190,8 @@ Applies a 2D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution".
 
 See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
+
+.. include:: cudnn_deterministic.rst
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
@@ -215,6 +225,8 @@ Applies a 3D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution"
 
 See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
+
+.. include:: cudnn_deterministic.rst
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
@@ -661,6 +673,8 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
+    # This is 100% the same code as dropout2d. We duplicate this code so that
+    # stack traces are not confusing.
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -1435,6 +1449,8 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
     r"""The Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,

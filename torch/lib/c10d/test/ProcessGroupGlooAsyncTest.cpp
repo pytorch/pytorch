@@ -52,6 +52,8 @@ class AsyncTest {
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
+    ::gloo::transport::tcp::attr attr;
+    options.devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
         new ::c10d::ProcessGroupGloo(store, rank, size, options));
@@ -262,4 +264,5 @@ int main(int argc, char** argv) {
     TemporaryFile file;
     runAsyncBroadcastTest(file.path, 4, 1);
   }
+  std::cout << "Test successful" << std::endl;
 }

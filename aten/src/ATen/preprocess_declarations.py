@@ -217,8 +217,20 @@ def discover_sparse_tensor_operations(declaration):
                                                                        (raw_args - filtered_args)]
 
 
+def is_extended_method(option):
+    if 'method' in option['variants']:
+        return False
+    elif option.get('deprecated', False):
+        return False
+    elif not option['variants']:
+        return False
+    else:
+        return True
+
+
 def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
+    non_extended_methods = set()
     for declaration in declarations:
         common_with_cwrap.set_declaration_defaults(declaration)
         declaration['options'] = [deepcopy(o) for o in declaration['options']]
@@ -237,6 +249,20 @@ def run(declarations):
                 sanitize_return(option)
             process_types_and_backends(option)
             add_variants(option)
+            if not is_extended_method(option):
+                non_extended_methods.add(option['api_name'])
         declaration['options'] = handle_outputs_taken_as_arguments(
             declaration['options'])
+
+    # We (very unfortunately) have overloaded virtual methods. Because
+    # of C++'s rules, we cannot move one overload without doing some
+    # extra work to make sure that overload in a superclass and an
+    # overload in a subclass resolve together. I've chosen to resolve
+    # this problem simply by moving ALL overloads of a method which
+    # occurs in Tensor to Type.  This is why we have to first compute
+    # which methods *names* go on type, and then move ALL overloads
+    # of this name to Type.
+    for declaration in declarations:
+        for option in declaration['options']:
+            option['extended_method'] = option['api_name'] not in non_extended_methods
     return declarations
