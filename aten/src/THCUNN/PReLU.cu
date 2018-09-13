@@ -1,5 +1,5 @@
 #include "THCUNN.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 #include "THCTensor.hpp"
@@ -69,7 +69,7 @@ struct PReLUAccGradParametersShared
 {
   __device__ __forceinline__ void operator()(T *gradInput, T  *input, T *gradOutput)
   {
-    *gradInput = (*input) * (*gradOutput) * (*input <= 0);
+    *gradInput = (*input) * (*gradOutput) * static_cast<int>(*input <= 0);
   }
 };
 
@@ -84,7 +84,7 @@ struct PReLUAccGradParameters
 
   __device__ __forceinline__ void operator()(T *gradInput, T *input, T *gradOutput)
   {
-    *gradInput = (*input) * (*gradOutput) * scale * (*input <= 0);
+    *gradInput = (*input) * (*gradOutput) * scale * static_cast<int>(*input <= 0);
   }
 };
 
@@ -99,7 +99,7 @@ struct PReLUAccGradParameters1to1
 
   __device__ __forceinline__ void operator()(T *gradWeight, T *input, T *gradOutput)
   {
-    *gradWeight += (*input) * (*gradOutput) * scale * (*input <= 0);
+    *gradWeight += (*input) * (*gradOutput) * scale * static_cast<int>(*input <= 0);
   }
 };
 

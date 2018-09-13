@@ -39,7 +39,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   ss << "The shape of the mask " << mask.sizes() << " at index " << maskIdx;
   ss << " does not match the shape of the indexed tensor " << self.sizes();
   ss << " at index " << idx;
-  throw std::runtime_error(ss.str());
+  AT_ERROR(ss.str());
 }
 
 static void checkIndexTensorTypes(TensorList indices) {
@@ -47,9 +47,8 @@ static void checkIndexTensorTypes(TensorList indices) {
     if (tensor.defined()) {
       auto& type = tensor.type();
       auto scalarType = type.scalarType();
-      if (scalarType != kLong && scalarType != kByte) {
-        throw std::runtime_error("tensors used as indices must be long or byte tensors");
-      }
+      AT_CHECK(scalarType == kLong || scalarType == kByte,
+               "tensors used as indices must be long or byte tensors");
     }
   }
 }
@@ -146,12 +145,10 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size)
   if (index.numel() != 0) {
     auto max_idx = index.max().toCLong();
     auto min_idx = index.min().toCLong();
-    if (max_idx >= dim_size) {
-      AT_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-    }
-    if (min_idx < -dim_size) {
-      AT_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-    }
+    AT_CHECK(max_idx < dim_size,
+             "index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    AT_CHECK(min_idx >= -dim_size,
+             "index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
   }
   return index.remainder(dim_size);
 }
@@ -230,9 +227,8 @@ static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) 
 }
 
 Tensor index(const Tensor & self, TensorList indices) {
-  if (indices.size() > (size_t)self.dim()) {
-   AT_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  }
+  AT_CHECK(indices.size() <= (size_t)self.dim(),
+           "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
 
   Tensor src, linearIndex;
   std::tie(src, linearIndex) = makeLinearIndex(self, indices);
@@ -240,9 +236,8 @@ Tensor index(const Tensor & self, TensorList indices) {
 }
 
 Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value) {
-  if (indices.size() > (size_t)self.dim()) {
-   AT_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  }
+  AT_CHECK(indices.size() <= (size_t)self.dim(),
+           "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
 
   Tensor src, linearIndex, expandedValue;
   std::tie(src, linearIndex) = makeLinearIndex(self, indices);
@@ -252,9 +247,8 @@ Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value) 
 }
 
 Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value) {
-  if (indices.size() > (size_t)self.dim()) {
-   AT_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  }
+  AT_CHECK(indices.size() <= (size_t)self.dim(),
+           "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
 
   Tensor src, linearIndex, expandedValue;
   std::tie(src, linearIndex) = makeLinearIndex(self, indices);
@@ -265,18 +259,14 @@ Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value) {
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   dim = maybe_wrap_dim(dim, self.dim());
 
-  if (index.dim() >= 2) {
-   AT_ERROR(
-        "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
-  }
+  AT_CHECK(index.dim() < 2,
+           "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
+
   int64_t numIndices = index.numel();
-  if (source.dim() == 0 && numIndices != 1) {
-   AT_ERROR(
-        "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
-  }
-  if (index.type().scalarType() != ScalarType::Long) {
-   AT_ERROR("index_copy_(): Expected LongTensor for index");
-  }
+  AT_CHECK(source.dim() != 0 || numIndices == 1,
+           "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
+  AT_CHECK(index.type().scalarType() == ScalarType::Long,
+           "index_copy_(): Expected LongTensor for index");
 
   // Check that source and destination slices have the same size
   auto selfSlicedSizes = self.sizes().vec();
@@ -294,7 +284,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
     ss << "index_copy_(): Source/destination tensor must have same slice shapes. ";
     ss << "Destination slice shape: " << selfSlicedSizes << " at dimension " << dim;
     ss << " and source slice shape: " << sourceSlicedSizes << " at dimension 0.";
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
   if (source.dim() > 0 && numIndices != source.size(dim)) {
      AT_ERROR(

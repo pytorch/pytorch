@@ -12,7 +12,7 @@ Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
                 bool inverse, IntList checked_signal_sizes,
                 bool normalized, bool onesided,
                 IntList output_sizes) {
-  throw std::runtime_error("fft: ATen not compiled with MKL support");
+  AT_ERROR("fft: ATen not compiled with MKL support");
 }
 
 }}
@@ -191,12 +191,8 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
       osize = output_sizes[i];
       istride = complex_input ? input.stride(i) >> 1 : input.stride(i);
       ostride = onumel;
-      if (isize > MKL_LONG_MAX || osize > MKL_LONG_MAX || ostride > MKL_LONG_MAX) {
-        std::ostringstream ss;
-        ss << "MKL FFT: input signal numel exceeds allowed range [1 ~ "
-           << MKL_LONG_MAX << "]";
-        throw std::runtime_error(ss.str());
-      }
+      AT_CHECK(isize <= MKL_LONG_MAX && osize <= MKL_LONG_MAX && ostride <= MKL_LONG_MAX,
+               "MKL FFT: input signal numel exceeds allowed range [1 ~ ", MKL_LONG_MAX, "]");
       if (!need_contiguous && istride > MKL_LONG_MAX) {
         // If we didn't plan to contiguous-fy but the `istride` exceeds bound,
         // check if we can stride (equal to `inumel`) get back within bound if
@@ -205,12 +201,8 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
         // fine as `inumel` is non-decreasing.
         need_contiguous = true;
       }
-      if (need_contiguous && inumel > MKL_LONG_MAX) {
-        std::ostringstream ss;
-        ss << "MKL FFT: input signal numel exceeds allowed range [1 ~ "
-           << MKL_LONG_MAX << "]";
-        throw std::runtime_error(ss.str());
-      }
+      AT_CHECK(!need_contiguous || inumel <= MKL_LONG_MAX,
+               "MKL FFT: input signal numel exceeds allowed range [1 ~ ", MKL_LONG_MAX, "]");
       inumel *= isize;
       onumel *= osize;
     }
@@ -227,7 +219,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
     std::ostringstream ss;
     ss << "MKL FFT doesn't support tensor of type: "
        << at::toString(input.type().scalarType());
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
   // signal type
   DFTI_CONFIG_VALUE signal_type;

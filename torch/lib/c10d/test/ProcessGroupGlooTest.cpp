@@ -11,7 +11,10 @@
 
 #include <gloo/transport/tcp/device.h>
 
+#ifdef USE_CUDA
 #include <c10d/CUDAUtils.hpp>
+#endif
+
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/TestUtils.hpp>
@@ -43,6 +46,8 @@ class SignalTest {
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
+    ::gloo::transport::tcp::attr attr;
+    options.devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
 
     ::c10d::ProcessGroupGloo pg(store, rank, size, options);
 
@@ -124,6 +129,9 @@ class CollectiveTest {
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
+
+    ::gloo::transport::tcp::attr attr;
+    options.devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
         new ::c10d::ProcessGroupGloo(store, rank, size, options));
@@ -264,20 +272,25 @@ int main(int argc, char** argv) {
     testAllreduce(file.path, at::Backend::CPU);
   }
 
+#ifdef USE_CUDA
   {
     TemporaryFile file;
     testAllreduce(file.path, at::Backend::CUDA);
   }
+#endif
 
   {
     TemporaryFile file;
     testBroadcast(file.path, at::Backend::CPU);
   }
 
+#ifdef USE_CUDA
   {
     TemporaryFile file;
     testBroadcast(file.path, at::Backend::CUDA);
   }
+#endif
 
+  std::cout << "Test successful" << std::endl;
   return 0;
 }

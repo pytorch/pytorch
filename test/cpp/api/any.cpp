@@ -22,8 +22,9 @@ TEST_CASE("any-module") {
       }
     };
     AnyModule any(M{});
-    REQUIRE(any.forward().get<int>() == 123);
+    REQUIRE(any.forward<int>() == 123);
   }
+
   SECTION("int(int)") {
     struct M : torch::nn::Module {
       int forward(int x) {
@@ -31,8 +32,9 @@ TEST_CASE("any-module") {
       }
     };
     AnyModule any(M{});
-    REQUIRE(any.forward(5).get<int>() == 5);
+    REQUIRE(any.forward<int>(5) == 5);
   }
+
   SECTION("const char*(const char*)") {
     struct M : torch::nn::Module {
       const char* forward(const char* x) {
@@ -40,7 +42,7 @@ TEST_CASE("any-module") {
       }
     };
     AnyModule any(M{});
-    REQUIRE(any.forward("hello").get<const char*>() == std::string("hello"));
+    REQUIRE(any.forward<const char*>("hello") == std::string("hello"));
   }
 
   SECTION("string(int, const double)") {
@@ -51,7 +53,7 @@ TEST_CASE("any-module") {
     };
     AnyModule any(M{});
     int x = 4;
-    REQUIRE(any.forward(x, 3.14).get<std::string>() == std::string("7"));
+    REQUIRE(any.forward<std::string>(x, 3.14) == std::string("7"));
   }
 
   SECTION("Tensor(string, const string&, string&&)") {
@@ -66,8 +68,8 @@ TEST_CASE("any-module") {
     };
     AnyModule any(M{});
     REQUIRE(
-        any.forward(std::string("a"), std::string("ab"), std::string("abc"))
-            .get<torch::Tensor>()
+        any.forward(
+               std::string("a"), std::string("ab"), std::string("abc"))
             .sum()
             .toCInt() == 6);
   }
@@ -181,7 +183,7 @@ TEST_CASE("any-module") {
         any.forward<int>(5),
         StartsWith("Cannot call forward() on an empty AnyModule"));
   }
-  SECTION("can move assign differentm modules") {
+  SECTION("can move assign different modules") {
     struct M : torch::nn::Module {
       std::string forward(int x) {
         return std::to_string(x);
@@ -196,10 +198,10 @@ TEST_CASE("any-module") {
     REQUIRE(any.is_empty());
     any = std::make_shared<M>();
     REQUIRE(!any.is_empty());
-    REQUIRE(any.forward(5).get<std::string>() == "5");
+    REQUIRE(any.forward<std::string>(5) == "5");
     any = std::make_shared<N>();
     REQUIRE(!any.is_empty());
-    REQUIRE(any.forward(5.0f).get<int>() == 8);
+    REQUIRE(any.forward<int>(5.0f) == 8);
   }
   SECTION("constructs from ModuleHolder") {
     struct MImpl : torch::nn::Module {
@@ -218,6 +220,10 @@ TEST_CASE("any-module") {
     AnyModule any(M{5});
     REQUIRE(any.get<MImpl>().value == 5);
     REQUIRE(any.get<M>()->value == 5);
+
+    AnyModule module(Linear(3, 4));
+    std::shared_ptr<Module> ptr = module.ptr();
+    Linear linear(module.get<Linear>());
   }
   SECTION("converts autograd::Variable to torch::Tensor correctly") {
     struct M : torch::nn::Module {
@@ -232,12 +238,10 @@ TEST_CASE("any-module") {
       AnyModule any(M{});
       REQUIRE(
           any.forward(torch::autograd::Variable(torch::ones(5)))
-              .get<torch::Tensor>()
               .sum()
               .toCFloat() == 5);
       // at::Tensors that are not variables work too.
-      REQUIRE(
-          any.forward(at::ones(5)).get<torch::Tensor>().sum().toCFloat() == 5);
+      REQUIRE(any.forward(at::ones(5)).sum().toCFloat() == 5);
     }
   }
 }
