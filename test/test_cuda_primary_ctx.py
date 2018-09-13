@@ -16,12 +16,14 @@ if not TEST_CUDA:
     print('CUDA not available, skipping tests')
     TestCase = object  # noqa: F811
 
+
 def get_is_primary_context_created(device):
-    flags = ctypes.cast( (ctypes.c_uint*1)(), ctypes.POINTER(ctypes.c_uint) )
-    active = ctypes.cast( (ctypes.c_int*1)(), ctypes.POINTER(ctypes.c_int) )
+    flags = ctypes.cast((ctypes.c_uint * 1)(), ctypes.POINTER(ctypes.c_uint))
+    active = ctypes.cast((ctypes.c_int * 1)(), ctypes.POINTER(ctypes.c_int))
     result = torch.cuda.cudart().cuDevicePrimaryCtxGetState(ctypes.c_int(device), flags, active)
     assert result == 0, 'cuDevicePrimaryCtxGetState failed'
     return bool(active[0])
+
 
 class TestCudaPrimaryCtx(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
