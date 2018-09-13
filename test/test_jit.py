@@ -6848,7 +6848,7 @@ a")
             return torch.dropout(x, p=0.5, train=False)
 
         self.assertEqual(foo(input), input)
- 
+
 
 class MnistNet(nn.Module):
     def __init__(self):
