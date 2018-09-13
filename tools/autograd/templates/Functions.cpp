@@ -1399,26 +1399,28 @@ std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self
 // each output separately; there is not all that much sharing
 // of computation going on here.
 std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
-    const Tensor & mb_ggI,
-    const Tensor & mb_ggW,
-    const Tensor & mb_gO,
-    const Tensor & input,
-    const Tensor & weight,
-    std::array<bool, 3> output_mask) {
+    const Tensor & grad_grad_input,
+    const Tensor & grad_grad_weight,
+    const Tensor & grad_out,
+    const Tensor & input_,
+    const Tensor & weight_) {
+
+    auto input = input_.contiguous();
+    auto weight = weight_.contiguous();
 
   // Zero-fill undefined grads (TODO: do this more efficiently)
-  auto ggI = mb_ggI.defined() ? mb_ggI : at::zeros_like(input);
-  auto ggW = mb_ggW.defined() ? mb_ggW : at::zeros_like(weight);
-  auto gO = mb_gO.defined() ? mb_gO : at::zeros_like(input);
+  auto ggI = grad_grad_input.defined() ? grad_grad_input.contiguous() : at::zeros_like(input);
+  auto ggW = grad_grad_weight.defined() ? grad_grad_weight.contiguous() : at::zeros_like(weight);
+  auto gO = grad_out.defined() ? grad_out.contiguous() : at::zeros_like(input);
 
   auto positive_mask = (input > 0).type_as(ggI);
   auto nonpositive_mask = (input <= 0).type_as(ggW);
 
   // Explanation: Let input be i, weight be w, grad_output be gO.
-  // f(i, w) = i  if i > 0
-  //         = wi if i <= 0
-  // df/di * gO  = gO      if i > 0      df/dw * g0 = 0      if i > 0
-  //             = g0 * w  if i <= 0                = g0 * i  if i <= 0
+  // f(i, w) = i      if i > 0
+  //         = w * i  if i <= 0
+  // gI = df/di * gO  = gO      if i > 0    gW = df/dw * gO = 0       if i > 0
+  //                  = gO * w  if i <= 0                   = gO * i  if i <= 0
   // The rest is taking derivatives of these wrt i, w, gO and summing/expanding properly.
 
   if (weight.numel() == 1) {
@@ -1462,7 +1464,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       }
 
       Tensor ggO;
-      if (output_mask[0]) {
+      if (gO.requires_grad()) {
           // expand weight as input as in ggW/ggI above
           auto weight_expanded = weight;
           for (int64_t i = 0; i < dims_to_unsqueeze; i++) {

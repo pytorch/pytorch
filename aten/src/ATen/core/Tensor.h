@@ -551,6 +551,8 @@ struct AT_API Tensor {
   Tensor & round_();
   Tensor relu() const;
   Tensor & relu_();
+  Tensor prelu(const Tensor & weight) const;
+  std::tuple<Tensor,Tensor> prelu_backward(const Tensor & grad_output, const Tensor & weight) const;
   Tensor hardshrink(Scalar lambd=0.5) const;
   Tensor hardshrink_backward(const Tensor & grad_out, Scalar lambd) const;
   Tensor rsqrt() const;

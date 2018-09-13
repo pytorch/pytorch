@@ -4633,6 +4633,14 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_PReLU_backward_requires_grad_false(self):
+        m = nn.PReLU().to('cuda')
+        x = torch.randn(2, 3, 4, 5, requires_grad=False, device='cuda')
+        y = m(x)
+        y.mean().backward()
+        self.assertEqual(x.grad, None)
+
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
         input = torch.ones(5)
