@@ -52,6 +52,9 @@ VariableType::VariableType(Context* context, Type* baseType)
 ScalarType VariableType::scalarType() const {
   return baseType->scalarType();
 }
+caffe2::TypeMeta VariableType::typeMeta() const {
+  return baseType->typeMeta();
+}
 Backend VariableType::backend() const {
   return baseType->backend();
 }

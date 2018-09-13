@@ -36,6 +36,7 @@ void register_variable_type_for(at::Type* baseType);
 struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::Type* baseType);
   at::ScalarType scalarType() const override;
+  virtual caffe2::TypeMeta typeMeta() const override;
   at::Backend backend() const override;
   at::Allocator* allocator() const override;
   at::Device getDeviceFromPtr(void * data) const override;
