@@ -26,10 +26,6 @@ namespace caffe2 {
 
 using StorageImpl = at::StorageImpl;
 
-}
-
-namespace caffe2 {
-
 class CAFFE2_API Storage {
  public:
   Storage() {}
