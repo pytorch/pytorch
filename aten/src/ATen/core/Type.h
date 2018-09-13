@@ -82,6 +82,7 @@ struct AT_API Type {
 
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
+  virtual caffe2::TypeMeta typeMeta() const = 0;
   virtual Backend backend() const = 0;
   Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;

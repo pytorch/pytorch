@@ -11,12 +11,12 @@ public:
   Storage(const c10::intrusive_ptr<StorageImpl>& ptr) : storage_impl_(ptr) {}
   Storage(c10::intrusive_ptr<StorageImpl>&& ptr) : storage_impl_(std::move(ptr)) {}
   Storage(
-      at::ScalarType,
+      caffe2::TypeMeta,
       size_t size,
       Allocator* allocator,
       bool resizable = false);
   Storage(
-      at::ScalarType,
+      caffe2::TypeMeta,
       at::DataPtr,
       size_t size,
       const std::function<void(void*)>& deleter,
@@ -33,7 +33,7 @@ public:
   bool resizable() const { return storage_impl_->resizable(); }
   // get() use here is to get const-correctness
   void* data() const { return storage_impl_.get()->data(); }
-  const at::DataType dtype() const {
+  const caffe2::TypeMeta dtype() const {
     return storage_impl_->dtype();
   }
   const at::DataPtr& data_ptr() const { return storage_impl_->data_ptr(); }
