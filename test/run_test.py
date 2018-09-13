@@ -21,7 +21,7 @@ TESTS = [
     'cpp_extensions',
     'c10d',
     'cuda',
-    'cuda_primary_ctx.py'
+    'cuda_primary_ctx',
     'dataloader',
     'distributed',
     'distributions',
