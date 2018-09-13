@@ -1,8 +1,12 @@
 #pragma once
 
-#include "caffe2/core/storage.h"
+#include <ATen/core/TensorImpl.h>
 
-#include <ATen/core/intrusive_ptr.h>
+#include <ATen/core/context_base.h>
+
+#include "caffe2/core/common.h"
+#include "caffe2/core/flags.h"
+#include "caffe2/core/logging.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -19,14 +23,14 @@ namespace caffe2 {
 /**
  * A utility function to convert vector<int> to vector<TIndex>.
  */
-inline vector<TIndex> ToVectorTIndex(const std::vector<int>& src) {
-  return vector<TIndex>(src.begin(), src.end());
+inline std::vector<TIndex> ToVectorTIndex(const std::vector<int>& src) {
+  return std::vector<TIndex>(src.begin(), src.end());
 }
 
 /**
  * Return product of all dimensions starting from k
  */
-inline TIndex size_from_dim_(int k, const vector<TIndex>& dims) {
+inline TIndex size_from_dim_(int k, const std::vector<TIndex>& dims) {
   TIndex r = 1;
   for (size_t i = k; i < dims.size(); ++i) {
     r *= dims[i];
@@ -35,7 +39,7 @@ inline TIndex size_from_dim_(int k, const vector<TIndex>& dims) {
 }
 
 // Product of all dims up to k (not including dims[k])
-inline TIndex size_to_dim_(int k, const vector<TIndex>& dims) {
+inline TIndex size_to_dim_(int k, const std::vector<TIndex>& dims) {
   CAFFE_ENFORCE((unsigned)k <= dims.size());
   TIndex r = 1;
   for (int i = 0; i < k; ++i) {
@@ -45,7 +49,7 @@ inline TIndex size_to_dim_(int k, const vector<TIndex>& dims) {
 }
 
 // Product of all dims between k and l (not including dims[k] and dims[l])
-inline TIndex size_between_dim_(int k, int l, const vector<TIndex>& dims) {
+inline TIndex size_between_dim_(int k, int l, const std::vector<TIndex>& dims) {
   CAFFE_ENFORCE((unsigned)l < dims.size());
   TIndex r = 1;
   if (k < l) {
@@ -94,12 +98,12 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   // and immediately discard it in Resize() since
   // reset_tensor will be true and FreeMemory will be called,
   // we might want to avoid creating Storage twice?
-  explicit TensorImpl(const vector<TIndex>& dims, at::DeviceType device_type)
+  explicit TensorImpl(const std::vector<TIndex>& dims, at::DeviceType device_type)
       : storage_(device_type) {
     Resize(dims);
   }
 
-  explicit TensorImpl(const vector<int>& dims, at::DeviceType device_type)
+  explicit TensorImpl(const std::vector<int>& dims, at::DeviceType device_type)
       : storage_(device_type) {
     Resize(dims);
   }
@@ -130,8 +134,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   TensorImpl(
-      const vector<TIndex>& dims,
-      const vector<T>& values,
+      const std::vector<TIndex>& dims,
+      const std::vector<T>& values,
       BaseContext* context)
       : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
     Resize(dims);
@@ -149,7 +153,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       typename = typename std::enable_if<std::is_scalar<T>::value>::type>
   TensorImpl(const T& value, BaseContext* context)
       : storage_(context->GetDevicetype(), TypeMeta::Make<T>()) {
-    Resize(vector<TIndex>{});
+    Resize(std::vector<TIndex>{});
     context->CopyItemsFromCPU(
         storage_.dtype(), numel_, &value, mutable_data<T>());
   }
@@ -202,7 +206,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       return;
     }
     if (storage_.dtype() != src.meta()) {
-      storage_ = Storage(GetDeviceType(), src.meta());
+      storage_ = at::Storage(GetDeviceType(), src.meta());
     }
     if (src.size() == -1) {
       dims_.clear();
@@ -412,7 +416,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * Resizes the tensor without touching underlying storage.
    * This requires the total size of the tensor to remains constant.
    */
-  inline void Reshape(const vector<TIndex>& dims) {
+  inline void Reshape(const std::vector<TIndex>& dims) {
     TIndex new_size = 1;
     for (auto d : dims) {
       CAFFE_ENFORCE_GE_WITH_CALLER(d, 0);
@@ -430,7 +434,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     dims_ = dims;
   }
 
-  inline void Reshape(const vector<int>& dims) {
+  inline void Reshape(const std::vector<int>& dims) {
     Reshape(ToVectorTIndex(dims));
   }
 
@@ -441,7 +445,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = Storage(storage_.device_type(), storage_.dtype());
+    storage_ = at::Storage(storage_.device_type(), storage_.dtype());
   }
 
   /**
@@ -449,7 +453,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * is very slow since it involves quite some string operations, so do not use
    * it in your performance-critical code.
    */
-  string DebugString() const {
+  std::string DebugString() const {
     std::stringstream ss;
     ss << "A Tensor of item size " << storage_.itemsize() << " and type "
        << storage_.dtype().name() << " and dimension (";
@@ -552,7 +556,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     } else {
       int64_t numel = capacity / data_type.itemsize();
       // Create a new Storage
-      storage_ = Storage(data_type, numel, std::move(data_ptr), nullptr, true);
+      storage_ = at::Storage(data_type, numel, std::move(data_ptr), nullptr, true);
     }
   }
 
@@ -613,7 +617,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.set_dtype(meta);
       } else {
         if (storage_.dtype() != meta) {
-          storage_ = Storage(storage_.device_type(), meta);
+          storage_ = at::Storage(storage_.device_type(), meta);
         }
       }
 
@@ -735,7 +739,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Returns the dimensions of the tensor as a vector.
    */
-  inline const vector<TIndex>& dims() const {
+  inline const std::vector<TIndex>& dims() const {
     return dims_;
   }
 
@@ -813,11 +817,11 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     GetStaticContext()->ExtractDeviceOption(device, raw_data());
   }
 
-  const Storage& storage() {
+  const at::Storage& storage() {
     return storage_;
   }
 
-  const Storage& storage() const {
+  const at::Storage& storage() const {
     return storage_;
   }
 
@@ -830,14 +834,14 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ = false;
-  Storage storage_;
+  at::Storage storage_;
   // int64_t storage_offset_;
 
  private:
   template <
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
-  bool SetDims(const vector<T>& src) {
+  bool SetDims(const std::vector<T>& src) {
     auto old_numel = numel_;
     dims_.resize(src.size());
     TIndex new_numel = 1;
