@@ -6708,6 +6708,14 @@ a")
 
         self.assertEqual(foo(input), input)
 
+    def test_list_builtin(self):
+        @torch.jit.script
+        def fn(x):
+            y = list(x + 1, x + 2, x + 3)
+            return y[2]
+
+        self.assertExpectedGraph(fn.graph)
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
