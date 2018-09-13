@@ -72,7 +72,7 @@ IMPLEMENT_THC_CUDA_TENSOR_COPY(Long, Long, int64_t)
 // THCudaTensor aka the non-existent THCudaFloatTensor
 IMPLEMENT_THC_CUDA_TENSOR_COPY(Float, , float)
 IMPLEMENT_THC_CUDA_TENSOR_COPY(Double, Double, double)
-IMPLEMENT_THC_CUDA_TENSOR_COPY(Half, Half, half)
+IMPLEMENT_THC_CUDA_TENSOR_COPY(Half, Half, at::Half)
 
 #undef IMPLEMENT_THC_CUDA_TENSOR_COPY
 

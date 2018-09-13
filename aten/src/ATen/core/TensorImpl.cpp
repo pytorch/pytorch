@@ -34,7 +34,7 @@ TensorImpl::TensorImpl(Storage storage, TensorTypeId type_id, bool is_variable)
     is_contiguous_(true),
     numel_(0),
     type_id_(type_id),
-    scalar_type_(dataTypeToScalarType(storage_.dtype())),
+    scalar_type_(storage_ ? dataTypeToScalarType(storage_.dtype()) : ScalarType::Undefined),
     is_variable_(is_variable) {}
 
 IntList TensorImpl::sizes() const {

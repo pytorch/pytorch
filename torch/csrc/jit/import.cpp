@@ -180,7 +180,7 @@ void DecoderBase::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
 
 class ModuleDecoder : DecoderBase {
  public:
-  ModuleDecoder(std::shared_ptr<script::Module> root_module,
+  ModuleDecoder(ModuleLookup module_lookup,
                 const std::string& filename);
 
  private:
@@ -202,7 +202,7 @@ class ModuleDecoder : DecoderBase {
                                const std::vector<int64_t>& strides);
 
   std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
-      std::shared_ptr<script::Module> root_module,
+      ModuleLookup module_lookup,
       const std::string fullname);
 
   PyTorchFileReader file_reader_;
@@ -330,7 +330,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
 // Given a full name of a parameter or method,
 // return the parent submodule and local name
 std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFullName(
-    std::shared_ptr<script::Module> root_module,
+    ModuleLookup module_lookup,
     const std::string fullname) {
   std::vector<std::string> vec;
   std::stringstream ss(fullname);
@@ -339,18 +339,13 @@ std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFull
     vec.push_back(name);
   }
 
-  std::shared_ptr<script::Module> curr = root_module;
-  for (size_t i = 0; i < vec.size() - 1; i++) {
-    if (curr->find_module(vec[i]) == nullptr) {
-      curr->register_module(vec[i], std::make_shared<script::Module>());
-    }
-    curr = curr->get_module(vec[i]);
-  }
-  return std::make_pair(curr, vec.back());
+  std::string last = vec.back();
+  vec.pop_back();
+  return std::make_pair(module_lookup(vec), std::move(last));
 }
 
 ModuleDecoder::ModuleDecoder(
-    const std::shared_ptr<script::Module> root_module,
+    ModuleLookup module_lookup,
     const std::string &filename) :
     file_reader_(filename) {
   auto model_proto = onnx::ModelProto();
@@ -363,7 +358,7 @@ ModuleDecoder::ModuleDecoder(
   for (auto &tensor_proto : graph_proto.initializer()) {
     std::shared_ptr<script::Module> parent_module;
     std::string name;
-    std::tie(parent_module, name) = parseFullName(root_module, tensor_proto.name());
+    std::tie(parent_module, name) = parseFullName(module_lookup, tensor_proto.name());
 
     auto param = buildParameter(tensor_proto);
     parent_module->register_parameter(name, param, /* is_buffer = */ tensor_proto.int64_data(0));
@@ -373,7 +368,7 @@ ModuleDecoder::ModuleDecoder(
   for (auto &node_proto : graph_proto.node()) {
     std::shared_ptr<script::Module> parent_module;
     std::string name;
-    std::tie(parent_module, name) = parseFullName(root_module, node_proto.name());
+    std::tie(parent_module, name) = parseFullName(module_lookup, node_proto.name());
 
     std::vector<at::Tensor*> member_inputs;
     for (auto &param_name : node_proto.input()) {
@@ -393,15 +388,26 @@ ModuleDecoder::ModuleDecoder(
 
 }  // namespace
 
-void ImportIRModule(
-    const std::shared_ptr<script::Module> module,
+void import_ir_module(
+    ModuleLookup module_lookup,
     const std::string& filename) {
-  ModuleDecoder(module, filename);
+  ModuleDecoder(module_lookup, filename);
 }
 
 std::shared_ptr<script::Module> load(const std::string& filename) {
   auto module = std::make_shared<script::Module>();
-  ModuleDecoder(module, filename);
+
+  auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
+    std::shared_ptr<script::Module> curr = module;
+    for (const auto& name : qualified_name) {
+      if (curr->find_module(name) == nullptr) {
+        curr->register_module(name, std::make_shared<script::Module>());
+      }
+      curr = curr->get_module(name);
+    }
+    return curr;
+  };
+  ModuleDecoder(module_lookup, filename);
   return module;
 }
 
