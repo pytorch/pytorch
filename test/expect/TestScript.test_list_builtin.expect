@@ -1,0 +1,15 @@
+graph(%x : Dynamic) {
+  %1 : int = prim::Constant[value=3]()
+  %2 : int = prim::Constant[value=2]()
+  %3 : int = prim::Constant[value=1]()
+  %4 : int = prim::Constant[value=1]()
+  %5 : Dynamic = aten::add(%x, %3, %4)
+  %6 : int = prim::Constant[value=1]()
+  %7 : Dynamic = aten::add(%x, %2, %6)
+  %8 : int = prim::Constant[value=1]()
+  %9 : Dynamic = aten::add(%x, %1, %8)
+  %10 : Dynamic[] = prim::ListConstruct(%5, %7, %9)
+  %y : Dynamic[] = aten::list(%10)
+  %12 : Dynamic = aten::select(%y, %2)
+  return (%12);
+}

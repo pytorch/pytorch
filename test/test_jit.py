@@ -6870,6 +6870,17 @@ a")
 
         self.assertEqual(foo(input), input)
 
+    def test_list_builtin(self):
+        @torch.jit.script
+        def from_tuple(x):
+            tup = (x + 1, x + 2, x + 3)
+            y = list(tup)
+            # TODO: mutate y
+            # y[2] += 10
+            return y[2]
+
+        self.assertExpectedGraph(from_tuple.graph)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
