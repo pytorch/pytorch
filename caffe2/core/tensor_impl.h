@@ -103,7 +103,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * context pointer in tensor, which indicates the type of the tensor.
    */
   at::BaseStaticContext* GetStaticContext() const {
-    return get_static_context(GetDeviceType());
+    auto device_type = GetDeviceType();
+    return get_static_context(device_type);
   }
 
   /* @brief
@@ -732,7 +733,9 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void ExtractDeviceOption(DeviceOption* device) const {
-    GetStaticContext()->ExtractDeviceOption(device, raw_data());
+    auto* context = GetStaticContext();
+    CHECK(context);
+    context->ExtractDeviceOption(device, raw_data());
   }
 
   const at::Storage& storage() {
