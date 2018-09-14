@@ -51,7 +51,7 @@ CAFFE2_API const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
 static_assert(sizeof(unsigned short) == 2,
               "Short on this platform is not 16 bit.");
 namespace caffe2 {
-typedef at::Half float16;
+using float16 = at::Half;
 
 // Helpers to avoid using typeinfo with -rtti
 template <typename T>
