@@ -63,7 +63,7 @@ class Sequential(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return Sequential(OrderedDict(list(self._modules.items())[idx]))
+            return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
             return self._get_item_by_idx(self._modules.values(), idx)
 
