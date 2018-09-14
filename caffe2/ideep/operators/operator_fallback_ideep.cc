@@ -30,7 +30,6 @@
 #include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/affine_channel_op.h>
 #include <caffe2/operators/stop_gradient.h>
-#include <caffe2/sgd/adam_op.h>
 #include <caffe2/sgd/iter_op.h>
 #include <caffe2/sgd/learning_rate_op.h>
 
@@ -167,6 +166,5 @@ REGISTER_IDEEP_OPERATOR(
         NumericTypes,
         CPUContext,
         MulFunctor<CPUContext>>>);
-REGISTER_IDEEP_OPERATOR(Adam, IDEEPFallbackOp<AdamOp<float, CPUContext>>);
 
 } // namespace caffe2
