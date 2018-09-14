@@ -462,7 +462,6 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/parallel.cpp
     ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/sequential.cpp
-	#${TORCH_API_TEST_DIR}/static.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
     ${TORCH_API_TEST_DIR}/tensor.cpp
     ${TORCH_API_TEST_DIR}/jit.cpp
