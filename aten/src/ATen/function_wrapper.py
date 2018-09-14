@@ -192,7 +192,7 @@ if(${check_name}.type().is_sparse()) {
 
 BUFFER_DEFINITION = CodeTemplate("""\
 auto ${name}_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-    ${Backend}TensorId(), ScalarType::${ScalarName}, ${THTensor}_new(), false).release();
+    ${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), ${THTensor}_new(), false).release();
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
