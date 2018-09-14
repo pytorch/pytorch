@@ -22,7 +22,6 @@
 #include <caffe2/operators/loss_op.h>
 #include <caffe2/operators/pad_op.h>
 #include <caffe2/operators/prelu_op.h>
-#include <caffe2/operators/reshape_op.h>
 #include <caffe2/operators/roi_align_op.h>
 #include <caffe2/operators/roi_align_rotated_op.h>
 #include <caffe2/operators/scale_op.h>
@@ -51,9 +50,6 @@ REGISTER_IDEEP_OPERATOR(
 REGISTER_IDEEP_OPERATOR(Flatten, IDEEPFallbackOp<FlattenOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(ResizeLike, IDEEPFallbackOp<ResizeLikeOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(Transpose, IDEEPFallbackOp<TransposeOp<CPUContext>>);
-REGISTER_IDEEP_OPERATOR(
-    Reshape,
-    IDEEPFallbackOp<ReshapeOp<float, CPUContext>, SkipIndices<1>>);
 
 // filter operators
 REGISTER_IDEEP_OPERATOR(
