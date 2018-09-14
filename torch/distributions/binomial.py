@@ -100,7 +100,11 @@ class Binomial(Distribution):
             if self.total_count.min() != max_count:
                 arange = torch.arange(max_count, dtype=self._param.dtype, device=self._param.device)
                 mask = arange >= self.total_count.unsqueeze(-1)
-                bernoullis.masked_fill_(mask, 0.)
+                if torch._C._get_tracing_state():
+                    # [JIT WORKAROUND] lack of support for .masked_fill_()
+                    bernoullis[mask.expand(shape)] = 0.
+                else:
+                    bernoullis.masked_fill_(mask, 0.)
             return bernoullis.sum(dim=-1)
 
     def log_prob(self, value):
