@@ -116,12 +116,12 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
    .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
     .def("_jit_pass_specialize_undef", specializeUndef)
-   .def("_jit_differentiate", [](Graph &g, const std::vector<bool>& requires_grad) {
+   .def("_jit_differentiate", [](Graph &g) {
        // the python binding slightly differs in semantics
        // it makes a copy of the input Graph, and works on that
        // jit::differentiate mutates the input Graph
        auto g_clone = g.copy();
-       return differentiate(g_clone, requires_grad);
+       return differentiate(g_clone);
    });
 
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")

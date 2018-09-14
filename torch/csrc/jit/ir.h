@@ -190,6 +190,9 @@ public:
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
+  bool requires_grad() const {
+    return type()->requires_grad();
+  }
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }

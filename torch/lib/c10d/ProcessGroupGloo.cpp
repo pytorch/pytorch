@@ -145,7 +145,7 @@ ProcessGroupGloo::WorkGloo::WorkGloo()
 
 ProcessGroupGloo::WorkGloo::~WorkGloo() {}
 
-bool ProcessGroupGloo::WorkGloo::isCompleted() const {
+bool ProcessGroupGloo::WorkGloo::isCompleted() {
   return completed_;
 }
 
@@ -222,7 +222,7 @@ ProcessGroupGloo::SendWork::SendWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-bool ProcessGroupGloo::SendWork::isCompleted() const {
+bool ProcessGroupGloo::SendWork::isCompleted() {
   // No way to poll for completion yet
   return true;
 }
@@ -252,7 +252,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
     int* srcRank)
     : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(srcRank) {}
 
-bool ProcessGroupGloo::RecvWork::isCompleted() const {
+bool ProcessGroupGloo::RecvWork::isCompleted() {
   // No way to poll for completion yet
   return true;
 }
