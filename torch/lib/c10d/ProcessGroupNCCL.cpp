@@ -100,7 +100,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 
 // Check if the NCCL kernels are queued on the GPUs
-bool ProcessGroupNCCL::WorkNCCL::isCompleted() const {
+bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   return true;
 }
 
