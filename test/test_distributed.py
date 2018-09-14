@@ -241,9 +241,9 @@ class _DistTestBase(object):
             group = [0, 1]
         group_id = dist.new_group(group)
         backend_val = dist.DistBackend.parse(BACKEND)
-        self.assertEqual(dist.get_backend(group_id), backend_val)
+        self.assertEqual(dist.get_backend(), backend_val)
         if dist.get_rank() in group:
-            self.assertEqual(dist.get_backend(), backend_val)
+            self.assertEqual(dist.get_backend(group_id), backend_val)
 
     # Test destroy
     def test_destroy_group(self):
