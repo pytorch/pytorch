@@ -41,14 +41,7 @@ class LogisticNormal(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LogisticNormal, _instance)
-        batch_shape = torch.Size(batch_shape)
-        base_dist = self.base_dist.expand(batch_shape + self.base_dist.batch_shape[-1:])
-        super(LogisticNormal, new).__init__(base_dist,
-                                            StickBreakingTransform(),
-                                            validate_args=False)
-        new._event_shape = self._event_shape
-        new._validate_args = self._validate_args
-        return new
+        return super(LogisticNormal, self).expand(batch_shape, _instance=new)
 
     @property
     def loc(self):
