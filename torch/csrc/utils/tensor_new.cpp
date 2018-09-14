@@ -250,7 +250,7 @@ Tensor legacy_new_from_sequence(const Type & type, at::optional<Device> device, 
   return legacy_new_from_data(type, device, data);
 }
 
-Tensor check_legacy_ctor_device(const Type& type, at::optional<Device> device) {
+void check_legacy_ctor_device(const Type& type, at::optional<Device> device) {
   if (device.has_value()) {
     AT_CHECK(type.device_type() == device.value().type(),
              "legacy constructor for device type: ", type.device_type(),
