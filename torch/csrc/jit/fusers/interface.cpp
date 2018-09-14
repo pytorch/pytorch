@@ -14,6 +14,12 @@
 
 namespace torch { namespace jit {
 
+namespace detail {
+
+bool cpu_fuser_enabled = false;
+
+} // namespace detail
+
 // Pure virtual destructor definition
 FusionHandle::~FusionHandle() { }
 
@@ -22,7 +28,7 @@ std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group) {
   if (device == kCPUDevice) {
     #if USE_CPU_FUSER
       return cpufuser::getFusionHandle(fusion_group);
-    #endif 
+    #endif
     throw std::runtime_error("CPU fusion is not supported on this build.");
   }
 
@@ -35,9 +41,9 @@ std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group) {
 
 bool canFuseOnCPU() {
   #if USE_CPU_FUSER
-    return true;
+    return detail::cpu_fuser_enabled;
   #endif // USE_CPU_FUSER
-  
+
   return false;
 }
 
@@ -47,6 +53,10 @@ bool canFuseOnGPU() {
   #endif  // USE_CUDA_FUSER
 
   return false;
+}
+
+void overrideCanFuseOnCPU(bool value) {
+  detail::cpu_fuser_enabled = value;
 }
 
 std::vector<at::Tensor> debugLaunchGraph(

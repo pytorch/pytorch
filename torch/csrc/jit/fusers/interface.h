@@ -25,6 +25,9 @@ TORCH_API std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group);
 TORCH_API bool canFuseOnCPU();
 TORCH_API bool canFuseOnGPU();
 
+// CPU fuser is disabled by default, but we still want to test it.
+TORCH_API void overrideCanFuseOnCPU(bool value);
+
 TORCH_API std::vector<at::Tensor> debugLaunchGraph(
   Graph& graph
 , int device
