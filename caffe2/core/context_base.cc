@@ -19,6 +19,11 @@ BaseStaticContext* get_static_context(DeviceType t) {
   return ptr;
 }
 
+CAFFE_DEFINE_POINTER_REGISTRY(
+    ExtractDeviceOptionFnRegistry,
+    DeviceType,
+    ExtractDeviceOptionFn*);
+
 CAFFE_DEFINE_TYPED_REGISTRY(
     ContextRegistry,
     DeviceType,

@@ -159,10 +159,6 @@ class MKLStaticContext : public BaseStaticContext {
     return MKLDNN;
   }
 
-  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
-      override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-  }
 };
 
 } // namespace caffe2

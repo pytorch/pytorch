@@ -75,8 +75,6 @@ void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c) {
   type_call_registry_[id] = c;
 }
 
-int GetGPUIDForPointer(const void* ptr);
-
 vector<TIndex> GetTensorInfo(
     const void* c,
     size_t* capacity,

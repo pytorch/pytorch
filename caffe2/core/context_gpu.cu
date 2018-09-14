@@ -408,4 +408,11 @@ BaseStaticContext* GetCUDAStaticContext() {
 
 REGISTER_STATIC_CONTEXT(CUDA, GetCUDAStaticContext());
 
+void ExtractDeviceOptionCUDA(DeviceOption* device, const void* data) {
+  device->set_device_type(PROTO_CUDA);
+  device->set_cuda_gpu_id(GetGPUIDForPointer(data));
+}
+
+// REGISTER_DEVICE_OPTION_FN(CUDA, ExtractDeviceOptionCUDA);
+
 }  // namespace caffe2

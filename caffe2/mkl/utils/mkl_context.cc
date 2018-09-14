@@ -28,4 +28,10 @@ BaseStaticContext* GetMKLStaticContext() {
 
 REGISTER_STATIC_CONTEXT(MKLDNN, GetMKLStaticContext());
 
+void ExtractDeviceOptionMKLDNN(DeviceOption* device, const void* data) {
+  device->set_device_type(PROTO_MKLDNN);
+}
+
+// REGISTER_DEVICE_OPTION_FN(MKLDNN, ExtractDeviceOptionMKLDNN);
+
 } // namespace caffe2
