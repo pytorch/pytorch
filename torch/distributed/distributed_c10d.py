@@ -267,8 +267,6 @@ def init_process_group(backend,
             _default_pg = ProcessGroupNCCL(store, rank, world_size)
             _pg_map[_default_pg] = (DistBackend.NCCL, store)
             _pg_names[_default_pg] = group_name
-        else:
-            raise RuntimeError("Invalid distributed backend name: " + backend)
 
     _default_pg_init_method = init_method
 
