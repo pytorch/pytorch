@@ -119,9 +119,9 @@ def canonical(graph):
 
 
 def get_lstm_inputs(device, training=False):
-    input = torch.randn(3, 10, dtype=torch.float, device=device)
-    hx = torch.randn(3, 20, dtype=torch.float, device=device)
-    cx = torch.randn(3, 20, dtype=torch.float, device=device)
+    input = torch.randn(3, 10, dtype=torch.float, device=device, requires_grad=training)
+    hx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
+    cx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
     module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
     if training:
         params = tuple(module.parameters())
@@ -921,7 +921,7 @@ class TestJit(JitTestCase):
 
         def fn(x, y):
             z = x
-            if x + y > x:
+            if bool(x + y > x):
                 z = x + y
             return z
 
@@ -1622,12 +1622,11 @@ class TestJit(JitTestCase):
         @torch.jit.script
         def constant_prop(a):
             b = 2 + 1
-            if a < 2:
+            if bool(a < 2):
                 c = b + 2
             else:
                 c = b - 2
             return c
-
         out_ref = constant_prop(torch.tensor(2))
         self.run_pass('constant_propagation', constant_prop.graph)
         out_test = constant_prop(torch.tensor(2))
@@ -1661,8 +1660,8 @@ class TestJit(JitTestCase):
             c0 = 1
             c1 = 1
             c2 = 1
-            if a:  # -> c0, c1
-                if b:  # -> c0
+            if bool(a):  # -> c0, c1
+                if bool(b):  # -> c0
                     if True:  # -> c0
                         c0 = c0 + 1
                         if False:
@@ -2111,7 +2110,7 @@ class TestBatched(TestCase):
 
     def test_if_else(self):
         def single_if(a, b):
-            if a > b:
+            if bool(a > b):
                 a = a + b
             else:
                 a = a - b
@@ -2131,7 +2130,7 @@ class TestBatched(TestCase):
 
     def test_if_else_with_scalar(self):
         def single_if(a, b):
-            if a > 0.1:
+            if bool(a > 0.1):
                 a = a + b
             else:
                 a = a - b
@@ -2151,7 +2150,7 @@ class TestBatched(TestCase):
 
     def test_if_noelse(self):
         def single_if(a, b):
-            if a > b:
+            if bool(a > b):
                 a = a + b
             return a
 
@@ -2169,7 +2168,7 @@ class TestBatched(TestCase):
 
     def test_if_noelse_with_scalar(self):
         def single_if(a, b):
-            if a > 0.1:
+            if bool(a > 0.1):
                 a = a + b
             return a
 
@@ -2187,7 +2186,7 @@ class TestBatched(TestCase):
 
     def test_while(self):
         def single_while(a, b):
-            while a > b:
+            while bool(a > b):
                 a = a - b
             return a
 
@@ -2275,7 +2274,7 @@ class TestBatched(TestCase):
         def greedy(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
                    b_i, b_f, b_o, b_c, w_hs, b_s, iter_num):
             iter_count = torch.zeros_like(iter_num)
-            while(iter_count < iter_num):
+            while bool(iter_count < iter_num):
                 iter_count += 1
                 # LSTM Cell
                 i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
@@ -2341,7 +2340,7 @@ class TestBatched(TestCase):
             vocab_size = embed.size(1)
             iter_count = torch.zeros_like(iter_num)
             max_len = idx.size(2)
-            while(iter_count < iter_num):
+            while bool(iter_count < iter_num):
                 iter_count += 1
                 # LSTM Cell
                 i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
@@ -2541,6 +2540,19 @@ class TestScript(JitTestCase):
             # type: (List[int]) -> Tuple[Tensor, List[int]]
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
+
+    def test_nested_list_error(self):
+        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
+            @torch.jit.script
+            def foo(x):
+                # type: (Tuple[List[List[int]]]) -> int
+                return 4
+
+    def test_nested_list_construct_error(self):
+        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
+            @torch.jit.script
+            def foo(x):
+                return [[4]]
 
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
@@ -3455,7 +3467,7 @@ a")
 
     def test_while(self):
         def func(a, b, max):
-            while a < max:
+            while bool(a < max):
                 a = a + 1
                 b = b + 1
             c = a + b
@@ -3472,7 +3484,7 @@ a")
             somenum = 5
             dontmutateme = 3
             third = 0
-            while i < lim:
+            while bool(i < lim):
                 third = first + second
                 first = second
                 second = third
@@ -3494,7 +3506,7 @@ a")
         def func(a, b):
             # type: (int, int) -> int
             d = 3
-            if a > 10:
+            if bool(a > 10):
                 a = 3 + d
             else:
                 b = 3 + d
@@ -3510,7 +3522,7 @@ a")
             # type: (int, int) -> int
             d = 3
             for _ in range(20):
-                if a > 10:
+                if bool(a > 10):
                     a = 3 + d
                 else:
                     b = 3 + d
@@ -3522,7 +3534,7 @@ a")
 
     def test_if_noelse(self):
         def func(a, b):
-            if a > 10:
+            if bool(a > 10):
                 a = 3 + b
             c = a + b
             return c
@@ -3530,11 +3542,19 @@ a")
         inputs = self._make_scalar_vars([-1, 1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_explicit_bool_cast(self):
+        with self.assertRaisesRegex(RuntimeError, "expected an integer"):
+            @torch.jit.script
+            def test_bool_cast(a):
+                if a:
+                    return a + 2
+                return a + 1
+
     def test_while_nonexistent_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
             torch.jit.CompilationUnit('''
             def test_while(a, b):
-                while a < 10:
+                while bool(a < 10):
                     a = a + x
                     b = b + 1
                 return a + b
@@ -3552,7 +3572,7 @@ a")
 
     def test_while_write_outer_then_read(self):
         def func(a, b):
-            while a < 10:
+            while bool(a < 10):
                 a = a + 1
                 b = a + 1
             return a + b
@@ -3701,7 +3721,7 @@ a")
     def test_ternary(self):
         def func(a, b):
             c = 3
-            c = a + b if a > 3 else b
+            c = a + b if bool(a > 3) else b
             return c
 
         inputs_true = self._make_scalar_vars([5, 2], torch.int64)
@@ -3724,18 +3744,18 @@ a")
         @torch.jit.script
         def testNoThrows(t):
             c1 = 1
-            if (False and t[1]) or (True or t[1]):
+            if (False and bool(t[1])) or (True or bool(t[1])):
                 c1 = 0
             return c1
 
         @torch.jit.script
         def throwsOr(t):
-            c0 = False or t[1]
+            c0 = False or bool(t[1])
             print(c0)
 
         @torch.jit.script
         def throwsAnd(t):
-            c0 = True and t[1]
+            c0 = True and bool(t[1])
             print(c0)
 
         t = torch.randn(0)
@@ -3969,7 +3989,7 @@ a")
             step = 1
             while i < 10:
                 b = pyfunc(b)
-                if b > 3.0:
+                if bool(b > 3.0):
                     b = pyfunc(b)
                 i = 11
             return b
@@ -4967,7 +4987,7 @@ a")
         @torch.jit.script
         def foo(a, c):
             b = 0.0
-            if a == 0.0:
+            if bool(a == 0.0):
                 b = 1.0
             return b + c
 
@@ -4986,7 +5006,7 @@ a")
     def test_if_define(self):
         @torch.jit.script
         def foo(a):
-            if a == 0:
+            if bool(a == 0):
                 b = 1
             else:
                 b = 0
@@ -4995,14 +5015,14 @@ a")
         @torch.jit.script
         def foo2(a):
             b = 0
-            if a == 0:
+            if bool(a == 0):
                 b = 1
             return b + 1
 
         @torch.jit.script
         def foo3(a):
             b = 1
-            if a == 0:
+            if bool(a == 0):
                 c = 4
             else:
                 b = 0
@@ -5129,10 +5149,11 @@ a")
                 self.param1 = torch.nn.Parameter(torch.rand(5, 5))
                 self.param2 = torch.nn.Parameter(self.param1[3])
                 self.param3 = torch.nn.Parameter(torch.rand(5, 5))
+                self.param4 = torch.nn.Parameter(torch.rand(11, 5)[1:6])
 
             @torch.jit.script_method
             def foo(self):
-                return self.param1 + self.param2 + self.param3
+                return self.param1 + self.param2 + self.param3 + self.param4
 
         m_orig = M()
         m_import = self.getExportImportCopy(m_orig)
@@ -5287,7 +5308,7 @@ a")
 
             @torch.jit.script_method
             def forward(self, x):
-                if torch.sum(x) > 0:
+                if bool(torch.sum(x) > 0):
                     x = torch.neg(x)
                 return x
 
@@ -5402,8 +5423,8 @@ a")
                 # we cannot use `True` as the condition. Constant prop
                 # would remove the `if` statements.
                 c = sum(x) > 4
-                if c:
-                    if c:
+                if bool(c):
+                    if bool(c):
                         y = self.m(x)
                     else:
                         y = self.m(x)
@@ -5520,10 +5541,10 @@ a")
             def f4(a):
                 torch.cat(a)
 
-        with self.assertRaisesRegex(RuntimeError, 'argument \'tensors\' but found Tensor[][]'):
+        with self.assertRaisesRegex(RuntimeError, 'argument \'tensors\' but found int\[\]'):
             @torch.jit.script
             def f5(a):
-                torch.cat([[a]])
+                torch.cat([3])
 
         with self.assertRaisesRegex(RuntimeError, 'Lists must contain only a single type'):
             @torch.jit.script
@@ -5836,7 +5857,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'return statements can appear only at the end of the function body'):
             @torch.jit.script
             def return_stmt_wrong(x):
-                if x > 3:
+                if bool(x > 3):
                     return 3
                 else:
                     return x
@@ -6863,6 +6884,25 @@ a")
 
         self.assertEqual(foo(input), input)
 
+    def test_export_dynamic_slice(self):
+        class DynamicSliceExportMod(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                retval = x[0]
+                for i in range(x.size(1)):
+                    retval += torch.sum(x[0:i], dim=0)
+                return retval
+
+        mod = DynamicSliceExportMod()
+
+        input = torch.rand(3, 4, 5)
+        example_outs = mod(input)
+
+        f = io.BytesIO()
+        exported = torch.onnx.export_to_pretty_string(
+            DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
+        self.assertExpected(exported)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -6958,9 +6998,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_dcgan_models(self, device='cuda', check_export_import=False)
 
-    # XXX: When this is fixed, write a CUDA test for this.
-    @unittest.skip('https://github.com/pytorch/pytorch/issues/8439 InstanceNormalization bug')
-    def test_neural_style(self):
+    @staticmethod
+    def _test_neural_style(self, device, check_export_import=True):
         class TransformerNet(torch.nn.Module):
             def __init__(self):
                 super(TransformerNet, self).__init__()
@@ -7057,7 +7096,15 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 out = self.conv2d(out)
                 return out
 
-        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 224, 224),))
+        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 64, 64),), export_import=check_export_import)
+
+    def test_neural_style(self):
+        self._test_neural_style(self, device='cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    def test_neural_style_cuda(self):
+        # XXX: export_import on CUDA modules doesn't work (#11480)
+        self._test_neural_style(self, device='cuda', check_export_import=False)
 
     @staticmethod
     def _test_mnist(self, device, check_export_import=True):
@@ -7076,7 +7123,9 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_mnist_training_leaks_no_memory_cuda(self):
         net = MnistNet().cuda()
-        traced_net = torch.jit.trace(net, [torch.randn(5, 1, 28, 28, device='cuda')])
+        # MnistNet uses dropout, don't check its trace
+        traced_net = torch.jit.trace(net, [torch.randn(5, 1, 28, 28, device='cuda')],
+                                     check_trace=False)
 
         def train(iters):
             for _ in range(iters):
