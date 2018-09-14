@@ -245,7 +245,7 @@ class _DistTestBase(object):
         if dist.get_rank() in group:
             self.assertEqual(dist.get_backend(group_id), backend_val)
         else:
-            with self.assertRaises(RuntimeError, "Invalid process group specified"):
+            with self.assertRaisesRegex(RuntimeError, "Invalid process group specified"):
                 dist.get_backend(group_id)
 
     # Test destroy
