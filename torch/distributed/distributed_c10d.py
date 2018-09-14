@@ -61,6 +61,7 @@ class DistBackend(IntEnum):
 _backend = DistBackend.UNDEFINED
 dist_backend = DistBackend
 
+
 class group(object):
     WORLD = object()
 
