@@ -46,6 +46,7 @@ namespace c10 {
   _(prim, TupleConstruct)          \
   _(prim, TupleUnpack)             \
   _(prim, TupleIndex)              \
+  _(prim, TupleSlice)              \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
   _(prim, BoolToTensor)            \

@@ -6981,6 +6981,29 @@ a")
                 c = (1,)
                 return c[-3]
 
+    def test_tuple_slicing(self):
+        def tuple_slice(a):
+            if a:
+                b = (1, 2, 3, 4)
+            else:
+                b = (4, 3, 2, 1)
+            c = b[-4:4]
+            d = b[0:]
+            e = c[1:-1]
+            return e
+
+        self.checkScript(tuple_slice, torch.tensor([1]))
+        tuple_comp = torch.jit.script(tuple_slice)
+        self.assertExpectedGraph(tuple_comp.graph)
+        self.run_pass('lower_all_tuples', tuple_comp.graph)
+        self.assertEqual(tuple_comp(torch.tensor([1])), (2, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "Tuple index out of range."):
+            @torch.jit.script
+            def test_indexing_end_out_of_bounds():
+                c = (1,)
+                return c[0:2]
+
     def test_indexing_error(self):
         with self.assertRaisesRegex(RuntimeError, "Indexing only supported on lists, tensors, and tuples"):
             @torch.jit.script

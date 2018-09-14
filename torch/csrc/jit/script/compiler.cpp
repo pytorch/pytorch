@@ -1543,6 +1543,29 @@ private:
     }
   }
 
+  Value * emitNegate(const TreeRef& tree) {
+    const auto& inputs = tree->trees();
+    auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+    auto neg_val = emitBuiltinCall(
+               tree->range(),
+               *method.graph(),
+               aten::neg,
+               named_values,
+               {},
+               /*required=*/true);
+    // constant fold the input if possible
+    auto maybe_constant_input = toIValue(neg_val->node()->input());
+    if (!maybe_constant_input) {
+      return neg_val;
+    }
+    auto op = getOperation(neg_val->node());
+    Stack stack;
+    stack.push_back(*maybe_constant_input);
+    op(stack);
+    JIT_ASSERT(stack.size() == 1);
+    return graph->insertConstant(stack[0], tree->range());
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree) {
     switch (tree->kind()) {
@@ -1561,17 +1584,7 @@ private:
       case '-':
       case '%':
       case TK_UNARY_MINUS: {
-        const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
-        return emitBuiltinCall(
-                   tree->range(),
-                   *method.graph(),
-                   kind,
-                   c10::nullopt,
-                   named_values,
-                   {},
-                   /*required=*/true);
+        return emitNegative(tree);
       }
       case TK_AND:
       case TK_OR: {
@@ -1698,6 +1711,13 @@ private:
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
+    if (input->type()->cast<TupleType>()) {
+      if (has_end) {
+        return emitTupleSlice(loc, args[0], args[1], /*end*/args[2], step);
+      } else {
+        return emitTupleSlice(loc, args[0], args[1], c10::nullopt, step);
+      }
+    }
     return emitBuiltinCall(loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
 
@@ -1843,13 +1863,34 @@ private:
   }
 
   Value* emitTupleIndex(const SourceRange& loc,
-    Value * tuple_val,
-    Value * idx_val) {
+      Value * tuple_val,
+      Value * idx_val) {
     auto tuple_typ = tuple_val->type()->cast<TupleType>();
     auto adj_index = getTupleIndexVal(loc, tuple_typ, idx_val, /*allow_out_of_bounds*/false);
     return graph->insertNode(
         graph->createTupleIndex(tuple_val, adj_index))->output();
   }
+
+  Value* emitTupleSlice(const SourceRange& loc,
+      const NamedValue& tuple_val,
+      const NamedValue& beg_val,
+      const at::optional<NamedValue&> end_val) {
+    auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
+    int64_t beg = getTupleIndexVal(loc, tuple_type, beg_val.value(*graph), /*allow_out_of_bounds*/true);
+    int64_t end;
+    int64_t tuple_len = tuple_type->elements().size();
+    if (end_val) {
+      end = getTupleIndexVal(loc, tuple_type, end_val->value(*graph), true);
+    } else {
+      end = tuple_len;
+    }
+    // slicing does not throw out of bounds errors
+    end = std::min(std::max((int64_t)0, end), tuple_len);
+    beg = std::min(std::max((int64_t)0, beg), tuple_len);
+    return graph->insertNode(
+        graph->createTupleSlice(tuple_val.value(*graph), beg, end))->output();
+  }
+
 
   // Desugars gather syntactic sugar foo[i]
   Value* emitBasicGather(const Subscript& subscript) {

@@ -8,17 +8,55 @@ namespace torch { namespace jit {
 namespace {
 
 // operators where we expect to find tuples as inputs/outputs
-// this is to assert we are only  doing modifications when we know
+// this is to assert we are only doing modifications when we know
 // we can flatten tuples
 std::unordered_set<Symbol> white_list = {
   prim::If,
   prim::Loop,
   prim::TupleUnpack,
   prim::TupleConstruct,
+  prim::TupleIndex,
+  prim::TupleSlice,
   prim::Param,
   prim::Return,
 };
 
+// returns true if a tuple operator was removed
+bool removeTupleNodes(Node *n, bool must_remove_tuples) {
+  if (n->kind() != prim::TupleUnpack && n->kind() != prim::TupleIndex
+      && n->kind() != prim::TupleSlice) {
+    return false;
+  }
+  auto construct = n->input()->node();
+  if (construct->kind() != prim::TupleConstruct) {
+    if (must_remove_tuples) {
+      AT_ERROR(n->kind().toQualString(), " not matched to tuple construct");
+    }
+    return false;
+  }
+  if (n->kind() == prim::TupleUnpack) {
+    for(size_t i = 0; i < n->outputs().size(); ++i) {
+      n->outputs()[i]->replaceAllUsesWith(construct->inputs()[i]);
+    }
+  } else if (n->kind() == prim::TupleIndex) {
+    auto idx = n->i(attr::index);
+    n->output()->replaceAllUsesWith(construct->inputs()[idx]);
+  } else if (n->kind() == prim::TupleSlice) {
+    std::vector<Value*> values;
+    int64_t beg = n->i(attr::beg);
+    int64_t end = n->i(attr::end);
+    int64_t step = n->i(attr::step);
+    for (size_t i = beg; i < end; i += step) {
+      values.push_back(construct->inputs()[i]);
+    }
+    auto graph = n->owningGraph();
+    auto tuple_out = graph->createTuple(values);
+    graph->setInsertPoint(n);
+    graph->insertNode(tuple_out);
+    n->output()->replaceAllUsesWith(tuple_out->output());
+  }
+  return true;
+}
 
 } //anonymous namespace
 
@@ -32,26 +70,12 @@ static void VisitNode(Node* n, Node* insert_point) {
     return;
   }
 
-  // make any TupleUnpack dead by undoing TupleUnpack(TupleConstruct())
-  if(n->kind() == prim::TupleUnpack) {
-    auto construct = n->input()->node();
-    // note: removing these asserts changes this pass from a complete lowering
-    // pass to one that removes tuples when possible. When tuples are first-class
-    // in the interpreter, we should still run this pass to remove extraneous uses
-    JIT_ASSERTM(construct->kind() == prim::TupleConstruct, "tuple unpack not matched to tuple construct");
-    for(size_t i = 0; i < n->outputs().size(); ++i) {
-      n->outputs()[i]->replaceAllUsesWith(construct->inputs()[i]);
-    }
-    return;
-  }
+  // note: changing the second argument to false changes this pass from a complete lowering
+  // pass to one that removes tuples when possible. When tuples are first-class
+  // in the interpreter, we should still run this pass to remove extraneous uses
 
-  // undo TupleIndex[index=i](TupleConstruct())
-  if (n->kind() == prim::TupleIndex) {
-    auto construct = n->inputs().at(0)->node();
-    JIT_ASSERTM(construct->kind() == prim::TupleConstruct, "tuple index not matched to tuple construct");
-    auto idx = n->i(attr::index);
-    n->output()->replaceAllUsesWith(construct->inputs()[idx]);
-    return;
+  if (removeTupleNodes(n, /*must_remove_tuples*/true)) {
+    return; //tuple operator found
   }
 
   // flatten the input list  op(a, tup, b) --> op(a, t0, t1, b)
@@ -140,23 +164,7 @@ void LowerAllTuples(std::shared_ptr<Graph>& graph) {
 
 static void LowerSimpleTuples(Block* block) {
   for(auto n : block->nodes()) {
-    // make any TupleUnpack dead by undoing TupleUnpack(TupleConstruct())
-    // and TupleIndex[index=i](TupleConstruct())
-    if(n->kind() == prim::TupleUnpack) {
-      auto construct = n->input()->node();
-      if(construct->kind() == prim::TupleConstruct) {
-        for(size_t i = 0; i < n->outputs().size(); ++i) {
-          n->outputs()[i]->replaceAllUsesWith(construct->inputs()[i]);
-        }
-      }
-    } else if (n->kind() == prim::TupleIndex) {
-      auto construct = n->inputs().at(0)->node();
-      if(construct->kind() == prim::TupleConstruct) {
-        auto idx = n->i(attr::index);
-        n->output()->replaceAllUsesWith(construct->inputs()[idx]);
-      }
-    }
-
+    removeTupleNodes(n, /*must_remove_tuples*/false);
     for(auto b : n->blocks()) {
       LowerSimpleTuples(b);
     }
