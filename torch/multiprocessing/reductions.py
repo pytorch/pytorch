@@ -75,17 +75,16 @@ def reduce_event(event):
 
 
 def rebuild_tensor(cls, storage, metadata):
-    storage_offset, size, stride, requires_grad, backward_hooks = metadata
+    storage_offset, size, stride, requires_grad = metadata
     t = torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
     if cls == torch.nn.parameter.Parameter:
         t = torch.nn.parameter.Parameter(t)
     t.requires_grad = requires_grad
-    t._backward_hooks = backward_hooks
     return t
 
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
-                        storage_cls, storage_device, storage_handle, storage_size, requires_grad, backward_hooks):
+                        storage_cls, storage_device, storage_handle, storage_size, requires_grad):
 
     storage = storage_from_cache(storage_cls, storage_handle)
     if storage is None:
@@ -97,7 +96,6 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
     if tensor_cls == torch.nn.parameter.Parameter:
         t = torch.nn.parameter.Parameter(t)
     t.requires_grad = requires_grad
-    t._backward_hooks = backward_hooks
     return t
 
 
@@ -163,6 +161,8 @@ def reduce_tensor(tensor):
 
         shared_cache[handle] = StorageWeakRef(storage)
 
+        # _backward_hooks purposely omitted here, see
+        # Note [Don't serialize hooks]
         return (rebuild_cuda_tensor,
                 (type(tensor),
                  tensor.size(),
@@ -172,10 +172,10 @@ def reduce_tensor(tensor):
                  device,
                  handle,
                  storage_size,
-                 tensor.requires_grad,
-                 tensor._backward_hooks))
+                 tensor.requires_grad))
 
-    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad, tensor._backward_hooks)
+    # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
+    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)
     return (rebuild_tensor, (type(tensor), storage, metadata))
 
 

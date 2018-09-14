@@ -87,6 +87,43 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
     return kwargs['async']
 
 
+# Note [Don't serialize hooks]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Since time immemorial, we have serialized the backward hooks associated with
+# variables.  This kind of half-worked--Python can pickle global functions
+# (but not closures!)--but there were problems.
+#
+#   - It's fragile.  If you serialize a backward hook into a saved
+#     model, and then you rename the function associated with the hook,
+#     now your saved model is broken and you can't load it anymore.
+#
+#   - It's not actually used.  The standard recommendation is to
+#     serialize the *state_dict* of a model, not the model itself
+#     (since this is more stable to code changes affecting the model
+#     serialization), and the state dict saves "data" only, thus
+#     stripping the the backward hooks.  In some cases, hooks are
+#     essential to the well-functioning of a model (e.g., DDP),
+#     but DDP already manages readding the hooks!
+#
+#   - We didn't serialize them in many cases.  Prior to #10220, we
+#     were dropping backward hooks in ForkingPickler.  We "fixed" this
+#     to be convenient with other serialization sites, but lack of
+#     serializing backward hooks wasn't actually the root cause of
+#     the bug.
+#
+# With these cases in mind, we have decided that a better strategy
+# is to just NOT serialize hooks at all.
+#
+# Since this is a BC-breaking change, we should warn when we previously
+# serialized a hook, but no longer do so. This will be done by adding a special
+# sentinel property to hooks will be used to suppress this warning. If a hook
+# has the property _torch_serialize_ignore, we will not emit a warning if we
+# attempt to serialize a Tensor with this hook attached to it.
+#
+# By the way, when _backward_hooks is skipped, we must give an EMPTY
+# OrderedDict(), if you pass a None you'll run afoul #12219.
+
+
 def _rebuild_tensor(storage, storage_offset, size, stride):
     class_name = storage.__class__.__name__.replace('Storage', 'Tensor')
     module = importlib.import_module(storage.__module__)
@@ -97,12 +134,18 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
 def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
+    # NB: This line exists only for backwards compatibility; the
+    # general expectation is that backward_hooks is an empty
+    # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
     return tensor
 
 
 def _rebuild_parameter(data, requires_grad, backward_hooks):
     param = torch.nn.Parameter(data, requires_grad)
+    # NB: This line exists only for backwards compatibility; the
+    # general expectation is that backward_hooks is an empty
+    # OrderedDict.  See Note [Don't serialize hooks]
     param._backward_hooks = backward_hooks
 
     return param
