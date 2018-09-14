@@ -29,7 +29,7 @@ TensorImpl::TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
     : TensorImpl(std::move(storage), type_id, storage.dtype(), is_variable) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& type_meta, bool is_variable)
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable)
     : storage_(std::move(storage)),
       storage_offset_(0),
       sizes_{0},
@@ -37,7 +37,7 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::Ty
       is_contiguous_(true),
       numel_(0),
       type_id_(type_id),
-      type_meta_(type_meta),
+      data_type_(data_type),
       is_variable_(is_variable) {}
 
 IntList TensorImpl::sizes() const {
