@@ -725,7 +725,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   void ExtractDeviceOption(DeviceOption* device) const {
-    GetStaticContext()->ExtractDeviceOption(device, raw_data());
+    caffe2::ExtractDeviceOption(device, raw_data(), GetDeviceType());
   }
 
   const at::Storage& storage() {

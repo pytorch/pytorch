@@ -33,4 +33,17 @@ BaseStaticContext* GetCPUStaticContext() {
 
 REGISTER_STATIC_CONTEXT(CPU, GetCPUStaticContext());
 
+struct ExtractDeviceOptionCPU : public ExtractDeviceOptionFn {
+  void operator()(DeviceOption* device, const void* data) override {
+    device->set_device_type(PROTO_CPU);
+  }
+};
+
+ExtractDeviceOptionFn* GetExtractDeviceOptionCPU() {
+  static ExtractDeviceOptionCPU fn;
+  return &fn;
+}
+
+REGISTER_DEVICE_OPTION_FN(CPU, GetExtractDeviceOptionCPU);
+
 } // namespace caffe2

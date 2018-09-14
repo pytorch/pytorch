@@ -36,4 +36,10 @@ BaseStaticContext* GetIDEEPStaticContext() {
 
 REGISTER_STATIC_CONTEXT(IDEEP, GetIDEEPStaticContext());
 
+void ExtractDeviceOptionIDEEP(DeviceOption* device, const void* data) {
+  device->set_device_type(PROTO_IDEEP);
+}
+
+// REGISTER_DEVICE_OPTION_FN(IDEEP, ExtractDeviceOptionIDEEP);
+
 } // namespace caffe2

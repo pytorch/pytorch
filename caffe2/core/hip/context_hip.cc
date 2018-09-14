@@ -427,4 +427,11 @@ BaseStaticContext* GetHIPStaticContext() {
 
 REGISTER_STATIC_CONTEXT(HIP, GetHIPStaticContext());
 
+void ExtractDeviceOptionHIP(DeviceOption* device, const void* data) {
+  device->set_device_type(PROTO_HIP);
+  device->set_cuda_hip_id(GetGPUIDForPointer(data));
+}
+
+// REGISTER_DEVICE_OPTION_FN(HIP, ExtractDeviceOptionHIP);
+
 } // namespace caffe2
