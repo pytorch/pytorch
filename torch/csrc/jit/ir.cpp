@@ -555,7 +555,7 @@ namespace {
 
 const OperatorSet& nondeterminstic_aten_ops() {
   static OperatorSet nondeterministic_ops = {
-    "aten::dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::dropout(Tensor input, float p, bool train) -> Tensor",
     "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
     "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
     "aten::_th_bernoulli(Tensor self, *, Generator generator) -> Tensor",
@@ -567,8 +567,8 @@ const OperatorSet& nondeterminstic_aten_ops() {
     "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
     "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
     "aten::poisson(Tensor self, Generator generator) -> Tensor",
-    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
-    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
     "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
     "aten::rand_like(Tensor self) -> Tensor",
     "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
@@ -593,7 +593,7 @@ bool Node::isNondeterministic() const {
     return false;
   }
   // Dropout with train = False is deterministic
-  if (matches("aten::dropout(Tensor input, float p, int train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
+  if (matches("aten::dropout(Tensor input, float p, bool train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
     return false;
   }
   return true;

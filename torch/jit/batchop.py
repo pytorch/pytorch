@@ -304,7 +304,7 @@ def batch_unsqueeze(data, mask, dims, dim_):
 @torch.jit.script
 def batch_argmax(data, mask, dims, dim_, keepdim_):
     dim = int(dim_)
-    keepdim = int(keepdim_)
+    keepdim = bool(keepdim_)
     # if dim == 0:
     #     raise ValueError("cannot do argmax along batch_dim")
     batch_size = data.size(0)
@@ -339,7 +339,7 @@ def batch_topk(data, mask, dims, k_, dim_, largest_, sorted_):
     k = int(k_)
     dim = int(dim_)
     largest = int(largest_)
-    sorted = int(sorted_)
+    sorted = bool(sorted_)
     # if dim == 0:
     #     raise ValueError("cannot do topk along batch_dim")
     batch_size = data.size(0)

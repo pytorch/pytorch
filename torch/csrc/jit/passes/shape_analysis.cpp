@@ -429,12 +429,12 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
     "aten::clamp_max(Tensor self, Scalar max) -> Tensor",
     "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
-    "aten::alpha_dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::alpha_dropout(Tensor input, float p, bool train) -> Tensor",
     "aten::bernoulli(Tensor self, float p, Generator generator) -> Tensor",
     "aten::cos(Tensor self) -> Tensor",
     "aten::cosh(Tensor self) -> Tensor",
     "aten::digamma(Tensor self) -> Tensor",
-    "aten::dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::dropout(Tensor input, float p, bool train) -> Tensor",
     "aten::elu(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale) -> Tensor",
     "aten::erf(Tensor self) -> Tensor",
     "aten::erfc(Tensor self) -> Tensor",
@@ -450,8 +450,8 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::floor(Tensor self) -> Tensor",
     "aten::frac(Tensor self) -> Tensor",
     "aten::flip(Tensor self, int[] dims) -> Tensor",
-    "aten::feature_alpha_dropout(Tensor input, float p, int train) -> Tensor",
-    "aten::feature_dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor",
+    "aten::feature_dropout(Tensor input, float p, bool train) -> Tensor",
     "aten::hardshrink(Tensor self, Scalar lambd) -> Tensor",
     "aten::hardtanh(Tensor self, Scalar min_val, Scalar max_val) -> Tensor",
     "aten::glu(Tensor self, int dim) -> Tensor",
@@ -467,7 +467,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::reciprocal(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
     "aten::round(Tensor self) -> Tensor",
-    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
     "aten::rsqrt(Tensor self) -> Tensor",
     "aten::selu(Tensor self) -> Tensor",
     "aten::sigmoid(Tensor self) -> Tensor",
@@ -638,7 +638,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   //     Knowing the type and device of weights or biases is usually enough to
   //     infer the output type.
   static const register_formula_for nn_ops_first_input_preserving {{
-    "aten::batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, int training, float momentum, float eps, int cudnn_enabled) -> Tensor",
+    "aten::batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps, int cudnn_enabled) -> Tensor",
     "aten::conv1d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
     "aten::conv2d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
     "aten::conv3d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
@@ -1092,16 +1092,9 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
       }
     } else if (node->matches("aten::unfold(Tensor self, int dimension, int size, int step) -> Tensor")) {
       auto & t = tensor_types.at(0);
-<<<<<<< HEAD
       return t->dim() == 0 ? t : t->withDim(t->dim() + 1);
     } else if (node->matches("aten::polygamma(int n, Tensor self) -> Tensor")) {
       return tensor_types.at(0);
-=======
-      return t->withDim(t->dim() + 1);
-    } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*with_const=*/attr::size) ||
-               node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor", /*with_const=*/attr::size)) {
-      return tensor_types.at(0)->withDim(node->get<std::vector<int64_t>>(attr::size)->size());
->>>>>>> Rebase
     }
     return nullptr;
   };

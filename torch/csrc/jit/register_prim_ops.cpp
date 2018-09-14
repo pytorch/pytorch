@@ -418,25 +418,25 @@ RegisterOperators reg({
 });
 
 // define implementations for primitive number ops
-#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result float_result) \
-  Operator(                                                                   \
-      #aten_op "(int a, int b) -> " #int_result,                              \
-      [](Node* node) {                                                        \
-        return [=](Stack& stack) {                                            \
-          int64_t a, b;                                                       \
-          pop(stack, a, b);                                                   \
-          push(stack, int_op);                                                \
-          return 0;                                                           \
-        };                                                                    \
-      }),                                                                     \
-  Operator(                                                                   \
-      #aten_op "(float a, float b) -> " #float_result, [](Node* node) {       \
-        return [=](Stack& stack) {                                            \
-          double a, b;                                                        \
-          pop(stack, a, b);                                                   \
-          push(stack, float_op);                                              \
-          return 0;                                                           \
-        };                                                                    \
+#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
+  Operator(                                                                    \
+      #aten_op "(int a, int b) -> " #int_result,                               \
+      [](Node* node) {                                                         \
+        return [=](Stack& stack) {                                             \
+          int64_t a, b;                                                        \
+          pop(stack, a, b);                                                    \
+          push(stack, int_op);                                                 \
+          return 0;                                                            \
+        };                                                                     \
+      }),                                                                      \
+  Operator(                                                                    \
+      #aten_op "(float a, float b) -> " #float_result, [](Node* node) {        \
+        return [=](Stack& stack) {                                             \
+          double a, b;                                                         \
+          pop(stack, a, b);                                                    \
+          push(stack, float_op);                                               \
+          return 0;                                                            \
+        };                                                                     \
       }),
 
 #define DEFINE_INT_OP(aten_op, op)                            \
@@ -660,7 +660,7 @@ RegisterOperators reg2({
     // Pass in two ops for handling int and float separately as % in C++ only works for int
     // The modulus calculation is different between C++ and Python (on negative), we preserve
     // the python behavior as it's more common and match python syntax, hence the conversion.
-    DEFINE_GENERIC_OP(aten::remainder, (b + (a % b)) % b, fmod((b + fmod(a, b)), b), float)
+    DEFINE_GENERIC_OP(aten::remainder, (b + (a % b)) % b, fmod((b + fmod(a, b)), b), int, float)
 
     // TODO: Support python floordiv (//)
     // Right now aten::floordiv is only used by loop unrolling
