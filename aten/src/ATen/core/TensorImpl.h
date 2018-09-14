@@ -9,6 +9,7 @@
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/LegacyTypeDispatch.h"
 #include "ATen/core/Backend.h"
+#include "caffe2/core/logging.h"
 
 struct THTensor;
 
@@ -149,8 +150,8 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
   // sizes/strides are in bounds for the storage that is allocated;
   // this is the responsibility of the caller
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
-    AT_CHECK(
-        new_size.size() == new_stride.size(),
+    CAFFE_ENFORCE_EQ_WITH_CALLER(
+        new_size.size(), new_stride.size(),
         "dimensionality of sizes (",
         new_size.size(),
         ") must match dimensionality of strides (",
