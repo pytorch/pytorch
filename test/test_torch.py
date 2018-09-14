@@ -8850,6 +8850,7 @@ class TestTorch(TestCase):
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1], device="cuda"))
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).cuda())
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).to(device="cuda"))
 
 
 # Functions to test negative dimension wrapping
