@@ -98,7 +98,8 @@ void TensorIterator::compute_common_type() {
       if (op.tensor->defined() && type != op.tensor->type()) {
         if (op.tensor->dim() == 0) {
           if (type.backend() != at::Backend::CUDA) {
-            *op.tensor = op.tensor->toType(type);
+            cast_tensors_.emplace_back(op.tensor->toType(type));
+            op.tensor = &(cast_tensors_.back());
           }
         } else {
           op.needs_cast = true;
