@@ -1117,7 +1117,6 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @skipIfRocm
     def test_poisson_gpu_sample(self):
         set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
@@ -1525,7 +1524,6 @@ class TestDistributions(TestCase):
                                         scipy.stats.norm(loc=loc, scale=scale),
                                         'Normal(mean={}, std={})'.format(loc, scale))
 
-    @skipIfRocm
     def test_lowrank_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -1574,7 +1572,6 @@ class TestDistributions(TestCase):
                                  (mean_multi_batch, cov_factor_batched, cov_diag_batched))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @skipIfRocm
     def test_lowrank_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
         cov_factor = torch.randn(3, 1, requires_grad=True)
@@ -1608,7 +1605,6 @@ class TestDistributions(TestCase):
         self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @skipIfRocm
     def test_lowrank_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5, requires_grad=True)
@@ -1621,7 +1617,6 @@ class TestDistributions(TestCase):
                                     'LowRankMultivariateNormal(loc={}, cov_factor={}, cov_diag={})'
                                     .format(mean, cov_factor, cov_diag), multivariate=True)
 
-    @skipIfRocm
     def test_lowrank_multivariate_normal_properties(self):
         loc = torch.randn(5)
         cov_factor = torch.randn(5, 2)
@@ -1695,7 +1690,6 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, None, scale_tril_batched))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @skipIfRocm
     def test_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
         tmp = torch.randn(3, 10)
@@ -1733,7 +1727,6 @@ class TestDistributions(TestCase):
         self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @skipIfRocm
     def test_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(3, requires_grad=True)
@@ -1883,7 +1876,6 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @skipIfRocm
     def test_gamma_gpu_shape(self):
         alpha = torch.tensor(torch.exp(torch.randn(2, 3).cuda()), requires_grad=True)
         beta = torch.tensor(torch.exp(torch.randn(2, 3).cuda()), requires_grad=True)
@@ -1914,7 +1906,6 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @skipIfRocm
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -2147,7 +2138,6 @@ class TestDistributions(TestCase):
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
 
-    @skipIfRocm
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -2176,7 +2166,6 @@ class TestDistributions(TestCase):
                     except NotImplementedError:
                         pass
 
-    @skipIfRocm
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
         for Dist, params in EXAMPLES:
@@ -2196,7 +2185,6 @@ class TestDistributions(TestCase):
                     'icdf(cdf(x)) = {}'.format(actual),
                 ]))
 
-    @skipIfRocm
     def test_cdf_log_prob(self):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
@@ -2588,7 +2576,6 @@ class TestDistributionShapes(TestCase):
         super(TestCase, self).tearDown()
         Distribution.set_default_validate_args(False)
 
-    @skipIfRocm
     def test_entropy_shape(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -3323,7 +3310,6 @@ class TestKL(TestCase):
 
 
 class TestConstraints(TestCase):
-    @skipIfRocm
     def test_params_contains(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -3347,7 +3333,6 @@ class TestConstraints(TestCase):
                         Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
-    @skipIfRocm
     def test_support_contains(self):
         for Dist, params in EXAMPLES:
             self.assertIsInstance(Dist.support, Constraint)
@@ -3627,7 +3612,6 @@ class TestAgainstScipy(TestCase):
             )
         ]
 
-    @skipIfRocm
     def test_mean(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
@@ -3638,7 +3622,6 @@ class TestAgainstScipy(TestCase):
             else:
                 self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
 
-    @skipIfRocm
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
@@ -3654,7 +3637,6 @@ class TestAgainstScipy(TestCase):
                 self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)
 
-    @skipIfRocm
     def test_cdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = pytorch_dist.sample((5,))
@@ -3664,7 +3646,6 @@ class TestAgainstScipy(TestCase):
                 continue
             self.assertEqual(cdf, scipy_dist.cdf(samples), message=pytorch_dist)
 
-    @skipIfRocm
     def test_icdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = torch.rand((5,) + pytorch_dist.batch_shape)
@@ -3970,7 +3951,6 @@ class TestConstraintRegistry(TestCase):
             self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @skipIfRocm
     def test_biject_to_cuda(self):
         for constraint in self.get_constraints(is_cuda=True):
             try:
@@ -4003,7 +3983,6 @@ class TestConstraintRegistry(TestCase):
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @skipIfRocm
     def test_transform_to_cuda(self):
         for constraint in self.get_constraints(is_cuda=True):
             t = transform_to(constraint)
