@@ -50,8 +50,8 @@ class Upsample(Module):
         0.3.1. Since then, the default behavior is ``align_corners = False``.
         See below for concrete examples on how this affects the outputs.
 
-    .. warning::
-        This class is deprecated in favor of :func:`~nn.functional.interpolate`.
+    .. note::
+        If you want downsampling/general resizing, you should use :func:`~nn.functional.interpolate`.
 
     Examples::
 
@@ -121,7 +121,6 @@ class Upsample(Module):
         self.align_corners = align_corners
 
     def forward(self, input):
-        warnings.warn("nn.Upsampling is deprecated. Use nn.functional.interpolate instead.")
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def extra_repr(self):
