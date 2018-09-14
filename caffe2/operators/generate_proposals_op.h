@@ -3,8 +3,6 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/utils/eigen_utils.h"
-#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -39,17 +37,6 @@ class ConstTensorView {
   const T* data_ = nullptr;
   std::vector<int> dims_;
 };
-
-// Generate a list of bounding box shapes for each pixel based on predefined
-//     bounding box shapes 'anchors'.
-// anchors: predefined anchors, size(A, 4)
-// Return: all_anchors_vec: (H * W, A * 4)
-// Need to reshape to (H * W * A, 4) to match the format in python
-CAFFE2_API ERMatXf ComputeAllAnchors(
-    const TensorCPU& anchors,
-    int height,
-    int width,
-    float feat_stride);
 
 struct GenerateProposalsArguments {
   GenerateProposalsArguments(const OperatorBase& op)

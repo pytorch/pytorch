@@ -1,4 +1,5 @@
 #include "caffe2/operators/generate_proposals_op.h"
+#include "caffe2/operators/generate_proposals_op_util.h"
 
 #include <gtest/gtest.h>
 #include "caffe2/core/flags.h"

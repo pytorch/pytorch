@@ -1,4 +1,5 @@
 #include "caffe2/operators/generate_proposals_op.h"
+#include "caffe2/operators/generate_proposals_op_util.h"
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 #include "generate_proposals_op_util_nms.h"
 
