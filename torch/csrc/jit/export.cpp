@@ -316,6 +316,17 @@ void EncoderBase::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *nod
       for(auto & v : node->is(name))
         attr->add_ints(v);
       break;
+    case AttributeKind::b:
+      attr->set_type(onnx::AttributeProto_AttributeType_INT);
+      // Implicitly convert bools to ints
+      attr->set_i(node->b(name));
+      break;
+    case AttributeKind::bs:
+      attr->set_type(onnx::AttributeProto_AttributeType_INTS);
+      for(auto v : node->bs(name))
+        // Implicitly convert bools to ints
+        attr->add_ints(v);
+      break;
     case AttributeKind::s:
       attr->set_type(onnx::AttributeProto_AttributeType_STRING);
       attr->set_s(node->s(name));
@@ -558,6 +569,8 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("FloatType");
   } else if (kind == TypeKind::IntType) {
     type_proto->set_denotation("IntType");
+  } else if (kind == TypeKind::BoolType) {
+    type_proto->set_denotation("BoolType");
   } else if (kind == TypeKind::NoneType) {
     type_proto->set_denotation("NoneType");
   } else if (kind == TypeKind::GeneratorType) {

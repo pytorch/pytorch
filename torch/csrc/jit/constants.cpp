@@ -115,6 +115,15 @@ RegisterOperators reg({
             push(stack, s);
             return 0;
           };
+        } else if (
+            type->isSubtypeOf(BoolType::get()) &&
+            node->kindOf(attr::value) == AttributeKind::i) {
+          // Handle int -> bool conversion
+          auto i = node->i(attr::value);
+          return [i](Stack& stack) {
+            push(stack, i != 0);
+            return 0;
+          };
         } else {
           std::stringstream ss;
           ss << "constant literal not supported for: " << type->str();

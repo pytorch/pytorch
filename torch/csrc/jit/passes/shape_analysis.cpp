@@ -638,7 +638,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   //     Knowing the type and device of weights or biases is usually enough to
   //     infer the output type.
   static const register_formula_for nn_ops_first_input_preserving {{
-    "aten::batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps, int cudnn_enabled) -> Tensor",
+    "aten::batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
     "aten::conv1d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
     "aten::conv2d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
     "aten::conv3d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor",
@@ -646,16 +646,16 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::conv_transpose1d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
     "aten::conv_transpose2d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
     "aten::conv_transpose3d(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] output_padding, int groups, int[] dilation) -> Tensor",
-    "aten::convolution(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int transposed, int[] output_padding, int groups) -> Tensor",
+    "aten::convolution(Tensor input, Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor",
     "aten::adaptive_avg_pool1d(Tensor self, int[] output_size) -> Tensor",
     "aten::adaptive_avg_pool2d(Tensor self, int[] output_size) -> Tensor",
     "aten::adaptive_avg_pool3d(Tensor self, int[] output_size) -> Tensor",
-    "aten::avg_pool1d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int ceil_mode, int count_include_pad) -> Tensor",
-    "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int ceil_mode, int count_include_pad) -> Tensor",
-    "aten::avg_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int ceil_mode, int count_include_pad) -> Tensor",
-    "aten::max_pool1d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, int ceil_mode) -> Tensor",
-    "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, int ceil_mode) -> Tensor",
-    "aten::max_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, int ceil_mode) -> Tensor",
+    "aten::avg_pool1d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
+    "aten::avg_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
+    "aten::avg_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, bool ceil_mode, bool count_include_pad) -> Tensor",
+    "aten::max_pool1d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
+    "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
+    "aten::max_pool3d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
     "aten::max_unpool2d(Tensor self, Tensor indices, int[] output_size) -> Tensor",
     "aten::max_unpool3d(Tensor self, Tensor indices, int[] output_size, int[] stride, int[] padding) -> Tensor",
     "aten::reflection_pad1d(Tensor self, int[] padding) -> Tensor",
@@ -663,12 +663,12 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::replication_pad1d(Tensor self, int[] padding) -> Tensor",
     "aten::replication_pad2d(Tensor self, int[] padding) -> Tensor",
     "aten::replication_pad3d(Tensor self, int[] padding) -> Tensor",
-    "aten::upsample_bilinear2d(Tensor self, int[] output_size, int align_corners) -> Tensor",
-    "aten::upsample_linear1d(Tensor self, int[] output_size, int align_corners) -> Tensor",
+    "aten::upsample_bilinear2d(Tensor self, int[] output_size, bool align_corners) -> Tensor",
+    "aten::upsample_linear1d(Tensor self, int[] output_size, bool align_corners) -> Tensor",
     "aten::upsample_nearest1d(Tensor self, int[] output_size) -> Tensor",
     "aten::upsample_nearest2d(Tensor self, int[] output_size) -> Tensor",
     "aten::upsample_nearest3d(Tensor self, int[] output_size) -> Tensor",
-    "aten::upsample_trilinear3d(Tensor self, int[] output_size, int align_corners) -> Tensor",
+    "aten::upsample_trilinear3d(Tensor self, int[] output_size, bool align_corners) -> Tensor",
     "aten::prelu(Tensor self, Tensor weight) -> Tensor",
   }, [](Node * node) -> type_vec_t {
     if (auto type = node->input(0)->type()->cast<TensorType>()) {
@@ -695,10 +695,10 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::mean(Tensor self) -> Tensor",
     "aten::median(Tensor self) -> Tensor",
     "aten::norm(Tensor self, Scalar p) -> Tensor",
-    "aten::std(Tensor self, int unbiased) -> Tensor",
+    "aten::std(Tensor self, bool unbiased) -> Tensor",
     "aten::sum(Tensor self) -> Tensor",
     "aten::trace(Tensor self) -> Tensor",
-    "aten::var(Tensor self, int unbiased) -> Tensor",
+    "aten::var(Tensor self, bool unbiased) -> Tensor",
     "aten::all(Tensor self) -> Tensor",
     "aten::any(Tensor self) -> Tensor",
   }, [](Node * node) -> type_vec_t {
@@ -728,7 +728,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
 
   static const auto multidim_reduce_with_postprocess =
     [](Node * node, size_t num_reduced_dim, bool upcast_integer) -> type_vec_t {
-      auto maybe_keepdim = node->get<int64_t>(attr::keepdim);
+      auto maybe_keepdim = node->get<bool>(attr::keepdim);
       if (!maybe_keepdim) return {};
       if (auto type = node->input(0)->type()->cast<TensorType>()) {
         if (upcast_integer && !at::isFloatingType(type->scalarType())) {
@@ -753,24 +753,24 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   //   - First input should be the only tensor input
   //   - Has a bool keepdim argument
   static const register_formula_for dim_reduce_ops {{
-    "aten::argmax(Tensor self, int dim, int keepdim) -> Tensor",
-    "aten::argmin(Tensor self, int dim, int keepdim) -> Tensor",
-    "aten::max_values(Tensor self, int dim, int keepdim) -> Tensor",
-    "aten::min_values(Tensor self, int dim, int keepdim) -> Tensor",
-    "aten::mean(Tensor self, int dim, int keepdim) -> Tensor",
-    "aten::norm(Tensor self, Scalar p, int dim, int keepdim) -> Tensor",
-    "aten::std(Tensor self, int dim, int unbiased, int keepdim) -> Tensor",
-    "aten::var(Tensor self, int dim, int unbiased, int keepdim) -> Tensor",
-    "aten::logsumexp(Tensor self, int dim, int keepdim) -> Tensor",
-    "aten::all(Tensor self, int dim, int keepdim) -> Tensor",
-    "aten::any(Tensor self, int dim, int keepdim) -> Tensor",
+    "aten::argmax(Tensor self, int dim, bool keepdim) -> Tensor",
+    "aten::argmin(Tensor self, int dim, bool keepdim) -> Tensor",
+    "aten::max_values(Tensor self, int dim, bool keepdim) -> Tensor",
+    "aten::min_values(Tensor self, int dim, bool keepdim) -> Tensor",
+    "aten::mean(Tensor self, int dim, bool keepdim) -> Tensor",
+    "aten::norm(Tensor self, Scalar p, int dim, bool keepdim) -> Tensor",
+    "aten::std(Tensor self, int dim, bool unbiased, bool keepdim) -> Tensor",
+    "aten::var(Tensor self, int dim, bool unbiased, bool keepdim) -> Tensor",
+    "aten::logsumexp(Tensor self, int dim, bool keepdim) -> Tensor",
+    "aten::all(Tensor self, int dim, bool keepdim) -> Tensor",
+    "aten::any(Tensor self, int dim, bool keepdim) -> Tensor",
 
     // Ops returning indices as second output
-    "aten::kthvalue(Tensor self, int k, int dim, int keepdim) -> (Tensor, Tensor)",
-    "aten::max(Tensor self, int dim, int keepdim) -> (Tensor, Tensor)",
-    "aten::min(Tensor self, int dim, int keepdim) -> (Tensor, Tensor)",
-    "aten::median(Tensor self, int dim, int keepdim) -> (Tensor, Tensor)",
-    "aten::mode(Tensor self, int dim, int keepdim) -> (Tensor, Tensor)",
+    "aten::kthvalue(Tensor self, int k, int dim, bool keepdim) -> (Tensor, Tensor)",
+    "aten::max(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
+    "aten::min(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
+    "aten::median(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
+    "aten::mode(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
   }, [](Node * node) -> type_vec_t {
     // NB: Note that while this function is generally meant to be used with ops that
     // have a single output, we will fix up its return right below.
@@ -791,7 +791,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   //   - First input should be the only tensor input
   //   - has a bool keepdim argument
   static const register_formula_for dim_reduce_ops_with_integer_upcast {{
-    "aten::prod(Tensor self, int dim, int keepdim) -> Tensor",
+    "aten::prod(Tensor self, int dim, bool keepdim) -> Tensor",
   }, [](Node * node) -> type_vec_t {
     return multidim_reduce_with_postprocess(node, /*num_reduce_dim=*/1, /*integer_upcast=*/true);
   }};
@@ -805,7 +805,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   // Additionally:
   //   - has bool keepdim and int[] dim arguments
   static const register_formula_for multidim_reduce_ops_with_integer_upcast {{
-    "aten::sum(Tensor self, int[] dim, int keepdim) -> Tensor",
+    "aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
   }, [](Node * node) -> type_vec_t {
     if (auto dim = node->get<std::vector<int64_t>>(attr::dim)) {
       // TODO: can dim contain duplicates?
@@ -893,14 +893,14 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     }
   };
   static const register_formula_for cast_ops {{
-    "aten::_cast_Byte(Tensor self, int non_blocking) -> Tensor",
-    "aten::_cast_Char(Tensor self, int non_blocking) -> Tensor",
-    "aten::_cast_Double(Tensor self, int non_blocking) -> Tensor",
-    "aten::_cast_Float(Tensor self, int non_blocking) -> Tensor",
-    "aten::_cast_Half(Tensor self, int non_blocking) -> Tensor",
-    "aten::_cast_Int(Tensor self, int non_blocking) -> Tensor",
-    "aten::_cast_Long(Tensor self, int non_blocking) -> Tensor",
-    "aten::_cast_Short(Tensor self, int non_blocking) -> Tensor",
+    "aten::_cast_Byte(Tensor self, bool non_blocking) -> Tensor",
+    "aten::_cast_Char(Tensor self, bool non_blocking) -> Tensor",
+    "aten::_cast_Double(Tensor self, bool non_blocking) -> Tensor",
+    "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
+    "aten::_cast_Half(Tensor self, bool non_blocking) -> Tensor",
+    "aten::_cast_Int(Tensor self, bool non_blocking) -> Tensor",
+    "aten::_cast_Long(Tensor self, bool non_blocking) -> Tensor",
+    "aten::_cast_Short(Tensor self, bool non_blocking) -> Tensor",
   }, [](Node * node) -> type_vec_t {
     if (auto type = node->namedInput(attr::self)->type()->cast<TensorType>()) {
       return {type->toScalarType(get_cast_scalar_type(node))};
