@@ -234,6 +234,15 @@ class _DistTestBase(object):
         default_grp = dist.get_default_group()
         self.assertNotEqual(default_grp, None)
 
+    def test_get_backend(self):
+        if dist.get_world_size() > 2:
+            group = [1, 2]
+        else:
+            group = [0, 1]
+        group_id = dist.new_group(group)
+        self.assertEqual(dist.get_backend(group_id), BACKEND)
+        self.assertEqual(dist.get_backend(), BACKEND)
+
     # Test destroy
     def test_destroy_group(self):
         if dist.get_world_size() > 2:

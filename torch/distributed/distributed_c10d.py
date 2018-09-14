@@ -1,4 +1,5 @@
 import torch
+from enum import IntEnum
 
 from .rendezvous import rendezvous, register_rendezvous_handler
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
@@ -23,11 +24,21 @@ except ImportError:
     _NCCL_AVAILBLE = False
 
 
-class DistBackend:
+class DistBackend(IntEnum):
     UNDEFINED = -1
     GLOO = 0
     NCCL = 2
     MPI = 3
+
+    @classmethod
+    def parse_backend(cls, name):
+        val = getattr(cls, name.upper(), None)
+        if val is None or val == DistBackend.UNDEFINED:
+            raise RuntimeError("Invalid backend name: '{}'".format(name))
+        return val
+
+    def get_name(self, name):
+        return self.name.lower()
 
 
 class group(object):
@@ -166,6 +177,29 @@ def get_default_group():
     return _default_pg
 
 
+def get_backend(group=group.WORLD):
+    """
+    Returns the backend of the given process group.
+
+    Arguments:
+        group (ProcessGroup, optional): The process group to work on
+
+    Returns:
+        The backend of the given process group as a lowercase string.
+
+    """
+    _check_default_pg()
+
+    if group == GroupMember.WORLD:
+        pg = _default_pg
+    else:
+        pg = group
+    pg_info = _pg_map.get(pg, None)
+    if pg_info is None:
+        raise RuntimeError("Invalid process group specified")
+    return pg_info[0].get_name()
+
+
 def init_process_group(backend,
                        init_method="env://",
                        **kwargs):
@@ -203,7 +237,9 @@ def init_process_group(backend,
     assert len(kwargs) == 0, \
         "got unexpected keyword arguments: %s" % ",".join(kwargs.keys())
 
-    if backend == "mpi":
+    backend = DistBackend.parse_backend(backend)
+
+    if backend == DistBackend.MPI:
         if not is_mpi_available():
             raise RuntimeError("Distributed package doesn't have MPI built in")
 
@@ -220,11 +256,11 @@ def init_process_group(backend,
         else:
             store, rank, world_size = next(rendezvous(init_method))
 
-        if backend == "gloo":
+        if backend == DistBackend.GLOO:
             _default_pg = ProcessGroupGloo(store, rank, world_size)
             _pg_map[_default_pg] = (DistBackend.GLOO, store)
             _pg_names[_default_pg] = group_name
-        elif backend == "nccl":
+        elif backend == DistBackend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
