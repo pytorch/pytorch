@@ -66,7 +66,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Checks if request has completed. In this specific case of NCCL, it checks
     // if the NCCL operation has completed on the GPU in its own NCCL stream.
     // Non-blocking operation.
-    bool isCompleted() const override;
+    bool isCompleted() override;
 
     // Let current THC stream wait on the completing of the NCCL work
     // always return true and will throw if there are exceptions

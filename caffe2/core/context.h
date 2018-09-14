@@ -153,7 +153,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
     return true;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return CPU;
   }
 

@@ -17,32 +17,28 @@ const Tensor& TensorImpl::grad() const {
   AT_ERROR("grad is not implemented for Tensor");
 }
 
-namespace {
-Storage createStorage_(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator) {
+TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable)
+    : TensorImpl({}, type_id, scalar_type, is_variable) {
   // UndefinedTensors and SparseTensors don't have storages.
   if (type_id != UndefinedTensorId() && scalar_type != ScalarType::Undefined
       && type_id != SparseCPUTensorId() && type_id != SparseCUDATensorId()) {
-    return Storage(scalarTypeToTypeMeta(scalar_type), 0, allocator, true);
-  } else {
-    return Storage();
+    storage_ = Storage(scalarTypeToTypeMeta(scalar_type), 0, allocator, true);
   }
 }
-}
 
-TensorImpl::TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable)
-    : TensorImpl(createStorage_(type_id, scalar_type, allocator), type_id, is_variable) {
-}
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable)
+    : TensorImpl(std::move(storage), type_id, dataTypeToScalarType(storage.dtype().id()), is_variable) {}
 
-TensorImpl::TensorImpl(Storage storage, TensorTypeId type_id, bool is_variable)
-    :storage_(std::move(storage)),
-    storage_offset_(0),
-    sizes_{0},
-    strides_{1},
-    is_contiguous_(true),
-    numel_(0),
-    type_id_(type_id),
-    scalar_type_(storage_ ? dataTypeToScalarType(storage_.dtype().id()) : ScalarType::Undefined),
-    is_variable_(is_variable) {}
+TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable)
+    : storage_(std::move(storage)),
+      storage_offset_(0),
+      sizes_{0},
+      strides_{1},
+      is_contiguous_(true),
+      numel_(0),
+      type_id_(type_id),
+      scalar_type_(scalar_type),
+      is_variable_(is_variable) {}
 
 IntList TensorImpl::sizes() const {
   return sizes_;

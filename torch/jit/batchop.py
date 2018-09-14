@@ -140,7 +140,7 @@ def batch_select(data, mask, dims, dim_, index_):
     # if dim == 0:
     #     raise ValueError("Cannot select 0 dim in BatchTensor")
     data = data.select(dim, index)
-    if dims[dim - 1]:
+    if bool(dims[dim - 1]):
         mask = mask.select(dim, index)
     else:
         mask = mask.select(dim, 0)
@@ -171,7 +171,7 @@ def batch_index_select(data, mask, dims, dim_, index_data, index_mask, index_dim
     res_mask = torch.zeros([0])
     for i in range(batch_size):
         d = data[i].index_select(dim - 1, index_data[i]).unsqueeze(0)
-        if dims[dim - 1]:
+        if bool(dims[dim - 1]):
             m = mask[i].index_select(dim - 1, index_data[i]).unsqueeze(0)
         else:
             m = mask[i].unsqueeze(0)
@@ -310,7 +310,7 @@ def batch_argmax(data, mask, dims, dim_, keepdim_):
     batch_size = data.size(0)
     res_data = torch.zeros([0])
     for i in range(batch_size):
-        if dims[dim - 1]:
+        if bool(dims[dim - 1]):
             if dim - 1 != 0:
                 m = mask[i].transpose(0, dim - 1)
             else:
@@ -346,7 +346,7 @@ def batch_topk(data, mask, dims, k_, dim_, largest_, sorted_):
     res_data = torch.zeros([0])
     res_index = torch.zeros([0])
     for i in range(batch_size):
-        if dims[dim - 1]:
+        if bool(dims[dim - 1]):
             if dim - 1 != 0:
                 m = mask[i].transpose(0, dim - 1)
             else:
@@ -364,7 +364,7 @@ def batch_topk(data, mask, dims, k_, dim_, largest_, sorted_):
         else:
             res_data = torch.cat([res_data, d], 0)
             res_index = torch.cat([res_index, idx], 0)
-    if dims[dim - 1]:
+    if bool(dims[dim - 1]):
         mask = mask.narrow(dim, 0, k)
     return res_data, mask, dims, res_index, mask, dims
 
@@ -378,7 +378,7 @@ def batch_softmax(data, mask, dims, dim_):
     max_len = data.size(dim)
     res_data = torch.zeros([0])
     for i in range(batch_size):
-        if dims[dim - 1]:
+        if bool(dims[dim - 1]):
             if dim - 1 != 0:
                 m = mask[i].transpose(0, dim - 1)
             else:
@@ -417,7 +417,7 @@ def batch_view(data, mask, dims, sizes):
     res_dims = data_sizes_.narrow(0, 0, 1)
     for i_ in range(sizes.size(0) - 1):
         i = i_ + 1
-        if(sizes[i] == -1):
+        if bool(sizes[i] == -1):
             cur_size_ = mask.size(i)
             cur_dim = 1
         else:
@@ -434,7 +434,7 @@ def batch_view(data, mask, dims, sizes):
 def batch_cat2(data1, mask1, dims1, data2, mask2, dims2, dim_):
     dim = int(dim_)
     data = torch.cat([data1, data2], dim)
-    if(dims1[dim - 1]):
+    if bool(dims1[dim - 1]):
         mask = torch.cat([mask1, mask2], dim)
     else:
         mask = mask1
@@ -445,7 +445,7 @@ def batch_cat2(data1, mask1, dims1, data2, mask2, dims2, dim_):
 def batch_cat3(data1, mask1, dims1, data2, mask2, dims2, data3, mask3, dims3, dim_):
     dim = int(dim_)
     data = torch.cat([data1, data2, data3], dim)
-    if(dims1[dim - 1]):
+    if bool(dims1[dim - 1]):
         mask = torch.cat([mask1, mask2, mask3], dim)
     else:
         mask = mask1
@@ -460,7 +460,7 @@ def batch_narrow(data, mask, dims, dimension_, start_, length_):
     # if dimension == 0:
     #     raise ValueError("cannot do narrow along batch_dim")
     data = data.narrow(dimension, start, length)
-    if dims[dimension - 1]:
+    if bool(dims[dimension - 1]):
         mask = mask.narrow(dimension, start, length)
     else:
         mask = mask.narrow(dimension, 0, 1)

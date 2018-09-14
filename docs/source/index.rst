@@ -33,7 +33,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    torch.autograd <autograd>
    torch.distributed <distributed>
    torch.distributions <distributions>
-   torch.jit <JIT>
+   torch.jit <jit>
    torch.multiprocessing <multiprocessing>
    bottleneck
    checkpoint
