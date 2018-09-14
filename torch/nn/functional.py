@@ -2227,22 +2227,22 @@ def affine_grid(theta, size):
 def pad(input, pad, mode='constant', value=0):
     r"""Pads tensor.
 
-    `Nd` constant padding:  The number of dimensions to pad is
-        :math:`\left\lfloor\frac{len(padding)}{2}\right\rfloor` and the dimensions that get padded begins with the
-        last dimension and moves forward. See below for examples.
+    Pading size:
+        The number of dimensions to pad is :math:`\left\lfloor\frac{\text{len(pad)}}{2}\right\rfloor`
+        and the dimensions that get padded begins with the last dimension and moves forward.
+        For example, to pad the last dimension of the input tensor, then `pad` has form
+        `(padLeft, padRight)`; to pad the last 2 dimensions of the input tensor, then use
+        `(padLeft, padRight, padTop, padBottom)`; to pad the last 3 dimensions, use
+        `(padLeft, padRight, padTop, padBottom, padFront, padBack)`.
 
-    `1D`, `2D` and `3D` "reflect" / "replicate" padding:
-        for 1D:
-                3D input tensor with padding of the form `(padLeft, padRight)`
-        for 2D:
-                4D input tensor with padding of the form `(padLeft, padRight, padTop, padBottom)`.
-        for 3D:
-                5D input tensor with padding of the form
-                `(padLeft, padRight, padTop, padBottom, padFront, padBack)`. No "reflect" implementation.
-
-    See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
-    :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
-    padding modes works.
+    Padding mode:
+        See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
+        :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
+        padding modes works. Constant padding is implemented for arbitrary dimensions.
+        Replicate padding is implemented for padding the last 3 dimensions of 5D input
+        tensor, or the last 2 dimensions of 4D input tensor, or the last dimension of
+        3D input tensor. Reflect padding is only implemented for padding the last 2
+        dimensions of 4D input tensor, or the last dimension of 3D input tensor.
 
     Args:
         input (Tensor): `Nd` tensor
