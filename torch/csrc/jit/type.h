@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <iostream>
+#include <type_traits>
 
 namespace torch { namespace jit {
 
@@ -24,6 +25,7 @@ _(FloatType) \
 _(IntType) \
 _(NoneType) \
 _(StringType) \
+_(GeneratorType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -50,13 +52,20 @@ struct cloneType<true, T> {
 template<typename T>
 struct cloneType<false, T> {
   std::shared_ptr<T> operator()(std::shared_ptr<const T> ptr) const {
-    return std::make_shared<T>(*ptr);
+    auto result = std::make_shared<typename std::remove_const<T>::type>(*ptr);
+    // XXX: the line above will correctly slice the struct, and make its runtype
+    // type exactly equal to T. However, kind_ is a field of Type, so it will simply
+    // be copied, and we need to fix it in here to match the dynamic type.
+    result->kind_ = T::Kind;
+    return result;
   }
 };
 
 struct TORCH_API Type : std::enable_shared_from_this<Type> {
 private:
   TypeKind kind_;
+  template<bool is_singleton, typename T>
+  friend struct cloneType;
 
 protected:
   Type(TypeKind kind)
@@ -70,13 +79,21 @@ public:
   virtual bool isSubtypeOf(const TypePtr rhs) const {
     return *this == *rhs;
   }
-  // user-friendly form of the type, separate from
-  // operator<< which is verbose and unambiguous
+
+  // How this type will appear in FunctionSchema declarations
   virtual std::string str() const = 0;
+
+  // How this type will appear as if it were a type annotation in Python
+  // which is sometimes different than how it appears in declarations (e.g. int[] vs List[int])
+  virtual std::string python_str() const {
+    return str();
+  }
 
   TypeKind kind() const {
     return kind_;
   }
+
+  virtual bool requires_grad() const { return false; }
 
   // Dynamically cast this object to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid.
@@ -128,8 +145,10 @@ struct TORCH_API DynamicType : public Type {
   static constexpr bool is_singleton = true;
   template<typename ... T>
   static DynamicTypePtr create( T&& ... all ) {
-    return DynamicTypePtr(new DynamicType( std::forward<T>(all)... ));
+    return DynamicTypePtr(new DynamicType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
+
+  bool requires_grad() const override { return true; }
 
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -155,12 +174,13 @@ struct TORCH_API TensorType : public Type {
 
   template<typename ... T>
   static TensorTypePtr create( T&& ... all ) {
-    return TensorTypePtr(new TensorType( std::forward<T>(all)... ));
+    return TensorTypePtr(new TensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
 
   at::ScalarType scalarType() const { return scalar_type_; }
   int device() const { return device_; }
   int dim() const { return dim_; }
+  bool requires_grad() const override { return requires_grad_; }
 
   TensorTypePtr toScalarType(at::ScalarType type){
     auto t = TensorType::create(*this);
@@ -170,6 +190,11 @@ struct TORCH_API TensorType : public Type {
   TensorTypePtr withDim(int new_dim) {
     auto t = TensorType::create(*this);
     t->dim_ = new_dim;
+    return t;
+  }
+  TensorTypePtr withRequiresGrad(bool req) {
+    auto t = TensorType::create(*this);
+    t->requires_grad_ = req;
     return t;
   }
 
@@ -194,14 +219,20 @@ struct TORCH_API TensorType : public Type {
 
 protected:
   TensorType(const at::Tensor& tensor, TypeKind kind=TypeKind::TensorType)
-    : TensorType(tensor.type().scalarType(), tensor.type().is_cuda() ? tensor.get_device() : -1, tensor.dim(), kind) {}
-  TensorType(at::ScalarType scalar_type, int device, int dim, TypeKind kind=TypeKind::TensorType)
+    : TensorType(tensor.type().scalarType(),
+                 tensor.type().is_cuda() ? tensor.get_device() : -1,
+                 tensor.dim(),
+                 tensor.is_variable() && tensor.requires_grad(),
+                 kind) {}
+  TensorType(at::ScalarType scalar_type, int device, int dim, bool requires_grad=true, TypeKind kind=TypeKind::TensorType)
     : Type(kind)
     , scalar_type_(scalar_type)
+    , requires_grad_(at::isFloatingType(scalar_type) && requires_grad)
     , device_(device)
     , dim_(dim) {}
 
   at::ScalarType scalar_type_;
+  bool requires_grad_;
   int device_;
   int dim_;
 };
@@ -214,15 +245,15 @@ struct TORCH_API CompleteTensorType : public TensorType {
   friend struct Type;
   template<typename ... T>
   static CompleteTensorTypePtr create( T&& ... all ) {
-    return CompleteTensorTypePtr(new CompleteTensorType( std::forward<T>(all)... ));
+    return CompleteTensorTypePtr(new CompleteTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
 
   // overloaded create variadic template argument as it could not distinguish initializer list
   static CompleteTensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes) {
-    return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes));
+    return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes)); // NOLINT(modernize-make-shared)
   }
   static CompleteTensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides) {
-    return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes, strides));
+    return CompleteTensorTypePtr(new CompleteTensorType(scalar_type, device, sizes, strides)); // NOLINT(modernize-make-shared)
   }
 
   static const TypeKind Kind = TypeKind::CompleteTensorType;
@@ -263,7 +294,7 @@ struct TORCH_API CompleteTensorType : public TensorType {
     if (rhs->kind() == TypeKind::DynamicType)
       return true;
     if (rhs->kind() == TypeKind::TensorType)
-      return *dynamic_cast<const TensorType*>(this) == *rhs;
+      return *expect<TensorType>() ==  *rhs;
     return *this == *rhs;
   }
   std::string str() const override {
@@ -285,16 +316,16 @@ private:
     : TensorType(tensor, TypeKind::CompleteTensorType)
     , sizes_(tensor.sizes().vec())
     , strides_(tensor.strides().vec()) {}
-  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes)
-    : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes)) {}
-  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides)
-    : TensorType(scalar_type, device, sizes.size(), TypeKind::CompleteTensorType)
+  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes, bool requires_grad=true)
+    : CompleteTensorType(scalar_type, device, sizes, CompleteTensorType::contiguousStridesOf(sizes), requires_grad) {}
+  CompleteTensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides, bool requires_grad=true)
+    : TensorType(scalar_type, device, sizes.size(), requires_grad, TypeKind::CompleteTensorType)
     , sizes_(sizes.vec())
     , strides_(strides.vec()) {}
 
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
-    if(sizes.size() == 0) // zero-dim case
+    if(sizes.empty()) // zero-dim case
       return strides;
     strides.back() = 1;
     for(size_t i = strides.size() - 1; i > 0; i--) {
@@ -317,7 +348,7 @@ struct TORCH_API ListType : public Type {
   friend struct Type;
   template<typename ... T>
   static ListTypePtr create( T&& ... all ) {
-    return ListTypePtr(new ListType( std::forward<T>(all)... ));
+    return ListTypePtr(new ListType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     if(auto rhs_ = rhs.cast<ListType>()) {
@@ -330,6 +361,11 @@ struct TORCH_API ListType : public Type {
     ss << getElementType()->str() << "[]";
     return ss.str();
   }
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "List[" << getElementType()->python_str() << "]";
+    return ss.str();
+  }
   TypePtr getElementType() const {
     return elem;
   }
@@ -337,10 +373,11 @@ struct TORCH_API ListType : public Type {
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
+
+  static const TypeKind Kind = TypeKind::ListType;
 private:
   ListType(TypePtr elem)
-  : Type(TypeKind::ListType), elem(elem) {}
-  static const TypeKind Kind = TypeKind::ListType;
+  : Type(TypeKind::ListType), elem(std::move(elem)) {}
   TypePtr elem;
 };
 
@@ -350,9 +387,8 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 struct TORCH_API TupleType : public Type {
   static constexpr bool is_singleton = false;
   friend struct Type;
-  template<typename ... T>
-  static TupleTypePtr create( T&& ... all ) {
-    return TupleTypePtr(new TupleType( std::forward<T>(all)... ));
+  static TupleTypePtr create(std::vector<TypePtr> types) {
+    return TupleTypePtr(new TupleType( std::move(types) )); // NOLINT(modernize-make-shared)
   }
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
@@ -379,11 +415,23 @@ struct TORCH_API TupleType : public Type {
     ss << ")";
     return ss.str();
   }
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "Tuple[";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->python_str();
+    }
+    ss << "]";
+    return ss.str();
+  }
+
+  static const TypeKind Kind = TypeKind::TupleType;
 private:
   TupleType(std::vector<TypePtr> elements_)
   : Type(TypeKind::TupleType)
   , elements_(std::move(elements_)) {}
-  static const TypeKind Kind = TypeKind::TupleType;
 
   bool compare(const Type& rhs, std::function<bool(const TypePtr, const TypePtr)> fn) const {
     if(rhs.kind() != kind())
@@ -408,7 +456,7 @@ struct TORCH_API NumberType : public Type {
   static constexpr bool is_singleton = true;
   template<typename ... T>
   static NumberTypePtr create( T&& ... all ) {
-    return NumberTypePtr(new NumberType( std::forward<T>(all)... ));
+    return NumberTypePtr(new NumberType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -431,7 +479,7 @@ struct TORCH_API FloatType : public Type {
   static constexpr bool is_singleton = true;
   template<typename ... T>
   static FloatTypePtr create( T&& ... all ) {
-    return FloatTypePtr(new FloatType( std::forward<T>(all)... ));
+    return FloatTypePtr(new FloatType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -457,7 +505,7 @@ struct TORCH_API IntType : public Type {
   static constexpr bool is_singleton = true;
   template<typename ... T>
   static IntTypePtr create( T&& ... all ) {
-    return IntTypePtr(new IntType( std::forward<T>(all)... ));
+    return IntTypePtr(new IntType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -483,7 +531,7 @@ struct TORCH_API StringType : public Type {
   static constexpr bool is_singleton = true;
   template<typename ... T>
   static StringTypePtr create( T&& ... all ) {
-    return StringTypePtr(new StringType( std::forward<T>(all)... ));
+    return StringTypePtr(new StringType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -509,12 +557,12 @@ struct NoneType : public Type {
   static constexpr bool is_singleton = true;
   template<typename ... T>
   static NoneTypePtr create( T&& ... all ) {
-    return NoneTypePtr(new NoneType( std::forward<T>(all)... ));
+    return NoneTypePtr(new NoneType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
   }
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     return "None";
   }
   static const TypeKind Kind = TypeKind::NoneType;
@@ -523,6 +571,28 @@ struct NoneType : public Type {
 private:
   NoneType()
   : Type(TypeKind::NoneType) {}
+};
+
+struct GeneratorType;
+using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
+struct GeneratorType : public Type {
+  static constexpr bool is_singleton = true;
+  template<typename ... T>
+  static GeneratorTypePtr create( T&& ... all) {
+    return GeneratorTypePtr(new GeneratorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Generator";
+  }
+  static const TypeKind Kind = TypeKind::GeneratorType;
+  // global singleton
+  static GeneratorTypePtr get();
+private:
+  GeneratorType()
+  : Type(TypeKind::GeneratorType) {}
 };
 
 

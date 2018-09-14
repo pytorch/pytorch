@@ -1,6 +1,6 @@
 #include "caffe2/operators/flexible_top_k.h"
 
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 

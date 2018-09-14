@@ -29,21 +29,24 @@ THC_API void THCTensor_(topk)(THCState* state,
   THCTensor_(resize)(state, topK, topKSize, {});
   THCudaLongTensor_resize(state, indices, topKSize, {});
 
+  // static_cast is required to ensure that the correct type (INDEX_T)
+  // is provided to the kernel for the arguments.
+
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
-  gatherTopK<real, INDEX_T, DIM, DIR>                                   \
+  gatherTopK<scalar_t, INDEX_T, DIM, DIR>                                   \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
       inputInfo,                                                        \
-      sliceSize,                                                        \
-      k,                                                                \
-      inputSlices,                                                      \
+      static_cast<INDEX_T>(sliceSize),                                  \
+      static_cast<INDEX_T>(k),                                          \
+      static_cast<INDEX_T>(inputSlices),                                \
       /* The actual dimension that the k-selection is running in */     \
       /* may have changed from collapseDims() */                        \
-      inputInfo.strides[collapseInputDim],                              \
+      static_cast<INDEX_T>(inputInfo.strides[collapseInputDim]),        \
       topKInfo,                                                         \
-      topKSlices,                                                       \
-      topKInfo.strides[collapseTopKDim],                                \
+      static_cast<INDEX_T>(topKSlices),                                 \
+      static_cast<INDEX_T>(topKInfo.strides[collapseTopKDim]),          \
       indicesInfo,                                                      \
-      indicesInfo.strides[collapseIndicesDim])
+      static_cast<INDEX_T>(indicesInfo.strides[collapseIndicesDim]))
 
 #define RUN_DIR(INDEX_T, DIM)                   \
   if (dir) {                                    \
@@ -63,11 +66,17 @@ THC_API void THCTensor_(topk)(THCState* state,
     RUN_DIR(INDEX_T, -1);                       \
   }
 
+#ifdef __HIP_PLATFORM_HCC__
+#define TOPK_WARP_SIZE 64
+#else
+#define TOPK_WARP_SIZE 32
+#endif
+
 #define RUN_T(INDEX_T)                                                  \
-  TensorInfo<real, INDEX_T> inputInfo =                                 \
-    getTensorInfo<real, THCTensor, INDEX_T>(state, input);              \
-  TensorInfo<real, INDEX_T> topKInfo =                                  \
-    getTensorInfo<real, THCTensor, INDEX_T>(state, topK);               \
+  TensorInfo<scalar_t, INDEX_T> inputInfo =                                 \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, input);              \
+  TensorInfo<scalar_t, INDEX_T> topKInfo =                                  \
+    getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, topK);               \
   TensorInfo<int64_t, INDEX_T> indicesInfo =                            \
     getTensorInfo<int64_t, THCudaLongTensor, INDEX_T>(state, indices);  \
                                                                         \
@@ -96,7 +105,7 @@ THC_API void THCTensor_(topk)(THCState* state,
     THError("Slice to sort is too large");                              \
   }                                                                     \
                                                                         \
-  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) 32), (int64_t) 1024)); \
+  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) TOPK_WARP_SIZE), (int64_t) 1024)); \
                                                                         \
   /* This is used as a template parameter to calculate indices. */      \
   /* We only specialize it if all collapsed dim sizes are the */        \
@@ -124,6 +133,7 @@ THC_API void THCTensor_(topk)(THCState* state,
 #undef RUN_DIM
 #undef RUN_DIR
 #undef RUN_K
+#undef TOPK_WARP_SIZE
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting

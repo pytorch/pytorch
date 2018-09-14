@@ -12,6 +12,8 @@
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
 
+#include <mpi.h>
+
 namespace c10d {
 
 // WorkEntry is the state associated with a single MPI run instance.
@@ -76,7 +78,7 @@ class ProcessGroupMPI : public ProcessGroup {
     virtual ~WorkMPI();
 
     // Checks if request has completed. Non-blocking operation.
-    bool isCompleted() const override;
+    bool isCompleted() override;
 
     // Returns if the work completed successfully
     // if false, the exception function can be called to get details.
@@ -105,8 +107,30 @@ class ProcessGroupMPI : public ProcessGroup {
     friend class ProcessGroupMPI;
   };
 
+  class AsyncWork : public ProcessGroup::Work {
+   public:
+    AsyncWork(at::Tensor tensor, MPI_Request request, int* srcRank = nullptr);
+    virtual ~AsyncWork();
+
+    bool isCompleted() override;
+
+    bool isSuccess() const override;
+
+    void synchronize() override;
+
+    bool wait() override;
+
+    const std::exception& exception() const override;
+
+   protected:
+    at::Tensor tensor_;
+    MPI_Request request_;
+    int* const srcRank_;
+    MPI_Status status_;
+  };
+
   // Constructor will spawn up the worker thread loop
-  explicit ProcessGroupMPI(int rank, int size);
+  explicit ProcessGroupMPI(int rank, int size, MPI_Comm pgComm);
 
   virtual ~ProcessGroupMPI();
 
@@ -141,20 +165,26 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
-      int dstRank);
+      int dstRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
-      int srcRank);
+      int srcRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
-      int* srcRank);
+      int* srcRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> barrier();
 
+  std::unordered_map<int, int> getGroupRank();
+
   // Creating a new ProcessGroupMPI, will initiialize MPI if not initialized
-  static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI();
+  static std::shared_ptr<ProcessGroupMPI> createProcessGroupMPI(
+      std::vector<int> ranks = {});
 
  protected:
   using WorkType =
@@ -177,11 +207,17 @@ class ProcessGroupMPI : public ProcessGroup {
 
   // Global states
   static void initMPIOnce();
+  static void mpiExit();
   static std::once_flag onceFlagInitMPI;
 
   static std::mutex pgGlobalMutex_;
   static int numProcessGroups_;
   static int mpiThreadSupport_;
+
+  MPI_Comm pgComm_;
+  int groupRank_;
+  int groupSize_;
+  std::unordered_map<int, int> groupRankMap_;
 };
 
 } // namespace c10d

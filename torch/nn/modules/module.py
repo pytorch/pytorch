@@ -42,7 +42,7 @@ class Module(object):
                return F.relu(self.conv2(x))
 
     Submodules assigned in this way will be registered, and will have their
-    parameters converted too when you call `.cuda()`, etc.
+    parameters converted too when you call :meth:`to`, etc.
     """
 
     dump_patches = False
@@ -650,7 +650,7 @@ class Module(object):
                     # local shape should match the one in checkpoint
                     error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
                                       'where the shape is {} in current model.'
-                                      .format(key, param.shape, input_param.shape))
+                                      .format(key, input_param.shape, param.shape))
                     continue
 
                 if isinstance(input_param, Parameter):

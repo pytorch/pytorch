@@ -17,7 +17,7 @@ struct CAFFE2_API Token {
 
 class CAFFE2_API TokenizedString {
   // holder for strings that have been modified
-  std::vector<std::unique_ptr<std::string>> modifiedStrings_;
+  std::vector<std::shared_ptr<std::string>> modifiedStrings_;
   std::vector<Token> tokens_;
   int lastDelim_;
 

@@ -44,7 +44,7 @@ public:
   static bool initialized;
   explicit GLContext();
   explicit GLContext(const DeviceOption &option) {
-    DCHECK_EQ(option.device_type(), OPENGL);
+    DCHECK_EQ(option.device_type(), PROTO_OPENGL);
     GLContext();
   }
   ~GLContext() {}

@@ -12,7 +12,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/registry.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/filler.h"
 
 namespace caffe2 {
@@ -190,7 +190,7 @@ class CAFFE2_API OpSchema {
     uint64_t flops{0}; // Floating point operations.
     uint64_t bytes_read{0}; // Total memory read.
     uint64_t bytes_written{0}; // Total memory written.
-    uint64_t params_bytes{0}; // Memory footprint of parameters
+    uint64_t params_bytes{0}; // Memory read for parameters.
   };
   /**
    * @brief Registers a function that takes in an OperatorDef
@@ -328,7 +328,7 @@ class CAFFE2_API OpSchema {
     return inplace_enforced_(x, y);
   }
 
-  friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
+  CAFFE2_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
     return args_;
@@ -518,8 +518,22 @@ inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
 
 // Helper function
 inline uint64_t nElemFromDim(const TensorShape& X, int dim = 0) {
+  CAFFE_ENFORCE_GE(dim, 0, "Invalid maximum index specified");
+
   uint64_t nElem = 1;
   for (int i = dim; i < X.dims_size(); ++i) {
+    nElem *= X.dims(i);
+  }
+  return nElem;
+}
+
+// Helper function
+inline uint64_t nElemBetweenDim(const TensorShape& X, int start, int stop) {
+  CAFFE_ENFORCE_GE(start, 0, "Invalid maximum index specified");
+  CAFFE_ENFORCE_LE(stop, X.dims_size(), "Invalid maximum index specified");
+
+  uint64_t nElem = 1;
+  for (int i = start; i < stop; ++i) {
     nElem *= X.dims(i);
   }
   return nElem;
@@ -563,14 +577,14 @@ OpSchema::Cost PointwiseCostInference(
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
 #define OPERATOR_SCHEMA(name)                                     \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
+  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
   static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
 #define OPERATOR_SCHEMA(name)                                     \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
+  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
   static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 

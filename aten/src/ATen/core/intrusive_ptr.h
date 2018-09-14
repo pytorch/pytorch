@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Error.h>
 #include <atomic>
 #include <stdexcept>
@@ -32,7 +33,7 @@ namespace c10 {
 // tells us if the object was allocated by us.  If it wasn't, no
 // intrusive_ptr for you!
 
-class intrusive_ptr_target {
+class AT_CORE_API intrusive_ptr_target {
   // Note [Weak references for intrusive refcounting]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Here's the scheme:
@@ -113,11 +114,20 @@ class intrusive_ptr_target {
 
 namespace detail {
 template <class TTarget>
-struct intrusive_target_default_null_type final {
+struct AT_CORE_EXPORT intrusive_target_default_null_type final {
   static constexpr TTarget* singleton() noexcept {
     return nullptr;
   }
 };
+
+template<class TTarget, class ToNullType, class FromNullType>
+TTarget* assign_ptr_(TTarget* rhs) {
+  if (FromNullType::singleton() == rhs) {
+    return ToNullType::singleton();
+  } else {
+    return rhs;
+  }
+}
 } // namespace detail
 
 template <class TTarget, class NullType>
@@ -126,7 +136,7 @@ class weak_intrusive_ptr;
 template <
     class TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
-class intrusive_ptr final {
+class AT_CORE_EXPORT intrusive_ptr final {
  private:
   static_assert(
       std::is_base_of<intrusive_ptr_target, TTarget>::value,
@@ -190,17 +200,10 @@ class intrusive_ptr final {
 
   template <class From, class FromNullType>
   /* implicit */ intrusive_ptr(intrusive_ptr<From, FromNullType>&& rhs) noexcept
-      : target_(rhs.target_) {
+      : target_(detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr move constructor got pointer of wrong type.");
-#ifndef _WIN32
-    // This static_assert triggers on MSVC
-    //  error C2131: expression did not evaluate to a constant
-    static_assert(
-        NullType::singleton() == FromNullType::singleton(),
-        "NullType mismatch. intrusive_ptr move constructor got pointer with differing null value.");
-#endif
     rhs.target_ = FromNullType::singleton();
   }
 
@@ -211,17 +214,10 @@ class intrusive_ptr final {
   template <class From, class FromNullType>
   /* implicit */ intrusive_ptr(
       const intrusive_ptr<From, FromNullType>& rhs)
-      : target_(rhs.target_) {
+      : target_(detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr copy constructor got pointer of wrong type.");
-#ifndef _WIN32
-    // This static_assert triggers on MSVC
-    //  error C2131: expression did not evaluate to a constant
-    static_assert(
-        NullType::singleton() == FromNullType::singleton(),
-        "NullType mismatch. intrusive_ptr copy constructor got pointer with differing null value.");
-#endif
     retain_();
   }
 
@@ -239,18 +235,8 @@ class intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr move assignment got pointer of wrong type.");
-#ifndef _WIN32
-    // This static_assert triggers on MSVC
-    //  error C2131: expression did not evaluate to a constant
-    static_assert(
-        NullType::singleton() == FromNullType::singleton(),
-        "NullType mismatch. intrusive_ptr move assignment got pointer with differing null value.");
-#endif
-    if (static_cast<const void*>(&this->target_) != static_cast<const void*>(&rhs.target_)) {
-      reset_();
-      target_ = rhs.target_;
-      rhs.target_ = FromNullType::singleton();
-    }
+    intrusive_ptr tmp = std::move(rhs);
+    swap(tmp);
     return *this;
   }
 
@@ -263,18 +249,8 @@ class intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. intrusive_ptr copy assignment got pointer of wrong type.");
-#ifndef _WIN32
-    // This static_assert triggers on MSVC
-    //  error C2131: expression did not evaluate to a constant
-    static_assert(
-        NullType::singleton() == FromNullType::singleton(),
-        "NullType mismatch. intrusive_ptr copy assignment got pointer with differing null value.");
-#endif
-    if (static_cast<const void*>(&this->target_) != static_cast<const void*>(&rhs.target_)) {
-      reset_();
-      target_ = rhs.target_;
-      retain_();
-    }
+    intrusive_ptr tmp = rhs;
+    swap(tmp);
     return *this;
   }
 
@@ -415,7 +391,7 @@ inline bool operator!=(
 template <
     typename TTarget,
     class NullType = detail::intrusive_target_default_null_type<TTarget>>
-class weak_intrusive_ptr final {
+class AT_CORE_EXPORT weak_intrusive_ptr final {
  private:
   static_assert(
       std::is_base_of<intrusive_ptr_target, TTarget>::value,
@@ -469,17 +445,10 @@ class weak_intrusive_ptr final {
   template <class From, class FromNullType>
   /* implicit */ weak_intrusive_ptr(
       weak_intrusive_ptr<From, FromNullType>&& rhs) noexcept
-      : target_(rhs.target_) {
+      : target_(detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr move constructor got pointer of wrong type.");
-#ifndef _WIN32
-    // This static_assert triggers on MSVC
-    //  error C2131: expression did not evaluate to a constant
-    static_assert(
-        NullType::singleton() == FromNullType::singleton(),
-        "NullType mismatch. weak_intrusive_ptr move constructor got pointer with differing null value.");
-#endif
     rhs.target_ = FromNullType::singleton();
   }
 
@@ -491,17 +460,10 @@ class weak_intrusive_ptr final {
   template <class From, class FromNullType>
   /* implicit */ weak_intrusive_ptr(
       const weak_intrusive_ptr<From, FromNullType>& rhs)
-      : target_(rhs.target_) {
+      : target_(detail::assign_ptr_<TTarget, NullType, FromNullType>(rhs.target_)) {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr copy constructor got pointer of wrong type.");
-#ifndef _WIN32
-    // This static_assert triggers on MSVC
-    //  error C2131: expression did not evaluate to a constant
-    static_assert(
-        NullType::singleton() == FromNullType::singleton(),
-        "NullType mismatch. weak_intrusive_ptr copy constructor got pointer with differing null value.");
-#endif
     retain_();
   }
 
@@ -520,18 +482,8 @@ class weak_intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr move assignment got pointer of wrong type.");
-#ifndef _WIN32
-    // This static_assert triggers on MSVC
-    //  error C2131: expression did not evaluate to a constant
-    static_assert(
-        NullType::singleton() == FromNullType::singleton(),
-        "NullType mismatch. weak_intrusive_ptr move assignment got pointer with differing null value.");
-#endif
-    if (static_cast<const void*>(&this->target_) != static_cast<const void*>(&rhs.target_)) {
-      reset_();
-      target_ = rhs.target_;
-      rhs.target_ = FromNullType::singleton();
-    }
+    weak_intrusive_ptr tmp = std::move(rhs);
+    swap(tmp);
     return *this;
   }
 
@@ -545,18 +497,8 @@ class weak_intrusive_ptr final {
     static_assert(
         std::is_convertible<From*, TTarget*>::value,
         "Type mismatch. weak_intrusive_ptr copy assignment got pointer of wrong type.");
-#ifndef _WIN32
-    // This static_assert triggers on MSVC
-    //  error C2131: expression did not evaluate to a constant
-    static_assert(
-        NullType::singleton() == FromNullType::singleton(),
-        "NullType mismatch. weak_intrusive_ptr copy assignment got pointer with differing null value.");
-#endif
-    if (static_cast<const void*>(&this->target_) != static_cast<const void*>(&rhs.target_)) {
-      reset_();
-      target_ = rhs.target_;
-      retain_();
-    }
+    weak_intrusive_ptr tmp = rhs;
+    swap(tmp);
     return *this;
   }
 
@@ -797,13 +739,13 @@ namespace std {
 // To allow intrusive_ptr and weak_intrusive_ptr inside std::unordered_map or
 // std::unordered_set, we need std::hash
 template <class TTarget, class NullType>
-struct hash<c10::intrusive_ptr<TTarget, NullType>> {
+struct AT_CORE_EXPORT hash<c10::intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x.get());
   }
 };
 template <class TTarget, class NullType>
-struct hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
+struct AT_CORE_EXPORT hash<c10::weak_intrusive_ptr<TTarget, NullType>> {
   size_t operator()(const c10::weak_intrusive_ptr<TTarget, NullType>& x) const {
     return std::hash<TTarget*>()(x._unsafe_get_target());
   }

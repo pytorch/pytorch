@@ -10,15 +10,25 @@
 
 set -ex
 
+SYNC_COMMAND="cp"
+if [ -x "$(command -v rsync)" ]; then
+    SYNC_COMMAND="rsync -lptgoD"
+fi
+
 # Options for building only a subset of the libraries
 USE_CUDA=0
 USE_ROCM=0
 USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
-FULL_CAFFE2=0
+CAFFE2_STATIC_LINK_CUDA=0
+TORCH_USE_CEREAL=0
+RERUN_CMAKE=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
+      --dont-rerun-cmake)
+          RERUN_CMAKE=0
+          ;;
       --use-cuda)
           USE_CUDA=1
           ;;
@@ -34,11 +44,11 @@ while [[ $# -gt 0 ]]; do
       --use-gloo-ibverbs)
           USE_GLOO_IBVERBS=1
           ;;
-      --full-caffe2)
-          FULL_CAFFE2=1
-          ;;
       --cuda-static-link)
           CAFFE2_STATIC_LINK_CUDA=1
+          ;;
+      --use-cereal)
+          TORCH_USE_CEREAL=1
           ;;
       *)
           break
@@ -103,11 +113,11 @@ else
     fi
 fi
 CPP_FLAGS=" -std=c++11 "
-GLOO_FLAGS=""
+GLOO_FLAGS="-DBUILD_TEST=OFF "
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $USE_CUDA -eq 1 ]]; then
-    GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
+    GLOO_FLAGS+="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 # Gloo infiniband support
 if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
@@ -150,43 +160,50 @@ function build() {
       THCS | THCUNN ) BUILD_C_FLAGS=$C_FLAGS;;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
-  # TODO: The *_LIBRARIES cmake variables should eventually be
-  # deprecated because we are using .cmake files to handle finding
-  # installed libraries instead
-  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
-              ${CMAKE_GENERATOR} \
-              -DTorch_FOUND="1" \
-              -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-              -DCMAKE_C_FLAGS="$BUILD_C_FLAGS $USER_CFLAGS" \
-              -DCMAKE_CXX_FLAGS="$BUILD_C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
-              -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-              -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-              -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
-              -DCUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS" \
-              -DCUDA_DEVICE_DEBUG=$CUDA_DEVICE_DEBUG \
-              -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
-              -Dcwrap_files="$CWRAP_FILES" \
-              -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
-              -DTH_LIB_PATH="$INSTALL_DIR/lib" \
-              -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
-              -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
-              -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
-              -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
-              -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
-              -DTHC_LIBRARIES="$INSTALL_DIR/lib/libTHC$LD_POSTFIX" \
-              -DTHCS_LIBRARIES="$INSTALL_DIR/lib/libTHCS$LD_POSTFIX" \
-              -DTH_SO_VERSION=1 \
-              -DTHC_SO_VERSION=1 \
-              -DTHNN_SO_VERSION=1 \
-              -DTHCUNN_SO_VERSION=1 \
-              -DTHD_SO_VERSION=1 \
-              -DUSE_CUDA=$USE_CUDA \
-              -DNO_NNPACK=$((1-$USE_NNPACK)) \
-              -DNCCL_EXTERNAL=1 \
-              -DCMAKE_DEBUG_POSTFIX="" \
-              -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-              ${@:2} \
-              -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ${CMAKE_ARGS[@]}
+  if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
+      # TODO: The *_LIBRARIES cmake variables should eventually be
+      # deprecated because we are using .cmake files to handle finding
+      # installed libraries instead
+      ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+		       ${CMAKE_GENERATOR} \
+		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
+		       -DTorch_FOUND="1" \
+		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+		       -DCMAKE_C_FLAGS="$BUILD_C_FLAGS $USER_CFLAGS" \
+		       -DCMAKE_CXX_FLAGS="$BUILD_C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
+		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+		       -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
+		       -DCUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS" \
+		       -DCUDA_DEVICE_DEBUG=$CUDA_DEVICE_DEBUG \
+		       -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
+		       -Dcwrap_files="$CWRAP_FILES" \
+		       -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
+		       -DTH_LIB_PATH="$INSTALL_DIR/lib" \
+		       -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
+		       -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
+		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
+		       -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
+		       -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
+		       -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
+		       -DTHC_LIBRARIES="$INSTALL_DIR/lib/libTHC$LD_POSTFIX" \
+		       -DTHCS_LIBRARIES="$INSTALL_DIR/lib/libTHCS$LD_POSTFIX" \
+		       -DTH_SO_VERSION=1 \
+		       -DTHC_SO_VERSION=1 \
+		       -DTHNN_SO_VERSION=1 \
+		       -DTHCUNN_SO_VERSION=1 \
+		       -DTHD_SO_VERSION=1 \
+		       -DUSE_CUDA=$USE_CUDA \
+		       -DTORCH_USE_CEREAL=$TORCH_USE_CEREAL \
+		       -DBUILD_EXAMPLES=OFF \
+		       -DBUILD_TEST=$BUILD_TEST \
+		       -DNO_NNPACK=$((1-$USE_NNPACK)) \
+		       -DNCCL_EXTERNAL=1 \
+		       -DCMAKE_DEBUG_POSTFIX="" \
+		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+		       ${@:2} \
+		       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ${CMAKE_ARGS[@]}
+  fi
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   popd
 
@@ -211,18 +228,21 @@ function path_remove {
 function build_nccl() {
   mkdir -p build/nccl
   pushd build/nccl
-  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
-              ${CMAKE_GENERATOR} \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-              -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
-              -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
-              -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
-              -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake" \
-              -DNUM_JOBS="$MAX_JOBS"
+  if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
+      ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+		       ${CMAKE_GENERATOR} \
+		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
+		       -DCMAKE_BUILD_TYPE=Release \
+		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+		       -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
+		       -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
+		       -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
+		       -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake" \
+		       -DNUM_JOBS="$MAX_JOBS"
+  fi
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
-  cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
+  find lib -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "${INSTALL_DIR}/lib/"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
     ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
   fi
@@ -238,6 +258,9 @@ function build_nccl() {
 # detected them (to ensure that we have a consistent view between the
 # PyTorch and Caffe2 builds.)
 function build_caffe2() {
+  # pwd is pytorch_root/build
+
+  # TODO change these to CMAKE_ARGS for consistency
   if [[ -z $EXTRA_CAFFE2_CMAKE_FLAGS ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS=()
   fi
@@ -249,50 +272,60 @@ function build_caffe2() {
     EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
   fi
 
-  ${CMAKE_VERSION} $BASE_DIR \
-  ${CMAKE_GENERATOR} \
-      -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
-      -DBUILDING_WITH_TORCH_LIBS=ON \
-      -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-      -DBUILD_CAFFE2=$FULL_CAFFE2 \
-      -DBUILD_TORCH=$BUILD_TORCH \
-      -DBUILD_PYTHON=$FULL_CAFFE2 \
-      -DBUILD_BINARY=OFF \
-      -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
-      -DONNX_NAMESPACE=$ONNX_NAMESPACE \
-      -DUSE_CUDA=$USE_CUDA \
-      -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
-      -DUSE_ROCM=$USE_ROCM \
-      -DUSE_NNPACK=$USE_NNPACK \
-      -DCUDA_DEVICE_DEBUG=$CUDA_DEVICE_DEBUG \
-      -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
-      -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
-      -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
-      -DUSE_MKLDNN=$USE_MKLDNN \
-      -DMKLDNN_INCLUDE_DIR=$MKLDNN_INCLUDE_DIR \
-      -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
-      -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
-      -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-      -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-      -DCMAKE_C_FLAGS="$USER_CFLAGS" \
-      -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
-      -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
-      -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
+  if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
+      ${CMAKE_VERSION} $BASE_DIR \
+		       ${CMAKE_GENERATOR} \
+		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
+		       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
+		       -DBUILDING_WITH_TORCH_LIBS=ON \
+		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+		       -DBUILD_TORCH=$BUILD_TORCH \
+		       -DBUILD_PYTHON=$BUILD_PYTHON \
+		       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
+		       -DBUILD_BINARY=$BUILD_BINARY \
+		       -DBUILD_TEST=$BUILD_TEST \
+		       -DINSTALL_TEST=$INSTALL_TEST \
+		       -DBUILD_CAFFE2_OPS=$BUILD_CAFFE2_OPS \
+		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
+		       -DUSE_CUDA=$USE_CUDA \
+		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
+		       -DUSE_ROCM=$USE_ROCM \
+		       -DUSE_NNPACK=$USE_NNPACK \
+		       -DUSE_LEVELDB=$USE_LEVELDB \
+		       -DUSE_LMDB=$USE_LMDB \
+		       -DUSE_OPENCV=$USE_OPENCV \
+		       -DUSE_GLOG=OFF \
+		       -DUSE_GFLAGS=OFF \
+		       -DUSE_SYSTEM_EIGEN_INSTALL=OFF \
+		       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
+		       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
+		       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
+		       -DUSE_MKLDNN=$USE_MKLDNN \
+		       -DMKLDNN_INCLUDE_DIR=$MKLDNN_INCLUDE_DIR \
+		       -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
+		       -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
+		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+		       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
+		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
+		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+		       -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
-  ${CMAKE_INSTALL} -j"$MAX_JOBS"
-
-  # Install Python proto files
-  if [[ $FULL_CAFFE2 -ne 0 ]]; then
-    find . -name proto
-    for proto_file in ./caffe2/proto/*.py; do
-      cp $proto_file "../caffe2/proto/"
-    done
   fi
+
+  # This is needed by the aten tests built with caffe2
+  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
+      # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
+      find "${INSTALL_DIR}/lib" -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "lib/"
+  fi
+
+  ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
+    # root/torch/lib/tmp_install/lib
     pushd "$INSTALL_DIR/lib"
     for lib in *.dylib; do
       echo "Updating install_name for $lib"
@@ -342,15 +375,15 @@ pushd $TORCH_LIB_DIR
 # binaries to torch/lib
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
-cp -r "$INSTALL_DIR/lib"/* .
+$SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
-    cp -r "$INSTALL_DIR/lib64"/* .
+    $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
 fi
-cp ../../aten/src/THNN/generic/THNN.h .
-cp ../../aten/src/THCUNN/generic/THCUNN.h .
-cp -r "$INSTALL_DIR/include" .
+$SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
+$SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
+$SYNC_COMMAND -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
-    cp -r "$INSTALL_DIR/bin/"/* .
+    $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .
 fi
 
 popd

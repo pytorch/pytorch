@@ -54,7 +54,7 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // --------------------------------------------------------------------
 
 static Tensor scalar_tensor(Scalar s) {
-  auto tensor = s.toTensor();
+  auto tensor = scalar_to_tensor(s);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
@@ -470,7 +470,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
       r.copy_(t);
     }
   } else {
-    at::mul_out(r, t, beta.toTensor());
+    at::mul_out(r, t, scalar_to_tensor(beta));
   }
 
   auto csr_accessor = csr.accessor<int64_t, 1>();
@@ -541,7 +541,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   int64_t nnz        = sparse._nnz();
 
   if (nnz == 0) {
-    at::mul_out(r, t, r.type().scalarTensor(beta.local()));
+    at::mul_out(r, t, r.type().scalarTensor(beta));
     return r;
   }
 
@@ -784,7 +784,7 @@ Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
 // sparse, dense -> sparse
 Tensor smm(const Tensor& self, const Tensor& mat2) {
   auto result = self.type().tensor();
-  self.type().sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
+  at::sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
   return result;
 }
 
@@ -792,7 +792,7 @@ Tensor smm(const Tensor& self, const Tensor& mat2) {
 Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
     Scalar beta, Scalar alpha) {
   auto result = self.type().tensor();
-  self.type().sspaddmm_out(result, self, mat1, mat2, beta, alpha);
+  at::sspaddmm_out(result, self, mat1, mat2, beta, alpha);
   return result;
 }
 

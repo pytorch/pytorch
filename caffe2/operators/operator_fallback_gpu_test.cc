@@ -29,8 +29,7 @@ OPERATOR_SCHEMA(IncrementByOne)
     .NumInputs(1).NumOutputs(1).AllowInplace({{0, 0}});
 
 REGISTER_CPU_OPERATOR(IncrementByOne, IncrementByOneOp);
-REGISTER_CUDA_OPERATOR(IncrementByOne,
-                       GPUFallbackOp<IncrementByOneOp>);
+REGISTER_CUDA_OPERATOR(IncrementByOne, GPUFallbackOp);
 
 TEST(OperatorFallbackTest, IncrementByOneOp) {
   OperatorDef op_def = CreateOperatorDef(
@@ -59,7 +58,7 @@ TEST(OperatorFallbackTest, GPUIncrementByOneOp) {
   OperatorDef op_def = CreateOperatorDef(
       "IncrementByOne", "", vector<string>{"X"},
       vector<string>{"X"});
-  op_def.mutable_device_option()->set_device_type(CUDA);
+  op_def.mutable_device_option()->set_device_type(PROTO_CUDA);
   Workspace ws;
   Tensor source_tensor(vector<TIndex>{2, 3}, CPU);
   for (int i = 0; i < 6; ++i) {

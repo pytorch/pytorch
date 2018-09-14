@@ -5,7 +5,7 @@
 
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/registry.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 namespace db {
@@ -273,7 +273,7 @@ class CAFFE2_API DBReader {
     for (uint32_t s = 0; s < shard_id_; s++) {
       cursor_->Next();
       CAFFE_ENFORCE(
-          cursor_->Valid(), "Db has less rows than shard id: ", s, shard_id_);
+          cursor_->Valid(), "Db has fewer rows than shard id: ", s, shard_id_);
     }
   }
 

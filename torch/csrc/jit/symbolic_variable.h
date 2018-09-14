@@ -110,7 +110,10 @@ struct SymbolicVariable {
     return create(aten::tanh, {*this})[0].typeLike(*this);
   }
   std::vector<SymbolicVariable> chunk(int64_t chunks, int dim) const {
-    return create(t("chunk"), { *this , insertConstant(chunks), insertConstant(dim) }, chunks);
+    Node *chunk;
+    auto outputs = create(prim::ConstantChunk, {value()}, chunks, &chunk);
+    chunk->i_(attr::chunks, chunks)->i_(attr::dim, dim);
+    return outputs;
   }
   SymbolicVariable type_as(const SymbolicVariable rhs) const {
     return create(aten::type_as, {*this, rhs})[0].typeLikeWithRhsScalarType(*this, rhs);
@@ -120,8 +123,13 @@ struct SymbolicVariable {
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, Value* dim) {
     Graph *g = dim->owningGraph();
-    auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
-    Value *input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    Value * input_list;
+    if (inputs.size() == 1 && inputs[0].value()->type()->isSubtypeOf(ListType::ofTensors())) {
+      input_list = inputs[0];
+    } else {
+      auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
+      input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    }
     return create(aten::cat, {input_list, dim})[0];
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int dim) {
@@ -143,7 +151,9 @@ struct SymbolicVariable {
     Graph *g = inputs[0].value()->owningGraph();
     auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
     Value * input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
-    return create(aten::broadcast_tensors, { input_list }, inputs.size());
+    Value * output_list = g->insert(aten::broadcast_tensors, {input_list});
+    Node * unpack = g->insertNode(g->create(prim::ListUnpack, {output_list}, inputs.size()));
+    return fmap<SymbolicVariable>(unpack->outputs());
   }
   SymbolicVariable sum() const {
     return create(t("sum"), {*this})[0];
@@ -176,7 +186,7 @@ struct SymbolicVariable {
     return reshape(insertConstant(sizes));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
-    return create(aten::addmm, {*this, mat1, mat2, insertConstant(1.0), insertConstant(1.0)})[0];
+    return create(aten::addmm, {*this, mat1, mat2, insertConstant(1), insertConstant(1)})[0];
   }
   Value * value() const {
     return v;

@@ -43,8 +43,11 @@ struct PyTensorType {
   // Precondition: Access to this struct is protected by the GIL
   at::Type* aten_type() {
     if (!aten_type_) {
-      auto* baseType = globalContext().getTypeOpt(static_cast<at::Backend>(backend), static_cast<at::ScalarType>(scalar_type));
-      aten_type_ = baseType ? torch::autograd::VariableType::getType(*baseType) : nullptr;
+      if (is_cuda) {
+        torch::utils::cuda_lazy_init();
+      }
+      auto* baseType = globalContext().getNonVariableTypeOpt(static_cast<at::Backend>(backend), static_cast<at::ScalarType>(scalar_type));
+      aten_type_ = baseType ? torch::autograd::VariableType::getVariableTypeFromBaseType(*baseType) : nullptr;
     }
     return aten_type_;
   }
@@ -68,9 +71,6 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   auto aten_type = tensor_type.aten_type();
   if (!aten_type) {
     throw unavailable_type(tensor_type);
-  }
-  if (aten_type->is_cuda()) {
-    torch::utils::cuda_lazy_init();
   }
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*aten_type, args, kwargs));
   END_HANDLE_TH_ERRORS
@@ -119,8 +119,8 @@ PyObject *Tensor_is_sparse(PyTensorType *self) {
 }
 
 static struct PyMethodDef metaclass_methods[] = {
-  {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, NULL},
-  {NULL}
+  {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, nullptr},
+  {nullptr}
 };
 
 typedef PyObject *(*getter)(PyObject *, void *);
@@ -151,7 +151,7 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
 static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyObject* tp_dict) {
   // NOTE: we don't use the typical static declaration of PyTypeObject because
   // we need to initialize as many types as there are VariableType instances.
-  // The typical PyVarObject_HEAD_INIT(NULL, 0) is described in the Python
+  // The typical PyVarObject_HEAD_INIT(nullptr, 0) is described in the Python
   // documentation: it initializes the refcnt to 1 and the other object header
   // fields to zero.
   memset(&type, 0, sizeof(PyTypeObject));

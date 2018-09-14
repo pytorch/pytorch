@@ -8,14 +8,15 @@
 #include "caffe2/core/hip/common_miopen.h"
 #include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/hip/operator_fallback_hip.h"
+#include "caffe2/python/pybind_state_registry.h"
 
 namespace caffe2 {
 namespace python {
 
-REGISTER_HIP_OPERATOR(Python, GPUFallbackOp<PythonOp<CPUContext, false>>);
+REGISTER_HIP_OPERATOR(Python, GPUFallbackOp);
 REGISTER_HIP_OPERATOR(
     PythonGradient,
-    GPUFallbackOp<PythonGradientOp<CPUContext, false>>);
+    GPUFallbackOp);
 
 REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
 REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
@@ -52,7 +53,7 @@ void addHIPObjectMethods(py::module& m) {
           [](DLPackWrapper<HIPContext>* t) -> py::object {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                HIP,
+                PROTO_HIP,
                 "Expected HIP device option for HIP tensor");
 
             return t->data();
@@ -63,7 +64,7 @@ void addHIPObjectMethods(py::module& m) {
           [](DLPackWrapper<HIPContext>* t, py::object obj) {
             CAFFE_ENFORCE_EQ(
                 t->device_option.device_type(),
-                HIP,
+                PROTO_HIP,
                 "Expected HIP device option for HIP tensor");
             t->feed(obj);
           },
@@ -85,6 +86,9 @@ PYBIND11_MODULE(caffe2_pybind11_state_hip, m) {
   addHIPGlobalMethods(m);
   addObjectMethods(m);
   addHIPObjectMethods(m);
+  for (const auto& addition : PybindAdditionRegistry()->Keys()) {
+    PybindAdditionRegistry()->Create(addition, m);
+  }
 }
 } // namespace python
 } // namespace caffe2

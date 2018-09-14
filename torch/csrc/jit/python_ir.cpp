@@ -180,29 +180,6 @@ void initPythonIRBindings(PyObject * module_) {
        py::arg("defer_weight_export")=false,
        py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::ONNX,
        py::arg("google_printer")=false)
-    .def("wrapPyFuncWithSymbolic", [](Graph &g, py::function func, std::vector<Value*> inputs, size_t n_outputs, py::function symbolic) {
-      // This function should be used for situations where we have a Python function
-      // that should have different behavior when exporting for JIT interpreter
-      // execution v.s. for ONNX export. For example, nn.utils.rnn.pack_padded_sequence
-      // emits a placeholder under ONNX export, but we want to keep the ability to
-      // run this in the interpreter, thus we emit a PythonOp for that use case.
-
-      // Concretely, this function emits a PythonOp wrapping the passed-in
-      // parameter `func`, while storing the function `symbolic` for use by the
-      // ONNX export
-      std::string cconv(inputs.size(), 't');
-      func.attr("symbolic") = symbolic;
-      Node* new_node = g.insertNode(g.createPythonOp(
-        THPObjectPtr(func.release().ptr()), cconv, {}));
-      for (auto i : inputs)
-        new_node->addInput(i);
-      std::vector<Value*> outputs;
-      for (size_t i = 0; i < n_outputs; ++i)
-        new_node->addOutput();
-      auto sl = std::make_shared<StringSourceLocation>(tracer::getPythonInterpreterStackTrace());
-      new_node->setSourceLocation(sl);
-      return py::make_iterator(new_node->outputs().begin(), new_node->outputs().end());
-    }, py::return_value_policy::reference_internal)
     .def("inputs",[](Graph &g) {
       return py::make_iterator(g.inputs().begin(), g.inputs().end());
     })
@@ -297,6 +274,15 @@ void initPythonIRBindings(PyObject * module_) {
       ss << n;
       return ss.str();
     })
+    .def("getSourceLocation", [](Node & n) -> py::object {
+      std::stringstream ss;
+      if (auto sl = n.getSourceLocation()) {
+        sl->highlight(ss);
+        return py::str(ss.str());
+      } else {
+        return py::none();
+      }
+    })
     .def("hasMultipleOutputs",[](Node&n) {
       return n.outputs().size() > 1;
     })
@@ -312,7 +298,9 @@ void initPythonIRBindings(PyObject * module_) {
     .def("outputs",[](Node &n) {
       return py::make_iterator(n.outputs().begin(), n.outputs().end());
     })
-    .NS(output)
+    .def("output", [](Node &n) {
+      return n.output();
+    })
     .NS(addInput)
     .NS(replaceInput)
     .NS(replaceInputWith)
@@ -328,6 +316,7 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(eraseOutput)
     .NS(addOutput)
     .NS(scopeName)
+    .NS(isNondeterministic)
     .def("blocks", [](Node& n) {
       return py::make_iterator(n.blocks().begin(), n.blocks().end());
     })
@@ -426,21 +415,41 @@ void initPythonIRBindings(PyObject * module_) {
 
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
-      return t.str();
+      return t.python_str();
+    })
+    .def("str",[](Type & t) {
+      std::ostringstream s;
+      s << t;
+      return s.str();
     })
     .def("kind",[](Type& t_) {
       Type * t = &t_;
       switch(t->kind()) {
         case TypeKind::DynamicType:
           return "DynamicType";
+        case TypeKind::TensorType:
+          return "TensorType";
+        case TypeKind::NumberType:
+          return "NumberType";
+        case TypeKind::NoneType:
+          return "NoneType";
         case TypeKind::CompleteTensorType:
           return "CompleteTensorType";
         case TypeKind::TupleType:
           return "TupleType";
-        default:
-          AT_ERROR("unknown type kind");
-          return "";
+        case TypeKind::ListType:
+          return "ListType";
+        case TypeKind::IntType:
+          return "IntType";
+        case TypeKind::FloatType:
+          return "FloatType";
+        case TypeKind::StringType:
+          return "StringType";
+        case TypeKind::GeneratorType:
+          return "GeneratorType";
         }
+        // not reachable, but some compilers complain
+        AT_ERROR("Unknown Type Kind");
     })
     .def("sizes",[](Type& t) {
       return t.expect<CompleteTensorType>()->sizes();
@@ -459,7 +468,8 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
         return self->isSubtypeOf(other);
-    });
+    })
+    .def_static("inferFrom", inferTypeFrom);
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
     .def_static("get", &NumberType::get);

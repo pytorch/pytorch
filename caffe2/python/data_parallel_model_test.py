@@ -447,6 +447,121 @@ class DataParallelModelTest(TestCase):
         self.assertTrue(transform.called)
         self.assertEqual(transform.call_count, 1)
 
+    @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    def test_multi_device_spatial_bn_cpu(self, seed, batch_size):
+        self._spatial_bn_check("cpu", seed, batch_size)
+
+    def _spatial_bn_check(self, device_type, seed, batch_size):
+        devices = [0, 1, 2]
+        epsilon = 1e-3
+        tolerance = 1e-3
+
+        def _test_forward_pass(x, devices, device_type, scale, bias, epsilon):
+            x_concat = np.concatenate(x)
+            mean = np.mean(x_concat, axis=0)
+            var = np.var(x_concat, axis=0)
+            for device in devices:
+                x_i = x[device]
+                x_hat = (x_i - mean) / (np.sqrt(var + epsilon))
+                expected_out = scale * x_hat + bias
+                spatial_out = workspace.FetchBlob(
+                    "{}_{}/sp_out".format(device_type, device))
+                rel_error = np.linalg.norm(spatial_out - expected_out) \
+                            / np.linalg.norm(expected_out)
+                self.assertTrue(rel_error < 0.005)
+
+        def _test_backward_pass(x, devices, device_type, scale, tolerance):
+            dBias_arr = []
+            dY_arr = []
+            dGamma_arr = []
+            num_devices = len(devices)
+            mean = np.array(workspace.FetchBlob(
+                "{}_0/sp_out_sm".format(device_type)), dtype=np.float32)
+            inv_var = np.array(workspace.FetchBlob(
+                "{}_0/sp_out_siv".format(device_type)), dtype=np.float32)
+
+            # dBias
+            # Sum dBias values over all devices to find the average gradient
+            for device in devices:
+                dY_blob = workspace.FetchBlob(
+                    "{}_{}/sp_out_grad".format(device_type, device))
+                dY = np.array(dY_blob, dtype=np.float32)
+                dY_arr.append(dY)
+                dBias_arr.append(np.array(np.sum(dY, axis=0), dtype=np.float32))
+            dBias = np.sum(dBias_arr, dtype=np.float32)
+            dBias_avg = dBias / num_devices
+            for device in devices:
+                dBiasActual = np.sum(workspace.FetchBlob("{}_{}/sp_out_b_grad"
+                    .format(device_type, device)), dtype=np.float32)
+                self.assertTrue(np.isclose([dBiasActual], [dBias], atol=tolerance))
+
+            # dGamma
+            # Sum dGamma values over all devices to find the average gradient
+            for device in devices:
+                dGamma = np.sum((x[device] - mean) * inv_var * dY_arr[device],
+                    axis=0, dtype=np.float32)
+                dGamma_arr.append(dGamma)
+            dGamma = np.sum(dGamma_arr, axis=0, dtype=np.float32)
+            dGamma_avg = dGamma / num_devices
+            for device in devices:
+                dGammaActual = workspace.FetchBlob(
+                    "{}_{}/sp_out_s_grad".format(device_type, device))
+                self.assertTrue(np.isclose([dGamma], [dGammaActual], atol=tolerance))
+
+            # dX
+            scale_inv_var = scale * inv_var / batch_size
+            for device in devices:
+                dX = scale_inv_var * (dY_arr[device] * batch_size - dBias_avg
+                    - (x[device] - mean) * dGamma_avg * inv_var)
+                dX_actual = workspace.FetchBlob(
+                    "{}_{}/tanh_grad".format(device_type, device))
+                self.assertTrue(np.isclose([dX], [dX_actual], atol=tolerance).all())
+
+        def add_input_ops(model):
+            for device in devices:
+                data = np.random.rand(batch_size, 1, 1, 1).astype(np.float32)
+                workspace.FeedBlob("{}_{}/data".format(device_type, device), data)
+
+        def add_model_ops(model, loss_scale):
+            model.Tanh("data", "tanh")
+            model.SpatialBN("tanh", "sp_out", 1, epsilon=epsilon, is_test=False)
+            model.Sqr("sp_out", "sqr")
+            loss = model.SumElements("sqr", "loss")
+            return [loss]
+
+        def add_optimizer(model):
+            return optimizer.build_sgd(model, 0.1)
+
+        np.random.seed(seed)
+        workspace.ResetWorkspace()
+        model = cnn.CNNModelHelper(
+            order="NCHW",
+            name="test"
+        )
+        data_parallel_model.Parallelize(
+            model,
+            input_builder_fun=add_input_ops,
+            forward_pass_builder_fun=add_model_ops,
+            optimizer_builder_fun=add_optimizer,
+            devices=devices,
+            cpu_device=device_type == "cpu",
+            shared_model=False,
+            combine_spatial_bn=True,
+        )
+
+        workspace.RunNetOnce(model.param_init_net)
+        scale = workspace.FetchBlob("{}_0/sp_out_s".format(device_type))
+        bias = workspace.FetchBlob("{}_0/sp_out_b".format(device_type))
+        workspace.RunNetOnce(model.net)
+
+        x = []
+        for device in devices:
+            x_blob = workspace.FetchBlob("{}_{}/tanh".format(device_type, device))
+            x_i = np.array(x_blob, dtype=np.float32)
+            x.append(x_i)
+
+        _test_forward_pass(x, devices, device_type, scale, bias, epsilon)
+        _test_backward_pass(x, devices, device_type, scale, tolerance)
 
 class RecurrentNetworkParallelTest(TestCase):
 

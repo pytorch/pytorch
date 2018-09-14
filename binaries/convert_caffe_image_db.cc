@@ -16,7 +16,7 @@
 
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/core/logging.h"
 

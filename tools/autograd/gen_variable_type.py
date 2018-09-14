@@ -31,7 +31,7 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'contiguous', 'resize_', 'resize_as_'
+    'contiguous', 'resize_', 'resize_as_', 'detach', 'detach_',
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -80,7 +80,7 @@ DONT_REQUIRE_DERIVATIVE = {
 }
 
 METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
@@ -108,7 +108,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
-Type::${method_prefix_derived}${api_name}(${type_method_args})""")
+TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
 
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
@@ -124,50 +124,42 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-profiler::RecordFunction profiler("${name}");""")
+profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr());""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
 torch::jit::Node* node = nullptr;
+std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
-  auto& graph = jit::tracer::getTracingState()->graph;
-  node = graph->create(jit::aten::${trace_name}, /*outputs=*/0);
+  tracer_state = jit::tracer::getTracingState();
+  node = tracer_state->graph->create(jit::aten::${trace_name}, /*outputs=*/0);
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
-  graph->appendNode(node);
+  tracer_state->graph->appendNode(node);
+  ${inplace_guard}
+  jit::tracer::setTracingState(nullptr);
 }
+""")
+
+INPLACE_GUARD = CodeTemplate("""\
+jit::tracer::ensureUnique("${name}", ${mutable_input});
 """)
 
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
-if (jit::tracer::isTracing()) {
-  jit::tracer::postRecordTrace(node, ArrayRef<Variable>(${trace_outputs}) );
+if (tracer_state) {
+  jit::tracer::setTracingState(std::move(tracer_state));
+  ${record_trace_outputs}
 }
 """)
 
-RECORD_ATTRIBUTE = CodeTemplate("""\
-setattr(trace_info.n, jit::attr::${attr_name}, ${name});""")
-
-RECORD_POSITIONAL_ATTRIBUTE = CodeTemplate("""\
-setposattr(trace_info.n, ${i}, "${name}", ${name});""")
-
-POSITIONAL_ATTR_NYI = """\
-throw std::runtime_error("Can't have size-dependent arguments to functions that "
-                         "take variable number of tensor arguments");
-"""
-
 
 def should_trace(declaration):
-    # Operations involving Generator, Storage, Type are not traceable
-    # at the moment
-    if any(arg['simple_type'] in {'Generator', 'Storage', 'ScalarType', 'Type', 'optional<ScalarType>'}
-            for arg in declaration['arguments']):
+    # Operations involving Storage or Type are not traceable at the moment
+    if any(arg['simple_type'] in {'Storage', 'Type'} for arg in declaration['arguments']):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
     if 'Tensor' not in declaration['return_type']:
-        return False
-    tensor_args = [arg for arg in declaration['arguments'] if arg['simple_type'] in {'Tensor', 'TensorList'}]
-    if len(tensor_args) == 0:
         return False
     name = declaration['name']
     base_name = name[:-1] if declaration['inplace'] else name[:-4] if name.endswith('_out') else name
@@ -181,6 +173,38 @@ def should_trace(declaration):
     if base_name == 'addmm' and overload == ['Tensor', 'Tensor', 'Tensor', 'Scalar', 'Scalar']:
         return False
     return True
+
+
+def record_trace_outputs(declaration):
+    if declaration['name'].endswith('_out'):
+        output_names = [arg['name'] for arg in declaration['arguments'] if arg.get('output', False)]
+    else:
+        output_names = [r['name'] for r in declaration['returns']]
+    return ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names]
+
+
+def format_trace(declaration):
+    local = {}
+
+    add_trace_inputs = []
+    for argument in declaration['arguments']:
+        add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
+    local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
+    local['inplace_guard'] = ''
+    # Record inplace operations as out-of-place operations (e.g.,
+    # not add_ but add)
+    # TODO: Add a proper concept of side effects to the IR, and
+    # properly record inplace operations.
+    local['trace_name'] = uninplace_api_name(declaration['api_name'])
+    if local['trace_name'] != declaration['api_name']:
+        local['inplace_guard'] = INPLACE_GUARD.substitute(name=declaration['api_name'],
+                                                          mutable_input=declaration['arguments'][0]['name'])
+    if local['trace_name'] in RENAME_TRACE:
+        local['trace_name'] = RENAME_TRACE[local['trace_name']]
+
+    local['record_trace_outputs'] = record_trace_outputs(declaration)
+
+    return (PRE_RECORD_TRACE.substitute(local), POST_RECORD_TRACE.substitute(local))
 
 
 def gen_variable_type(out, aten_declarations, template_path):
@@ -265,16 +289,12 @@ def emit_body(declaration):
         print('WARNING: derivative ignored for {}'.format(name), file=sys.stderr)
 
     def setup_derivative():
-        def error_msg():
-            name = declaration['api_name']
-            return '"the derivative for {} is not implemented"'.format(name)
-
         args_with_derivatives = find_args_with_derivatives()
 
         env = {}
         env['args_with_derivatives'] = reference_args(args_with_derivatives)
-        env['op'] = func['op'] if func is not None else 'Error'
-        env['op_ctor'] = '' if func is not None else error_msg()
+        env['op'] = func['op'] if func is not None else 'NotImplemented'
+        env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
         if is_out_fn:
             setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
@@ -361,42 +381,10 @@ def emit_body(declaration):
                 res.append(arg['name'])
         return res
 
-    def get_trace_outputs(declaration):
-        if declaration['return_type'] == 'std::vector<Tensor>':
-            return 'flatten_tensor_args({})'.format(declaration['returns'][0]['name'])
-        elif name.endswith('_out'):
-            output_args = [arg['name'] for arg in arguments
-                           if arg.get('output', False)]
-            return '{' + ', '.join(output_args) + '}'
-        trace_outs = [r['name'] for r in declaration['returns']]
-        if any(ret['dynamic_type'] == 'TensorList' for ret in declaration['returns']):
-            return CodeTemplate("flatten_tensor_args( ${outs} )").substitute(outs=trace_outs)
-        else:
-            return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
-
     def emit_record_trace(env):
         if not should_trace(declaration):
             return ('', '')
-
-        local = {}
-
-        add_trace_inputs = []
-        for argument in declaration['arguments']:
-            add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
-        local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
-
-        # Record inplace operations as out-of-place operations (e.g.,
-        # not add_ but add)
-        # TODO: Add a proper concept of side effects to the IR, and
-        # properly record inplace operations.
-        local['trace_name'] = uninplace_api_name(declaration['api_name'])
-        if local['trace_name'] in RENAME_TRACE:
-            local['trace_name'] = RENAME_TRACE[local['trace_name']]
-
-        local['trace_outputs'] = get_trace_outputs(declaration)
-
-        combined = nested_dict(local, nested_dict(env, declaration))
-        return (PRE_RECORD_TRACE.substitute(combined), POST_RECORD_TRACE.substitute(combined))
+        return format_trace(declaration)
 
     def declare_returned_variables():
         if modifies_arguments:

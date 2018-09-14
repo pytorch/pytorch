@@ -185,7 +185,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   int64_t tg_target_stride;
 
   int64_t max_target_length;
-  auto tg_batch_offsets = at::empty({batch_size}, TensorOptions(at::CPU(kLong)));
+  auto tg_batch_offsets = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
   auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
@@ -219,8 +219,8 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 	     " (while checking arguments for ", c, ")");
   }
 
-  auto target_lengths_t = at::tensor(target_lengths, targets.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(targets.type().toScalarType(kLong));
-  auto input_lengths_t = at::tensor(input_lengths, targets.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(targets.type().toScalarType(kLong));
+  auto target_lengths_t = at::tensor(target_lengths, targets.options().dtype(kLong));
+  auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
   tg_batch_offsets = tg_batch_offsets.toType(targets.type().toScalarType(kLong));
 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());

@@ -100,7 +100,7 @@ op = core.CreateOperator(
 X = np.array([5., 2.])
 print("X:\n",X)
 
-# Feed X into workspace
+// Feed X into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 
 workspace.RunOperatorOnce(op)

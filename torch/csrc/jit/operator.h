@@ -97,7 +97,7 @@ Operator& sig(const char *signature_literal);
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char *> sig_literals);
   // XXX: Returns a nullptr if no Operator in the set matches n
-  Operator* find(Node *n);
+  Operator* find(const Node *n) const;
 private:
   std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
 };

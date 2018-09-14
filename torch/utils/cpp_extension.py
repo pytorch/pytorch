@@ -63,10 +63,17 @@ for instructions on how to install GCC 4.9 or higher.
                               !! WARNING !!
 '''
 CUDA_HOME = _find_cuda_home()
+CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
+
+COMMON_NVCC_FLAGS = [
+    '-D__CUDA_NO_HALF_OPERATORS__',
+    '-D__CUDA_NO_HALF_CONVERSIONS__',
+    '-D__CUDA_NO_HALF2_OPERATORS__',
+]
 
 
 def is_binary_build():
@@ -164,7 +171,7 @@ class BuildExtension(build_ext):
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
-                    cflags += ['--compiler-options', "'-fPIC'"]
+                    cflags = COMMON_NVCC_FLAGS + ['--compiler-options', "'-fPIC'"] + cflags
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
                 # NVCC does not allow multiple -std to be passed, so we avoid
@@ -349,7 +356,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     Example:
         >>> from setuptools import setup
-        >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
+        >>> from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         >>> setup(
                 name='cuda_extension',
                 ext_modules=[
@@ -407,6 +414,8 @@ def include_paths(cuda=False):
     ]
     if cuda:
         paths.append(_join_cuda_home('include'))
+        if CUDNN_HOME is not None:
+            paths.append(os.path.join(CUDNN_HOME, 'include'))
     return paths
 
 
@@ -432,6 +441,8 @@ def library_paths(cuda=False):
     if cuda:
         lib_dir = 'lib/x64' if sys.platform == 'win32' else 'lib64'
         paths.append(_join_cuda_home(lib_dir))
+        if CUDNN_HOME is not None:
+            paths.append(os.path.join(CUDNN_HOME, lib_dir))
     return paths
 
 
@@ -732,9 +743,13 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
             extra_ldflags.append('/LIBPATH:{}'.format(
                 _join_cuda_home('lib/x64')))
             extra_ldflags.append('cudart.lib')
+            if CUDNN_HOME is not None:
+                extra_ldflags.append(os.path.join(CUDNN_HOME, 'lib/x64'))
         else:
             extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
             extra_ldflags.append('-lcudart')
+            if CUDNN_HOME is not None:
+                extra_ldflags.append('-L{}'.format(os.path.join(CUDNN_HOME, 'lib64')))
 
     return extra_ldflags
 
@@ -802,15 +817,21 @@ def _write_ninja_file(path,
     # Turn into absolute paths so we can emit them into the ninja build
     # file wherever it is.
     sources = [os.path.abspath(file) for file in sources]
-    includes = [os.path.abspath(file) for file in extra_include_paths]
+    user_includes = [os.path.abspath(file) for file in extra_include_paths]
 
     # include_paths() gives us the location of torch/torch.h
-    includes += include_paths(with_cuda)
+    system_includes = include_paths(with_cuda)
     # sysconfig.get_paths()['include'] gives us the location of Python.h
-    includes.append(sysconfig.get_paths()['include'])
+    system_includes.append(sysconfig.get_paths()['include'])
+
+    # Windoze does not understand `-isystem`.
+    if sys.platform == 'win32':
+        user_includes += system_includes
+        system_includes.clear()
 
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
-    common_cflags += ['-I{}'.format(include) for include in includes]
+    common_cflags += ['-I{}'.format(include) for include in user_includes]
+    common_cflags += ['-isystem {}'.format(include) for include in system_includes]
 
     if is_binary_build():
         common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=0']
@@ -822,7 +843,7 @@ def _write_ninja_file(path,
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
-        cuda_flags = common_cflags
+        cuda_flags = common_cflags + COMMON_NVCC_FLAGS
         if sys.platform == 'win32':
             cuda_flags = _nt_quote_args(cuda_flags)
         else:
@@ -892,6 +913,7 @@ def _write_ninja_file(path,
         object_files.append(target)
         if sys.platform == 'win32':
             source_file = source_file.replace(':', '$:')
+        source_file = source_file.replace(" ", "$ ")
         build.append('build {}: {} {}'.format(target, rule, source_file))
 
     ext = '.pyd' if sys.platform == 'win32' else '.so'

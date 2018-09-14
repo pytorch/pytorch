@@ -9,7 +9,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/plan_executor.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_print_blob_sizes_at_exit,

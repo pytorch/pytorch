@@ -87,7 +87,7 @@ void THNN_(SparseLinear_updateOutput)(
   }
 
   // output = W * x
-  real one = ScalarConvert<int, real>::to(1);
+  scalar_t one = ScalarConvert<int, scalar_t>::to(1);
   cusparseMatDescr_t descr = 0;
   cusparseCreateMatDescr(&descr);
   cusparseSetMatType(descr,CUSPARSE_MATRIX_TYPE_GENERAL);
@@ -186,7 +186,7 @@ void THNN_(SparseLinear_accGradParameters)(
   THCTensor_(copy)(state, buf, tgradOutput);
   THCTensor_(free)(state, tgradOutput);
 
-  real one = ScalarConvert<int, real>::to(1);
+  scalar_t one = ScalarConvert<int, scalar_t>::to(1);
   cusparseMatDescr_t descr = 0;
   cusparseCreateMatDescr(&descr);
   cusparseSetMatType(descr,CUSPARSE_MATRIX_TYPE_GENERAL);

@@ -13,9 +13,10 @@ struct HipEventWrapper
           hip_gpu_id_(option.hip_gpu_id()),
           status_(EventStatus::EVENT_INITIALIZED)
     {
-        CAFFE_ENFORCE(option.device_type(), HIP);
-        DeviceGuard g(hip_gpu_id_);
-        HIP_ENFORCE(hipEventCreate(&hip_event_ /*, hipEventDefault | hipEventDisableTiming*/));
+      CAFFE_ENFORCE(option.device_type(), PROTO_HIP);
+      DeviceGuard g(hip_gpu_id_);
+      HIP_ENFORCE(hipEventCreate(
+          &hip_event_ /*, hipEventDefault | hipEventDisableTiming*/));
     }
     ~HipEventWrapper()
     {

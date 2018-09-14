@@ -69,7 +69,7 @@ DynamicCUDAInterfaceSetter _;
 // let's not if we don't need to!)
 std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
   THCState* thc_state = THCState_alloc();
-  
+
   THCudaInit(thc_state);
   return std::unique_ptr<THCState, void (*)(THCState*)>(
       thc_state, [](THCState* p) {
@@ -90,6 +90,14 @@ bool CUDAHooks::hasCUDA() const {
     return false;
   }
   return true;
+}
+
+bool CUDAHooks::hasMAGMA() const {
+#ifdef USE_MAGMA
+  return true;
+#else
+  return false;
+#endif
 }
 
 bool CUDAHooks::hasCuDNN() const {

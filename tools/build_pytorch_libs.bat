@@ -63,8 +63,9 @@ IF "%REL_WITH_DEB_INFO%"=="1" (
   set BUILD_TYPE=RelWithDebInfo
 )
 
+:: sccache will fail if all cores are used for compiling
 IF NOT DEFINED MAX_JOBS (
-  set MAX_JOBS=%NUMBER_OF_PROCESSORS%
+  set /a MAX_JOBS=%NUMBER_OF_PROCESSORS% - 1
 )
 
 IF NOT DEFINED BUILD_SHARED_LIBS (
@@ -151,6 +152,8 @@ goto:eof
                   -DTHNN_SO_VERSION=1 ^
                   -DTHCUNN_SO_VERSION=1 ^
                   -DUSE_CUDA=%USE_CUDA% ^
+                  -DBUILD_EXAMPLES=OFF ^
+                  -DBUILD_TEST=%BUILD_TEST% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
@@ -169,16 +172,25 @@ goto:eof
   cd build
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
-                  -DBUILD_CAFFE2=OFF ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^
                   -DBUILD_SHARED_LIBS="%BUILD_SHARED_LIBS%" ^
                   -DBUILD_PYTHON=OFF ^
-                  -DBUILD_BINARY=OFF ^
+                  -DBUILD_BINARY=%BUILD_BINARY% ^
+                  -DBUILD_TEST=OFF ^
+                  -DINSTALL_TEST=%INSTALL_TEST% ^
+                  -DBUILD_CAFFE2_OPS=%BUILD_CAFFE2_OPS% ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
+                  -DUSE_CUDNN=OFF ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
+                  -DUSE_LEVELDB=%USE_LEVELDB% ^
+                  -DUSE_LMDB=%USE_LMDB% ^
+                  -DUSE_OPENCV=%USE_OPENCV% ^
+                  -DUSE_GLOG=OFF ^
+                  -DUSE_GFLAGS=OFF ^
+                  -DUSE_SYSTEM_EIGEN_INSTALL=OFF ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^

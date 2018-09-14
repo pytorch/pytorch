@@ -61,6 +61,7 @@ struct Method {
   }
 
   IValue operator()(std::vector<IValue> stack) {
+    checkInputsAgainstSchema(stack);
     run(stack);
     if (stack.size() != 1) {
       return Tuple::create(std::move(stack));
@@ -162,6 +163,10 @@ struct Method {
     return get_executor().getDebugState();
   }
 
+  bool is_optimized() {
+    return optimize;
+  }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
@@ -172,6 +177,34 @@ private:
       executor = GraphExecutor(graph(), optimize);
     });
     return executor;
+  }
+
+  void checkInputsAgainstSchema(std::vector<IValue>& inputs) {
+    const auto& schema = getSchema();
+    // Do we have more inputs than the schema accepts?
+    AT_CHECK(
+        inputs.size() <= schema.arguments.size(),
+        "Expected at most ", schema.arguments.size(),
+        " argument(s) for operator '", schema.name, "', but received ",
+        inputs.size(), " argument(s). Declaration: ", schema);
+
+    for (size_t pos = 0; pos < schema.arguments.size(); ++pos) {
+      const auto& argument = schema.arguments[pos];
+      if (pos < inputs.size()) {
+        const TypePtr inputType = inferTypeFrom(inputs[pos]);
+        AT_CHECK(inputType->isSubtypeOf(argument.type),
+              "Expected value of type ", *argument.type,
+              " for argument '", argument.name,
+              "' in position ", pos,
+              ", but instead got value of type ", *inputType,
+              ". Declaration: ", schema);
+      } else if (argument.default_value) {
+        inputs.push_back(*argument.default_value);
+      } else {
+        AT_ERROR(schema.name, "() is missing value for argument '",
+                argument.name, "'. Declaration: ", schema);
+      }
+    }
   }
 
   GraphExecutor executor; // for execution
@@ -317,6 +350,24 @@ struct Module {
       return pm->get();
     }
     return nullptr;
+  }
+
+  /// Run a method from this module.
+  ///
+  /// For example:
+  /// @code
+  ///   IValue output = module->run("relu_script", a, b);
+  /// @endcode
+  ///
+  /// To get a compile a module from a source string, see torch::jit::compile
+  ///
+  /// @param method_name The name of the method to run
+  /// @param args Arguments to be passed to the method
+  /// @return An IValue containing the return value (or values if it is a tuple)
+  /// from the method
+  template <typename... Types>
+  IValue run_method(const std::string& method_name, Types&&... args) {
+    return get_method(method_name)({IValue(std::forward<Types>(args))...});
   }
 
   void save(const std::string& filename);

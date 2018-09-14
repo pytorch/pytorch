@@ -125,7 +125,7 @@ void THCudaShutdown(THCState* state)
   for (int dev = 0; dev < deviceCount; ++dev) {
     THCudaCheck(cudaSetDevice(dev));
     THCCudaResourcesPerDevice* res = &(state->resourcesPerDevice[dev]);
-    
+
     // Frees BLAS handle
     if (res->blasHandle) {
       THCublasCheck(cublasDestroy(res->blasHandle));
@@ -223,29 +223,29 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
 }
 
 THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
-  return at::cuda::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
+  return at::cuda::detail::CUDAStream_getCurrentStream(device);
 }
 
 void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
-  at::cuda::detail::CUDAStream_setStreamOnDevice(device, stream);
+  at::cuda::detail::CUDAStream_setStream(stream);
+}
+
+THC_API void THCState_setStream(THCState *state, THCStream* stream) {
+  at::cuda::detail::CUDAStream_setStream(stream);
 }
 
 cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
   return at::cuda::detail::CUDAStream_stream(
-    at::cuda::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device));
+    at::cuda::detail::CUDAStream_getCurrentStream(device));
 }
 
 cudaStream_t THCState_getCurrentStream(THCState *state) {
   return at::cuda::detail::CUDAStream_stream(
-    at::cuda::detail::CUDAStream_getCurrentStreamUnsafe());
+    at::cuda::detail::CUDAStream_getCurrentStream());
 }
 
 THCStream* THCState_getStream(THCState *state) {
-  return at::cuda::detail::CUDAStream_getCurrentStreamUnsafe();
-}
-
-void THCState_setStream(THCState *state, THCStream *stream) {
-  at::cuda::detail::CUDAStream_setStream(stream);
+  return at::cuda::detail::CUDAStream_getCurrentStream();
 }
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
@@ -256,7 +256,7 @@ cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
     THError("THCState and sparseHandles must be set as there is no default sparseHandle");
     return NULL;
   }
-    
+
   int device;
   THCudaCheck(cudaGetDevice(&device));
 
@@ -280,7 +280,7 @@ cusparseHandle_t THCState_getCurrentSparseHandle(THCState *state)
 
   int device;
   THCudaCheck(cudaGetDevice(&device));
-  
+
   // Creates the sparse handle if not created yet
   THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
   if (!res->sparseHandle) {
@@ -474,30 +474,3 @@ cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalB
 
 #include "THCStorage.cpp"
 #include "THCAllocator.cpp"
-
-/* from THCHalf.h */
-
-half THC_float2half(float f)
-{
-#if CUDA_VERSION < 9000
-  half h;
-  TH_float2halfbits(&f, &h.x);
-  return h;
-#else
-  __half_raw h_raw;
-  TH_float2halfbits(&f, &h_raw.x);
-  return half(h_raw);
-#endif
-}
-
-float  THC_half2float(half h)
-{
-  float f;
-#if CUDA_VERSION < 9000
-  TH_halfbits2float(&h.x, &f);
-#else
-  __half_raw h_raw(h);
-  TH_halfbits2float(&h_raw.x, &f);
-#endif
-  return f;
-}

@@ -11,7 +11,7 @@
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/UndefinedTensor.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Half.h"
@@ -27,53 +27,28 @@ $extra_cuda_headers
 
 namespace at {
 
-${Type}::${Type}(Context* context)
-  : Type(context, ${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
+${Type}::${Type}()
+  : ${DenseBackend}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
+}
+caffe2::TypeMeta ${Type}::typeMeta() const {
+  AT_ERROR("typeMeta not defined for SparseType");
 }
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
-bool ${Type}::is_cuda() const { return backend() == Backend::CUDA || backend() == Backend::SparseCUDA; }
-bool ${Type}::is_sparse() const { return backend() == Backend::SparseCPU || backend() == Backend::SparseCUDA; }
-bool ${Type}::is_distributed() const { return false; }
-
-Storage ${Type}::storage(bool resizable) const {
-  AT_ERROR("storage not supported on sparse");
-}
-Storage ${Type}::storage(size_t size, bool resizable) const {
-  AT_ERROR("storage not supported on sparse");
-}
-Storage ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  AT_ERROR("storage not supported on sparse");
-}
-Storage ${Type}::storageWithAllocator(int64_t size, Allocator* allocator) const {
-  AT_ERROR("storage not supported on sparse");
-}
-Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  AT_ERROR("unsafeTensorFromTH not supported on sparse");
-}
-Storage ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
-  AT_ERROR("unsafeTensorFromTH not supported on sparse");
-}
-std::unique_ptr<Generator> ${Type}::generator() const {
-  return std::unique_ptr<Generator>(new ${Generator}(context));
-}
 
 const char * ${Type}::toString() const {
-  return ${Type}::typeString();
+  return "${Type}";
 }
+
 TypeID ${Type}::ID() const {
   return ${TypeID};
 }
 
 size_t ${Type}::elementSizeInBytes() const {
   return sizeof(${ScalarType});
-}
-
-const char * ${Type}::typeString() {
-  return "${Type}";
 }
 
 ${type_derived_method_definitions}

@@ -15,11 +15,9 @@ namespace {
 std::unordered_set<Symbol> skip_list = {
   prim::If,
   prim::Loop, //TODO: handle Loop
-  //FIXME Same problem as in DCE - cpp & python PythonOp and CppOp should be
-  //FIXME treated as having side effects but ONNX depends on them being removed
   prim::Print,
+  prim::PythonOp, //may have side effects
   //all the rand functions from native_functions.yaml
-  aten::permute,
   aten::rand,
   aten::rand_out,
   aten::rand_like,
@@ -31,6 +29,11 @@ std::unordered_set<Symbol> skip_list = {
   aten::randn_like,
   aten::randperm,
   aten::randperm_out,
+  prim::Constant,
+  prim::Undefined,
+  prim::NoneGenerator,
+  // TODO (zach): we should consider skipping tensor factories in the cases
+  // where the constant tensor would be large but cheap to create.
  };
 
 std::vector<IValue> runNode(Node* n) {
@@ -40,9 +43,14 @@ std::vector<IValue> runNode(Node* n) {
     stack.push_back(*(toIValue(input)));
   }
   op(stack);
-  auto var_outputs = fmap(stack, [&](IValue v) {
+  auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
     if (v.isTensor()) {
-      return IValue(autograd::as_variable_ref(v.toTensor()).data());
+      auto t = std::move(v).toTensor();
+      if(t.defined()) {
+        return IValue(autograd::as_variable_ref(t).data());
+      } else {
+        return t;
+      }
     } else {
       return v;
     }
@@ -55,8 +63,13 @@ void propagateNode(Node* n) {
   auto graph = n->owningGraph();
   WithInsertPoint guard(n);
   for (size_t i = 0; i < outputs.size(); ++i) {
-    auto new_output = graph->insertConstant(outputs[i]);
-    n->outputs()[i]->replaceAllUsesWith(new_output);
+    try {
+      auto new_output = graph->insertConstant(outputs[i]);
+      n->outputs()[i]->replaceAllUsesWith(new_output);
+    } catch(constant_not_supported_error& err) {
+      // we cannot actually represent the IValue as a constant node,
+      // so we give up replacing it
+    }
     // let dce elimination remove n
   }
 }
@@ -114,11 +127,11 @@ bool removeExtraNodeOutputs(Node *n) {
 } // anonymous namespace
 
 void ConstantPropagation(Node* n, bool recurse) {
-  bool constant_inputs = (n->inputs().size() > 0) &&
-    std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-      return v->node()->kind() == prim::Constant;
-    });
-  bool supported_node = skip_list.count(n->kind()) == 0;
+  bool constant_inputs =
+      std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
+        return v->node()->kind() == prim::Constant;
+      });
+  bool supported_node = !n->kind().is_onnx() && skip_list.count(n->kind()) == 0;
   auto run_blocks = [&]() {
     if (recurse) {
       for (Block * block : n->blocks()) {
@@ -145,7 +158,6 @@ void ConstantPropagation(Node* n, bool recurse) {
 }
 
 void ConstantPropagation(Block* block, bool recurse) {
-  ConstantPropagation(block->param_node(), recurse);
   for(auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node *n = *it;
     it++; //advance iterator bc the current node may be destroyed

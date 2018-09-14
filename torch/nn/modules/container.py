@@ -1,5 +1,6 @@
 import warnings
-from collections import OrderedDict, Iterable, Mapping
+from collections import OrderedDict
+from torch._six import container_abcs
 from itertools import islice
 import operator
 
@@ -178,7 +179,7 @@ class ModuleList(Module):
         Arguments:
             modules (iterable): iterable of modules to append
         """
-        if not isinstance(modules, Iterable):
+        if not isinstance(modules, container_abcs.Iterable):
             raise TypeError("ModuleList.extend should be called with an "
                             "iterable, but got " + type(modules).__name__)
         offset = len(self)
@@ -278,12 +279,12 @@ class ModuleDict(Module):
             modules (iterable): a mapping (dictionary) of (string: :class:`~torch.nn.Module``) or
                 an iterable of key/value pairs of type (string, :class:`~torch.nn.Module``)
         """
-        if not isinstance(modules, Iterable):
+        if not isinstance(modules, container_abcs.Iterable):
             raise TypeError("ModuleDict.update should be called with an "
                             "iterable of key/value pairs, but got " +
                             type(modules).__name__)
 
-        if isinstance(modules, Mapping):
+        if isinstance(modules, container_abcs.Mapping):
             if isinstance(modules, OrderedDict):
                 for key, module in modules.items():
                     self[key] = module
@@ -292,7 +293,7 @@ class ModuleDict(Module):
                     self[key] = module
         else:
             for j, m in enumerate(modules):
-                if not isinstance(m, Iterable):
+                if not isinstance(m, container_abcs.Iterable):
                     raise TypeError("ModuleDict update sequence element "
                                     "#" + str(j) + " should be Iterable; is" +
                                     type(m).__name__)
@@ -375,7 +376,7 @@ class ParameterList(Module):
         Arguments:
             parameters (iterable): iterable of parameters to append
         """
-        if not isinstance(parameters, Iterable):
+        if not isinstance(parameters, container_abcs.Iterable):
             raise TypeError("ParameterList.extend should be called with an "
                             "iterable, but got " + type(parameters).__name__)
         offset = len(self)
@@ -403,8 +404,8 @@ class ParameterDict(Module):
 
     Arguments:
         parameters (iterable, optional): a mapping (dictionary) of
-            (string : :class:`~torch.nn.Parameter``) or an iterable of key,value pairs
-            of type (string, :class:`~torch.nn.Parameter``)
+            (string : :class:`~torch.nn.Parameter`) or an iterable of key,value pairs
+            of type (string, :class:`~torch.nn.Parameter`)
 
     Example::
 
@@ -480,15 +481,15 @@ class ParameterDict(Module):
 
         Arguments:
             parameters (iterable): a mapping (dictionary) of
-                (string : :class:`~torch.nn.Parameter``) or an iterable of
-                key/value pairs of type (string, :class:`~torch.nn.Parameter``)
+                (string : :class:`~torch.nn.Parameter`) or an iterable of
+                key/value pairs of type (string, :class:`~torch.nn.Parameter`)
         """
-        if not isinstance(parameters, Iterable):
+        if not isinstance(parameters, container_abcs.Iterable):
             raise TypeError("ParametersDict.update should be called with an "
                             "iterable of key/value pairs, but got " +
                             type(parameters).__name__)
 
-        if isinstance(parameters, Mapping):
+        if isinstance(parameters, container_abcs.Mapping):
             if isinstance(parameters, OrderedDict):
                 for key, parameter in parameters.items():
                     self[key] = parameter
@@ -497,7 +498,7 @@ class ParameterDict(Module):
                     self[key] = parameter
         else:
             for j, p in enumerate(parameters):
-                if not isinstance(p, Iterable):
+                if not isinstance(p, container_abcs.Iterable):
                     raise TypeError("ParameterDict update sequence element "
                                     "#" + str(j) + " should be Iterable; is" +
                                     type(p).__name__)

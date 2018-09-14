@@ -8,6 +8,26 @@ from caffe2.python import brew, model_helper
 
 
 class ModelHelperTest(unittest.TestCase):
+    def test_get_complete_net_type(self):
+        model = model_helper.ModelHelper("test_orig")
+        brew.conv(
+            model,
+            "input",
+            "conv",
+            dim_in=3,
+            dim_out=16,
+            weight_init=("MSRAFill", {}),
+            kernel=3,
+            stride=1,
+            pad=0,
+        )
+        model.net.Proto().type = "async_scheduling"
+        net = model.GetCompleteNet()
+        model2 = model_helper.ModelHelper("test_new")
+        model2.ConstructInitTrainNetfromNet(net)
+        self.assertTrue(model2.net.Proto().type, "async_scheduling")
+        self.assertTrue(model2.param_init_net.Proto().type, "async_scheduling")
+
     def test_get_complete_net(self):
         model = model_helper.ModelHelper("test_orig")
         conv = brew.conv(

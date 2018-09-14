@@ -59,7 +59,11 @@ struct Function;
 /// which case it tracks that `Variable`'s data and autograd history. Beyond
 /// construction, the interface of a view is identical to that of a regular
 /// `Variable`. You can determine whether `Variable` is in fact a view by
-/// probing its `is_view()` method.
+/// probing its `is_view()` method. Note that the *view* semantics are only
+/// meaningful for `Variable` relations that are relevant to autograd. For
+/// example, if you hide your code from autograd using `.data`, the `Variable`s
+/// will not be registered as having view relations, even if they share storage.
+///
 ///
 ///                               Interface
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -173,6 +177,22 @@ struct TORCH_API Variable : public at::Tensor {
     }
   }
 
+  /// Returns a copy of this `Variable` that is detached from its autograd graph
+  /// and has a blank version. This method is OK to call if the `Variable` is a
+  /// view.
+  Variable detach() const;
+
+  /// Like `detach()`, but removes this `Variable` in-place. This method may
+  /// only be called on non-view `Variable`s. You can use `is_view()` to check
+  /// this. If this `Variable` is a view, throws an `std::runtime_error()`.
+  void detach_();
+
+  /// Computes the gradient of current tensor w.r.t. graph leaves.
+  void backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const;
+
+  /// Sets the type of the Variable.
+  void set_data(Tensor new_data) const;
+
   /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
   /// `Variable`.
   /// NOTE: This will always set the `grad_fn`, even if this is a leaf variable,
@@ -245,7 +265,7 @@ struct TORCH_API Variable : public at::Tensor {
   // Private Methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  Variable(Variable::Impl* self, bool retain);
+  Variable(c10::intrusive_ptr<Variable::Impl> self);
   Impl* get() const;
 };
 
@@ -253,8 +273,8 @@ struct TORCH_API Variable : public at::Tensor {
 //                            Variable::Impl
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct Variable::Impl : public at::TensorImpl {
-  TORCH_API explicit Impl(
+struct TORCH_API Variable::Impl : public at::TensorImpl {
+  explicit Impl(
       at::Tensor data,
       bool requires_grad = false,
       Edge gradient_edge = Edge());
@@ -275,8 +295,6 @@ struct Variable::Impl : public at::TensorImpl {
   int64_t dim() const override;
   const at::Storage& storage() const override;
   int64_t storage_offset() const override;
-
-  static const char* typeString();
 
   std::shared_ptr<Function> get_grad_accumulator();
   virtual std::shared_ptr<Function>& get_grad_fn() {
@@ -309,24 +327,15 @@ struct Variable::Impl : public at::TensorImpl {
     return grad_;
   }
 
-  /// Returns a copy of this `Variable` that is detached from its autograd graph
-  /// and has a blank version. This method is OK to call if the `Variable` is a
-  /// view.
-  Tensor detach() const override;
+  Variable detach() const;
+  void detach_();
 
-  /// Like `detach()`, but removes this `Variable` in-place. This method may
-  /// only be called on non-view `Variable`s. You can use `is_view()` to check
-  /// this. If this `Variable` is a view, throws an `std::runtime_error()`.
-  void detach_() override;
+  void set_data(Tensor new_data);
 
-  /// Sets the type of the Variable.
-  void set_data(Tensor new_data) override;
-
-  /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
       at::optional<at::Tensor> gradient,
       bool keep_graph,
-      bool create_graph) override;
+      bool create_graph);
 
   /// Reset all expensive fields to free up resources
   void release_resources() override;
@@ -367,7 +376,7 @@ struct Variable::Impl : public at::TensorImpl {
 /// same version_counter. The grad_fn field of the Variable may become stale
 /// due to in-place modifications of the shared data. Accesses should go
 /// through get_grad_fn(). All other fields are always valid.
-struct Variable::ViewImpl : public Variable::Impl {
+struct TORCH_API Variable::ViewImpl : public Variable::Impl {
   ViewImpl(Variable base, at::Tensor data, Edge gradient_edge);
 
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
@@ -408,7 +417,7 @@ inline Variable make_variable_view(
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
     return Variable(c10::make_intrusive<Variable::ViewImpl>(
-            std::move(base), std::move(data), std::move(gradient_edge)).release(), false);
+            std::move(base), std::move(data), std::move(gradient_edge)));
   }
   return Variable();
 }
@@ -418,7 +427,7 @@ inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    return Variable(c10::make_intrusive<Variable::Impl>(data, requires_grad).release(), false);
+    return Variable(c10::make_intrusive<Variable::Impl>(data, requires_grad));
   }
   return Variable();
 }
@@ -428,7 +437,7 @@ inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
       !data.is_variable(),
       "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
-    return Variable(c10::make_intrusive<Variable::Impl>(data, false, std::move(gradient_edge)).release(), false);
+    return Variable(c10::make_intrusive<Variable::Impl>(data, false, std::move(gradient_edge)));
   }
   return Variable();
 }
@@ -485,6 +494,22 @@ inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
 
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
   return get()->get_grad_accumulator();
+}
+
+inline Variable Variable::detach() const {
+  return get()->detach();
+}
+
+inline void Variable::detach_() {
+  get()->detach_();
+}
+
+inline void Variable::backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  get()->backward(gradient, keep_graph, create_graph);
+}
+
+inline void Variable::set_data(Tensor new_data) const {
+  get()->set_data(new_data);
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
@@ -569,8 +594,8 @@ inline PyObject* Variable::pyobj() const noexcept {
 // Private Methods
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline Variable::Variable(Variable::Impl* self, bool retain)
-    : at::Tensor(self, retain) {}
+inline Variable::Variable(c10::intrusive_ptr<Variable::Impl> self)
+    : at::Tensor(std::move(self)) {}
 
 inline Variable::Impl* Variable::get() const {
   AT_CHECK(defined(), "Called Variable::get() on an undefined Variable");
