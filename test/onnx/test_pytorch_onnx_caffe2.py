@@ -127,13 +127,14 @@ class TestCaffe2Backend(unittest.TestCase):
         return cuda_model, cuda_input
 
     def run_debug_test(self, model, train, batch_size, state_dict=None,
-                       input=None, use_gpu=True):
+                       input=None, use_gpu=True, example_outputs=None):
         """
         # TODO: remove this from the final release version
         This test is for our debugging only for the case where
         embed_params=False
         """
-        model.train(train)
+        if not isinstance(model, torch.jit.ScriptModule):
+            model.train(train)
         if state_dict is not None:
             model.load_state_dict(state_dict)
 
@@ -144,7 +145,8 @@ class TestCaffe2Backend(unittest.TestCase):
         if use_gpu:
             model, input = self.convert_cuda(model, input)
 
-        onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False)
+        onnxir, torch_out = do_export(model, input, export_params=self.embed_params, verbose=False,
+                                      example_outputs=example_outputs)
         if isinstance(torch_out, torch.autograd.Variable):
             torch_out = (torch_out,)
 
@@ -153,12 +155,14 @@ class TestCaffe2Backend(unittest.TestCase):
             np.testing.assert_almost_equal(x.data.cpu().numpy(), y, decimal=3)
 
     def run_actual_test(self, model, train, batch_size, state_dict=None,
-                        input=None, use_gpu=True, rtol=0.001, atol=1e-7):
+                        input=None, use_gpu=True, rtol=0.001, atol=1e-7,
+                        example_outputs=None):
         """
         This is what the user facing version will look like
         """
         # set the training/test mode for the model
-        model.train(train)
+        if not isinstance(model, torch.jit.ScriptModule):
+            model.train(train)
         # use the pre-trained model params if available
         if state_dict is not None:
             model.load_state_dict(state_dict)
@@ -175,14 +179,16 @@ class TestCaffe2Backend(unittest.TestCase):
         verify.verify(model, input, c2, rtol=rtol, atol=atol)
 
     def run_model_test(self, model, train, batch_size, state_dict=None,
-                       input=None, use_gpu=True, rtol=0.001, atol=1e-7):
+                       input=None, use_gpu=True, rtol=0.001, atol=1e-7,
+                       example_outputs=None):
         use_gpu_ = torch.cuda.is_available() and use_gpu
         if self.embed_params:
             self.run_actual_test(model, train, batch_size, state_dict, input,
-                                 use_gpu=use_gpu_, rtol=rtol, atol=atol)
+                                 use_gpu=use_gpu_, rtol=rtol, atol=atol,
+                                 example_outputs=example_outputs)
         else:
             self.run_debug_test(model, train, batch_size, state_dict, input,
-                                use_gpu=use_gpu_)
+                                use_gpu=use_gpu_, example_outputs=example_outputs)
 
     def test_linear(self):
         model = nn.Linear(1, 1)
@@ -346,11 +352,11 @@ class TestCaffe2Backend(unittest.TestCase):
         mp = onnx.ModelProto.FromString(do_export(model, input, export_params=self.embed_params)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
-            assert len(prepared.init_net.op) == 1038
-            assert len(prepared.predict_net.op) == 101
+            assert len(prepared.init_net.op) == 875
+            assert len(prepared.predict_net.op) == 130
         else:
-            assert len(prepared.init_net.op) == 27
-            assert len(prepared.predict_net.op) == 1112
+            assert len(prepared.init_net.op) == 8
+            assert len(prepared.predict_net.op) == 997
 
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)
@@ -890,6 +896,28 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_dynamic_slice(self):
+        class DynamicSliceExportMod(torch.nn.Module):
+            def forward(self, x):
+                results = []
+                for i in range(4):
+                    results.append(x[:x.size(0) - i, i:x.size(2), i:3])
+                return tuple(results)
+
+        x = torch.rand(5, 5, 5)
+        self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_dynamic_slice_to_the_end(self):
+        class DynamicSliceExportMod(torch.nn.Module):
+            def forward(self, x):
+                results = []
+                for i in range(4):
+                    results.append(x[:, i:, x.size(2) - 5])
+                return tuple(results)
+
+        x = torch.rand(5, 5, 5)
+        self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
 # a bit of metaprogramming to set up all the rnn tests
 

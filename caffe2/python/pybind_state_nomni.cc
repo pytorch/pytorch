@@ -106,10 +106,10 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](NNModule* nn) -> NNGraph* { return &nn->dataFlow; },
           py::return_value_policy::reference_internal)
       .def("convertToCaffe2Proto", [](NNModule& nn, py::object def) {
-        auto attr = def.attr("SerializeToString");
         CAFFE_ENFORCE(
-            attr, "convertToCaffe2Proto takes either no args", "a NetDef");
-        auto str = attr();
+            pybind11::hasattr(def, "SerializeToString"),
+            "convertToCaffe2Proto takes either no args", "a NetDef");
+        auto str = def.attr("SerializeToString")();
         caffe2::NetDef proto;
         proto.ParseFromString(py::bytes(str));
         auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
@@ -153,12 +153,11 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "createNode",
           [](NNGraph* g, py::object op_def) {
-            auto attr = op_def.attr("SerializeToString");
             CAFFE_ENFORCE(
-                attr,
+                pybind11::hasattr(op_def, "SerializeToString"),
                 "createNode takes either OperatorDef",
                 "or ng.NeuralNetOperator");
-            auto str = attr();
+            auto str = op_def.attr("SerializeToString")();
             OperatorDef op;
             op.ParseFromString(py::bytes(str));
             if (op.input().size() || op.output().size()) {
@@ -234,9 +233,11 @@ void addNomnigraphMethods(pybind11::module& m) {
                   auto nnOp = nn::get<NeuralNetOperator>(node);
                   return opName == nnOp->getName();
                 });
-            return g->createNode(
-                nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(
-                    match, true, 1, !strict));
+            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            if (!strict) {
+              node.nonTerminal();
+            }
+            return g->createNode(std::move(node));
           },
           py::return_value_policy::reference_internal,
           py::arg("node"),
@@ -244,9 +245,11 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "createNode",
           [](nn::NNMatchGraph* g, nom::repr::Tensor& tensor, bool strict) {
-            return g->createNode(
-                nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(
-                    nn::matchTensor(), true, 1, !strict));
+            auto node = nn::NNMatchNode(nn::matchTensor());
+            if (!strict) {
+              node.nonTerminal();
+            }
+            return g->createNode(std::move(node));
           },
           py::return_value_policy::reference_internal,
           py::arg("tensor"),
@@ -256,9 +259,11 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](nn::NNMatchGraph* g, bool strict) {
             auto match = nn::NNNodeMatchCriteria(
                 [](NNGraph::NodeRef node) { return true; });
-            return g->createNode(
-                nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(
-                    match, true, 1, !strict));
+            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            if (!strict) {
+              node.nonTerminal();
+            }
+            return g->createNode(std::move(node));
           },
           py::return_value_policy::reference_internal,
           py::arg("strict") = false)

@@ -41,6 +41,15 @@ class ExpRelaxedCategorical(Distribution):
         event_shape = self._categorical.param_shape[-1:]
         super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(ExpRelaxedCategorical, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.temperature = self.temperature
+        new._categorical = self._categorical.expand(batch_shape)
+        super(ExpRelaxedCategorical, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
 
@@ -57,8 +66,8 @@ class ExpRelaxedCategorical(Distribution):
         return self._categorical.probs
 
     def rsample(self, sample_shape=torch.Size()):
-        sample_shape = torch.Size(sample_shape)
-        uniforms = clamp_probs(self.logits.new(self._extended_shape(sample_shape)).uniform_())
+        shape = self._extended_shape(sample_shape)
+        uniforms = clamp_probs(torch.rand(shape, dtype=self.logits.dtype, device=self.logits.device))
         gumbels = -((-(uniforms.log())).log())
         scores = (self.logits + gumbels) / self.temperature
         return scores - scores.logsumexp(dim=-1, keepdim=True)
@@ -68,7 +77,7 @@ class ExpRelaxedCategorical(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        log_scale = (self.temperature.new(self.temperature.shape).fill_(K).lgamma() -
+        log_scale = (self.temperature.new_tensor(float(K)).lgamma() -
                      self.temperature.log().mul(-(K - 1)))
         score = logits - value.mul(self.temperature)
         score = (score - score.logsumexp(dim=-1, keepdim=True)).sum(-1)
@@ -100,8 +109,14 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
-        super(RelaxedOneHotCategorical, self).__init__(ExpRelaxedCategorical(temperature, probs, logits),
-                                                       ExpTransform(), validate_args=validate_args)
+        base_dist = ExpRelaxedCategorical(temperature, probs, logits)
+        super(RelaxedOneHotCategorical, self).__init__(base_dist,
+                                                       ExpTransform(),
+                                                       validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(RelaxedOneHotCategorical, _instance)
+        return super(RelaxedOneHotCategorical, self).expand(batch_shape, _instance=new)
 
     @property
     def temperature(self):

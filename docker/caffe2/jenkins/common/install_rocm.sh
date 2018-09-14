@@ -50,13 +50,6 @@ install_hip_thrust() {
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
 }
 
-# This will be removed after merging an upcoming PR.
-install_hcsparse() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb 
-    dpkg -i /opt/rocm/debians/hcsparse.deb
-}
-
 # Install an updated version of rocRand that's PyTorch compatible.
 install_rocrand() {
     mkdir -p /opt/rocm/debians
@@ -67,10 +60,30 @@ install_rocrand() {
 # Install rocSPARSE/hipSPARSE that will be released soon - can co-exist w/ hcSPARSE which will be removed soon
 install_hipsparse() {
     mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/rocsparse-0.1.1.0.deb -o /opt/rocm/debians/rocsparse.deb
-    curl https://s3.amazonaws.com/ossci-linux/hipsparse-0.1.1.0.deb -o /opt/rocm/debians/hipsparse.deb
+    curl https://s3.amazonaws.com/ossci-linux/rocsparse-0.1.2.114-Linux.deb -o /opt/rocm/debians/rocsparse.deb
+    curl https://s3.amazonaws.com/ossci-linux/hipsparse-0.1.2.55-Linux.deb -o /opt/rocm/debians/hipsparse.deb
     dpkg -i /opt/rocm/debians/rocsparse.deb
     dpkg -i /opt/rocm/debians/hipsparse.deb
+}
+
+# Install custom hcc containing two compiler fixes relevant to PyTorch
+install_customhcc() {
+    HIP_VERSION="1.5.18354"
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/hcc-1.2.18272-Linux.deb -o /opt/rocm/debians/hcc-Linux.deb
+    curl "https://s3.amazonaws.com/ossci-linux/hip_base-$HIP_VERSION.deb" -o /opt/rocm/debians/hip_base.deb
+    curl "https://s3.amazonaws.com/ossci-linux/hip_doc-$HIP_VERSION.deb" -o /opt/rocm/debians/hip_doc.deb
+    curl "https://s3.amazonaws.com/ossci-linux/hip_samples-$HIP_VERSION.deb" -o /opt/rocm/debians/hip_samples.deb
+    curl "https://s3.amazonaws.com/ossci-linux/hip_hcc-$HIP_VERSION.deb" -o /opt/rocm/debians/hip_hcc.deb
+    dpkg -i /opt/rocm/debians/hcc-Linux.deb
+    dpkg -i /opt/rocm/debians/hip_base.deb
+    dpkg -i /opt/rocm/debians/hip_doc.deb
+    dpkg -i /opt/rocm/debians/hip_samples.deb
+    dpkg -i /opt/rocm/debians/hip_hcc.deb
+
+    if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
+        sudo sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>/' /opt/rocm/hip/cmake/FindHIP.cmake
+    fi
 }
 
 # Install Python packages depending on the base OS
@@ -85,5 +98,5 @@ fi
 
 install_hip_thrust
 install_rocrand
-install_hcsparse
 install_hipsparse
+install_customhcc

@@ -127,7 +127,7 @@ class MKLContext : public BaseContext {
     return true;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return MKLDNN;
   }
 
@@ -166,6 +166,11 @@ class MKLStaticContext : public BaseStaticContext {
 
   DeviceType GetDeviceType() override {
     return MKLDNN;
+  }
+
+  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
+      override {
+    device->set_device_type(TypeToProto(GetDeviceType()));
   }
 };
 

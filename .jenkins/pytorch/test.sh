@@ -90,6 +90,8 @@ test_python_all_except_nn() {
 
 test_aten() {
   # Test ATen
+  # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
+  # scalar_tensor_test, basic, native_test
   if ([[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]); then
     echo "Running ATen tests with pytorch lib"
     TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
@@ -97,7 +99,7 @@ test_aten() {
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
     if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-      SUDO=sudo 
+      SUDO=sudo
     fi
 
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
@@ -140,12 +142,28 @@ test_libtorch() {
   fi
 }
 
+test_custom_script_ops() {
+  if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+    echo "Testing custom script operators"
+    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    pushd test/custom_operator
+    cp -r "$CUSTOM_OP_BUILD" build
+    # Run tests Python-side and export a script module.
+    python test_custom_ops.py -v
+    python model.py --export-script-module=model.pt
+    # Run tests C++-side and load the exported script module.
+    build/test_custom_ops ./model.pt
+    popd
+  fi
+}
+
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
   test_python_nn
   test_python_all_except_nn
   test_aten
   test_torchvision
   test_libtorch
+  test_custom_script_ops
 else
   if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
     test_python_nn
@@ -154,5 +172,6 @@ else
     test_aten
     test_torchvision
     test_libtorch
+    test_custom_script_ops
   fi
 fi

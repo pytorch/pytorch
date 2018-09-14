@@ -125,7 +125,7 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
         printPrimList(out,n->is(name));
         break;
       case AttributeKind::s:
-        out << escapeString(n->s(name));
+        out << "\"" << escapeString(n->s(name)) << "\"";
         break;
       case AttributeKind::ss:
         printPrimList(out,n->ss(name));
@@ -135,7 +135,7 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
           at::Tensor t = n->t(name);
           // 1-elem tensors are usually boxed scalars, so print them like it
           if (t.numel() == 1) {
-            auto scalar_tensor = t.view({})._local_scalar();
+            auto scalar_tensor = at::_local_scalar(t.view({}));
             out << "{";
             if (scalar_tensor.isFloatingPoint()) {
               out << scalar_tensor.toDouble();
@@ -331,9 +331,9 @@ void Node::lint() const {
   IR_ELSEIFM_CONST(PythonOp)
     size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
-      if (c == 's') {
+      if (c == 'c') {
         n_scalars++;
-      } else if (c == 't') {
+      } else if (c == 'd') {
         n_tensors++;
       } else {
         JIT_ASSERT(0);

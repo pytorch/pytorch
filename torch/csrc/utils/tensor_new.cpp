@@ -144,6 +144,9 @@ ScalarType infer_scalar_type(PyObject *obj) {
     return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)(PyArray_FromScalar(obj, nullptr))));
   }
 #endif
+  if (THPUtils_checkString(obj)) {
+    throw TypeError("new(): invalid data type '%s'", Py_TYPE(obj)->tp_name);
+  }
   if (PySequence_Check(obj)) {
     at::optional<ScalarType> scalarType;
     auto length = PySequence_Length(obj);
@@ -153,7 +156,9 @@ ScalarType infer_scalar_type(PyObject *obj) {
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle) throw python_error();
-      ScalarType item_scalarType = infer_scalar_type(handle.get());
+      auto cur_item = handle.get();
+      if (cur_item == obj) throw TypeError("new(): self-referential lists are incompatible");
+      ScalarType item_scalarType = infer_scalar_type(cur_item);
       scalarType = (scalarType) ?
           at::promoteTypes(*scalarType, item_scalarType) : item_scalarType;
       if (scalarType == ScalarType::Double) {
@@ -506,7 +511,7 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
 Tensor new_empty(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_empty(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  });
+  }, /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -520,7 +525,7 @@ Tensor new_empty(const Type& type, PyObject* args, PyObject* kwargs) {
 Tensor new_full(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_full(IntList size, Scalar fill_value, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  });
+  }, /*traceable=*/true);
 
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -534,7 +539,7 @@ Tensor new_full(const Type& type, PyObject* args, PyObject* kwargs) {
 Tensor new_ones(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_ones(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  });
+  }, /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -548,7 +553,7 @@ Tensor new_ones(const Type& type, PyObject* args, PyObject* kwargs) {
 Tensor new_zeros(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new_zeros(IntList size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
-  });
+  }, /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);

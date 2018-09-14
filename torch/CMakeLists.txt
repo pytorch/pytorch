@@ -9,7 +9,7 @@ else()
   option(USE_CUDA "Use CUDA" ON)
 endif()
 
-option(BUILD_TORCH_TEST "Build torch test binaries" ON)
+option(BUILD_TEST "Build torch test binaries" ON)
 option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
 
 # TODO: Unify with version from setup.py
@@ -26,7 +26,7 @@ if(NOT TORCH_INSTALL_BIN_DIR)
 endif()
 
 if(NOT TORCH_INSTALL_INCLUDE_DIR)
-  set(TORCH_INSTALL_INCLUDE_DIR include/libtorch)
+  set(TORCH_INSTALL_INCLUDE_DIR include)
 endif()
 
 if(NOT TORCH_INSTALL_LIB_DIR)
@@ -174,9 +174,10 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
@@ -211,7 +212,6 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     )
-
 endif()
 
 
@@ -287,8 +287,7 @@ if (MSVC)
   target_link_libraries(torch onnx onnx_library)
 endif()
 
-target_link_libraries(torch
-  caffe2_library)
+target_link_libraries(torch caffe2_library)
 
 find_package(OpenMP)
 if(OPENMP_FOUND)
@@ -303,6 +302,13 @@ if (NOT NO_API AND NOT USE_ROCM)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
+
+  if (TORCH_USE_CEREAL)
+    target_compile_definitions(torch PUBLIC TORCH_USE_CEREAL)
+    # SYSTEM headers are included with -isystem and thus do not trigger warnings.
+    target_include_directories(torch SYSTEM PUBLIC
+      "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
+  endif()
 endif()
 
 if(USE_CUDA)
@@ -320,23 +326,11 @@ if(USE_CUDA)
     set_target_properties(torch PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
   else()
     set(TORCH_CUDA_LIBRARIES
-      ${CUDA_CUDA_LIB}
-      ${CUDA_NVRTC_LIB}
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libnvToolsExt.so
       ${CUDA_LIBRARIES})
   endif()
 
-  if(MSVC OR APPLE)
-    target_link_libraries(torch caffe2_gpu_library ${TORCH_CUDA_LIBRARIES})
-  else()
-    # TODO: using the full TORCH_CUDA_LIBRARIES here causes some
-    # builds to fail in CI, as libcuda.so can no longer be found. It's
-    # not clear why this is the case, and the situation should be
-    # investigated/cleaned up.  Note that the test+jit/test_api
-    # targets below do require linking against the full
-    # TORCH_CUDA_LIBRARIES, even on Linux
-    target_link_libraries(torch caffe2_gpu_library ${CUDA_LIBRARIES})
-  endif()
+  target_link_libraries(torch caffe2_gpu_library ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(torch PRIVATE USE_CUDA)
 endif()
 
@@ -350,7 +344,7 @@ if(USE_ROCM)
     /opt/rocm/include
     /opt/rocm/hcc/include
     /opt/rocm/rocblas/include
-    /opt/rocm/hcsparse/include
+    /opt/rocm/hipsparse/include
     )
 endif()
 
@@ -382,10 +376,6 @@ target_include_directories(torch PRIVATE ${ATen_CPU_INCLUDE})
 target_include_directories(torch PUBLIC
   ${TORCH_SRC_DIR}/csrc)
 
-# SYSTEM headers are included with -isystem and thus do not trigger warnings.
-target_include_directories(torch SYSTEM PUBLIC
-  "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
-
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
@@ -395,6 +385,8 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
+install(FILES "${TORCH_SRC_DIR}/op.h"
+        DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 install(TARGETS torch
   RUNTIME DESTINATION "${TORCH_INSTALL_BIN_DIR}"
@@ -402,7 +394,7 @@ install(TARGETS torch
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # JIT Tests. TODO: Put into test/cpp/jit folder
-if (BUILD_TORCH_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
+if (BUILD_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
   add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
   target_link_libraries(test_jit torch ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(test_jit PUBLIC USE_CATCH _FORCE_INLINES)
@@ -411,14 +403,14 @@ if (BUILD_TORCH_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
     ${ATen_CPU_INCLUDE})
 
   if (USE_CUDA)
-    target_link_libraries(test_jit ${CUDA_LIBRARIES})
+    target_link_libraries(test_jit ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB})
   endif()
 endif()
 
-if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
+if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
   set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
 
-  add_executable(test_api
+  set(TORCH_API_TEST_SOURCES
     ${TORCH_API_TEST_DIR}/any.cpp
     ${TORCH_API_TEST_DIR}/cursor.cpp
     ${TORCH_API_TEST_DIR}/integration.cpp
@@ -430,22 +422,26 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/parallel.cpp
     ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/sequential.cpp
-    ${TORCH_API_TEST_DIR}/serialization.cpp
     ${TORCH_API_TEST_DIR}/static.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
     ${TORCH_API_TEST_DIR}/tensor.cpp
     ${TORCH_API_TEST_DIR}/jit.cpp
-    # Temporary until ATen tests are built with Caffe2
     ${TORCH_API_TEST_DIR}/tensor_options.cpp
     ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
-    )
+  )
+
+  if (TORCH_USE_CEREAL)
+    list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/serialization.cpp)
+  endif()
+
+  add_executable(test_api ${TORCH_API_TEST_SOURCES})
 
   target_include_directories(test_api
     PUBLIC
     "${TORCH_ROOT}/third_party/catch/single_include"
     ${ATen_CPU_INCLUDE})
 
-  target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES})
+  target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB})
 
   if (NOT MSVC)
     if (APPLE)
@@ -473,3 +469,7 @@ configure_file(
     ${TORCH_ROOT}/cmake/TorchConfig.cmake.in
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
     @ONLY)
+install(FILES
+    ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
+    ${PROJECT_BINARY_DIR}/TorchConfig.cmake
+    DESTINATION share/cmake/Torch)

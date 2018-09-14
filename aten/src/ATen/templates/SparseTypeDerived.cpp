@@ -11,7 +11,7 @@
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/UndefinedTensor.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Half.h"
@@ -31,6 +31,9 @@ ${Type}::${Type}()
   : ${DenseBackend}TypeDefault(${Backend}TensorId(), /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
+}
+caffe2::TypeMeta ${Type}::typeMeta() const {
+  AT_ERROR("typeMeta not defined for SparseType");
 }
 Backend ${Type}::backend() const {
   return Backend::${Backend};

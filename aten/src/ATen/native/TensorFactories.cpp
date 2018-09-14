@@ -23,7 +23,7 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // A number of factory functions are implemented in the following way:
 //
-//    return at::getMaybeVariableType(options)._arange(start, end, step);
+//    return at::getType(options)._arange(start, end, step);
 //
 // That is to say, they grab a Type for TensorOptions, and then call some
 // internal method.  What's going on?
@@ -33,7 +33,7 @@
 // (and never will) understand TensorOptions, so we need to handle TensorOptions
 // inside native before batting over to TH.  The expectation is that when
 // these factories get ported to native, this is no longer necessary,
-// and we can eliminate the getMaybeVariableType call.
+// and we can eliminate the getType call.
 
 namespace at {
 namespace native {
@@ -59,6 +59,10 @@ void window_function_checks(
       window_length);
 }
 
+const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
+  return at::getType(options);
+}
+
 } // namespace
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -73,7 +77,7 @@ Tensor arange(
     Scalar step,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._arange(start, end, step);
+  return getFactoryType(options)._arange(start, end, step);
 }
 
 Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
@@ -86,7 +90,7 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
 Tensor arange(Scalar end, const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._arange(end);
+  return getFactoryType(options)._arange(end);
 }
 
 Tensor& arange_out(Tensor& result, Scalar end) {
@@ -94,7 +98,7 @@ Tensor& arange_out(Tensor& result, Scalar end) {
 }
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
-  return like.type().toScalarType(at::kLong)._arange(like.size(dim));
+  return at::getType(like.options().dtype(at::kLong))._arange(like.size(dim));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -102,7 +106,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 Tensor empty(IntList size, const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
   // Can't call a factory function, because the buck stops with us!
-  return at::getMaybeVariableType(options).tensor(size);
+  return getFactoryType(options).tensor(size);
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
@@ -139,7 +143,6 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
     auto res = native::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
-
     return res;
   }
   return native::empty(self.sizes(), options);
@@ -219,7 +222,7 @@ Tensor linspace(
     int64_t steps,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._linspace(start, end, steps);
+  return getFactoryType(options)._linspace(start, end, steps);
 }
 
 Tensor& linspace_out(Tensor& result, Scalar start, Scalar end) {
@@ -242,7 +245,7 @@ Tensor logspace(
     int64_t steps,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._logspace(start, end, steps);
+  return getFactoryType(options)._logspace(start, end, steps);
 }
 
 Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
@@ -476,7 +479,7 @@ Tensor range(
     Scalar step,
     const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
-  return at::getMaybeVariableType(options)._range(start, end, step);
+  return getFactoryType(options)._range(start, end, step);
 }
 
 Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
