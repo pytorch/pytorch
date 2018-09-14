@@ -46,7 +46,7 @@ class DistBackend(IntEnum):
     MPI = 3
 
     @staticmethod
-    def parse_backend(name):
+    def parse(name):
         if isinstance(name, DistBackend):
             val = name
         else:
@@ -260,7 +260,7 @@ def init_process_group(backend,
     assert len(kwargs) == 0, \
         "got unexpected keyword arguments: %s" % ",".join(kwargs.keys())
 
-    backend = DistBackend.parse_backend(backend)
+    backend = DistBackend.parse(backend)
 
     if backend == DistBackend.MPI:
         if not is_mpi_available():

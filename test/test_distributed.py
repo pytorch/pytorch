@@ -240,7 +240,7 @@ class _DistTestBase(object):
         else:
             group = [0, 1]
         group_id = dist.new_group(group)
-        backend_val = dist.DistBackend.parse_name(BACKEND)
+        backend_val = dist.DistBackend.parse(BACKEND)
         self.assertEqual(dist.get_backend(group_id), backend_val)
         if dist.get_rank() in group:
             self.assertEqual(dist.get_backend(), backend_val)
