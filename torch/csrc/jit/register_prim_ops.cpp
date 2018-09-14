@@ -143,7 +143,7 @@ RegisterOperators reg({
             auto s = pop(stack).toString();
             if (s->string() != "inf") {
               AT_ERROR(
-                  "Expected 'inf' when casting to float, but got '",
+                  "Only 'inf' can be cast to a float, but got '",
                   s->string(),
                   "'");
             }

@@ -10,7 +10,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from torch._six import inf, inf_str
+from torch._six import inf, PY2
 from common import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm, suppress_warnings
 from textwrap import dedent
 import os
@@ -23,7 +23,6 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
-import importlib
 from test_autograd import method_tests, create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
@@ -58,7 +57,6 @@ if torch.cuda.is_available():
 
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
-PY2 = sys.version_info[0] == 2
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
@@ -7610,12 +7608,9 @@ def the_method({}):
 
 
 def get_constant(x):
-    module = None
     if x == inf or x == -inf:
-        if PY2:
-            return (inf_str, None)
-        module = 'math'
-    return (str(x), module)
+        return 'float(\'inf\')' if PY2 else 'math.inf'
+    return x
 
 
 # create a script function from (name, func_type, output_process_fn),
@@ -7634,11 +7629,7 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
                 actuals.append(name)
                 tensors.append(arg)
             else:
-                (name, module) = get_constant(arg)
-                if module is not None:
-                    modules.add(module)
-                    name = "{}.{}".format(module, name)
-                actuals.append(name)
+                actuals.append(str(get_constant(arg)))
         kwargs_str = ''
         for k, v in kwargs.items():
             kwargs_str += ', ' + k + '=' + str(v)
@@ -7653,8 +7644,8 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
 
         script = script_template.format(', '.join(formals), call)
 
-        for module in modules:
-            locals()[module] = importlib.import_module(module)
+        # for math.inf
+        import math
 
         CU = torch.jit.CompilationUnit(script)
         self.assertExportImport(CU.the_method.graph, tensors)

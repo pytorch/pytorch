@@ -28,12 +28,10 @@ PY3 = sys.version_info[0] == 3
 if PY2:
     inf = float('inf')
     nan = float('nan')
-    inf_str = 'float(\'inf\')'
 else:
     import math
     inf = math.inf
     nan = math.nan
-    inf_str = 'math.inf'
 
 if PY2:
     string_classes = basestring
