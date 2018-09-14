@@ -8,6 +8,7 @@
 #   TORCH_FOUND        -- True if the system has the Torch library
 #   TORCH_INCLUDE_DIRS -- The include directories for torch
 #   TORCH_LIBRARIES    -- Libraries to link to
+#   TORCH_CXX_FLAGS    -- Additional (required) flags to pass to the compiler
 #
 # and the following imported targets:
 #
@@ -31,6 +32,9 @@ set(TORCH_INCLUDE_DIRS "${TORCH_INSTALL_PREFIX}/lib/include")
 # Library dependencies.
 find_package(Caffe2 REQUIRED)
 find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
+
+# We build libtorch with the old GCC ABI, so dependent libraries must too.
+set(TORCH_CXX_FLAGS -D_GLIBCXX_USE_CXX11_ABI=0)
 
 set(TORCH_LIBRARIES ${TORCH_LIBRARY} ${Caffe2_MAIN_LIBS})
 if (@USE_CUDA@)
@@ -68,4 +72,5 @@ function(torch_add_custom_op_library name source_files)
   target_include_directories(${name} PUBLIC "${TORCH_INCLUDE_DIRS}")
   target_link_libraries(${name} "${TORCH_LIBRARIES}")
   set_property(TARGET ${name} PROPERTY CXX_STANDARD 11)
+  target_compile_options(${name} ${TORCH_CXX_FLAGS})
 endfunction(torch_add_custom_op_library)
