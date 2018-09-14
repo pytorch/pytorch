@@ -205,6 +205,17 @@ def _construct_empty_tensor_list():
     return []
 
 
+def enable_cpu_fuser(fn):
+    def wrapper(*args, **kwargs):
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            torch._C._jit_override_can_fuse_on_cpu(False)
+            raise
+    return wrapper
+
+
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
@@ -630,6 +641,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
+    @enable_cpu_fuser
     def test_lstm_fusion_cpu(self):
         inputs = get_lstm_inputs('cpu')
         try:
@@ -1370,6 +1382,7 @@ class TestJit(JitTestCase):
         self.run_ge_tests(False, False)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @enable_cpu_fuser
     def test_ge_optimized(self):
         self.run_ge_tests(True, False)
 
@@ -3053,6 +3066,7 @@ a")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @skipIfRocm
+    @enable_cpu_fuser
     def test_chunk_fusion_correctness(self):
         return self._test_chunk_fusion_correctness(self, 'cpu')
 
@@ -6928,7 +6942,6 @@ class MnistNet(nn.Module):
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
-
     @staticmethod
     def _test_dcgan_models(self, device, check_export_import=True):
         class DCGANGenerator(nn.Module):
