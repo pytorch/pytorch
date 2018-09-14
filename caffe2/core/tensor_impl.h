@@ -90,7 +90,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
 
   explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0) {
-    data_type_ = storage_.dtype();
+    data_type_ = storage_ ? storage_.dtype() : TypeMeta{};
   }
 
   TensorImpl(const TensorImpl&) = default;
