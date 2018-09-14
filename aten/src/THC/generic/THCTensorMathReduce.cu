@@ -70,6 +70,7 @@ THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t va
   if (numel > 0) {
     ptrdiff_t size = numel / THTensor_sizeLegacyNoScalars(data, 0);
     dim3 grid( THTensor_sizeLegacyNoScalars(data, 0));
+    // NOTE: only with this specific number of threads can this work on GPUs with a warp size != 32 (such as AMD). Do not alter w/o changing buffer size in kernel.
     dim3 threads(32);
 
     THCTensor_kernel_renorm<scalar_t, accreal>
