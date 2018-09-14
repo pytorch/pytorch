@@ -554,19 +554,42 @@ inline dim3 getApplyBlock() {
 
   The calling convention is
 
-  1. Take advantage of tempalte arguments. Sequentially,
+  1. The tempalte arguments should be, sequentially,
     - First N typename args specify the scalar types of each of the N tensors.
-    - (Optional) int step arg specifies the number of elements operated together
-      at the same time.
+    - (Optional) `int step` arg specifies the number of elements processed
+      together at the same time.
       Default is 1.
-    - A usually omitted (i.e., infered) typename arg specifies the type of the
+    - A usually omitted (i.e., inferred) typename arg specifies the type of the
       function/functor applied on `N * step` values  in each iteration of each
       CUDA thread.
   2. The arguments should be, sequentially,
     - N tensors
-    - op: a function/functor that takes takes N references to scalar types
-          (same as the first N template args); at least one of these references
-          should be non-const in order to write the output.
+    - op: a function/functor that processes `N * step` values at the same time.
+      - If `step == 1`, it must have signature
+        `void(*)(scalar1_t&, scalar2_t&, ..., scalarN_t&)`, where
+        `scalar*_t`s are the first N typename template args, and the inputs
+        are the `N` values from the `N` tensors retrieved at a common index.
+      - Otherwise, it must must have signature
+          void(*)(int n, scalar1_t&, scalar1_t&, ..., scalar1_t&,  // repeat `step` times
+                         scalar2_t&, scalar2_t&, ..., scalar2_t&,  // repeat `step` times
+                         ...,
+                         scalarN_t&, scalarN_t&, ..., scalarN_t&)  // repeat `step` times
+        Different from `step == 1` case, it processes `N * step` values taken
+        from `step` common indices. Moreover, the first input `n` represents the
+        number of valid indices (it will always have `0 < n <= step`). It will
+        almost always be `step`, but at the boundary we may not have full `step`
+        elements and `n` can be a lesser value.
+
+        E.g., if `step == 4` and `N == 2`, `op` could be
+
+          [](int n, scalar1_t &u1, scalar1_t &u2, scalar1_t &u3, scalar1_t &u4,
+                    scalar2_t &v1, scalar2_t &v2, scalar2_t &v3, scalar2_t &v4) {
+            // Only process u1, ..., un and v1, ..., vn.
+            // So if `n == 3`, `u4` and `v4` need not to be considered.
+          }
+
+      In both cases, the references can actually be const, but at least one of
+      them should be non-const in order to write the output.
     - (Optional, but recommended) N TensorArgType args that specify for each
       tensor whether `op` reads AND writes ] (i.e., TensorArgType::ReadWrite),
       or only reads (i.e., TensorArgType::ReadOnly).
@@ -587,9 +610,10 @@ inline dim3 getApplyBlock() {
 
   CUDA_tensor_apply2<scalar1, scalar2, 2>(
     a, b,
-    [] __device__ (scalar1 &a_val1, scalar1 &a_val2,
-                   const scalar2 &b_val1, const scalar2 &b_val2) {
+    [] __device__ (int n, scalar1 &a_val1, scalar1 &a_val2,
+                          const scalar2 &b_val1, const scalar2 &b_val2) {
       // call special vectorized op here, or just do elementwise and enjoy unrolling...
+      // if n == 1, only process a_val1 and b_val1
     }
   );
 */
