@@ -833,6 +833,9 @@ inline Tensor & Tensor::log2_() {
 inline Tensor Tensor::logdet() const {
     return type().logdet(*this);
 }
+inline Tensor Tensor::log_softmax(int64_t dim, ScalarType dtype) const {
+    return type().log_softmax(*this, dim, dtype);
+}
 inline Tensor Tensor::log_softmax(int64_t dim) const {
     return type().log_softmax(*this, dim);
 }
@@ -994,6 +997,9 @@ inline std::tuple<Tensor,Tensor> Tensor::slogdet() const {
 }
 inline Tensor Tensor::smm(const Tensor & mat2) const {
     return type().smm(*this, mat2);
+}
+inline Tensor Tensor::softmax(int64_t dim, ScalarType dtype) const {
+    return type().softmax(*this, dim, dtype);
 }
 inline Tensor Tensor::softmax(int64_t dim) const {
     return type().softmax(*this, dim);

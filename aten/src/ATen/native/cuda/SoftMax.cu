@@ -479,6 +479,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool upconv
   if (upconvert) AT_ASSERTM(input_.type().scalarType() == ScalarType::Half,"upconvert is supported for Half type only");
   auto input = input_.contiguous();
   Tensor output = upconvert ? at::empty_like(input, input.options().dtype(ScalarType::Float)) : at::empty_like(input);
+  static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
   AT_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
@@ -506,8 +507,6 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool upconv
               output.data<scalar_t>(), input.data<scalar_t>(), dim_size
           );
       } else {
-          bool accscalar_assert = std::is_same<accscalar_t, float>::value; 
-          AT_ASSERTM(accscalar_assert, "accscalar_t for mixed precision softmax should be float"); 
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
             <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
               output.data<accscalar_t>(), input.data<scalar_t>(), dim_size
@@ -532,8 +531,6 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool upconv
              output.data<scalar_t>(), input.data<scalar_t>(), outer_size, dim_size, inner_size
       );
       } else {
-          bool accscalar_assert = std::is_same<accscalar_t, float>::value; 
-          AT_ASSERTM(accscalar_assert, "accscalar_t for mixed precision softmax should be float"); 
           SpatialSoftMax_getLaunchSizes<accscalar_t>(
               &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, accscalar_t, Epilogue>,
               outer_size, dim_size, inner_size,
@@ -555,6 +552,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
   auto grad = grad_.contiguous();
   Tensor gI = upconvert? at::empty_like(grad, grad.options().dtype(ScalarType::Half)) : at::empty_like(grad);
+  static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (grad.dim() == 0) grad = grad.view(1);
   AT_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
   auto output = output_.contiguous();
@@ -580,8 +578,6 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
             gI.data<scalar_t>(), output.data<scalar_t>(), grad.data<scalar_t>(), dim_size
     );
     } else {
-       bool accscalar_assert = std::is_same<accscalar_t, float>::value;
-       AT_ASSERTM(accscalar_assert, "accscalar_t for mixed precision softmax should be float"); 
         cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
             gI.data<scalar_t>(), output.data<accscalar_t>(), grad.data<accscalar_t>(), dim_size
@@ -605,8 +601,6 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
             outer_size, dim_size, inner_size
         );
     } else {
-        bool accscalar_assert = std::is_same<accscalar_t, float>::value;
-        AT_ASSERTM(accscalar_assert, "accscalar_t for mixed precision softmax should be float"); 
         SpatialSoftMax_getLaunchSizes<accscalar_t>(
             &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, accscalar_t, Epilogue>,
             outer_size, dim_size, inner_size,
