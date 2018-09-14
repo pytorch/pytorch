@@ -285,7 +285,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return cudaStreamQuery(stream) == cudaSuccess;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return CUDA;
   }
 

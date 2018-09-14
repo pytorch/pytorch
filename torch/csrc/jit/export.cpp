@@ -685,7 +685,7 @@ void ModuleEncoder::EncodeTensor(
     }
 
     auto record_number = file_writer_.writeRecord(
-      static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.numel());
+      static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.storage().size());
     tensor_proto->add_int64_data(record_number);
     storage_dedup_map_[storage_ptr] = record_number;
   }
