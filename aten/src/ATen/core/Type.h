@@ -381,8 +381,6 @@ struct AT_API Type {
   virtual Tensor all(const Tensor & self, int64_t dim, bool keepdim=false) const = 0;
   virtual bool allclose(const Tensor & self, const Tensor & other, double rtol=1e-05, double atol=1e-08, bool equal_nan=false) const = 0;
   virtual Tensor any(const Tensor & self, int64_t dim, bool keepdim=false) const = 0;
-  AT_DEPRECATED(virtual Tensor arange(Scalar start, Scalar end, Scalar step=1) const = 0);
-  AT_DEPRECATED(virtual Tensor arange(Scalar end) const = 0);
   virtual Tensor argmax(const Tensor & self, int64_t dim, bool keepdim=false) const = 0;
   virtual Tensor argmax(const Tensor & self) const = 0;
   virtual Tensor argmin(const Tensor & self, int64_t dim, bool keepdim=false) const = 0;
@@ -430,7 +428,6 @@ struct AT_API Type {
   virtual Tensor div(const Tensor & self, Scalar other) const = 0;
   virtual Tensor & div_(Tensor & self, Scalar other) const = 0;
   virtual Tensor dot(const Tensor & self, const Tensor & tensor) const = 0;
-  AT_DEPRECATED(virtual Tensor empty(IntList size) const = 0);
   virtual Tensor erf(const Tensor & self) const = 0;
   virtual Tensor & erf_(Tensor & self) const = 0;
   virtual Tensor erfc(const Tensor & self) const = 0;
@@ -441,13 +438,11 @@ struct AT_API Type {
   virtual Tensor & expm1_(Tensor & self) const = 0;
   virtual Tensor expand(const Tensor & self, IntList size, bool implicit=false) const = 0;
   virtual Tensor expand_as(const Tensor & self, const Tensor & other) const = 0;
-  AT_DEPRECATED(virtual Tensor eye(int64_t n, int64_t m=-1) const = 0);
   virtual Tensor flatten(const Tensor & self, int64_t start_dim=0, int64_t end_dim=-1) const = 0;
   virtual Tensor & fill_(Tensor & self, Scalar value) const = 0;
   virtual Tensor & fill_(Tensor & self, const Tensor & value) const = 0;
   virtual Tensor floor(const Tensor & self) const = 0;
   virtual Tensor & floor_(Tensor & self) const = 0;
-  AT_DEPRECATED(virtual Tensor full(IntList size, Scalar fill_value) const = 0);
   virtual Tensor ger(const Tensor & self, const Tensor & vec2) const = 0;
   virtual std::tuple<Tensor,Tensor> gesv(const Tensor & self, const Tensor & A) const = 0;
   virtual Tensor fft(const Tensor & self, int64_t signal_ndim, bool normalized=false) const = 0;
@@ -469,7 +464,6 @@ struct AT_API Type {
   virtual bool is_signed(const Tensor & self) const = 0;
   virtual bool is_sparse(const Tensor & self) const = 0;
   virtual std::tuple<Tensor,Tensor> kthvalue(const Tensor & self, int64_t k, int64_t dim=-1, bool keepdim=false) const = 0;
-  AT_DEPRECATED(virtual Tensor linspace(Scalar start, Scalar end, int64_t steps=100) const = 0);
   virtual Tensor log(const Tensor & self) const = 0;
   virtual Tensor & log_(Tensor & self) const = 0;
   virtual Tensor log10(const Tensor & self) const = 0;
@@ -479,7 +473,6 @@ struct AT_API Type {
   virtual Tensor log2(const Tensor & self) const = 0;
   virtual Tensor & log2_(Tensor & self) const = 0;
   virtual Tensor logdet(const Tensor & self) const = 0;
-  AT_DEPRECATED(virtual Tensor logspace(Scalar start, Scalar end, int64_t steps=100) const = 0);
   virtual Tensor log_softmax(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor logsumexp(const Tensor & self, int64_t dim, bool keepdim=false) const = 0;
   virtual Tensor matmul(const Tensor & self, const Tensor & other) const = 0;
@@ -504,16 +497,9 @@ struct AT_API Type {
   virtual Tensor mvlgamma(const Tensor & self, int64_t p) const = 0;
   virtual Tensor & mvlgamma_(Tensor & self, int64_t p) const = 0;
   virtual Tensor narrow(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
-  AT_DEPRECATED(virtual Tensor ones(IntList size) const = 0);
   virtual Tensor permute(const Tensor & self, IntList dims) const = 0;
   virtual Tensor pin_memory(const Tensor & self) const = 0;
   virtual Tensor pinverse(const Tensor & self, double rcond=1e-15) const = 0;
-  AT_DEPRECATED(virtual Tensor rand(IntList size, Generator * generator=nullptr) const = 0);
-  AT_DEPRECATED(virtual Tensor randint(int64_t high, IntList size, Generator * generator=nullptr) const = 0);
-  AT_DEPRECATED(virtual Tensor randint(int64_t low, int64_t high, IntList size, Generator * generator=nullptr) const = 0);
-  AT_DEPRECATED(virtual Tensor randn(IntList size, Generator * generator=nullptr) const = 0);
-  AT_DEPRECATED(virtual Tensor randperm(int64_t n, Generator * generator=nullptr) const = 0);
-  AT_DEPRECATED(virtual Tensor range(Scalar start, Scalar end, Scalar step=1) const = 0);
   virtual Tensor repeat(const Tensor & self, IntList repeats) const = 0;
   virtual Tensor reshape(const Tensor & self, IntList shape) const = 0;
   virtual Tensor reshape_as(const Tensor & self, const Tensor & other) const = 0;
@@ -581,7 +567,6 @@ struct AT_API Type {
   virtual Tensor var(const Tensor & self, int64_t dim, bool unbiased=true, bool keepdim=false) const = 0;
   virtual Tensor view_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor where(const Tensor & condition, const Tensor & self, const Tensor & other) const = 0;
-  AT_DEPRECATED(virtual Tensor zeros(IntList size) const = 0);
   virtual Tensor norm(const Tensor & self, Scalar p=2) const = 0;
   virtual Tensor norm(const Tensor & self, Scalar p, int64_t dim, bool keepdim=false) const = 0;
   virtual Tensor clone(const Tensor & self) const = 0;
