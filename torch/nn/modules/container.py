@@ -170,12 +170,9 @@ class ModuleList(Module):
             index (int): index to insert.
             module (nn.Module): module to insert
         """
-        self.append(module)
-        items = list(self._modules.items())
-        items.insert(index, (str(index), items.pop()[1]))
-        for i in range(index + 1, len(items)):
-            items[i] = (str(int(items[i][0]) + 1), items[i][1])
-        self._modules = OrderedDict(items)
+        for i in range(len(self._modules), index, -1):
+          self._modules[str(i)] = self._modules[str(i - 1)]
+        self._modules[str(index)] = module
 
     def append(self, module):
         r"""Appends a given module to the end of the list.
