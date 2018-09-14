@@ -45,8 +45,12 @@ class Categorical(Distribution):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
+            if probs.dim() < 1:
+                raise ValueError("`probs` parameter must be at least one-dimensional.")
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
+            if logits.dim() < 1:
+                raise ValueError("`logits` parameter must be at least one-dimensional.")
             self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
