@@ -106,12 +106,8 @@ void bernoulli_tensor_cuda_kernel(
   at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4>(
       ret, p,
       [seeds] __device__(
-          scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
+          int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4,
           const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
-        assert(0 <= p1 && p1 <= 1);
-        assert(0 <= p2 && p2 <= 1);
-        assert(0 <= p3 && p3 <= 1);
-        assert(0 <= p4 && p4 <= 1);
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
@@ -119,10 +115,24 @@ void bernoulli_tensor_cuda_kernel(
             seeds.second,
             &state);
         float4 rand = curand_uniform4(&state);
-        v1 = static_cast<scalar_t>(rand.x <= p1);
-        v2 = static_cast<scalar_t>(rand.y <= p2);
-        v3 = static_cast<scalar_t>(rand.z <= p3);
-        v4 = static_cast<scalar_t>(rand.w <= p4);
+        switch (n) {
+          case 4: {
+            assert(0 <= p4 && p4 <= 1);
+            v4 = static_cast<scalar_t>(rand.w <= p4);
+          }
+          case 3: {
+            assert(0 <= p3 && p3 <= 1);
+            v3 = static_cast<scalar_t>(rand.z <= p3);
+          }
+          case 2: {
+            assert(0 <= p2 && p2 <= 1);
+            v2 = static_cast<scalar_t>(rand.y <= p2);
+          }
+          case 1: {
+            assert(0 <= p1 && p1 <= 1);
+            v1 = static_cast<scalar_t>(rand.x <= p1);
+          }
+        }
       }
     );
 }
@@ -136,7 +146,7 @@ void bernoulli_scalar_cuda_kernel(
   // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
   at::cuda::CUDA_tensor_apply1<scalar_t, 4>(
       ret, [seeds, p] __device__(
-        scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4) {
+        int n, scalar_t& v1, scalar_t& v2, scalar_t& v3, scalar_t& v4) {
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
@@ -144,10 +154,20 @@ void bernoulli_scalar_cuda_kernel(
             seeds.second,
             &state);
         float4 rand = curand_uniform4(&state);
-        v1 = static_cast<scalar_t>(rand.x <= p);
-        v2 = static_cast<scalar_t>(rand.y <= p);
-        v3 = static_cast<scalar_t>(rand.z <= p);
-        v4 = static_cast<scalar_t>(rand.w <= p);
+        switch (n) {
+          case 4: {
+            v4 = static_cast<scalar_t>(rand.w <= p);
+          }
+          case 3: {
+            v3 = static_cast<scalar_t>(rand.z <= p);
+          }
+          case 2: {
+            v2 = static_cast<scalar_t>(rand.y <= p);
+          }
+          case 1: {
+            v1 = static_cast<scalar_t>(rand.x <= p);
+          }
+        }
       }
     );
 }

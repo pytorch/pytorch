@@ -7380,6 +7380,10 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_bernoulli(self, p_dtype, device):
+        for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
+            x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
+            self.assertEqual(x.bernoulli().tolist(), trivial_p)
+
         def isBinary(t):
             return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
 

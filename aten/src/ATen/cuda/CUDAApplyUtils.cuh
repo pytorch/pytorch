@@ -5,6 +5,8 @@
 #include "THC/THCAtomics.cuh"
 #include "ATen/cuda/CUDAContext.h"
 
+#include <math.h>
+
 //
 // This file contains pointwise operation functions and kernels that
 // work on both contiguous and non-contiguous tensor arguments of
@@ -143,15 +145,30 @@ template <typename Op,
           typename... Offsets>
 struct ApplyOp1 {
 __device__ __forceinline__
-static void apply(detail::TensorInfo<scalar, IndexType> &a,
-                  const Op &op, IndexType linearIndex, Offsets... offsets) {
+static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op, int n,
+                  IndexType linearIndex, Offsets... aOffsets) {
   // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset =
-    detail::IndexToOffset<scalar, IndexType, ADims>::get(linearIndex, a);
+  const IndexType aOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar, IndexType, ADims>::get(linearIndex, a) : 0;
 
   ApplyOp1<Op, scalar, IndexType, ADims, step - 1, const IndexType, Offsets...>::apply(
-    a, op, linearIndex + 1, aOffset, offsets...
+    a, op, n, linearIndex + 1, aOffsets..., aOffset
   );
+}
+};
+
+// Specialize step=1 case. We don't need to pass in how many elements need to
+// processed in this case.
+template <typename Op,
+          typename scalar,
+          typename IndexType,
+          int ADims,
+          typename Offset>
+struct ApplyOp1<Op, scalar, IndexType, ADims, 0, Offset> {
+__device__ __forceinline__
+static void apply(detail::TensorInfo<scalar, IndexType> &a, int n,
+                  const Op &op, IndexType linearIndex, Offset offset) {
+  op(a.data[offset]);
 }
 };
 
@@ -162,9 +179,9 @@ template <typename Op,
           typename... Offsets>
 struct ApplyOp1<Op, scalar, IndexType, ADims, 0, Offsets...> {
 __device__ __forceinline__
-static void apply(detail::TensorInfo<scalar, IndexType> &a,
-                  const Op &op, IndexType linearIndex, Offsets... offsets) {
-  op(a.data[offsets]...);
+static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op, int n,
+                 IndexType linearIndex, Offsets... offsets) {
+  op(n, a.data[offsets]...);
 }
 };
 
@@ -177,12 +194,12 @@ template <typename Op,
 __launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
-                                      IndexType totalElements,
-                                      const Op op) {
+                                      IndexType totalElements, const Op op) {
   for (IndexType linearIndex = (blockIdx.x * blockDim.x + threadIdx.x) * step;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x * step) {
-    ApplyOp1<Op, scalar, IndexType, ADims, step>::apply(a, op, linearIndex);
+    ApplyOp1<Op, scalar, IndexType, ADims, step>::apply(
+      a, op, ::min(step, static_cast<int>(totalElements - linearIndex)), linearIndex);
   }
 }
 
@@ -199,19 +216,36 @@ struct ApplyOp2 {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, IndexType linearIndex,
+                  const Op &op, int n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets) {
   // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset =
-    detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a);
+  const IndexType aOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a) : 0;
 
   // Convert `linearIndex` into an offset of `b`
-  const IndexType bOffset =
-    detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b);
+  const IndexType bOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b) : 0;
 
   ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, step - 1, const IndexType, Offsets...>::apply(
-    a, b, op, linearIndex + 1, aOffset, aOffsets..., bOffset, bOffsets...
+    a, b, op, n, linearIndex + 1, aOffsets..., aOffset, bOffsets..., bOffset
   );
+}
+};
+
+template <typename Op,
+          typename scalar1,
+          typename scalar2,
+          typename IndexType,
+          int ADims,
+          int BDims,
+          typename Offset>
+struct ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, 0, Offset> {
+__device__ __forceinline__
+static void apply(detail::TensorInfo<scalar1, IndexType> &a,
+                  detail::TensorInfo<scalar2, IndexType> &b,
+                  const Op &op, int n, IndexType linearIndex,
+                  Offset aOffset, Offset bOffset) {
+  op(a.data[aOffset], b.data[bOffset]);
 }
 };
 
@@ -226,9 +260,9 @@ struct ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, 0, Offsets...> {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
-                  const Op &op, IndexType linearIndex,
+                  const Op &op, int n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets) {
-  op(a.data[aOffsets]..., b.data[bOffsets]...);
+  op(n, a.data[aOffsets]..., b.data[bOffsets]...);
 }
 };
 
@@ -250,7 +284,8 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x * step) {
     ApplyOp2<Op, scalar1, scalar2, IndexType, ADims, BDims, step>::apply(
-      a, b, op, linearIndex);
+      a, b, op, ::min(step, static_cast<int>(totalElements - linearIndex)),
+      linearIndex);
   }
 }
 
@@ -270,26 +305,47 @@ __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
                   detail::TensorInfo<scalar3, IndexType> &c,
-                  const Op &op, IndexType linearIndex,
+                  const Op &op, int n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets,
                   Offsets... cOffsets) {
   // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset =
-    detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a);
+  const IndexType aOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a) : 0;
 
   // Convert `linearIndex` into an offset of `b`
-  const IndexType bOffset =
-    detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b);
+  const IndexType bOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b) : 0;
 
   // Convert `linearIndex` into an offset of `c`
-  const IndexType cOffset =
-    detail::IndexToOffset<scalar3, IndexType, CDims>::get(linearIndex, c);
+  const IndexType cOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar3, IndexType, CDims>::get(linearIndex, c) : 0;
 
   ApplyOp3<Op, scalar1, scalar2, scalar3, IndexType, ADims, BDims, CDims,
            step - 1, const IndexType, Offsets...>::apply(
-    a, b, c, op, linearIndex + 1, aOffset, aOffsets..., bOffset, bOffsets...,
-    cOffset, cOffsets...
+    a, b, c, op, n, linearIndex + 1, aOffsets..., aOffset, bOffsets..., bOffset,
+    cOffsets..., cOffset
   );
+}
+};
+
+template <typename Op,
+          typename scalar1,
+          typename scalar2,
+          typename scalar3,
+          typename IndexType,
+          int ADims,
+          int BDims,
+          int CDims,
+          typename Offset>
+struct ApplyOp3<Op, scalar1, scalar2, scalar3, IndexType,
+                ADims, BDims, CDims, 0, Offset> {
+__device__ __forceinline__
+static void apply(detail::TensorInfo<scalar1, IndexType> &a,
+                  detail::TensorInfo<scalar2, IndexType> &b,
+                  detail::TensorInfo<scalar3, IndexType> &c,
+                  const Op &op, int n, IndexType linearIndex,
+                  Offset aOffset, Offset bOffset, Offset cOffset) {
+  op(a.data[aOffset], b.data[bOffset], c.data[cOffset]);
 }
 };
 
@@ -308,10 +364,10 @@ __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
                   detail::TensorInfo<scalar3, IndexType> &c,
-                  const Op &op, IndexType linearIndex,
+                  const Op &op, int n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets,
                   Offsets... cOffsets) {
-  op(a.data[aOffsets]..., b.data[bOffsets]..., c.data[cOffsets]...);
+  op(n, a.data[aOffsets]..., b.data[bOffsets]..., c.data[cOffsets]...);
 }
 };
 
@@ -336,7 +392,7 @@ kernelPointwiseApply3(detail::TensorInfo<scalar1, IndexType> a,
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x * step) {
     ApplyOp3<Op, scalar1, scalar2, scalar3, IndexType, ADims, BDims, CDims, step>::apply(
-      a, b, c, op, linearIndex);
+      a, b, c, op, ::min(step, static_cast<int>(totalElements - linearIndex)), linearIndex);
   }
 }
 
@@ -359,30 +415,55 @@ static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
                   detail::TensorInfo<scalar3, IndexType> &c,
                   detail::TensorInfo<scalar4, IndexType> &d,
-                  const Op &op, IndexType linearIndex,
+                  const Op &op, int n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets,
                   Offsets... cOffsets, Offsets... dOffsets) {
   // Convert `linearIndex` into an offset of `a`
-  const IndexType aOffset =
-    detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a);
+  const IndexType aOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar1, IndexType, ADims>::get(linearIndex, a) : 0;
 
   // Convert `linearIndex` into an offset of `b`
-  const IndexType bOffset =
-    detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b);
+  const IndexType bOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b) : 0;
 
   // Convert `linearIndex` into an offset of `c`
-  const IndexType cOffset =
-    detail::IndexToOffset<scalar3, IndexType, CDims>::get(linearIndex, c);
+  const IndexType cOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar3, IndexType, CDims>::get(linearIndex, c) : 0;
 
   // Convert `linearIndex` into an offset of `d`
-  const IndexType dOffset =
-    detail::IndexToOffset<scalar4, IndexType, DDims>::get(linearIndex, d);
+  const IndexType dOffset = sizeof...(Offsets) < n ?
+    detail::IndexToOffset<scalar4, IndexType, DDims>::get(linearIndex, d) : 0;
 
   ApplyOp4<Op, scalar1, scalar2, scalar3, scalar4, IndexType,
            ADims, BDims, CDims, DDims, step - 1, const IndexType, Offsets...>::apply(
-    a, b, c, d, op, linearIndex + 1, aOffset, aOffsets..., bOffset, bOffsets...,
-    cOffset, cOffsets..., dOffset, dOffsets...
+    a, b, c, d, op, n, linearIndex + 1, aOffsets..., aOffset, bOffsets..., bOffset,
+    cOffsets..., cOffset, dOffsets..., dOffset
   );
+}
+};
+
+template <typename Op,
+          typename scalar1,
+          typename scalar2,
+          typename scalar3,
+          typename scalar4,
+          typename IndexType,
+          int ADims,
+          int BDims,
+          int CDims,
+          int DDims,
+          typename Offset>
+struct ApplyOp4<Op, scalar1, scalar2, scalar3, scalar4, IndexType,
+                ADims, BDims, CDims, DDims, 0, Offset> {
+__device__ __forceinline__
+static void apply(detail::TensorInfo<scalar1, IndexType> &a,
+                  detail::TensorInfo<scalar2, IndexType> &b,
+                  detail::TensorInfo<scalar3, IndexType> &c,
+                  detail::TensorInfo<scalar4, IndexType> &d,
+                  const Op &op, int n, IndexType linearIndex,
+                  Offset aOffset, Offset bOffset,
+                  Offset cOffset, Offset dOffset) {
+  op(a.data[aOffset], b.data[bOffset], c.data[cOffset], d.data[dOffset]);
 }
 };
 
@@ -404,10 +485,10 @@ static void apply(detail::TensorInfo<scalar1, IndexType> &a,
                   detail::TensorInfo<scalar2, IndexType> &b,
                   detail::TensorInfo<scalar3, IndexType> &c,
                   detail::TensorInfo<scalar4, IndexType> &d,
-                  const Op &op, IndexType linearIndex,
+                  const Op &op, int n, IndexType linearIndex,
                   Offsets... aOffsets, Offsets... bOffsets,
                   Offsets... cOffsets, Offsets... dOffsets) {
-  op(a.data[aOffsets]..., b.data[bOffsets]..., c.data[cOffsets]..., d.data[dOffsets]...);
+  op(n, a.data[aOffsets]..., b.data[bOffsets]..., c.data[cOffsets]..., d.data[dOffsets]...);
 }
 };
 
@@ -434,7 +515,7 @@ kernelPointwiseApply4(detail::TensorInfo<scalar1, IndexType> a,
        linearIndex += gridDim.x * blockDim.x * step) {
     ApplyOp4<Op, scalar1, scalar2, scalar3, scalar4, IndexType,
              ADims, BDims, CDims, DDims, step>::apply(
-      a, b, c, d, op, linearIndex);
+      a, b, c, d, op, ::min(step, static_cast<int>(totalElements - linearIndex)), linearIndex);
   }
 }
 
