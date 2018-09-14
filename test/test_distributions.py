@@ -1907,6 +1907,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfRocm
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -3984,6 +3985,7 @@ class TestConstraintRegistry(TestCase):
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @skipIfRocm
     def test_transform_to_cuda(self):
         for constraint in self.get_constraints(is_cuda=True):
             t = transform_to(constraint)
