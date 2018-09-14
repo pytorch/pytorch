@@ -62,12 +62,13 @@ torch/lib/*.so*
 torch/lib/build
 torch/lib/cmake
 torch/lib/include
+torch/lib/lib/
 torch/lib/pkgconfig
 torch/lib/protoc
+torch/lib/python*
+torch/lib/share/
 torch/lib/tmp_install
 torch/lib/torch_shm_manager
-torch/lib/python*
-torch/share/
 torch/version.py
 
 # IPython notebook checkpoints

@@ -210,9 +210,10 @@ except ImportError:
 
 # Constant known variables used throughout this file
 cwd = os.path.dirname(os.path.abspath(__file__))
-lib_path = os.path.join(cwd, "torch", "lib")
+local_package_root = os.path.join(cwd, "torch", "lib")
+lib_path = os.path.join(local_package_root, "lib")
 third_party_path = os.path.join(cwd, "third_party")
-tmp_install_path = lib_path + "/tmp_install"
+tmp_install_path = os.path.join(local_package_root, "tmp_install")
 caffe2_build_dir = os.path.join(cwd, "build")
 # lib/pythonx.x/site-packages
 rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
@@ -475,7 +476,7 @@ class build_deps(PytorchCommand):
         # we need to find a better way to do this.
         # More information can be found in conversation thread of PR #5772
 
-        self.copy_tree('torch/lib/tmp_install/share', 'torch/share')
+        self.copy_tree('torch/lib/tmp_install/share', 'torch/lib/share')
         self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
         self.copy_file('torch/csrc/torch.h', 'torch/lib/include/torch/torch.h')
@@ -1108,7 +1109,7 @@ C = Extension("torch._C",
               extra_compile_args=main_compile_args + extra_compile_args,
               include_dirs=include_dirs,
               library_dirs=library_dirs,
-              extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib')],
+              extra_link_args=extra_link_args + main_link_args + [make_relative_rpath('lib/lib')],
               )
 extensions.append(C)
 
@@ -1193,10 +1194,10 @@ if __name__ == '__main__':
         entry_points=entry_points,
         package_data={
             'torch': [
-                'lib/*.so*',
-                'lib/*.dylib*',
-                'lib/*.dll',
-                'lib/*.lib',
+                'lib/lib/*.so*',
+                'lib/lib/*.dylib*',
+                'lib/lib/*.dll',
+                'lib/lib/*.lib',
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
@@ -1228,11 +1229,11 @@ if __name__ == '__main__':
                 'lib/include/THC/generic/*.h',
                 'lib/include/THCUNN/*.cuh',
                 'lib/include/THNN/*.h',
-                'share/cmake/ATen/*.cmake',
-                'share/cmake/Caffe2/*.cmake',
-                'share/cmake/Caffe2/public/*.cmake',
-                'share/cmake/Gloo/*.cmake',
-                'share/cmake/Torch/*.cmake',
+                'lib/share/cmake/ATen/*.cmake',
+                'lib/share/cmake/Caffe2/*.cmake',
+                'lib/share/cmake/Caffe2/public/*.cmake',
+                'lib/share/cmake/Gloo/*.cmake',
+                'lib/share/cmake/Torch/*.cmake',
             ],
             'caffe2': [
                 rel_site_packages + '/caffe2/**/*.py'
