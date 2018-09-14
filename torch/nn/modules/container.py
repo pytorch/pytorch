@@ -132,7 +132,7 @@ class ModuleList(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return ModuleList(list(self._modules.values())[idx])
+            return self.__class__(list(self._modules.values())[idx])
         else:
             return self._modules[self._get_abs_string_index(idx)]
 
