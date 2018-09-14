@@ -403,17 +403,19 @@ if (BUILD_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
     target_link_libraries(test_jit ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB})
   endif()
 endif()
+
 if (BUILD_TORCH_TEST)
-	set(TORCH_API_GTEST_DIR "${TORCH_ROOT}/test/cpp/api")
+	set(TORCH_API_GTEST_DIR "${TORCH_ROOT}/test/cpp/api/")
 	add_executable(gtest_api
-		${TORCH_API_GTEST_DIR}/main.cpp
 		${TORCH_API_GTEST_DIR}/static.cpp
 		)
-	#target_link_libraries(gtest_api gtest_main)
-	target_include_directories(gtest_api PUBLIC "${TORCH_ROOT}/third_party/googletest/googletest/include")
 	target_include_directories(gtest_api PUBLIC ${ATen_CPU_INCLUDE})
-	target_link_libraries(gtest_api torch ${TORCH_CUDA_LIBRARIES})
+	target_link_libraries(gtest_api torch gtest_main)
+	if (USE_CUDA)
+		target_link_libraries(gtest_api ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB} ${TORCH_CUDA_LIBRARIES})
+	endif()
 endif()
+
 if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
   set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
 
