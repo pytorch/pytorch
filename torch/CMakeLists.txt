@@ -385,7 +385,7 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
-install(FILES "${TORCH_SRC_DIR}/op.h"
+install(FILES "${TORCH_SRC_DIR}/script.h"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 install(TARGETS torch
@@ -458,6 +458,14 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
         -Wno-unused-but-set-parameter)
     endif()
   endif()
+endif()
+
+
+option(TORCH_GLIBCXX_USE_CXX11_ABI "Determines the _GLIBCXX_USE_CXX11_ABI define" ON)
+if (TORCH_GLIBCXX_USE_CXX11_ABI)
+  set(GLIBCXX_USE_CXX11_ABI 1)
+else()
+  set(GLIBCXX_USE_CXX11_ABI 0)
 endif()
 
 # CMake config for external projects.
