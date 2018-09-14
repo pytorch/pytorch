@@ -146,7 +146,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fusion_compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
@@ -174,7 +173,9 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
@@ -188,6 +189,34 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   )
+
+SET(USE_CPU_FUSER 0)
+if (NOT WIN32)
+  SET(USE_CPU_FUSER 1)
+
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/tensor_desc.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/fusion_handle_impl.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/fused_kernel.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fusion_compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fused_kernel.cpp
+  )
+endif()
+
+SET(USE_CUDA_FUSER 0)
+if (USE_CUDA AND NOT USE_ROCM AND NOT WIN32)
+  SET(USE_CUDA_FUSER 1)
+
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/fusion_compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/fused_kernel.cpp
+  )
+
+endif()
+
+CONFIGURE_FILE(
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/Config.h.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/jit/fusers/Config.h)
 
 if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
@@ -211,7 +240,6 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     )
-
 endif()
 
 
@@ -302,6 +330,13 @@ if (NOT NO_API AND NOT USE_ROCM)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
+
+  if (TORCH_USE_CEREAL)
+    target_compile_definitions(torch PUBLIC TORCH_USE_CEREAL)
+    # SYSTEM headers are included with -isystem and thus do not trigger warnings.
+    target_include_directories(torch SYSTEM PUBLIC
+      "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
+  endif()
 endif()
 
 if(USE_CUDA)
@@ -369,10 +404,6 @@ target_include_directories(torch PRIVATE ${ATen_CPU_INCLUDE})
 target_include_directories(torch PUBLIC
   ${TORCH_SRC_DIR}/csrc)
 
-# SYSTEM headers are included with -isystem and thus do not trigger warnings.
-target_include_directories(torch SYSTEM PUBLIC
-  "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
-
 set_target_properties(torch PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
@@ -419,7 +450,7 @@ endif()
 if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
   set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
 
-  add_executable(test_api
+  set(TORCH_API_TEST_SOURCES
     ${TORCH_API_TEST_DIR}/any.cpp
     ${TORCH_API_TEST_DIR}/cursor.cpp
     ${TORCH_API_TEST_DIR}/integration.cpp
@@ -432,14 +463,19 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/sequential.cpp
     ${TORCH_API_TEST_DIR}/serialization.cpp
-	#${TORCH_API_TEST_DIR}/static.cpp
+	  #${TORCH_API_TEST_DIR}/static.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
     ${TORCH_API_TEST_DIR}/tensor.cpp
     ${TORCH_API_TEST_DIR}/jit.cpp
-    # Temporary until ATen tests are built with Caffe2
     ${TORCH_API_TEST_DIR}/tensor_options.cpp
     ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
-    )
+  )
+
+  if (TORCH_USE_CEREAL)
+    list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/serialization.cpp)
+  endif()
+
+  add_executable(test_api ${TORCH_API_TEST_SOURCES})
 
   target_include_directories(test_api
     PUBLIC

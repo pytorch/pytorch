@@ -177,7 +177,7 @@ class ProcessGroupGloo : public ProcessGroup {
     explicit WorkGloo();
     virtual ~WorkGloo();
 
-    bool isCompleted() const override;
+    bool isCompleted() override;
     bool isSuccess() const override;
     void synchronize() override;
     bool wait() override;
@@ -235,7 +235,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
     virtual ~SendWork() = default;
 
-    bool isCompleted() const override;
+    bool isCompleted() override;
 
     bool isSuccess() const override;
 
@@ -259,7 +259,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
     virtual ~RecvWork() = default;
 
-    bool isCompleted() const override;
+    bool isCompleted() override;
 
     bool isSuccess() const override;
 
@@ -327,15 +327,18 @@ class ProcessGroupGloo : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
-      int dstRank) override;
+      int dstRank,
+      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
-      int srcRank) override;
+      int srcRank,
+      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank) override;
+      int* srcRank,
+      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> barrier() override;
 

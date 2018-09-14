@@ -6,7 +6,7 @@ from torch.jit.frontend import get_jit_ast
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 import torch.testing
-from collections import defaultdict, OrderedDict, namedtuple, Iterable
+from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
 import itertools
@@ -73,7 +73,16 @@ def load(filename):
             A ``ScriptModule`` object.
     """
     m = ScriptModule()
-    m._load(filename)
+
+    def module_lookup(names):
+        curr = m
+        for name in names:
+            if not hasattr(curr, name):
+                setattr(curr, name, ScriptModule())
+            curr = getattr(curr, name)
+        return curr
+
+    torch._C.import_ir_module(module_lookup, filename)
     return m
 
 
@@ -306,6 +315,7 @@ class TracingCheckError(Exception):
 
 
 # Check the traced module against a set of user-provided validation inputs
+@torch.no_grad()
 def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
     for inputs in check_inputs:
         if isinstance(inputs, torch.Tensor):

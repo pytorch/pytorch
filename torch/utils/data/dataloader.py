@@ -6,7 +6,7 @@ from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
 from . import SequentialSampler, RandomSampler, BatchSampler
 import signal
 import functools
-import collections
+from torch._six import container_abcs
 import re
 import sys
 import threading
@@ -187,9 +187,9 @@ def default_collate(batch):
         return torch.DoubleTensor(batch)
     elif isinstance(batch[0], string_classes):
         return batch
-    elif isinstance(batch[0], collections.Mapping):
+    elif isinstance(batch[0], container_abcs.Mapping):
         return {key: default_collate([d[key] for d in batch]) for key in batch[0]}
-    elif isinstance(batch[0], collections.Sequence):
+    elif isinstance(batch[0], container_abcs.Sequence):
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
@@ -201,9 +201,9 @@ def pin_memory_batch(batch):
         return batch.pin_memory()
     elif isinstance(batch, string_classes):
         return batch
-    elif isinstance(batch, collections.Mapping):
+    elif isinstance(batch, container_abcs.Mapping):
         return {k: pin_memory_batch(sample) for k, sample in batch.items()}
-    elif isinstance(batch, collections.Sequence):
+    elif isinstance(batch, container_abcs.Sequence):
         return [pin_memory_batch(sample) for sample in batch]
     else:
         return batch
@@ -289,12 +289,15 @@ class _DataLoaderIter(object):
 
             if self.pin_memory:
                 self.data_queue = queue.Queue()
-                self.pin_memory_thread = threading.Thread(
+                pin_memory_thread = threading.Thread(
                     target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
                           torch.cuda.current_device()))
-                self.pin_memory_thread.daemon = True
-                self.pin_memory_thread.start()
+                pin_memory_thread.daemon = True
+                pin_memory_thread.start()
+                # Similar to workers (see comment above), we only register
+                # pin_memory_thread once it is started.
+                self.pin_memory_thread = pin_memory_thread
             else:
                 self.data_queue = self.worker_result_queue
 
@@ -397,7 +400,7 @@ class _DataLoaderIter(object):
                 q.put(None)
             for w in self.workers:
                 w.join()
-            if self.pin_memory:
+            if hasattr(self, 'pin_memory_thread'):
                 self.pin_memory_thread.join()
 
     def __del__(self):

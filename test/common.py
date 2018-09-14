@@ -350,6 +350,13 @@ class TestCase(unittest.TestCase):
                     self.assertTrue(torch.equal(nan_mask, b != b), message)
                     diff = a - b
                     diff[nan_mask] = 0
+                    # inf check if allow_inf=True
+                    if allow_inf:
+                        inf_mask = (a == float("inf")) | (a == float("-inf"))
+                        self.assertTrue(torch.equal(inf_mask,
+                                                    (b == float("inf")) | (b == float("-inf"))),
+                                        message)
+                        diff[inf_mask] = 0
                     # TODO: implement abs on CharTensor
                     if diff.is_signed() and 'CharTensor' not in diff.type():
                         diff = diff.abs()
