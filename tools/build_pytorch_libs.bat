@@ -112,7 +112,7 @@ goto read_loop
 
 cd torch/lib
 
-copy /Y tmp_install\lib\* .
+copy /Y tmp_install\lib .
 IF EXIST ".\tmp_install\bin" (
   copy /Y tmp_install\bin\* .
 )
