@@ -203,7 +203,9 @@ def get_backend(group=group.WORLD):
     Returns the backend of the given process group.
 
     Arguments:
-        group (ProcessGroup, optional): The process group to work on
+        group (ProcessGroup, optional): The process group to work on. The
+            default is the general main process group. If another specific group
+            is specified, the calling process must be part of :attr:`group`.
 
     Returns:
         The backend of the given process group as a :class:`DistBackend` value.
