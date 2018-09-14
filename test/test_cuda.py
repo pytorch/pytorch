@@ -262,8 +262,7 @@ tests = [
     ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1'),
     ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2'),
     ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3'),
-    ('pow', small_3d, lambda t: [number(-1., -1, t)], 'pow-1', types, False,
-        "skipIfRocm:CharTensor,IntTensor,LongTensor,ShortTensor"),
+    ('pow', small_3d, lambda t: [number(-1., -1, t)], 'pow-1', float_types),
     # HalfTensor gives bad result at pow-2 with data sampled from torch.randn
     ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half, False,
         "skipIfRocm:FloatTensor"),
