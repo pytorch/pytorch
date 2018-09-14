@@ -269,7 +269,7 @@ class HIPContext final : public BaseContext {
     return hipStreamQuery(stream) == hipSuccess;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return HIP;
   }
 
