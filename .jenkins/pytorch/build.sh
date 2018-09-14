@@ -139,7 +139,7 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   mkdir "$CUSTOM_OP_BUILD"
   pushd "$CUSTOM_OP_BUILD"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch/lib" cmake "$CUSTOM_OP_TEST"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
   make VERBOSE=1
   popd
 fi

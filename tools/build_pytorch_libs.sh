@@ -375,9 +375,9 @@ pushd $TORCH_LIB_DIR
 # binaries to torch/lib
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
-$SYNC_COMMAND -r "$INSTALL_DIR/lib" .
+$SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
-    $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* lib
+    $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
 fi
 $SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
 $SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
