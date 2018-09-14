@@ -90,6 +90,8 @@ test_python_all_except_nn() {
 
 test_aten() {
   # Test ATen
+  # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
+  # scalar_tensor_test, basic, native_test
   if ([[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]); then
     echo "Running ATen tests with pytorch lib"
     TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
