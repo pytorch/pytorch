@@ -25,21 +25,41 @@ except ImportError:
 
 
 class DistBackend(IntEnum):
+    """
+    An enum class of available backends: GLOO, NCCL, and MPI.
+
+    The values of this class can be accessed as attributes, e.g.,
+    ``DistBackend.NCCL``, and used directly in calling
+    :func:`~torch.distributed.init_process_group`. The function
+    :func:`torch.distributed.get_backend` will also return values of this enum.
+
+    .. note:: ``.name`` attribute can be used to get the name of backend as a
+              string, e.g., ``dist.get_backend().name``.
+
+    .. note:: The entry ``DistBackend.UNDEFINED`` is present but only used as
+              initial value of some fields. Users should neither use it directly
+              nor assume its existence.
+    """
     UNDEFINED = -1
     GLOO = 0
     NCCL = 2
     MPI = 3
 
-    @classmethod
-    def parse_backend(cls, name):
-        val = getattr(cls, name.upper(), None)
+    @staticmethod
+    def parse_backend(name):
+        if isinstance(name, DistBackend):
+            val = name
+        else:
+            val = getattr(DistBackend, name.upper(), None)
         if val is None or val == DistBackend.UNDEFINED:
-            raise RuntimeError("Invalid backend name: '{}'".format(name))
+            raise RuntimeError("Invalid backend: '{}'".format(name))
         return val
 
-    def get_name(self, name):
-        return self.name.lower()
-
+# The following two values are here to maintain backward compatibility with
+# pre-c10d distributed package.
+# TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
+_backend = DistBackend.UNDEFINED
+dist_backend = DistBackend
 
 class group(object):
     WORLD = object()
@@ -185,7 +205,7 @@ def get_backend(group=group.WORLD):
         group (ProcessGroup, optional): The process group to work on
 
     Returns:
-        The backend of the given process group as a lowercase string.
+        The backend of the given process group as a :class:`DistBackend` value.
 
     """
     _check_default_pg()
@@ -197,7 +217,7 @@ def get_backend(group=group.WORLD):
     pg_info = _pg_map.get(pg, None)
     if pg_info is None:
         raise RuntimeError("Invalid process group specified")
-    return pg_info[0].get_name()
+    return pg_info[0]
 
 
 def init_process_group(backend,
@@ -208,9 +228,10 @@ def init_process_group(backend,
     initialize the distributed package
 
     Arguments:
-        backend (str): Name of the backend to use. Depending on build-time
-                       configuration valid values include:
-                        ``mpi`` and ``gloo``.
+        backend (str or DistBackend): The backend to use. Depending on
+            build-time configurations, valid values include ``mpi``, ``gloo``,
+            and ``nccl``. This field can be either a string (e.g., ``"gloo"``)
+            or a :class:`DistBackend` constant (e.g., ``DistBackend.GLOO``).
         init_method (str, optional): URL specifying how to initialize the
                                      process group.
         world_size (int, optional): Number of processes participating in
@@ -224,6 +245,7 @@ def init_process_group(backend,
     """
     global _pg_map
     global _pg_names
+    global _backend
     global _default_pg
     global _default_pg_init_method
 
@@ -268,6 +290,7 @@ def init_process_group(backend,
             _pg_map[_default_pg] = (DistBackend.NCCL, store)
             _pg_names[_default_pg] = group_name
 
+    _backend = _pg_map[_default_pg][0]
     _default_pg_init_method = init_method
 
 

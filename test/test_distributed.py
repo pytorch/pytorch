@@ -240,8 +240,8 @@ class _DistTestBase(object):
         else:
             group = [0, 1]
         group_id = dist.new_group(group)
-        self.assertEqual(dist.get_backend(group_id), BACKEND)
-        self.assertEqual(dist.get_backend(), BACKEND)
+        self.assertEqual(dist.get_backend(group_id), dist.DistBackend.parse_name(BACKEND))
+        self.assertEqual(dist.get_backend(), dist.DistBackend.parse_name(BACKEND))
 
     # Test destroy
     def test_destroy_group(self):
