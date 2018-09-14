@@ -69,11 +69,4 @@ inline bool fp16_type() {
 
 }  // namespace caffe2
 
-// Make __f16 a fundamental type.
-namespace std {
-template<>
-struct is_fundamental<caffe2::float16> : std::integral_constant<bool, true> {
-};
-}  // namespace std
-
 #endif  // CAFFE2_CORE_TYPES_H_

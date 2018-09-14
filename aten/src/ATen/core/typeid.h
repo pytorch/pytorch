@@ -30,6 +30,13 @@
 // fix all of the call-sites, which I want to do later.  So the namespace
 // is not fixed at the moment.
 
+// Make __f16 a fundamental type.
+namespace std {
+template<>
+struct is_fundamental<at::Half> : std::integral_constant<bool, true> {
+};
+}  // namespace std
+
 namespace caffe2 {
 
 class TypeMeta;
