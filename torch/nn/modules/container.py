@@ -334,7 +334,7 @@ class ParameterList(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return ParameterList(list(self._parameters.values())[idx])
+            return self.__class__(list(self._parameters.values())[idx])
         else:
             idx = operator.index(idx)
             if not (-len(self) <= idx < len(self)):
