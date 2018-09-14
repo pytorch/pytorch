@@ -21,12 +21,11 @@ namespace nn {
 
 /// A list of `Module`s that acts as a `Module` itself.
 ///
-/// A `Sequential` is fundamentally a list of objects that are subclasses of
-/// module and each have a `forward()` method. `Sequential` provides a
-/// `forward()` method of its own, which accepts any input and forwards it to
-/// the first module it stores. It then "chains" outputs to inputs sequentially
-/// for each subsequent module, finally returning the output of the last module.
-/// For example:
+/// A `Sequential` is fundamentally a list of `Module`s, each with a `forward()`
+/// method. `Sequential` provides a `forward()` method of its own, which accepts
+/// any input and forwards it to the first module it stores. It then "chains"
+/// outputs to inputs sequentially for each subsequent module, finally returning
+/// the output of the last module. For example:
 ///
 /// \rst
 /// .. code-block:: cpp
@@ -54,12 +53,14 @@ namespace nn {
 ///
 /// \endrst
 ///
-/// The value a `Sequential` further provides is that it allows treating a whole
-/// list of modules as a single module, such that performing a
-/// transformation on the `Sequential` applies to each of the modules it stores
-/// (which are each a registered submodule of the `Sequential`). For example,
-/// calling `.to(torch::kCUDA)` on a `Sequential` will move each module in the
-/// list to CUDA memory. For example:
+/// Why should you use `Sequential` instead of a simple `std::vector`? The value
+/// a `Sequential` provides over manually calling a sequence of modules is that
+/// it allows treating the whole container *as a single module*, such that
+/// performing a transformation on the `Sequential` applies to each of the
+/// modules it stores (which are each a registered submodule of the
+/// `Sequential`). For example, calling
+/// `.to(torch::kCUDA)` on a `Sequential` will move each module in the list to
+/// CUDA memory. For example:
 ///
 /// \rst
 /// .. code-block:: cpp
@@ -83,9 +84,8 @@ namespace nn {
 /// \rst
 /// .. attention::
 ///   One current limitation of `Sequential` is that all except the first module
-///   must accept a single argument. You may define your modules to take tuples
-///   to satisfy this constraints, but `Sequential` will currently not unpack
-///   this tuple into an argument list for you.
+///   must accept a single argument. If your modules need to take multiple
+///   arguments, you should define them to take and return tuples.
 /// \endrst
 class SequentialImpl : public Cloneable<SequentialImpl> {
  public:
@@ -131,7 +131,16 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   ///
   /// The return type is taken as the first template parameter. It defaults to
   /// `Tensor`. If the last module in the `Sequential` returns another type `T`,
-  /// you should call `forward<T>(inputs)` instead of just `forward(inputs)`.
+  /// you should call `forward<T>(inputs)` instead of just `forward(inputs)`:
+  ///
+  /// \rst
+  /// .. code-block:: cpp
+  ///
+  ///   torch::Tensor tensor = sequential1->forward(inputs);
+  ///   int integer = sequential2->forward<int>(inputs);
+  ///   float value = sequential3->forward<float>(inputs);
+  ///
+  /// \endrst
   template <typename ReturnType = Tensor, typename... InputTypes>
   ReturnType forward(InputTypes&&... inputs) {
     AT_CHECK(!is_empty(), "Cannot call forward() on an empty Sequential");
