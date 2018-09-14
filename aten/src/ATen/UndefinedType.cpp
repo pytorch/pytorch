@@ -9,7 +9,7 @@ ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }
 caffe2::TypeMeta UndefinedType::typeMeta() const {
-  AT_ERROR("typeMeta not defined for UndefinedType");
+  return scalarTypeToTypeMeta(scalarType());
 }
 Backend UndefinedType::backend() const {
   return Backend::Undefined;

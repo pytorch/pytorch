@@ -13,7 +13,7 @@ TEST_CASE("torch script") {
       def test_relu(a, b):
         return torch.relu(a + b)
       def test_while(a, i):
-        while i < 10:
+        while bool(i < 10):
           a += a
           i += 1
         return a

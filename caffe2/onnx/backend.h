@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-constexpr int kKnownOpsetVersion = 7;
+constexpr int kKnownOpsetVersion = 9;
 
 namespace caffe2 {
 namespace onnx {
@@ -211,6 +211,17 @@ class CAFFE2_API Caffe2Backend {
   Caffe2Ops CreateLogSoftmax(OnnxNode* onnx_node, const ConversionContext& ctx);
 
   Caffe2Ops CreateSlice(OnnxNode* onnx_node, const ConversionContext& ctx);
+
+  std::string PreprocessSliceIndexTensor(OnnxNode* onnx_node,
+                                                        Caffe2Ops& ret,
+                                                        std::string indices_tensor,
+                                                        std::string axes_tensor,
+                                                        std::string rank_tensor,
+                                                        std::string zero_tensor,
+                                                        std::string one_tensor,
+                                                        int default_value);
+
+  Caffe2Ops CreateDynamicSlice(OnnxNode* onnx_node, const ConversionContext& ctx);
 
   Caffe2Ops CreateSplit(OnnxNode* onnx_node, const ConversionContext& ctx);
 

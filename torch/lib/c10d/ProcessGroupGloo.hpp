@@ -177,7 +177,7 @@ class ProcessGroupGloo : public ProcessGroup {
     explicit WorkGloo();
     virtual ~WorkGloo();
 
-    bool isCompleted() const override;
+    bool isCompleted() override;
     bool isSuccess() const override;
     void synchronize() override;
     bool wait() override;
@@ -235,7 +235,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
     virtual ~SendWork() = default;
 
-    bool isCompleted() const override;
+    bool isCompleted() override;
 
     bool isSuccess() const override;
 
@@ -259,7 +259,7 @@ class ProcessGroupGloo : public ProcessGroup {
 
     virtual ~RecvWork() = default;
 
-    bool isCompleted() const override;
+    bool isCompleted() override;
 
     bool isSuccess() const override;
 
