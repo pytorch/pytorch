@@ -23,7 +23,7 @@ CAFFE2_DEFINE_bool(
 
 namespace caffe2 {
 
-CAFFE2_CUDA_API int NumCudaDevices() {
+int NumCudaDevices() {
   if (getenv("CAFFE2_DEBUG_CUDA_INIT_ORDER")) {
     static bool first = true;
     if (first) {
