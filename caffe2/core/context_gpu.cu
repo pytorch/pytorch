@@ -399,6 +399,8 @@ void CUDAStaticContext::Delete(void* ptr) {
   }
 }
 
+REGISTER_CONTEXT(CUDA, CUDAContext);
+
 BaseStaticContext* GetCUDAStaticContext() {
   static CUDAStaticContext context;
   return &context;

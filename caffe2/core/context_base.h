@@ -27,4 +27,21 @@ struct StaticContextFunctionRegisterer {
   static StaticContextFunctionRegisterer<t> g_static_context_##d(f); \
   }
 
+// Context constructor registry
+CAFFE_DECLARE_TYPED_REGISTRY(
+    ContextRegistry,
+    DeviceType,
+    BaseContext,
+    std::unique_ptr,
+    caffe2::DeviceOption);
+
+#define REGISTER_CONTEXT(type, ...) \
+  CAFFE_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
+
+inline std::unique_ptr<BaseContext> CreateContext(
+    DeviceType type,
+    const caffe2::DeviceOption& option = caffe2::DeviceOption()) {
+  return ContextRegistry()->Create(type, option);
+}
+
 } // namespace caffe2

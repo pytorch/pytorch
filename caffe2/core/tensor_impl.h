@@ -106,17 +106,6 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return get_static_context(GetDeviceType());
   }
 
-  /* @brief
-   * Create a context that has the same device_type
-   * as the tensor.
-   * Note that this doesn't support passing in argument
-   * TODO(jerryzh): move this to a global registry
-   * that can create context for us
-   */
-  std::unique_ptr<at::BaseContext> CreateContext() const {
-    return GetStaticContext()->CreateContext();
-  }
-
   at::DeviceType GetDeviceType() const {
     return storage_.device_type();
   }
@@ -154,8 +143,12 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // knows how to copy between CPU and that context
         if (src.GetDeviceType() != CPU || GetDeviceType() == CPU) {
           if (!context) {
-            src.CreateContext()->CopyBytesToDevice(
-                nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());
+            CreateContext(src.GetDeviceType())
+                ->CopyBytesToDevice(
+                    nbytes(),
+                    src.raw_data(),
+                    raw_mutable_data(),
+                    GetDeviceType());
           } else {
             CAFFE_ENFORCE(
                 context->device_type() == src.GetDeviceType(),
@@ -167,8 +160,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
           // In case source context is CPU, and target context is non-CPU
           // We'll have to create a Context from target and perform the
           // copy using that context
-          CreateContext()->CopyBytesFromCPU(
-              nbytes(), src.raw_data(), raw_mutable_data());
+          CreateContext(GetDeviceType())
+              ->CopyBytesFromCPU(nbytes(), src.raw_data(), raw_mutable_data());
         }
       }
     }

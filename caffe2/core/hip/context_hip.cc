@@ -408,16 +408,17 @@ void HIPStaticContext::Delete(void* ptr) {
         g_hip_device_affiliation.erase(it);
         break;
     }
-    case HipMemoryPoolType::THC: 
-    {
-        HIP_ENFORCE(g_thc_allocator->Free(ptr));
-        if (FLAGS_caffe2_gpu_memory_tracking) {
-          g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
-        }
-        break;
+    case HipMemoryPoolType::THC: {
+      HIP_ENFORCE(g_thc_allocator->Free(ptr));
+      if (FLAGS_caffe2_gpu_memory_tracking) {
+        g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
+      }
+      break;
     }
     }
 }
+
+REGISTER_CONTEXT(HIP, HIPContext);
 
 BaseStaticContext* GetHIPStaticContext() {
   static HIPStaticContext context;

@@ -178,15 +178,6 @@ class IDEEPStaticContext : public BaseStaticContext {
     return GetCPUAllocator()->New(nbytes);
   }
 
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<IDEEPContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<IDEEPContext>(option);
-  }
-
   DeviceType GetDeviceType() override {
     return IDEEP;
   }

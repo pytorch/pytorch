@@ -24,6 +24,8 @@ uint32_t RandomNumberSeed() {
       kPrime2 * tv_sec + kPrime3 * tv_usec;
 }
 
+REGISTER_CONTEXT(CPU, CPUContext);
+
 BaseStaticContext* GetCPUStaticContext() {
   static CPUStaticContext context;
   return &context;

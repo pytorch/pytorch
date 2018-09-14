@@ -385,19 +385,6 @@ class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
  public:
   std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
 
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<CUDAContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<CUDAContext>(option);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(int gpu_id = -1) {
-    return caffe2::make_unique<CUDAContext>(gpu_id);
-  }
-
   DeviceType GetDeviceType() override {
     return CUDA;
   }

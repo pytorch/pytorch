@@ -30,11 +30,6 @@ class AT_CORE_API BaseStaticContext {
 
   virtual std::pair<void*, DeleterFnPtr> New(size_t nbytes) const = 0;
 
-  virtual std::unique_ptr<BaseContext> CreateContext() = 0;
-
-  virtual std::unique_ptr<BaseContext> CreateContext(
-      const caffe2::DeviceOption&) = 0;
-
   virtual DeviceType GetDeviceType() = 0;
 
   /*

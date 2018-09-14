@@ -155,15 +155,6 @@ class MKLStaticContext : public BaseStaticContext {
     return GetCPUAllocator()->New(nbytes);
   }
 
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<MKLContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<MKLContext>(option);
-  }
-
   DeviceType GetDeviceType() override {
     return MKLDNN;
   }

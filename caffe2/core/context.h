@@ -192,15 +192,6 @@ class CAFFE2_API CPUStaticContext : public BaseStaticContext {
     return data_and_deleter;
   }
 
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<CPUContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<CPUContext>(option);
-  }
-
   DeviceType GetDeviceType() override {
     return CPU;
   }
