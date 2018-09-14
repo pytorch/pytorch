@@ -39,7 +39,7 @@ void mark(std::string name, bool include_cuda /* = true */) {
   }
 }
 
-void pushRange(std::string name, std::string msg/*= {}*/, int64_t sequence_nr/*= -1*/) {
+void pushRange(std::string name, const char* msg/*= ""*/, int64_t sequence_nr/*= -1*/) {
   if (state == ProfilerState::Disabled) {
     return;
   }
