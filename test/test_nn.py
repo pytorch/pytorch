@@ -6556,7 +6556,6 @@ def add_test(test, decorator=None):
         add(cuda_test_name + '_double', lambda self,
             test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.double, **kwargs))
 
-        @skipIfRocm
         def test_half(self, test=test, kwargs=kwargs):
             test.test_cuda(self, dtype=torch.half, **kwargs)
         if getattr(test, 'check_half', True):
