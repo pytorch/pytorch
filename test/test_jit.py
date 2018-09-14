@@ -7621,7 +7621,6 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
         formals = []
         tensors = []
         actuals = []
-        modules = set()
         for arg in args:
             if isinstance(arg, torch.Tensor):
                 name = 'i{}'.format(len(formals))
