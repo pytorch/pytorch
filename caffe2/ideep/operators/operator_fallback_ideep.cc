@@ -32,6 +32,8 @@
 #include <caffe2/operators/stop_gradient.h>
 #include <caffe2/sgd/iter_op.h>
 #include <caffe2/sgd/learning_rate_op.h>
+#include <caffe2/queue/queue_ops.h>
+#include <caffe2/operators/tensor_protos_db_input.h>
 
 // can add more non-IDEEP operators if needed
 namespace caffe2 {
@@ -166,5 +168,7 @@ REGISTER_IDEEP_OPERATOR(
         NumericTypes,
         CPUContext,
         MulFunctor<CPUContext>>>);
+REGISTER_IDEEP_OPERATOR(TensorProtosDBInput, IDEEPFallbackOp<TensorProtosDBInput<CPUContext>>);
+REGISTER_IDEEP_OPERATOR(CloseBlobsQueue, IDEEPFallbackOp<CloseBlobsQueueOp<CPUContext>>);
 
 } // namespace caffe2
