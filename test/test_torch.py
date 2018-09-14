@@ -8861,6 +8861,20 @@ class TestTorch(TestCase):
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.FloatTensor())
         self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).to(device="cuda"))
 
+    def test_cast_binary_op(self):
+        # Scalar
+        a = torch.tensor(2)
+        b = torch.tensor(3)
+        a_copy = a.clone()
+        b_copy = b.clone()
+
+        self.assertEqual(torch.tensor(6), a.float() * b)
+
+        self.assertEqual(a.type(), a_copy.type())
+        self.assertEqual(a.data.type(), a_copy.data.type())
+        self.assertEqual(b.type(), b_copy.type())
+        self.assertEqual(b.data.type(), b_copy.type())
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1
