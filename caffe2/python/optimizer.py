@@ -8,6 +8,8 @@ from __future__ import unicode_literals
 from collections import namedtuple, defaultdict
 from past.builtins import basestring
 
+import logging
+
 import numpy as np
 
 from caffe2.python import core, scope, utils, workspace
@@ -19,6 +21,8 @@ _LEARNING_RATE_INJECTION = "lr_injection"
 
 AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
 _optimizer_instance_count = defaultdict(int)
+
+logger = logging.getLogger(__name__)
 
 
 class Optimizer(object):
@@ -554,6 +558,8 @@ class AdagradOptimizer(Optimizer):
         )
 
         if self.rowWise:
+            assert self.engine == "SIMD", "Got {}".format(self.engine)
+
             shapes, types = workspace.InferShapesAndTypes([param_init_net])
             if str(param) not in shapes:
                 # Type/shape inference is not available for this param, fallback
@@ -577,13 +583,24 @@ class AdagradOptimizer(Optimizer):
                     shape=[shapes[str(param)][0]],
                     value=0.0
                 )
-
         else:
-            param_squared_sum = param_init_net.ConstantFill(
-                [param],
-                str(param) + "_squared_sum",
-                value=0.0
-            )
+            if self.engine == "SIMD_Q_FP16" or self.engine == "SIMD_Q_STOC_FP16":
+                shapes, types = workspace.InferShapesAndTypes([param_init_net])
+                assert str(param) in shapes, shapes
+                shape = shapes[str(param)]
+
+                param_squared_sum = param_init_net.Float16ConstantFill(
+                    [],
+                    str(param) + "_squared_sum",
+                    value=0.0,
+                    shape=shape,
+                )
+            else:
+                param_squared_sum = param_init_net.ConstantFill(
+                    [param],
+                    str(param) + "_squared_sum",
+                    value=0.0
+                )
 
         self._aux_params.local.append(param_squared_sum)
 
@@ -604,7 +621,7 @@ class AdagradOptimizer(Optimizer):
                 [param, param_squared_sum, grad.indices, grad.values, lr],
                 [param, param_squared_sum],
                 epsilon=self.epsilon,
-                engine=self.engine
+                engine=self.engine,
             )
         else:
             output_args = [param, param_squared_sum]

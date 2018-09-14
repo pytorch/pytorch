@@ -7,6 +7,8 @@ from torch import _weight_norm, norm_except_dim
 
 class WeightNorm(object):
     def __init__(self, name, dim):
+        if dim is None:
+            dim = -1
         self.name = name
         self.dim = dim
 
@@ -17,6 +19,9 @@ class WeightNorm(object):
 
     @staticmethod
     def apply(module, name, dim):
+        if dim is None:
+            dim = -1
+
         fn = WeightNorm(name, dim)
 
         weight = getattr(module, name)
