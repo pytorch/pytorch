@@ -8832,7 +8832,7 @@ class TestTorch(TestCase):
         self.assertEqual(grid_a.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_b.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_c.shape, torch.Size([1, 3, 2]))
-        grid_a2, grid_b2, grid_c2 = torch.meshgrid([a, b, c])
+        grid_a2, grid_b2, grid_c2 = torch.meshgrid(a, b, c)
         self.assertEqual(grid_a2.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_b2.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_c2.shape, torch.Size([1, 3, 2]))
