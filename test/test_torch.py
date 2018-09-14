@@ -3965,7 +3965,7 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_gesv_batched(self, cast):
-        from test_autograd import random_fullrank_matrix_distinct_singular_value as fullrank
+        from common import random_fullrank_matrix_distinct_singular_value as fullrank
         # test against gesv: one batch
         A = cast(fullrank(5, 1))
         b = cast(torch.randn(1, 5, 10))
@@ -4018,7 +4018,7 @@ class TestTorch(TestCase):
             return
 
         from numpy.linalg import solve
-        from test_autograd import random_fullrank_matrix_distinct_singular_value as fullrank
+        from common import random_fullrank_matrix_distinct_singular_value as fullrank
 
         # test against numpy.linalg.solve
         A = cast(fullrank(4, 2, 1, 3))
@@ -4632,7 +4632,7 @@ class TestTorch(TestCase):
 
         # Single matrix, but full rank
         # This is for negative powers
-        from test_autograd import random_fullrank_matrix_distinct_singular_value
+        from common import random_fullrank_matrix_distinct_singular_value
         M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
         run_test(M)
         run_test(M, sign=-1)

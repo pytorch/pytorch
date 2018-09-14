@@ -14,8 +14,12 @@ from torch._six import inf, nan
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
-from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
-    suppress_warnings, skipIfRocm
+from common import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
+                    suppress_warnings, skipIfRocm,
+                    prod_single_zero, random_square_matrix_of_rank,
+                    random_symmetric_matrix, random_symmetric_psd_matrix,
+                    random_symmetric_pd_matrix, make_nonzero_det,
+                    random_fullrank_matrix_distinct_singular_value)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -2564,69 +2568,6 @@ def prod_zeros(dim_size, dim_select):
     result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
     result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
     return result
-
-
-def prod_single_zero(dim_size):
-    result = torch.randn(dim_size, dim_size)
-    result[0, 1] = 0
-    return result
-
-
-def random_square_matrix_of_rank(l, rank):
-    assert rank <= l
-    A = torch.randn(l, l)
-    u, s, v = A.svd()
-    for i in range(l):
-        if i >= rank:
-            s[i] = 0
-        elif s[i] == 0:
-            s[i] = 1
-    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
-
-
-def random_symmetric_matrix(l):
-    A = torch.randn(l, l)
-    for i in range(l):
-        for j in range(i):
-            A[i, j] = A[j, i]
-    return A
-
-
-def random_symmetric_psd_matrix(l):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1))
-
-
-def random_symmetric_pd_matrix(l, eps=1e-5):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
-
-
-def make_nonzero_det(A, sign=None, min_singular_value=0.1):
-    u, s, v = A.svd()
-    s[s < min_singular_value] = min_singular_value
-    A = u.mm(torch.diag(s)).mm(v.t())
-    det = A.det().item()
-    if sign is not None:
-        if (det < 0) ^ (sign < 0):
-            A[0, :].neg_()
-    return A
-
-
-def random_fullrank_matrix_distinct_singular_value(l, *batches):
-    if len(batches) == 0:
-        A = torch.randn(l, l)
-        u, _, v = A.svd()
-        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-        return u.mm(torch.diag(s)).mm(v.t())
-    else:
-        all_matrices = []
-        for _ in range(0, torch.prod(torch.as_tensor(batches)).item()):
-            A = torch.randn(l, l)
-            u, _, v = A.svd()
-            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-            all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
-        return torch.stack(all_matrices).reshape(*(batches + (l, l)))
 
 
 def uniform_scalar(offset=0, requires_grad=False):
