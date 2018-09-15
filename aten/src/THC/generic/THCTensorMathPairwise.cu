@@ -43,23 +43,13 @@ THCTensor_(sub)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t val
 THC_API void
 THCTensor_(add_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
 {
-#ifdef THC_REAL_IS_HALF
-  auto v = THC_half2float(value) * THC_half2float(alpha);
-  THCTensor_(add)(state, self_, src_, THC_float2half(v));
-#else
   THCTensor_(add)(state, self_, src_, value * alpha);
-#endif
 }
 
 THC_API void
 THCTensor_(sub_scaled)(THCState *state, THCTensor *self_, THCTensor *src_, scalar_t value, scalar_t alpha)
 {
-#ifdef THC_REAL_IS_HALF
-  auto v = THC_half2float(value) * THC_half2float(alpha);
-  THCTensor_(sub)(state, self_, src_, THC_float2half(v));
-#else
   THCTensor_(sub)(state, self_, src_, value * alpha);
-#endif
 }
 
 THC_API void

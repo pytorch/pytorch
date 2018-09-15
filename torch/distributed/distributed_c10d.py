@@ -373,7 +373,8 @@ def get_world_size(group=group.WORLD):
 
 def isend(tensor,
           dst,
-          group=group.WORLD):
+          group=group.WORLD,
+          tag=0):
     """
     Sends a tensor asynchronously.
 
@@ -381,6 +382,7 @@ def isend(tensor,
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank.
         group (ProcessGroup, optional): The process group to work on
+        tag (int, optional): Tag to match send with remote recv
 
     Returns:
         A distributed request object.
@@ -392,15 +394,16 @@ def isend(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
-        return _default_pg.send([tensor], dst)
+        return _default_pg.send([tensor], dst, tag)
     else:
         group_dst_rank = _get_group_rank(group, dst)
-        return group.send([tensor], group_dst_rank)
+        return group.send([tensor], group_dst_rank, tag)
 
 
 def irecv(tensor,
           src,
-          group=group.WORLD):
+          group=group.WORLD,
+          tag=0):
     """
     Receives a tensor asynchronously.
 
@@ -408,6 +411,7 @@ def irecv(tensor,
         tensor (Tensor): Tensor to fill with received data.
         src (int): Source rank.
         group (ProcessGroup, optional): The process group to work on
+        tag (int, optional): Tag to match recv with remote send
 
     Returns:
         A distributed request object.
@@ -419,15 +423,16 @@ def irecv(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
-        return _default_pg.recv([tensor], src)
+        return _default_pg.recv([tensor], src, tag)
     else:
         group_src_rank = _get_group_rank(group, src)
-        return group.recv([tensor], group_src_rank)
+        return group.recv([tensor], group_src_rank, tag)
 
 
 def send(tensor,
          dst,
-         group=group.WORLD):
+         group=group.WORLD,
+         tag=0):
     """
     Sends a tensor synchronously.
 
@@ -435,6 +440,7 @@ def send(tensor,
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank.
         group (ProcessGroup, optional): The process group to work on
+        tag (int, optional): Tag to match send with remote recv
 
     """
     if _rank_not_in_group(group):
@@ -442,15 +448,16 @@ def send(tensor,
 
     if group == GroupMember.WORLD:
         _check_default_pg()
-        _default_pg.send([tensor], dst).wait()
+        _default_pg.send([tensor], dst, tag).wait()
     else:
         group_dst_rank = _get_group_rank(group, dst)
-        group.send([tensor], group_dst_rank).wait()
+        group.send([tensor], group_dst_rank, tag).wait()
 
 
 def recv(tensor,
          src=None,
-         group=group.WORLD):
+         group=group.WORLD,
+         tag=0):
     """
     Receives a tensor synchronously.
 
@@ -459,6 +466,7 @@ def recv(tensor,
         src (int, optional): Source rank. Will receive from any
             process if unspecified.
         group (ProcessGroup, optional): The process group to work on
+        tag (int, optional): Tag to match recv with remote send
 
     Returns:
         Sender rank
@@ -476,7 +484,7 @@ def recv(tensor,
 
     if src is None:
         rank_tensor = torch.IntTensor([-1])
-        pg.recv_anysource([tensor], rank_tensor).wait()
+        pg.recv_anysource([tensor], rank_tensor, tag).wait()
         src_rank = rank_tensor[0].item()
         if group == GroupMember.WORLD:
             return src_rank
@@ -484,10 +492,10 @@ def recv(tensor,
             return _get_global_rank(pg, src_rank)
     else:
         if group == GroupMember.WORLD:
-            pg.recv([tensor], src).wait()
+            pg.recv([tensor], src, tag).wait()
         else:
             group_src_rank = _get_group_rank(pg, src)
-            pg.recv([tensor], group_src_rank).wait()
+            pg.recv([tensor], group_src_rank, tag).wait()
         return src
 
 

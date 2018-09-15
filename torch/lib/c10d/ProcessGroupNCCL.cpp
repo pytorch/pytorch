@@ -100,7 +100,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
 ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 
 // Check if the NCCL kernels are queued on the GPUs
-bool ProcessGroupNCCL::WorkNCCL::isCompleted() const {
+bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   return true;
 }
 
@@ -599,19 +599,22 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
     int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support send");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& /* unused */,
+    int /* unused */,
     int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support recv");
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
     std::vector<at::Tensor>& /* unused */,
-    int* /* unused */) {
+    int* /* unused */,
+    int /* unused */) {
   throw std::runtime_error("ProcessGroupNCCL does not support recv");
 }
 

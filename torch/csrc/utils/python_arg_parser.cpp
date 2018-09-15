@@ -103,6 +103,10 @@ bool FunctionParameter::check(PyObject* obj) {
       return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkDouble(obj));
     }
     case ParameterType::SCALAR:
+      if (PyComplex_Check(obj)) {
+        return true;
+      }
+      // fallthrough
     case ParameterType::DOUBLE: {
       if (THPUtils_checkDouble(obj)) {
         return true;
@@ -446,6 +450,13 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     PyObject* obj = nullptr;
     bool is_kwd = false;
     if (arg_pos < nargs) {
+      // extra positional args given after single positional IntList arg
+      if (param.keyword_only) {
+        if (raise_exception) {
+          extra_args(*this, nargs);
+        }
+        return false;
+      }
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
       obj = PyDict_GetItem(kwargs, param.python_name);

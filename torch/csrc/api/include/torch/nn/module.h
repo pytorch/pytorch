@@ -225,8 +225,8 @@ class Module {
   ///     }
   ///   }
   ///
-  /// MyModule module;
-  /// module->modules().apply(initialize_weights);
+  ///   MyModule module;
+  ///   module->modules().apply(initialize_weights);
   /// \endrst
   template <typename ModuleType>
   typename ModuleType::ContainedType* as() noexcept;
@@ -244,8 +244,8 @@ class Module {
   ///     }
   ///   }
   ///
-  /// MyModule module;
-  /// module->modules().apply(initialize_weights);
+  ///   MyModule module;
+  ///   module->modules().apply(initialize_weights);
   /// \endrst
   template <
       typename ModuleType,

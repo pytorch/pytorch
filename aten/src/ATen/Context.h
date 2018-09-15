@@ -5,6 +5,7 @@
 #include "ATen/CUDAStream.h"
 #include "ATen/core/Generator.h"
 #include "ATen/Type.h"
+#include "ATen/TypeExtendedInterface.h"
 #include "ATen/Utils.h"
 #include "ATen/core/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
@@ -21,23 +22,25 @@
 
 namespace at {
 
+struct Tensor;
+
 class AT_API Context {
 public:
   Context();
-  Type* getNonVariableTypeRaw(Backend p, ScalarType s) {
-    return globalLegacyTypeDispatch().getNonVariableTypeRaw(p, s);
+  TypeExtendedInterface* getNonVariableTypeRaw(Backend p, ScalarType s) {
+    return static_cast<TypeExtendedInterface*>(globalLegacyTypeDispatch().getNonVariableTypeRaw(p, s));
   }
-  Type * getNonVariableTypeOpt(Backend p, ScalarType s) {
-    return globalLegacyTypeDispatch().getNonVariableTypeOpt(p, s);
+  TypeExtendedInterface * getNonVariableTypeOpt(Backend p, ScalarType s) {
+    return static_cast<TypeExtendedInterface*>(globalLegacyTypeDispatch().getNonVariableTypeOpt(p, s));
   }
-  Type & getNonVariableType(Backend p, ScalarType s) {
-    return globalLegacyTypeDispatch().getNonVariableType(p, s);
+  TypeExtendedInterface & getNonVariableType(Backend p, ScalarType s) {
+    return static_cast<TypeExtendedInterface&>(globalLegacyTypeDispatch().getNonVariableType(p, s));
   }
-  Type & getVariableType(Backend p, ScalarType s) {
-    return globalLegacyTypeDispatch().getVariableType(p, s);
+  TypeExtendedInterface & getVariableType(Backend p, ScalarType s) {
+    return static_cast<TypeExtendedInterface&>(globalLegacyTypeDispatch().getVariableType(p, s));
   }
-  Type & getType(Backend p, ScalarType s, bool is_variable) {
-    return globalLegacyTypeDispatch().getType(p, s, is_variable);
+  TypeExtendedInterface & getType(Backend p, ScalarType s, bool is_variable) {
+    return static_cast<TypeExtendedInterface&>(globalLegacyTypeDispatch().getType(p, s, is_variable));
   }
   // The passed in Type must be delete'able
   // TODO: Just make it take a unique_ptr
@@ -142,24 +145,25 @@ static inline void init() {
   }
 }
 
-static inline Type& getNonVariableType(Backend p, ScalarType s) {
+static inline TypeExtendedInterface& getNonVariableType(Backend p, ScalarType s) {
   return globalContext().getNonVariableType(p, s);
 }
 
-static inline Type& getNonVariableType(DeviceType p, ScalarType s) {
+static inline TypeExtendedInterface& getNonVariableType(DeviceType p, ScalarType s) {
   return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
 }
 
-AT_API Type& getType(TensorOptions options);
-AT_API Type& getType(const TensorImpl*);
+AT_API TypeExtendedInterface& getType(TensorOptions options);
+AT_API TypeExtendedInterface& getType(const TensorImpl*);
+AT_API TypeExtendedInterface& getType(const Tensor&);
 
 AT_API Allocator* getCPUAllocator();
 
-static inline Type& CPU(ScalarType s) {
+static inline TypeExtendedInterface& CPU(ScalarType s) {
   return getNonVariableType(Backend::CPU, s);
 }
 
-static inline Type& CUDA(ScalarType s) {
+static inline TypeExtendedInterface& CUDA(ScalarType s) {
   return getNonVariableType(Backend::CUDA, s);
 }
 

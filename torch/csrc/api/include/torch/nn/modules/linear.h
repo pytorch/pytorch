@@ -10,6 +10,7 @@
 
 namespace torch {
 namespace nn {
+/// Options for the `Linear` module.
 struct LinearOptions {
   LinearOptions(int64_t in, int64_t out);
   /// The number of input features (columns of the input matrix).
