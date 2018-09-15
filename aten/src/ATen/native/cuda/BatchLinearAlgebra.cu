@@ -140,6 +140,8 @@ AT_ERROR("gesv: MAGMA library not found in "
 #endif
 }
 
+LINALG_HELPER_2_ARGS(gesv, self, A, cuda)
+
 template <typename scalar_t>
 static void apply_inverse(Tensor &self, Tensor &self_inv, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
@@ -188,8 +190,6 @@ AT_ERROR("inverse: MAGMA library not found in "
   }
 #endif
 }
-
-LINALG_HELPER_2_ARGS(gesv, self, A, cuda)
 
 // Because this is out-of-place inverse, the predefined macros will
 // not work
