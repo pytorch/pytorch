@@ -32,9 +32,9 @@ TEST(static, static){
   EXPECT_EQ((torch::all_of<false, false, false>::value), false);
   EXPECT_EQ((torch::all_of<true, true, false>::value), false);
   EXPECT_EQ(torch::any_of<>::value, false);
-  // EXPECT_EQ((torch::any_of<true>::value), true);
-  // EXPECT_EQ((torch::any_of<true, true, true>::value), true);
-  // EXPECT_EQ((torch::any_of<false>::value), false);
+  EXPECT_EQ(bool((torch::any_of<true>::value)), true);
+  EXPECT_EQ(bool((torch::any_of<true, true, true>::value)), true);
+  EXPECT_EQ(bool((torch::any_of<false>::value)), false);
   EXPECT_EQ(f(torch::nn::LinearImpl(1, 2)), true);
   EXPECT_EQ(f(5), false);
   EXPECT_EQ(torch::detail::check_not_lvalue_references<int>(), true);
