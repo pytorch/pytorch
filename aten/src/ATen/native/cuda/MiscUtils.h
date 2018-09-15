@@ -44,4 +44,3 @@ static inline Storage pin_memory(int64_t size, Tensor dummy) {
   
 } // namespace native
 } // namespace at
-
