@@ -10,6 +10,8 @@ import sysconfig
 import tempfile
 import warnings
 
+from future.utils import raise_from
+
 import torch
 from .file_baton import FileBaton
 
@@ -791,10 +793,7 @@ def _build_extension_module(name, build_directory, verbose):
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
         message = "Error building extension '{}': {}".format(name, error.output.decode())
-        if sys.version_info < (3, 3):
-            raise RuntimeError(message)
-        else:
-            raise RuntimeError(message) from None
+        raise_from(RuntimeError(message), None)
 
 
 def _import_module_from_library(module_name, path):
