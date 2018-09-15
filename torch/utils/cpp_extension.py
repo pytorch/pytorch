@@ -781,13 +781,18 @@ def _build_extension_module(name, build_directory, verbose):
     try:
         sys.stdout.flush()
         sys.stderr.flush()
-        subprocess.run(
-            ['ninja', '-v'],
-            stdout=None if verbose else subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            cwd=build_directory,
-            check=True
-        )
+        if sys.version_info >= (3, 5):
+            subprocess.run(
+                ['ninja', '-v'],
+                stdout=None if verbose else subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd=build_directory,
+                check=True)
+        else:
+            subprocess.check_output(
+                ['ninja', '-v'],
+                stderr=subprocess.STDOUT,
+                cwd=build_directory)
     except subprocess.CalledProcessError:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
