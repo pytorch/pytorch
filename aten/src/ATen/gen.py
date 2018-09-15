@@ -259,7 +259,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#undef THNN_',
             '#undef THCIndexTensor_',
         ]
-        env['extra_cuda_headers'] = ['#include <ATen/cuda/CUDAHalf.cuh>']
+        env['extra_cuda_headers'] = ['#include <ATen/cuda/ATenCUDAGeneral.h>']
         env['extra_cuda_headers'].append('#include <ATen/DeviceGuard.h>')
         env['extra_cuda_headers'].append('#include <ATen/cuda/CUDADevice.h>')
         env['extra_cuda_headers'].append('#include <ATen/cuda/CUDATypeDefault.h>')

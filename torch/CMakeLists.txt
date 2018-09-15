@@ -146,7 +146,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fusion_compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
@@ -176,6 +175,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
@@ -189,6 +189,34 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   )
+
+SET(USE_CPU_FUSER 0)
+if (NOT WIN32)
+  SET(USE_CPU_FUSER 1)
+
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/tensor_desc.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/fusion_handle_impl.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/fused_kernel.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fusion_compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fused_kernel.cpp
+  )
+endif()
+
+SET(USE_CUDA_FUSER 0)
+if (USE_CUDA AND NOT USE_ROCM AND NOT WIN32)
+  SET(USE_CUDA_FUSER 1)
+
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/fusion_compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/fused_kernel.cpp
+  )
+
+endif()
+
+CONFIGURE_FILE(
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/Config.h.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/jit/fusers/Config.h)
 
 if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
