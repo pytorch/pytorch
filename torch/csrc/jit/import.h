@@ -5,8 +5,11 @@
 
 namespace torch { namespace jit {
 
-TORCH_API void ImportIRModule(
-    const std::shared_ptr<script::Module> module,
+using ModuleLookup = std::function<std::shared_ptr<script::Module>(
+    const std::vector<std::string>&)>;
+
+TORCH_API void import_ir_module(
+    ModuleLookup module_lookup,
     const std::string& filename);
 
 TORCH_API std::shared_ptr<script::Module> load(const std::string& filename);

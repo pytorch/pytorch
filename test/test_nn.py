@@ -1683,6 +1683,12 @@ class TestNN(NNTestCase):
         self.assertEqual(m.weight_g.size(), (1, 5))
         self.assertEqual(m(input), expected_output)
 
+        # test with dim=None
+        m = nn.Linear(5, 7)
+        expected_output = m(input)
+        m = torch.nn.utils.weight_norm(m, dim=None)
+        self.assertEqual(m(input), expected_output)
+
     def test_weight_norm_pickle(self):
         m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
@@ -3153,6 +3159,24 @@ class TestNN(NNTestCase):
         out = n(input={'data': i, 'unused': ()})
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
+    def test_data_parallel_device_args(self):
+        cuda0 = torch.device('cuda:0')
+        cuda1 = torch.device('cuda:1')
+
+        # test output_device
+        l = nn.Linear(10, 5).to(cuda0, torch.float)
+        i = torch.randn(20, 10, dtype=torch.float, device=cuda0, requires_grad=True)
+        out = dp.data_parallel(l, i, device_ids=(0, 1), output_device=cuda0)
+        self.assertEqual(out, l(i))
+
+        # test device_ids
+        l = nn.Linear(10, 5).to(cuda0, torch.float)
+        i = torch.randn(20, 10, dtype=torch.float, device=cuda0, requires_grad=True)
+        out = dp.data_parallel(l, i, device_ids=(cuda0, cuda1), output_device=cuda0)
+        self.assertEqual(out, l(i))
 
     def test_state_dict(self):
         l = nn.Linear(5, 5)

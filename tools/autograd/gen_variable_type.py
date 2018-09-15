@@ -124,7 +124,7 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-profiler::RecordFunction profiler("${name}");""")
+profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr());""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
 torch::jit::Node* node = nullptr;

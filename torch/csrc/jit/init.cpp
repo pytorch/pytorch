@@ -1,4 +1,5 @@
 #include "torch/csrc/utils/pybind.h"
+#include "torch/csrc/utils/auto_gil.h"
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
@@ -32,6 +33,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/fusers/interface.h"
 
 #include <pybind11/functional.h>
 
@@ -114,13 +116,14 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx_block", BlockToONNX)
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
    .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
-    .def("_jit_pass_specialize_undef", specializeUndef)
-   .def("_jit_differentiate", [](Graph &g, const std::vector<bool>& requires_grad) {
+   .def("_jit_pass_specialize_undef", specializeUndef)
+   .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
+   .def("_jit_differentiate", [](Graph &g) {
        // the python binding slightly differs in semantics
        // it makes a copy of the input Graph, and works on that
        // jit::differentiate mutates the input Graph
        auto g_clone = g.copy();
-       return differentiate(g_clone, requires_grad);
+       return differentiate(g_clone);
    });
 
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -206,7 +209,10 @@ void initJITBindings(PyObject *module) {
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         const auto & graph = ge.graph();
         auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
-        ge.run(stack);
+        {
+          AutoNoGIL no_gil_guard;
+          ge.run(stack);
+        }
         return createPyObjectForStack(std::move(stack));
       });
 

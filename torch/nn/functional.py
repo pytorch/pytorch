@@ -67,6 +67,8 @@ planes.
 
 See :class:`~torch.nn.Conv1d` for details and output shape.
 
+.. include:: cudnn_deterministic.rst
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
     weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kW)`
@@ -94,6 +96,8 @@ Applies a 2D convolution over an input image composed of several input
 planes.
 
 See :class:`~torch.nn.Conv2d` for details and output shape.
+
+.. include:: cudnn_deterministic.rst
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
@@ -124,6 +128,8 @@ planes.
 
 See :class:`~torch.nn.Conv3d` for details and output shape.
 
+.. include:: cudnn_deterministic.rst
+
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
     weight: filters of shape :math:`(\text{out\_channels} \times \frac{\text{in\_channels}}{\text{groups}} \times kT \times kH \times kW)`
@@ -151,6 +157,8 @@ Applies a 1D transposed convolution operator over an input signal
 composed of several input planes, sometimes also called "deconvolution".
 
 See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
+
+.. include:: cudnn_deterministic.rst
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iW)`
@@ -182,6 +190,8 @@ Applies a 2D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution".
 
 See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
+
+.. include:: cudnn_deterministic.rst
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iH \times iW)`
@@ -215,6 +225,8 @@ Applies a 3D transposed convolution operator over an input image
 composed of several input planes, sometimes also called "deconvolution"
 
 See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
+
+.. include:: cudnn_deterministic.rst
 
 Args:
     input: input tensor of shape :math:`(\text{minibatch} \times \text{in\_channels} \times iT \times iH \times iW)`
@@ -661,6 +673,8 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Defualt: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
+    # This is 100% the same code as dropout2d. We duplicate this code so that
+    # stack traces are not confusing.
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -1302,7 +1316,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
             raise ValueError("max mode does not support sparse weights")
 
     else:
-        raise ValueError("mode has to be one of sum or mean")
+        raise ValueError("mode has to be one of sum, mean or max")
 
     if max_norm is not None:
         with torch.no_grad():
@@ -1343,46 +1357,10 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
-    if not use_input_stats and (running_mean is None or running_var is None):
-        raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
-
-    b, c = input.size(0), input.size(1)
-    if weight is not None:
-        weight = weight.repeat(b)
-    if bias is not None:
-        bias = bias.repeat(b)
-
-    import torch.onnx.symbolic
-
-    @torch.onnx.symbolic_override(torch.onnx.symbolic.instance_norm)
-    def _instance_norm(input, running_mean=None, running_var=None, weight=None,
-                       bias=None, use_input_stats=None, momentum=None, eps=None):
-        # Repeat stored stats and affine transform params if necessary
-        if running_mean is not None:
-            running_mean_orig = running_mean
-            running_mean = running_mean_orig.repeat(b)
-        if running_var is not None:
-            running_var_orig = running_var
-            running_var = running_var_orig.repeat(b)
-
-        # Apply instance norm
-        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
-
-        out = batch_norm(
-            input_reshaped, running_mean, running_var, weight=weight, bias=bias,
-            training=use_input_stats, momentum=momentum, eps=eps)
-
-        # Reshape and copy back
-        if running_mean is not None:
-            running_mean_orig.copy_(running_mean.view(b, c).mean(0, keepdim=False))
-        if running_var is not None:
-            running_var_orig.copy_(running_var.view(b, c).mean(0, keepdim=False))
-
-        return out.view(b, c, *input.size()[2:])
-    return _instance_norm(input, running_mean=running_mean,
-                          running_var=running_var, weight=weight, bias=bias,
-                          use_input_stats=use_input_stats, momentum=momentum,
-                          eps=eps)
+    return torch.instance_norm(
+        input, weight, bias, running_mean, running_var,
+        use_input_stats, momentum, eps, torch.backends.cudnn.enabled
+    )
 
 
 def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
@@ -1435,6 +1413,8 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
     r"""The Connectionist Temporal Classification loss.
 
     See :class:`~torch.nn.CTCLoss` for details.
+
+    .. include:: cudnn_deterministic.rst
 
     Args:
         log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
@@ -1938,36 +1918,23 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=No
     return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction)
 
 
-def pixel_shuffle(input, upscale_factor):
-    r"""Rearranges elements in a tensor of shape :math:`[*, C*r^2, H, W]` to a
-    tensor of shape :math:`[C, H*r, W*r]`.
+pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
+Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
+tensor of shape :math:`(C, H \times r, W \times r)`.
 
-    See :class:`~torch.nn.PixelShuffle` for details.
+See :class:`~torch.nn.PixelShuffle` for details.
 
-    Args:
-        input (Tensor): Input
-        upscale_factor (int): factor to increase spatial resolution by
+Args:
+    input (Tensor): the input tensor
+    upscale_factor (int): factor to increase spatial resolution by
 
-    Examples::
+Examples::
 
-        >>> ps = nn.PixelShuffle(3)
-        >>> input = torch.empty(1, 9, 4, 4)
-        >>> output = ps(input)
-        >>> print(output.size())
-        torch.Size([1, 1, 12, 12])
-    """
-    batch_size, channels, in_height, in_width = input.size()
-    channels //= upscale_factor ** 2
-
-    out_height = in_height * upscale_factor
-    out_width = in_width * upscale_factor
-
-    input_view = input.contiguous().view(
-        batch_size, channels, upscale_factor, upscale_factor,
-        in_height, in_width)
-
-    shuffle_out = input_view.permute(0, 1, 4, 2, 5, 3).contiguous()
-    return shuffle_out.view(batch_size, channels, out_height, out_width)
+    >>> input = torch.randn(1, 9, 4, 4)
+    >>> output = torch.nn.functional.pixel_shuffle(input, 3)
+    >>> print(output.size())
+    torch.Size([1, 1, 12, 12])
+""")
 
 
 def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
@@ -2260,22 +2227,22 @@ def affine_grid(theta, size):
 def pad(input, pad, mode='constant', value=0):
     r"""Pads tensor.
 
-    `Nd` constant padding:  The number of dimensions to pad is
-        :math:`\left\lfloor\frac{len(padding)}{2}\right\rfloor` and the dimensions that get padded begins with the
-        last dimension and moves forward. See below for examples.
+    Pading size:
+        The number of dimensions to pad is :math:`\left\lfloor\frac{\text{len(pad)}}{2}\right\rfloor`
+        and the dimensions that get padded begins with the last dimension and moves forward.
+        For example, to pad the last dimension of the input tensor, then `pad` has form
+        `(padLeft, padRight)`; to pad the last 2 dimensions of the input tensor, then use
+        `(padLeft, padRight, padTop, padBottom)`; to pad the last 3 dimensions, use
+        `(padLeft, padRight, padTop, padBottom, padFront, padBack)`.
 
-    `1D`, `2D` and `3D` "reflect" / "replicate" padding:
-        for 1D:
-                3D input tensor with padding of the form `(padLeft, padRight)`
-        for 2D:
-                4D input tensor with padding of the form `(padLeft, padRight, padTop, padBottom)`.
-        for 3D:
-                5D input tensor with padding of the form
-                `(padLeft, padRight, padTop, padBottom, padFront, padBack)`. No "reflect" implementation.
-
-    See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
-    :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
-    padding modes works.
+    Padding mode:
+        See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
+        :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
+        padding modes works. Constant padding is implemented for arbitrary dimensions.
+        Replicate padding is implemented for padding the last 3 dimensions of 5D input
+        tensor, or the last 2 dimensions of 4D input tensor, or the last dimension of
+        3D input tensor. Reflect padding is only implemented for padding the last 2
+        dimensions of 4D input tensor, or the last dimension of 3D input tensor.
 
     Args:
         input (Tensor): `Nd` tensor

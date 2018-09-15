@@ -5,7 +5,6 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/graph_executor.h"
@@ -28,6 +27,7 @@ namespace torch { namespace jit {
 namespace {
 
 Operation createPythonOperation(Node* op_) {
+  AutoGIL gil;
   PythonOp* op = static_cast<PythonOp*>(op_);
   py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
   size_t num_inputs = 0;

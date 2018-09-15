@@ -232,6 +232,10 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
   }
+
+  if (PyComplex_Check(args[i])) {
+    return at::Scalar(THPUtils_unpackComplexDouble(args[i]));
+  }
   return at::Scalar(THPUtils_unpackDouble(args[i]));
 }
 
@@ -430,7 +434,7 @@ inline at::Generator* PythonArgs::generator(int i) {
 }
 
 inline at::Storage PythonArgs::storage(int i) {
-  if (!args[i]) return nullptr;
+  if (!args[i]) return at::Storage();
   return createStorage(args[i]);
 }
 

@@ -21,13 +21,13 @@ size_t THStorage_(elementSize)()
 
 THStorage* THStorage_(new)(void)
 {
-  return THStorage_new(at::CTypeToScalarType<scalar_t>::to());
+  return THStorage_new(caffe2::TypeMeta::Make<scalar_t>());
 }
 
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(at::CTypeToScalarType<scalar_t>::to()),
+      caffe2::TypeMeta::Make<scalar_t>(),
       size,
       getTHDefaultAllocator(),
       true).release();
@@ -38,7 +38,7 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         at::Allocator *allocator)
 {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(at::CTypeToScalarType<scalar_t>::to()),
+      caffe2::TypeMeta::Make<scalar_t>(),
       size,
       allocator,
       true).release();
@@ -48,18 +48,18 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
 
 THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags)
 {
-  auto scalar_type = at::CTypeToScalarType<scalar_t>::to();
+  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
   size_t actual_size = -1;
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(scalar_type),
+      type_meta,
       size,
       THMapAllocator::makeDataPtr(
-          filename, flags, size * at::elementSize(scalar_type), &actual_size),
+          filename, flags, size * type_meta.itemsize(), &actual_size),
       /* allocator */ nullptr,
       false).release();
 
   if (size <= 0) {
-    storage->set_numel(actual_size / at::elementSize(scalar_type));
+    storage->set_numel(actual_size / type_meta.itemsize());
   }
 
   return storage;
@@ -116,7 +116,7 @@ void THStorage_(free)(THStorage *storage)
 THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t size,
                                                at::Allocator* allocator) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
-      at::scalarTypeToDataType(at::CTypeToScalarType<scalar_t>::to()),
+      caffe2::TypeMeta::Make<scalar_t>(),
       size,
       std::move(data),
       allocator,

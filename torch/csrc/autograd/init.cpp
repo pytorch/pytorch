@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/python_function.h"
+#include "torch/csrc/autograd/function.h"
 
 PyObject * THPAutograd_initExtension(PyObject *_unused)
 {
@@ -48,6 +49,11 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
     torch::autograd::profiler::pushRange(name);
   });
   m.def("_pop_range", []() { torch::autograd::profiler::popRange(); });
+
+  /// TODO: Replace this ASAP with a better solution for deep autograd graphs!
+  m.def("_unsafe_set_delete_function_max_recursion_depth", [](size_t value) {
+    torch::autograd::deleteFunctionMaxRecursionDepth = value;
+  });
 
   Py_RETURN_TRUE;
 }

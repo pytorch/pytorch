@@ -29,12 +29,14 @@ using at::TensorList;
 using at::Type;
 using at::ScalarType;
 using at::optional;
+using at::Device;
 
-void register_variable_type_for(at::Type* baseType);
+void register_variable_type_for(at::TypeExtendedInterface* baseType);
 
 struct TORCH_API VariableType final : public at::TypeDefault {
-  VariableType(Context* context, at::Type* baseType);
+  VariableType(Context* context, at::TypeExtendedInterface* baseType);
   at::ScalarType scalarType() const override;
+  virtual caffe2::TypeMeta typeMeta() const override;
   at::Backend backend() const override;
   at::Allocator* allocator() const override;
   at::Device getDeviceFromPtr(void * data) const override;
@@ -72,7 +74,7 @@ private:
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 
-  at::Type* baseType;
+  at::TypeExtendedInterface* baseType;
   std::string str;
   size_t id_;
 };

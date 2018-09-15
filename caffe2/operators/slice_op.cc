@@ -3,8 +3,8 @@
 
 namespace caffe2 {
 
-REGISTER_CPU_OPERATOR(Slice, SliceOp<int, CPUContext>);
-REGISTER_CPU_OPERATOR(SliceGradient, SliceGradientOp<int, CPUContext>);
+REGISTER_CPU_OPERATOR(Slice, SliceOp<CPUContext>);
+REGISTER_CPU_OPERATOR(SliceGradient, SliceGradientOp<CPUContext>);
 
 OPERATOR_SCHEMA(Slice)
     .NumInputs(1, 3)
