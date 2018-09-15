@@ -171,7 +171,7 @@ class ModuleList(Module):
             module (nn.Module): module to insert
         """
         for i in range(len(self._modules), index, -1):
-          self._modules[str(i)] = self._modules[str(i - 1)]
+            self._modules[str(i)] = self._modules[str(i - 1)]
         self._modules[str(index)] = module
 
     def append(self, module):
