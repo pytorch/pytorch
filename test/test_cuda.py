@@ -338,6 +338,8 @@ tests = [
     ('gt', medium_2d, lambda t: [medium_2d(t)],),
     ('lt', medium_2d, lambda t: [medium_2d(t)],),
     ('is_contiguous', medium_2d, lambda t: [],),
+    ('i0', small_3d, lambda t: [], None, float_types, "skipIfRocm:DoubleTensor,FloatTensor,HalfTensor"),
+    ('i1', small_3d, lambda t: [], None, float_types, "skipIfRocm:DoubleTensor,FloatTensor,HalfTensor"),
     # TODO: can't check negative case - GPU copy will be contiguous
     ('is_same_size', medium_2d, lambda t: [small_3d(t)], 'negative'),
     ('is_same_size', medium_2d, lambda t: [medium_2d(t)], 'positive'),
@@ -598,8 +600,6 @@ simple_pointwise_float = [
     'lgamma',
     'digamma',
     'trigamma',
-    'i0',
-    'i1',
 ]
 
 for fn in simple_pointwise_float:
