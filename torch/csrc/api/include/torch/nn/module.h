@@ -69,7 +69,7 @@ namespace nn {
 /// are registered separately via `register_buffer`. These methods are part of
 /// the protected API of `Module` and are typically invoked from within a
 /// concrete `Module`s constructor.
-class Module {
+class TORCH_API Module {
  public:
   /// Tells the base `Module` about the name of the submodule.
   explicit Module(std::string name);

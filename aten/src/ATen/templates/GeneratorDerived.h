@@ -9,7 +9,7 @@
 namespace at {
 
 class Context;
-struct ${name}Generator : public Generator {
+struct CAFFE2_API ${name}Generator : public Generator {
   ${name}Generator(Context * context);
   virtual ~${name}Generator();
 

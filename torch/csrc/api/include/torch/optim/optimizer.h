@@ -1,5 +1,7 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 #include <algorithm>
 #include <functional>
 #include <iterator>
@@ -30,7 +32,7 @@ namespace detail {
 /// mechanism. All it specifies is that optimizers must be supplied with a
 /// vector of parameters. It also defines certain methods that all optimizers
 /// shall have, such as `zero_grad`.
-class OptimizerBase {
+class TORCH_API OptimizerBase {
  public:
   using ParameterCursor = torch::detail::CursorBase<Tensor>;
 

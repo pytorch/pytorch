@@ -397,6 +397,7 @@ def generate_outputs():
         fm = file_manager
         if env['name'] == 'CUDA':
             fm = cuda_file_manager
+
         fm.write(fname, GENERATOR_DERIVED, env)
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
