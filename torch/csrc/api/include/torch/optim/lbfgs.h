@@ -2,11 +2,9 @@
 
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
+#include <torch/serialization.h>
 
 #include <ATen/ATen.h>
-
-#include <cereal/access.hpp>
-#include <cereal/cereal.hpp>
 
 #include <deque>
 #include <functional>
@@ -41,6 +39,7 @@ class LBFGS : public LossClosureOptimizer {
 
   template <class Archive>
   void serialize(Archive& ar) {
+#if defined(TORCH_USE_CEREAL)
     ar(CEREAL_NVP(d));
     ar(CEREAL_NVP(t));
     ar(CEREAL_NVP(H_diag));
@@ -48,10 +47,13 @@ class LBFGS : public LossClosureOptimizer {
     ar(CEREAL_NVP(prev_loss));
     ar(CEREAL_NVP(old_dirs));
     ar(CEREAL_NVP(old_stps));
+#endif // defined(TORCH_USE_CEREAL)
   }
 
  private:
+#if defined(TORCH_USE_CEREAL)
   friend class cereal::access;
+#endif // defined(TORCH_USE_CEREAL)
   LBFGS() : options(0) {}
 
   Tensor gather_flat_grad();
@@ -69,6 +71,5 @@ class LBFGS : public LossClosureOptimizer {
   int64_t func_evals{0};
   int64_t state_n_iter{0};
 };
-
 } // namespace optim
 } // namespace torch

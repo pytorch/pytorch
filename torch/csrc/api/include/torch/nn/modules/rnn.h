@@ -170,8 +170,8 @@ struct RNNOptions {
 };
 
 /// A multi-layer Elman RNN module with Tanh or ReLU activation.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.RNN for more
-/// documenation.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.RNN to learn about the
+/// exact behavior of this module.
 class RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
   RNNImpl(int64_t input_size, int64_t hidden_size)
@@ -198,8 +198,8 @@ TORCH_MODULE(RNN);
 using LSTMOptions = detail::RNNOptionsBase;
 
 /// A multi-layer long-short-term-memory (LSTM) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM for more
-/// documenation.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM to learn about the
+/// exact behavior of this module.
 class LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
   LSTMImpl(int64_t input_size, int64_t hidden_size)
@@ -224,8 +224,8 @@ TORCH_MODULE(LSTM);
 using GRUOptions = detail::RNNOptionsBase;
 
 /// A multi-layer gated recurrent unit (GRU) module.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.GRU for more
-/// documenation.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.GRU to learn about the
+/// exact behavior of this module.
 class GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
   GRUImpl(int64_t input_size, int64_t hidden_size)
