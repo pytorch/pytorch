@@ -7,7 +7,7 @@
 THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
                                              THCTensor* keys,
                                              THCudaLongTensor* values,
-                                             int dim, int order);
+                                             int dim, bool dir);
 
 /* Performs an out-of-place sort of `input`, returning the per-slice indices
    in `indices` and the sorted values in `sorted` */
