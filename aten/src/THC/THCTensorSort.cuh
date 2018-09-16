@@ -1,7 +1,9 @@
 #ifndef THC_TENSORSORT_CUH
 #define THC_TENSORSORT_CUH
 
+#include "THC.h"
 #include "THCReduceApplyUtils.cuh"
+#include "THCTensorMath.h"
 #include "THCSortUtils.cuh"
 #include "THCTensorCopy.h"
 #include "THCTensorTypeUtils.cuh"
