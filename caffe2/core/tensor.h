@@ -9,7 +9,7 @@
 namespace caffe2 {
 
 class CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
-  UndefinedTensorImpl() : TensorImpl(CPU){};
+  UndefinedTensorImpl() : TensorImpl(at::Storage()){};
 
  public:
  // Without this, we get:
