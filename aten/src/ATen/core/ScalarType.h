@@ -159,9 +159,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   if (a == ud || b == ud) {
     return ScalarType::Undefined;
   }
-  // if (isComplexType(a) || isComplexType(b)) {
-  //   AT_ERROR("promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be");
-  // }
+
   static constexpr ScalarType _promoteTypesLookup
       [static_cast<int>(ScalarType::NumOptions)]
       [static_cast<int>(ScalarType::NumOptions)] = {
