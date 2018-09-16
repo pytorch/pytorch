@@ -100,13 +100,25 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_.data<T>() + storage_offset_;
   }
 
+  inline void* data() const {
+    return static_cast<void*>(
+        static_cast<char*>(storage_.data()) +
+        at::elementSize(scalar_type_) * storage_offset_);
+  }
+
   template <typename T>
   inline T * unsafe_data() const {
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
+  // TODO: Remove this once we get rid of scalar_type and use dmeta or dtype
+  // instead.
   inline at::ScalarType scalar_type() const {
     return scalar_type_;
+  }
+
+  inline caffe2::TypeMeta dtype() const {
+    return storage_.dtype();
   }
 
   virtual int64_t storage_offset() const {

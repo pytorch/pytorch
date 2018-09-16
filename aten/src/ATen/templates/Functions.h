@@ -25,14 +25,11 @@ namespace detail {
 
 static inline TypeExtendedInterface & infer_type(const Tensor & t) {
   AT_CHECK(t.defined(), "undefined Tensor");
-  return static_cast<TypeExtendedInterface&>(t.type());
+  return getType(t);
 }
 static inline TypeExtendedInterface & infer_type(const TensorList & tl) {
   AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return static_cast<TypeExtendedInterface&>(tl[0].type());
-}
-static inline TypeExtendedInterface & non_specific_type() {
-  return static_cast<TypeExtendedInterface&>(at::getNonVariableType(at::Backend::Undefined, at::ScalarType::Float));
+  return getType(tl[0]);
 }
 
 } // namespace detail

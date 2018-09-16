@@ -3513,6 +3513,7 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    @skipIfRocm
     def test_topk_noncontiguous_gpu(self):
         t = torch.randn(20, device="cuda")[::2]
         top1, idx1 = t.topk(5)
@@ -7426,6 +7427,14 @@ class TestTorch(TestCase):
             self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
             self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
 
+        # fail parse with additional positional args after intlist arg
+        self.assertRaisesRegex(TypeError,
+                               "received an invalid combination of arguments",
+                               lambda: torch.LongTensor((6, 0), 1, 1, 0))
+        self.assertRaisesRegex(TypeError,
+                               "missing 1 required positional arguments",
+                               lambda: torch.tensor().new_zeros((5, 5), 0))
+
     def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]  # 0-3
@@ -8842,6 +8851,29 @@ class TestTorch(TestCase):
         self.assertTrue(grid_a.equal(expected_grid_a))
         self.assertTrue(grid_b.equal(expected_grid_b))
         self.assertTrue(grid_c.equal(expected_grid_c))
+
+    @unittest.skipIf(torch.cuda.is_available(), "CUDA is available, can't test CUDA not built error")
+    def test_cuda_not_built(self):
+        msg = "Torch not compiled with CUDA enabled"
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1], device="cuda"))
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).cuda())
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).to(device="cuda"))
+
+    def test_cast_binary_op(self):
+        # Scalar
+        a = torch.tensor(2)
+        b = torch.tensor(3)
+        a_copy = a.clone()
+        b_copy = b.clone()
+
+        self.assertEqual(torch.tensor(6), a.float() * b)
+
+        self.assertEqual(a.type(), a_copy.type())
+        self.assertEqual(a.data.type(), a_copy.data.type())
+        self.assertEqual(b.type(), b_copy.type())
+        self.assertEqual(b.data.type(), b_copy.type())
 
 
 # Functions to test negative dimension wrapping

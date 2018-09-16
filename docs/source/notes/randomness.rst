@@ -3,7 +3,7 @@ Reproducibility
 ===============
 
 Completely reproducible results are not guaranteed across PyTorch releases,
-individual commits or different platforms. Furthermore, results need to be
+individual commits or different platforms. Furthermore, results need not be
 reproducible between CPU and GPU executions, even when using identical seeds.
 
 However, in order to make computations deterministic on your specific problem on
