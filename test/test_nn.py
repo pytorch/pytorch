@@ -1956,13 +1956,9 @@ class TestNN(NNTestCase):
         input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
 
         # Empty list is only handled in CPU for now
-        offsets = torch.tensor([0, 3], device=device, dtype=torch.long) if cuda \
-            else torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
+        offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
 
         grad_output = torch.tensor(
-            [1, 2,
-             3, 4], device=device, dtype=dtype).view(2, 2)
-        grad_output_with_empty = torch.tensor(
             [99, 99,
              1, 2,
              99, 99,
@@ -1972,10 +1968,6 @@ class TestNN(NNTestCase):
         if mode == "sum" or mode == "mean":
             denominator = 1 if mode == "sum" else 3
             expected_output = torch.tensor(
-                [[13, 16],
-                 [13, 16]], device=device, dtype=dtype) / denominator
-
-            expected_output_with_empty = torch.tensor(
                 [[0, 0],
                  [13, 16],
                  [0, 0],
@@ -1990,10 +1982,6 @@ class TestNN(NNTestCase):
                  [3, 4]], device=device, dtype=dtype) / denominator
         elif mode == "max":
             expected_output = torch.tensor(
-                [[7, 8],
-                 [9, 10]], device=device, dtype=dtype)
-
-            expected_output_with_empty = torch.tensor(
                 [[0, 0],
                  [7, 8],
                  [0, 0],
@@ -2008,14 +1996,14 @@ class TestNN(NNTestCase):
                  [3, 4]], device=device, dtype=dtype)
 
         output = es(input, offsets)
-        output.backward(grad_output if cuda else grad_output_with_empty)
+        output.backward(grad_output)
 
         es_weight_grad = es.weight.grad.data
         if sparse:
             es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(
             output.data,
-            expected_output if cuda else expected_output_with_empty)
+            expected_output)
         self.assertEqual(es_weight_grad, expected_grad_weight, dtype2prec[dtype])
 
         # check same example except as 2D (2 x 3)

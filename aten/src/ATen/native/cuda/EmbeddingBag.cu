@@ -49,6 +49,12 @@ __global__ void EmbeddingBag_updateOutputKernel(
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
       assert(end >= begin);
 
+      if (end == begin) {
+        max_indices[bag * featureSize + featureDim] = -1;
+        output[bag * featureSize + featureDim] = 0;
+        continue;
+      }
+
       accscalar_t weightFeatSum = 0;
       scalar_t weightFeatMax;
 
