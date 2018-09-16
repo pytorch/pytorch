@@ -21,29 +21,73 @@ namespace at { namespace native { namespace {
 /**  NOTE [ Grid Sample CPU Kernels ]
  *
  *   Implementation of vectorized grid sample CPU kernels is divided into three
- *   parts:
+ *   parts. More detailed description exist after this paragraph, but on a high
+ *   level, they are
+ *   1. `ComputeLocation` struct
+ *      + Computes the interpolation location basing on padding mode.
+ *   2. `ApplyGridSample` struct
+ *      + Owns N (# spatial dims) `ComputeLocation` structs, and uses them to
+ *        compute the interpolation locations.
+ *      + Interpolates the values and writes to output.
+ *   3. `grid_sample_2d_grid_slice_iterator` function
+ *      + Iterates over a slice of the grid tensor based on the geometry by the
+ *        spatial ordering, i.e., the first iteration will process grid values
+ *           grid[n, 0, 0, :], grid[n, 0, 1, :], grid[n, 0, 2, :], ...
+ *        (Recall that, e.g., 2D grid has shape [N x H x W x 2], so grid[n, ...]
+ *         is a slice, and grid[n, h, w, :] contains the values for a single
+ *         output spatial location.)
+ *      + Applies a given operator at each iteration, so we can use the same
+ *        pattern for forward and backward.
+ *
+ *   Putting everything together, we have, e.g., the forward kernel implemented
+ *   as
+ *
+ *      // `ApplyGridSample` struct that processes grid values, extracts and
+ *      // interpolates input values, and write to output.
+ *      ApplyGridSample<scalar_t, 2, interp, padding> grid_sample(input_accessor);
+ *
+ *      // For each slice, we call `grid_sample_2d_grid_slice_iterator` with
+ *      //   1. the grid slice, and
+ *      //   2. a lambda that takes in
+ *      //      i.   location vectors (x and y for 2D) extracted from grid
+ *      //      ii.  `spatial_offset` as the spatial offset of these vectors
+ *      //           from the beginning of this slice.
+ *      //      iii. `len` as the number of valid locations in the vectors.
+ *      //           (There might not be enough near boundary.)
+ *      for (int n = 0; n < input_accessor.size(0); n++) {
+ *        grid_sample_2d_grid_slice_iterator(
+ *          grid_accessor[n],
+ *          [&](const Vec256<scalar_t>& grid_x,
+ *              const Vec256<scalar_t>& grid_y,
+ *              int64_t spatial_offset, int64_t len) {
+ *            grid_sample.forward(out_accessor[n], input_accessor[n],
+ *                                spatial_offset, grid_x, grid_y, len);
+ *          });
+ *      }
+ *
+ *   Now we talk about details of each of these three parts:
  *
  *   1. `ComputeLocation` struct
  *      Transforms grid values into interpolation locations of the input tensor
- *      for a particular spatial dimension, basing on the size of that dimension
+ *      for a particular spatial dimension, based on the size of that dimension
  *      in input tensor, and the padding mode.
  *
- *      template<typename scalar_t, GridSamplerPadding padding>
- *      struct ComputeLocation {
- *        using Vec = Vec256<scalar_t>;
+ *        template<typename scalar_t, GridSamplerPadding padding>
+ *        struct ComputeLocation {
+ *          using Vec = Vec256<scalar_t>;
  *
- *        // ctor
- *        ComputeLocation(int64_t size);
+ *          // ctor
+ *          ComputeLocation(int64_t size);
  *
- *        // Given grid values `in`, return the interpolation locations after
- *        // un-normalization and padding mechanism (elementwise).
- *        Vec apply(const Vec &in) const;
+ *          // Given grid values `in`, return the interpolation locations after
+ *          // un-normalization and padding mechanism (elementwise).
+ *          Vec apply(const Vec &in) const;
  *
- *        // Similar to `apply`, but also returns `d apply(in) / d in`
- *        // (elementwise).
- *        // this is often used in gradient computation.
- *        std::pair<Vec, Vec> apply_get_grad(const Vec &in) const;
- *      };
+ *          // Similar to `apply`, but also returns `d apply(in) / d in`
+ *          // (elementwise).
+ *          // this is often used in gradient computation.
+ *          std::pair<Vec, Vec> apply_get_grad(const Vec &in) const;
+ *        };
  *
  *   2. `ApplyGridSample` struct
  *      Owns N `ComputeLocation` structs, where N is the number of spatial
@@ -52,41 +96,41 @@ namespace at { namespace native { namespace {
  *      `ComputeLocation`s, applies interpolation procedure, and then writes to
  *      the output (or grad_input & grad_grid in backward).
  *
- *      template<typename scalar_t, int spatial_dim,
- *               GridSamplerInterpolation interp,
- *               GridSamplerPadding padding>
- *      struct ApplyGridSample {
+ *        template<typename scalar_t, int spatial_dim,
+ *                 GridSamplerInterpolation interp,
+ *                 GridSamplerPadding padding>
+ *        struct ApplyGridSample {
  *
- *        // ctor
- *        ApplyGridSample(const TensorAccessor<scalar_t, 4>& input);
+ *          // ctor
+ *          ApplyGridSample(const TensorAccessor<scalar_t, 4>& input);
  *
- *        // Applies grid sampling (forward) procedure:
- *        //   1. computes interpolation locations from grid values `grid_x` and
- *        //      `grid_y`,
- *        //   2. interpolates output values using the locations and input data
- *        //      in `inp_slice`, and
- *        //   3. writes the first `len` values in the interpolated vector to
- *        //      `out_slice` with spatial offset being `offset`.
- *        //
- *        // This assimes that `grid_x` and `grid_y` all contain valid grid
- *        // values \in [-1, 1], even at indices greater than `len`.
- *        //
- *        // The `*_slice` argument namess mean samples within a batch (i.e.,
- *        // with the batch dimension sliced out).
- *        void forward(TensorAccessor<scalar_t, 3>& out_slice,
- *                     const TensorAccessor<scalar_t, 3>& inp_slice,
- *                     int64_t offset, const Vec& grid_x, const Vec& grid_y,
- *                     int64_t len) const;
+ *          // Applies grid sampling (forward) procedure:
+ *          //   1. computes interpolation locations from grid values `grid_x`
+ *          //      and `grid_y`,
+ *          //   2. interpolates output values using the locations and input
+ *          //      data in `inp_slice`, and
+ *          //   3. writes the first `len` values in the interpolated vector to
+ *          //      `out_slice` with spatial offset being `offset`.
+ *          //
+ *          // This assimes that `grid_x` and `grid_y` all contain valid grid
+ *          // values \in [-1, 1], even at indices greater than `len`.
+ *          //
+ *          // The `*_slice` argument namess mean samples within a batch (i.e.,
+ *          // with the batch dimension sliced out).
+ *          void forward(TensorAccessor<scalar_t, 3>& out_slice,
+ *                       const TensorAccessor<scalar_t, 3>& inp_slice,
+ *                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
+ *                       int64_t len) const;
  *
- *        // Applies grid sampling (backward) procedure. Arguments semantics
- *        // and strategy are similar to those of `forward`.
- *        void backward(TensorAccessor<scalar_t, 3>& gInp_slice,
- *                      TensorAccessor<scalar_t, 3>& gGrid_slice,
- *                      const TensorAccessor<scalar_t, 3>& gOut_slice,
- *                      const TensorAccessor<scalar_t, 3>& inp_slice,
- *                      int64_t offset, const Vec& grid_x, const Vec& grid_y,
- *                      int64_t len) const;
- *      };
+ *          // Applies grid sampling (backward) procedure. Arguments semantics
+ *          // and strategy are similar to those of `forward`.
+ *          void backward(TensorAccessor<scalar_t, 3>& gInp_slice,
+ *                        TensorAccessor<scalar_t, 3>& gGrid_slice,
+ *                        const TensorAccessor<scalar_t, 3>& gOut_slice,
+ *                        const TensorAccessor<scalar_t, 3>& inp_slice,
+ *                        int64_t offset, const Vec& grid_x, const Vec& grid_y,
+ *                        int64_t len) const;
+ *        };
  *
  *   3. `grid_sample_2d_grid_slice_iterator` function
  *      Among the tensors we work with, we know that the output tensors are
@@ -94,36 +138,32 @@ namespace at { namespace native { namespace {
  *      backward), we need to randomly read `input` anyways, and `grad_output`
  *      usually comes from autograd and is often contiguous. So we base our
  *      iterating strategy on the geometry of grid.
- *      `grid_sample_2d_grid_slice_iterator` function provides an abstract to
+ *      `grid_sample_2d_grid_slice_iterator` function provides an abstraction to
  *      efficiently iterates through a `grid` slice (without batch dimension).
  *      See comments of that function on the specific cases and strategies used.
  *
- *      template<typename scalar_t, typename ApplyFn>
- *      void grid_sample_2d_grid_slice_iterator(
- *        const TensorAccessor<scalar_t, 3>& grid_slice,
- *        const ApplyFn &apply_fn);
+ *        template<typename scalar_t, typename ApplyFn>
+ *        void grid_sample_2d_grid_slice_iterator(
+ *          const TensorAccessor<scalar_t, 3>& grid_slice,
+ *          const ApplyFn &apply_fn);
  *
- *      // `apply_fn` is a function/lambda that can be called as if it has
- *      // declaration:
- *      //   void apply_fn(const Vec256<scalar_t>& grid_x,
- *      //                 const Vec256<scalar_t>& grid_y,
- *      //                 int64_t spatial_offset, int64_t len);
+ *      `apply_fn` is a function/lambda that takes in
+ *           i.   location vectors (x and y for 2D) extracted from grid
+ *           ii.  `spatial_offset` as the spatial offset of these vectors
+ *                from the beginning of this slice.
+ *           iii. `len` as the number of valid locations in the vectors.
+ *                (There might not be enough near boundary.)
+
+ *       It should be callable as if it has declaration:
+ *          void apply_fn(const Vec256<scalar_t>& grid_x,
+ *                        const Vec256<scalar_t>& grid_y,
+ *                        int64_t spatial_offset, int64_t len);
  *
  *      `apply_fn` will be called multiple times, and together cover the entire
- *      output spatial space. Therefore, e.g., to implement forward 2d grid
- *      sample, we can do
+ *      output spatial space.
  *
- *      ApplyGridSample<scalar_t, 2, interp, padding> grid_sample(input_accessor);
- *
- *      for (int n = 0; n < input_accessor.size(0); n++) {
- *        grid_sample_2d_grid_slice_iterator(
- *          grid_accessor[n],
- *          [&](const Vec256<scalar_t>& grid_x, const Vec256<scalar_t>& grid_y,
- *              int64_t spatial_offset, int64_t len) {
- *            grid_sample.forward(out_accessor[n], input_accessor[n],
- *                                spatial_offset, grid_x, grid_y, len);
- *          });
- *      }
+ *  Now you should be able tp understand everything about the implementaion of
+ *  2D forward kernel shown at the beginning of this note.
  *
  **/
 
@@ -190,14 +230,17 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Border>
     return min(Vec(max_val), max(unnormalize(in), Vec(0)));
   }
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
+    using int_t = int_same_size_t<scalar_t>;
     Vec max_val_vec(max_val), zeros(0);
     auto indices = unnormalize(in);
-    auto in_bound_hi = indices <= max_val_vec;
-    auto in_bound_lo = indices >= zeros;
-    auto res = Vec::blendv(zeros,
-                           Vec::blendv(max_val_vec, indices, in_bound_hi),
-                           in_bound_lo);
-    return std::make_pair(res, (in_bound_hi & in_bound_lo) & Vec(half_max_val));
+    auto bounded_lo = max(indices, zeros);
+    // Integral type equality comparison is very very fast because it just looks
+    // at the bits. Casting is free too. So we use the following pattern instead
+    // of comparison + blendv.
+    auto in_bound_lo = cast<scalar_t>(cast<int_t>(bounded_lo) == cast<int_t>(indices));
+    auto res = min(bounded_lo, max_val_vec);
+    auto in_bound_hi = cast<scalar_t>(cast<int_t>(res) == cast<int_t>(indices));
+    return std::make_pair(res, (in_bound_lo & in_bound_hi) & Vec(half_max_val));
   }
 };
 
@@ -250,7 +293,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection>
 
     return std::make_pair(
       Vec::blendv(extra, reflected_extra, one_more_flip),
-      Vec::blendv(half_max_val, Vec(neg_half_max_val), one_more_flip ^ neg_in)
+      Vec::blendv(Vec(half_max_val), Vec(neg_half_max_val), one_more_flip ^ neg_in)
     );
   }
 };

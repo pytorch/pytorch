@@ -351,11 +351,28 @@ inline mask_gather(const Vec256<T>& src, T const* base_addr,
 // Cast a given vector to another type without changing the bits representation.
 // So a Vec<double> of 256 bits containing all ones can be cast to a
 // Vec<int64_t> of 256 bits containing all ones (i.e., four negative 1s).
+namespace {
+  // There is a struct here because we don't have static_if and I can't
+  // partially specialize a templated function.
+  template<typename dst_t, typename src_t>
+  struct CastImpl {
+    static inline Vec256<dst_t> apply(const Vec256<src_t>& src) {
+      src_t src_arr[Vec256<src_t>::size];
+      src.store(static_cast<void*>(src_arr));
+      return Vec256<dst_t>::loadu(static_cast<const void*>(src_arr));
+    }
+  };
+
+  template<typename scalar_t>
+  struct CastImpl<scalar_t, scalar_t> {
+    static inline Vec256<scalar_t> apply(const Vec256<scalar_t>& src) {
+      return src;
+    }
+  };
+}
 template<typename dst_t, typename src_t>
 Vec256<dst_t> cast(const Vec256<src_t>& src) {
-  src_t src_arr[Vec256<src_t>::size];
-  src.store(static_cast<void*>(src_arr));
-  return Vec256<dst_t>::loadu(static_cast<const void*>(src_arr));
+  return CastImpl<dst_t, src_t>::apply(src);
 }
 
 template <typename T>
