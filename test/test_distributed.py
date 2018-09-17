@@ -257,6 +257,12 @@ class _DistTestBase(object):
             dist.DistBackend("undefined")
         with self.assertRaisesRegex(ValueError, "Invalid backend: 'xYz'"):
             dist.DistBackend("xYz")
+        with self.assertRaises(ValueError):
+            dist.DistBackend(None)
+        with self.assertRaises(ValueError):
+            dist.DistBackend(3)
+        with self.assertRaises(ValueError):
+            dist.DistBackend(["gloo"])
 
     # Test destroy
     def test_destroy_group(self):

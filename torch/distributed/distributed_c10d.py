@@ -230,8 +230,9 @@ def init_process_group(backend,
     Arguments:
         backend (str or DistBackend): The backend to use. Depending on
             build-time configurations, valid values include ``mpi``, ``gloo``,
-            and ``nccl``. This field can be either a string (e.g., ``"gloo"``)
-            or a :class:`DistBackend` constant (e.g., ``DistBackend.GLOO``).
+            and ``nccl``. This field should be given as a lowercase string
+            (e.g., ``"gloo"``), which can also be accessed via
+            :class:`DistBackend` attributes (e.g., ``DistBackend.GLOO``).
         init_method (str, optional): URL specifying how to initialize the
                                      process group.
         world_size (int, optional): Number of processes participating in
@@ -239,8 +240,8 @@ def init_process_group(backend,
         rank (int, optional): Rank of the current process.
         group_name (str, optional, deprecated): Group name.
 
-    To enable ``backend == mpi``, PyTorch needs to built from source on
-    a system that supports MPI. The same applies to NCCL as well.
+    To enable ``backend == DistBackend.MPI``, PyTorch needs to built from source
+    on a system that supports MPI. The same applies to NCCL as well.
 
     """
     global _pg_map
