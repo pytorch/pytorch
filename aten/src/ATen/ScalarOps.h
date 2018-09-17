@@ -10,6 +10,8 @@ namespace at {
 inline Tensor scalar_to_tensor(Scalar s) {
   if (s.isFloatingPoint()) {
     return CPU(kDouble).scalarTensor(s);
+  } else if (s.isComplex()) {
+    return CPU(kComplexDouble).scalarTensor(s);
   } else {
     AT_ASSERT(s.isIntegral());
     return CPU(kLong).scalarTensor(s);
