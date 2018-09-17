@@ -120,10 +120,7 @@ class RelaxedBernoulli(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RelaxedBernoulli, _instance)
-        base_dist = self.base_dist.expand(batch_shape)
-        super(RelaxedBernoulli, new).__init__(base_dist, SigmoidTransform(), validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+        return super(RelaxedBernoulli, self).expand(batch_shape, _instance=new)
 
     @property
     def temperature(self):

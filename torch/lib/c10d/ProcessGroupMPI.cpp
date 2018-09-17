@@ -649,7 +649,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
     std::vector<at::Tensor>& tensors,
-    int dstRank) {
+    int dstRank,
+    int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
@@ -666,7 +667,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
         tensor.numel(),
         mpiDatatype.at(tensor.type().scalarType()),
         dstRank,
-        0,
+        tag,
         pgComm_,
         &request));
   }
@@ -676,7 +677,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
     std::vector<at::Tensor>& tensors,
-    int srcRank) {
+    int srcRank,
+    int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
@@ -693,7 +695,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
         tensor.numel(),
         mpiDatatype.at(tensor.type().scalarType()),
         srcRank,
-        0,
+        tag,
         pgComm_,
         &request));
   }
@@ -703,7 +705,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
     std::vector<at::Tensor>& tensors,
-    int* srcRank) {
+    int* srcRank,
+    int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
@@ -720,7 +723,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
         tensor.numel(),
         mpiDatatype.at(tensor.type().scalarType()),
         MPI_ANY_SOURCE,
-        0,
+        tag,
         pgComm_,
         &request));
   }
