@@ -490,8 +490,8 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
         # Clang has an unfixed bug leading to spurious missing braces
         # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
         -Wno-missing-braces)
-	  target_compile_options(gtest_api PRIVATE
-		-Wno-missing-braces)
+      target_compile_options(gtest_api PRIVATE
+        -Wno-missing-braces)
 	else()
       target_compile_options(test_api PRIVATE
         # Considered to be flaky.  See the discussion at
