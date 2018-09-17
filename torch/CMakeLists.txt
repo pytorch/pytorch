@@ -499,7 +499,7 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
         -Wno-maybe-uninitialized
         # gcc gives nonsensical warnings about variadic.h
         -Wno-unused-but-set-parameter)
-      target_compile_options(gtest_api PRIVATE
+     target_compile_options(gtest_api PRIVATE
 		-Wno-maybe-uninitialized
 		-Wno-unused-but-set-parameter)
     endif()
