@@ -84,7 +84,7 @@ static inline Storage pin_memory(int64_t size, Tensor dummy) {
   name = static_cast<type*>(storage_##name.data());
 
 template <typename scalar_t>
-static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
+static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("gesv: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
