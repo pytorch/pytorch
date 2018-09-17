@@ -139,3 +139,27 @@ namespace test_map_types_to_values {
     }
 
 }
+
+namespace test_find {
+  static_assert(0 == find<typelist<int>, int>::value, "");
+  static_assert(0 == find<typelist<int, double, bool>, int>::value, "");
+  static_assert(1 == find<typelist<int, double, bool>, double>::value, "");
+  static_assert(0 == find<typelist<int, int&, const int&, int&&>, int>::value, "");
+  static_assert(1 == find<typelist<int, int&, const int&, int&&>, int&>::value, "");
+  static_assert(2 == find<typelist<int, int&, const int&, int&&>, const int&>::value, "");
+  static_assert(3 == find<typelist<int, int&, const int&, int&&>, int&&>::value, "");
+}
+
+namespace test_contains {
+  static_assert(!contains_t<typelist<>, int>::value, "");
+  static_assert(contains_t<typelist<int, double>, int>::value, "");
+  static_assert(!contains_t<typelist<int, double>, float>::value, "");
+  static_assert(!contains_t<typelist<int, double>, int&>::value, "");
+}
+
+namespace test_unique {
+  static_assert(std::is_same<typelist<>, unique_t<typelist<>>>::value, "");
+  static_assert(std::is_same<typelist<int>, unique_t<typelist<int, int, int>>>::value, "");
+  static_assert(std::is_same<typelist<int, double, float>, unique_t<typelist<int, double, int, int, float, double>>>::value, "");
+  static_assert(std::is_same<typelist<int, int&, const int&, int&&>, unique_t<typelist<int, int, int&, const int&, int&&, int&, int>>>::value, "");
+}
