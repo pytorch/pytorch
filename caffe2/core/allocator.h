@@ -11,8 +11,8 @@ CAFFE2_DECLARE_bool(caffe2_cpu_allocator_do_zero_fill);
 
 namespace caffe2 {
 
-// Use 32-byte alignment should be enough for computation up to AVX512.
-constexpr size_t gCaffe2Alignment = 32;
+// Use 64-byte alignment should be enough for computation up to AVX512.
+constexpr size_t gCaffe2Alignment = 64;
 
 using MemoryDeleter = void (*)(void*);
 
