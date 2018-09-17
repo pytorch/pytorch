@@ -68,8 +68,7 @@ at::Tensor DecoderBase::buildTensor(const onnx::TensorProto& tensor_proto) {
   tensor.resize_(sizes);
 
   JIT_ASSERT(
-      tensor.storage().size() *
-          tensor.storage().elementSize() ==
+      tensor.storage().size() * tensor.storage().itemsize() ==
       tensor_proto.raw_data().size());
 
   std::memcpy(tensor.data_ptr(), tensor_proto.raw_data().data(), tensor_proto.raw_data().size());

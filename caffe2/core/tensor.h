@@ -176,10 +176,6 @@ class CAFFE2_API Tensor final {
     impl_.get()->Reshape(dims);
   }
 
-  inline void FreeMemory() const {
-    impl_.get()->FreeMemory();
-  }
-
   string DebugString() const {
     return impl_.get()->DebugString();
   }
