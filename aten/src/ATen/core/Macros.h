@@ -43,8 +43,11 @@
 // Designates functions callable from the host (CPU) and the device (GPU)
 #define AT_HOST_DEVICE __host__ __device__
 #define AT_DEVICE __device__
+#define AT_HOST __host__
 #else
 #define AT_HOST_DEVICE
+#define AT_HOST
+#define AT_DEVICE
 #endif
 
 // Disable the copy and assignment operator for a class. Note that this will
