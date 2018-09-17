@@ -1,5 +1,5 @@
 import torch
-from enum import Enum
+from torch._six import string_classes
 
 from .rendezvous import rendezvous, register_rendezvous_handler
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
@@ -24,16 +24,17 @@ except ImportError:
     _NCCL_AVAILBLE = False
 
 
-class DistBackend(Enum):
+class DistBackend(object):
     """
-    An enum class of available backends: GLOO, NCCL, and MPI.
+    An enum-like class of available backends: GLOO, NCCL, and MPI.
 
-    The values of this class can be accessed as attributes, e.g.,
-    ``DistBackend.NCCL``, and used directly in calling
-    :func:`~torch.distributed.init_process_group`.
+    The values of this class are lowercase strings, e.g., ``"gloo"``. They can
+    be accessed as attributes, e.g., ``DistBackend.NCCL``.
 
-    .. note:: ``.value`` attribute can be used to get the name of backend as a
-              string, e.g., ``dist.get_backend().value``.
+    This class can be directly called to parse the string, e.g.,
+    ``DistBackend(backend_str)`` will check if ``backend_str`` is valid, and
+    return the parsed lowercase string if so. It also accepts uppercase strings,
+    e.g., ``DistBackend("GLOO")`` returns ``"gloo"``.
 
     .. note:: The entry ``DistBackend.UNDEFINED`` is present but only used as
               initial value of some fields. Users should neither use it directly
@@ -44,20 +45,13 @@ class DistBackend(Enum):
     NCCL = "nccl"
     MPI = "mpi"
 
-    @staticmethod
-    def parse(name):
-        if isinstance(name, DistBackend):
-            enum_val = name
-            name = enum_val.value  # get the string value
-        else:
-            enum_val = getattr(DistBackend, name.upper(), DistBackend.UNDEFINED)
-        if enum_val == DistBackend.UNDEFINED:
+    def __new__(cls, name):
+        if not isinstance(name, string_classes):
+            raise ValueError("Backend name must be a string, but got: {}".format(name))
+        value = getattr(DistBackend, name.upper(), DistBackend.UNDEFINED)
+        if value == DistBackend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
-        return enum_val
-
-# Overwriting __new__ after class definition so we can add the custom parsing
-# logic to DistBackend(...) call.
-DistBackend.__new__ = lambda cls, name: DistBackend.parse(name)
+        return value
 
 # The following two values are here to maintain backward compatibility with
 # pre-c10d distributed package.
@@ -223,7 +217,7 @@ def get_backend(group=group.WORLD):
         pg = group
     if _rank_not_in_group(pg):
         raise RuntimeError("Invalid process group specified")
-    return _pg_map.get(pg, None)[0].value
+    return _pg_map.get(pg, None)[0]
 
 
 def init_process_group(backend,

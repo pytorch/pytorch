@@ -250,16 +250,13 @@ class _DistTestBase(object):
 
     def test_DistBackend(self):
         # test parsing
-        backend = dist.DistBackend(BACKEND)
+        backend = BACKEND.lower()
         self.assertEqual(dist.DistBackend(BACKEND.upper()), backend)
-        self.assertEqual(dist.DistBackend.parse(BACKEND.upper()), backend)
-        self.assertEqual(dist.DistBackend.parse(BACKEND), backend)
+        self.assertEqual(dist.DistBackend(BACKEND), backend)
         with self.assertRaisesRegex(ValueError, "Invalid backend: 'undefined'"):
             dist.DistBackend("undefined")
-        with self.assertRaisesRegex(ValueError, "Invalid backend: 'undefined'"):
-            dist.DistBackend(dist.DistBackend("undefined"))
         with self.assertRaisesRegex(ValueError, "Invalid backend: 'xYz'"):
-            dist.DistBackend(dist.DistBackend("xYz"))
+            dist.DistBackend("xYz")
 
     # Test destroy
     def test_destroy_group(self):
