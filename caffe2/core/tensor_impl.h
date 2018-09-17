@@ -679,6 +679,10 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_;
   }
 
+  inline const std::vector<TIndex>& sizes() const {
+    return sizes_;
+  }
+
   inline TIndex size_from_dim(int k) const {
     return size_from_dim_(k, sizes_);
   }
@@ -785,25 +789,31 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TypeMeta data_type_;
 
  private:
+  TIndex compute_numel() const {
+    TIndex n = 1;
+    for (auto s : sizes()) {
+      n *= s;
+    }
+    return n;
+  }
+
   template <
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDims(const std::vector<T>& src) {
     auto old_numel = numel_;
     sizes_.resize(src.size());
-    TIndex new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
-      new_numel *= src[i];
       sizes_[i] = src[i];
     }
-    numel_ = new_numel;
+    numel_ = compute_numel();
     return numel_ != old_numel;
   }
 
   bool SetDims() {
     auto old_numel = numel_;
     sizes_.resize(0);
-    numel_ = 1;
+    numel_ = compute_numel();
     return numel_ != old_numel;
   }
 
@@ -814,7 +824,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     auto old_numel = numel_;
     sizes_.resize(1);
     sizes_[0] = d0;
-    numel_ = d0;
+    numel_ = compute_numel();
     return numel_ != old_numel;
   }
 
@@ -823,7 +833,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_.resize(2);
     sizes_[0] = d0;
     sizes_[1] = d1;
-    numel_ = d0 * d1;
+    numel_ = compute_numel();
     return numel_ != old_numel;
   }
 
@@ -833,7 +843,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_[0] = d0;
     sizes_[1] = d1;
     sizes_[2] = d2;
-    numel_ = d0 * d1 * d2;
+    numel_ = compute_numel();
     return numel_ != old_numel;
   }
 
@@ -845,7 +855,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_[1] = d1;
     sizes_[2] = d2;
     sizes_[3] = d3;
-    numel_ = d0 * d1 * d2 * d3;
+    numel_ = compute_numel();
     return numel_ != old_numel;
   }
 };
