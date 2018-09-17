@@ -1,5 +1,5 @@
 import torch
-from enum import IntEnum
+from enum import Enum
 
 from .rendezvous import rendezvous, register_rendezvous_handler
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
@@ -24,36 +24,40 @@ except ImportError:
     _NCCL_AVAILBLE = False
 
 
-class DistBackend(IntEnum):
+class DistBackend(Enum):
     """
     An enum class of available backends: GLOO, NCCL, and MPI.
 
     The values of this class can be accessed as attributes, e.g.,
     ``DistBackend.NCCL``, and used directly in calling
-    :func:`~torch.distributed.init_process_group`. The function
-    :func:`torch.distributed.get_backend` will also return values of this enum.
+    :func:`~torch.distributed.init_process_group`.
 
-    .. note:: ``.name`` attribute can be used to get the name of backend as a
-              string, e.g., ``dist.get_backend().name``.
+    .. note:: ``.value`` attribute can be used to get the name of backend as a
+              string, e.g., ``dist.get_backend().value``.
 
     .. note:: The entry ``DistBackend.UNDEFINED`` is present but only used as
               initial value of some fields. Users should neither use it directly
               nor assume its existence.
     """
-    UNDEFINED = -1
-    GLOO = 0
-    NCCL = 2
-    MPI = 3
+    UNDEFINED = "undefined"
+    GLOO = "gloo"
+    NCCL = "nccl"
+    MPI = "mpi"
 
     @staticmethod
     def parse(name):
         if isinstance(name, DistBackend):
-            val = name
+            enum_val = name
+            name = enum_val.value  # get the string value
         else:
-            val = getattr(DistBackend, name.upper(), None)
-        if val is None or val == DistBackend.UNDEFINED:
-            raise RuntimeError("Invalid backend: '{}'".format(name))
-        return val
+            enum_val = getattr(DistBackend, name.upper(), DistBackend.UNDEFINED)
+        if enum_val == DistBackend.UNDEFINED:
+            raise ValueError("Invalid backend: '{}'".format(name))
+        return enum_val
+
+# Overwriting __new__ after class definition so we can add the custom parsing
+# logic to DistBackend(...) call.
+DistBackend.__new__ = lambda cls, name: DistBackend.parse(name)
 
 # The following two values are here to maintain backward compatibility with
 # pre-c10d distributed package.
@@ -208,7 +212,7 @@ def get_backend(group=group.WORLD):
             is specified, the calling process must be part of :attr:`group`.
 
     Returns:
-        The backend of the given process group as a :class:`DistBackend` value.
+        The backend of the given process group as a lower case string.
 
     """
     _check_default_pg()
@@ -217,10 +221,9 @@ def get_backend(group=group.WORLD):
         pg = _default_pg
     else:
         pg = group
-    pg_info = _pg_map.get(pg, None)
-    if pg_info is None:
+    if _rank_not_in_group(pg):
         raise RuntimeError("Invalid process group specified")
-    return pg_info[0]
+    return _pg_map.get(pg, None)[0].value
 
 
 def init_process_group(backend,
@@ -262,7 +265,7 @@ def init_process_group(backend,
     assert len(kwargs) == 0, \
         "got unexpected keyword arguments: %s" % ",".join(kwargs.keys())
 
-    backend = DistBackend.parse(backend)
+    backend = DistBackend(backend)
 
     if backend == DistBackend.MPI:
         if not is_mpi_available():
