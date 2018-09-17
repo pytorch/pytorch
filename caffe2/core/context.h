@@ -207,6 +207,7 @@ class CAFFE2_API CPUStaticContext : public BaseStaticContext {
 
   void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
       override {
+    CHECK(device);
     device->set_device_type(TypeToProto(GetDeviceType()));
   }
 

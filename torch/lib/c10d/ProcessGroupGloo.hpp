@@ -327,15 +327,18 @@ class ProcessGroupGloo : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
-      int dstRank) override;
+      int dstRank,
+      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
-      int srcRank) override;
+      int srcRank,
+      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
-      int* srcRank) override;
+      int* srcRank,
+      int tag) override;
 
   std::shared_ptr<ProcessGroup::Work> barrier() override;
 
