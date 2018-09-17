@@ -22,8 +22,6 @@ CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace caffe2 {
 
-using DimVector = at::SmallVector<int64_t, 5>;
-
 /**
  * A utility function to convert vector<int> to vector<TIndex>.
  */
@@ -137,7 +135,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (data_type_ != src.meta()) {
       CAFFE_ENFORCE_WITH_CALLER(
           src.is_contiguous(),
-          "Source Tensor must be contiguous in order to be copied.");
+          "Right now only copy of contiguous source Tensor is supported.");
       storage_ = at::Storage(GetDeviceType(), src.meta());
       data_type_ = src.meta();
     }
@@ -211,7 +209,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     CAFFE_ENFORCE_GE_WITH_CALLER(
         num, 0, "`num` must be non-negative for Extend");
     CAFFE_ENFORCE_WITH_CALLER(
-        is_contiguous_, "Tensor must be contiguous in order to call Extend.");
+        is_contiguous_,
+        "Right now Extend is only supported for contiguous Tensor.");
     auto newDims = dims_;
     newDims[0] += num;
     if (!storage_.data()) {
@@ -253,7 +252,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void ShrinkTo(TIndex outer_dim) {
     CAFFE_ENFORCE_WITH_CALLER(
-        is_contiguous_, "Tensor must be contiguous in order to call ShrinkTo.");
+        is_contiguous_,
+        "Right now ShrinkTo is only supported on contiguous Tensor.");
     CAFFE_ENFORCE_WITH_CALLER(dims_.size() >= 1, "Tensor must be at least 1D");
     CAFFE_ENFORCE_WITH_CALLER(
         outer_dim <= dims_[0],
@@ -279,7 +279,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   void ReserveSpace(const T& outer_dim) {
     CAFFE_ENFORCE_WITH_CALLER(
         is_contiguous_,
-        "Tensor must be contiguous in order to call ReserveSpace.");
+        "Right now ReserveSpace is only supported for contiguous Tensor.");
     CAFFE_ENFORCE(
         numel_ != -1, "size should be initialized before calling ReserveSpace");
     CAFFE_ENFORCE(
@@ -351,7 +351,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   inline void ResizeLike(const TensorImpl& src_tensor) {
     CAFFE_ENFORCE_WITH_CALLER(
         src_tensor.is_contiguous(),
-        "Tensor must be contiguous in order to call ResizeLike.");
+        "Right now ResizeLike is only supported for contiguous Tensor.");
     // Note: need casting for different context types.
     if (static_cast<void*>(this) != static_cast<const void*>(&src_tensor)) {
       Resize(src_tensor.dims());
@@ -364,7 +364,8 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void Reshape(const std::vector<TIndex>& dims) {
     CAFFE_ENFORCE_WITH_CALLER(
-        is_contiguous_, "Tensor must be contiguous in order to call Reshape.");
+        is_contiguous_,
+        "Right now Reshape is only supported for contiguous Tensor.");
     TIndex new_size = 1;
     for (auto d : dims) {
       CAFFE_ENFORCE_GE_WITH_CALLER(d, 0);
@@ -475,7 +476,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       MemoryDeleter d = nullptr) {
     CAFFE_ENFORCE_WITH_CALLER(
         is_contiguous_,
-        "Tensor must be contiguous in order to call ShareExternalPointer.");
+        "Right now ShareExternalPointer is only supported for contiguos Tensor.");
     CAFFE_ENFORCE_WITH_CALLER(
         data_type.id() != TypeIdentifier::uninitialized(),
         "To share with a raw external pointer you need to pass in an "
@@ -739,7 +740,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   // TODO: Change to ArrayRef later
-  inline DimVector strides() {
+  inline at::DimVector strides() {
     return strides_;
   }
 
@@ -815,7 +816,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
  protected:
   // TODO: change to DimVector
   std::vector<TIndex> dims_; // sizes_
-  DimVector strides_;
+  at::DimVector strides_;
   TIndex numel_ = -1; // numel_
   bool is_contiguous_ = true;
   // we decide to keep reserved_ and it will

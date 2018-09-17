@@ -3,7 +3,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     return()
   endif()
 else()
-  cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
   project(torch CXX C)
   find_package(Caffe2 REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
@@ -322,15 +322,8 @@ if(OPENMP_FOUND)
   if (VERBOSE)
     message(STATUS "Compiling with OpenMP")
   endif()
-  target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
-  #cmake only check for separate OpenMP library on AppleClang 7+
-  #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
-  if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
-    if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
-        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
-      target_link_libraries(torch ${OpenMP_libomp_LIBRARY})
-    endif()
-  endif()
+  target_compile_options(torch INTERFACE -fopenmp)
+  target_link_libraries(torch -fopenmp)
 endif()
 
 if (NOT NO_API AND NOT USE_ROCM)
@@ -420,7 +413,7 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
-install(FILES "${TORCH_SRC_DIR}/op.h"
+install(FILES "${TORCH_SRC_DIR}/script.h"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 install(TARGETS torch
@@ -493,6 +486,28 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
         -Wno-unused-but-set-parameter)
     endif()
   endif()
+endif()
+
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  message(STATUS "${CMAKE_CXX_COMPILER} ${CMAKE_CURRENT_LIST_DIR}/abi-check.cpp -o ${CMAKE_BINARY_DIR}/abi-check")
+  execute_process(
+    COMMAND
+      "${CMAKE_CXX_COMPILER}"
+      "${CMAKE_CURRENT_LIST_DIR}/abi-check.cpp"
+      "-o"
+      "${CMAKE_BINARY_DIR}/abi-check"
+    RESULT_VARIABLE ABI_CHECK_COMPILE_RESULT)
+  if (ABI_CHECK_COMPILE_RESULT)
+    message(FATAL_ERROR "Could not compile ABI Check: ${ABI_CHECK_COMPILE_RESULT}")
+  endif()
+  execute_process(
+    COMMAND "${CMAKE_BINARY_DIR}/abi-check"
+    RESULT_VARIABLE ABI_CHECK_RESULT
+    OUTPUT_VARIABLE GLIBCXX_USE_CXX11_ABI)
+  if (ABI_CHECK_RESULT)
+    message(WARNING "Could not run ABI Check: ${ABI_CHECK_RESULT}")
+  endif()
+  message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
 endif()
 
 # CMake config for external projects.

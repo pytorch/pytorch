@@ -290,7 +290,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->stride(dim);
   }
 
-  inline DimVector strides() {
+  inline at::DimVector strides() {
     return impl_.get()->strides();
   }
 
