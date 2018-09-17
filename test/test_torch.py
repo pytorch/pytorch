@@ -1080,7 +1080,6 @@ class TestTorch(TestCase):
             self.assertEqual(torch.zeros(0, device=device), torch.pairwise_distance(x, y))
             self.assertEqual(torch.zeros((0, 1), device=device), torch.pairwise_distance(x, y, keepdim=True))
 
-    @skipIfRocm
     def test_pdist_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -1096,7 +1095,6 @@ class TestTorch(TestCase):
             x = torch.randn(shape, device=device)
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_pdist_scipy(self):
         from scipy.spatial.distance import pdist
@@ -2279,7 +2277,6 @@ class TestTorch(TestCase):
                                                 dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                                 int64_dtype, layout, device, fv + 5, False)
 
-    @skipIfRocm
     def test_empty_full(self):
         self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
@@ -3798,7 +3795,6 @@ class TestTorch(TestCase):
         self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
         self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
 
-    @skipIfRocm
     def test_narrow_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -4091,7 +4087,6 @@ class TestTorch(TestCase):
         self.assertEqual(x.data, cast(x_exp))
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_gesv_batched_dims(self):
         self._test_gesv_batched_dims(self, lambda t: t)
 
@@ -7620,7 +7615,6 @@ class TestTorch(TestCase):
             self.assertEqual(device, device_copied)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_half_tensor_cuda(self):
         x = torch.randn(5, 5).half()
         self.assertEqual(x.cuda(), x)
