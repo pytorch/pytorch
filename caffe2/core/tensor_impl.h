@@ -251,14 +251,10 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * that the extra capacity after the end of the shurnk tensor is maintained.
    */
   void ShrinkTo(TIndex outer_dim) {
-<<<<<<< HEAD
     CAFFE_ENFORCE_WITH_CALLER(
         is_contiguous_,
         "Right now ShrinkTo is only supported on contiguous Tensor.");
-    CAFFE_ENFORCE_WITH_CALLER(dims_.size() >= 1, "Tensor must be at least 1D");
-=======
     CAFFE_ENFORCE_WITH_CALLER(sizes_.size() >= 1, "Tensor must be at least 1D");
->>>>>>> Uses sizes_ instead of dims_ in caffe2::TensorImpl
     CAFFE_ENFORCE_WITH_CALLER(
         outer_dim <= sizes_[0],
         "New outer dimension must be smaller than current.");
@@ -706,6 +702,10 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_;
   }
 
+  inline const std::vector<TIndex>& sizes() const {
+    return sizes_;
+  }
+
   inline TIndex size_from_dim(int k) const {
     return size_from_dim_(k, sizes_);
   }
@@ -838,19 +838,29 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TypeMeta data_type_;
 
  private:
+  TIndex compute_numel() const {
+    TIndex n = 1;
+    for (auto s : sizes()) {
+      n *= s;
+    }
+    return n;
+  }
+
   template <
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDims(const std::vector<T>& src) {
     auto old_numel = numel_;
     sizes_.resize(src.size());
-    TIndex new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
-      new_numel *= src[i];
       sizes_[i] = src[i];
     }
+<<<<<<< HEAD
     update_strides();
     numel_ = new_numel;
+=======
+    numel_ = compute_numel();
+>>>>>>> Add compute_numel and sizes() to caffe2::TensorImpl
     return numel_ != old_numel;
   }
 
@@ -861,8 +871,12 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     update_strides();
 =======
     sizes_.resize(0);
+<<<<<<< HEAD
 >>>>>>> Uses sizes_ instead of dims_ in caffe2::TensorImpl
     numel_ = 1;
+=======
+    numel_ = compute_numel();
+>>>>>>> Add compute_numel and sizes() to caffe2::TensorImpl
     return numel_ != old_numel;
   }
 
@@ -878,8 +892,12 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 =======
     sizes_.resize(1);
     sizes_[0] = d0;
+<<<<<<< HEAD
 >>>>>>> Uses sizes_ instead of dims_ in caffe2::TensorImpl
     numel_ = d0;
+=======
+    numel_ = compute_numel();
+>>>>>>> Add compute_numel and sizes() to caffe2::TensorImpl
     return numel_ != old_numel;
   }
 
@@ -894,8 +912,12 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_.resize(2);
     sizes_[0] = d0;
     sizes_[1] = d1;
+<<<<<<< HEAD
 >>>>>>> Uses sizes_ instead of dims_ in caffe2::TensorImpl
     numel_ = d0 * d1;
+=======
+    numel_ = compute_numel();
+>>>>>>> Add compute_numel and sizes() to caffe2::TensorImpl
     return numel_ != old_numel;
   }
 
@@ -912,8 +934,12 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_[0] = d0;
     sizes_[1] = d1;
     sizes_[2] = d2;
+<<<<<<< HEAD
 >>>>>>> Uses sizes_ instead of dims_ in caffe2::TensorImpl
     numel_ = d0 * d1 * d2;
+=======
+    numel_ = compute_numel();
+>>>>>>> Add compute_numel and sizes() to caffe2::TensorImpl
     return numel_ != old_numel;
   }
 
@@ -933,8 +959,12 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     sizes_[1] = d1;
     sizes_[2] = d2;
     sizes_[3] = d3;
+<<<<<<< HEAD
 >>>>>>> Uses sizes_ instead of dims_ in caffe2::TensorImpl
     numel_ = d0 * d1 * d2 * d3;
+=======
+    numel_ = compute_numel();
+>>>>>>> Add compute_numel and sizes() to caffe2::TensorImpl
     return numel_ != old_numel;
   }
 
