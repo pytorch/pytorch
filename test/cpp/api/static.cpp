@@ -23,18 +23,21 @@ torch::detail::enable_if_module_t<T, bool> f(T&& m) {
   return true;
 }
 
-// TEST_CASE("static") {
-TEST(static, static){
+TEST(TestStatic, All_Of){
   EXPECT_EQ(torch::all_of<>::value, true);
   EXPECT_EQ(torch::all_of<true>::value, true);
   EXPECT_EQ((torch::all_of<true, true, true>::value), true);
   EXPECT_EQ(torch::all_of<false>::value, false);
   EXPECT_EQ((torch::all_of<false, false, false>::value), false);
   EXPECT_EQ((torch::all_of<true, true, false>::value), false);
+}
+TEST(TestStatic, Any_Of){
   EXPECT_EQ(torch::any_of<>::value, false);
   EXPECT_EQ(bool((torch::any_of<true>::value)), true);
   EXPECT_EQ(bool((torch::any_of<true, true, true>::value)), true);
   EXPECT_EQ(bool((torch::any_of<false>::value)), false);
+}
+TEST(TestStatic, Enable_If_Module){
   EXPECT_EQ(f(torch::nn::LinearImpl(1, 2)), true);
   EXPECT_EQ(f(5), false);
   EXPECT_EQ(torch::detail::check_not_lvalue_references<int>(), true);
@@ -44,7 +47,8 @@ TEST(static, static){
       (torch::detail::check_not_lvalue_references<float, int&, char>()), false);
   EXPECT_EQ(torch::detail::check_not_lvalue_references<std::string>(), true);
   EXPECT_EQ(torch::detail::check_not_lvalue_references<std::string&>(), false);
-
+}
+TEST(TestStatic, Apply){
   std::vector<int> v;
   torch::apply([&v](int x) { v.push_back(x); }, 1, 2, 3, 4, 5);
   EXPECT_EQ(v.size(), 5);

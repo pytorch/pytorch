@@ -477,7 +477,7 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
    add_executable(gtest_api
 		${TORCH_API_GTEST_DIR}/static.cpp
 		)
-   target_include_directories(gtest_api PUBLIC ${ATen_CPU_INCLUDE})
+   target_include_directories(gtest_api PRIVATE ${ATen_CPU_INCLUDE})
    target_link_libraries(gtest_api torch gtest_main)
    if (USE_CUDA)
       target_link_libraries(gtest_api ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB} ${TORCH_CUDA_LIBRARIES})
@@ -499,7 +499,7 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
         -Wno-maybe-uninitialized
         # gcc gives nonsensical warnings about variadic.h
         -Wno-unused-but-set-parameter)
-	target_compile_options(gtest_api PRIVATE
+      target_compile_options(gtest_api PRIVATE
 		-Wno-maybe-uninitialized
 		-Wno-unused-but-set-parameter)
     endif()
