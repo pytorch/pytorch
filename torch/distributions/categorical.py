@@ -47,7 +47,9 @@ class Categorical(Distribution):
         if probs is not None:
             if probs.dim() < 1:
                 raise ValueError("`probs` parameter must be at least one-dimensional.")
-            self.probs = probs / probs.sum(-1, keepdim=True)
+            sum_probs = probs.detach().cpu().numpy().sum(-1, keepdims=True)
+            sum_probs = torch.from_numpy(sum_probs).type_as(probs).to(probs.device)
+            self.probs = probs / sum_probs
         else:
             if logits.dim() < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
