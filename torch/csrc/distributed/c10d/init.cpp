@@ -258,7 +258,8 @@ PyObject* c10d_init(PyObject* _unused) {
               "recv_anysource",
               [](::c10d::ProcessGroup& pg,
                  std::vector<at::Tensor>& input,
-                 at::Tensor& srcRankTensor) {
+                 at::Tensor& srcRankTensor,
+                 int tag) {
                 if (srcRankTensor.type().scalarType() != at::kInt) {
                   throw std::runtime_error(
                       "source rank tensor needs to be "
@@ -270,10 +271,11 @@ PyObject* c10d_init(PyObject* _unused) {
                       "contain only one element");
                 }
                 return pg.recvAnysource(
-                    input, static_cast<int*>(srcRankTensor.data_ptr()));
+                    input, static_cast<int*>(srcRankTensor.data_ptr()), tag);
               },
               py::arg("tensors"),
               py::arg("src_rank"),
+              py::arg("tag"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(

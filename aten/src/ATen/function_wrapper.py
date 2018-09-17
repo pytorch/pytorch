@@ -343,7 +343,8 @@ ALLOC_NOARGS_WRAP = {
     'THDenseTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                       '(${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), allocator(), false).release()',
     'THDenseIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                           '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Long), allocator(), false).release()'
+                           '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Long), '
+                           'allocator(), false).release()'
 }
 
 ALLOC_WRAP = {
@@ -1151,7 +1152,7 @@ def create_generic(top_env, declarations):
                 option['inferred_type'] = 'detail::infer_type({})'.format(dispatch_tensor)
             else:
                 # doesn't depend on a specific type, use undefined float
-                option['inferred_type'] = 'detail::non_specific_type()'
+                option['inferred_type'] = 'at::getNonVariableType(at::Backend::Undefined, at::ScalarType::Float)'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
             if is_factory_method:
