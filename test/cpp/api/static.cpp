@@ -24,29 +24,28 @@ torch::detail::enable_if_module_t<T, bool> f(T&& m) {
 }
 
 TEST(TestStatic, All_Of){
-  EXPECT_EQ(torch::all_of<>::value, true);
-  EXPECT_EQ(torch::all_of<true>::value, true);
-  EXPECT_EQ((torch::all_of<true, true, true>::value), true);
-  EXPECT_EQ(torch::all_of<false>::value, false);
-  EXPECT_EQ((torch::all_of<false, false, false>::value), false);
-  EXPECT_EQ((torch::all_of<true, true, false>::value), false);
+  EXPECT_TRUE(torch::all_of<>::value);
+  EXPECT_TRUE(torch::all_of<true>::value);
+  EXPECT_TRUE((torch::all_of<true, true, true>::value));
+  EXPECT_FALSE(torch::all_of<false>::value);
+  EXPECT_FALSE((torch::all_of<false, false, false>::value));
+  EXPECT_FALSE((torch::all_of<true, true, false>::value));
 }
 TEST(TestStatic, Any_Of){
-  EXPECT_EQ(torch::any_of<>::value, false);
-  EXPECT_EQ(bool((torch::any_of<true>::value)), true);
-  EXPECT_EQ(bool((torch::any_of<true, true, true>::value)), true);
-  EXPECT_EQ(bool((torch::any_of<false>::value)), false);
+  EXPECT_FALSE(torch::any_of<>::value);
+  EXPECT_TRUE(bool((torch::any_of<true>::value)));
+  EXPECT_TRUE(bool((torch::any_of<true, true, true>::value)));
+  EXPECT_FALSE(bool((torch::any_of<false>::value)));
 }
 TEST(TestStatic, Enable_If_Module){
-  EXPECT_EQ(f(torch::nn::LinearImpl(1, 2)), true);
-  EXPECT_EQ(f(5), false);
-  EXPECT_EQ(torch::detail::check_not_lvalue_references<int>(), true);
-  EXPECT_EQ(
-      (torch::detail::check_not_lvalue_references<float, int, char>()), true);
-  EXPECT_EQ(
-      (torch::detail::check_not_lvalue_references<float, int&, char>()), false);
-  EXPECT_EQ(torch::detail::check_not_lvalue_references<std::string>(), true);
-  EXPECT_EQ(torch::detail::check_not_lvalue_references<std::string&>(), false);
+  EXPECT_TRUE(f(torch::nn::LinearImpl(1, 2)));
+  EXPECT_FALSE(f(5));
+  EXPECT_TRUE(torch::detail::check_not_lvalue_references<int>());
+  EXPECT_TRUE((torch::detail::check_not_lvalue_references<float, int, char>()));
+  EXPECT_FALSE(
+      (torch::detail::check_not_lvalue_references<float, int&, char>()));
+  EXPECT_TRUE(torch::detail::check_not_lvalue_references<std::string>());
+  EXPECT_FALSE(torch::detail::check_not_lvalue_references<std::string&>());
 }
 TEST(TestStatic, Apply){
   std::vector<int> v;
