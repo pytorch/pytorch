@@ -186,13 +186,6 @@ To checked_convert(From f, const char* name) {
   return convert<To, From>(f);
 }
 
-template <typename To, typename From>
-To HalfFix(From h) {
-  To ret;
-  ret.x = h.x;
-  return ret;
-}
-
 AT_CORE_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace at

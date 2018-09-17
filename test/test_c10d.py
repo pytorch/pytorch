@@ -379,14 +379,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i in range(self.world_size):
             if i == self.rank:
                 continue
-            send_work.append(pg.send([inputs[i]], i))
+            send_work.append(pg.send([inputs[i]], i, 0))
 
         # Issue recvs
         recv_work = []
         for i in range(self.world_size):
             if i == self.rank:
                 continue
-            recv_work.append(pg.recv([outputs[i]], i))
+            recv_work.append(pg.recv([outputs[i]], i, 0))
 
         # Wait for sends to complete
         for work in send_work:
