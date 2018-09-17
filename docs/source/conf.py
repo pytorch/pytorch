@@ -29,7 +29,8 @@ try:
 except ImportError:
     import warnings
     warnings.warn('unable to load "torchvision" package')
-import sphinx_rtd_theme
+
+import pytorch_sphinx_theme
 
 RELEASE = os.environ.get('RELEASE', False)
 
@@ -134,8 +135,8 @@ autodoc_inherit_docstrings = False
 #
 #
 #
-html_theme = 'sphinx_rtd_theme'
-html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+html_theme = 'pytorch_sphinx_theme'
+html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
 
 # Theme options are theme-specific and customize the look and feel of a theme
@@ -143,6 +144,7 @@ html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 # documentation.
 #
 html_theme_options = {
+    'pytorch_project': 'docs',
     'canonical_url': 'https://pytorch.org/docs/stable/',
     'collapse_navigation': False,
     'display_version': True,
@@ -160,13 +162,13 @@ if RELEASE:
 html_static_path = ['_static', '_images']
 
 html_style_path = 'css/pytorch_theme.css'
-html_context = {
-    'css_files': [
-        'https://fonts.googleapis.com/css?family=Lato',
-        '_static/css/pytorch_theme.css',
-        'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css',
-    ],
-}
+#html_context = {
+    #'css_files': [
+    #    'https://fonts.googleapis.com/css?family=Lato',
+    #    '_static/css/pytorch_theme.css',
+    #    'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css',
+    #],
+#}
 
 
 # -- Options for HTMLHelp output ------------------------------------------
