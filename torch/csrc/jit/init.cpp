@@ -33,6 +33,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/fusers/interface.h"
 
 #include <pybind11/functional.h>
 
@@ -115,7 +116,8 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx_block", BlockToONNX)
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
    .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
-    .def("_jit_pass_specialize_undef", specializeUndef)
+   .def("_jit_pass_specialize_undef", specializeUndef)
+   .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
    .def("_jit_differentiate", [](Graph &g) {
        // the python binding slightly differs in semantics
        // it makes a copy of the input Graph, and works on that

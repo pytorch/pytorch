@@ -1215,6 +1215,22 @@ inline Scalar Tensor::_local_scalar() const {
     return type()._local_scalar(*this);
 }
 
+inline bool Tensor::is_variable() const noexcept {
+  return type().is_variable();
+}
+
+inline ScalarType Tensor::dtype() const noexcept {
+  return type().scalarType();
+}
+
+inline Layout Tensor::layout() const noexcept {
+  return type().layout();
+}
+
+inline Device Tensor::device() const {
+  return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
+}
+
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \

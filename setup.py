@@ -413,6 +413,7 @@ def build_libs(libs):
 # protobuf python compiler) from the build folder to the root folder
 # cp root/build/caffe2/proto/proto.py root/caffe2/proto/proto.py
 def copy_protos():
+    print('setup.py::copy_protos()')
     for src in glob.glob(
             os.path.join(caffe2_build_dir, 'caffe2', 'proto', '*.py')):
         dst = os.path.join(
@@ -423,6 +424,7 @@ def copy_protos():
 # Build all dependent libraries
 class build_deps(PytorchCommand):
     def run(self):
+        print('setup.py::build_deps::run()')
         # Check if you remembered to check out submodules
         def check_file(f):
             if not os.path.exists(f):
@@ -507,6 +509,7 @@ for lib in dep_libs:
 
 class build_module(PytorchCommand):
     def run(self):
+        print('setup.py::build_module::run()')
         self.run_command('build_py')
         self.run_command('build_ext')
 
@@ -514,6 +517,7 @@ class build_module(PytorchCommand):
 class build_py(setuptools.command.build_py.build_py):
 
     def run(self):
+        print('setup.py::build_py::run()')
         self.run_command('create_version_file')
         setuptools.command.build_py.build_py.run(self)
 
@@ -521,6 +525,7 @@ class build_py(setuptools.command.build_py.build_py):
 class develop(setuptools.command.develop.develop):
 
     def run(self):
+        print('setup.py::develop::run()')
         self.run_command('create_version_file')
         setuptools.command.develop.develop.run(self)
         self.create_compile_commands()
@@ -727,9 +732,9 @@ class rebuild(distutils.command.build.build):
 class install(setuptools.command.install.install):
 
     def run(self):
+        print('setup.py::run()')
         if not self.skip_build:
             self.run_command('build_deps')
-        copy_protos()
 
         setuptools.command.install.install.run(self)
 
