@@ -88,7 +88,7 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
 class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
  public:
   TensorImpl() = delete;
-  explicit TensorImpl(at::Storage&& storage) : storage_(storage) {}
+  explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)) {}
   explicit TensorImpl(DeviceType device_type) : storage_(device_type) {}
 
   /**
