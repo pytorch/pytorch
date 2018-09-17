@@ -413,7 +413,7 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
-install(FILES "${TORCH_SRC_DIR}/op.h"
+install(FILES "${TORCH_SRC_DIR}/script.h"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 install(TARGETS torch
@@ -486,6 +486,28 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
         -Wno-unused-but-set-parameter)
     endif()
   endif()
+endif()
+
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  message(STATUS "${CMAKE_CXX_COMPILER} ${CMAKE_CURRENT_LIST_DIR}/abi-check.cpp -o ${CMAKE_BINARY_DIR}/abi-check")
+  execute_process(
+    COMMAND
+      "${CMAKE_CXX_COMPILER}"
+      "${CMAKE_CURRENT_LIST_DIR}/abi-check.cpp"
+      "-o"
+      "${CMAKE_BINARY_DIR}/abi-check"
+    RESULT_VARIABLE ABI_CHECK_COMPILE_RESULT)
+  if (ABI_CHECK_COMPILE_RESULT)
+    message(FATAL_ERROR "Could not compile ABI Check: ${ABI_CHECK_COMPILE_RESULT}")
+  endif()
+  execute_process(
+    COMMAND "${CMAKE_BINARY_DIR}/abi-check"
+    RESULT_VARIABLE ABI_CHECK_RESULT
+    OUTPUT_VARIABLE GLIBCXX_USE_CXX11_ABI)
+  if (ABI_CHECK_RESULT)
+    message(WARNING "Could not run ABI Check: ${ABI_CHECK_RESULT}")
+  endif()
+  message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
 endif()
 
 # CMake config for external projects.
