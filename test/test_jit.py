@@ -10,6 +10,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
+from torch._six import inf, PY2
 from common import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN, skipIfRocm, suppress_warnings
 from textwrap import dedent
 import os
@@ -56,7 +57,6 @@ if torch.cuda.is_available():
 
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
-PY2 = sys.version_info[0] == 2
 PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
@@ -2620,6 +2620,13 @@ a")
             return a + a + a
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
+
+    def test_inf(self):
+        @torch.jit.script
+        def foo(a):
+            return a < float('inf')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
 
     def test_add(self):
         def func(a, b):
@@ -7549,8 +7556,6 @@ EXCLUDE_SCRIPT = {
     'test_var_dim_1d',
     'test_var_dim_1d_neg0',
     'test_var_dim_neg0',
-    'test_norm_inf',
-    'test_renorm_norm_inf',
     'test_matrix_power_n=-1',  # involves inverse
     'test_matrix_power_n=-3',  # involves inverse
     # skipped nn functional tests
@@ -7638,6 +7643,12 @@ def the_method({}):
 '''
 
 
+def get_constant(x):
+    if x == inf or x == -inf:
+        return 'float(\'inf\')' if PY2 else 'math.inf'
+    return x
+
+
 # create a script function from (name, func_type, output_process_fn),
 # returns a function takes in (args, kwargs) and runs the compiled function and
 # then applies the post process fn to the outputs
@@ -7653,7 +7664,7 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
                 actuals.append(name)
                 tensors.append(arg)
             else:
-                actuals.append(str(arg))
+                actuals.append(str(get_constant(arg)))
         kwargs_str = ''
         for k, v in kwargs.items():
             kwargs_str += ', ' + k + '=' + str(v)
@@ -7667,6 +7678,10 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
             raise 'Unsupported function type'
 
         script = script_template.format(', '.join(formals), call)
+
+        # for math.inf
+        import math
+
         CU = torch.jit.CompilationUnit(script)
         self.assertExportImport(CU.the_method.graph, tensors)
         output = output_process_fn(CU.the_method(*tensors))
