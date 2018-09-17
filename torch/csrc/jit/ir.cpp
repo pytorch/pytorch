@@ -562,7 +562,7 @@ const OperatorSet& nondeterminstic_aten_ops() {
     "aten::bernoulli(Tensor self) -> Tensor",
     "aten::bernoulli(Tensor self, Tensor p, Generator generator) -> Tensor",
     "aten::bernoulli(Tensor self, float p, Generator generator) -> Tensor",
-    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Generator generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator generator) -> Tensor",
     "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
     "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
     "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",

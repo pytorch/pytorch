@@ -194,10 +194,14 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::cast(ivalue.toDouble());
   } else if (ivalue.isInt()) {
     return py::cast(ivalue.toInt());
+  }else if (ivalue.isBool()) {
+    return py::cast(ivalue.toBool());
   } else if (ivalue.isIntList()) {
     return py::cast(ivalue.toIntListRef());
   } else if (ivalue.isDoubleList()) {
     return py::cast(ivalue.toDoubleListRef());
+  } else if (ivalue.isBoolList()) {
+    return py::cast(ivalue.toBoolListRef());
   } else if (ivalue.isTensorList()) {
     return py::cast(ivalue.toTensorListRef());
   } else if (ivalue.isTuple()) {

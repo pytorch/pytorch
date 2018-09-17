@@ -324,7 +324,7 @@ struct Environment {
         {"print", std::make_shared<PrintValue>()},
         {"float", std::make_shared<CastValue>(FloatType::get())},
         {"int", std::make_shared<CastValue>(IntType::get())},
-        {"bool", std::make_shared<CastValue>(IntType::get())},
+        {"bool", std::make_shared<CastValue>(BoolType::get())},
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
         {"_to_tensor", std::make_shared<CastValue>(DynamicType::get()) },
@@ -994,7 +994,7 @@ private:
     Value* v = emitExpr(cond);
     if (!v->type()->isSubtypeOf(BoolType::get())) {
       ErrorReport error(cond);
-      error << "expected an boolean expression for condition but found "
+      error << "expected a boolean expression for condition but found "
             << v->type()->str();
       if (v->type()->isSubtypeOf(DynamicType::get())) {
         error << ", to use a tensor in a boolean"
@@ -1873,6 +1873,7 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"Tensor", DynamicType::get()},
     {"int", IntType::get()},
     {"float", FloatType::get()},
+    {"bool", BoolType::get()},
   };
   return map;
 }

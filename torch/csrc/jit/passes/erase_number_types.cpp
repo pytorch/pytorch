@@ -20,6 +20,7 @@ static void EraseNumberTypesOnBlock(Block* block) {
           it->output()->replaceAllUsesWith(r);
         }
       } break;
+      case prim::TensorToBool:
       case prim::TensorToNum:
       case prim::ImplicitTensorToNum:
       case prim::NumToTensor: {

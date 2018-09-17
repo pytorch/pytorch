@@ -511,7 +511,7 @@ class TestJit(JitTestCase):
 
             @torch.jit.script_method
             def forward(self, input):
-                if self.training:
+                if self.training == 1:
                     x = 2 * input
                 else:
                     x = -input
@@ -1338,7 +1338,6 @@ class TestJit(JitTestCase):
     # as all backwards functions of views are implemented
     # as a zero filled tensor with a gradient fill on the
     # viewed portion.
-    @unittest.expectedFailure
     def test_inplace_copy(self):
         x = torch.randn(4, 4, requires_grad=True)
 
@@ -3626,7 +3625,7 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_explicit_bool_cast(self):
-        with self.assertRaisesRegex(RuntimeError, "expected an integer"):
+        with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
             @torch.jit.script
             def test_bool_cast(a):
                 if a:
@@ -7604,32 +7603,6 @@ EXCLUDE_TYPE_CHECK = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-<<<<<<< HEAD
-    # TODO: Fix var/std
-    # there are two schemas for var (and std):
-    # (1) var(Tensor, int, *, bool, bool, Tensor)
-    # (2) var(Tensor, *, bool)
-    #
-    # Right now, the following is happening:
-    # - Shorter schemas come before longer schemas
-    # - bool, int are treated as IntType rather than DynamicType like before
-    # So the schemas look like the following in operator:
-    # (2) var(DynamicType, IntType)
-    # (1) var(DynamicType, IntType, IntType, DynamicType)
-    # Now, when one calls torch.var(tensor, dim=1), the compiler mistakingly
-    # matches it with (2) instead of (1), which is a problem.
-    'test_std_dim',
-    'test_std_dim_1d',
-    'test_std_dim_1d_neg0',
-    'test_std_dim_neg0',
-    'test_var_dim',
-    'test_var_dim_1d',
-    'test_var_dim_1d_neg0',
-    'test_var_dim_neg0',
-=======
-    'test_norm_inf',
-    'test_renorm_norm_inf',
->>>>>>> Add Bool type to IR
     'test_matrix_power_n=-1',  # involves inverse
     'test_matrix_power_n=-3',  # involves inverse
 

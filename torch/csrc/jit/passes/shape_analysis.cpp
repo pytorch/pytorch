@@ -996,7 +996,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
       }
       return true;
     }
-  } else if (node->matches("aten::embedding(Tensor weight, Tensor indices, int padding_idx, int scale_grad_by_freq, int sparse) -> Tensor")) {
+  } else if (node->matches("aten::embedding(Tensor weight, Tensor indices, int padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor")) {
     auto weight_type = input_type(0);
     auto indices_type = input_type(1);
     if (weight_type && indices_type) {
@@ -1037,7 +1037,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
                node->matches("aten::reshape_as(Tensor self, Tensor other) -> Tensor")) {
       return tensor_types.at(0)->withDim(tensor_types.at(1)->dim());
     } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor") ||
-               node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor") ||
+               node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor") ||
                node->matches("aten::as_strided(Tensor self, int[] size, int[] stride) -> Tensor") ||
                node->matches("aten::as_strided(Tensor self, int[] size, int[] stride, int storage_offset) -> Tensor")) {
       return reshape_prop(node, attr::size, tensor_types);

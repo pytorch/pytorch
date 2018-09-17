@@ -389,7 +389,6 @@ struct CodeImpl {
   CodeImpl(std::shared_ptr<Graph>& graph_)
       : preprocess(*graph_) {
     graph = preprocess.graph;
-    // std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
   }
 

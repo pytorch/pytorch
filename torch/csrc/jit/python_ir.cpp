@@ -348,6 +348,8 @@ void initPythonIRBindings(PyObject * module_) {
     .def(#method, [](Node & n, const char * name) { \
       return n.method(Symbol::attr(name)); \
     })
+    .CREATE_ACCESSOR(Bool,b)
+    .CREATE_ACCESSOR(Bools,bs)
     .CREATE_ACCESSOR(Float,f)
     .CREATE_ACCESSOR(Floats,fs)
     .CREATE_ACCESSOR(String,s)
@@ -486,6 +488,8 @@ void initPythonIRBindings(PyObject * module_) {
     .def_static("get", &FloatType::get);
   py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
     .def_static("get", &DynamicType::get);
+  py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
+    .def_static("get", &BoolType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
     .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))

@@ -311,6 +311,7 @@ struct TORCH_API CompleteTensorType : public TensorType {
     return prod;
   }
   static TypePtr fromNumberType(TypePtr typ);
+  static TypePtr fromBoolType(TypePtr typ);
 
 private:
   CompleteTensorType(const at::Tensor& tensor)
@@ -646,9 +647,19 @@ inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
     return CompleteTensorType::create(at::kLong, -1, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
     return CompleteTensorType::create(at::kFloat, -1, {});
+  } else if (typ->isSubtypeOf(BoolType::get())) {
+    return CompleteTensorType::create(at::kLong, -1, {});
   }
   AT_ERROR("unknown number type", typ->str());
 }
+
+inline TypePtr CompleteTensorType::fromBoolType(TypePtr type) {
+  if (type->isSubtypeOf(BoolType::get())) {
+    return CompleteTensorType::create(at::kLong, -1, {});
+  }
+  AT_ERROR("unknown bool type", type->str());
+}
+
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
 // nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
@@ -673,7 +684,7 @@ TypePtr getTypePtr() {
 template<> inline TypePtr getTypePtr<at::Tensor>() { return DynamicType::get(); }
 template<> inline TypePtr getTypePtr<double>() { return FloatType::get(); }
 template<> inline TypePtr getTypePtr<int64_t>() { return IntType::get(); }
-template<> inline TypePtr getTypePtr<bool>() { return IntType::get(); }
+template<> inline TypePtr getTypePtr<bool>() { return BoolType::get(); }
 template<> inline TypePtr getTypePtr<at::Scalar>() { return NumberType::get(); }
 template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListType::ofTensors(); }
 template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }

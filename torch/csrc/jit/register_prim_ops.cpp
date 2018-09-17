@@ -128,6 +128,18 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::BoolToTensor,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            bool b;
+            pop(stack, b);
+            push(
+                stack,
+                autograd::make_variable(at::scalar_to_tensor(b ? 1 : 0)));
+            return 0;
+          };
+        }),
+    Operator(
         prim::IntToFloat,
         [](Node* node) -> Operation {
           return [](Stack& stack) {
