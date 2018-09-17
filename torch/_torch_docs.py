@@ -1694,7 +1694,7 @@ gels(B, A, out=None) -> Tensor
 
 Computes the solution to the least squares and least norm problems for a full
 rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
-size :math:`(n \times k)`.
+size :math:`(m \times k)`.
 
 If :math:`m \geq n`, :func:`gels` solves the least-squares problem:
 
@@ -1713,7 +1713,7 @@ If :math:`m < n`, :func:`gels` solves the least-norm problem:
    \end{array}
 
 Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
-rows of :math:`X` contains the solution. If :math`m \geq n`, the residual sum of squares
+rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
 for the solution in each column is given by the sum of squares of elements in the
 remaining :math:`m - n` rows of that column.
 
@@ -1834,9 +1834,9 @@ batched outputs `X, LU`.
 
 Args:
     B (Tensor): input matrix of size :math:`(*, m, k)` , where :math:`*`
-      is zero or more batch dimensions.
+                is zero or more batch dimensions.
     A (Tensor): input square matrix of size :math:`(*, m, m)`, where
-      :math:`*` is zero or more batch dimensions.
+                :math:`*` is zero or more batch dimensions.
     out ((Tensor, Tensor), optional): optional output tuple.
 
 Example::

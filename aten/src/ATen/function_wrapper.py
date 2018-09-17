@@ -39,7 +39,7 @@ else:
 #    declaration under Type.h  (right now, we call this template
 #    BROADCAST but it also handles default arguments)
 TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
+${return_type} ${api_name}(${type_method_formals}) const override;
 """)
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
@@ -60,18 +60,18 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
 #    for 'native' declarations (so the native dispatch is hardcoded into
 #    the template here.)
 PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0;
+virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const = 0;
 """)
 DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
 AT_DEPRECATED(virtual ${return_type} \
-${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0);
+${method_prefix_derived}${api_name}(${type_method_formals}) const = 0);
 """)
 PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const = 0;
+virtual ${return_type} ${api_name}(${type_method_formals}) const = 0;
 """)
 
 TYPE_METHOD_DECLARATION_ABSTRACT = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const override;
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
 TYPE_METHOD_DEFINITION_ABSTRACT = CodeTemplate("""\
 ${return_type} TypeDefault::${method_prefix_derived}${api_name}(${type_method_formals}) const {
@@ -79,7 +79,7 @@ ${return_type} TypeDefault::${method_prefix_derived}${api_name}(${type_method_fo
 }
 """)
 TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
+${return_type} ${api_name}(${type_method_formals}) const override;
 """)
 TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
 ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
@@ -515,7 +515,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_definition_body': List[str],
     'type_method_actuals': List[str],
     'type_method_definition_dispatch': str,
-    'type_method_formals_with_defaults': List[str],
     'type_method_formals': List[str],
     'variants': str,
     'when_spares_dispatch': str,
@@ -817,7 +816,6 @@ def create_generic(top_env, declarations):
 
         # There are no cases where these differ, but they do in native_functions
         option['type_method_formals'] = option['formals']
-        option['type_method_formals_with_defaults'] = option['formals_with_defaults']
         option['type_method_actuals'] = option['actuals']
 
         option['const_mark'] = '' if option['inplace'] else ' const'
@@ -1051,7 +1049,6 @@ def create_generic(top_env, declarations):
             dispatch_type['is_type_dispatched'] = True
 
         option['type_method_formals'] = [format_formal(f) for f in formals if f != dispatch_type]
-        option['type_method_formals_with_defaults'] = [formal_with_default(f) for f in formals if f != dispatch_type]
         option['type_method_actuals'] = [f['name'] for f in formals if f != dispatch_type]
         option['native_actuals'] = [f['name'] if f != dispatch_type else '*this' for f in formals]
 
