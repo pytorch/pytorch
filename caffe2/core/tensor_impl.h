@@ -817,15 +817,10 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_offset_;
   }
 
- protected:
-<<<<<<< HEAD
+ private:
   // TODO: change to DimVector
-  std::vector<TIndex> dims_; // sizes_
+  std::vector<TIndex> sizes_; // sizes_
   at::DimVector strides_;
-=======
-  using DimVector = std::vector<TIndex>;
-  DimVector sizes_; // sizes_
->>>>>>> Uses sizes_ instead of dims_ in caffe2::TensorImpl
   TIndex numel_ = -1; // numel_
   bool is_contiguous_ = true;
   // we decide to keep reserved_ and it will
@@ -837,7 +832,6 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   int64_t storage_offset_ = 0;
   TypeMeta data_type_;
 
- private:
   TIndex compute_numel() const {
     TIndex n = 1;
     for (auto s : sizes()) {
