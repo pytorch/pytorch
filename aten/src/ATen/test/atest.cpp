@@ -21,7 +21,7 @@ void trace() {
   EXPECT_FLOAT_EQ(foo.trace().toCFloat(), trace);
 }
 
-// CATCH_TEST_CASE( "atest", "[]" ) {
+// TEST_CASE( "atest", "[]" ) {
 TEST(atest, atest) {
   manual_seed(123, at::kCPU);
   manual_seed(123, at::kCUDA);
