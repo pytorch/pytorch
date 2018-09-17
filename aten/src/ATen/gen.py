@@ -391,8 +391,12 @@ def generate_outputs():
     declarations = preprocess_declarations.run(declarations)
     for fname, env in generators.items():
         fm = file_manager
+        env['classname'] = env['name']
+        if env['classname'] == 'CPU':
+            env['classname'] = "AT_API CPU"
         if env['name'] == 'CUDA':
             fm = cuda_file_manager
+
         fm.write(fname, GENERATOR_DERIVED, env)
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
