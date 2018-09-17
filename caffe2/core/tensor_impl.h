@@ -137,7 +137,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       data_type_ = src.meta();
     }
     if (src.size() == -1) {
-      dims_.clear();
+      sizes_.clear();
       numel_ = -1;
       storage_.reset();
       data_type_ = TypeMeta();
@@ -184,10 +184,10 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    *        to dimension of `num`.
    */
   void ExtendTo(TIndex num, float growthPct, at::BaseContext* context) {
-    CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
+    CAFFE_ENFORCE_GE_WITH_CALLER(sizes_.size(), 1);
     CAFFE_ENFORCE_GE_WITH_CALLER(growthPct, 0);
     CAFFE_ENFORCE(context != nullptr, "Context must be provided.");
-    Extend(num - dims_[0], growthPct, context);
+    Extend(num - sizes_[0], growthPct, context);
   }
 
   /**
@@ -200,10 +200,10 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * complexity.
    */
   void Extend(TIndex num, float growthPct, at::BaseContext* context) {
-    CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
+    CAFFE_ENFORCE_GE_WITH_CALLER(sizes_.size(), 1);
     CAFFE_ENFORCE_GE_WITH_CALLER(
         num, 0, "`num` must be non-negative for Extend");
-    auto newDims = dims_;
+    auto newDims = sizes_;
     newDims[0] += num;
     if (!storage_.data()) {
       Resize(newDims);
@@ -215,16 +215,16 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         static_cast<TIndex>(1),
         std::multiplies<TIndex>());
     if (newNumel * storage_.itemsize() <= storage_.capacity()) {
-      dims_ = newDims;
+      sizes_ = newDims;
       numel_ = newNumel;
       return;
     }
-    auto newCapacity = dims_;
+    auto newCapacity = sizes_;
     newCapacity[0] = std::max<size_t>(
-        newDims[0], std::ceil(dims_[0] * (growthPct + 100) / 100));
+        newDims[0], std::ceil(sizes_[0] * (growthPct + 100) / 100));
     auto oldData = std::move(storage_.data_ptr());
     auto oldSize = numel_;
-    auto oldDims = dims_;
+    auto oldDims = sizes_;
     Resize(newCapacity);
     auto* newData = raw_mutable_data(data_type_);
     CAFFE_ENFORCE(
@@ -232,7 +232,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     context->CopyItemsSameDevice(
         data_type_, oldSize, oldData.get(), newData);
     reserved_ = true;
-    dims_ = newDims;
+    sizes_ = newDims;
     numel_ = newNumel;
   }
 
@@ -243,17 +243,17 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * that the extra capacity after the end of the shurnk tensor is maintained.
    */
   void ShrinkTo(TIndex outer_dim) {
-    CAFFE_ENFORCE_WITH_CALLER(dims_.size() >= 1, "Tensor must be at least 1D");
+    CAFFE_ENFORCE_WITH_CALLER(sizes_.size() >= 1, "Tensor must be at least 1D");
     CAFFE_ENFORCE_WITH_CALLER(
-        outer_dim <= dims_[0],
+        outer_dim <= sizes_[0],
         "New outer dimension must be smaller than current.");
     CAFFE_ENFORCE(
         storage_.unique(),
         "Can't call ShrinkTo on shared storage, please call Resize instead.");
-    dims_[0] = outer_dim;
+    sizes_[0] = outer_dim;
     numel_ = std::accumulate(
-        dims_.begin(),
-        dims_.end(),
+        sizes_.begin(),
+        sizes_.end(),
         static_cast<TIndex>(1),
         std::multiplies<TIndex>());
   }
@@ -270,7 +270,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         numel_ != -1, "size should be initialized before calling ReserveSpace");
     CAFFE_ENFORCE(
         storage_.unique(), "Can't call ReserveSpace on shared storage.");
-    auto newCapacity = dims_;
+    auto newCapacity = sizes_;
     newCapacity[0] = outer_dim;
     auto newNumel = std::accumulate(
         newCapacity.begin(),
@@ -283,11 +283,11 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // Old data is discarded
     storage_.data_ptr().clear();
     auto oldSize = numel_;
-    auto oldDims = dims_;
+    auto oldDims = sizes_;
     Resize(newCapacity);
     // Allocate new memory but don't copy over the data
     raw_mutable_data(data_type_);
-    dims_ = oldDims;
+    sizes_ = oldDims;
     numel_ = oldSize;
     reserved_ = true;
   }
@@ -360,7 +360,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         " The old caffe2 mixes Reshape and Resize but this behavior has "
         "been changed. If you find this error, most likely you will need "
         "to change corresponding code from Reshape to Resize.");
-    dims_ = dims;
+    sizes_ = dims;
   }
 
   inline void Reshape(const std::vector<int>& dims) {
@@ -387,7 +387,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     std::stringstream ss;
     ss << "A Tensor of item size " << storage_.itemsize() << " and type "
        << data_type_.name() << " and dimension (";
-    for (int d : dims_) {
+    for (int d : sizes_) {
       ss << d << ",";
     }
     ss << ").";
@@ -643,7 +643,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * Returns the number of dimensions of the data.
    */
   inline int ndim() const {
-    return dims_.size();
+    return sizes_.size();
   }
   /**
    * Returns the size (i.e. the number of items) of the tensor.
@@ -676,19 +676,19 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * Returns the dimensions of the tensor as a vector.
    */
   inline const std::vector<TIndex>& dims() const {
-    return dims_;
+    return sizes_;
   }
 
   inline TIndex size_from_dim(int k) const {
-    return size_from_dim_(k, dims_);
+    return size_from_dim_(k, sizes_);
   }
 
   inline TIndex size_to_dim(int k) const {
-    return size_to_dim_(k, dims_);
+    return size_to_dim_(k, sizes_);
   }
 
   inline TIndex size_between_dim(int k, int l) const {
-    return size_between_dim_(k, l, dims_);
+    return size_between_dim_(k, l, sizes_);
   }
 
   /**
@@ -733,11 +733,11 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline int dim32(const int i) const {
 #ifndef NDEBUG
-    CAFFE_ENFORCE_LT_WITH_CALLER(i, dims_.size(), "Exceeding ndim limit");
+    CAFFE_ENFORCE_LT_WITH_CALLER(i, sizes_.size(), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
 #endif
-    CAFFE_ENFORCE_LT_WITH_CALLER(dims_[i], std::numeric_limits<int>::max());
-    return static_cast<int>(dims_[i]);
+    CAFFE_ENFORCE_LT_WITH_CALLER(sizes_[i], std::numeric_limits<int>::max());
+    return static_cast<int>(sizes_[i]);
   }
 
   /**
@@ -747,10 +747,10 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline TIndex dim(const int i) const {
 #ifndef NDEBUG
-    CAFFE_ENFORCE_LT_WITH_CALLER(i, dims_.size(), "Exceeding ndim limit");
+    CAFFE_ENFORCE_LT_WITH_CALLER(i, sizes_.size(), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
 #endif
-    return dims_[i];
+    return sizes_[i];
   }
 
   void ExtractDeviceOption(DeviceOption* device) const {
@@ -773,7 +773,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
  protected:
   using DimVector = std::vector<TIndex>;
-  DimVector dims_; // sizes_
+  DimVector sizes_; // sizes_
   TIndex numel_ = -1; // numel_
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
@@ -790,11 +790,11 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDims(const std::vector<T>& src) {
     auto old_numel = numel_;
-    dims_.resize(src.size());
+    sizes_.resize(src.size());
     TIndex new_numel = 1;
     for (size_t i = 0; i < src.size(); ++i) {
       new_numel *= src[i];
-      dims_[i] = src[i];
+      sizes_[i] = src[i];
     }
     numel_ = new_numel;
     return numel_ != old_numel;
@@ -802,7 +802,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool SetDims() {
     auto old_numel = numel_;
-    dims_.resize(0);
+    sizes_.resize(0);
     numel_ = 1;
     return numel_ != old_numel;
   }
@@ -812,27 +812,27 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   // another shot.
   bool SetDims(const TIndex d0) {
     auto old_numel = numel_;
-    dims_.resize(1);
-    dims_[0] = d0;
+    sizes_.resize(1);
+    sizes_[0] = d0;
     numel_ = d0;
     return numel_ != old_numel;
   }
 
   bool SetDims(const TIndex d0, const TIndex d1) {
     auto old_numel = numel_;
-    dims_.resize(2);
-    dims_[0] = d0;
-    dims_[1] = d1;
+    sizes_.resize(2);
+    sizes_[0] = d0;
+    sizes_[1] = d1;
     numel_ = d0 * d1;
     return numel_ != old_numel;
   }
 
   bool SetDims(const TIndex d0, const TIndex d1, const TIndex d2) {
     auto old_numel = numel_;
-    dims_.resize(3);
-    dims_[0] = d0;
-    dims_[1] = d1;
-    dims_[2] = d2;
+    sizes_.resize(3);
+    sizes_[0] = d0;
+    sizes_[1] = d1;
+    sizes_[2] = d2;
     numel_ = d0 * d1 * d2;
     return numel_ != old_numel;
   }
@@ -840,11 +840,11 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool
   SetDims(const TIndex d0, const TIndex d1, const TIndex d2, const TIndex d3) {
     auto old_numel = numel_;
-    dims_.resize(4);
-    dims_[0] = d0;
-    dims_[1] = d1;
-    dims_[2] = d2;
-    dims_[3] = d3;
+    sizes_.resize(4);
+    sizes_[0] = d0;
+    sizes_[1] = d1;
+    sizes_[2] = d2;
+    sizes_[3] = d3;
     numel_ = d0 * d1 * d2 * d3;
     return numel_ != old_numel;
   }
