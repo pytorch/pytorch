@@ -426,6 +426,7 @@ class build_deps(PytorchCommand):
     def run(self):
         print('setup.py::build_deps::run()')
         # Check if you remembered to check out submodules
+
         def check_file(f):
             if not os.path.exists(f):
                 print("Could not find {}".format(f))
