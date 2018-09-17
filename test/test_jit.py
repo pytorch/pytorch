@@ -119,9 +119,9 @@ def canonical(graph):
 
 
 def get_lstm_inputs(device, training=False):
-    input = torch.randn(3, 10, dtype=torch.float, device=device)
-    hx = torch.randn(3, 20, dtype=torch.float, device=device)
-    cx = torch.randn(3, 20, dtype=torch.float, device=device)
+    input = torch.randn(3, 10, dtype=torch.float, device=device, requires_grad=training)
+    hx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
+    cx = torch.randn(3, 20, dtype=torch.float, device=device, requires_grad=training)
     module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
     if training:
         params = tuple(module.parameters())
@@ -203,6 +203,17 @@ def _construct_empty_float_list():
 
 def _construct_empty_tensor_list():
     return []
+
+
+def enable_cpu_fuser(fn):
+    def wrapper(*args, **kwargs):
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            torch._C._jit_override_can_fuse_on_cpu(False)
+            raise
+    return wrapper
 
 
 class JitTestCase(TestCase):
@@ -630,6 +641,7 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
+    @enable_cpu_fuser
     def test_lstm_fusion_cpu(self):
         inputs = get_lstm_inputs('cpu')
         try:
@@ -1370,6 +1382,7 @@ class TestJit(JitTestCase):
         self.run_ge_tests(False, False)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @enable_cpu_fuser
     def test_ge_optimized(self):
         self.run_ge_tests(True, False)
 
@@ -3053,6 +3066,7 @@ a")
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @skipIfRocm
+    @enable_cpu_fuser
     def test_chunk_fusion_correctness(self):
         return self._test_chunk_fusion_correctness(self, 'cpu')
 
@@ -6889,6 +6903,24 @@ a")
             DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
         self.assertExpected(exported)
 
+    def test_string_frontend_elif(self):
+        code = '''
+            def elif_test(niter : int):
+                rv = 0
+                for i in range(niter):
+                    if i % 3 == 0 and i % 5 == 0:
+                        rv += 35
+                    elif i % 3 == 0:
+                        rv += 3
+                    elif i % 5 == 0:
+                        rv += 5
+                    else:
+                        rv += i
+                return rv
+        '''
+
+        self.checkScript(code, (101,), name='elif_test', outputs=3028)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -6910,7 +6942,6 @@ class MnistNet(nn.Module):
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
-
     @staticmethod
     def _test_dcgan_models(self, device, check_export_import=True):
         class DCGANGenerator(nn.Module):

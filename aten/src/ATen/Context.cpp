@@ -12,6 +12,7 @@
 
 #include "ATen/CPUGenerator.h"
 #include "ATen/RegisterCPU.h"
+#include "ATen/Tensor.h"
 
 #include "TH/TH.h"  // for USE_LAPACK
 
@@ -107,15 +108,19 @@ bool Context::setFlushDenormal(bool on) {
 #endif
 }
 
-Type& getType(TensorOptions options) {
+TypeExtendedInterface& getType(TensorOptions options) {
   return globalContext().getType(
             options.backend(), options.dtype(), options.is_variable());
 }
 
-Type& getType(const TensorImpl* impl) {
+TypeExtendedInterface& getType(const TensorImpl* impl) {
   Backend backend = tensorTypeIdToBackend(impl->type_id());
   return globalContext().getType(
-            backend, impl->scalar_type(), impl->is_variable());
+            backend, dataTypeToScalarType(impl->dtype().id()), impl->is_variable());
+}
+
+TypeExtendedInterface& getType(const Tensor& t) {
+  return getType(t.unsafeGetTensorImpl());
 }
 
 Allocator* getCPUAllocator() {

@@ -35,11 +35,7 @@ class HalfNormal(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(HalfNormal, _instance)
-        batch_shape = torch.Size(batch_shape)
-        base_dist = self.base_dist.expand(batch_shape)
-        super(HalfNormal, new).__init__(base_dist, AbsTransform(), validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+        return super(HalfNormal, self).expand(batch_shape, _instance=new)
 
     @property
     def scale(self):
