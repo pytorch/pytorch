@@ -775,7 +775,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_offset_;
   }
 
- protected:
+ private:
   using DimVector = std::vector<TIndex>;
   DimVector sizes_; // sizes_
   TIndex numel_ = -1; // numel_
@@ -788,7 +788,6 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   int64_t storage_offset_ = 0;
   TypeMeta data_type_;
 
- private:
   TIndex compute_numel() const {
     TIndex n = 1;
     for (auto s : sizes()) {
