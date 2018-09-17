@@ -436,23 +436,6 @@ TYPED_TEST(TensorCPUTest, NoLongerSharesAfterResize) {
   EXPECT_NE(old_pointer, tensor.mutable_data<TypeParam>());
 }
 
-TYPED_TEST(TensorCPUTest, NoLongerSharesAfterFreeMemory) {
-  vector<int> dims(3);
-  dims[0] = 2;
-  dims[1] = 3;
-  dims[2] = 5;
-  Tensor tensor(dims, CPU);
-  Tensor other_tensor(dims, CPU);
-  EXPECT_TRUE(tensor.mutable_data<TypeParam>() != nullptr);
-  other_tensor.ShareData(tensor);
-  EXPECT_EQ(tensor.data<TypeParam>(), other_tensor.data<TypeParam>());
-  auto* old_pointer = other_tensor.data<TypeParam>();
-
-  tensor.FreeMemory();
-  EXPECT_EQ(old_pointer, other_tensor.data<TypeParam>());
-  EXPECT_NE(old_pointer, tensor.mutable_data<TypeParam>());
-}
-
 TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   // Set flags (defaults)
   FLAGS_caffe2_keep_on_shrink = true;

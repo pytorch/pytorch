@@ -305,29 +305,41 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * mutable_data(). However, if the shape is different but the total number of
    * items is the same, the underlying storage is kept.
    */
-  template <typename... Ts>
-  void Resize(Ts... dim_source) {
-    bool is_init = numel_ == -1;
-    bool size_changed = SetDims(dim_source...);
-    if (size_changed) {
-      // If needed, we will free the data. the next mutable_data() call
-      // will create the data storage.
-      bool reset_tensor = false;
-      if (reserved_) {
-        // If tensor is reserved then don't claim its memeory unless capacity()
-        // is smaller than new size
-        reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize();
-      } else {
-        reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize() ||
-            !FLAGS_caffe2_keep_on_shrink ||
-            storage_.capacity() - (storage_offset_ + numel_) * storage_.itemsize() >
-                FLAGS_caffe2_max_keep_on_shrink_memory;
-      }
-
-      if (reset_tensor && !is_init) {
-        FreeMemory();
-      }
+  template <
+      typename T,
+      typename = typename std::enable_if<std::is_integral<T>::value>::type>
+  void Resize(const std::vector<T>& src) {
+    sizes_.resize(src.size());
+    for (size_t i = 0; i < src.size(); ++i) {
+      sizes_[i] = src[i];
     }
+    resize_memory_numel();
+  }
+
+  void Resize() {
+    sizes_ = {};
+    resize_memory_numel();
+  }
+
+  void Resize(const TIndex d0) {
+    sizes_ = {d0};
+    resize_memory_numel();
+  }
+
+  void Resize(const TIndex d0, const TIndex d1) {
+    sizes_ = {d0, d1};
+    resize_memory_numel();
+  }
+
+  void Resize(const TIndex d0, const TIndex d1, const TIndex d2) {
+    sizes_ = {d0, d1, d2};
+    resize_memory_numel();
+  }
+
+  void
+  Resize(const TIndex d0, const TIndex d1, const TIndex d2, const TIndex d3) {
+    sizes_ = {d0, d1, d2, d3};
+    resize_memory_numel();
   }
 
   /**
@@ -365,17 +377,6 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   inline void Reshape(const std::vector<int>& dims) {
     Reshape(ToVectorTIndex(dims));
-  }
-
-  /**
-   * Release whatever memory the tensor was holding but keep size and type
-   * information. Subsequent call to mutable_data will trigger new memory
-   * allocation.
-   */
-  inline void FreeMemory() {
-    // We'll detach from the old Storage and create a new one
-    storage_ = at::Storage(storage_.device_type(), data_type_);
-    storage_offset_ = 0;
   }
 
   /**
@@ -796,66 +797,39 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return n;
   }
 
-  template <
-      typename T,
-      typename = typename std::enable_if<std::is_integral<T>::value>::type>
-  bool SetDims(const std::vector<T>& src) {
+  void resize_memory_numel() {
+    bool is_init = numel_ == -1;
     auto old_numel = numel_;
-    sizes_.resize(src.size());
-    for (size_t i = 0; i < src.size(); ++i) {
-      sizes_[i] = src[i];
+    numel_ = compute_numel();
+    if (numel_ != old_numel) {
+      // If needed, we will free the data. the next mutable_data() call
+      // will create the data storage.
+      bool reset_tensor = false;
+      if (reserved_) {
+        // If tensor is reserved then don't claim its memeory unless capacity()
+        // is smaller than new size
+        reset_tensor = storage_.capacity() <
+            (storage_offset_ + numel_) * storage_.itemsize();
+      } else {
+        reset_tensor = storage_.capacity() <
+                (storage_offset_ + numel_) * storage_.itemsize() ||
+            !FLAGS_caffe2_keep_on_shrink ||
+            storage_.capacity() -
+                    (storage_offset_ + numel_) * storage_.itemsize() >
+                FLAGS_caffe2_max_keep_on_shrink_memory;
+      }
+
+      if (reset_tensor && !is_init) {
+        /**
+         * Release whatever memory the tensor was holding but keep size and type
+         * information. Subsequent call to mutable_data will trigger new memory
+         * allocation.
+         */
+        // We'll detach from the old Storage and create a new one
+        storage_ = at::Storage(storage_.device_type(), data_type_);
+        storage_offset_ = 0;
+      }
     }
-    numel_ = compute_numel();
-    return numel_ != old_numel;
-  }
-
-  bool SetDims() {
-    auto old_numel = numel_;
-    sizes_.resize(0);
-    numel_ = compute_numel();
-    return numel_ != old_numel;
-  }
-
-  // TODO(jiayq): maybe rewrite the following functions with initializer list.
-  // NVCC does not play well with initializer lists last time, but worth
-  // another shot.
-  bool SetDims(const TIndex d0) {
-    auto old_numel = numel_;
-    sizes_.resize(1);
-    sizes_[0] = d0;
-    numel_ = compute_numel();
-    return numel_ != old_numel;
-  }
-
-  bool SetDims(const TIndex d0, const TIndex d1) {
-    auto old_numel = numel_;
-    sizes_.resize(2);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    numel_ = compute_numel();
-    return numel_ != old_numel;
-  }
-
-  bool SetDims(const TIndex d0, const TIndex d1, const TIndex d2) {
-    auto old_numel = numel_;
-    sizes_.resize(3);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    sizes_[2] = d2;
-    numel_ = compute_numel();
-    return numel_ != old_numel;
-  }
-
-  bool
-  SetDims(const TIndex d0, const TIndex d1, const TIndex d2, const TIndex d3) {
-    auto old_numel = numel_;
-    sizes_.resize(4);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    sizes_[2] = d2;
-    sizes_[3] = d3;
-    numel_ = compute_numel();
-    return numel_ != old_numel;
   }
 };
 
