@@ -8152,6 +8152,7 @@ class TestCustomOperators(JitTestCase):
         ):
             torch.ops.aten.relu()
 
+    @unittest.skipIf(True, "temporarily disabled")
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
