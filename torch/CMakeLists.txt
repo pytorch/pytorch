@@ -146,7 +146,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fusion_compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
@@ -176,6 +175,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
@@ -189,6 +189,34 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   )
+
+SET(USE_CPU_FUSER 0)
+if (NOT WIN32)
+  SET(USE_CPU_FUSER 1)
+
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/tensor_desc.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/fusion_handle_impl.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/fused_kernel.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fusion_compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fused_kernel.cpp
+  )
+endif()
+
+SET(USE_CUDA_FUSER 0)
+if (USE_CUDA AND NOT USE_ROCM AND NOT WIN32)
+  SET(USE_CUDA_FUSER 1)
+
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/fusion_compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/fused_kernel.cpp
+  )
+
+endif()
+
+CONFIGURE_FILE(
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/Config.h.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/jit/fusers/Config.h)
 
 if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
@@ -385,7 +413,7 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
-install(FILES "${TORCH_SRC_DIR}/op.h"
+install(FILES "${TORCH_SRC_DIR}/script.h"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 install(TARGETS torch
@@ -458,6 +486,28 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
         -Wno-unused-but-set-parameter)
     endif()
   endif()
+endif()
+
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  message(STATUS "${CMAKE_CXX_COMPILER} ${CMAKE_CURRENT_LIST_DIR}/abi-check.cpp -o ${CMAKE_BINARY_DIR}/abi-check")
+  execute_process(
+    COMMAND
+      "${CMAKE_CXX_COMPILER}"
+      "${CMAKE_CURRENT_LIST_DIR}/abi-check.cpp"
+      "-o"
+      "${CMAKE_BINARY_DIR}/abi-check"
+    RESULT_VARIABLE ABI_CHECK_COMPILE_RESULT)
+  if (ABI_CHECK_COMPILE_RESULT)
+    message(FATAL_ERROR "Could not compile ABI Check: ${ABI_CHECK_COMPILE_RESULT}")
+  endif()
+  execute_process(
+    COMMAND "${CMAKE_BINARY_DIR}/abi-check"
+    RESULT_VARIABLE ABI_CHECK_RESULT
+    OUTPUT_VARIABLE GLIBCXX_USE_CXX11_ABI)
+  if (ABI_CHECK_RESULT)
+    message(WARNING "Could not run ABI Check: ${ABI_CHECK_RESULT}")
+  endif()
+  message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
 endif()
 
 # CMake config for external projects.
