@@ -6884,43 +6884,6 @@ a")
 
         self.assertEqual(foo(input), input)
 
-    def test_export_dynamic_slice(self):
-        class DynamicSliceExportMod(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                retval = x[0]
-                for i in range(x.size(1)):
-                    retval += torch.sum(x[0:i], dim=0)
-                return retval
-
-        mod = DynamicSliceExportMod()
-
-        input = torch.rand(3, 4, 5)
-        example_outs = mod(input)
-
-        f = io.BytesIO()
-        exported = torch.onnx.export_to_pretty_string(
-            DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
-        self.assertExpected(exported)
-
-    def test_string_frontend_elif(self):
-        code = '''
-            def elif_test(niter : int):
-                rv = 0
-                for i in range(niter):
-                    if i % 3 == 0 and i % 5 == 0:
-                        rv += 35
-                    elif i % 3 == 0:
-                        rv += 3
-                    elif i % 5 == 0:
-                        rv += 5
-                    else:
-                        rv += i
-                return rv
-        '''
-
-        self.checkScript(code, (101,), name='elif_test', outputs=3028)
-
 
 class MnistNet(nn.Module):
     def __init__(self):
