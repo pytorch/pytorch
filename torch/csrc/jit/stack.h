@@ -59,10 +59,10 @@ static inline void pop(Stack& stack, Types&... args) {
   drop(stack, N);
 }
 template<typename... Types>
-static inline void push(Stack& stack, Types... args) {
+static inline void push(Stack& stack, Types&&... args) {
   constexpr size_t N = sizeof...(args);
   int result[N] = {
-    (stack.push_back(std::forward<Types>(args)), 0)...
+    (stack.emplace_back(std::forward<Types>(args)), 0)...
   };
   (void) result;
 }
