@@ -66,10 +66,6 @@ public:
   template <typename T>
   T* unsafe_data() const { return storage_impl_->unsafe_data<T>(); }
 
-  size_t elementSize() const {
-    return storage_impl_->itemsize();
-  }
-
   inline size_t itemsize() const {
     return storage_impl_->itemsize();
   }
