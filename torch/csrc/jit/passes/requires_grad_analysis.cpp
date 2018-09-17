@@ -65,15 +65,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
 
   auto inputs = node->inputs();
   auto outputs = node->outputs();
-  // This might look a bit weird, but is in fact necessary. There are nodes that have no
-  // tensor inputs, but produce tensor outputs (e.g. aten::cat). At the moment we can't
-  // propagate requires_grad through lists, so we should assume that the outputs will
-  // require it. However, since aten::cat has only a list and an int input, both of which
-  // don't require grad, it will set the flag for its output to false.
-  bool has_tensor_inputs =
-    std::any_of(inputs.begin(), inputs.end(),
-                [](Value *v) { return v->type()->isSubtypeOf(DynamicType::get()); });
-  bool should_require = !has_tensor_inputs || std::any_of(inputs.begin(), inputs.end(), getRequiresGrad);
+  bool should_require = std::any_of(inputs.begin(), inputs.end(), getRequiresGrad);
   for (size_t i = 0; i < outputs.size(); ++i) {
     if (auto type = outputs[i]->type()->cast<TensorType>()) {
       setRequiresGrad(outputs[i], should_require && at::isFloatingType(type->scalarType()));
