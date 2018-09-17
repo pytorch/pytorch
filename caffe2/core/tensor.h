@@ -50,45 +50,75 @@ class CAFFE2_API Tensor final {
     return impl_.get();
   }
 
-  explicit Tensor(DeviceType type)
-      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(type)) {}
+  explicit Tensor(Storage storage)
+      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(std::move(storage))) {}
 
+  /**
+   * @brief Creates a tensor of the given dimension.
+   *
+   * Note that the actual data allocation is not going to be carried out until
+   * the first time mutable_data() is called.
+   */
   explicit Tensor(const vector<TIndex>& dims, DeviceType type)
-      : impl_(
-            c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(dims, type)) {}
+      : Tensor(Storage(type)) {
+    // TODO: here, we create a Storage
+    // and immediately discard it in Resize() since
+    // reset_tensor will be true and FreeMemory will be called,
+    // we might want to avoid creating Storage twice?
+    Resize(dims);
+  }
 
   explicit Tensor(const vector<int>& dims, DeviceType type)
-      : impl_(
-            c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(dims, type)) {}
+      : Tensor(Storage(type)) {
+    Resize(dims);
+  }
 
+  /**
+   * context_for_copy is required to have the same DeviceType as src
+   */
   Tensor(const Tensor& src, BaseContext* context_for_copy, DeviceType type)
-      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-            *src.impl_,
-            context_for_copy,
-            type)) {}
+      : Tensor(Storage(type)) {
+    CopyFrom(src, context_for_copy);
+  }
 
+  /**
+   * @brief: Create a Tensor of at::DeviceType `type` and initialize it with
+   * src Tensor
+   */
   Tensor(const Tensor& src, DeviceType type)
-      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-            *src.impl_,
-            type)) {}
+      : Tensor(Storage(type)) {
+    CopyFrom(src);
+  }
 
+  /**
+   * @brief Creates a tensor, and fills its contents with the given values.
+   * The type of tensor will be decided by the context parameter
+   */
   template <typename T>
   Tensor(
       const vector<TIndex>& dims,
       const vector<T>& values,
       BaseContext* context)
-      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-            dims,
-            values,
-            context)) {}
+      : Tensor(Storage(context->device_type(), TypeMeta::Make<T>())) {
+    Resize(dims);
+    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size());
+    context->CopyItemsFromCPU(
+        storage().dtype(), size(), values.data(), mutable_data<T>());
+  }
 
+  /**
+   * @brief Creates a scalar tensor, and fills its content with the given value.
+   * The type of tensor will be decided by the context parameter
+   */
   template <
       typename T,
       typename = typename std::enable_if<std::is_scalar<T>::value>::type>
   Tensor(const T& value, BaseContext* context)
-      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-            value,
-            context)) {}
+      : Tensor(Storage(context->device_type(), TypeMeta::Make<T>())) {
+    Resize(std::vector<TIndex>{});
+    context->CopyItemsFromCPU(
+        storage().dtype(), size(), &value, mutable_data<T>());
+  }
 
   Tensor Clone() const {
     Tensor x(GetDeviceType());
@@ -275,6 +305,10 @@ class CAFFE2_API Tensor final {
 
   inline void ExtractDeviceOption(DeviceOption* device) const {
     return impl_.get()->ExtractDeviceOption(device);
+  }
+
+  const Storage& storage() {
+    return impl_->storage();
   }
 };
 

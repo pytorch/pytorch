@@ -53,9 +53,6 @@ class CAFFE2_API Annotation {
     return kind_;
   }
 
-  Annotation(const Annotation&) = delete;
-  Annotation& operator=(Annotation&) = delete;
-
  private:
   const AnnotationKind kind_;
 };
