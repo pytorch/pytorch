@@ -1,6 +1,8 @@
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/function.h"
 
+#include <sstream>
+
 namespace torch { namespace autograd { namespace profiler {
 
 ProfilerState state = ProfilerState::Disabled;
@@ -37,13 +39,19 @@ void mark(std::string name, bool include_cuda /* = true */) {
   }
 }
 
-void pushRange(std::string name) {
+void pushRange(std::string name, const char* msg/*= ""*/, int64_t sequence_nr/*= -1*/) {
   if (state == ProfilerState::Disabled) {
     return;
   }
   if (state == ProfilerState::NVTX) {
 #ifdef USE_CUDA
-    nvtxRangePushA(name.c_str());
+    if(sequence_nr >= 0) {
+      std::stringstream s;
+      s << name << msg << sequence_nr;
+      nvtxRangePushA(s.str().c_str());
+    } 
+    else
+      nvtxRangePushA(name.c_str());
 #else
     throw std::logic_error(
         "pushRange called with NVTX tracing, but compiled without CUDA");
@@ -95,6 +103,13 @@ RecordFunction::RecordFunction(const char* name) {
   pushRange(name);
 }
 
+RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr) 
+{
+  if (state == ProfilerState::Disabled)
+    return;
+  pushRange(name, ", seq=", current_sequence_nr);
+}
+
 RecordFunction::~RecordFunction() {
   if (state == ProfilerState::Disabled)
     return;
@@ -102,7 +117,7 @@ RecordFunction::~RecordFunction() {
 }
 
 void RecordFunction::pushFunctionRange(Function* fn) {
-  pushRange(fn->name());
+  pushRange(fn->name(), ", stashed seq=", fn->sequence_nr());
 }
 
 #ifdef USE_CUDA

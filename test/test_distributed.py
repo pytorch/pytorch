@@ -322,6 +322,26 @@ class _DistTestBase(object):
         self.assertEqual(len(recv_ranks), dist.get_world_size() - 1)
         self._barrier()
 
+    # SEND RECV WITH TAG
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
+    def test_send_recv_with_tag(self):
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        tensor = _build_tensor(10, value=rank)
+
+        for dst in range(0, world_size):
+            if dst == rank:
+                # Recv mode
+                for src in range(0, world_size):
+                    if src == rank:
+                        continue
+                    output_tensor = _build_tensor(10, value=-1)
+                    dist.recv(output_tensor, src, tag=src)
+                    self.assertTrue(output_tensor.eq(src).all())
+            else:
+                # Send mode
+                dist.send(tensor, dst, tag=rank)
+
     # ISEND
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
     def test_isend(self):

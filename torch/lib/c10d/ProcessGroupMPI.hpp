@@ -165,15 +165,18 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
-      int dstRank);
+      int dstRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
-      int srcRank);
+      int srcRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
-      int* srcRank);
+      int* srcRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> barrier();
 

@@ -707,17 +707,26 @@ at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   return tensor;
 }
 
+uint32_t checkTag(int32_t tag) {
+  if (tag < 0) {
+    throw std::runtime_error("Tag must be >= 0");
+  }
+  return (uint32_t) tag;
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
     std::vector<at::Tensor>& tensors,
-    int dstRank) {
+    int dstRank,
+    int tag) {
   auto& tensor = checkSingleTensor(tensors);
+  auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.type().elementSizeInBytes();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
   auto buf = context->createUnboundBuffer(ptr, size);
-  buf->send(dstRank, 0);
+  buf->send(dstRank, utag);
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the send.
@@ -726,15 +735,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
     std::vector<at::Tensor>& tensors,
-    int srcRank) {
+    int srcRank,
+    int tag) {
   auto& tensor = checkSingleTensor(tensors);
+  auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.type().elementSizeInBytes();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
   auto buf = context->createUnboundBuffer(ptr, size);
-  buf->recv(srcRank, 0);
+  buf->recv(srcRank, utag);
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
@@ -743,8 +754,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
     std::vector<at::Tensor>& tensors,
-    int* srcRank) {
+    int* srcRank,
+    int tag) {
   auto& tensor = checkSingleTensor(tensors);
+  auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.type().elementSizeInBytes();
 
@@ -761,7 +774,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
     srcRanks.push_back(i);
   }
 
-  buf->recv(srcRanks, 0);
+  buf->recv(srcRanks, utag);
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
