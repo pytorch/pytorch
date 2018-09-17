@@ -6,7 +6,7 @@
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-THC_API void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, double b)
+void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, double b)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
@@ -21,7 +21,7 @@ THC_API void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, do
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
-THC_API void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, double stdv)
+void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, double stdv)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
@@ -36,13 +36,13 @@ THC_API void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, 
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
-THC_API void THCTensor_(normal_means)(THCState *state, THCTensor *self, THCTensor *means, double stddev) {
+void THCTensor_(normal_means)(THCState *state, THCTensor *self, THCTensor *means, double stddev) {
   THCTensor_(resizeAs)(state, self, means);
   THCTensor_(normal)(state, self, 0, stddev);
   THCTensor_(cadd)(state, self, self, ScalarConvert<int, scalar_t>::to(1), means);
 }
 
-THC_API void THCTensor_(normal_stddevs)(THCState *state, THCTensor *self, double mean, THCTensor *stddevs)
+void THCTensor_(normal_stddevs)(THCState *state, THCTensor *self, double mean, THCTensor *stddevs)
 {
   THCTensor_(resizeAs)(state, self, stddevs);
   THCTensor_(normal)(state, self, 0, 1);
@@ -50,7 +50,7 @@ THC_API void THCTensor_(normal_stddevs)(THCState *state, THCTensor *self, double
   THCTensor_(add)(state, self, self, ScalarConvert<double, scalar_t>::to(mean));
 }
 
-THC_API void THCTensor_(normal_means_stddevs)(THCState *state, THCTensor *self, THCTensor *means, THCTensor *stddevs)
+void THCTensor_(normal_means_stddevs)(THCState *state, THCTensor *self, THCTensor *means, THCTensor *stddevs)
 {
   THCTensor_(resizeAs)(state, self, means);
   THCTensor_(normal)(state, self, 0, 1);
@@ -58,7 +58,7 @@ THC_API void THCTensor_(normal_means_stddevs)(THCState *state, THCTensor *self, 
   THCTensor_(cadd)(state, self, self, ScalarConvert<int, scalar_t>::to(1), means);
 }
 
-THC_API void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mean, double stdv)
+void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mean, double stdv)
 {
 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
@@ -75,7 +75,7 @@ THC_API void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mea
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
-THC_API void THCTensor_(exponential)(THCState* state, THCTensor *self_, double lambda)
+void THCTensor_(exponential)(THCState* state, THCTensor *self_, double lambda)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
@@ -91,7 +91,7 @@ THC_API void THCTensor_(exponential)(THCState* state, THCTensor *self_, double l
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
-THC_API void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median, double sigma)
+void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median, double sigma)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
@@ -128,11 +128,11 @@ void THCTensor_(renormRows)(struct THCState* state,
                                         rows, cols);
 }
 
-THC_API void THCTensor_(multinomial)(struct THCState *state,
-                                      THCudaLongTensor *self,
-                                      THCTensor *prob_dist,
-                                      int n_sample,
-                                      int with_replacement)
+void THCTensor_(multinomial)(struct THCState *state,
+                              THCudaLongTensor *self,
+                              THCTensor *prob_dist,
+                              int n_sample,
+                              int with_replacement)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, prob_dist));
   THCGenerator* gen = THCRandom_getGenerator(state);
@@ -299,7 +299,7 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
   }
 }
 
-THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCudaLongTensor *_J, THCTensor *_q){
+void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCudaLongTensor *_J, THCTensor *_q){
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
   THAssert(THCTensor_(isContiguous)(state, _probs));
@@ -354,7 +354,7 @@ THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_prob
   THCudaLongTensor_free(state, larger_short);
 }
 
-THC_API void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCudaLongTensor *_J, THCTensor *_q){
+void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCudaLongTensor *_J, THCTensor *_q){
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
   THCGenerator* gen = THCRandom_getGenerator(state);
@@ -388,7 +388,7 @@ GENERATE_KERNEL1(generate_bernoulli, double, double p, double, curand_uniform_do
 GENERATE_KERNEL1(generate_bernoulli, scalar_t, double p, float, curand_uniform, (ScalarConvert<bool, scalar_t>::to(x <= p)))
 #endif
 
-THC_API void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
+void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
@@ -413,7 +413,7 @@ void THCTensor_(bernoulli_Tensor)(THCState *state, THCTensor *self, THCTensor* p
 }
 
 #define DEFINE_BERNOULLI_TENSOR(NAME, PROB_TYPE, PROB_DATA_TYPE)               \
-THC_API void THCTensor_(NAME)(THCState* state,                                 \
+void THCTensor_(NAME)(THCState* state,                                 \
         THCTensor *self_, PROB_TYPE *probs_)                                   \
 {                                                                              \
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, probs_));             \
@@ -458,7 +458,7 @@ GENERATE_KERNEL2(generate_random, scalar_t, int32_t base, uint32_t range, uint32
     static_cast<scalar_t>(static_cast<int32_t>(x % range + base)))
 #endif
 
-THC_API void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)
+void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
@@ -474,7 +474,7 @@ THC_API void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
-THC_API void THCTensor_(clampedRandom)(THCState* state, THCTensor *self_, int64_t min_val, int64_t max_val)
+void THCTensor_(clampedRandom)(THCState* state, THCTensor *self_, int64_t min_val, int64_t max_val)
 {
   THArgCheck(min_val < max_val, 2,
              "max must be greater than min, but got: min = %lld, max = %lld", min_val, max_val);
@@ -502,14 +502,14 @@ THC_API void THCTensor_(clampedRandom)(THCState* state, THCTensor *self_, int64_
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
-THC_API void THCTensor_(cappedRandom)(THCState* state, THCTensor *self_, int64_t max_val)
+void THCTensor_(cappedRandom)(THCState* state, THCTensor *self_, int64_t max_val)
 {
   THCTensor_(clampedRandom)(state, self_, 0LL, max_val);
 };
 
 #define HLF_MANT_DIG 11
 
-THC_API void THCTensor_(random)(THCState* state, THCTensor *self_)
+void THCTensor_(random)(THCState* state, THCTensor *self_)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);

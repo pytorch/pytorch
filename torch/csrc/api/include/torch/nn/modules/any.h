@@ -38,7 +38,7 @@ namespace nn {
 /// Example:
 ///
 /// \rst
-/// .. code-block::
+/// .. code-block:: cpp
 ///   struct GenericTrainer {
 ///     torch::nn::AnyModule module;
 ///
@@ -57,7 +57,7 @@ namespace nn {
 /// `AnyModule` will compile, but throw an exception at runtime:
 ///
 /// \rst
-/// .. code-block::
+/// .. code-block:: cpp
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   // Linear takes a tensor as input, but we are passing an integer.
 ///   // This will compile, but throw a `torch::Error` exception at runtime.
@@ -79,7 +79,7 @@ namespace nn {
 /// for example.
 ///
 /// \rst
-/// .. code-block::
+/// .. code-block:: cpp
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   auto output = module.forward(torch::ones({2, 3}));
 ///
@@ -97,7 +97,7 @@ namespace nn {
 /// using `.get<T>()` where `T` is the concrete module type.
 ///
 /// \rst
-/// .. code-block::
+/// .. code-block:: cpp
 ///   torch::nn::AnyModule module(torch::nn::Linear(3, 4));
 ///   std::shared_ptr<nn::Module> ptr = module.ptr();
 ///   torch::nn::Linear linear(module.get<torch::nn::Linear>());

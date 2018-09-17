@@ -184,6 +184,7 @@ private:
   DimVector shape_;
   DimVector perm_;
   SmallVector<OperandInfo, 4> operands_;
+  SmallVector<Tensor, 4> cast_tensors_;
   int num_outputs_ = 0;
   bool has_coalesced_dimensions_ = false;
 };
