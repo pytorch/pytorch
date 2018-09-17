@@ -81,6 +81,7 @@ vector<TIndex> GetTensorInfo(
     const void* c,
     size_t* capacity,
     DeviceOption* device) {
+  CHECK(capacity);
   const Tensor* tc = static_cast<const Tensor*>(c);
   CHECK(tc);
   CHECK(tc->unsafeGetTensorImpl());

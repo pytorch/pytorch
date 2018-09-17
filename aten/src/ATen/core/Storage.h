@@ -7,9 +7,7 @@ namespace at {
 struct AT_API Storage {
 public:
   Storage() {}
-  explicit Storage(StorageImpl* storage_impl) : storage_impl_(c10::intrusive_ptr<StorageImpl>::reclaim(storage_impl)) {}
-  explicit Storage(const c10::intrusive_ptr<StorageImpl>& ptr) : storage_impl_(ptr) {}
-  explicit Storage(c10::intrusive_ptr<StorageImpl>&& ptr) : storage_impl_(std::move(ptr)) {}
+  Storage(c10::intrusive_ptr<StorageImpl> ptr) : storage_impl_(std::move(ptr)) {}
   Storage(
       caffe2::TypeMeta data_type,
       size_t size,
@@ -34,7 +32,7 @@ public:
             /* allocator */ nullptr,
             resizable)) {}
 
-  explicit Storage(at::DeviceType device_type)
+  Storage(at::DeviceType device_type)
       : storage_impl_(c10::make_intrusive<StorageImpl>(device_type)) {}
   Storage(at::DeviceType device_type, caffe2::TypeMeta data_type)
       : storage_impl_(

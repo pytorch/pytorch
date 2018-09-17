@@ -9,7 +9,7 @@
 namespace caffe2 {
 
 class CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
-  UndefinedTensorImpl() : TensorImpl(Storage()){};
+  UndefinedTensorImpl() : TensorImpl(CPU){};
 
  public:
  // Without this, we get:
@@ -52,9 +52,6 @@ class CAFFE2_API Tensor final {
 
   explicit Tensor(Storage storage)
       : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(std::move(storage))) {}
-
-  explicit Tensor(DeviceType device_type)
-      : Tensor(Storage(device_type)) {}
 
   /**
    * @brief Creates a tensor of the given dimension.

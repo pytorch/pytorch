@@ -73,49 +73,53 @@ else:
 
 
 def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
-    global _use_shared_memory
-    _use_shared_memory = True
+    try:
+        global _use_shared_memory
+        _use_shared_memory = True
 
-    # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
-    # module's handlers are executed after Python returns from C low-level
-    # handlers, likely when the same fatal signal happened again already.
-    # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
-    _set_worker_signal_handlers()
+        # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
+        # module's handlers are executed after Python returns from C low-level
+        # handlers, likely when the same fatal signal happened again already.
+        # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
+        _set_worker_signal_handlers()
 
-    torch.set_num_threads(1)
-    random.seed(seed)
-    torch.manual_seed(seed)
+        torch.set_num_threads(1)
+        random.seed(seed)
+        torch.manual_seed(seed)
 
-    # Do not wait for putting thread to join when this worker exits. Otherwise,
-    # this worker may always be waiting to put and doesn't check index_queue
-    # and done_event for termination signal.
-    data_queue.cancel_join_thread()
+        # Do not wait for putting thread to join when this worker exits.
+        # Otherwise, this worker may always be waiting to put and doesn't check
+        # index_queue and done_event for termination signal.
+        data_queue.cancel_join_thread()
 
-    if init_fn is not None:
-        init_fn(worker_id)
+        if init_fn is not None:
+            init_fn(worker_id)
 
-    watchdog = ManagerWatchdog()
+        watchdog = ManagerWatchdog()
 
-    while True:
-        try:
-            r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
-        except queue.Empty:
-            if watchdog.is_alive() and not done_event.is_set():
-                continue
-            else:
+        while True:
+            try:
+                r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
+            except queue.Empty:
+                if watchdog.is_alive() and not done_event.is_set():
+                    continue
+                else:
+                    break
+            # use done_event so that we can get faster exiting signal even if there
+            # are still indices in index_queue
+            if r is None or done_event.is_set():
                 break
-        # use done_event so that we can get faster exiting signal even if there
-        # are still indices in index_queue
-        if r is None or done_event.is_set():
-            break
-        idx, batch_indices = r
-        try:
-            samples = collate_fn([dataset[i] for i in batch_indices])
-        except Exception:
-            data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
-        else:
-            data_queue.put((idx, samples))
-            del samples
+            idx, batch_indices = r
+            try:
+                samples = collate_fn([dataset[i] for i in batch_indices])
+            except Exception:
+                data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+            else:
+                data_queue.put((idx, samples))
+                del samples
+    except KeyboardInterrupt:
+        # Main process will raise KeyboardInterrupt anyways.
+        pass
 
 
 def _pin_memory_loop(in_queue, out_queue, done_event, pin_memory, device_id):

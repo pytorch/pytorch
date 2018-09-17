@@ -42,9 +42,9 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
-VariableType::VariableType(Context* context, Type* baseType)
+VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
   : TypeDefault(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
-  , baseType(static_cast<TypeExtendedInterface*>(baseType))
+  , baseType(baseType)
   , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
@@ -105,7 +105,7 @@ TypeID VariableType::ID() const {
 std::vector<std::unique_ptr<Type>> type_to_variable_type;
 
 // XXX - this is not threadsafe with uses of Variables
-void register_variable_type_for(Type* baseType) {
+void register_variable_type_for(TypeExtendedInterface* baseType) {
   AT_ASSERT(baseType);
   size_t base_id = static_cast<size_t>(baseType->ID());
   if(type_to_variable_type.size() <= base_id) {
@@ -166,7 +166,7 @@ REGISTER_VARIABLE_HOOKS(VariableHooks)
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
 void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend, at::ScalarType scalar_type) const {
   auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
-  register_variable_type_for(baseType);
+  register_variable_type_for(static_cast<at::TypeExtendedInterface*>(baseType));
 }
 
 at::Type& VariableHooks::getVariableTypeFromBaseType(const at::Type& baseType) const {
