@@ -302,8 +302,7 @@
       output: True
     - accreal start
     - accreal end
-    - arg: accreal step
-      default: 1
+    - accreal step
 ]]
 [[
   name: _arange
@@ -320,8 +319,7 @@
           output: True
         - accreal start
         - accreal end
-        - arg: accreal step
-          default: 1
+        - accreal step
     - cname: arange
       arguments:
         - arg: THTensor* result
@@ -1956,8 +1954,7 @@
       output: True
     - real start
     - real end
-    - arg: long steps
-      default: 100
+    - long steps
 ]]
 [[
   name: _logspace
@@ -1976,8 +1973,7 @@
       output: True
     - real start
     - real end
-    - arg: long steps
-      default: 100
+    - long steps
 ]]
 [[
   name: histc

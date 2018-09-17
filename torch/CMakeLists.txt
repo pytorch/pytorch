@@ -3,7 +3,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     return()
   endif()
 else()
-  cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
   project(torch CXX C)
   find_package(Caffe2 REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
@@ -146,7 +146,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/fusion_compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
@@ -176,6 +175,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/fusers/interface.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
@@ -189,6 +189,34 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   )
+
+SET(USE_CPU_FUSER 0)
+if (NOT WIN32)
+  SET(USE_CPU_FUSER 1)
+
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/tensor_desc.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/fusion_handle_impl.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/common/fused_kernel.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fusion_compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cpu/fused_kernel.cpp
+  )
+endif()
+
+SET(USE_CUDA_FUSER 0)
+if (USE_CUDA AND NOT USE_ROCM AND NOT WIN32)
+  SET(USE_CUDA_FUSER 1)
+
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/fusion_compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/cuda/fused_kernel.cpp
+  )
+
+endif()
+
+CONFIGURE_FILE(
+    ${TORCH_SRC_DIR}/csrc/jit/fusers/Config.h.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/csrc/jit/fusers/Config.h)
 
 if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
@@ -294,8 +322,15 @@ if(OPENMP_FOUND)
   if (VERBOSE)
     message(STATUS "Compiling with OpenMP")
   endif()
-  target_compile_options(torch INTERFACE -fopenmp)
-  target_link_libraries(torch -fopenmp)
+  target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
+  #cmake only check for separate OpenMP library on AppleClang 7+
+  #https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
+  if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "7.0" OR
+        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "7.0")
+      target_link_libraries(torch ${OpenMP_libomp_LIBRARY})
+    endif()
+  endif()
 endif()
 
 if (NOT NO_API AND NOT USE_ROCM)

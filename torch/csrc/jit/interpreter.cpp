@@ -6,7 +6,6 @@
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/ivalue.h"
