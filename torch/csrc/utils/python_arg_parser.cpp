@@ -227,6 +227,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     default_double = atof(str.c_str());
   } else if (type_ == ParameterType::COMPLEX) {
     default_complex[0] = atof(str.c_str()); // TODO: parse "x + xj"?
+    default_complex[1] = 0;
   } else if (type_ == ParameterType::SCALAR) {
     if (str == "None") {
       // This is a bit awkward, but convenient for clamp which takes Scalars,
