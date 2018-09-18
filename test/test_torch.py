@@ -5233,7 +5233,7 @@ class TestTorch(TestCase):
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
     @skipIfNoLapack
-    def tset_potri(self):
+    def test_potri(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -5241,7 +5241,7 @@ class TestTorch(TestCase):
                           (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
 
         # make sure 'a' is symmetric PSD
-        a = a * a.t()
+        a = torch.mm(a, a.t())
 
         # compute inverse directly
         inv0 = torch.inverse(a)
@@ -5252,13 +5252,13 @@ class TestTorch(TestCase):
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # upper Triangular Test
-        chol = torch.potrf(a, 'U')
-        inv1 = torch.potri(chol, 'U')
+        chol = torch.potrf(a, True)
+        inv1 = torch.potri(chol, True)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # lower Triangular Test
-        chol = torch.potrf(a, 'L')
-        inv1 = torch.potri(chol, 'L')
+        chol = torch.potrf(a, False)
+        inv1 = torch.potri(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
     @skipIfNoLapack
