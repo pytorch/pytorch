@@ -6,7 +6,7 @@ from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
 from . import SequentialSampler, RandomSampler, BatchSampler
 import signal
 import functools
-import collections
+from torch._six import container_abcs
 import re
 import sys
 import threading
@@ -73,49 +73,53 @@ else:
 
 
 def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
-    global _use_shared_memory
-    _use_shared_memory = True
+    try:
+        global _use_shared_memory
+        _use_shared_memory = True
 
-    # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
-    # module's handlers are executed after Python returns from C low-level
-    # handlers, likely when the same fatal signal happened again already.
-    # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
-    _set_worker_signal_handlers()
+        # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
+        # module's handlers are executed after Python returns from C low-level
+        # handlers, likely when the same fatal signal happened again already.
+        # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
+        _set_worker_signal_handlers()
 
-    torch.set_num_threads(1)
-    random.seed(seed)
-    torch.manual_seed(seed)
+        torch.set_num_threads(1)
+        random.seed(seed)
+        torch.manual_seed(seed)
 
-    # Do not wait for putting thread to join when this worker exits. Otherwise,
-    # this worker may always be waiting to put and doesn't check index_queue
-    # and done_event for termination signal.
-    data_queue.cancel_join_thread()
+        # Do not wait for putting thread to join when this worker exits.
+        # Otherwise, this worker may always be waiting to put and doesn't check
+        # index_queue and done_event for termination signal.
+        data_queue.cancel_join_thread()
 
-    if init_fn is not None:
-        init_fn(worker_id)
+        if init_fn is not None:
+            init_fn(worker_id)
 
-    watchdog = ManagerWatchdog()
+        watchdog = ManagerWatchdog()
 
-    while True:
-        try:
-            r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
-        except queue.Empty:
-            if watchdog.is_alive() and not done_event.is_set():
-                continue
-            else:
+        while True:
+            try:
+                r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
+            except queue.Empty:
+                if watchdog.is_alive() and not done_event.is_set():
+                    continue
+                else:
+                    break
+            # use done_event so that we can get faster exiting signal even if there
+            # are still indices in index_queue
+            if r is None or done_event.is_set():
                 break
-        # use done_event so that we can get faster exiting signal even if there
-        # are still indices in index_queue
-        if r is None or done_event.is_set():
-            break
-        idx, batch_indices = r
-        try:
-            samples = collate_fn([dataset[i] for i in batch_indices])
-        except Exception:
-            data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
-        else:
-            data_queue.put((idx, samples))
-            del samples
+            idx, batch_indices = r
+            try:
+                samples = collate_fn([dataset[i] for i in batch_indices])
+            except Exception:
+                data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+            else:
+                data_queue.put((idx, samples))
+                del samples
+    except KeyboardInterrupt:
+        # Main process will raise KeyboardInterrupt anyways.
+        pass
 
 
 def _pin_memory_loop(in_queue, out_queue, done_event, pin_memory, device_id):
@@ -187,9 +191,9 @@ def default_collate(batch):
         return torch.DoubleTensor(batch)
     elif isinstance(batch[0], string_classes):
         return batch
-    elif isinstance(batch[0], collections.Mapping):
+    elif isinstance(batch[0], container_abcs.Mapping):
         return {key: default_collate([d[key] for d in batch]) for key in batch[0]}
-    elif isinstance(batch[0], collections.Sequence):
+    elif isinstance(batch[0], container_abcs.Sequence):
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
@@ -201,9 +205,9 @@ def pin_memory_batch(batch):
         return batch.pin_memory()
     elif isinstance(batch, string_classes):
         return batch
-    elif isinstance(batch, collections.Mapping):
+    elif isinstance(batch, container_abcs.Mapping):
         return {k: pin_memory_batch(sample) for k, sample in batch.items()}
-    elif isinstance(batch, collections.Sequence):
+    elif isinstance(batch, container_abcs.Sequence):
         return [pin_memory_batch(sample) for sample in batch]
     else:
         return batch
@@ -256,7 +260,6 @@ class _DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
             self.worker_queue_idx = 0
             self.worker_result_queue = multiprocessing.Queue()
             self.batches_outstanding = 0
@@ -267,29 +270,40 @@ class _DataLoaderIter(object):
             self.reorder_dict = {}
             self.done_event = multiprocessing.Event()
 
-            self.workers = [
-                multiprocessing.Process(
+            self.index_queues = []
+            self.workers = []
+            for i in range(self.num_workers):
+                index_queue = multiprocessing.Queue()
+                w = multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queues[i],
+                    args=(self.dataset, index_queue,
                           self.worker_result_queue, self.done_event,
                           self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
-                for i in range(self.num_workers)]
+                w.daemon = True  # ensure that the worker exits on process exit
+                # Process.start() actually take some time as it needs to start a
+                # process and pass the arguments over via a pipe. Therefore, we
+                # only add a worker to self.workers list after it started, so
+                # that we do not call .join() if program dies before it starts,
+                # and __del__ tries to join it but will get:
+                #     AssertionError: can only join a started process.
+                w.start()
+                self.index_queues.append(index_queue)
+                self.workers.append(w)
 
             if self.pin_memory:
                 self.data_queue = queue.Queue()
-                self.pin_memory_thread = threading.Thread(
+                pin_memory_thread = threading.Thread(
                     target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
                           torch.cuda.current_device()))
-                self.pin_memory_thread.daemon = True
-                self.pin_memory_thread.start()
+                pin_memory_thread.daemon = True
+                pin_memory_thread.start()
+                # Similar to workers (see comment above), we only register
+                # pin_memory_thread once it is started.
+                self.pin_memory_thread = pin_memory_thread
             else:
                 self.data_queue = self.worker_result_queue
-
-            for w in self.workers:
-                w.daemon = True  # ensure that the worker exits on process exit
-                w.start()
 
             _update_worker_pids(id(self), tuple(w.pid for w in self.workers))
             _set_SIGCHLD_handler()
@@ -390,7 +404,7 @@ class _DataLoaderIter(object):
                 q.put(None)
             for w in self.workers:
                 w.join()
-            if self.pin_memory:
+            if hasattr(self, 'pin_memory_thread'):
                 self.pin_memory_thread.join()
 
     def __del__(self):

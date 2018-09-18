@@ -39,6 +39,9 @@ void printTensorAndCheck(const std::vector<T>& values) {
   expect_stderr_contains(values);
 }
 
+// We need real glog for this test to pass
+#ifdef CAFFE2_USE_GOOGLE_GLOG
+
 #if !(__APPLE__) // TODO(janusz): thread_local does not work under mac.
 
 TEST(SmartTensorPrinterTest, SimpleTest) {
@@ -47,5 +50,7 @@ TEST(SmartTensorPrinterTest, SimpleTest) {
 }
 
 #endif // !(__APPLE__)
+
+#endif // CAFFE2_USE_GOOGLE_GLOG
 
 } // namespace caffe2

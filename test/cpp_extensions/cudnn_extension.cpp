@@ -14,7 +14,7 @@
 
 #include <ATen/cudnn/Descriptors.h> // for TensorDescriptor
 #include <ATen/cuda/Exceptions.h> // for CUDNN_CHECK
-#include <ATen/cudnn/Handles.h> // for getCudnnHandle
+#include <ATen/cudnn/Handle.h> // for getCudnnHandle
 
 // Name of function in python module and name used for error messages by
 // at::check* functions.

@@ -1,5 +1,5 @@
-#ifndef GATHER_OP_H
-#define GATHER_OP_H
+#ifndef GATHER_OP_H_
+#define GATHER_OP_H_
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
@@ -40,6 +40,9 @@ class GatherOp : public Operator<Context> {
 
     for (int i = 0; i < N; ++i) {
       auto idx = idxs[i];
+      if (idx < 0) {
+        idx = idx + data.dim(0);
+      }
       CAFFE_ENFORCE(
           0 <= idx && idx < data.dim(0),
           "INDICES element is out of DATA bounds, id=",
@@ -56,4 +59,4 @@ class GatherOp : public Operator<Context> {
   INPUT_TAGS(DATA, INDICES);
 };
 } // namespace caffe2
-#endif
+#endif // GATHER_OP_H_

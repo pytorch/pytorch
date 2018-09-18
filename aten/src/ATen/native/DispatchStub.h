@@ -22,7 +22,10 @@
 //   DEFINE_DISPATCH(stub);
 //
 // In native/cpu/MyKernel.cpp:
-//   void kernel(const Tensor& x) { ... }
+//   namespace {
+//     // use anonymous namespace so that different cpu versions won't conflict
+//     void kernel(const Tensor& x) { ... }
+//   }
 //   REGISTER_DISPATCH(stub, &kernel);
 //
 // To call:
@@ -46,19 +49,22 @@ enum class CPUCapability {
 CPUCapability get_cpu_capability();
 
 template <typename FnPtr, typename T>
-struct AT_API DispatchStub {
-  static_assert(std::is_pointer<FnPtr>::value, "FnPtr should be a pointer type");
+struct AT_API DispatchStub;
+
+template <typename rT, typename T, typename... Args>
+struct AT_API DispatchStub<rT (*) (Args...), T> {
+  using FnPtr = rT (*) (Args...);
 
   template <typename... ArgTypes>
-  void operator()(DeviceType device_type, ArgTypes&&... args) {
+  rT operator()(DeviceType device_type, ArgTypes&&... args) {
     if (device_type == DeviceType::CPU) {
       if (!cpu_dispatch_ptr) {
         cpu_dispatch_ptr = choose_cpu_impl();
       }
-      (*cpu_dispatch_ptr)(std::forward<ArgTypes>(args)...);
+      return (*cpu_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::CUDA) {
       AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
-      (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
+      return (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else {
       AT_ERROR("DispatchStub: unsupported device type", device_type);
     }
@@ -103,6 +109,11 @@ struct RegisterDispatch {
 };
 } // anonymous namespace
 
+// Compiler will complain if you put things like std::tuple<Tensor, Tensor> in
+// the `fn` argument of DECLARE_DISPATCH. Some possible workarounds, e.g.,
+// adding parentheses and using helper struct to get rid of the parentheses, do
+// not work with MSVC. So do a `using`-declaration if you need to pass in such
+// `fn`, e.g., grid_sampler_2d_backward_cpu_kernel in GridSampleKernel.h.
 #define DECLARE_DISPATCH(fn, name) \
   struct name : DispatchStub<fn, name> {}; \
   extern AT_API struct name name

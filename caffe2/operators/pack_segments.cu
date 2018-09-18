@@ -299,7 +299,7 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
   Data_T* out_ptr = static_cast<Data_T*>(out->raw_mutable_data(data.meta()));
 
   // Return empty out (with the proper shape) if any of the dimensions is 0.
-  if (!(data.dim(0) * data.dim(1))) {
+  if (data.dim(0) == 0 || data.dim(1) == 0) {
     return true;
   }
 

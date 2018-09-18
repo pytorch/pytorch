@@ -86,7 +86,7 @@ workspace.ResetWorkspace()
 op = core.CreateOperator(
     "Sum",
     ["A",  "B"],
-    ["A"],  # inplace
+    ["A"],  // inplace
 )
 
 workspace.FeedBlob("A", np.array([[1,2,5],[8,3,4]]).astype(np.float32))

@@ -24,6 +24,9 @@ std::shared_ptr<Graph> Canonicalize(const std::shared_ptr<Graph>& graph) {
       r_outputs.at(i)->setStage(outputs.at(i)->stage());
       rn_env[outputs.at(i)] = r_outputs.at(i);
     }
+    if (node->hasAttribute(attr::Subgraph)) {
+      r_node->g_(attr::Subgraph, Canonicalize(node->g(attr::Subgraph)));
+    }
   }
   for (auto* output : graph->outputs()) {
     r->registerOutput(rn_fn(output));

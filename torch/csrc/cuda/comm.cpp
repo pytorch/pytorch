@@ -72,6 +72,9 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
                    [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
     throw std::runtime_error("all tensors must be on devices[0]");
   }
+#ifdef USE_NCCL
+  buffer_size = std::min(torch::cuda::nccl::get_max_count(), buffer_size);
+#endif
 
   tensor_list2d outputs(devices.size());
   outputs[0] = tensors.vec();

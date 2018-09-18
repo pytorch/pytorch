@@ -15,7 +15,7 @@ TEST(ConvToNNPackTest, TestSimple) {
   op = AddOp(&netdef, "Conv", {"in"}, {"out"});
   op = AddOp(&netdef, "Relu", {"out"}, {"out"});
   op = AddOp(&netdef, "Conv", {"out"}, {"out"}); // if not CPU, won't transform
-  op->mutable_device_option()->set_device_type(CUDA);
+  op->mutable_device_option()->set_device_type(PROTO_CUDA);
   op = AddOp(&netdef, "Relu", {"out"}, {"out"});
   op = AddOp(&netdef, "Conv", {"out"}, {"out"});
   op->set_engine("NNPACK"); // does not need to be transformed
@@ -28,7 +28,7 @@ TEST(ConvToNNPackTest, TestSimple) {
 
   int nnpack_count = 0;
   for (auto& op : transformed_netdef.op()) {
-    if (op.type() == "Conv" && op.device_option().device_type() == CPU) {
+    if (op.type() == "Conv" && op.device_option().device_type() == PROTO_CPU) {
       EXPECT_EQ(op.engine(), "NNPACK");
       nnpack_count++;
     }

@@ -9,6 +9,8 @@ from future.utils import viewitems, viewkeys, viewvalues
 import logging
 import copy
 
+from multiprocessing import cpu_count
+
 from caffe2.python import \
     model_helper, dyndep, scope, workspace, core, memonger, utils
 from caffe2.proto import caffe2_pb2
@@ -44,6 +46,7 @@ def Parallelize(
     param_update_builder_fun=None,
     optimizer_builder_fun=None,
     post_sync_builder_fun=None,
+    pre_grad_net_transformer_fun=None,
     net_transformer_fun=None,
     devices=None,
     rendezvous=None,
@@ -91,6 +94,11 @@ def Parallelize(
                         Signature:
                         net_transformer_fun(
                             model, num_devices, device_prefix, device_type)
+      pre_grad_net_transformer_fun:
+                        Optional function to transform the network similar to
+                        net_transformer_fun, but happens before gradient ops
+                        been add.
+                        Signature: pre_grad_net_transformer_fun(model)
       post_sync_builder_fun:
                         Function applied after initial parameter sync has been
                         completed, such as keeping multi-precision parameters
@@ -127,7 +135,10 @@ def Parallelize(
         device scope was: {}".format(scope.CurrentDeviceScope())
 
     if devices is None:
-        devices = list(range(0, workspace.NumCudaDevices())),
+        if not cpu_device:
+            devices = list(range(0, workspace.NumCudaDevices()))
+        else:
+            devices = list(range(0, cpu_count()))
 
     if not cpu_device:
         for gpu in devices:
@@ -233,6 +244,9 @@ def Parallelize(
         list(viewkeys(model_helper_obj._device_grouped_blobs))
     model_helper_obj._computed_param_names =\
         list(viewkeys(computed_params_grouped))
+
+    if pre_grad_net_transformer_fun:
+        pre_grad_net_transformer_fun(model_helper_obj)
 
     if has_parameter_updates:
         log.info("Adding gradient operators")
