@@ -7,15 +7,12 @@
 #
 #   TORCH_FOUND        -- True if the system has the Torch library
 #   TORCH_INCLUDE_DIRS -- The include directories for torch
-#   TORCH_LIBRARIES    -- Libraries to link to
+#   TORCH_LIBRARIES    -- Libraries to link against
+#   TORCH_CXX_FLAGS    -- Additional (required) compiler flags
 #
 # and the following imported targets:
 #
-#   Torch
-#
-# and the following functions:
-#
-#   torch_add_custom_op_library(<name> <source_files>)
+#   torch
 
 if ($ENV{TORCH_INSTALL_PREFIX})
   set(TORCH_INSTALL_PREFIX $ENV{TORCH_INSTALL_PREFIX})
@@ -26,13 +23,19 @@ else()
 endif()
 
 # Include directories.
-set(TORCH_INCLUDE_DIRS "${TORCH_INSTALL_PREFIX}/lib/include")
+if (EXISTS "${TORCH_INSTALL_PREFIX}/lib/include")
+  set(TORCH_INCLUDE_DIRS "${TORCH_INSTALL_PREFIX}/lib/include")
+else()
+  set(TORCH_INCLUDE_DIRS "${TORCH_INSTALL_PREFIX}/include")
+endif()
 
 # Library dependencies.
 find_package(Caffe2 REQUIRED)
-find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
 
-set(TORCH_LIBRARIES ${TORCH_LIBRARY} ${Caffe2_MAIN_LIBS})
+find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
+add_library(torch SHARED IMPORTED)
+set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
+
 if (@USE_CUDA@)
   if(MSVC)
     set(NVTOOLEXT_HOME "C:/Program Files/NVIDIA Corporation/NvToolsExt")
@@ -59,13 +62,12 @@ if (@USE_CUDA@)
   list(APPEND TORCH_LIBRARIES ${TORCH_CUDA_LIBRARIES})
 endif()
 
-# Creates a shared library <name> with the correct include directories
-# and linker flags set to include Torch header files and link with Torch
-# libraries. Also sets the C++ standard version to C++11. All options
-# can be override by specifying further options on the `<name>` CMake target.
-function(torch_add_custom_op_library name source_files)
-  add_library(${name} SHARED ${source_files})
-  target_include_directories(${name} PUBLIC "${TORCH_INCLUDE_DIRS}")
-  target_link_libraries(${name} "${TORCH_LIBRARIES}")
-  set_property(TARGET ${name} PROPERTY CXX_STANDARD 11)
-endfunction(torch_add_custom_op_library)
+# When we build libtorch with the old GCC ABI, dependent libraries must too.
+set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
+
+set_target_properties(torch PROPERTIES
+    IMPORTED_LOCATION ${TORCH_LIBRARY}
+    INTERFACE_INCLUDE_DIRECTORIES ${TORCH_INCLUDE_DIRS}
+    INTERFACE_COMPILE_OPTIONS ${TORCH_CXX_FLAGS}
+    CXX_STANDARD 11
+)

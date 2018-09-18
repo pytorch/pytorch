@@ -1,4 +1,5 @@
 import torch
+from torch._six import string_classes
 
 from .rendezvous import rendezvous, register_rendezvous_handler
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
@@ -23,11 +24,40 @@ except ImportError:
     _NCCL_AVAILBLE = False
 
 
-class DistBackend:
-    UNDEFINED = -1
-    GLOO = 0
-    NCCL = 2
-    MPI = 3
+class DistBackend(object):
+    """
+    An enum-like class of available backends: GLOO, NCCL, and MPI.
+
+    The values of this class are lowercase strings, e.g., ``"gloo"``. They can
+    be accessed as attributes, e.g., ``DistBackend.NCCL``.
+
+    This class can be directly called to parse the string, e.g.,
+    ``DistBackend(backend_str)`` will check if ``backend_str`` is valid, and
+    return the parsed lowercase string if so. It also accepts uppercase strings,
+    e.g., ``DistBackend("GLOO")`` returns ``"gloo"``.
+
+    .. note:: The entry ``DistBackend.UNDEFINED`` is present but only used as
+              initial value of some fields. Users should neither use it directly
+              nor assume its existence.
+    """
+    UNDEFINED = "undefined"
+    GLOO = "gloo"
+    NCCL = "nccl"
+    MPI = "mpi"
+
+    def __new__(cls, name):
+        if not isinstance(name, string_classes):
+            raise ValueError("Backend name must be a string, but got: {}".format(name))
+        value = getattr(DistBackend, name.upper(), DistBackend.UNDEFINED)
+        if value == DistBackend.UNDEFINED:
+            raise ValueError("Invalid backend: '{}'".format(name))
+        return value
+
+# The following two values are here to maintain backward compatibility with
+# pre-c10d distributed package.
+# TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
+_backend = DistBackend.UNDEFINED
+dist_backend = DistBackend
 
 
 class group(object):
@@ -166,6 +196,30 @@ def get_default_group():
     return _default_pg
 
 
+def get_backend(group=group.WORLD):
+    """
+    Returns the backend of the given process group.
+
+    Arguments:
+        group (ProcessGroup, optional): The process group to work on. The
+            default is the general main process group. If another specific group
+            is specified, the calling process must be part of :attr:`group`.
+
+    Returns:
+        The backend of the given process group as a lower case string.
+
+    """
+    _check_default_pg()
+
+    if group == GroupMember.WORLD:
+        pg = _default_pg
+    else:
+        pg = group
+    if _rank_not_in_group(pg):
+        raise RuntimeError("Invalid process group specified")
+    return _pg_map.get(pg, None)[0]
+
+
 def init_process_group(backend,
                        init_method="env://",
                        **kwargs):
@@ -174,9 +228,11 @@ def init_process_group(backend,
     initialize the distributed package
 
     Arguments:
-        backend (str): Name of the backend to use. Depending on build-time
-                       configuration valid values include:
-                        ``mpi`` and ``gloo``.
+        backend (str or DistBackend): The backend to use. Depending on
+            build-time configurations, valid values include ``mpi``, ``gloo``,
+            and ``nccl``. This field should be given as a lowercase string
+            (e.g., ``"gloo"``), which can also be accessed via
+            :class:`DistBackend` attributes (e.g., ``DistBackend.GLOO``).
         init_method (str, optional): URL specifying how to initialize the
                                      process group.
         world_size (int, optional): Number of processes participating in
@@ -184,12 +240,13 @@ def init_process_group(backend,
         rank (int, optional): Rank of the current process.
         group_name (str, optional, deprecated): Group name.
 
-    To enable ``backend == mpi``, PyTorch needs to built from source on
-    a system that supports MPI. The same applies to NCCL as well.
+    To enable ``backend == DistBackend.MPI``, PyTorch needs to built from source
+    on a system that supports MPI. The same applies to NCCL as well.
 
     """
     global _pg_map
     global _pg_names
+    global _backend
     global _default_pg
     global _default_pg_init_method
 
@@ -203,7 +260,9 @@ def init_process_group(backend,
     assert len(kwargs) == 0, \
         "got unexpected keyword arguments: %s" % ",".join(kwargs.keys())
 
-    if backend == "mpi":
+    backend = DistBackend(backend)
+
+    if backend == DistBackend.MPI:
         if not is_mpi_available():
             raise RuntimeError("Distributed package doesn't have MPI built in")
 
@@ -220,20 +279,19 @@ def init_process_group(backend,
         else:
             store, rank, world_size = next(rendezvous(init_method))
 
-        if backend == "gloo":
+        if backend == DistBackend.GLOO:
             _default_pg = ProcessGroupGloo(store, rank, world_size)
             _pg_map[_default_pg] = (DistBackend.GLOO, store)
             _pg_names[_default_pg] = group_name
-        elif backend == "nccl":
+        elif backend == DistBackend.NCCL:
             if not is_nccl_available():
                 raise RuntimeError("Distributed package doesn't have NCCL "
                                    "built in")
             _default_pg = ProcessGroupNCCL(store, rank, world_size)
             _pg_map[_default_pg] = (DistBackend.NCCL, store)
             _pg_names[_default_pg] = group_name
-        else:
-            raise RuntimeError("Invalid distributed backend name: " + backend)
 
+    _backend = _pg_map[_default_pg][0]
     _default_pg_init_method = init_method
 
 

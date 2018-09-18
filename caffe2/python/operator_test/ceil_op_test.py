@@ -3,18 +3,23 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+<<<<<<< HEAD
 from caffe2.python import core, workspace
+=======
+from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
+>>>>>>> upstream/master
 from hypothesis import given
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 
 import unittest
 
 
-class TestCeil(hu.HypothesisTestCase):
+class TestCeil(serial.SerializedTestCase):
 
-    @given(X=hu.tensor(),
+    @serial.given(X=hu.tensor(),
            engine=st.sampled_from([""] if workspace.has_hip_support else ["", "CUDNN"]),
            **hu.gcs)
     def test_ceil(self, X, gc, dc, engine):

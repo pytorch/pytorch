@@ -13,7 +13,7 @@ __global__ void LabelCrossEntropyKernel(
     const float log_threshold, float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     CUDA_KERNEL_ASSERT(labeldata[i] >= 0 && labeldata[i] < D);
-    Ydata[i] = -logf(max(Xdata[i * D + labeldata[i]], log_threshold));
+    Ydata[i] = -logf(fmaxf(Xdata[i * D + labeldata[i]], log_threshold));
   }
 }
 __global__ void LabelCrossEntropyGradientKernel(
@@ -21,7 +21,7 @@ __global__ void LabelCrossEntropyGradientKernel(
     const float* dYdata, const float log_threshold, float* dXdata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     int idx = i * D + labeldata[i];
-    dXdata[idx] = - dYdata[i] / max(Xdata[idx], log_threshold);
+    dXdata[idx] = - dYdata[i] / fmaxf(Xdata[idx], log_threshold);
   }
 }
 }  // namespace

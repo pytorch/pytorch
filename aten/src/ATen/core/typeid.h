@@ -49,9 +49,9 @@ class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, ui
       TypeIdentifier typeId);
   friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
 
-  // This is 8, because 0 is uint8_t (due to ScalarType BC constraint)
+  // 0 is uint8_t (due to ScalarType BC constraint)
   static constexpr TypeIdentifier uninitialized() {
-    return TypeIdentifier(8);
+    return TypeIdentifier(11);
   }
 
  private:
@@ -222,7 +222,7 @@ class AT_CORE_API TypeMeta {
   friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
-  bool Match() const {
+  bool Match() const noexcept {
     return (id_ == Id<T>());
   }
 
@@ -452,10 +452,8 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 
 class Tensor;
 
-// Note: we have preallocated the numbers 0-8 so they line up exactly
+// Note: we have preallocated the numbers so they line up exactly
 // with at::ScalarType's numbering.  All other numbers do not matter.
-//
-// Notably, the "uninitialized" type id is 8, not 0, for hysterical raisins.
 
 struct _CaffeHighestPreallocatedTypeId final {};
 
@@ -470,7 +468,7 @@ CAFFE_DECLARE_KNOWN_TYPE(7, double)
 CAFFE_DECLARE_KNOWN_TYPE(8, at::ComplexHalf)
 CAFFE_DECLARE_KNOWN_TYPE(9, std::complex<float>)
 CAFFE_DECLARE_KNOWN_TYPE(10, std::complex<double>)
-// 10 = undefined type id
+// 11 = undefined type id
 
 CAFFE_DECLARE_KNOWN_TYPE(12, Tensor)
 CAFFE_DECLARE_KNOWN_TYPE(13, std::string)

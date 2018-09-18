@@ -7,11 +7,12 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 from hypothesis import assume, given, settings, HealthCheck
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestFcOperator(hu.HypothesisTestCase):
+class TestFcOperator(serial.SerializedTestCase):
     def _run_test(self, n, m, k, transposed, multi_dim, dtype, engine, gc, dc):
         if dtype == np.float16:
             # fp16 only supported with CUDA
@@ -76,7 +77,7 @@ class TestFcOperator(hu.HypothesisTestCase):
                                       threshold=threshold, stepsize=stepsize)
 
     @settings(max_examples=50, suppress_health_check=[HealthCheck.filter_too_much])
-    @given(n=st.integers(1, 5),
+    @serial.given(n=st.integers(1, 5),
            m=st.integers(0, 5),
            k=st.integers(1, 5),
            multi_dim=st.sampled_from([True, False]),

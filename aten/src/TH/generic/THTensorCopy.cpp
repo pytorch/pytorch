@@ -26,13 +26,11 @@ int THTensor_(copyTransposeValid)(THTensor *tensor, THTensor *src) {
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's tricker
 void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
-  #define MIN(x, y) (((x) < (y)) ? (x) : (y))
-  #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 
 #ifdef TH_REAL_IS_BYTE
-  const int BLOCK_SZ = 120;
+  const int64_t BLOCK_SZ = 120;
 #else
-  const int BLOCK_SZ = 60;
+  const int64_t BLOCK_SZ = 60;
 #endif
 
   THTensor *buf = THTensor_(newWithSize2d)(BLOCK_SZ, BLOCK_SZ);
@@ -48,8 +46,8 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
       scalar_t *spo = sp + R + C * NR;
       scalar_t *rpo = rp + C + R * NC;
 
-      int nr = MIN(NR - R, BLOCK_SZ);
-      int nc = MIN(NC - C, BLOCK_SZ);
+      int nr = std::min(NR - R, BLOCK_SZ);
+      int nc = std::min(NC - C, BLOCK_SZ);
 
       // 1. copy columns from src to buf
       for (int c = 0; c < nc; c++) {
@@ -57,10 +55,10 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
       }
 
       // 2. transpose buf in place
-      int rc_max = MAX(nr, nc);
-      int rc_min = MIN(nr, nc);
+      int rc_max = std::max(nr, nc);
+      int rc_min = std::min(nr, nc);
       for (int r = 0; r < rc_max; r++) {
-        int end = MIN(r, rc_min);
+        int end = std::min(r, rc_min);
         for (int c = 0; c < end; c++) {
           scalar_t tmp = bp[r + BLOCK_SZ * c];
           bp[r + BLOCK_SZ * c] = bp[r * BLOCK_SZ + c];
@@ -75,8 +73,6 @@ void THTensor_(copyTranspose)(THTensor *tensor, THTensor *src) {
     }
   }
   c10::raw::intrusive_ptr::decref(buf);
-  #undef MIN
-  #undef MAX
 }
 
 void THTensor_(copy)(THTensor *tensor, THTensor *src)
