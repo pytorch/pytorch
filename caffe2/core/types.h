@@ -42,8 +42,8 @@ CAFFE2_API const TypeMeta& DataTypeToTypeMeta(const TensorProto::DataType& dt);
 }  // namespace caffe2
 
 ///////////////////////////////////////////////////////////////////////////////
-// Half float definition. Currently half float operators are mainly on CUDA
-// gpus.
+// at::Half is defined in ATen/core/Half.h. Currently half float operators are
+// mainly on CUDA gpus.
 // The reason we do not directly use the cuda __half data type is because that
 // requires compilation with nvcc. The float16 data type should be compatible
 // with the cuda __half data type, but will allow us to refer to the data type
@@ -56,12 +56,12 @@ using float16 = at::Half;
 // Helpers to avoid using typeinfo with -rtti
 template <typename T>
 inline bool fp16_type();
-// explicit instantation for float16 defined in types.cc.
+
 template <>
 inline bool fp16_type<float16>() {
   return true;
 }
-// The rest.
+
 template <typename T>
 inline bool fp16_type() {
   return false;
