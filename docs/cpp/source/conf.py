@@ -17,7 +17,7 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
+import os
 # sys.path.insert(0, os.path.abspath('.'))
 
 import sys
@@ -29,7 +29,7 @@ import sphinx_rtd_theme
 
 # If your documentation needs a minimal Sphinx version, state it here.
 #
-# needs_sphinx = '1.0'
+needs_sphinx = '1.6'
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
@@ -39,7 +39,24 @@ extensions = [
     'exhale'
 ]
 
-breathe_projects = {"PyTorch": "build/xml"}
+# Setup absolute paths for communicating with breathe / exhale where
+# items are expected / should be trimmed by.
+# This file is {repo_root}/docs/cpp/source/conf.py
+this_file_dir = os.path.abspath(os.path.dirname(__file__))
+doxygen_xml_dir = os.path.join(
+    os.path.dirname(this_file_dir),  # {repo_root}/docs/cpp
+    'build',                         # {repo_root}/docs/cpp/build
+    'xml'                            # {repo_root}/docs/cpp/build/xml
+)
+repo_root = os.path.dirname(  # {repo_root}
+    os.path.dirname(          # {repo_root}/docs
+        os.path.dirname(      # {repo_root}/docs/cpp
+            this_file_dir     # {repo_root}/docs/cpp/source
+        )
+    )
+)
+
+breathe_projects = {"PyTorch": doxygen_xml_dir}
 breathe_default_project = "PyTorch"
 
 # Setup the exhale extension
@@ -50,7 +67,7 @@ exhale_args = {
     "containmentFolder": "./api",
     "rootFileName": "library_root.rst",
     "rootFileTitle": "Library API",
-    "doxygenStripFromPath": "../",
+    "doxygenStripFromPath": repo_root,
     ############################################################################
     # Suggested optional arguments.                                            #
     ############################################################################
@@ -137,7 +154,6 @@ todo_include_todos = True
 # a list of builtin themes.
 #
 html_theme = 'sphinx_rtd_theme'
-html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -150,21 +166,33 @@ html_theme_options = {
     'logo_only': True,
 }
 
-html_logo = '../source/_static/img/pytorch-logo-dark-unstable.png'
+# NOTE: sharing python docs resources
+html_logo = os.path.join(
+    repo_root, 'docs', 'source', '_static', 'img', 'pytorch-logo-dark-unstable.png'
+)
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['../source/_static']
+# NOTE: sharing python docs resources
+html_static_path = [os.path.join(repo_root, 'docs', 'source', '_static')]
 
-# html_style_path = 'css/pytorch_theme.css'
-html_context = {
-    'css_files': [
+
+# Called automatically by Sphinx, making this `conf.py` an "extension".
+def setup(app):
+    # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
+    # and can be moved outside of this function (and the setup(app) function
+    # can be deleted).
+    html_css_files = [
         'https://fonts.googleapis.com/css?family=Lato',
-        '_static/css/pytorch_theme.css'
-    ],
-}
+        'css/pytorch_theme.css'  # relative to paths in `html_static_path`
+    ]
 
+    # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
+    # `add_stylesheet` (deprecated in 1.8).
+    add_css = getattr(app, 'add_css_file', getattr(app, 'add_stylesheet'))
+    for css_file in html_css_files:
+        add_css(css_file)
 
 # -- Options for HTMLHelp output ------------------------------------------
 
