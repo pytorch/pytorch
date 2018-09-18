@@ -5,4 +5,4 @@
 
 // CATCH_REQUIRE_THROWS is not defined identically to REQUIRE_THROWS and causes warning;
 // define our own version that doesn't warn.
-INTERNAL_CATCH_THROWS( "_CATCH_REQUIRE_THROWS", Catch::ResultDisposition::Normal, __VA_ARGS__ )
+#define _CATCH_REQUIRE_THROWS( ... ) INTERNAL_CATCH_THROWS( "CATCH_REQUIRE_THROWS", Catch::ResultDisposition::Normal, __VA_ARGS__ )
