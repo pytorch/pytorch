@@ -21,7 +21,7 @@
 #include "ATen/cuda/CUDAContext.h"
 #include <cuda_runtime.h>
 #endif
-#ifndef WIN32
+#ifndef _WIN32
 #include <time.h>
 #endif
 
@@ -36,7 +36,7 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
 }
 
 inline int64_t getTime() {
-#ifdef WIN32
+#ifdef _WIN32
   using namespace std::chrono;
   using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
   return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
