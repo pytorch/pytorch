@@ -19,7 +19,9 @@ Tensor constant_pad_nd(const Tensor& self, IntList pad, Scalar value) {
     for (int i = 0; i < l_pad; i++) {
         auto pad_idx = pad.size() - ((i + 1) * 2);
         auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
-        AT_CHECK(new_dim > 0, "input is too small");
+        AT_CHECK(new_dim > 0, "The input size ", input_sizes[l_diff + i], ", plus negative padding ",
+                 pad[pad_idx], " and ", pad[pad_idx + 1], "resulted in a negative output size, "
+                 "which is invalid. Check dimension ", l_diff + i, "of your input.");
         new_shape.emplace_back(new_dim);
     }
 
