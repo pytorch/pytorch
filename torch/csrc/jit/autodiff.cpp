@@ -23,10 +23,20 @@ void wrapDim(int64_t & dim, const std::vector<int64_t> & sizes) {
 }
 
 bool isDifferentiable(Node * n) {
+  // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
     "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+    "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+    "aten::add(Scalar other, Tensor self) -> Tensor",
     "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+    "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+    "aten::sub(Scalar other, Tensor self) -> Tensor",
     "aten::mul(Tensor self, Tensor other) -> Tensor",
+    "aten::mul(Tensor self, Scalar other) -> Tensor",
+    "aten::mul(Scalar other, Tensor self) -> Tensor",
+    "aten::div(Scalar other, Tensor self) -> Tensor",
+    "aten::div(Tensor self, Tensor other) -> Tensor",
+    "aten::div(Tensor self, Scalar other) -> Tensor",
     "aten::sigmoid(Tensor self) -> Tensor",
     "aten::tanh(Tensor self) -> Tensor",
     "aten::relu(Tensor self) -> Tensor",
@@ -89,14 +99,41 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {grads.at(0), grads.at(0) * node->namedInput(attr::alpha), nullptr};
 
+    } else if (node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor")) {
+      return {grads.at(0), nullptr, nullptr};
+
+    } else if (node->matches("aten::add(Scalar other, Tensor self) -> Tensor")) {
+      return {nullptr, grads.at(0)};
+
     } else if (node->kind() == prim::AutogradAdd) {
       return {grads.at(0), grads.at(0)};
 
     } else if (node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
       return {grads.at(0), -grads.at(0) * node->namedInput(attr::alpha), nullptr};
 
+    } else if (node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor")) {
+      return {grads.at(0), nullptr, nullptr};
+
+    } else if (node->matches("aten::sub(Scalar other, Tensor self) -> Tensor")) {
+      return {nullptr, -grads.at(0)};
+
     } else if (node->matches("aten::mul(Tensor self, Tensor other) -> Tensor")) {
       return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
+
+    } else if (node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
+      return {grads.at(0) * inputs.at(1), nullptr};
+
+    } else if (node->matches("aten::mul(Scalar other, Tensor self) -> Tensor")) {
+      return {nullptr, grads.at(0) * inputs.at(0)};
+
+    } else if (node->matches("aten::div(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0) / inputs.at(1), -grads.at(0) * inputs.at(0) / (inputs.at(1) * inputs.at(1))};
+
+    } else if (node->matches("aten::div(Tensor self, Scalar other) -> Tensor")) {
+      return {grads.at(0) / inputs.at(1), nullptr};
+
+    } else if (node->matches("aten::div(Scalar other, Tensor self) -> Tensor")) {
+      return {nullptr, -grads.at(0) * inputs.at(0) / (inputs.at(1) * inputs.at(1))};
 
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
       return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};

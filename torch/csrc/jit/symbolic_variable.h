@@ -56,6 +56,9 @@ struct SymbolicVariable {
   SymbolicVariable operator*(const SymbolicVariable rhs) const {
     return create(aten::mul, {*this, rhs})[0].typeLike(*this);
   }
+  SymbolicVariable operator/(const SymbolicVariable rhs) const {
+    return create(aten::div, {*this, rhs})[0].typeLike(*this);
+  }
   SymbolicVariable operator*(at::Scalar rhs) const {
     if (isConstInt(rhs, 1))
       return *this;
