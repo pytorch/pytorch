@@ -3080,7 +3080,7 @@ method_tests = [
     ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', [0]),
     ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
     ('inverse', random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('inverse', random_fullrank_matrix_distinct_singular_value(S, [2, 3]),
+    ('inverse', random_fullrank_matrix_distinct_singular_value(S, 2, 3),
      NO_ARGS, 'batched', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (1, 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
