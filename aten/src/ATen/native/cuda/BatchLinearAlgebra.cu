@@ -338,28 +338,30 @@ void apply_triu_tril(Tensor& result, const Tensor& self, int64_t k) {
 }
 
 Tensor& tril_cuda_(Tensor &self, int64_t k) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "tril", [&] {
       apply_triu_tril<scalar_t, true, false>(self, self, k);
     });
   return self;
 }
 
 Tensor& tril_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&] {
+  result.resize_as_(self);
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "tril", [&] {
       apply_triu_tril<scalar_t, false, false>(result, self, k);
     });
   return result;
 }
 
 Tensor& triu_cuda_(Tensor &self, int64_t k) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "triu", [&] {
       apply_triu_tril<scalar_t, true, true>(self, self, k);
     });
   return self;
 }
 
 Tensor& triu_cuda_out(Tensor &result, const Tensor& self, int64_t k) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&] {
+  result.resize_as_(self);
+  AT_DISPATCH_ALL_TYPES_AND_HALF(self.type(), "triu", [&] {
       apply_triu_tril<scalar_t, false, true>(result, self, k);
     });
   return result;

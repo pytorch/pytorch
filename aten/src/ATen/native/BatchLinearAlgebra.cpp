@@ -333,6 +333,7 @@ Tensor& tril_cpu_(Tensor &self, int64_t k) {
 }
 
 Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
+  result.resize_as_(self);
   AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&] {
       apply_triu_tril<scalar_t, false, false>(result, self, k);
     });
@@ -353,6 +354,7 @@ Tensor& triu_cpu_(Tensor &self, int64_t k) {
 }
 
 Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
+  result.resize_as_(self);
   AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&] {
       apply_triu_tril<scalar_t, false, true>(result, self, k);
     });

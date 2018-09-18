@@ -4612,7 +4612,7 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_inverse(self, cast):
-        from test_autograd import random_fullrank_matrix_distinct_singular_value
+        from common import random_fullrank_matrix_distinct_singular_value
 
         # no batches: 2-D tensors
         M = cast(random_fullrank_matrix_distinct_singular_value(5))
@@ -4629,13 +4629,13 @@ class TestTorch(TestCase):
         self.assertEqual(MII, MI, 0, 'inverse value in-place')
 
         # one batch
-        M = cast(random_fullrank_matrix_distinct_singular_value(5, [1]))
+        M = cast(random_fullrank_matrix_distinct_singular_value(5, 1))
         MI = torch.inverse(M)
         expected_inv = M.squeeze(0).inverse()
         self.assertEqual(MI, expected_inv.unsqueeze(0))
 
         # four batches
-        M = cast(random_fullrank_matrix_distinct_singular_value(5, [4]))
+        M = cast(random_fullrank_matrix_distinct_singular_value(5, 4))
         expected_inv_list = []
         for i in range(0, 4):
             expected_inv_list.append(torch.inverse(M[i]))
@@ -4644,13 +4644,13 @@ class TestTorch(TestCase):
         self.assertEqual(MI, expected_inv)
 
         # correctness test
-        M = cast(random_fullrank_matrix_distinct_singular_value(5, [3]))
+        M = cast(random_fullrank_matrix_distinct_singular_value(5, 3))
         MI = torch.inverse(M)
         self.assertEqual(torch.matmul(M, MI), E.expand_as(M))
         self.assertEqual(torch.matmul(MI, M), E.expand_as(M))
 
         # torch.inverse with out and batches
-        M = cast(random_fullrank_matrix_distinct_singular_value(5, [3]))
+        M = cast(random_fullrank_matrix_distinct_singular_value(5, 3))
         MI = torch.Tensor(3, 5, 5)
         torch.inverse(M, out=MI)
         self.assertEqual(torch.inverse(M), MI)
