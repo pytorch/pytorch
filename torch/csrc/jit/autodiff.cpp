@@ -73,6 +73,7 @@ bool isDifferentiable(Node * n) {
     "aten::reciprocal(Tensor self) -> Tensor",
     "aten::remainder(Tensor self, Scalar other) -> Tensor",
     "aten::round(Tensor self) -> Tensor",
+    "aten::rsqrt(Tensor self) -> Tensor",
     "aten::sin(Tensor self) -> Tensor",
     "aten::sinh(Tensor self) -> Tensor",
     "aten::tan(Tensor self) -> Tensor",
@@ -246,6 +247,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
 
     } else if (node->matches("aten::round(Tensor self) -> Tensor")) {
       return {SymbolicVariable::zeros_like(grads.at(0))};
+
+    } else if (node->matches("aten::rsqrt(Tensor self) -> Tensor")) {
+      return {grads.at(0) * outputs.at(0).pow(3.) * -0.5};
 
     } else if (node->matches("aten::sin(Tensor self) -> Tensor")) {
       return {grads.at(0) * inputs.at(0).cos()};

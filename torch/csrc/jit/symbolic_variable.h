@@ -182,6 +182,9 @@ struct SymbolicVariable {
   SymbolicVariable cosh() const {
     return create(t("cosh"), {*this})[0];
   }
+  SymbolicVariable pow(at::Scalar other) const {
+    return create(t("pow"), {*this, insertConstant(other)})[0];
+  }
   SymbolicVariable rsqrt() const {
     return create(t("rsqrt"), {*this})[0];
   }
