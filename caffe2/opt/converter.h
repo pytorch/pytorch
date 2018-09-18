@@ -66,7 +66,7 @@ private:
   int DeviceType = caffe2::DeviceTypeProto::PROTO_CPU;
 };
 
-CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
+CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict = false);
 
 CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 

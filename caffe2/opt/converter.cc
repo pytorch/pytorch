@@ -264,8 +264,7 @@ std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
 
 /// \brief Ingest a caffe2 protobuf model and output an NNModule.
 /// \param net The caffe2 protobuf NetDef
-/// \param blobMap [optional][output] A pointer to a blobMap to be populated with all the output blobs of the NetDef by name->NodeRef
-repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, repr::NNGraph::NodeRef>* blobMapOut) {
+repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict) {
   repr::NNModule module;
   repr::NNGraph& dfg = module.dataFlow;
   repr::NNCFGraph& cfg = module.controlFlow;
@@ -285,7 +284,6 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
   /// \brief For the construction of the control flow graph we keep track
   /// of a current basic block, which we split up as we come accross control
   /// flow operations such as if and while.
-  // std::unique_ptr<repr::BasicBlockType<repr::NNGraph>> currentBasicBlock =
   auto bbNode =
       cfg.createNode(util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
 
@@ -323,17 +321,26 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
   }
 
   if (externalInputNames.size()) {
-    std::ostringstream os;
-    for (const auto& inputName : externalInputNames) {
-      os << "\"" << inputName << "\" ";
-    }
+    // In strict mode we ensure the input names are valid
+    if (strict) {
+      std::ostringstream os;
+      for (const auto& inputName : externalInputNames) {
+        os << "\"" << inputName << "\" ";
+      }
 
-    CAFFE_ENFORCE(
-        externalInputNames.size() == 0,
-        "Attempting to convert an ill-formed network: external_input contains ",
-        externalInputNames.size(),
-        " unused blobs: ",
-        os.str());
+      CAFFE_ENFORCE(
+          externalInputNames.size() == 0,
+          "Attempting to convert an ill-formed network: ",
+          "external_input contains ",
+          externalInputNames.size(),
+          " unused blobs: ",
+          os.str());
+    // Otherwise, we add the blobs to the graph as no-ops
+    } else {
+      for (const auto& input : externalInputNames) {
+        blobMap[input] = dfg.createNode(util::make_unique<repr::Tensor>(input));
+      }
+    }
   }
 
   for (const auto& outputName : net.external_output()) {
@@ -345,9 +352,6 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
     module.outputs.insert(blobMap[outputName]);
   }
 
-  if (blobMapOut) {
-    *blobMapOut = blobMap;
-  }
   return module;
 }
 
