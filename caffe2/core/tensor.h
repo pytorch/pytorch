@@ -286,6 +286,18 @@ class CAFFE2_API Tensor final {
     return impl_.get()->canonical_axis_index(axis_index);
   }
 
+  inline int64_t stride(int64_t dim) const {
+    return impl_.get()->stride(dim);
+  }
+
+  inline at::DimVector strides() {
+    return impl_.get()->strides();
+  }
+
+  inline bool is_contiguous() const {
+    return impl_.get()->is_contiguous();
+  }
+
   template <typename T>
   inline bool IsType() const {
     return impl_.get()->IsType<T>();
