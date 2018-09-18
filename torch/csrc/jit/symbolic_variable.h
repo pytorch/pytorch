@@ -173,6 +173,9 @@ struct SymbolicVariable {
     Node * unpack = g->insertNode(g->create(prim::ListUnpack, {output_list}, inputs.size()));
     return fmap<SymbolicVariable>(unpack->outputs());
   }
+  SymbolicVariable sign() const {
+    return create(t("sign"), {*this})[0];
+  }
   SymbolicVariable sum() const {
     return create(t("sum"), {*this})[0];
   }
