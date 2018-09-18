@@ -43,7 +43,7 @@ namespace nn {
 /// The value of `0.5` is then stored within the `Functional` object and supplied
 /// to the function call at invocation time. Note that such bound values are
 /// evaluated eagerly and stored a single time. See the documentation of
-/// [`std::bind`](https://en.cppreference.com/w/cpp/utility/functional/bind) for
+/// [std::bind](https://en.cppreference.com/w/cpp/utility/functional/bind) for
 /// more information on the semantics of argument binding.
 ///
 /// \rst
