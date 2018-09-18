@@ -74,10 +74,8 @@ struct Event final {
       cpu_ns_ = getTime();
       TORCH_CUDA_CHECK(cudaEventRecord(event, stream));
       return;
-#else
-      throw std::runtime_error("Compiled without CUDA support.");
-#endif
     }
+#endif
     cpu_ns_ = getTime();
   }
   std::string kind() const {
