@@ -176,6 +176,12 @@ struct SymbolicVariable {
   static SymbolicVariable zeros_like(const SymbolicVariable input) {
     return create(t("zeros_like"), {input})[0];
   }
+  SymbolicVariable cos() const {
+    return create(t("cos"), {*this})[0];
+  }
+  SymbolicVariable cosh() const {
+    return create(t("cosh"), {*this})[0];
+  }
   SymbolicVariable rsqrt() const {
     return create(t("rsqrt"), {*this})[0];
   }
