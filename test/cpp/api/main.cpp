@@ -1,5 +1,5 @@
 #define CATCH_CONFIG_RUNNER
-#include <catch.hpp>
+#include "catch_utils.hpp"
 
 #include <torch/cuda.h>
 

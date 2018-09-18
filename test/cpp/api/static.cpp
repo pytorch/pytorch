@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include "catch_utils.hpp"
 
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
@@ -22,43 +22,43 @@ torch::detail::enable_if_module_t<T, bool> f(T&& m) {
   return true;
 }
 
-TEST_CASE("static") {
-  SECTION("all_of") {
-    REQUIRE(torch::all_of<>::value == true);
-    REQUIRE(torch::all_of<true>::value == true);
-    REQUIRE(torch::all_of<true, true, true>::value == true);
-    REQUIRE(torch::all_of<false>::value == false);
-    REQUIRE(torch::all_of<false, false, false>::value == false);
-    REQUIRE(torch::all_of<true, true, false>::value == false);
+CATCH_TEST_CASE("static") {
+  CATCH_SECTION("all_of") {
+    CATCH_REQUIRE(torch::all_of<>::value == true);
+    CATCH_REQUIRE(torch::all_of<true>::value == true);
+    CATCH_REQUIRE(torch::all_of<true, true, true>::value == true);
+    CATCH_REQUIRE(torch::all_of<false>::value == false);
+    CATCH_REQUIRE(torch::all_of<false, false, false>::value == false);
+    CATCH_REQUIRE(torch::all_of<true, true, false>::value == false);
   }
-  SECTION("any_of") {
-    REQUIRE(torch::any_of<>::value == false);
-    REQUIRE(torch::any_of<true>::value == true);
-    REQUIRE(torch::any_of<true, true, true>::value == true);
-    REQUIRE(torch::any_of<false>::value == false);
-    REQUIRE(torch::any_of<true, true, false>::value == true);
+  CATCH_SECTION("any_of") {
+    CATCH_REQUIRE(torch::any_of<>::value == false);
+    CATCH_REQUIRE(torch::any_of<true>::value == true);
+    CATCH_REQUIRE(torch::any_of<true, true, true>::value == true);
+    CATCH_REQUIRE(torch::any_of<false>::value == false);
+    CATCH_REQUIRE(torch::any_of<true, true, false>::value == true);
   }
-  SECTION("enable_if_module_t") {
-    REQUIRE(f(torch::nn::LinearImpl(1, 2)) == true);
-    REQUIRE(f(5) == false);
+  CATCH_SECTION("enable_if_module_t") {
+    CATCH_REQUIRE(f(torch::nn::LinearImpl(1, 2)) == true);
+    CATCH_REQUIRE(f(5) == false);
   }
-  SECTION("check_not_lvalue_references") {
-    REQUIRE(torch::detail::check_not_lvalue_references<int>() == true);
-    REQUIRE(
+  CATCH_SECTION("check_not_lvalue_references") {
+    CATCH_REQUIRE(torch::detail::check_not_lvalue_references<int>() == true);
+    CATCH_REQUIRE(
         torch::detail::check_not_lvalue_references<float, int, char>() == true);
-    REQUIRE(
+    CATCH_REQUIRE(
         torch::detail::check_not_lvalue_references<float, int&, char>() ==
         false);
-    REQUIRE(torch::detail::check_not_lvalue_references<std::string>() == true);
-    REQUIRE(
+    CATCH_REQUIRE(torch::detail::check_not_lvalue_references<std::string>() == true);
+    CATCH_REQUIRE(
         torch::detail::check_not_lvalue_references<std::string&>() == false);
   }
-  SECTION("apply") {
+  CATCH_SECTION("apply") {
     std::vector<int> v;
     torch::apply([&v](int x) { v.push_back(x); }, 1, 2, 3, 4, 5);
-    REQUIRE(v.size() == 5);
+    CATCH_REQUIRE(v.size() == 5);
     for (size_t i = 0; i < v.size(); ++i) {
-      REQUIRE(v.at(i) == 1 + i);
+      CATCH_REQUIRE(v.at(i) == 1 + i);
     }
   }
 }
