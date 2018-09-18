@@ -142,7 +142,7 @@ struct AT_API Tensor {
     return tensor_impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return tensor_impl_->scalar_type();
+    return dataTypeToScalarType(tensor_impl_->dtype().id());
   }
   const Storage& storage() const {
     return tensor_impl_->storage();
@@ -684,3 +684,5 @@ private:
   c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_tensor_impl_;
 };
 } // namespace at
+
+#include "ATen/core/TensorMethods.h"

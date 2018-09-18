@@ -76,6 +76,8 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
     n = graph.createFloatToInt(value);
   } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
     n = graph.createIntToFloat(value);
+  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(StringType::get())) {
+    n = graph.createStringToFloat(value);
   } else {
     throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
       << dst->str() << "'.";
