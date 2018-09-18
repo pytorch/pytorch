@@ -1,5 +1,5 @@
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 // Test IntegerDivider: this tests *all* 32-bit pairs (a, b) where a % b is 0 or
 // (b-1), so it takes a few minutes to run.
@@ -62,18 +62,18 @@ class IntDividerTester {
     cudaError_t err;
 
     err = cudaMalloc(&dividersBuf_, NUM_CASES * sizeof(IntDivider<Value>));
-    REQUIRE(err == cudaSuccess);
+    CATCH_REQUIRE(err == cudaSuccess);
     err = cudaMalloc(&testCasesBuf_, NUM_CASES * sizeof(TestCase<Value>));
-    REQUIRE(err == cudaSuccess);
+    CATCH_REQUIRE(err == cudaSuccess);
   }
 
   ~IntDividerTester() {
     cudaError_t err;
 
     err = cudaFree(dividersBuf_);
-    REQUIRE(err == cudaSuccess);
+    CATCH_REQUIRE(err == cudaSuccess);
     err = cudaFree(testCasesBuf_);
-    REQUIRE(err == cudaSuccess);
+    CATCH_REQUIRE(err == cudaSuccess);
   }
 
   void addTestCase(Value dividend, Value divisor, int steps) {
@@ -92,18 +92,18 @@ class IntDividerTester {
     cudaError_t err;
 
     if (testCases_.empty()) return;
-    REQUIRE(!dividers_.empty());
+    CATCH_REQUIRE(!dividers_.empty());
 
-    REQUIRE(dividers_.size() <= NUM_CASES);
-    REQUIRE(testCases_.size() <= NUM_CASES);
+    CATCH_REQUIRE(dividers_.size() <= NUM_CASES);
+    CATCH_REQUIRE(testCases_.size() <= NUM_CASES);
     err = cudaMemcpy(dividersBuf_, dividers_.data(),
                      dividers_.size() * sizeof(IntDivider<Value>),
                      cudaMemcpyHostToDevice);
-    REQUIRE(err == cudaSuccess);
+    CATCH_REQUIRE(err == cudaSuccess);
     err = cudaMemcpy(testCasesBuf_, testCases_.data(),
                      testCases_.size() * sizeof(TestCase<Value>),
                      cudaMemcpyHostToDevice);
-    REQUIRE(err == cudaSuccess);
+    CATCH_REQUIRE(err == cudaSuccess);
 
     int numCases = testCases_.size();
     testIntDivider<Value><<<512, 512>>>(
@@ -180,11 +180,11 @@ static void testUint64Divider()
   tester.flush();
 }
 
-TEST_CASE( "CUDA integer divider", "[cuda]" ) {
+CATCH_TEST_CASE( "CUDA integer divider", "[cuda]" ) {
 
   testUint64Divider();
   testUint32Divider();
 
   cudaError_t err = cudaDeviceSynchronize();
-  REQUIRE(err == cudaSuccess);
+  CATCH_REQUIRE(err == cudaSuccess);
 }
