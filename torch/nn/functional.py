@@ -1206,7 +1206,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                   scale_grad_by_freq=False, mode='mean', sparse=False):
-    r"""Computes sums or means of 'bags' of embeddings, without instantiating the
+    r"""Computes sums, means or maxes of 'bags' of embeddings, without instantiating the
     intermediate embeddings.
 
     See :class:`torch.nn.EmbeddingBag` for more details.
