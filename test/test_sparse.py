@@ -1044,7 +1044,7 @@ class TestSparse(TestCase):
     @skipIfRocm
     def test_log1p(self):
         input = torch.sparse_coo_tensor(
-            torch.LongTensor([[0], [1], [2]]).transpose(1, 0),
+            torch.LongTensor([[0], [1], [2]]).transpose(1, 0).clone().detach(),
             torch.FloatTensor([3, 4, 5]),
             torch.Size([3]),
             device=self.device)
@@ -1052,7 +1052,7 @@ class TestSparse(TestCase):
 
         # test uncoalesced input
         input_uncoalesced = torch.sparse_coo_tensor(
-            torch.LongTensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+            torch.LongTensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0).clone().detach(),
             torch.FloatTensor([2, 3, 4, 1, 1, 1]),
             torch.Size([3]),
             device=self.device)
