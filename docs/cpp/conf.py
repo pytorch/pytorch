@@ -23,7 +23,7 @@
 import sys
 import textwrap
 
-import sphinx_rtd_theme
+import pytorch_sphinx_theme
 
 # -- General configuration ------------------------------------------------
 
