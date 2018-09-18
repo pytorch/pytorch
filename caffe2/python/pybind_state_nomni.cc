@@ -198,7 +198,14 @@ void addNomnigraphMethods(pybind11::module& m) {
             CAFFE_ENFORCE(nn::is<nom::repr::Tensor>(n));
             return nn::get<nom::repr::Tensor>(n);
           },
-          py::return_value_policy::reference_internal);
+          py::return_value_policy::reference_internal)
+      .def(
+          "getAnnotation",
+          [](NNGraph::NodeRef n) { return getOrAddCaffe2Annotation(n); })
+      .def("setAnnotation", [](NNGraph::NodeRef n, Caffe2Annotation annot) {
+        auto* nnOp = nn::get<NeuralNetOperator>(n);
+        nnOp->setAnnotation(nom::util::make_unique<Caffe2Annotation>(annot));
+      });
 
   py::class_<GenericOperator> nnop(m, "NeuralNetOperator");
   py::class_<nom::repr::Tensor> nndata(m, "NeuralNetData");
@@ -282,6 +289,14 @@ void addNomnigraphMethods(pybind11::module& m) {
     }
     return NNSubgraph();
   });
+
+  // Annotation API
+  py::class_<Caffe2Annotation> annotation(m, "Annotation");
+  annotation.def(py::init<>())
+      .def("setDevice", &Caffe2Annotation::setDevice)
+      .def("getDevice", &Caffe2Annotation::getDevice)
+      .def("setDeviceType", &Caffe2Annotation::setDeviceType)
+      .def("getDeviceType", &Caffe2Annotation::getDeviceType);
 }
 
 REGISTER_PYBIND_ADDITION(addNomnigraphMethods);

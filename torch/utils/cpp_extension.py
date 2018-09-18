@@ -288,7 +288,7 @@ class BuildExtension(build_ext):
         # if the extension is compiled with gcc >= 5.1,
         # then we have to define _GLIBCXX_USE_CXX11_ABI=0
         # so that the std::string in the API is resolved to
-        # non-C++11 symbols
+        # non-C++11 symbols.
         define = '-D_GLIBCXX_USE_CXX11_ABI=0'
         if is_binary_build():
             if isinstance(extension.extra_compile_args, dict):
