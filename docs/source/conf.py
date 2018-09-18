@@ -39,7 +39,7 @@ import pytorch_sphinx_theme
 
 # If your documentation needs a minimal Sphinx version, state it here.
 #
-# needs_sphinx = '1.0'
+needs_sphinx = '1.6'
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
@@ -161,14 +161,23 @@ if RELEASE:
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static', '_images']
 
-html_style_path = 'css/pytorch_theme.css'
-html_context = {
-    'css_files': [
+
+# Called automatically by Sphinx, making this `conf.py` an "extension".
+def setup(app):
+    # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
+    # and can be moved outside of this function (and the setup(app) function
+    # can be deleted).
+    html_css_files = [
         'https://fonts.googleapis.com/css?family=Lato',
-        '_static/css/pytorch_theme.css',
-        'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css',
-    ],
-}
+        'css/pytorch_theme.css',  # relative to paths in `html_static_path`
+        'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css'
+    ]
+
+    # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
+    # `add_stylesheet` (deprecated in 1.8).
+    add_css = getattr(app, 'add_css_file', getattr(app, 'add_stylesheet'))
+    for css_file in html_css_files:
+        add_css(css_file)
 
 
 # -- Options for HTMLHelp output ------------------------------------------
