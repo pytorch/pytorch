@@ -1,6 +1,4 @@
-#include "ATen/Formatting.h"
-
-#include <ATen/ATen.h>
+#include "ATen/core/Formatting.h"
 
 #include <cmath>
 #include <cstdint>
