@@ -161,6 +161,10 @@ def constant_tensor_add(a, b):
         return a + b
 
 
+def small_0d(t):
+    return make_tensor(t, (1,)).squeeze()
+
+
 def small_2d(t):
     return make_tensor(t, S, S)
 
@@ -258,6 +262,7 @@ tests = [
     ('mul', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
         "skipIfRocm:ByteTensor,CharTensor,HalfTensor,ShortTensor"),
     ('mul', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
+    ('mul', small_0d, lambda t: [small_0d(torch.IntTensor)], 'scalar'),
     ('div', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
         "skipIfRocm:ByteTensor,CharTensor,FloatTensor,HalfTensor,ShortTensor"),
     ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
