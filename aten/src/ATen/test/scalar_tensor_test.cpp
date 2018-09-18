@@ -133,14 +133,14 @@ void test(Type &T) {
       CATCH_REQUIRE(std::get<0>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
       CATCH_REQUIRE(std::get<1>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
-      CATCH_REQUIRE_THROWS(t.min(0));
+      _CATCH_REQUIRE_THROWS(t.min(0));
     }
 
     // simple indexing
     if (t.dim() > 0 && t.numel() != 0) {
       CATCH_REQUIRE(t[0].dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
-      CATCH_REQUIRE_THROWS(t[0]);
+      _CATCH_REQUIRE_THROWS(t[0]);
     }
 
     // fill_ (argument to fill_ can only be a 0-dim tensor)

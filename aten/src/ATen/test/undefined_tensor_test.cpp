@@ -20,30 +20,30 @@ CATCH_TEST_CASE( "undefined tensor test", "[]" ) {
   CATCH_REQUIRE(!und.defined());
   CATCH_REQUIRE(std::string("UndefinedType") == und.toString());
 
-  CATCH_REQUIRE_THROWS(und.strides());
-  CATCH_REQUIRE_THROWS(und.dim());
-  CATCH_REQUIRE_THROWS([]() {return Tensor();}() = Scalar(5));
-  CATCH_REQUIRE_THROWS(und.add(und));
-  CATCH_REQUIRE_THROWS(und.add(ft));
-  CATCH_REQUIRE_THROWS(ft.add(und));
-  CATCH_REQUIRE_THROWS(und.add(5));
-  CATCH_REQUIRE_THROWS(und.mm(und));
+  _CATCH_REQUIRE_THROWS(und.strides());
+  _CATCH_REQUIRE_THROWS(und.dim());
+  _CATCH_REQUIRE_THROWS([]() {return Tensor();}() = Scalar(5));
+  _CATCH_REQUIRE_THROWS(und.add(und));
+  _CATCH_REQUIRE_THROWS(und.add(ft));
+  _CATCH_REQUIRE_THROWS(ft.add(und));
+  _CATCH_REQUIRE_THROWS(und.add(5));
+  _CATCH_REQUIRE_THROWS(und.mm(und));
 
   und.toType(und.type());
-  CATCH_REQUIRE_THROWS(und.toType(ft.type()));
-  CATCH_REQUIRE_THROWS(ft.toType(und.type()));
+  _CATCH_REQUIRE_THROWS(und.toType(ft.type()));
+  _CATCH_REQUIRE_THROWS(ft.toType(und.type()));
   und.toType(ScalarType::Undefined);
-  CATCH_REQUIRE_THROWS(und.toType(ScalarType::Float));
-  CATCH_REQUIRE_THROWS(ft.toType(ScalarType::Undefined));
+  _CATCH_REQUIRE_THROWS(und.toType(ScalarType::Float));
+  _CATCH_REQUIRE_THROWS(ft.toType(ScalarType::Undefined));
 
   // copy_
-  CATCH_REQUIRE_THROWS(und.copy_(und));
-  CATCH_REQUIRE_THROWS(und.copy_(ft));
-  CATCH_REQUIRE_THROWS(ft.copy_(und));
+  _CATCH_REQUIRE_THROWS(und.copy_(und));
+  _CATCH_REQUIRE_THROWS(und.copy_(ft));
+  _CATCH_REQUIRE_THROWS(ft.copy_(und));
 
   und.toBackend(Backend::Undefined);
-  CATCH_REQUIRE_THROWS(und.toBackend(Backend::CPU));
-  CATCH_REQUIRE_THROWS(ft.toBackend(Backend::Undefined));
+  _CATCH_REQUIRE_THROWS(und.toBackend(Backend::CPU));
+  _CATCH_REQUIRE_THROWS(ft.toBackend(Backend::Undefined));
 
   Tensor to_move = ones({1}, CPU(kFloat));
   Tensor m(std::move(to_move));

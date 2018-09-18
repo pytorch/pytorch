@@ -88,7 +88,7 @@ CATCH_TEST_CASE( "scalar test", "[]" ) {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  CATCH_REQUIRE_THROWS(at::_local_scalar(Tensor{}));
+  _CATCH_REQUIRE_THROWS(at::_local_scalar(Tensor{}));
 
   test_overflow();
 
@@ -116,7 +116,7 @@ CATCH_TEST_CASE( "scalar test", "[]" ) {
   // test direct C-scalar type conversions
   {
     auto x = ones({1,2}, T);
-    CATCH_REQUIRE_THROWS(x.toCFloat());
+    _CATCH_REQUIRE_THROWS(x.toCFloat());
   }
   auto float_one = ones({}, T);
   CATCH_REQUIRE(float_one.toCFloat() == 1);

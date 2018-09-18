@@ -15,7 +15,7 @@ CATCH_TEST_CASE( "broadcast", "[]" ) {
   // 0) pre-req tests:
   CATCH_SECTION( "can't expand empty tensor" ) {
     auto empty = randn({0}, T);
-    CATCH_REQUIRE_THROWS(empty.expand({3}));
+    _CATCH_REQUIRE_THROWS(empty.expand({3}));
   }
 
   // 1) out-place function with 2 args
@@ -38,13 +38,13 @@ CATCH_TEST_CASE( "broadcast", "[]" ) {
     CATCH_SECTION( "old fallback behavior yields error" ) {
       auto a = randn({3, 5}, T);
       auto b = randn({5, 3}, T);
-      CATCH_REQUIRE_THROWS(a + b);
+      _CATCH_REQUIRE_THROWS(a + b);
     }
 
     CATCH_SECTION( "with mismatched sizes" ) {
       auto a = randn({3, 5}, T);
       auto b = randn({7, 5}, T);
-      CATCH_REQUIRE_THROWS(a + b);
+      _CATCH_REQUIRE_THROWS(a + b);
     }
   }
 
@@ -72,14 +72,14 @@ CATCH_TEST_CASE( "broadcast", "[]" ) {
       auto a = randn({3, 2, 5}, T);
       auto b = randn({2, 3, 5}, T);
       auto c = randn({5, 3, 2}, T);
-      CATCH_REQUIRE_THROWS(a.addcmul(b, c));
+      _CATCH_REQUIRE_THROWS(a.addcmul(b, c));
     }
 
     CATCH_SECTION( "with mismatched sizes" ){
       auto a = randn({3, 2, 5}, T);
       auto b = randn({2, 3, 5}, T);
       auto c = randn({5, 5, 5}, T);
-      CATCH_REQUIRE_THROWS(a.addcmul(b, c));
+      _CATCH_REQUIRE_THROWS(a.addcmul(b, c));
     }
   }
 
@@ -100,7 +100,7 @@ CATCH_TEST_CASE( "broadcast", "[]" ) {
     CATCH_SECTION( "error: would have to expand inplace arg" ) {
       auto a = randn({1, 5}, T);
       auto b = randn({3, 1}, T);
-      CATCH_REQUIRE_THROWS(a.add_(b));
+      _CATCH_REQUIRE_THROWS(a.add_(b));
     }
   }
 
@@ -126,7 +126,7 @@ CATCH_TEST_CASE( "broadcast", "[]" ) {
       auto a = randn({1, 3, 5}, T);
       auto b = randn({4, 1, 1}, T);
       auto c = randn({1, 3, 1}, T);
-      CATCH_REQUIRE_THROWS(a.addcmul_(b, c));
+      _CATCH_REQUIRE_THROWS(a.addcmul_(b, c));
     }
   }
 
@@ -148,7 +148,7 @@ CATCH_TEST_CASE( "broadcast", "[]" ) {
 
     CATCH_SECTION( "with mismatched sizes" ) {
       auto a = randn({3, 3}, T);
-      CATCH_REQUIRE_THROWS(a.addmm(b, c));
+      _CATCH_REQUIRE_THROWS(a.addmm(b, c));
     }
   }
 }
