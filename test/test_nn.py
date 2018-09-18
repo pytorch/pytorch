@@ -4222,8 +4222,7 @@ class TestNN(NNTestCase):
 
             # input and weights are not at the same device
             with self.assertRaisesRegex(RuntimeError,
-                                        "Input and parameter tensors are not at the same device, " +
-                                        "found input tensor at cuda and hidden tensor at cpu"):
+                                        "Input and parameter tensors are not at the same device"):
                 model(input.to('cuda:0'))
 
             # input and hiddens are not at the same device
@@ -4237,8 +4236,7 @@ class TestNN(NNTestCase):
             # hidden tensors are not at the same CUDA device
             if mode is 'LSTM':
                 with self.assertRaisesRegex(RuntimeError,
-                                            "Input and hidden CUDA tensors are not at the same GPU, " +
-                                            "found input tensor at CUDA:0 and hidden tensor at CUDA:1"):
+                                            "Input and hidden tensors are not at the same device"):
                     model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
 
     def test_rnn_initial_hidden_state(self):
