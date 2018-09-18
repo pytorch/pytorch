@@ -14,12 +14,15 @@
 #include <type_traits>
 #include <unordered_map>
 
+// forward declarations confuse doxygen
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace torch {
 namespace detail {
 template <typename T>
 class CursorBase;
 } // namespace detail
 } // namespace torch
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace torch {
 namespace nn {
