@@ -279,21 +279,21 @@ class _DistTestBase(object):
             with self.assertRaisesRegex(RuntimeError, "Invalid process group specified"):
                 dist.get_backend(group_id)
 
-    def test_DistBackend(self):
+    def test_Backend_enum_class(self):
         # test parsing
         backend = BACKEND.lower()
-        self.assertEqual(dist.DistBackend(BACKEND.upper()), backend)
-        self.assertEqual(dist.DistBackend(BACKEND), backend)
+        self.assertEqual(dist.Backend(BACKEND.upper()), backend)
+        self.assertEqual(dist.Backend(BACKEND), backend)
         with self.assertRaisesRegex(ValueError, "Invalid backend: 'undefined'"):
-            dist.DistBackend("undefined")
+            dist.Backend("undefined")
         with self.assertRaisesRegex(ValueError, "Invalid backend: 'xYz'"):
-            dist.DistBackend("xYz")
+            dist.Backend("xYz")
         with self.assertRaises(ValueError):
-            dist.DistBackend(None)
+            dist.Backend(None)
         with self.assertRaises(ValueError):
-            dist.DistBackend(3)
+            dist.Backend(3)
         with self.assertRaises(ValueError):
-            dist.DistBackend(["gloo"])
+            dist.Backend(["gloo"])
 
     # Test destroy
     def test_destroy_group(self):
