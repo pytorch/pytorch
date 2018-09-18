@@ -23,7 +23,6 @@ import os
 # source code directory, relative to this file, for sphinx-autobuild
 # sys.path.insert(0, os.path.abspath('../..'))
 
-import pytorch_sphinx_theme
 
 import torch
 try:
@@ -34,6 +33,7 @@ except ImportError:
 
 RELEASE = os.environ.get('RELEASE', False)
 
+import pytorch_sphinx_theme
 
 # -- General configuration ------------------------------------------------
 
@@ -135,6 +135,7 @@ autodoc_inherit_docstrings = False
 #
 #
 #
+
 html_theme = 'pytorch_sphinx_theme'
 html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
