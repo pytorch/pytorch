@@ -56,7 +56,7 @@ class RecurrentBaseOp : public Operator<HIPContext> {
   std::unique_ptr<detail::TensorDescriptors<T>> xDesc_;
   std::unique_ptr<detail::TensorDescriptors<T>> yDesc_;
 
-  std::vector<TIndex> cachedInputDims_;
+  std::vector<int64_t> cachedInputDims_;
   size_t reserveNbytes_;
   size_t miopenWsNbytes_;
 

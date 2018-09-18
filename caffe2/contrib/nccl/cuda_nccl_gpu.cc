@@ -269,7 +269,7 @@ void NCCL<T>::AllGather(const NCCLExecution& ex) {
       ex,
       [n](const NCCLElement& ctx) {
         CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
-        std::vector<TIndex> dims;
+        std::vector<int64_t> dims;
         dims.reserve(ctx.src->ndim() + 1);
         dims.push_back(n);
         for (auto d : ctx.src->dims()) {
@@ -307,7 +307,7 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
       [](const NCCLElement& ctx) {
         CAFFE_ENFORCE_NE(ctx.src, ctx.dst);
         const auto& srcDims = ctx.src->dims();
-        std::vector<TIndex> dstDims(srcDims.begin() + 1, srcDims.end());
+        std::vector<int64_t> dstDims(srcDims.begin() + 1, srcDims.end());
         ctx.dst->Resize(dstDims);
         ctx.dst->template mutable_data<T>();
       },

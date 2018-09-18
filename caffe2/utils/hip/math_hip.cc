@@ -714,8 +714,8 @@ DEFINE_BROADCAST_HIP_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
     cub::DeviceReduce::func(                                            \
         nullptr, memRequired, src, dst, N, context->hip_stream());      \
     auto buffer_size =                                                  \
-        static_cast<TIndex>((memRequired + sizeof(T) - 1) / sizeof(T)); \
-    scratch_ptr->Resize(std::vector<TIndex>{buffer_size});              \
+        static_cast<int64_t>((memRequired + sizeof(T) - 1) / sizeof(T)); \
+    scratch_ptr->Resize(std::vector<int64_t>{buffer_size});              \
     cub::DeviceReduce::func(                                            \
         static_cast<void*>(scratch_ptr->mutable_data<T>()),             \
         memRequired,                                                    \
@@ -1485,13 +1485,13 @@ void SumGenericIter(
   cub::DeviceReduce::Sum(
       nullptr, memRequired, it, dest, N, context->hip_stream());
   auto buffer_size =
-      static_cast<TIndex>((memRequired + sizeof(T) - 1) / sizeof(T));
+      static_cast<int64_t>((memRequired + sizeof(T) - 1) / sizeof(T));
   if (!dest) {
     // allocate one more T at the end of scratch for dest
-    scratch_ptr->Resize(std::vector<TIndex>{buffer_size + 1});
+    scratch_ptr->Resize(std::vector<int64_t>{buffer_size + 1});
     dest = scratch_ptr->template mutable_data<T>() + buffer_size;
   } else {
-    scratch_ptr->Resize(std::vector<TIndex>{buffer_size});
+    scratch_ptr->Resize(std::vector<int64_t>{buffer_size});
   }
   cub::DeviceReduce::Sum(
       static_cast<void*>(scratch_ptr->template mutable_data<T>()),
@@ -3473,7 +3473,7 @@ void TransposeHIPImpl(
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(float)
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(int)
-CAFFE2_SPECIALIZED_HIP_TRANSPOSE(TIndex)
+CAFFE2_SPECIALIZED_HIP_TRANSPOSE(int64_t)
 #undef CAFFE2_SPECIALIZED_HIP_TRANSPOSE
 
 namespace {

@@ -33,7 +33,7 @@ bool LengthsTileOp<CPUContext>::RunOnDevice() {
   auto src = static_cast<const char*>(data.raw_data());
   auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
 
-  for (TIndex i = 0; i < lengths_size; ++i) {
+  for (int64_t i = 0; i < lengths_size; ++i) {
     auto length = lengths_data[i];
     CAFFE_ENFORCE_GE(length, 0);
     for (int32_t j = 0; j < length; ++j) {
