@@ -2396,6 +2396,31 @@ class TestTorch(TestCase):
             a[0] = 7.
             self.assertEqual(5., res1[0].item())
 
+    def test_tensor_factory_copy_var(self):
+        # default copy from var
+        source = torch.randn(5, 5, requires_grad=True)
+        copy = torch.tensor(source)
+        self.assertEqual(copy.data, source.data)
+        self.assertTrue(source.requires_grad)
+        self.assertTrue(copy.is_leaf)
+        self.assertFalse(copy.requires_grad)
+
+        # copy with requires_grad=False
+        source = torch.randn(5, 5, requires_grad=True)
+        copy = torch.tensor(source, requires_grad=False)
+        self.assertEqual(copy.data, source.data)
+        self.assertTrue(source.requires_grad)
+        self.assertTrue(copy.is_leaf)
+        self.assertFalse(copy.requires_grad)
+
+        # copy with requires_grad=True
+        source = torch.randn(5, 5, requires_grad=True)
+        copy = torch.tensor(source, requires_grad=True)
+        self.assertEqual(copy.data, source.data)
+        self.assertTrue(source.requires_grad)
+        self.assertTrue(copy.is_leaf)
+        self.assertTrue(copy.requires_grad)
+
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):
             saved_dtype = torch.get_default_dtype()
