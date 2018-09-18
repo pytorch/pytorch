@@ -404,18 +404,6 @@ inline Tensor & Tensor::remainder_(Scalar other) {
 inline Tensor & Tensor::remainder_(const Tensor & other) {
     return type().remainder_(*this, other);
 }
-inline Tensor Tensor::tril(int64_t diagonal) const {
-    return type().tril(*this, diagonal);
-}
-inline Tensor & Tensor::tril_(int64_t diagonal) {
-    return type().tril_(*this, diagonal);
-}
-inline Tensor Tensor::triu(int64_t diagonal) const {
-    return type().triu(*this, diagonal);
-}
-inline Tensor & Tensor::triu_(int64_t diagonal) {
-    return type().triu_(*this, diagonal);
-}
 inline Tensor Tensor::cross(const Tensor & other, int64_t dim) const {
     return type().cross(*this, other, dim);
 }
@@ -454,9 +442,6 @@ inline std::tuple<Tensor,Tensor> Tensor::eig(bool eigenvectors) const {
 }
 inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some) const {
     return type().svd(*this, some);
-}
-inline Tensor Tensor::potrf(bool upper) const {
-    return type().potrf(*this, upper);
 }
 inline Tensor Tensor::potrs(const Tensor & input2, bool upper) const {
     return type().potrs(*this, input2, upper);
@@ -920,6 +905,9 @@ inline Tensor Tensor::pin_memory() const {
 inline Tensor Tensor::pinverse(double rcond) const {
     return type().pinverse(*this, rcond);
 }
+inline Tensor Tensor::potrf(bool upper) const {
+    return type().potrf(*this, upper);
+}
 inline Tensor Tensor::repeat(IntList repeats) const {
     return type().repeat(*this, repeats);
 }
@@ -1093,6 +1081,18 @@ inline Tensor Tensor::flip(IntList dims) const {
 }
 inline Tensor Tensor::rot90(int64_t k, IntList dims) const {
     return type().rot90(*this, k, dims);
+}
+inline Tensor Tensor::tril(int64_t diagonal) const {
+    return type().tril(*this, diagonal);
+}
+inline Tensor & Tensor::tril_(int64_t diagonal) {
+    return type().tril_(*this, diagonal);
+}
+inline Tensor Tensor::triu(int64_t diagonal) const {
+    return type().triu(*this, diagonal);
+}
+inline Tensor & Tensor::triu_(int64_t diagonal) {
+    return type().triu_(*this, diagonal);
 }
 inline Tensor Tensor::trunc() const {
     return type().trunc(*this);

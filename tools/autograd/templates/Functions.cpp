@@ -619,13 +619,15 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntList
 Tensor potrf_backward(Tensor grad, bool upper, Tensor L) {
   // cf. Iain Murray (2016); arXiv 1602.07527
   if (upper) {
-    L = L.t();
-    grad = grad.t();
+    L = L.transpose(-1, -2);
+    grad = grad.transpose(-1, -2);
   }
 
   auto phi = [](const Tensor & A) -> Tensor {
     auto B = A.tril();
-    B = B - 0.5 * at::diag(at::diag(B));
+    auto tmp = at::zeros_like(B);
+    tmp.diagonal(0, -1, -2) = B.diagonal(0, -1, -2);
+    B = B - 0.5 *tmp;
     return B;
   };
 
@@ -633,13 +635,13 @@ Tensor potrf_backward(Tensor grad, bool upper, Tensor L) {
   // only half of output matrix is unique
   auto Lbar = grad.tril();
 
-  auto P = phi(at::mm(L.t(), Lbar));
+  auto P = phi(at::matmul(L.transpose(-1, -2), Lbar));
   Tensor S;
-  std::tie(S, std::ignore) = at::gesv(P + P.t(), L.t());
-  std::tie(S, std::ignore) = at::gesv(S.t(), L.t());
+  std::tie(S, std::ignore) = at::gesv(P + P.transpose(-1, -2), L.transpose(-1, -2));
+  std::tie(S, std::ignore) = at::gesv(S.transpose(-1, -2), L.transpose(-1, -2));
   S = phi(S);
   if (upper) {
-    S = S.t();
+    S = S.transpose(-1, -2);
   }
   return S;
 }

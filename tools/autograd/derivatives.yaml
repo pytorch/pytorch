@@ -536,7 +536,7 @@
   self: zeros_like(self)
 
 - name: potrf(Tensor self, bool upper)
-  self: potrf_backward(grad, upper, output)
+  self: potrf_backward(grad, upper, result)
 
 - name: potri(Tensor self, bool upper)
   self: not_implemented("potri")

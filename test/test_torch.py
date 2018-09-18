@@ -5199,23 +5199,24 @@ class TestTorch(TestCase):
 
     @skipIfNoLapack
     def test_cholesky(self):
-        x = torch.rand(10, 10) + 1e-1
-        A = torch.mm(x, x.t())
+        for shape in [(10, 10), (5, 10, 10)]:
+            x = torch.rand(*shape) + 1e-1
+            A = torch.matmul(x, x.transpose(-1, -2))
 
-        # default Case
-        C = torch.potrf(A)
-        B = torch.mm(C.t(), C)
-        self.assertEqual(A, B, 1e-14)
+            # default Case
+            C = torch.potrf(A)
+            B = torch.matmul(C.transpose(-1, -2), C)
+            self.assertEqual(A, B, 1e-14)
 
-        # test Upper Triangular
-        U = torch.potrf(A, True)
-        B = torch.mm(U.t(), U)
-        self.assertEqual(A, B, 1e-14, 'potrf (upper) did not allow rebuilding the original matrix')
+            # test Upper Triangular
+            U = torch.potrf(A, True)
+            B = torch.matmul(U.transpose(-1, -2), U)
+            self.assertEqual(A, B, 1e-14, 'potrf (upper) did not allow rebuilding the original matrix')
 
-        # test Lower Triangular
-        L = torch.potrf(A, False)
-        B = torch.mm(L, L.t())
-        self.assertEqual(A, B, 1e-14, 'potrf (lower) did not allow rebuilding the original matrix')
+            # test Lower Triangular
+            L = torch.potrf(A, False)
+            B = torch.matmul(L, L.transpose(-1, -2))
+            self.assertEqual(A, B, 1e-14, 'potrf (lower) did not allow rebuilding the original matrix')
 
     @skipIfNoLapack
     def test_potrs(self):

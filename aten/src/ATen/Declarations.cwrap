@@ -2227,52 +2227,6 @@
     - arg: THTensor* tensor
 ]]
 [[
-  name: tril
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
-  name: tril_
-  cname: tril
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
-  name: triu
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
-  name: triu_
-  cname: triu
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: long diagonal
-      default: 0
-]]
-[[
   name: cross
   variants:
     - method
@@ -2780,27 +2734,6 @@
     - arg: THTensor* output
       output: True
     - THTensor* self
-]]
-[[
-  name: potrf
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* output
-      output: True
-    - THTensor* self
-    - arg: bool upper
-      if_true: U
-      if_false: L
-      default: U
 ]]
 [[
   name: potrs

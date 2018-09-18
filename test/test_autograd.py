@@ -1931,15 +1931,16 @@ class TestAutograd(TestCase):
 
     @skipIfRocm
     def test_potrf(self):
-        root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
+        for shape in [(S, S), (S, S, S)]:
+            root = torch.rand(*shape, requires_grad=True)
 
-        def run_test(upper):
-            def func(root):
-                x = torch.mm(root, root.t())
-                return torch.potrf(x, upper)
+            def run_test(upper):
+                def func(root):
+                    x = torch.matmul(root, root.transpose(-1, -2))
+                    return torch.potrf(x, upper)
 
-            gradcheck(func, [root])
-            gradgradcheck(func, [root])
+                gradcheck(func, [root])
+                gradgradcheck(func, [root])
 
         run_test(upper=True)
         run_test(upper=False)

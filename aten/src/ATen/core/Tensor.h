@@ -374,10 +374,6 @@ struct AT_API Tensor {
   Tensor remainder(const Tensor & other) const;
   Tensor & remainder_(Scalar other);
   Tensor & remainder_(const Tensor & other);
-  Tensor tril(int64_t diagonal=0) const;
-  Tensor & tril_(int64_t diagonal=0);
-  Tensor triu(int64_t diagonal=0) const;
-  Tensor & triu_(int64_t diagonal=0);
   Tensor cross(const Tensor & other, int64_t dim=-1) const;
   Tensor diag(int64_t diagonal=0) const;
   Tensor addbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
@@ -391,7 +387,6 @@ struct AT_API Tensor {
   std::tuple<Tensor,Tensor> symeig(bool eigenvectors=false, bool upper=true) const;
   std::tuple<Tensor,Tensor> eig(bool eigenvectors=false) const;
   std::tuple<Tensor,Tensor,Tensor> svd(bool some=true) const;
-  Tensor potrf(bool upper=true) const;
   Tensor potrs(const Tensor & input2, bool upper=true) const;
   Tensor potri(bool upper=true) const;
   std::tuple<Tensor,Tensor> pstrf(bool upper=true, Scalar tol=-1) const;
@@ -546,6 +541,7 @@ struct AT_API Tensor {
   Tensor permute(IntList dims) const;
   Tensor pin_memory() const;
   Tensor pinverse(double rcond=1e-15) const;
+  Tensor potrf(bool upper=true) const;
   Tensor repeat(IntList repeats) const;
   Tensor reshape(IntList shape) const;
   Tensor reshape_as(const Tensor & other) const;
@@ -604,6 +600,10 @@ struct AT_API Tensor {
   Tensor & transpose_(int64_t dim0, int64_t dim1);
   Tensor flip(IntList dims) const;
   Tensor rot90(int64_t k=1, IntList dims={0,1}) const;
+  Tensor tril(int64_t diagonal=0) const;
+  Tensor & tril_(int64_t diagonal=0);
+  Tensor triu(int64_t diagonal=0) const;
+  Tensor & triu_(int64_t diagonal=0);
   Tensor trunc() const;
   Tensor & trunc_();
   Tensor type_as(const Tensor & other) const;

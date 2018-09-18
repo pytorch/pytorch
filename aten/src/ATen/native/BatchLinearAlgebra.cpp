@@ -24,6 +24,11 @@ extern "C" void dgetrf_(int *m, int *n, double *a, int *lda, int *ipiv, int *inf
 extern "C" void sgetrf_(int *m, int *n, float *a, int *lda, int *ipiv, int *info);
 extern "C" void dgetri_(int *n, double *a, int *lda, int *ipiv, double *work, int *lwork, int *info);
 extern "C" void sgetri_(int *n, float *a, int *lda, int *ipiv, float *work, int *lwork, int *info);
+
+// potrf
+extern "C" void dpotrf_(char *uplo, int *n, double *a, int *lda, int *info);
+extern "C" void spotrf_(char *uplo, int *n, float *a, int *lda, int *info);
+
 #endif
 
 namespace at {
@@ -44,6 +49,11 @@ void lapackGetrf(int m, int n, scalar_t* a, int lda, int *ipiv, int *info) {
 template<class scalar_t>
 void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwork, int *info) {
   AT_ERROR("getri only takes float or double Tensors");
+}
+
+template<class scalar_t>
+void lapackPotrf(char *uplo, int *n, scalar_t *a, int *lda, int *info) {
+  AT_ERROR("potrf only takes float or double Tensors");
 }
 
 #ifdef USE_LAPACK
@@ -70,6 +80,15 @@ template<> void lapackGetrf<double>(int m, int n, double *a, int lda, int *ipiv,
 template<> void lapackGetrf<float>(int m, int n, float *a, int lda, int *ipiv, int *info) {
   sgetrf_(&m, &n, a, &lda, ipiv, info);
 }
+
+template<> void lapackPotrf<double>(char *uplo, int *n, double *a, int *lda, int *info) {
+  dpotrf_(uplo, n, a, lda, info);
+}
+
+template<> void lapackPotrf<float>(char *uplo, int *n, float *a, int *lda, int *info) {
+  spotrf_(uplo, n, a, lda, info);
+}
+
 #endif
 
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
@@ -203,6 +222,140 @@ Tensor& inverse_out(Tensor &result, const Tensor &self) {
     return result.resize_as_(self);
   }
   result.copy_(native::inverse(self));
+  return result;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ potrf ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template<typename scalar_t>
+static void apply_potrf(Tensor& A, bool upper) {
+#ifndef USE_LAPACK
+  AT_ERROR("not compiled with LAPACK");
+#endif
+
+  char uplo = upper ? 'U' : 'L';
+
+  auto A_data = A.data<scalar_t>();
+  auto A_mat_stride = matrixStride(A);
+
+  auto batch_size = batchCount(A);
+  int n = A.size(-2);
+  AT_CHECK(A.size(-1) == n, "last two dimensions must be of equal size");
+  //THArgCheck(THTensor_nDimensionLegacyAll(a) == 2, 1, "A should be 2 dimensional");
+  int lda = n;
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    int info;
+    lapackPotrf(&uplo, &n, A_data+i*A_mat_stride, &lda, &info);
+    AT_CHECK(info == 0, "The leading minor of order ", info, " is not positive definite");
+  }
+}
+
+Tensor potrf_cpu(const Tensor &self, bool upper) {
+  if (self.dim() == 0) {
+    return self.sqrt();
+  } else if (self.size(-1) == 0) {
+    return at::empty_like(self);
+  }
+  AT_CHECK(self.dim() >= 2, "tensor must be at least two-dimensional");
+  Tensor result = cloneBatchedColumnMajor(self);
+  AT_DISPATCH_FLOATING_TYPES(result.type(), "potrf", [&] {
+      apply_potrf<scalar_t>(result, upper);
+    });
+  if (upper) {
+    result.triu_();
+  } else {
+    result.tril_();
+  }
+  return result;
+}
+
+Tensor& potrf_out(Tensor& result, const Tensor &self, bool upper) {
+  // should check if out is of the right format and copy before...
+  result.resize_as_(self).copy_(at::potrf(self));
+  return result;
+}
+
+template <typename scalar_t, bool inplace, bool upper>
+void apply_triu_tril(Tensor& result, const Tensor& self, int64_t k) {
+  auto n = self.size(-2);
+  auto m = self.size(-1);
+  auto self_batched_ = self.view({-1, n, m});
+  auto self_batched = self_batched_.accessor<scalar_t, 3>();
+  auto result_batched_ = result.view({-1, n, m});
+  auto result_batched = result_batched_.accessor<scalar_t, 3>();
+  auto batch_size = self_batched.size(0);
+  AT_CHECK(result_batched.size(0) == batch_size, "matrix sizes don't match");
+  constexpr int64_t zero = 0;
+  for (int64_t b = 0; b < batch_size; b++) {
+    auto self1 = self_batched[b];
+    auto result1 = result_batched[b];
+    for (int64_t i = 0; i < n; i++) {
+      auto result_row = result1[i];
+      if (upper) { // triu
+	  int64_t sz = std::min(m, i+k);
+	  for (int64_t j = 0; j < sz; j++) {
+	  result_row[j] = 0;
+	}
+	if (! inplace) {
+	  auto self_row = self1[i];
+	  for (int64_t j = std::max(zero, i+k); j < m; j++) {
+	    result_row[j] = self_row[j];
+	  }
+	}
+      } else {     // tril
+	for (int64_t j = std::max(zero, i+k+1); j < m; j++) {
+	  result_row[j] = 0;
+	}
+	if (! inplace) {
+	  auto self_row = self1[i];
+	  int64_t sz = std::min(m, i+k+1);
+	  for (int64_t j = 0; j < sz; j++) {
+	    result_row[j] = self_row[j];
+	  }
+	}
+      }
+    }
+  }
+}
+
+Tensor tril(const Tensor &self, int64_t k) {
+  auto result = at::empty_like(self);
+  at::tril_out(result, self, k);
+  return result;
+}
+
+Tensor& tril_cpu_(Tensor &self, int64_t k) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&] {
+      apply_triu_tril<scalar_t, true, false>(self, self, k);
+    });
+  return self;
+}
+
+Tensor& tril_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "tril", [&] {
+      apply_triu_tril<scalar_t, false, false>(result, self, k);
+    });
+  return result;
+}
+
+Tensor triu(const Tensor &self, int64_t k) {
+  auto result = at::empty_like(self);
+  at::triu_out(result, self, k);
+  return result;
+}
+
+Tensor& triu_cpu_(Tensor &self, int64_t k) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&] {
+      apply_triu_tril<scalar_t, true, true>(self, self, k);
+    });
+  return self;
+}
+
+Tensor& triu_cpu_out(Tensor &result, const Tensor& self, int64_t k) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "triu", [&] {
+      apply_triu_tril<scalar_t, false, true>(result, self, k);
+    });
   return result;
 }
 

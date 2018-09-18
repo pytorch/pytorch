@@ -321,10 +321,6 @@ struct AT_API Type {
   virtual Tensor & remainder_(Tensor & self, Scalar other) const = 0;
   virtual Tensor & s_remainder_(Tensor & self, const Tensor & other) const = 0;
   virtual Tensor & remainder_(Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor tril(const Tensor & self, int64_t diagonal=0) const = 0;
-  virtual Tensor & tril_(Tensor & self, int64_t diagonal=0) const = 0;
-  virtual Tensor triu(const Tensor & self, int64_t diagonal=0) const = 0;
-  virtual Tensor & triu_(Tensor & self, int64_t diagonal=0) const = 0;
   virtual Tensor cross(const Tensor & self, const Tensor & other, int64_t dim=-1) const = 0;
   virtual Tensor diag(const Tensor & self, int64_t diagonal=0) const = 0;
   virtual Tensor s_addbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const = 0;
@@ -343,7 +339,6 @@ struct AT_API Type {
   virtual std::tuple<Tensor,Tensor> symeig(const Tensor & self, bool eigenvectors=false, bool upper=true) const = 0;
   virtual std::tuple<Tensor,Tensor> eig(const Tensor & self, bool eigenvectors=false) const = 0;
   virtual std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some=true) const = 0;
-  virtual Tensor potrf(const Tensor & self, bool upper=true) const = 0;
   virtual Tensor potrs(const Tensor & self, const Tensor & input2, bool upper=true) const = 0;
   virtual Tensor potri(const Tensor & self, bool upper=true) const = 0;
   virtual std::tuple<Tensor,Tensor> pstrf(const Tensor & self, bool upper=true, Scalar tol=-1) const = 0;
@@ -508,6 +503,7 @@ struct AT_API Type {
   virtual Tensor permute(const Tensor & self, IntList dims) const = 0;
   virtual Tensor pin_memory(const Tensor & self) const = 0;
   virtual Tensor pinverse(const Tensor & self, double rcond=1e-15) const = 0;
+  virtual Tensor potrf(const Tensor & self, bool upper=true) const = 0;
   AT_DEPRECATED(virtual Tensor rand(IntList size, Generator * generator=nullptr) const = 0);
   AT_DEPRECATED(virtual Tensor randint(int64_t high, IntList size, Generator * generator=nullptr) const = 0);
   AT_DEPRECATED(virtual Tensor randint(int64_t low, int64_t high, IntList size, Generator * generator=nullptr) const = 0);
@@ -572,6 +568,10 @@ struct AT_API Type {
   virtual Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) const = 0;
   virtual Tensor flip(const Tensor & self, IntList dims) const = 0;
   virtual Tensor rot90(const Tensor & self, int64_t k=1, IntList dims={0,1}) const = 0;
+  virtual Tensor tril(const Tensor & self, int64_t diagonal=0) const = 0;
+  virtual Tensor & tril_(Tensor & self, int64_t diagonal=0) const = 0;
+  virtual Tensor triu(const Tensor & self, int64_t diagonal=0) const = 0;
+  virtual Tensor & triu_(Tensor & self, int64_t diagonal=0) const = 0;
   virtual Tensor trunc(const Tensor & self) const = 0;
   virtual Tensor & trunc_(Tensor & self) const = 0;
   virtual Tensor type_as(const Tensor & self, const Tensor & other) const = 0;
