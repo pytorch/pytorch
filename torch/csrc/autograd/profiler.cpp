@@ -43,7 +43,8 @@ void mark(std::string name, bool include_cuda /* = true */) {
 }
 
 const char* c_str(const char *str) { return str; }
-const char* c_str(const std::string& str) { return str.c_str(); }
+// NB: non-const to disallow temporaries (lifetime issues)
+const char* c_str(std::string& str) { return str.c_str(); }
 
 template<typename T>
 void pushRangeImpl(T name, const char* msg="", int64_t sequence_nr=-1) {

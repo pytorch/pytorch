@@ -57,7 +57,7 @@ enum class EventKind : uint16_t {
 struct Event final {
   Event(EventKind kind, std::string name, uint16_t thread_id, bool record_cuda)
   : owned_name_(new std::string(std::move(name)))
-  , name_ptr_(nullptr)
+  , name_ptr_(owned_name_->c_str())
   , kind_(kind)
   , thread_id_(thread_id) { record(record_cuda); }
   Event(EventKind kind, const char* name, uint16_t thread_id, bool record_cuda)
@@ -88,11 +88,8 @@ struct Event final {
     }
     throw std::runtime_error("unknown EventKind");
   }
-  std::string name() const {
-    if (owned_name_) {
-      return *owned_name_;
-    }
-    return name_ptr_ ? name_ptr_ : "";
+  const char* name() const {
+    return name_ptr_;
   }
   uint16_t thread_id() const {
     return thread_id_;
@@ -129,6 +126,9 @@ struct Event final {
   }
 private:
   int64_t cpu_ns_; // signed to allow for negative intervals
+  // std::string is a very large object (usually around 32B),
+  // and this field is used only for user-created ranges, so
+  // it's better to save on size of Events.
   std::unique_ptr<std::string> owned_name_;
   const char * name_ptr_;
   EventKind kind_;
