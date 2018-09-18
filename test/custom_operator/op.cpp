@@ -16,7 +16,7 @@ std::vector<at::Tensor> custom_op(
 }
 
 static auto registry =
-    torch::RegisterOperators()
+    torch::jit::RegisterOperators()
         // We parse the schema for the user.
         .op("custom::op", &custom_op)
         // User provided schema. Among other things, allows defaulting values,

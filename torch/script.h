@@ -6,8 +6,3 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <ATen/ATen.h>
-
-namespace torch {
-using jit::createOperator;
-using jit::RegisterOperators;
-} // namespace torch
