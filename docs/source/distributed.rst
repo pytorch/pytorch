@@ -123,7 +123,7 @@ with ``file://`` and contain a path to a non-existent file (in an existing
 directory) on a shared file system. File-system initialization will automatically
 create that file if it doesn't exist, but will not delete the file. Therefore, it
 is your responsibility to make sure that the file is cleaned up before the next
-init_process_group call on the same file path/name.
+:func:`init_process_group` call on the same file path/name.
 
 Note that automatic rank assignment is not supported anymore in the latest
 distributed package and ``group_name`` is deprecated as well.
@@ -135,11 +135,11 @@ distributed package and ``group_name`` is deprecated as well.
 .. warning::
     This method does not clean up and remove the file and it is your responsibility
     to remove the file at the end of the training. This is especially important
-    if you plan to call init_process_group multiple times on the same file name.
+    if you plan to call :func:`init_process_group` multiple times on the same file name.
     In other words, if the file is not removed/cleaned up and you call
-    init_process_group again on that file, it is unexpected behavior and will cause
+    :func:`init_process_group` again on that file, it is unexpected behavior and will cause
     failures. The rule of thumb here is that, make sure that the file is non-existent or
-    empty everytime init_process_group is called.
+    empty everytime :func:`init_process_group` is called.
 
 ::
 
