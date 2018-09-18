@@ -49,6 +49,8 @@ class Optimizer(object):
         }
 
     def __setstate__(self, state):
+        for key in state.keys():
+            state[id(key)] = state.pop(key)
         self.__dict__.update(state)
 
     def __repr__(self):
