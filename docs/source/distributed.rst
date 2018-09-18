@@ -242,14 +242,15 @@ Collective functions
     They are used in specifying strategies for reduction collectives, e.g.,
     :func:`reduce`, :func:`all_reduce_multigpu`, etc.
 
-..
 
+..
     NB: `reduce_op` (alias of `ReduceOp`) already has its __doc__ inherited from
         `ReduceOp`, which is identical to the text above. But do **not** replace
         the above with an `autoclass`. Sphinx isn't smart enough to figure out
         doc inheritance (similar to sphinx-doc/sphinx#2437) and generates
         "alias of `torch.distributed.ReduceOP`". So unfortunately we have to
         duplicate doc here.
+
 
 Multi-GPU collective functions
 ------------------------------
