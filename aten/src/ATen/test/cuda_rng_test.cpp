@@ -1,5 +1,5 @@
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 #include "ATen/ATen.h"
 #include "cuda.h"
@@ -21,7 +21,7 @@ void testCudaRNGMultithread() {
   }
 };
 
-TEST_CASE( "CUDA RNG test", "[cuda]" ) {
-  SECTION( "multithread" )
+CATCH_TEST_CASE( "CUDA RNG test", "[cuda]" ) {
+  CATCH_SECTION( "multithread" )
     testCudaRNGMultithread();
 }

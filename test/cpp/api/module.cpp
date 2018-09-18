@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include "catch_utils.hpp"
 
 #include <torch/nn/module.h>
 #include <torch/nn/modules/linear.h>
@@ -22,21 +22,21 @@ struct AGIUnit2 : torch::nn::Module {
 };
 } // namespace test
 
-TEST_CASE("module/training-mode") {
+CATCH_TEST_CASE("module/training-mode") {
   torch::manual_seed(0);
   Linear module(3, 4);
-  REQUIRE(module->is_training());
-  SECTION("Enable eval mode") {
+  CATCH_REQUIRE(module->is_training());
+  CATCH_SECTION("Enable eval mode") {
     module->eval();
-    REQUIRE(!module->is_training());
+    CATCH_REQUIRE(!module->is_training());
   }
-  SECTION("Enable train mode") {
+  CATCH_SECTION("Enable train mode") {
     module->train();
-    REQUIRE(module->is_training());
+    CATCH_REQUIRE(module->is_training());
   }
 }
 
-TEST_CASE("module/zero-grad") {
+CATCH_TEST_CASE("module/zero-grad") {
   torch::manual_seed(0);
   Linear module(3, 4);
   auto weight = torch::ones({8, 3}, torch::requires_grad());
@@ -44,18 +44,18 @@ TEST_CASE("module/zero-grad") {
   loss.backward();
   for (auto& parameter : module->parameters()) {
     auto grad = parameter->grad();
-    REQUIRE(grad.defined());
-    REQUIRE(grad.sum().toCFloat() != 0);
+    CATCH_REQUIRE(grad.defined());
+    CATCH_REQUIRE(grad.sum().toCFloat() != 0);
   }
   module->zero_grad();
   for (auto& parameter : module->parameters()) {
     auto grad = parameter->grad();
-    REQUIRE(grad.defined());
-    REQUIRE(grad.sum().toCFloat() == 0);
+    CATCH_REQUIRE(grad.defined());
+    CATCH_REQUIRE(grad.sum().toCFloat() == 0);
   }
 }
 
-TEST_CASE("module/zero-grad-with-undefined") {
+CATCH_TEST_CASE("module/zero-grad-with-undefined") {
   struct TestModule : torch::nn::Module {
     TestModule() {
       x = register_parameter("x", torch::ones(5, at::requires_grad()));
@@ -68,120 +68,120 @@ TEST_CASE("module/zero-grad-with-undefined") {
   auto z = module.x * 2;
   z.sum().backward();
 
-  REQUIRE(module.x.grad().defined());
-  REQUIRE(!module.y.grad().defined());
+  CATCH_REQUIRE(module.x.grad().defined());
+  CATCH_REQUIRE(!module.y.grad().defined());
 
   module.zero_grad();
 
-  REQUIRE(module.x.grad().defined());
-  REQUIRE(!module.y.grad().defined());
+  CATCH_REQUIRE(module.x.grad().defined());
+  CATCH_REQUIRE(!module.y.grad().defined());
 
-  REQUIRE(module.x.grad().sum().toCFloat() == 0);
+  CATCH_REQUIRE(module.x.grad().sum().toCFloat() == 0);
 }
 
-TEST_CASE("module/name") {
+CATCH_TEST_CASE("module/name") {
   // CHECK instead of REQUIRE because demangling may fail.
   AGIUnit agi;
   // Call it twice just to make sure there are no bugs in the lazy
   // initialization semantics.
-  CHECK(agi.name() == "AGIUnit");
-  CHECK(agi.name() == "AGIUnit");
-  SECTION("correctly demangled") {
-    CHECK(test::AGIUnit().name() == "test::AGIUnit");
-    CHECK(test::AGIUnit2().name() == "Foo");
+  CATCH_CHECK(agi.name() == "AGIUnit");
+  CATCH_CHECK(agi.name() == "AGIUnit");
+  CATCH_SECTION("correctly demangled") {
+    CATCH_CHECK(test::AGIUnit().name() == "test::AGIUnit");
+    CATCH_CHECK(test::AGIUnit2().name() == "Foo");
   }
 }
 
-TEST_CASE("module/as") {
+CATCH_TEST_CASE("module/as") {
   Linear module(3, 4);
-  REQUIRE(module->as<Linear>() == module.get());
-  REQUIRE(module->as<LinearImpl>() == module.get());
-  REQUIRE(module->as<Module>() == module.get());
-  REQUIRE(module->as<AGIUnit>() == nullptr);
+  CATCH_REQUIRE(module->as<Linear>() == module.get());
+  CATCH_REQUIRE(module->as<LinearImpl>() == module.get());
+  CATCH_REQUIRE(module->as<Module>() == module.get());
+  CATCH_REQUIRE(module->as<AGIUnit>() == nullptr);
 
   std::shared_ptr<Module> raw = module.ptr();
-  REQUIRE(raw->as<Linear>() == module.get());
-  REQUIRE(raw->as<LinearImpl>() == module.get());
-  REQUIRE(raw->as<Module>() == module.get());
-  REQUIRE(raw->as<AGIUnit>() == nullptr);
+  CATCH_REQUIRE(raw->as<Linear>() == module.get());
+  CATCH_REQUIRE(raw->as<LinearImpl>() == module.get());
+  CATCH_REQUIRE(raw->as<Module>() == module.get());
+  CATCH_REQUIRE(raw->as<AGIUnit>() == nullptr);
 
   Module& raw_ref = *raw.get();
-  REQUIRE(raw_ref.as<Linear>() == module.get());
-  REQUIRE(raw_ref.as<LinearImpl>() == module.get());
-  REQUIRE(raw_ref.as<Module>() == module.get());
-  REQUIRE(raw_ref.as<AGIUnit>() == nullptr);
+  CATCH_REQUIRE(raw_ref.as<Linear>() == module.get());
+  CATCH_REQUIRE(raw_ref.as<LinearImpl>() == module.get());
+  CATCH_REQUIRE(raw_ref.as<Module>() == module.get());
+  CATCH_REQUIRE(raw_ref.as<AGIUnit>() == nullptr);
   if (auto* linear = raw_ref.as<Linear>()) {
-    REQUIRE(linear->weight.ndimension() == 2);
+    CATCH_REQUIRE(linear->weight.ndimension() == 2);
   }
 
   AGIUnit unit;
-  REQUIRE(unit.as<Linear>() == nullptr);
-  REQUIRE(unit.as<LinearImpl>() == nullptr);
-  REQUIRE(unit.as<AGIUnit>() == &unit);
+  CATCH_REQUIRE(unit.as<Linear>() == nullptr);
+  CATCH_REQUIRE(unit.as<LinearImpl>() == nullptr);
+  CATCH_REQUIRE(unit.as<AGIUnit>() == &unit);
 }
 
-TEST_CASE("module/conversions", "[multi-cuda]") {
+CATCH_TEST_CASE("module/conversions", "[multi-cuda]") {
   torch::manual_seed(0);
   Linear module(128, 64);
-  SECTION("starts as float on CPU") {
+  CATCH_SECTION("starts as float on CPU") {
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device() == torch::Device(torch::kCPU));
-      REQUIRE(parameter->dtype() == torch::kFloat32);
+      CATCH_REQUIRE(parameter->device() == torch::Device(torch::kCPU));
+      CATCH_REQUIRE(parameter->dtype() == torch::kFloat32);
     }
   }
-  SECTION("to(CUDA)") {
+  CATCH_SECTION("to(CUDA)") {
     module->to({torch::kCUDA, 0});
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
-      REQUIRE(parameter->device().index() == 0);
+      CATCH_REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
+      CATCH_REQUIRE(parameter->device().index() == 0);
     }
     module->to({at::kCUDA, 1});
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
-      REQUIRE(parameter->device().index() == 1);
+      CATCH_REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
+      CATCH_REQUIRE(parameter->device().index() == 1);
     }
   }
-  SECTION("to(CPU)") {
+  CATCH_SECTION("to(CPU)") {
     module->to(torch::Device(torch::kCPU));
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device().type() == torch::Device::Type::CPU);
+      CATCH_REQUIRE(parameter->device().type() == torch::Device::Type::CPU);
     }
   }
-  SECTION("to(Int32)") {
+  CATCH_SECTION("to(Int32)") {
     module->to(torch::kInt32);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->dtype() == torch::kInt32);
+      CATCH_REQUIRE(parameter->dtype() == torch::kInt32);
     }
   }
-  SECTION("to(Float64)") {
+  CATCH_SECTION("to(Float64)") {
     module->to(torch::kFloat64);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->dtype() == torch::kFloat64);
+      CATCH_REQUIRE(parameter->dtype() == torch::kFloat64);
     }
   }
-  SECTION("to(CUDA, Byte)") {
+  CATCH_SECTION("to(CUDA, Byte)") {
     module->to(torch::Device(torch::kCUDA, 1), torch::kUInt8);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
-      REQUIRE(parameter->device().index() == 1);
+      CATCH_REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
+      CATCH_REQUIRE(parameter->device().index() == 1);
     }
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->dtype() == torch::kUInt8);
+      CATCH_REQUIRE(parameter->dtype() == torch::kUInt8);
     }
   }
 }
 
-TEST_CASE("module/clone") {
+CATCH_TEST_CASE("module/clone") {
   torch::manual_seed(0);
-  SECTION(
+  CATCH_SECTION(
       "a module that does not override clone() throws when clone() is called") {
     struct UnCloneable : Module {};
     UnCloneable module;
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         module.clone(), StartsWith("clone() has not been implemented"));
   }
 
-  SECTION(
+  CATCH_SECTION(
       "a module that overrides clone() does not throw when clone() is called ") {
     struct Cloneable : Module {
       std::shared_ptr<Module> clone(
@@ -190,10 +190,10 @@ TEST_CASE("module/clone") {
       }
     };
     Cloneable module;
-    REQUIRE_NOTHROW(module.clone());
+    CATCH_REQUIRE_NOTHROW(module.clone());
   }
 
-  SECTION("Cloning creates distinct parameters") {
+  CATCH_SECTION("Cloning creates distinct parameters") {
     struct TestModule : public Cloneable<TestModule> {
       TestModule() {
         reset();
@@ -216,32 +216,32 @@ TEST_CASE("module/clone") {
     auto module2 = module->clone();
     auto params1 = module->parameters();
     auto params2 = module2->parameters();
-    REQUIRE(params1.size() == 6);
-    REQUIRE(params2.size() == 6);
+    CATCH_REQUIRE(params1.size() == 6);
+    CATCH_REQUIRE(params2.size() == 6);
     for (auto& param : params1) {
-      REQUIRE(!pointer_equal(param.value, params2[param.key]));
-      REQUIRE(param->allclose(params2[param.key]));
+      CATCH_REQUIRE(!pointer_equal(param.value, params2[param.key]));
+      CATCH_REQUIRE(param->allclose(params2[param.key]));
       param->add_(2);
     }
     for (auto& param : params1) {
-      REQUIRE(!param->allclose(params2[param.key]));
+      CATCH_REQUIRE(!param->allclose(params2[param.key]));
     }
 
     auto buffers1 = module->buffers();
     auto buffers2 = module2->buffers();
-    REQUIRE(buffers1.size() == 1);
-    REQUIRE(buffers2.size() == 1);
+    CATCH_REQUIRE(buffers1.size() == 1);
+    CATCH_REQUIRE(buffers2.size() == 1);
     for (auto& buffer : buffers1) {
-      REQUIRE(!pointer_equal(buffer.value, buffers2[buffer.key]));
-      REQUIRE(buffer->allclose(buffers2[buffer.key]));
+      CATCH_REQUIRE(!pointer_equal(buffer.value, buffers2[buffer.key]));
+      CATCH_REQUIRE(buffer->allclose(buffers2[buffer.key]));
       buffer->add_(2);
     }
     for (auto& buffer : buffers1) {
-      REQUIRE(!buffer->allclose(buffers2[buffer.key]));
+      CATCH_REQUIRE(!buffer->allclose(buffers2[buffer.key]));
     }
   }
 
-  SECTION("Cloning preserves external references") {
+  CATCH_SECTION("Cloning preserves external references") {
     struct TestModule : public Cloneable<TestModule> {
       TestModule() {
         reset();
@@ -256,19 +256,19 @@ TEST_CASE("module/clone") {
       torch::NoGradGuard no_grad;
       module->weight += 1;
     }
-    REQUIRE(pointer_equal(module->weight, module->parameters()["weight"]));
-    REQUIRE(module->weight.allclose(module->parameters()["weight"]));
+    CATCH_REQUIRE(pointer_equal(module->weight, module->parameters()["weight"]));
+    CATCH_REQUIRE(module->weight.allclose(module->parameters()["weight"]));
 
     auto module2 = std::dynamic_pointer_cast<TestModule>(
         std::shared_ptr<Module>(module->clone()));
-    REQUIRE(!pointer_equal(module2->weight, module->weight));
-    REQUIRE(pointer_equal(module2->weight, module2->parameters()["weight"]));
-    REQUIRE(module2->weight.allclose(module2->parameters()["weight"]));
-    REQUIRE(module2->weight.allclose(module->weight));
-    REQUIRE(!pointer_equal(module2->weight, module->parameters()["weight"]));
+    CATCH_REQUIRE(!pointer_equal(module2->weight, module->weight));
+    CATCH_REQUIRE(pointer_equal(module2->weight, module2->parameters()["weight"]));
+    CATCH_REQUIRE(module2->weight.allclose(module2->parameters()["weight"]));
+    CATCH_REQUIRE(module2->weight.allclose(module->weight));
+    CATCH_REQUIRE(!pointer_equal(module2->weight, module->parameters()["weight"]));
   }
 
-  SECTION("Cloning copies the values of variables of submodules") {
+  CATCH_SECTION("Cloning copies the values of variables of submodules") {
     struct TestModule : public Cloneable<TestModule> {
       TestModule() {
         reset();
@@ -299,16 +299,16 @@ TEST_CASE("module/clone") {
 
     auto b = std::dynamic_pointer_cast<NestedModule>(a->clone());
 
-    REQUIRE(!pointer_equal(b->module->weight, a->module->weight));
-    REQUIRE(
+    CATCH_REQUIRE(!pointer_equal(b->module->weight, a->module->weight));
+    CATCH_REQUIRE(
         pointer_equal(b->module->weight, b->module->parameters()["weight"]));
-    REQUIRE(b->module->parameters()["weight"].allclose(a->module->weight));
-    REQUIRE(b->module->weight.allclose(a->module->weight));
-    REQUIRE(b->module->value == a->module->value);
+    CATCH_REQUIRE(b->module->parameters()["weight"].allclose(a->module->weight));
+    CATCH_REQUIRE(b->module->weight.allclose(a->module->weight));
+    CATCH_REQUIRE(b->module->value == a->module->value);
   }
 }
 
-TEST_CASE("module/clone-to-device", "[cuda]") {
+CATCH_TEST_CASE("module/clone-to-device", "[cuda]") {
   struct TestModule : public Cloneable<TestModule> {
     TestModule() {
       reset();
@@ -324,7 +324,7 @@ TEST_CASE("module/clone-to-device", "[cuda]") {
     torch::Tensor buffer;
   };
 
-  SECTION("Cloning preserves the device of parameters/buffers") {
+  CATCH_SECTION("Cloning preserves the device of parameters/buffers") {
     TestModule m;
     torch::Device device(torch::kCUDA, 0);
 
@@ -332,33 +332,33 @@ TEST_CASE("module/clone-to-device", "[cuda]") {
 
     auto clone = m.clone();
     for (const auto& parameter : clone->parameters()) {
-      REQUIRE(parameter->device().type() == device.type());
-      REQUIRE(parameter->device().index() == device.index());
+      CATCH_REQUIRE(parameter->device().type() == device.type());
+      CATCH_REQUIRE(parameter->device().index() == device.index());
     }
     for (const auto& buffer : clone->buffers()) {
-      REQUIRE(buffer->device().type() == device.type());
-      REQUIRE(buffer->device().index() == device.index());
+      CATCH_REQUIRE(buffer->device().type() == device.type());
+      CATCH_REQUIRE(buffer->device().index() == device.index());
     }
   }
 
-  SECTION(
+  CATCH_SECTION(
       "Cloning to a particular device places all parameters/buffers there") {
     TestModule m;
     torch::Device device(torch::kCUDA, 1);
     // everything is on CPU here
     auto clone = m.clone(device);
     for (const auto& parameter : clone->parameters()) {
-      REQUIRE(parameter->device().type() == device.type());
-      REQUIRE(parameter->device().index() == device.index());
+      CATCH_REQUIRE(parameter->device().type() == device.type());
+      CATCH_REQUIRE(parameter->device().index() == device.index());
     }
     for (const auto& buffer : clone->buffers()) {
-      REQUIRE(buffer->device().type() == device.type());
-      REQUIRE(buffer->device().index() == device.index());
+      CATCH_REQUIRE(buffer->device().type() == device.type());
+      CATCH_REQUIRE(buffer->device().index() == device.index());
     }
   }
 }
 
-TEST_CASE("module/parameters") {
+CATCH_TEST_CASE("module/parameters") {
   torch::manual_seed(0);
   struct TestModule : Module {
     TestModule() {
@@ -372,19 +372,19 @@ TEST_CASE("module/parameters") {
 
   TestModule module;
 
-  SECTION("has correct number of parameters") {
-    REQUIRE(module.parameters().size() == 3);
+  CATCH_SECTION("has correct number of parameters") {
+    CATCH_REQUIRE(module.parameters().size() == 3);
   }
 
-  SECTION("contains parameters with the correct name") {
+  CATCH_SECTION("contains parameters with the correct name") {
     auto parameters = module.parameters();
-    REQUIRE(parameters.contains("a"));
-    REQUIRE(parameters.contains("b"));
-    REQUIRE(parameters.contains("c"));
+    CATCH_REQUIRE(parameters.contains("a"));
+    CATCH_REQUIRE(parameters.contains("b"));
+    CATCH_REQUIRE(parameters.contains("c"));
   }
 }
 
-TEST_CASE("module/buffers") {
+CATCH_TEST_CASE("module/buffers") {
   torch::manual_seed(0);
   struct TestModule : Module {
     TestModule() {
@@ -398,19 +398,19 @@ TEST_CASE("module/buffers") {
 
   TestModule module;
 
-  SECTION("has correct number of buffers") {
-    REQUIRE(module.buffers().size() == 3);
+  CATCH_SECTION("has correct number of buffers") {
+    CATCH_REQUIRE(module.buffers().size() == 3);
   }
 
-  SECTION("contains buffers with the correct name") {
+  CATCH_SECTION("contains buffers with the correct name") {
     auto buffers = module.buffers();
-    REQUIRE(buffers.contains("a"));
-    REQUIRE(buffers.contains("b"));
-    REQUIRE(buffers.contains("c"));
+    CATCH_REQUIRE(buffers.contains("a"));
+    CATCH_REQUIRE(buffers.contains("b"));
+    CATCH_REQUIRE(buffers.contains("c"));
   }
 }
 
-TEST_CASE("module/default-constructor") {
+CATCH_TEST_CASE("module/default-constructor") {
   struct AImpl : torch::nn::Module {
     AImpl() : x_(123) {}
     AImpl(int x) : x_(x) {}
@@ -420,20 +420,20 @@ TEST_CASE("module/default-constructor") {
 
   {
     A a;
-    REQUIRE(a);
-    REQUIRE(!a.is_empty());
-    REQUIRE(a->x_ == 123);
+    CATCH_REQUIRE(a);
+    CATCH_REQUIRE(!a.is_empty());
+    CATCH_REQUIRE(a->x_ == 123);
   }
   {
     A a(5);
-    REQUIRE(a);
-    REQUIRE(!a.is_empty());
-    REQUIRE(a->x_ == 5);
+    CATCH_REQUIRE(a);
+    CATCH_REQUIRE(!a.is_empty());
+    CATCH_REQUIRE(a->x_ == 5);
   }
   {
     A a = nullptr;
-    REQUIRE(!a);
-    REQUIRE(a.is_empty());
-    REQUIRE_THROWS_WITH(a->x_, StartsWith("Accessing empty ModuleHolder"));
+    CATCH_REQUIRE(!a);
+    CATCH_REQUIRE(a.is_empty());
+    CATCH_REQUIRE_THROWS_WITH(a->x_, StartsWith("Accessing empty ModuleHolder"));
   }
 }

@@ -2393,6 +2393,31 @@ class TestTorch(TestCase):
             a[0] = 7.
             self.assertEqual(5., res1[0].item())
 
+    def test_tensor_factory_copy_var(self):
+        # default copy from var
+        source = torch.randn(5, 5, requires_grad=True)
+        copy = torch.tensor(source)
+        self.assertEqual(copy.data, source.data)
+        self.assertTrue(source.requires_grad)
+        self.assertTrue(copy.is_leaf)
+        self.assertFalse(copy.requires_grad)
+
+        # copy with requires_grad=False
+        source = torch.randn(5, 5, requires_grad=True)
+        copy = torch.tensor(source, requires_grad=False)
+        self.assertEqual(copy.data, source.data)
+        self.assertTrue(source.requires_grad)
+        self.assertTrue(copy.is_leaf)
+        self.assertFalse(copy.requires_grad)
+
+        # copy with requires_grad=True
+        source = torch.randn(5, 5, requires_grad=True)
+        copy = torch.tensor(source, requires_grad=True)
+        self.assertEqual(copy.data, source.data)
+        self.assertTrue(source.requires_grad)
+        self.assertTrue(copy.is_leaf)
+        self.assertTrue(copy.requires_grad)
+
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):
             saved_dtype = torch.get_default_dtype()
@@ -5233,7 +5258,7 @@ class TestTorch(TestCase):
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
     @skipIfNoLapack
-    def tset_potri(self):
+    def test_potri(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -5241,7 +5266,7 @@ class TestTorch(TestCase):
                           (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
 
         # make sure 'a' is symmetric PSD
-        a = a * a.t()
+        a = torch.mm(a, a.t())
 
         # compute inverse directly
         inv0 = torch.inverse(a)
@@ -5252,13 +5277,13 @@ class TestTorch(TestCase):
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # upper Triangular Test
-        chol = torch.potrf(a, 'U')
-        inv1 = torch.potri(chol, 'U')
+        chol = torch.potrf(a, True)
+        inv1 = torch.potri(chol, True)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # lower Triangular Test
-        chol = torch.potrf(a, 'L')
-        inv1 = torch.potri(chol, 'L')
+        chol = torch.potrf(a, False)
+        inv1 = torch.potri(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
     @skipIfNoLapack
@@ -8873,6 +8898,10 @@ class TestTorch(TestCase):
         self.assertEqual(grid_a.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_b.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_c.shape, torch.Size([1, 3, 2]))
+        grid_a2, grid_b2, grid_c2 = torch.meshgrid(a, b, c)
+        self.assertEqual(grid_a2.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_b2.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_c2.shape, torch.Size([1, 3, 2]))
         expected_grid_a = torch.ones(1, 3, 2, dtype=torch.int64)
         expected_grid_b = torch.tensor([[[1, 1],
                                          [2, 2],
@@ -8883,6 +8912,9 @@ class TestTorch(TestCase):
         self.assertTrue(grid_a.equal(expected_grid_a))
         self.assertTrue(grid_b.equal(expected_grid_b))
         self.assertTrue(grid_c.equal(expected_grid_c))
+        self.assertTrue(grid_a2.equal(expected_grid_a))
+        self.assertTrue(grid_b2.equal(expected_grid_b))
+        self.assertTrue(grid_c2.equal(expected_grid_c))
 
     @unittest.skipIf(torch.cuda.is_available(), "CUDA is available, can't test CUDA not built error")
     def test_cuda_not_built(self):
