@@ -134,7 +134,7 @@ IF(HIP_FOUND)
   find_package_and_print_version(miopen REQUIRED)
   find_package_and_print_version(miopengemm)
   find_package_and_print_version(rocfft REQUIRED)
-  find_package_and_print_version(hipsparse REQUIRED)
+  #find_package_and_print_version(hipsparse REQUIRED)
   find_package_and_print_version(rocsparse REQUIRED)
 
   # TODO: hip_hcc has an interface include flag "-hc" which is only
