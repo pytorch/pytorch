@@ -1,0 +1,1 @@
+add: expected 'self' and 'other' to have same size, but self has size [3, 4] while other has size [3, 4, 4] (FYI: dense-sparse addition does not currently support broadcasting)
