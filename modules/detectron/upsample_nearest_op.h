@@ -74,6 +74,13 @@ class UpsampleNearestOp final : public Operator<Context> {
     const T *input_data = X.template data<T>();
     T *output_data = Y->template mutable_data<T>();
 
+#ifdef _OPENMP
+#if (_OPENMP >= 201307)
+#pragma omp parallel for simd
+#else
+#pragma omp parallel for
+#endif 
+#endif  
     for (int ii = 0; ii < Y->size(); ii++) {
       int ipidx = translate_idx(ii, d1, d2, d3, scale_);
       output_data[ii] = input_data[ipidx];

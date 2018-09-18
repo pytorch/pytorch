@@ -100,6 +100,13 @@ bool BatchPermutationOp<float, CPUContext>::RunOnDevice() {
   const float *src = X.template data<float>();
   float *dst = Y->template mutable_data<float>();
 
+#ifdef _OPENMP
+#if (_OPENMP >= 201307)
+#pragma omp parallel for simd
+#else
+#pragma omp parallel for
+#endif 
+#endif  
   for (int i = 0; i < N; i++) {
     int idx = indices.template data<int>()[i];
 
