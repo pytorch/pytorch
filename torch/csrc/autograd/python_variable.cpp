@@ -238,9 +238,11 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
 
   auto& grad = ((THPVariable*)py_grad)->cdata;
   bool gradIsSparse = false;
-  if (grad.type().scalarType() != at::kHalf) {
-         auto& sparseType = var.type().toBackend(var.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
-            gradIsSparse = grad.type() == sparseType;
+  auto backend = var.is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU;
+  auto typeOpt = at::globalContext().getNonVariableTypeOpt(backend, var.type().scalarType());  
+  if (typeOpt) {
+       auto& sparseType = at::globalContext().getNonVariableType(backend, var.type().scalarType());
+       gradIsSparse = grad.type() == sparseType;
   }
 
   THPUtils_assertRet(-1, grad.type() == var.type() || gradIsSparse,
