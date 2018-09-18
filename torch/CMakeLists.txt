@@ -436,8 +436,10 @@ if (BUILD_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
 endif()
 
 if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
-  set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
 
+  #Catch test of api.
+  #TODO: Change all these tests to Google test.
+  set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
   set(TORCH_API_TEST_SOURCES
     ${TORCH_API_TEST_DIR}/any.cpp
     ${TORCH_API_TEST_DIR}/cursor.cpp
@@ -450,7 +452,6 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/parallel.cpp
     ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/sequential.cpp
-    ${TORCH_API_TEST_DIR}/static.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
     ${TORCH_API_TEST_DIR}/tensor.cpp
     ${TORCH_API_TEST_DIR}/jit.cpp
@@ -471,19 +472,36 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
 
   target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB})
 
+   #Google test of api.
+   set(TORCH_API_GTEST_DIR "${TORCH_ROOT}/test/cpp/api/")
+   add_executable(gtest_api
+		${TORCH_API_GTEST_DIR}/static.cpp
+		)
+   target_include_directories(gtest_api PRIVATE ${ATen_CPU_INCLUDE})
+   target_link_libraries(gtest_api torch gtest_main)
+   if (USE_CUDA)
+      target_link_libraries(gtest_api ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB} ${TORCH_CUDA_LIBRARIES})
+   endif()
+
+  #Adding compile options for both tests.
   if (NOT MSVC)
     if (APPLE)
       target_compile_options(test_api PRIVATE
         # Clang has an unfixed bug leading to spurious missing braces
         # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
         -Wno-missing-braces)
-    else()
+      target_compile_options(gtest_api PRIVATE
+        -Wno-missing-braces)
+	else()
       target_compile_options(test_api PRIVATE
         # Considered to be flaky.  See the discussion at
         # https://github.com/pytorch/pytorch/pull/9608
         -Wno-maybe-uninitialized
         # gcc gives nonsensical warnings about variadic.h
         -Wno-unused-but-set-parameter)
+     target_compile_options(gtest_api PRIVATE
+		-Wno-maybe-uninitialized
+		-Wno-unused-but-set-parameter)
     endif()
   endif()
 endif()
