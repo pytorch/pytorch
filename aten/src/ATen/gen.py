@@ -1,6 +1,5 @@
 import argparse
 import os
-import filecmp
 
 import yaml
 from collections import OrderedDict
@@ -443,7 +442,33 @@ def generate_outputs():
 
     # check that generated files match source files
     core_source_path = os.path.join(options.source_path, 'core')
-    match, mismatch, errors = filecmp.cmpfiles(core_install_dir, core_source_path, core_files.keys(), shallow=False)
+
+    # Not use filecmp.cmpfiles here as we need to compare file content independent of line
+    # endings (which will often be different due to git's propensity to change them upon sync).
+    match = []
+    mismatch = []
+    errors = []
+
+    for name in core_files.keys():
+        a = os.path.join(core_install_dir, name)
+        b = os.path.join(core_source_path, name)
+
+        if not os.path.isfile(a) or not os.path.isfile(b):
+            errors.append(name)
+            continue
+
+        try:
+            lines_a = [ line.rstrip() for line in open(a).readlines() ]
+            lines_b = [ line.rstrip() for line in open(b).readlines() ]
+        except:
+            errors.append(name)
+            continue
+
+        if lines_a == lines_b:
+            match.append(name)
+        else:
+            mismatch.append(name)
+
     if errors:
         raise RuntimeError("Error while trying to compare source and generated files for {}. "
                            "Source directory: {}.  Generated directory: {}."
