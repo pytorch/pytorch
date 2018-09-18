@@ -228,6 +228,9 @@ struct GraphFuser {
         node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::le(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::gt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::gt(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::ge(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||

@@ -7,13 +7,13 @@ Torch Script
 .. currentmodule:: torch.jit
 
 Torch Script is a way to create serializable and optimizable models from PyTorch code.
-Anything code written in Torch Script can be saved from your Python
-process and loaded/run a process where there is no python dependency.
+Any code written in Torch Script can be saved from your Python
+process and loaded in a process where there is no Python dependency.
 
 We provide tools to incrementally transition a model from being a pure Python program
-to a Torch Script program that can be run independently from python, for instance, in a standalone C++ process.
+to a Torch Script program that can be run independently from Python, for instance, in a standalone C++ program.
 This makes it possible to train models in PyTorch using familiar tools and then export
-the model to a production environment where it is not a good idea to run models as python programs
+the model to a production environment where it is not a good idea to run models as Python programs
 for performance and multi-threading reasons.
 
 Creating Torch Script Code
@@ -47,7 +47,7 @@ Mixing Tracing and Scripting
 ----------------------------
 
 In many cases either tracing or script is an easier approach for converting a model.
-We allow you to compose tracing and scripting to suite the particular requirements
+We allow you to compose tracing and scripting to suit the particular requirements
 of a part of a model.
 
 Scripted functions can call traced ones. This is particularly useful when you need
@@ -79,6 +79,7 @@ Example:
 ::
 
     import torch
+
     @torch.jit.script
     def foo(x, y):
         if x.max() > y.max():

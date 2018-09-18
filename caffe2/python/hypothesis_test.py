@@ -2229,7 +2229,7 @@ class TestOperators(hu.HypothesisTestCase):
            in_place=st.booleans(),
            **hu.gcs)
     def test_unsafe_coalesce(self, sizes, in_place, gc, dc):
-        gAlignment = 32
+        gAlignment = 64
         Xs = [np.random.randn(size)
               .astype(np.random.choice([np.float32, np.float64, np.uint8]))
               for size in sizes]
