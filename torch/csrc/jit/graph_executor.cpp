@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/inline_autodiff_subgraphs.h"
+#include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/custom_operator.h"
@@ -379,7 +380,12 @@ private:
 
     // Phase 2. Propagate detailed information about the spec through the
     //          graph (enabled more specializations in later passes).
+    //          Shape propagation sometimes depends on certain arguments being
+    //          constants, and constant propagation doesn't need shape information
+    //          anyway, so it's better to run it first.
+    ConstantPropagation(opt_graph);
     PropagateInputShapes(*opt_graph, spec);
+    PropagateRequiresGrad(opt_graph, spec);
 
     // Phase 3. Run differentiable optimizations (i.e. simple graph rewrites that
     //          we can still execute using autograd).
@@ -392,18 +398,8 @@ private:
     if (needsGradient(opt_graph, spec)) {
       auto diff_nodes = CreateAutodiffSubgraphs(*opt_graph);
       for (Node * dnode : diff_nodes) {
-        // XXX: we don't have requires_grad information on the intermediate values,
-        // so we conservatively assume it's always true (on tensor inputs).
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
-        auto requires_grads = fmap(diff_graph->inputs(), [](Value* v) {
-          // NB: only floating-point inputs can have requires_grad=True. If we
-          // don't have type information, we have to assume that it's true.
-          if (auto tensor_type = v->type()->cast<TensorType>()) {
-            return at::isFloatingType(tensor_type->scalarType());
-          }
-          return v->type()->isSubtypeOf(DynamicType::get());
-        });
-        Gradient gradient = differentiate(diff_graph, requires_grads);
+        Gradient gradient = differentiate(diff_graph);
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
@@ -427,7 +423,6 @@ private:
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
     UnrollLoops(graph);
-    ConstantPropagation(graph);
     PeepholeOptimize(graph);
     CheckInplace(graph);
     BatchMM(graph);

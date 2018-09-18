@@ -74,13 +74,8 @@
 #define THPFloatUtils_unpackAccreal(object)   (double)THPUtils_unpackReal_FLOAT(object)
 #define THPFloatUtils_newAccreal(value)       THPUtils_newReal_FLOAT(value)
 #define THPHalfUtils_checkReal(object)        THPUtils_checkReal_FLOAT(object)
-#ifndef THP_HOST_HALF
-#define THPHalfUtils_unpackReal(object)       (half)THC_float2half(THPUtils_unpackReal_FLOAT(object))
-#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(THC_half2float(value))
-#else
-#define THPHalfUtils_unpackReal(object)       TH_float2half(THPUtils_unpackReal_FLOAT(object))
-#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(TH_half2float(value))
-#endif
+#define THPHalfUtils_unpackReal(object)       (at::Half)THPUtils_unpackReal_FLOAT(object)
+#define THPHalfUtils_newReal(value)           PyFloat_FromDouble(value)
 #define THPHalfUtils_checkAccreal(object)     THPUtils_checkReal_FLOAT(object)
 #define THPHalfUtils_unpackAccreal(object)    (double)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)

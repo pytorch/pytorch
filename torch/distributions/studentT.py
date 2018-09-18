@@ -1,11 +1,11 @@
+import math
 from numbers import Number
+
 import torch
 from torch._six import inf, nan
-import math
-from torch.distributions import constraints
+from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions import Chi2
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import _standard_normal, broadcast_all
 
 
 class StudentT(Distribution):
@@ -45,6 +45,17 @@ class StudentT(Distribution):
         batch_shape = torch.Size() if isinstance(df, Number) else self.df.size()
         super(StudentT, self).__init__(batch_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(StudentT, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.df = self.df.expand(batch_shape)
+        new.loc = self.loc.expand(batch_shape)
+        new.scale = self.scale.expand(batch_shape)
+        new._chi2 = self._chi2.expand(batch_shape)
+        super(StudentT, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def rsample(self, sample_shape=torch.Size()):
         # NOTE: This does not agree with scipy implementation as much as other distributions.
         # (see https://github.com/fritzo/notebooks/blob/master/debug-student-t.ipynb). Using DoubleTensor
@@ -54,7 +65,7 @@ class StudentT(Distribution):
         #   Z ~ Chi2(df)
         #   Y = X / sqrt(Z / df) ~ StudentT(df)
         shape = self._extended_shape(sample_shape)
-        X = self.df.new(shape).normal_()
+        X = _standard_normal(shape, dtype=self.df.dtype, device=self.df.device)
         Z = self._chi2.rsample(sample_shape)
         Y = X * torch.rsqrt(Z / self.df)
         return self.loc + self.scale * Y

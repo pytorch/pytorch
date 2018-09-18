@@ -3,7 +3,7 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import lazy_property
+from torch.distributions.utils import _standard_normal, lazy_property
 
 
 def _batch_mv(bmat, bvec):
@@ -146,6 +146,25 @@ class MultivariateNormal(Distribution):
         batch_shape, event_shape = self.loc.shape[:-1], self.loc.shape[-1:]
         super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(MultivariateNormal, _instance)
+        batch_shape = torch.Size(batch_shape)
+        loc_shape = batch_shape + self.event_shape
+        cov_shape = batch_shape + self.event_shape + self.event_shape
+        new.loc = self.loc.expand(loc_shape)
+        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
+        if 'covariance_matrix' in self.__dict__:
+            new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
+        if 'scale_tril' in self.__dict__:
+            new.scale_tril = self.scale_tril.expand(cov_shape)
+        if 'precision_matrix' in self.__dict__:
+            new.precision_matrix = self.precision_matrix.expand(cov_shape)
+        super(MultivariateNormal, new).__init__(batch_shape,
+                                                self.event_shape,
+                                                validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @lazy_property
     def scale_tril(self):
         return self._unbroadcasted_scale_tril.expand(
@@ -175,7 +194,7 @@ class MultivariateNormal(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps = self.loc.new_empty(shape).normal_()
+        eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)
 
     def log_prob(self, value):

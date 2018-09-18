@@ -2,7 +2,7 @@
 
 #include "Context.h"
 
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <thread>
 #include <mutex>
@@ -12,6 +12,7 @@
 
 #include "ATen/CPUGenerator.h"
 #include "ATen/RegisterCPU.h"
+#include "ATen/Tensor.h"
 
 #include "TH/TH.h"  // for USE_LAPACK
 
@@ -107,15 +108,37 @@ bool Context::setFlushDenormal(bool on) {
 #endif
 }
 
-Type& getMaybeVariableType(TensorOptions options) {
-  return globalContext().getMaybeVariableType(
+TypeExtendedInterface& getType(TensorOptions options) {
+  return globalContext().getType(
             options.backend(), options.dtype(), options.is_variable());
 }
 
-Type& getMaybeVariableType(const TensorImpl* impl) {
+TypeExtendedInterface& getType(const TensorImpl* impl) {
   Backend backend = tensorTypeIdToBackend(impl->type_id());
-  return globalContext().getMaybeVariableType(
-            backend, impl->scalar_type(), impl->is_variable());
+  return globalContext().getType(
+            backend, dataTypeToScalarType(impl->dtype().id()), impl->is_variable());
 }
+
+TypeExtendedInterface& getType(const Tensor& t) {
+  return getType(t.unsafeGetTensorImpl());
+}
+
+Allocator* getCPUAllocator() {
+  return getTHDefaultAllocator();
+}
+
+struct LegacyTypeInit : public LegacyTypeInitInterface {
+  LegacyTypeInit(LegacyTypeInitArgs) {}
+  void initCPU() const override {
+    globalContext();
+  }
+  void initCUDA() const override {
+    globalContext().lazyInitCUDA();
+  }
+  void initComplex() const override {
+    globalContext().lazyInitComplex();
+  }
+};
+REGISTER_LEGACY_TYPE_INIT(LegacyTypeInit);
 
 }

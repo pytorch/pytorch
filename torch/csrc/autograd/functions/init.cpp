@@ -93,6 +93,9 @@ void THPAutograd_initFunctions()
   static PyTypeObject ErrorClass;
   addClass<Error, NoCtor>(module, ErrorClass, "Error");
 
+  static PyTypeObject NotImplementedClass;
+  addClass<NotImplemented, NoCtor>(module, NotImplementedClass, "NotImplemented");
+
   static PyTypeObject DelayedErrorClass;
   addClass<DelayedError, DelayedErrorCtor>(module, DelayedErrorClass, "DelayedError");
 

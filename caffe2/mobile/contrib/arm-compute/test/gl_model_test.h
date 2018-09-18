@@ -51,7 +51,7 @@ namespace caffe2 {
   for (auto i = 0; i < predict_net_def.op().size(); ++i) {
     auto op = predict_net_def.mutable_op(i);
     if (std::find(cpu_ops.begin(), cpu_ops.end(), op->type()) == cpu_ops.end()) {
-      op->mutable_device_option()->set_device_type(CPU);
+      op->mutable_device_option()->set_device_type(PROTO_CPU);
     }
   }
   predict_net_def.set_type("simple");

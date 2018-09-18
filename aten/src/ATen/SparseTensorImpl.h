@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ATen/Tensor.h"
-#include "ATen/TensorImpl.h"
+#include "ATen/core/TensorImpl.h"
 #include "ATen/core/Error.h"
 
 namespace at {
@@ -36,7 +36,7 @@ struct AT_API SparseTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseTensorImpl(at::TensorTypeId, at::ScalarType);
+  explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&);
 
   int64_t nnz() const { return values_.size(0); }
   int64_t sparseDims() const { return sparseDims_; }

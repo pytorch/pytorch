@@ -26,7 +26,7 @@ __allow_nonbracketed_mutation_flag = True
 
 
 def find_cudnn_windows_lib():
-    proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE, stderr=PIPE)
+    proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE, stderr=PIPE, stdin=PIPE)
     out, err = proc.communicate()
     out = out.decode().strip()
     if len(out) > 0:

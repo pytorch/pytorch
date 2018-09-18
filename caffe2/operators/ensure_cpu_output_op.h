@@ -15,9 +15,9 @@ class EnsureCPUOutputOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    if (this->template InputIsType<Tensor>(0, CPU)) {
+    if (this->InputIsTensorType(0, CPU)) {
       return CopyWithContext<CPUContext>();
-    } else if (this->template InputIsType<Tensor>(0, Context::GetDeviceType())) {
+    } else if (this->InputIsTensorType(0, Context::GetDeviceType())) {
       // CUDA Context will go this branch
       return CopyWithContext<Context>();
     } else {

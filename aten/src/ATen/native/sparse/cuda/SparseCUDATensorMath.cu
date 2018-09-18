@@ -78,7 +78,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   LongTensor rowIndices = indices.select(0, 0);
   LongTensor colIndices = indices.select(0, 1);
   IntTensor csr = _to_csr_int(rowIndices, m, nnz);
-  IntTensor colIndicesInt = at::empty({colIndices.size(0)}, indices.type().toScalarType(kInt));
+  IntTensor colIndicesInt = at::empty({colIndices.size(0)}, indices.options().dtype(kInt));
   colIndicesInt.copy_(colIndices);
 
   // No half support, so we don't have to use CUDATypeConversion
@@ -94,7 +94,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
             r_.copy_(t);
           }
         } else {
-          at::mul_out(r_, t, beta.toTensor());
+          at::mul_out(r_, t, scalar_to_tensor(beta));
         }
 
         /* r_ */
@@ -106,37 +106,38 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
           r__.transpose_(0, 1);
         }
 
-        /* dense */
-        Tensor dense_;
-        char transpose_dense;
-        if(dense.stride(0) == 1 && dense.stride(1) == dense.size(0)) {
-          transpose_dense = 'n';
-          dense_ = dense;
-        } else if(dense.stride(1) == 1 && dense.stride(0) != dense.size(1)) {
-          transpose_dense = 't';
-          dense_ = dense;
-        } else {
-          transpose_dense = 't';
-          dense_ = dense.contiguous();
+        if (nnz > 0) {
+          /* dense */
+          Tensor dense_;
+          char transpose_dense;
+          if(dense.stride(0) == 1 && dense.stride(1) == dense.size(0)) {
+            transpose_dense = 'n';
+            dense_ = dense;
+          } else if(dense.stride(1) == 1 && dense.stride(0) != dense.size(1)) {
+            transpose_dense = 't';
+            dense_ = dense;
+          } else {
+            transpose_dense = 't';
+            dense_ = dense.contiguous();
+          }
+
+          sparse::cuda::csrmm2(
+            'n',
+            transpose_dense,
+            m,
+            n,
+            k,
+            nnz,
+            cast_alpha,
+            values.data<scalar_t>(),
+            csr.data<int32_t>(),
+            colIndicesInt.data<int32_t>(),
+            dense_.data<scalar_t>(),
+            (transpose_dense == 'n' ? dense_.stride(1) : dense_.stride(0)),
+            cast_beta,
+            r__.data<scalar_t>(),
+            r__.stride(1));
         }
-
-        sparse::cuda::csrmm2(
-          'n',
-          transpose_dense,
-          m,
-          n,
-          k,
-          nnz,
-          cast_alpha,
-          values.data<scalar_t>(),
-          csr.data<int32_t>(),
-          colIndicesInt.data<int32_t>(),
-          dense_.data<scalar_t>(),
-          (transpose_dense == 'n' ? dense_.stride(1) : dense_.stride(0)),
-          cast_beta,
-          r__.data<scalar_t>(),
-          r__.stride(1));
-
       });
 
   r_.copy_(r__);
@@ -153,7 +154,7 @@ Tensor s_addmm_sparse_dense_cuda(
     Scalar beta,
     Scalar alpha
 ) {
-  Tensor r = t.type().tensor();
+  Tensor r = at::empty({0}, t.options());
   s_addmm_out_sparse_dense_cuda(r, t, sparse, dense, beta, alpha);
   return r;
 }
@@ -208,7 +209,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 
   LongTensor indices = at::empty({1, nnz}, CUDA(kLong));
   // create values in column-major format to avoid copying in spaddmm
-  Tensor values = at::empty({n, nnz}, dense.type());
+  Tensor values = at::empty({n, nnz}, dense.options());
   values.transpose_(0, 1);
 
   // why does sparse need to be cloned? If this is really necessary maybe we
@@ -280,6 +281,10 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
   Tensor values = sparse._values();
   int64_t nDim = dense.dim();
   int64_t nDimI = sparse._sparseDims();
+
+  if (sparse._values().numel() == 0) {
+    return r_;
+  }
 
   if (sparse.is_coalesced()) {
     // TODO benchmark to decide whether to remove this special case
@@ -423,6 +428,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   SparseTensor src = src_.coalesce();
 
   if (src_._nnz() == 0 || t_._nnz() == 0) {
+    r_.resize_as_(src_);
     return r_.zero_();
   }
 
@@ -434,7 +440,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   Tensor t_values_ = t._values();
   LongTensor s_indices_ = src._indices();
   Tensor s_values_ = src._values();
-  LongTensor r_indices_ = t_indices_.type().tensor({sparseDims, max_nnz});
+  LongTensor r_indices_ = at::empty({sparseDims, max_nnz}, t_indices_.options());
   Tensor r_values_ = _new_values_with_size_of(t_values_, max_nnz).zero_();
   r_.resize_as_(src);
   _get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);

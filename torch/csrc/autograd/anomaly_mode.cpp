@@ -2,6 +2,6 @@
 
 namespace torch { namespace autograd {
 
-bool AnomalyMode::_enabled = 0;
+bool AnomalyMode::_enabled = false;
 
 }}

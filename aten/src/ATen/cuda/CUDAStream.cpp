@@ -209,7 +209,8 @@ int64_t CUDAStream_device(CUDAStreamInternals* ptr) {
 }
 
 void CUDAStream_synchronize_with(CUDAStreamInternals* ptr, const CUDAEvent& event) {
-    AT_CUDA_CHECK(cudaStreamWaitEvent(ptr->stream, event, 0));
+    if (event.isCreated())
+      AT_CUDA_CHECK(cudaStreamWaitEvent(ptr->stream, event, 0));
 }
 
 } // namespace detail

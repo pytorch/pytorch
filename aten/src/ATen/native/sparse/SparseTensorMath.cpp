@@ -54,7 +54,7 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // --------------------------------------------------------------------
 
 static Tensor scalar_tensor(Scalar s) {
-  auto tensor = s.toTensor();
+  auto tensor = scalar_to_tensor(s);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
@@ -250,18 +250,22 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
             for (d = 0; d < sparseDims; d++) {
               r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
             }
-            THBlas_axpy<scalar_t>(blockSize, 1,
-              t_values_ptr + t_i * blockSize, 1,
-              r_values_ptr + r_i * blockSize, 1);
+            if (t_values.numel() > 0) {  // We add all elements from t_values to r_values only if t_values is not an empty tensor
+              THBlas_axpy<scalar_t>(blockSize, 1,
+                t_values_ptr + t_i * blockSize, 1,
+                r_values_ptr + r_i * blockSize, 1);
+            }
             t_i++;
           }
           if (cmp <= 0) {
             for (d = 0; d < sparseDims; d++) {
               r_indices_accessor[d][r_i] = src_indices_accessor[d][s_i];
             }
-            THBlas_axpy<scalar_t>(blockSize, cast_value,
-              s_values_ptr + s_i * blockSize, 1,
-              r_values_ptr + r_i * blockSize, 1);
+            if (s_values.numel() > 0) {  // We add all elements from s_values to r_values only if s_values is not an empty tensor
+              THBlas_axpy<scalar_t>(blockSize, cast_value,
+                s_values_ptr + s_i * blockSize, 1,
+                r_values_ptr + r_i * blockSize, 1);
+            }
             s_i++;
           }
           r_i++;
@@ -368,6 +372,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   AT_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", src_.sizes());
 
   if (src_._nnz() == 0 || t_._nnz() == 0) {
+    r.resize_as_(src_);
     return r.zero_();
   }
 
@@ -470,7 +475,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
       r.copy_(t);
     }
   } else {
-    at::mul_out(r, t, beta.toTensor());
+    at::mul_out(r, t, scalar_to_tensor(beta));
   }
 
   auto csr_accessor = csr.accessor<int64_t, 1>();
@@ -519,7 +524,6 @@ Tensor& s_addmm_out_sparse_dense_cpu(
 
   AT_CHECK(sparse_._sparseDims() == 2, "addmm: matrices expected, got ", sparse_._sparseDims(), "D tensor");
   AT_CHECK(sparse_._denseDims() == 0, "addmm: scalar values expected, got ", sparse_._denseDims(), "D values");
-  AT_CHECK(dense.numel() != 0, "addmm: matrices expected, got empty tensor");
   AT_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
 
   SparseTensor sparse = sparse_.coalesce();
@@ -784,7 +788,7 @@ Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
 // sparse, dense -> sparse
 Tensor smm(const Tensor& self, const Tensor& mat2) {
   auto result = self.type().tensor();
-  self.type().sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
+  at::sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
   return result;
 }
 
@@ -792,7 +796,7 @@ Tensor smm(const Tensor& self, const Tensor& mat2) {
 Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
     Scalar beta, Scalar alpha) {
   auto result = self.type().tensor();
-  self.type().sspaddmm_out(result, self, mat1, mat2, beta, alpha);
+  at::sspaddmm_out(result, self, mat1, mat2, beta, alpha);
   return result;
 }
 

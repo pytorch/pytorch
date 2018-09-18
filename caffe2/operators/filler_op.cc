@@ -349,7 +349,7 @@ OPERATOR_SCHEMA(UniformIntFill)
     .NumInputs({0, 1, 3})
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference<>)
+    .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_INT32>)
     .SetDoc(R"DOC(
 Fill the output tensor with int32 samples from uniform distribution [`min`, `max`].
 

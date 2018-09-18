@@ -39,6 +39,8 @@ AT_API int64_t getNumGPUs();
 
 AT_API int64_t current_device();
 
+AT_API void set_device(int64_t device);
+
 AT_API cudaDeviceProp* getCurrentDeviceProperties();
 
 AT_API cudaDeviceProp* getDeviceProperties(int64_t device);
@@ -53,6 +55,8 @@ AT_API CUDAStream getCurrentCUDAStream(int64_t device = -1);
 
 AT_API void setCurrentCUDAStream(CUDAStream stream);
 AT_API void uncheckedSetCurrentCUDAStream(CUDAStream stream);
+
+AT_API Allocator* getCUDADeviceAllocator();
 
 /* Handles */
 #ifndef __HIP_PLATFORM_HCC__

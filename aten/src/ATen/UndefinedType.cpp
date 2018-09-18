@@ -8,12 +8,20 @@ UndefinedType::UndefinedType()
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }
+caffe2::TypeMeta UndefinedType::typeMeta() const {
+  return scalarTypeToTypeMeta(scalarType());
+}
 Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
-bool UndefinedType::is_cuda() const { return false; }
-bool UndefinedType::is_sparse() const { return false; }
-bool UndefinedType::is_distributed() const { return false; }
+
+Allocator* UndefinedType::allocator() const {
+  AT_ERROR("allocator not defined for UndefinedType");
+}
+
+Device UndefinedType::getDeviceFromPtr(void*) const {
+  AT_ERROR("getDeviceFromPtr not defined for UndefinedType");
+}
 
 Storage UndefinedType::storage(bool resizable) const {
   AT_ERROR("storage not defined for UndefinedType");
@@ -38,8 +46,9 @@ std::unique_ptr<Generator> UndefinedType::generator() const {
 }
 
 const char * UndefinedType::toString() const {
-  return UndefinedType::typeString();
+  return "UndefinedType";
 }
+
 TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
@@ -59,10 +68,6 @@ Type & UndefinedType::toScalarType(ScalarType s) const {
     return TypeDefault::toScalarType(s);
   }
   AT_ERROR("toScalarType not implemented for UndefinedType to non-UndefinedType");
-}
-
-const char * UndefinedType::typeString() {
-  return "UndefinedType";
 }
 
 Tensor & UndefinedType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {

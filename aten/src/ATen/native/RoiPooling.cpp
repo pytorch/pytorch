@@ -134,7 +134,7 @@ Tensor RoiPooling2d_backward_cpu(
   double spatialScale,
   const Tensor& gradOutput,
   const Tensor& argmaxes) {
-  throw std::runtime_error("not implemented");
+  AT_ERROR("not implemented");
 }
 
 }

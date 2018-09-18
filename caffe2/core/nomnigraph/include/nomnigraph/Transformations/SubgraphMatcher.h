@@ -29,18 +29,11 @@ namespace matcher {
  */
 
 template <typename NodeMatchCriteria>
-class CAFFE2_API MatchNode {
+class MatchNode {
  public:
   static const int kStarCount = -1;
-  MatchNode(
-      const NodeMatchCriteria& criteria,
-      bool includeInSubgraph = true,
-      int count = 1,
-      bool nonTerminal = false)
-      : criteria_(criteria),
-        includeInSubgraph_(includeInSubgraph),
-        count_(count),
-        nonTerminal_(nonTerminal) {}
+
+  MatchNode(const NodeMatchCriteria& criteria) : criteria_(criteria) {}
 
   MatchNode() = default;
   MatchNode(const MatchNode&) = default;
@@ -55,6 +48,25 @@ class CAFFE2_API MatchNode {
     return count_;
   }
 
+  MatchNode<NodeMatchCriteria>& count(int count) {
+    count_ = count;
+    return *this;
+  }
+
+  MatchNode<NodeMatchCriteria>& starCount() {
+    return count(kStarCount);
+  }
+
+  MatchNode<NodeMatchCriteria>& nonTerminal() {
+    nonTerminal_ = true;
+    return *this;
+  }
+
+  MatchNode<NodeMatchCriteria>& excludeFromSubgraph() {
+    includeInSubgraph_ = false;
+    return *this;
+  }
+
   bool isNonTerminal() const {
     return nonTerminal_;
   }
@@ -65,9 +77,9 @@ class CAFFE2_API MatchNode {
 
  private:
   NodeMatchCriteria criteria_;
-  bool includeInSubgraph_;
-  int count_;
-  bool nonTerminal_;
+  int count_ = 1;
+  bool includeInSubgraph_ = true;
+  bool nonTerminal_ = false;
 };
 
 template <typename NodeMatchCriteria>
@@ -76,38 +88,12 @@ using MatchGraph = Graph<MatchNode<NodeMatchCriteria>>;
 template <typename NodeMatchCriteria>
 using MatchNodeRef = typename MatchGraph<NodeMatchCriteria>::NodeRef;
 
-template <typename NodeMatchCriteria>
-MatchNodeRef<NodeMatchCriteria> subgraph(
-    MatchGraph<NodeMatchCriteria>& graph,
-    const NodeMatchCriteria& root,
-    const std::vector<MatchNodeRef<NodeMatchCriteria>>& children,
-    int count = 1,
-    bool includeInSubgraph = true) {
-  auto result = graph.createNode(
-      MatchNode<NodeMatchCriteria>(root, includeInSubgraph, count, false));
-  for (auto child : children) {
-    graph.createEdge(result, child);
-  }
-  return result;
-}
-
-// Note that for nonTerminalSubgraph, the default value for includeInSubgraph
-// is false since we typically do not want to include a nonTerminal node
-// in the matched subgraph.
-template <typename NodeMatchCriteria>
-MatchNodeRef<NodeMatchCriteria> nonTerminalSubgraph(
-    MatchGraph<NodeMatchCriteria>& graph,
-    const NodeMatchCriteria& root,
-    int count = 1,
-    bool includeInSubgraph = false) {
-  return graph.createNode(
-      MatchNode<NodeMatchCriteria>(root, includeInSubgraph, count, true));
-}
-
 // TODO: Reuse convertToDotString once convertToDotString can work
 // with subgraph.
 template <typename NodeMatchCriteria>
-std::string debugString(MatchNodeRef<NodeMatchCriteria> rootCriteriaRef) {
+std::string debugString(
+    MatchNodeRef<NodeMatchCriteria> rootCriteriaRef,
+    bool invertGraphTraversal) {
   std::ostringstream out;
   auto rootNode = rootCriteriaRef->data();
   out << "{rootCriteria = '" << rootNode.getCriteria() << "'";
@@ -117,11 +103,14 @@ std::string debugString(MatchNodeRef<NodeMatchCriteria> rootCriteriaRef) {
   if (rootNode.isNonTerminal()) {
     out << ", nonTerminal = " << rootNode.isNonTerminal();
   }
-  auto outEdges = rootCriteriaRef->getOutEdges();
-  if (!outEdges.empty()) {
+  auto edges = invertGraphTraversal ? rootCriteriaRef->getInEdges()
+                                    : rootCriteriaRef->getOutEdges();
+  if (!edges.empty()) {
     out << ", childrenCriteria = [";
-    for (auto& child : outEdges) {
-      out << debugString<NodeMatchCriteria>(child->head()) << ", ";
+    for (auto& child : edges) {
+      auto nextNode = invertGraphTraversal ? child->tail() : child->head();
+      out << debugString<NodeMatchCriteria>(nextNode, invertGraphTraversal)
+          << ", ";
     }
     out << "]";
   }
@@ -294,7 +283,8 @@ struct SubgraphMatcher {
           std::ostringstream debugMessage;
           debugMessage << "Subgraph root at " << root << " is not the same as "
                        << matchedNode << " which previously matched criteria "
-                       << debugString<NodeMatchCriteria>(rootCriteriaRef);
+                       << debugString<NodeMatchCriteria>(
+                              rootCriteriaRef, invertGraphTraversal);
           return SubgraphMatchResultType::notMatched(debugMessage.str());
         } else {
           return SubgraphMatchResultType::notMatched();
@@ -307,7 +297,8 @@ struct SubgraphMatcher {
         std::ostringstream debugMessage;
         debugMessage << "Subgraph root at " << root
                      << " does not match criteria "
-                     << debugString<NodeMatchCriteria>(rootCriteriaRef);
+                     << debugString<NodeMatchCriteria>(
+                            rootCriteriaRef, invertGraphTraversal);
         return SubgraphMatchResultType::notMatched(debugMessage.str());
       } else {
         return SubgraphMatchResultType::notMatched();
@@ -326,8 +317,10 @@ struct SubgraphMatcher {
         invertGraphTraversal ? root->getInEdges() : root->getOutEdges();
 
     int numEdges = edges.size();
-    const auto outEdges = rootCriteriaRef->getOutEdges();
-    int numChildrenCriteria = outEdges.size();
+    const auto criteriaEdges = invertGraphTraversal
+        ? rootCriteriaRef->getInEdges()
+        : rootCriteriaRef->getOutEdges();
+    int numChildrenCriteria = criteriaEdges.size();
 
     // The current algorithm implies that the ordering of the children is
     // important. The children nodes will be matched with the children subgraph
@@ -336,7 +329,9 @@ struct SubgraphMatcher {
     int currentEdgeIdx = 0;
     for (int criteriaIdx = 0; criteriaIdx < numChildrenCriteria;
          criteriaIdx++) {
-      auto childrenCriteriaRef = outEdges[criteriaIdx]->head();
+      auto childrenCriteriaRef = invertGraphTraversal
+          ? criteriaEdges[criteriaIdx]->tail()
+          : criteriaEdges[criteriaIdx]->head();
 
       int expectedCount = childrenCriteriaRef->data().getCount();
       bool isStarCount =
@@ -374,7 +369,7 @@ struct SubgraphMatcher {
               debugMessage << "Child node at " << child
                            << " does not match child criteria "
                            << debugString<NodeMatchCriteria>(
-                                  childrenCriteriaRef)
+                                  childrenCriteriaRef, invertGraphTraversal)
                            << ". We expected " << expectedCount
                            << " matches but only found " << countMatch << ".";
               return SubgraphMatchResultType::notMatched(debugMessage.str());
@@ -399,7 +394,8 @@ struct SubgraphMatcher {
           std::ostringstream debugMessage;
           debugMessage << "Expected " << expectedCount
                        << " matches for child criteria "
-                       << debugString<NodeMatchCriteria>(childrenCriteriaRef)
+                       << debugString<NodeMatchCriteria>(
+                              childrenCriteriaRef, invertGraphTraversal)
                        << " but only found " << countMatch;
           return SubgraphMatchResultType::notMatched(debugMessage.str());
         } else {

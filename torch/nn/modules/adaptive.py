@@ -25,7 +25,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     Adaptive softmax partitions the labels into several clusters, according to
     their frequency. These clusters may contain different number of targets
     each.
-    Additionally, clusters containig less frequent labels assign lower
+    Additionally, clusters containing less frequent labels assign lower
     dimensional embeddings to those labels, which speeds up the computation.
     For each minibatch, only clusters for which at least one target is
     present are evaluated.

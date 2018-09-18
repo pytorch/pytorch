@@ -1,0 +1,12 @@
+graph(%x : Float()
+      %y : Float()) {
+  %2 : Float() = prim::FusionGroup_0[device=-1](%x, %y)
+  return (%2);
+}
+with prim::FusionGroup_0 = graph(%0 : Float()
+      %1 : Float()) {
+  %2 : Float() = aten::type_as(%1, %0)
+  %3 : int = prim::Constant[value=1]()
+  %4 : Float() = aten::add(%0, %2, %3)
+  return (%4);
+}

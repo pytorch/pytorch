@@ -14,13 +14,14 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from common import TEST_WITH_ROCM
-import torch.distributed.c10d as c10d
+import torch.distributed as dist
 
 TESTS = [
     'autograd',
     'cpp_extensions',
     'c10d',
     'cuda',
+    'cuda_primary_ctx',
     'dataloader',
     'distributed',
     'distributions',
@@ -60,12 +61,12 @@ DISTRIBUTED_TESTS_CONFIG = {
 }
 
 
-if c10d.is_available():
-    if c10d.is_mpi_available():
+if dist.is_available():
+    if dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
             'WORLD_SIZE': '3'
         }
-    if c10d.is_nccl_available():
+    if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
@@ -102,10 +103,13 @@ def get_shell_output(command):
 
 
 def run_test(python, test_module, test_directory, options):
-    verbose = '--verbose' if options.verbose else ''
+    unittest_args = options.additional_unittest_args
+    if options.verbose:
+        unittest_args.append('--verbose')
+    unittest_args = ' '.join(unittest_args)
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
-    return shell('{} {}.py {}'.format(python, test_module, verbose),
+    return shell('{} {}.py {}'.format(python, test_module, unittest_args),
                  test_directory)
 
 
@@ -257,6 +261,11 @@ def parse_args():
         '--ignore-win-blacklist',
         action='store_true',
         help='always run blacklisted windows tests')
+    parser.add_argument(
+        'additional_unittest_args',
+        nargs='*',
+        help='additional arguments passed through to unittest, e.g., '
+             'python run_test.py -i sparse -- TestSparse.test_factory_size_check')
     return parser.parse_args()
 
 
@@ -283,8 +292,8 @@ def find_test_index(test, selected_tests, find_last_index=False):
                      'torch.TestTorch.test_tan', 'torch.TestTorch.test_add'**, 'utils']
     ```
 
-    If :attr:`test`='torch' and :attr:`find_last_index`=False result should be **2**.
-    If :attr:`test`='torch' and :attr:`find_last_index`=True result should be **4**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=False, result should be **2**.
+    If :attr:`test`='torch' and :attr:`find_last_index`=True, result should be **4**.
 
     Arguments:
         test (str): Name of test to lookup

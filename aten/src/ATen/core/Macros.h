@@ -39,11 +39,37 @@
 #define AT_CORE_API AT_CORE_IMPORT
 #endif // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
 
+#ifdef __CUDACC__
+// Designates functions callable from the host (CPU) and the device (GPU)
+#define AT_HOST_DEVICE __host__ __device__
+#define AT_DEVICE __device__
+#define AT_HOST __host__
+#else
+#define AT_HOST_DEVICE
+#define AT_HOST
+#define AT_DEVICE
+#endif
+
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
 #define AT_DISABLE_COPY_AND_ASSIGN(classname) \
   classname(const classname&) = delete;       \
   classname& operator=(const classname&) = delete
+
+
+#if defined(__ANDROID__)
+#define AT_ANDROID 1
+#define AT_MOBILE 1
+#elif (defined(__APPLE__) &&                                            \
+       (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
+#define AT_IOS 1
+#define AT_MOBILE 1
+#elif (defined(__APPLE__) && TARGET_OS_MAC)
+#define AT_IOS 1
+#define AT_MOBILE 0
+#else
+#define AT_MOBILE 0
+#endif // ANDROID / IOS / MACOS
 
 namespace at {
 inline int stoi(const std::string& str) {
