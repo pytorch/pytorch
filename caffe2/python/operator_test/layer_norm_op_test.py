@@ -4,17 +4,18 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import brew, core
+from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-import unittest
-import os
+import caffe2.python.serialized_test.serialized_test_util as serial
 import numpy as np
+import os
+import unittest
 
-from caffe2.python.model_helper import ModelHelper
 
-class TestLayerNormOp(hu.HypothesisTestCase):
+class TestLayerNormOp(serial.SerializedTestCase):
     @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
-    @given(X=hu.tensors(n=1), **hu.gcs)
+    @serial.given(X=hu.tensors(n=1), **hu.gcs)
     def test_layer_norm_grad_op(self, X, gc, dc):
         X = X[0]
         if len(X.shape) == 1:
