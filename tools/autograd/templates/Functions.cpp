@@ -2012,7 +2012,7 @@ Tensor constant_pad_nd_backward(const Tensor& grad, const Tensor& self, IntList 
     auto l_pad = pad.size() / 2;
     auto l_diff = l_inp - l_pad;
 
-    auto grad_input = Variable(at::zeros(self.sizes(), grad.options()));
+    auto grad_input = at::zeros(self.sizes(), grad.options());
 
     auto cg_input = grad_input;
     for (int i = l_diff; i < l_inp; i++) {
