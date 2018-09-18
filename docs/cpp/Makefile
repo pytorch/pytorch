@@ -4,7 +4,7 @@
 SPHINXOPTS    =
 SPHINXBUILD   = sphinx-build
 SPHINXPROJ    = PyTorch
-SOURCEDIR     = ./
+SOURCEDIR     = source
 BUILDDIR      = build
 PYCMD         = python
 
@@ -15,9 +15,11 @@ help:
 .PHONY: help Makefile clean
 
 clean:
+	@# Clean up sphinx and doxygen build artifacts.
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
-	@echo "Removing generated api/"
-	@rm -rf api/
+	@# Clean up exhale generated api.
+	@echo "Removing everything under generated 'source/api'..."
+	@rm -rf $(SOURCEDIR)/api
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).

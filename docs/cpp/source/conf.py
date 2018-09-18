@@ -17,7 +17,7 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
+import os
 # sys.path.insert(0, os.path.abspath('.'))
 
 import sys
@@ -39,7 +39,24 @@ extensions = [
     'exhale'
 ]
 
-breathe_projects = {"PyTorch": "build/xml"}
+# Setup absolute paths for communicating with breathe / exhale where
+# items are expected / should be trimmed by.
+# This file is {repo_root}/docs/cpp/source/conf.py
+this_file_dir = os.path.abspath(os.path.dirname(__file__))
+doxygen_xml_dir = os.path.join(
+    os.path.dirname(this_file_dir),  # {repo_root}/docs/cpp
+    'build',                         # {repo_root}/docs/cpp/build
+    'xml'                            # {repo_root}/docs/cpp/build/xml
+)
+repo_root = os.path.dirname(  # {repo_root}
+    os.path.dirname(          # {repo_root}/docs
+        os.path.dirname(      # {repo_root}/docs/cpp
+            this_file_dir     # {repo_root}/docs/cpp/source
+        )
+    )
+)
+
+breathe_projects = {"PyTorch": doxygen_xml_dir}
 breathe_default_project = "PyTorch"
 
 # Setup the exhale extension
@@ -50,7 +67,7 @@ exhale_args = {
     "containmentFolder": "./api",
     "rootFileName": "library_root.rst",
     "rootFileTitle": "Library API",
-    "doxygenStripFromPath": "../",
+    "doxygenStripFromPath": repo_root,
     ############################################################################
     # Suggested optional arguments.                                            #
     ############################################################################
@@ -150,12 +167,16 @@ html_theme_options = {
     'logo_only': True,
 }
 
-html_logo = '../source/_static/img/pytorch-logo-dark-unstable.png'
+# NOTE: sharing python docs resources
+html_logo = os.path.join(
+    repo_root, 'docs', 'source', '_static', 'img', 'pytorch-logo-dark-unstable.png'
+)
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['../source/_static']
+# NOTE: sharing python docs resources
+html_static_path = [os.path.join(repo_root, 'docs', 'source', '_static')]
 
 # html_style_path = 'css/pytorch_theme.css'
 html_context = {

@@ -2,38 +2,58 @@
 # Primary project setup.                                                       #
 ################################################################################
 PROJECT_NAME           = "PyTorch"
-# Where Doxygen should output files.  *MUST* agree with `breathe_projects` in
-# `conf.py`.  XML will be in ${OUTPUT_DIRECTORY}/xml, if GENERATE_HTML below set
-# to YES, it will be in ${OUTPUT_DIRECTORY}/html.
-OUTPUT_DIRECTORY       = build
+# Parent directory of where Doxygen should output files.  Cannot be for example
+# `../build/doxygen` because if `../build` does not exist Doxygen will error.
+OUTPUT_DIRECTORY       = ../build
+# XML output stored in ${OUTPUT_DIRECTORY}/${XML_OUTPUT}.  Must agree
+# with what is specified to `breathe_projects` in `conf.py`.
+XML_OUTPUT             = xml
+# HTML output stored in ${OUTPUT_DIRECTORY}/${HTML_OUTPUT}.
+# NOTE: it can be useful to have Doxygen generate HTML to verify what sphinx is
+#       creating, or to generate HTML documentation to check a docstring you are
+#       writing without needing to wait for Sphinx.
+#
+#       # Must run from this directory (see relative paths below...)
+#       $ cd /path/to/pytorch/docs/cpp/source
+#
+#       # Send configs in this file plus `GENERATE_HTML=YES` to doxygen on stdin
+#       $ (cat Doxyfile; echo 'GENERATE_HTML = YES') | doxygen -
+#
+#       # View the doxygen results.
+#       $ open ../build/doxygen_html/index.html
+#
+#       This sends everything in this file plus `GENERATE_HTML = YES` to doxygen
+#       on stdin.  Without needing to edit this `Doxyfile` directly.
+HTML_OUTPUT            = doxygen_html
 # Strip the path prefix.  *MUST* agree with `exhale_args` in conf.py.
-STRIP_FROM_PATH        = ../..
+# {repo_root}/docs/cpp/source/../../.. -> {repo_root}
+STRIP_FROM_PATH        = ../../..
 # What folders / files Doxygen should process.
-INPUT                  = ../../torch/csrc/api/include \
-                         ../../torch/csrc/api/src \
-                         ../../aten/src/ATen/ATen.h \
-                         ../../aten/src/ATen/Backend.h \
-                         ../../aten/src/ATen/Device.h \
-                         ../../aten/src/ATen/DeviceGuard.h \
-                         ../../aten/src/ATen/Layout.h \
-                         ../../aten/src/ATen/OptionsGuard.h \
-                         ../../aten/src/ATen/Scalar.h \
-                         ../../aten/src/ATen/TensorOptions.h \
-                         ../../aten/src/ATen/core/ArrayRef.h \
-                         ../../aten/src/ATen/core/DeviceType.h \
-                         ../../aten/src/ATen/core/Error.h \
-                         ../../aten/src/ATen/core/Half.h \
-                         ../../aten/src/ATen/core/ScalarType.h \
-                         ../../aten/src/ATen/cuda/CUDAGuard.h \
-                         ../../aten/src/ATen/cuda/CUDAStream.h \
-                         ../../aten/src/ATen/cuda/CUDAContext.h \
-                         ../../aten/src/ATen/cudnn/Descriptors.h \
-                         ../../aten/src/ATen/cudnn/Handles.h \
-                         ../../aten/src/ATen/cudnn/Types.h \
-                         ../../aten/src/ATen/cudnn/Utils.h \
-                         ../../aten/src/ATen/mkl/Descriptors.h \
-                         ../../build/aten/src/ATen/Tensor.h \
-                         ../../build/aten/src/ATen/Functions.h
+INPUT                  = ../../../torch/csrc/api/include \
+                         ../../../torch/csrc/api/src \
+                         ../../../aten/src/ATen/ATen.h \
+                         ../../../aten/src/ATen/Backend.h \
+                         ../../../aten/src/ATen/Device.h \
+                         ../../../aten/src/ATen/DeviceGuard.h \
+                         ../../../aten/src/ATen/Layout.h \
+                         ../../../aten/src/ATen/OptionsGuard.h \
+                         ../../../aten/src/ATen/Scalar.h \
+                         ../../../aten/src/ATen/TensorOptions.h \
+                         ../../../aten/src/ATen/core/ArrayRef.h \
+                         ../../../aten/src/ATen/core/DeviceType.h \
+                         ../../../aten/src/ATen/core/Error.h \
+                         ../../../aten/src/ATen/core/Half.h \
+                         ../../../aten/src/ATen/core/ScalarType.h \
+                         ../../../aten/src/ATen/cuda/CUDAGuard.h \
+                         ../../../aten/src/ATen/cuda/CUDAStream.h \
+                         ../../../aten/src/ATen/cuda/CUDAContext.h \
+                         ../../../aten/src/ATen/cudnn/Descriptors.h \
+                         ../../../aten/src/ATen/cudnn/Handles.h \
+                         ../../../aten/src/ATen/cudnn/Types.h \
+                         ../../../aten/src/ATen/cudnn/Utils.h \
+                         ../../../aten/src/ATen/mkl/Descriptors.h \
+                         ../../../build/aten/src/ATen/Tensor.h \
+                         ../../../build/aten/src/ATen/Functions.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
 # If you need this to be YES, exhale will probably break.
@@ -67,10 +87,10 @@ PREDEFINED             = DOXYGEN_DOCUMENTATION_BUILD
 PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
 # Symbol expansion to follow for #include statements (not input)
 SEARCH_INCLUDES        = YES
-INCLUDE_PATH           = ../.. \
-                         ../../torch/csrc/api/include \
-                         ../../aten/src \
-                         ../../build/aten/src
+INCLUDE_PATH           = ../../.. \
+                         ../../../torch/csrc/api/include \
+                         ../../../aten/src \
+                         ../../../build/aten/src
 ################################################################################
 # Compound extraction control.                                                 #
 ################################################################################
