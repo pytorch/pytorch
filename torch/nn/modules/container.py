@@ -164,6 +164,17 @@ class ModuleList(Module):
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
+    def insert(self, index, module):
+        r"""Insert a given module before a given index in the list.
+
+        Arguments:
+            index (int): index to insert.
+            module (nn.Module): module to insert
+        """
+        for i in range(len(self._modules), index, -1):
+            self._modules[str(i)] = self._modules[str(i - 1)]
+        self._modules[str(index)] = module
+
     def append(self, module):
         r"""Appends a given module to the end of the list.
 
