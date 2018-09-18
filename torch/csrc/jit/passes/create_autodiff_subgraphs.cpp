@@ -30,6 +30,11 @@ Node* mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
     if(value_map.count(v) > 0) {
       return value_map[v];
     }
+    if (auto value = toIValue(v)) {
+      Value * nv = new_graph->insertConstant(*value);
+      value_map[v] = nv;
+      return nv;
+    }
     Value * nv = new_graph->addInput()->setType(v->type());
     group_node->addInput(v);
     value_map[v] = nv;
@@ -90,8 +95,12 @@ void CreateAutodiffSubgraphs(Block * block, size_t threshold, std::vector<Node*>
   for(Node * node : block->nodes()) { // Note: nodes() iterator stays valid since it is
                             // always pointing _after_ the nodes that mergeNodes
                             // mutates.
-    if(isDifferentiable(node)) {
-      groupable.push_back(node);
+    if (isDifferentiable(node)) {
+      // Constants are generally cheap to clone, so it's better to replicate them,
+      // instead of moving them out from the original graph.
+      if (node->kind() != prim::Constant) {
+        groupable.push_back(node);
+      }
     } else {
       if(groupable.size() >= threshold) {
         diff_graphs.push_back(mergeNodes(block, prim::DifferentiableGraph, groupable));
