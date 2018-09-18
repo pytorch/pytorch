@@ -174,3 +174,19 @@ class TestBindings(test_util.TestCase):
             assert a == b
         for a, b in zip(new_netdef.external_output, net.Proto().external_output):
             assert a == b
+
+    def test_annotation_basic(self):
+        annot = ng.Annotation()
+        annot.setDevice("woot")
+        assert annot.getDevice() == "woot"
+        annot.setDeviceType(7)
+        assert annot.getDeviceType() == 7
+
+    def test_annotation_from_graph(self):
+        nn = ng.NNModule()
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        annot = node.getAnnotation()
+        annot.setDeviceType(7)
+        node.setAnnotation(annot)
+        new_annot = node.getAnnotation()
+        assert new_annot.getDeviceType() == 7

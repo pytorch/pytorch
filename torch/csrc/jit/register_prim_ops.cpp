@@ -13,10 +13,12 @@
 
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
+#include <string>
 #include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
@@ -131,6 +133,21 @@ RegisterOperators reg({
             double d;
             pop(stack, d);
             push(stack, (int64_t)d);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::StringToFloat,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto s = pop(stack).toString();
+            if (s->string() != "inf") {
+              AT_ERROR(
+                  "Only 'inf' can be cast to a float, but got '",
+                  s->string(),
+                  "'");
+            }
+            push(stack, std::numeric_limits<double>::infinity());
             return 0;
           };
         }),
