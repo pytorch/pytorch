@@ -202,10 +202,41 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "getAnnotation",
           [](NNGraph::NodeRef n) { return getOrAddCaffe2Annotation(n); })
-      .def("setAnnotation", [](NNGraph::NodeRef n, Caffe2Annotation annot) {
-        auto* nnOp = nn::get<NeuralNetOperator>(n);
-        nnOp->setAnnotation(nom::util::make_unique<Caffe2Annotation>(annot));
-      });
+      .def(
+          "setAnnotation",
+          [](NNGraph::NodeRef n, Caffe2Annotation annot) {
+            auto* nnOp = nn::get<NeuralNetOperator>(n);
+            nnOp->setAnnotation(
+                nom::util::make_unique<Caffe2Annotation>(annot));
+          })
+      .def(
+          "getOperatorPredecessors",
+          [](NNGraph::NodeRef n) {
+            CAFFE_ENFORCE(nn::is<NeuralNetOperator>(n));
+            std::vector<NNGraph::NodeRef> pred;
+            for (const auto& inEdge : n->getInEdges()) {
+              auto data = inEdge->tail();
+              if (nn::hasProducer(data)) {
+                pred.emplace_back(nn::getProducer(data));
+              }
+            }
+            return pred;
+          },
+          py::return_value_policy::reference)
+      .def(
+          "getOperatorSuccessors",
+          [](NNGraph::NodeRef n) {
+            CAFFE_ENFORCE(nn::is<NeuralNetOperator>(n));
+            std::vector<NNGraph::NodeRef> succ;
+            for (const auto& outEdge : n->getOutEdges()) {
+              auto data = outEdge->head();
+              for (const auto& consumer : nn::getConsumers(data)) {
+                succ.emplace_back(consumer);
+              }
+            }
+            return succ;
+          },
+          py::return_value_policy::reference);
 
   py::class_<GenericOperator> nnop(m, "NeuralNetOperator");
   py::class_<nom::repr::Tensor> nndata(m, "NeuralNetData");
