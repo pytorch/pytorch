@@ -281,6 +281,7 @@ function build_caffe2() {
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
 		       -DBUILD_TORCH=$BUILD_TORCH \
 		       -DBUILD_PYTHON=$BUILD_PYTHON \
+               -DBUILD_NUMPY=$USE_NUMPY \
 		       -DBUILD_SHARED_LIBS=$BUILD_SHARED_LIBS \
 		       -DBUILD_BINARY=$BUILD_BINARY \
 		       -DBUILD_TEST=$BUILD_TEST \
