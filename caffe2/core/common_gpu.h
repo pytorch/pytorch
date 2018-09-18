@@ -116,7 +116,7 @@ inline int CudaVersion() { return CUDA_VERSION; }
 /**
  * Returns the number of devices.
  */
-int NumCudaDevices();
+CAFFE2_CUDA_API int NumCudaDevices();
 
 /**
  * Check if the current running session has a cuda gpu present.

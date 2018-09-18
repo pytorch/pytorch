@@ -19,8 +19,12 @@ public:
       : Annotation(AnnotationKind::Caffe2), Device(device) {}
   virtual ~Caffe2Annotation() {}
 
-  void setDevice(std::string device) { Device = device; }
-  const std::string getDevice() const { return Device; }
+  void setDevice(std::string device) {
+    Device = device;
+  }
+  const std::string getDevice() const {
+    return Device;
+  }
 
   void setDeviceType(int device) {
     DeviceType = device;
@@ -33,6 +37,11 @@ public:
     OpDef = opDef;
     OpDefExists = true;
   }
+
+  bool hasOperatorDef() const {
+    return OpDefExists;
+  }
+
   const caffe2::OperatorDef& getOperatorDef() const {
     CAFFE_ENFORCE(
         OpDefExists,
@@ -57,7 +66,7 @@ private:
   int DeviceType = caffe2::DeviceTypeProto::PROTO_CPU;
 };
 
-CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
+CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict = false);
 
 CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 
@@ -72,6 +81,10 @@ CAFFE2_API std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOpera
 
 CAFFE2_API caffe2::OperatorDef convertToOperatorDef(
     const nom::repr::NNGraph::NodeRef& instrNode);
+
+// If the annotation doesn't exist, attempt to add it
+CAFFE2_API Caffe2Annotation
+getOrAddCaffe2Annotation(nom::repr::NNGraph::NodeRef& instrNode);
 
 class CAFFE2_API Converter {
  public:

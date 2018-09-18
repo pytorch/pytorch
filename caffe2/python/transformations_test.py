@@ -396,8 +396,8 @@ class TestTransformations(test_util.TestCase):
         net = core.Net("net")
         net.Relu(["X"], ["Y"])
         net.Proto().external_input.extend(["fake"])
-        with self.assertRaises(Exception):
-            transformer.AddNNPACK(net)  # just testing the converter
+        # This should now work
+        transformer.AddNNPACK(net)  # just testing the converter
 
     def test_converterEnforceUnusedOutputs(self):
         net = core.Net("net")

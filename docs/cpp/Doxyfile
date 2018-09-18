@@ -752,6 +752,10 @@ WARN_LOGFILE           =
 
 INPUT                  =  ../../torch/csrc/api/include \
                           ../../torch/csrc/api/src \
+                          ../../torch/csrc/jit/custom_operator.h \
+                          ../../torch/csrc/jit/import.h \
+                          ../../torch/csrc/jit/ivalue.h \
+                          ../../torch/csrc/jit/script/module.h \
                           ../../aten/src/ATen/ATen.h \
                           ../../aten/src/ATen/Backend.h \
                           ../../aten/src/ATen/Device.h \

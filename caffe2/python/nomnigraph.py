@@ -72,3 +72,4 @@ NeuralNetData = C.NeuralNetData
 NNSubgraph = C.NNSubgraph
 NNMatchGraph = C.NNMatchGraph
 Graph = C.Graph
+Annotation = C.Annotation

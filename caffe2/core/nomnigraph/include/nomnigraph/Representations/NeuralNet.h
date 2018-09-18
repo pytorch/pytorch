@@ -53,9 +53,6 @@ class CAFFE2_API Annotation {
     return kind_;
   }
 
-  Annotation(const Annotation&) = delete;
-  Annotation& operator=(Annotation&) = delete;
-
  private:
   const AnnotationKind kind_;
 };
@@ -427,7 +424,7 @@ CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 template <NNGraph* G>
 struct CAFFE2_EXPORT NodeHelper {};
 
-struct CAFFE2_API NNNodeMatchCriteria {
+struct NNNodeMatchCriteria {
   std::function<bool(NNGraph::NodeRef)> predicate;
   std::string debugString;
 
