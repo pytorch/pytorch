@@ -3,7 +3,7 @@
 #include <torch/detail/ordered_dict.h>
 #include <torch/nn/cursor.h>
 #include <torch/nn/pimpl.h>
-#include <torch/serialize/base.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
@@ -248,18 +248,11 @@ class Module {
       typename = torch::detail::disable_if_module_holder_t<ModuleType>>
   ModuleType* as() noexcept;
 
-  /// Serializes the `Module` using the given `Writer`.
-  ///
-  /// The default implementation of this method will write all parameters and
-  /// buffers (along with their names) into the writer, in the order they appear
-  /// in the module hierarchy.
-  virtual void save(serialize::Writer& writer) const;
+  /// Serializes the `Module` into the given `OutputArchive`.
+  virtual void save(serialize::OutputArchive& archive) const;
 
-  /// Deserializes the `Module` using the given `Writer`.
-  ///
-  /// The default implementation of this method will read all parameters and
-  /// buffers from the reader, in the order they appear in the module hierarchy.
-  virtual void load(serialize::Reader& reader);
+  /// Deserializes the `Module` from the given `InputArchive`.
+  virtual void load(serialize::InputArchive& archive);
 
  protected:
   /// Registers a parameter with this `Module`.

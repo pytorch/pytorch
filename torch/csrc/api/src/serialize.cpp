@@ -1,28 +1,28 @@
 #include <torch/serialize.h>
 
 #include <torch/optim/optimizer.h>
-#include <torch/serialize/reader.h>
-#include <torch/serialize/writer.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
+#include <string>
 #include <utility>
 
 namespace torch {
 namespace serialize {
-void save(const Tensor& tensor, serialize::Writer& writer) {
-  writer.write("0", tensor);
+void save(const Tensor& tensor, OutputArchive& archive) {
+  archive.write("0", tensor);
 }
 
-void save(const optim::Optimizer& optimizer, serialize::Writer& writer) {
-  optimizer.save(writer);
+void load(Tensor& tensor, InputArchive& archive) {
+  archive.read("0", tensor);
 }
 
-void load(Tensor& tensor, serialize::Reader& reader) {
-  reader.read("0", tensor);
+void save(const optim::Optimizer& optimizer, OutputArchive& archive) {
+  optimizer.save(archive);
 }
 
-void load(optim::Optimizer& optimizer, serialize::Reader& reader) {
-  optimizer.load(reader);
+void load(optim::Optimizer& optimizer, InputArchive& archive) {
+  optimizer.load(archive);
 }
 } // namespace serialize
 } // namespace torch

@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include <test/cpp/api/catch_utils.hpp>
 
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
@@ -6,13 +6,10 @@
 #include <torch/optim/optimizer.h>
 #include <torch/optim/sgd.h>
 #include <torch/serialize.h>
-#include <torch/serialize/cereal.h>
 #include <torch/tensor.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/util.h>
-
-#include <cereal/archives/portable_binary.hpp>
 
 #include <cstdio>
 #include <memory>
@@ -31,112 +28,65 @@ Sequential xor_model() {
       Linear(8, 1),
       Functional(at::sigmoid));
 }
+
+torch::Tensor save_and_load(torch::Tensor input) {
+  auto output = torch::empty({});
+  const std::string filename = torch::test::get_tempfile();
+  torch::save(input, filename);
+  torch::load(output, filename);
+  return output;
+}
 } // namespace
 
-TEST_CASE("Serialize/Cereal/Undefined") {
-  auto x = torch::Tensor();
+CATCH_TEST_CASE("Serialize/Default/Basic") {
+  torch::manual_seed(0);
 
-  REQUIRE(!x.defined());
-
-  auto y = torch::randn({5});
-
-  std::stringstream ss;
-
-  torch::save<CerealWriter>(x, ss);
-  torch::load<CerealReader>(y, ss);
-
-  REQUIRE(!y.defined());
-}
-
-TEST_CASE("Serialize/Cereal/CPUTypes") {
-  for (int i = 0; i < static_cast<int>(torch::Dtype::NumOptions); i++) {
-    if (i == static_cast<int>(torch::Dtype::Half)) {
-      // XXX can't serialize half tensors at the moment since contiguous()
-      /// is not implemented for this type;
-      continue;
-    } else if (at::isComplexType(static_cast<torch::Dtype>(i))) {
-      // Not supported yet
-      continue;
-    } else if (i == static_cast<int>(torch::Dtype::Undefined)) {
-      // We can't construct a tensor for this type. This is tested in
-      // serialization/undefined anyway.
-      continue;
-    }
-
-    auto x = torch::ones({5, 5}, static_cast<torch::Dtype>(i));
-    auto y = torch::empty({});
-
-    std::stringstream ss;
-    torch::save<CerealWriter>(x, ss);
-    torch::load<CerealReader>(y, ss);
-
-    REQUIRE(y.defined());
-    REQUIRE(x.sizes().vec() == y.sizes().vec());
-    if (torch::isIntegralType(static_cast<torch::Dtype>(i))) {
-      REQUIRE(x.equal(y));
-    } else {
-      REQUIRE(x.allclose(y));
-    }
-  }
-}
-
-TEST_CASE("Serialize/Cereal/Binary") {
   auto x = torch::randn({5, 5});
-  auto y = torch::Tensor();
+  auto y = save_and_load(x);
 
-  std::stringstream ss;
-  torch::save<CerealWriter>(x, ss);
-  torch::load<CerealReader>(y, ss);
-
-  REQUIRE(y.defined());
-  REQUIRE(x.sizes().vec() == y.sizes().vec());
-  REQUIRE(x.allclose(y));
+  CATCH_REQUIRE(y.defined());
+  CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
+  CATCH_REQUIRE(x.allclose(y));
 }
 
-TEST_CASE("Serialize/Cereal/Resized") {
+CATCH_TEST_CASE("Serialize/Default/Resized") {
+  torch::manual_seed(0);
+
   auto x = torch::randn({11, 5});
   x.resize_({5, 5});
-  auto y = torch::Tensor();
+  auto y = save_and_load(x);
 
-  std::stringstream ss;
-  torch::save<CerealWriter>(x, ss);
-  torch::load<CerealReader>(y, ss);
-
-  REQUIRE(y.defined());
-  REQUIRE(x.sizes().vec() == y.sizes().vec());
-  REQUIRE(x.allclose(y));
+  CATCH_REQUIRE(y.defined());
+  CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
+  CATCH_REQUIRE(x.allclose(y));
 }
 
-TEST_CASE("Serialize/Cereal/Sliced") {
+CATCH_TEST_CASE("Serialize/Default/Sliced") {
+  torch::manual_seed(0);
+
   auto x = torch::randn({11, 5});
-  x = x.slice(0, 1, 3);
-  auto y = torch::Tensor();
+  x = x.slice(0, 1, 5);
+  auto y = save_and_load(x);
 
-  std::stringstream ss;
-  torch::save<CerealWriter>(x, ss);
-  torch::load<CerealReader>(y, ss);
-
-  REQUIRE(y.defined());
-  REQUIRE(x.sizes().vec() == y.sizes().vec());
-  REQUIRE(x.allclose(y));
+  CATCH_REQUIRE(y.defined());
+  CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
+  CATCH_REQUIRE(x.allclose(y));
 }
 
-TEST_CASE("Serialize/Cereal/NonContiguous") {
+CATCH_TEST_CASE("Serialize/Default/NonContiguous") {
+  torch::manual_seed(0);
+
   auto x = torch::randn({11, 5});
   x = x.slice(1, 1, 4);
-  auto y = torch::Tensor();
+  auto y = save_and_load(x);
 
-  std::stringstream ss;
-  torch::save<CerealWriter>(x, ss);
-  torch::load<CerealReader>(y, ss);
-
-  REQUIRE(y.defined());
-  REQUIRE(x.sizes().vec() == y.sizes().vec());
-  REQUIRE(x.allclose(y));
+  CATCH_REQUIRE(y.defined());
+  CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
+  CATCH_REQUIRE(x.allclose(y));
 }
 
-TEST_CASE("Serialize/Cereal/XOR") {
-  // We better be able to save<CerealWriter> and load<CerealReader> a XOR model!
+CATCH_TEST_CASE("Serialize/Default/XOR") {
+  // We better be able to save and load an XOR model!
   auto getLoss = [](Sequential model, uint32_t batch_size) {
     auto inputs = torch::empty({batch_size, 2});
     auto labels = torch::empty({batch_size});
@@ -165,36 +115,35 @@ TEST_CASE("Serialize/Cereal/XOR") {
     optimizer.step();
 
     running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
-    REQUIRE(epoch < 3000);
+    CATCH_REQUIRE(epoch < 3000);
     epoch++;
   }
 
-  std::stringstream ss;
-  torch::save<CerealWriter>(model, ss);
-  torch::load<CerealReader>(model2, ss);
+  const std::string filename = torch::test::get_tempfile();
+  torch::save(model, filename);
+  torch::load(model2, filename);
 
   auto loss = getLoss(model2, 100);
-  REQUIRE(loss.toCFloat() < 0.1);
+  CATCH_REQUIRE(loss.toCFloat() < 0.1);
 }
 
-TEST_CASE("Serialize/Cereal/Optim") {
+CATCH_TEST_CASE("Serialize/Default/Optim") {
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
   auto model3 = Linear(5, 2);
 
-  // Models 1, 2, 3 will have the same params
-  std::stringstream ss;
-  torch::save<CerealWriter>(model1, ss);
-  torch::load<CerealReader>(model2, ss);
-  ss.seekg(0, std::ios::beg);
-  torch::load<CerealReader>(model3, ss);
+  // Models 1, 2, 3 will have the same parameters.
+  const std::string model_filename = torch::test::get_tempfile();
+  torch::save(model1, model_filename);
+  torch::load(model2, model_filename);
+  torch::load(model3, model_filename);
 
   auto param1 = model1->parameters();
   auto param2 = model2->parameters();
   auto param3 = model3->parameters();
   for (const auto& p : param1) {
-    REQUIRE(param1[p.key].allclose(param2[p.key]));
-    REQUIRE(param2[p.key].allclose(param3[p.key]));
+    CATCH_REQUIRE(param1[p.key].allclose(param2[p.key]));
+    CATCH_REQUIRE(param2[p.key].allclose(param3[p.key]));
   }
 
   // Make some optimizers with momentum (and thus state)
@@ -228,9 +177,10 @@ TEST_CASE("Serialize/Cereal/Optim") {
 
   // Do 2 steps of model 3 while saving the optimizer
   step(optim3, model3);
-  ss.clear();
-  torch::save<CerealWriter>(optim3, ss);
-  torch::load<CerealReader>(optim3_2, ss);
+
+  const std::string optim_filename = torch::test::get_tempfile();
+  torch::save(optim3, optim_filename);
+  torch::load(optim3_2, optim_filename);
   step(optim3_2, model3);
 
   param1 = model1->parameters();
@@ -239,12 +189,14 @@ TEST_CASE("Serialize/Cereal/Optim") {
   for (const auto& p : param1) {
     const auto& name = p.key;
     // Model 1 and 3 should be the same
-    REQUIRE(param1[name].norm().toCFloat() == param3[name].norm().toCFloat());
-    REQUIRE(param1[name].norm().toCFloat() != param2[name].norm().toCFloat());
+    CATCH_REQUIRE(
+        param1[name].norm().toCFloat() == param3[name].norm().toCFloat());
+    CATCH_REQUIRE(
+        param1[name].norm().toCFloat() != param2[name].norm().toCFloat());
   }
 }
 
-TEST_CASE("Serialize/Cereal/CUDA", "[cuda]") {
+CATCH_TEST_CASE("Serialize/Default/CUDA", "[cuda]") {
   torch::manual_seed(0);
   // We better be able to save and load a XOR model!
   auto getLoss = [](Sequential model, uint32_t batch_size) {
@@ -275,22 +227,22 @@ TEST_CASE("Serialize/Cereal/CUDA", "[cuda]") {
     optimizer.step();
 
     running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
-    REQUIRE(epoch < 3000);
+    CATCH_REQUIRE(epoch < 3000);
     epoch++;
   }
 
-  std::stringstream ss;
-  torch::save<CerealWriter>(model, ss);
-  torch::load<CerealReader>(model2, ss);
+  const std::string filename = torch::test::get_tempfile();
+  torch::save(model, filename);
+  torch::load(model2, filename);
 
   auto loss = getLoss(model2, 100);
-  REQUIRE(loss.toCFloat() < 0.1);
+  CATCH_REQUIRE(loss.toCFloat() < 0.1);
 
   model2->to(torch::kCUDA);
-  ss.clear();
-  torch::save<CerealWriter>(model2, ss);
-  torch::load<CerealReader>(model3, ss);
+  const std::string filename2 = torch::test::get_tempfile();
+  torch::save(model2, filename2);
+  torch::load(model3, filename2);
 
   loss = getLoss(model3, 100);
-  REQUIRE(loss.toCFloat() < 0.1);
+  CATCH_REQUIRE(loss.toCFloat() < 0.1);
 }

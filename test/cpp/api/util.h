@@ -1,7 +1,10 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
+#include <torch/tensor.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <utility>
 
@@ -24,6 +27,17 @@ class SimpleContainer : public nn::Cloneable<SimpleContainer> {
 
 inline bool pointer_equal(at::Tensor first, at::Tensor second) {
   return first.data<float>() == second.data<float>();
+}
+
+inline std::string get_tempfile() {
+#ifdef WIN32
+  return std::tmpnam(nullptr);
+#else
+  // http://pubs.opengroup.org/onlinepubs/009695399/functions/mkstemp.html
+  char filename[] = "/tmp/fileXXXXXX";
+  mkstemp(filename);
+  return std::string(filename);
+#endif
 }
 } // namespace test
 } // namespace torch

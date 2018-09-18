@@ -1,7 +1,6 @@
 #include <torch/optim/optimizer.h>
 
 #include <torch/nn/cursor.h>
-#include <torch/serialize/base.h>
 #include <torch/tensor.h>
 
 #include <string>
@@ -11,29 +10,6 @@
 namespace torch {
 namespace optim {
 namespace detail {
-void serialize(
-    serialize::Writer& writer,
-    const std::string& key,
-    const std::vector<int64_t>& steps) {
-  std::vector<torch::Tensor> tensors;
-  for (const auto& step : steps) {
-    tensors.push_back(torch::tensor(static_cast<int64_t>(step)));
-  }
-  writer.write(key, tensors, /*is_buffer=*/true);
-}
-
-void serialize(
-    serialize::Reader& reader,
-    const std::string& key,
-    std::vector<int64_t>& steps) {
-  std::vector<torch::Tensor> tensors;
-  reader.read(key, tensors, /*is_buffer=*/true);
-  steps.clear();
-  for (const auto& step : tensors) {
-    steps.push_back(step.toCLong());
-  }
-}
-
 OptimizerBase::OptimizerBase(std::vector<Tensor> parameters)
     : parameters_(std::move(parameters)) {}
 
@@ -71,6 +47,9 @@ std::vector<Tensor>& OptimizerBase::parameters() noexcept {
 size_t OptimizerBase::size() const noexcept {
   return parameters_.size();
 }
+
+void OptimizerBase::save(serialize::OutputArchive& archive) const {}
+void OptimizerBase::load(serialize::InputArchive& archive) {}
 } // namespace detail
 } // namespace optim
 } // namespace torch

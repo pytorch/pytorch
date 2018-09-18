@@ -1,63 +1,48 @@
 #pragma once
 
+#include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
-#include <torch/optim/optimizer.h>
-#include <torch/serialize/base.h>
-#include <torch/serialize/default.h>
+#include <torch/serialize/archive.h>
+#include <torch/tensor.h>
 
-#ifdef TORCH_USE_CEREAL
-#include <torch/serialize/cereal.h>
-#endif
-
+#include <string>
 #include <utility>
 
 namespace torch {
+namespace optim {
+class Optimizer;
+} // namespace optim
+} // namespace torch
+
+namespace torch {
 namespace serialize {
-
 template <typename ModuleType>
-void save(
-    const nn::ModuleHolder<ModuleType>& module,
-    serialize::Writer& writer) {
-  module->save(writer);
+void save(const nn::ModuleHolder<ModuleType>& module, OutputArchive& archive) {
+  module->save(archive);
 }
 
-void save(const Tensor& tensor, serialize::Writer& writer);
-void save(const optim::Optimizer& optimizer, serialize::Writer& writer);
-
 template <typename ModuleType>
-void load(nn::ModuleHolder<ModuleType>& module, serialize::Reader& reader) {
-  module->load(reader);
+void load(nn::ModuleHolder<ModuleType>& module, InputArchive& archive) {
+  module->load(archive);
 }
 
-void load(Tensor& tensor, serialize::Reader& reader);
-void load(optim::Optimizer& optimizer, serialize::Reader& reader);
+void save(const Tensor& tensor, OutputArchive& archive);
+void load(Tensor& tensor, InputArchive& archive);
+
+void save(const optim::Optimizer& optimizer, OutputArchive& archive);
+void load(optim::Optimizer& optimizer, InputArchive& archive);
 } // namespace serialize
 
-template <
-#ifdef TORCH_USE_CEREAL
-    typename WriterType = serialize::CerealWriter,
-#else
-    typename WriterType = serialize::DefaultWriter,
-#endif
-    typename T,
-    typename... Args>
-void save(const T& value, Args&&... args) {
-  WriterType writer(std::forward<Args>(args)...);
-  serialize::save(value, writer);
-  writer.finish();
+template <typename T>
+void save(const T& value, const std::string& filename) {
+  serialize::OutputArchive archive;
+  serialize::save(value, archive);
+  serialize::save_to_file(archive, filename);
 }
 
-template <
-#ifdef TORCH_USE_CEREAL
-    typename ReaderType = serialize::CerealReader,
-#else
-    typename ReaderType = serialize::DefaultReader,
-#endif
-    typename T,
-    typename... Args>
-void load(T& value, Args&&... args) {
-  ReaderType reader(std::forward<Args>(args)...);
-  serialize::load(value, reader);
-  reader.finish();
+template <typename T>
+void load(T& value, const std::string& filename) {
+  serialize::InputArchive archive = serialize::load_from_file(filename);
+  serialize::load(value, archive);
 }
 } // namespace torch

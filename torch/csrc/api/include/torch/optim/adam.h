@@ -3,10 +3,17 @@
 #include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialize/base.h>
+#include <torch/optim/serialize.h>
 
 #include <utility>
 #include <vector>
+
+namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
 
 namespace torch {
 namespace optim {
@@ -30,33 +37,26 @@ class Adam : public Optimizer {
 
   void step() override;
 
-  void save(serialize::Writer& writer) const override;
-  void load(serialize::Reader& reader) override;
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
 
   AdamOptions options;
+
+  std::vector<int64_t> step_buffers;
+  std::vector<Tensor> exp_average_buffers;
+  std::vector<Tensor> exp_average_sq_buffers;
+  std::vector<Tensor> max_exp_average_sq_buffers;
 
  private:
   Adam() : options(0) {}
 
-  template <typename Self, typename Serializer>
-  static void serialize(Self& self, Serializer& serializer) {
-    optim::detail::serialize(serializer, "step_buffers", self.step_buffers_);
-    serializer(
-        "exp_average_buffers", self.exp_average_buffers_, /*is_buffer=*/true);
-    serializer(
-        "exp_average_sq_buffers",
-        self.exp_average_sq_buffers_,
-        /*is_buffer=*/true);
-    serializer(
-        "max_exp_average_sq_buffers",
-        self.max_exp_average_sq_buffers_,
-        /*is_buffer=*/true);
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    TORCH_OPTIM_SERIALIZE(step_buffers);
+    TORCH_OPTIM_SERIALIZE(exp_average_buffers);
+    TORCH_OPTIM_SERIALIZE(exp_average_sq_buffers);
+    TORCH_OPTIM_SERIALIZE(max_exp_average_sq_buffers);
   }
-
-  std::vector<int64_t> step_buffers_;
-  std::vector<Tensor> exp_average_buffers_;
-  std::vector<Tensor> exp_average_sq_buffers_;
-  std::vector<Tensor> max_exp_average_sq_buffers_;
 };
 } // namespace optim
 } // namespace torch

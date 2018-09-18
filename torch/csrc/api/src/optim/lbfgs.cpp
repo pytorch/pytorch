@@ -2,7 +2,7 @@
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/serialize/base.h>
+#include <torch/serialize/archive.h>
 
 #include <ATen/ATen.h>
 
@@ -155,16 +155,12 @@ torch::Tensor LBFGS::step(LossClosure closure) {
   return orig_loss;
 }
 
-void LBFGS::save(serialize::Writer& writer) const {
-  serialize(*this, writer);
-  writer("old_dirs", old_dirs.begin(), old_dirs.end());
-  writer("old_stps", old_stps.begin(), old_stps.end());
+void LBFGS::save(serialize::OutputArchive& archive) const {
+  serialize(*this, archive);
 }
 
-void LBFGS::load(serialize::Reader& reader) {
-  serialize(*this, reader);
-  reader.read("old_dirs", std::back_inserter(old_dirs));
-  reader.read("old_stps", std::back_inserter(old_dirs));
+void LBFGS::load(serialize::InputArchive& archive) {
+  serialize(*this, archive);
 }
 } // namespace optim
 } // namespace torch

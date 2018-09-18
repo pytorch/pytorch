@@ -3,12 +3,20 @@
 #include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialize/base.h>
+#include <torch/optim/serialize.h>
+#include <torch/tensor.h>
 
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
+
+namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
 
 namespace torch {
 namespace optim {
@@ -36,26 +44,22 @@ class RMSprop : public Optimizer {
 
   RMSpropOptions options;
 
-  void save(serialize::Writer& writer) const override;
-  void load(serialize::Reader& reader) override;
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
+
+  std::vector<Tensor> square_average_buffers;
+  std::vector<Tensor> momentum_buffers;
+  std::vector<Tensor> grad_average_buffers;
 
  private:
   RMSprop() : options(0) {}
 
-  template <typename Self, typename Serializer>
-  static void serialize(Self& self, Serializer& serializer) {
-    serializer(
-        "square_average_buffers",
-        self.square_average_buffers_,
-        /*is_buffer=*/true);
-    serializer("momentum_buffers", self.momentum_buffers_, /*is_buffer=*/true);
-    serializer(
-        "grad_average_buffers", self.grad_average_buffers_, /*is_buffer=*/true);
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    TORCH_OPTIM_SERIALIZE(square_average_buffers);
+    TORCH_OPTIM_SERIALIZE(momentum_buffers);
+    TORCH_OPTIM_SERIALIZE(grad_average_buffers);
   }
-
-  std::vector<Tensor> square_average_buffers_;
-  std::vector<Tensor> momentum_buffers_;
-  std::vector<Tensor> grad_average_buffers_;
 };
 } // namespace optim
 } // namespace torch

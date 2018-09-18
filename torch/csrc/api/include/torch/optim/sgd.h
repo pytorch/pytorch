@@ -3,14 +3,18 @@
 #include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialize/base.h>
 #include <torch/tensor.h>
-
-#include <ATen/ATen.h>
 
 #include <cstddef>
 #include <utility>
 #include <vector>
+
+namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
 
 namespace torch {
 namespace optim {
@@ -33,15 +37,16 @@ class SGD : public Optimizer {
 
   void step() override;
 
-  void save(serialize::Writer& writer) const override;
-  void load(serialize::Reader& reader) override;
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
 
   SGDOptions options;
+
+  std::vector<Tensor> momentum_buffers;
 
  private:
   SGD() : options(0) {}
 
-  std::vector<Tensor> momentum_buffers_;
   /// Counts how often `step()` is called, for dampening.
   size_t iteration_{0};
 };

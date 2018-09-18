@@ -1,7 +1,10 @@
 #include <torch/optim/sgd.h>
 
 #include <torch/csrc/autograd/variable.h>
-#include <torch/serialize/base.h>
+#include <torch/nn/pimpl.h>
+#include <torch/optim/optimizer.h>
+#include <torch/optim/serialize.h>
+#include <torch/tensor.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
@@ -23,7 +26,7 @@ void SGD::step() {
     auto update = options.learning_rate_ * p.grad();
     if (options.momentum_ != 0) {
       const auto dampening = iteration_ == 0 ? 1 : 1 - options.dampening_;
-      auto& momentum = buffer_at(momentum_buffers_, i);
+      auto& momentum = buffer_at(momentum_buffers, i);
       momentum = (options.momentum_ * momentum) + (dampening * update);
       if (options.nesterov_) {
         // See github.com/lisa-lab/pylearn2/pull/136#issuecomment-10381617
@@ -44,13 +47,12 @@ void SGD::step() {
   iteration_ += 1;
 }
 
-void SGD::save(serialize::Writer& writer) const {
-  writer("momentum_buffers", momentum_buffers_);
+void SGD::save(serialize::OutputArchive& archive) const {
+  detail::serialize(archive, "momentum_buffers", momentum_buffers);
 }
 
-void SGD::load(serialize::Reader& reader) {
-  reader("momentum_buffers", momentum_buffers_);
+void SGD::load(serialize::InputArchive& archive) {
+  detail::serialize(archive, "momentum_buffers", momentum_buffers);
 }
-
 } // namespace optim
 } // namespace torch

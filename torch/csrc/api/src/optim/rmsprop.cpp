@@ -1,7 +1,7 @@
 #include <torch/optim/rmsprop.h>
 
 #include <torch/csrc/autograd/variable.h>
-#include <torch/serialize/base.h>
+#include <torch/serialize/archive.h>
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
@@ -27,13 +27,13 @@ void RMSprop::step() {
       p.grad() = p.grad() + options.weight_decay_ * p;
     }
 
-    auto square_average = buffer_at(square_average_buffers_, i);
+    auto square_average = buffer_at(square_average_buffers, i);
     square_average.mul_(options.alpha_)
         .addcmul_(p.grad(), p.grad(), 1.0 - options.alpha_);
 
     Tensor average;
     if (options.centered_ > 0) {
-      auto& grad_average = buffer_at(grad_average_buffers_, i);
+      auto& grad_average = buffer_at(grad_average_buffers, i);
       grad_average.mul_(options.alpha_).add_(p.grad(), 1.0 - options.alpha_);
       average = square_average.addcmul(grad_average, grad_average, -1.0)
                     .sqrt()
@@ -44,7 +44,7 @@ void RMSprop::step() {
 
     NoGradGuard guard;
     if (options.momentum_ > 0) {
-      auto& momentum = buffer_at(momentum_buffers_, i);
+      auto& momentum = buffer_at(momentum_buffers, i);
       momentum.mul_(options.momentum_).addcdiv_(p.grad(), average);
       p.add_(momentum, -options.learning_rate_);
     } else {
@@ -53,12 +53,12 @@ void RMSprop::step() {
   }
 }
 
-void RMSprop::save(serialize::Writer& writer) const {
-  serialize(*this, writer);
+void RMSprop::save(serialize::OutputArchive& archive) const {
+  serialize(*this, archive);
 }
 
-void RMSprop::load(serialize::Reader& reader) {
-  serialize(*this, reader);
+void RMSprop::load(serialize::InputArchive& archive) {
+  serialize(*this, archive);
 }
 } // namespace optim
 } // namespace torch

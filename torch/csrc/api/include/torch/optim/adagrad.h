@@ -1,12 +1,19 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialize/base.h>
+#include <torch/optim/serialize.h>
 #include <torch/tensor.h>
 
 #include <utility>
 #include <vector>
+
+namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
 
 namespace torch {
 namespace optim {
@@ -31,20 +38,20 @@ class Adagrad : public Optimizer {
 
   AdagradOptions options;
 
-  void save(serialize::Writer& writer) const override;
-  void load(serialize::Reader& reader) override;
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
+
+  std::vector<Tensor> sum_buffers;
+  std::vector<int64_t> step_buffers;
 
  private:
   Adagrad() : options(0) {}
 
-  template <typename Self, typename Serializer>
-  static void serialize(Self& self, Serializer& serializer) {
-    optim::detail::serialize(serializer, "step", self.step_);
-    serializer("sum", self.sum_, /*is_buffer=*/true);
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    TORCH_OPTIM_SERIALIZE(sum_buffers);
+    TORCH_OPTIM_SERIALIZE(step_buffers);
   }
-
-  std::vector<Tensor> sum_;
-  std::vector<int64_t> step_;
 };
 } // namespace optim
 } // namespace torch

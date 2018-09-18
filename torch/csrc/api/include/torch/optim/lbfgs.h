@@ -3,7 +3,8 @@
 #include <torch/arg.h>
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialize/base.h>
+#include <torch/optim/serialize.h>
+#include <torch/serialize/archive.h>
 
 #include <deque>
 #include <functional>
@@ -36,23 +37,8 @@ class LBFGS : public LossClosureOptimizer {
 
   LBFGSOptions options;
 
-  void save(serialize::Writer& writer) const override;
-  void load(serialize::Reader& reader) override;
-
- private:
-  LBFGS() : options(0) {}
-
-  Tensor gather_flat_grad();
-  void add_grad(const torch::Tensor& step_size, const Tensor& update);
-
-  template <typename Self, typename Serializer>
-  static void serialize(Self& self, Serializer& serializer) {
-    serializer("d", self.d, /*is_buffer=*/true);
-    serializer("t", self.t, /*is_buffer=*/true);
-    serializer("H_diag", self.H_diag, /*is_buffer=*/true);
-    serializer("prev_flat_grad", self.prev_flat_grad, /*is_buffer=*/true);
-    serializer("prev_loss", self.prev_loss, /*is_buffer=*/true);
-  }
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
 
   Tensor d{torch::empty({0})};
   Tensor H_diag{torch::empty({0})};
@@ -65,6 +51,23 @@ class LBFGS : public LossClosureOptimizer {
   std::deque<Tensor> old_stps;
   int64_t func_evals{0};
   int64_t state_n_iter{0};
+
+ private:
+  LBFGS() : options(0) {}
+
+  Tensor gather_flat_grad();
+  void add_grad(const torch::Tensor& step_size, const Tensor& update);
+
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    archive("d", self.d, /*is_buffer=*/true);
+    archive("t", self.t, /*is_buffer=*/true);
+    archive("H_diag", self.H_diag, /*is_buffer=*/true);
+    archive("prev_flat_grad", self.prev_flat_grad, /*is_buffer=*/true);
+    archive("prev_loss", self.prev_loss, /*is_buffer=*/true);
+    detail::serialize(archive, "old_dirs", self.old_dirs);
+    detail::serialize(archive, "old_stps", self.old_stps);
+  }
 };
 } // namespace optim
 } // namespace torch
