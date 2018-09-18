@@ -596,6 +596,10 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
       AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
     }
   }
+  for(int64_t i = 0; i < size - 1; i++){
+      AT_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
+      AT_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
+  }
   std::vector<Tensor> grids;
   for(int64_t i = 0; i < size; i++) {
     std::vector<int64_t> view_shape(size, 1);
