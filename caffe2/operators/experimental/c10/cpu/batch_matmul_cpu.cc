@@ -4,7 +4,6 @@
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
-using caffe2::int64_t;
 using std::vector;
 namespace math = caffe2::math;
 

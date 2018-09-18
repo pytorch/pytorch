@@ -6,7 +6,7 @@ using caffe2::BaseContext;
 using caffe2::CPUContext;
 using caffe2::Tensor;
 using caffe2::TensorCPU;
-using caffe2::int64_t;
+
 using std::vector;
 
 namespace caffe2 {

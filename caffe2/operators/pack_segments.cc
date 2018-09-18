@@ -61,7 +61,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   bool* presence_mask_data = nullptr;
   if (return_presence_mask_) {
     // Shape of presence is batch_size x max_len
-    std::vector<caffe2::int64_t> presence_shape{lengths.size(), max_length};
+    std::vector<int64_t> presence_shape{lengths.size(), max_length};
     presence_mask->Resize(presence_shape);
     presence_mask_data = presence_mask->template mutable_data<bool>();
   }

@@ -5,7 +5,7 @@
 using caffe2::CPUContext;
 using caffe2::Tensor;
 using caffe2::TensorProto_DataType;
-using caffe2::int64_t;
+
 
 namespace caffe2 {
 namespace {
