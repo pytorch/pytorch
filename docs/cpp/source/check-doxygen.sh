@@ -19,9 +19,7 @@ cat original-doxygen-log.txt
 
 # Filter out some warnings.
 ignore_warning "warning: no uniquely matching class member found for"
-ignore_warning "warning:.*\.\./\.\./build/aten.*"
-ignore_warning "warning: documented symbol \`torch::nn::FunctionalImpl::FunctionalImpl' was not declared or defined"
-ignore_warning "functional.h:81: warning: Found ';' while parsing initializer list!"
+ignore_warning "warning:.*\.\./\.\./\.\./build/aten.*"
 
 # Count the number of remaining warnings.
 warnings="$(grep 'warning:' doxygen-log.txt | wc -l)"
