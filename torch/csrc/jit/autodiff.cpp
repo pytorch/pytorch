@@ -108,16 +108,17 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       return {grads.at(0) * (outputs.at(0) > at::Scalar(0)).type_as(outputs.at(0))};
 
     } else if (node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor")) {
-      // we do two type_as as it's free (hopefully) and the "*" only works with float
+      // we do two type_as and "*" in lieu of boolean "and"
       // the "! (val > min)" is chosen such that the gradient is 0 on the
       // boundary and the factor is 1 when the boundary is NaN
       // the ! is expressed as "1-" for lack of a "not" function and
       // the the fuser insisting on float
-      // it would be prettier to return NaN as gradient for NaN,
-      // but that is hard to reliably code here, so we have 0 as gradient
-      // when the input is NaN (unless grads is NaN or infinite)
+      // A NaN input will cause the gradient to propagate through,
+      // the more pure approach would be to have NaNs in that case
+      // but that is hard to reliably code and costs extra checks
+      // so we decided against it, see
+      // https://github.com/pytorch/pytorch/pull/11574#discussion_r218104538
       return {grads.at(0)
-	      * (1-(inputs.at(0).isnan()).type_as(inputs.at(0)))
 	      * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0)))
 	      * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
     } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
