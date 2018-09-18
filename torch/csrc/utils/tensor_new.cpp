@@ -250,6 +250,15 @@ Tensor legacy_new_from_sequence(const Type & type, at::optional<Device> device, 
   return legacy_new_from_data(type, device, data);
 }
 
+void check_legacy_ctor_device(const Type& type, at::optional<Device> device) {
+  if (device.has_value()) {
+    AT_CHECK(type.device_type() == device.value().type(),
+             "legacy constructor for device type: ", type.device_type(),
+             " was passed device type: ", device.value().type(),
+             ", but device type must be: ", type.device_type());
+  }
+}
+
 Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
@@ -261,22 +270,30 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    auto deviceOptional = r.deviceOptional(0);
+    check_legacy_ctor_device(type, deviceOptional);
     return at::empty({0}, type.options(r.device(0).index()));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
-    at::DeviceGuard device_guard(r.device(2));
+    auto deviceOptional = r.deviceOptional(2);
+    check_legacy_ctor_device(type, deviceOptional);
+    at::DeviceGuard device_guard(deviceOptional);
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
-    at::DeviceGuard device_guard(r.device(3));
+    auto deviceOptional = r.deviceOptional(3);
+    check_legacy_ctor_device(type, deviceOptional);
+    at::DeviceGuard device_guard(deviceOptional);
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
+    auto deviceOptional = r.deviceOptional(1);
+    check_legacy_ctor_device(type, deviceOptional);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type, r.deviceOptional(1), r.pyobject(0));
+      return legacy_new_from_sequence(type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(type, r.device(1).index(), r.intlist(0));
   }
@@ -294,27 +311,35 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
   ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    at::DeviceGuard device_guard(r.device(0));
+    auto deviceOptional = r.deviceOptional(0);
+    check_legacy_ctor_device(type, deviceOptional);
+    at::DeviceGuard device_guard(deviceOptional);
     return type.tensor();
   } else if (r.idx == 1) {
-    auto cdata = reinterpret_cast<void*>(r.device(0).index());
+    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
-    at::DeviceGuard device_guard(r.device(2));
+    auto deviceOptional = r.deviceOptional(2);
+    check_legacy_ctor_device(type, deviceOptional);
+    at::DeviceGuard device_guard(deviceOptional);
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
-    at::DeviceGuard device_guard(r.device(3));
+    auto deviceOptional = r.deviceOptional(3);
+    check_legacy_ctor_device(type, deviceOptional);
+    at::DeviceGuard device_guard(deviceOptional);
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
+    auto deviceOptional = r.deviceOptional(1);
+    check_legacy_ctor_device(type, deviceOptional);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type, r.deviceOptional(1), r.pyobject(0));
+      return legacy_new_from_sequence(type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(type, r.device(1).index(), r.intlist(0));
   }
@@ -346,7 +371,9 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    at::DeviceGuard device_guard(r.device(0));
+    auto deviceOptional = r.deviceOptional(0);
+    check_legacy_ctor_device(type, deviceOptional);
+    at::DeviceGuard device_guard(deviceOptional);
     return type.tensor();
   } else if (r.idx == 1) {
     return new_with_storage(type, r.storage(0));
@@ -357,14 +384,18 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
     return new_with_tensor(type, r.tensor(0));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
+    auto deviceOptional = r.deviceOptional(1);
+    check_legacy_ctor_device(type, deviceOptional);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type, r.deviceOptional(1), r.pyobject(0));
+      return legacy_new_from_sequence(type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(type, r.device(1).index(), r.intlist(0));
   } else if (r.idx == 5) {
-    return legacy_new_from_sequence(type, r.deviceOptional(1), r.pyobject(0));
+    auto deviceOptional = r.deviceOptional(1);
+    check_legacy_ctor_device(type, deviceOptional);
+    return legacy_new_from_sequence(type, deviceOptional, r.pyobject(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
@@ -386,7 +417,9 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    at::DeviceGuard device_guard(r.device(0));
+    auto deviceOptional = r.deviceOptional(0);
+    check_legacy_ctor_device(type, deviceOptional);
+    at::DeviceGuard device_guard(deviceOptional);
     return type.tensor();
   } else if (r.idx == 1) {
     return new_with_storage(type, r.storage(0));
@@ -397,13 +430,17 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     return new_with_tensor(type, r.tensor(0));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
+    auto deviceOptional = r.deviceOptional(1);
+    check_legacy_ctor_device(type, deviceOptional);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(type, r.deviceOptional(1), r.pyobject(0));
+      return legacy_new_from_sequence(type, deviceOptional, r.pyobject(0));
     }
     return new_with_sizes(type, r.device(1).index(), r.intlist(0));
   } else if (r.idx == 5) {
+    auto deviceOptional = r.deviceOptional(1);
+    check_legacy_ctor_device(type, deviceOptional);
     return legacy_new_from_sequence(type, r.deviceOptional(1), r.pyobject(0));
   }
   throw std::runtime_error("new(): invalid arguments");
