@@ -1,4 +1,5 @@
 sphinx>=1.7.5
-sphinx_rtd_theme
+-e git+git://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphin
+x_theme
 breathe
 exhale
