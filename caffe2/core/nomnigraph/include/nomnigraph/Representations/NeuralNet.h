@@ -424,7 +424,7 @@ CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 template <NNGraph* G>
 struct CAFFE2_EXPORT NodeHelper {};
 
-struct CAFFE2_API NNNodeMatchCriteria {
+struct NNNodeMatchCriteria {
   std::function<bool(NNGraph::NodeRef)> predicate;
   std::string debugString;
 

@@ -343,6 +343,7 @@ if(USE_CUDA)
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
       ${CUDA_LIBRARIES})
+    set_target_properties(torch PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
     target_include_directories(torch PRIVATE "${NVTOOLEXT_HOME}/include")
   elseif(APPLE)
     set(TORCH_CUDA_LIBRARIES
