@@ -3818,6 +3818,13 @@ Constructs a tensor with :attr:`data`.
     If you have a NumPy ``ndarray`` and want to avoid a copy, use
     :func:`torch.from_numpy`.
 
+.. warning::
+
+    When data is a tensor `x`, :func:`torch.tensor` reads out 'the data' from whatever it is passed,
+    and constructs a leaf variable. Therefore ``torch.tensor(x)`` is equivalent to ``x.clone().detach()``
+    and ``torch.tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
+    The equivalents use ``clone()`` and ``detach()`` are recommended.
+
 Args:
     {data}
     {dtype}

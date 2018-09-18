@@ -41,7 +41,11 @@ parser.add_argument(
 parser.add_argument(
     '-d', '--install_dir', help='output directory', default='ATen')
 options = parser.parse_args()
-core_install_dir = os.path.join(options.install_dir, 'core_tmp') if options.install_dir is not None else None
+gen_to_source = os.environ.get('GEN_TO_SOURCE')  # update source directly as part of gen
+if not gen_to_source:
+    core_install_dir = os.path.join(options.install_dir, 'core_tmp') if options.install_dir is not None else None
+else:
+    core_install_dir = os.path.join(options.source_path, 'core')
 
 if options.install_dir is not None and not os.path.exists(options.install_dir):
     os.makedirs(options.install_dir)
@@ -50,8 +54,8 @@ if core_install_dir is not None and not os.path.exists(core_install_dir):
 
 
 class FileManager(object):
-    def __init__(self, prefix=None):
-        self.install_dir = '{}/{}'.format(options.install_dir, prefix) if prefix else options.install_dir
+    def __init__(self, install_dir=None):
+        self.install_dir = install_dir if install_dir else options.install_dir
         self.filenames = set()
         self.outputs_written = False
         self.undeclared_files = []
@@ -133,7 +137,7 @@ TYPE_REGISTER = CodeTemplate("""\
 context->registerType(Backend::${backend}, ScalarType::${scalar_type}, new ${type_name}());
 """)
 
-core_file_manager = FileManager('core_tmp')
+core_file_manager = FileManager(core_install_dir)
 file_manager = FileManager()
 cuda_file_manager = FileManager()
 
