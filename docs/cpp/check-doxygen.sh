@@ -21,11 +21,12 @@ ignore_warning "warning: source ../../build/aten/src/ is not a readable file"
 ignore_warning "warning: source ../../build/aten/src/ATen/Tensor.h is not a readable file"
 ignore_warning "warning: source ../../build/aten/src/ATen/Functions.h is not a readable file"
 ignore_warning "warning: documented symbol \`torch::nn::FunctionalImpl::FunctionalImpl' was not declared or defined"
+ignore_warning "functional.h:81: warning: Found ';' while parsing initializer list!"
 
 # Count the number of remaining warnings.
-warnings=$(grep 'warning:' doxygen-log.txt | wc -l)
+warnings="$(grep 'warning:' doxygen-log.txt | wc -l)"
 
-if [[ $warnings != 0 ]]; then
+if [[ "$warnings" -ne "0" ]]; then
   echo "Filtered output"
   cat doxygen-log.txt
   rm -f doxygen-log.txt original-doxygen-log.txt
