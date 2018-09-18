@@ -63,7 +63,7 @@ class Sequential(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return Sequential(OrderedDict(list(self._modules.items())[idx]))
+            return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
             return self._get_item_by_idx(self._modules.values(), idx)
 
@@ -132,7 +132,7 @@ class ModuleList(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return ModuleList(list(self._modules.values())[idx])
+            return self.__class__(list(self._modules.values())[idx])
         else:
             return self._modules[self._get_abs_string_index(idx)]
 
@@ -334,7 +334,7 @@ class ParameterList(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return ParameterList(list(self._parameters.values())[idx])
+            return self.__class__(list(self._parameters.values())[idx])
         else:
             idx = operator.index(idx)
             if not (-len(self) <= idx < len(self)):
