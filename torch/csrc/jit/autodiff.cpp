@@ -80,6 +80,12 @@ bool isDifferentiable(Node * n) {
     "aten::trunc(Tensor self) -> Tensor",
   };
 
+  // TODO: add support for the following fusible operators.
+  // They're a little tricky to implement; max/min require mutability for best perf
+  // "aten::atan2(Tensor self) -> Tensor",
+  // "aten::max(Tensor self) -> Tensor",
+  // "aten::min(Tensor self) -> Tensor"
+
   if (n->kind() == prim::Constant ||
       n->kind() == prim::AutogradAdd ||
       n->kind() == prim::ConstantChunk)
