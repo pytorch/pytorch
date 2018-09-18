@@ -499,16 +499,19 @@ Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    PyErr_WarnEx(PyExc_UserWarning,
-      "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-      "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
+    PyObject* data = r.pyobject(0);
+    if (THPVariable_Check(data)) {
+      PyErr_WarnEx(PyExc_UserWarning,
+        "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
+        "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
+    }
 
     bool type_inference = r.isNone(1);
     bool args_requires_grad = r.toBool(3);
     auto new_tensor = internal_new_from_data(
                typeWithDefault(r, 1, 2, type),
                r.deviceOptional(2),
-               r.pyobject(0),
+               data,
                true,
                true,
                type_inference);
@@ -543,15 +546,18 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    PyErr_WarnEx(PyExc_UserWarning,
-      "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-      "or sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).", 1);
+    PyObject* data = r.pyobject(0);
+    if (THPVariable_Check(data)) {
+      PyErr_WarnEx(PyExc_UserWarning,
+        "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
+        "or sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).", 1);
+    }
 
     bool args_requires_grad = r.toBool(3);
     auto new_tensor = new_from_data_copy(
                typeWithDefault(r, 1, 2, type),
                r.deviceOptional(2),
-               r.pyobject(0));
+               data);
     new_tensor.detach_(); // making new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
