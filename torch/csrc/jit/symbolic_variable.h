@@ -182,6 +182,12 @@ struct SymbolicVariable {
   SymbolicVariable sign() const {
     return create(t("sign"), {*this})[0];
   }
+  SymbolicVariable sin() const {
+    return create(t("sin"), {*this})[0];
+  }
+  SymbolicVariable sinh() const {
+    return create(t("sinh"), {*this})[0];
+  }
   SymbolicVariable sum() const {
     return create(t("sum"), {*this})[0];
   }

@@ -59,6 +59,10 @@ bool isDifferentiable(Node * n) {
     "aten::asin(Tensor self) -> Tensor",
     "aten::atan(Tensor self) -> Tensor",
     "aten::ceil(Tensor self) -> Tensor",
+    "aten::cos(Tensor self) -> Tensor",
+    "aten::cosh(Tensor self) -> Tensor",
+    "aten::exp(Tensor self) -> Tensor",
+    "aten::expm1(Tensor self) -> Tensor",
   };
 
   if (n->kind() == prim::Constant ||
@@ -186,6 +190,18 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
 
     } else if (node->matches("aten::ceil(Tensor self) -> Tensor")) {
       return {SymbolicVariable::zeros_like(grads.at(0))};
+
+    } else if (node->matches("aten::cos(Tensor self) -> Tensor")) {
+      return {grads.at(0) * -inputs.at(0).sin()};
+
+    } else if (node->matches("aten::cosh(Tensor self) -> Tensor")) {
+      return {grads.at(0) * inputs.at(0).sinh()};
+
+    } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
+      return {grads.at(0) * outputs.at(0)};
+
+    } else if (node->matches("aten::expm1(Tensor self) -> Tensor")) {
+      return {grads.at(0) * (outputs.at(0) + 1.)};
 
     } else if (node->kind() == prim::ConstantChunk) {
       return {SymbolicVariable::cat(grads, node->i(attr::dim))};
