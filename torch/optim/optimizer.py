@@ -50,8 +50,10 @@ class Optimizer(object):
         }
 
     def __setstate__(self, state):
-        for key in state.keys():
-            state[id(key)] = state.pop(key)
+        if 'state' in state.keys():
+            for key in state['state'].keys():
+                if isinstance(state['state'][key], torch.Tensor):
+                    state['state'][id(key)] = state['state'].pop(key)
         self.__dict__.update(state)
 
     def __repr__(self):

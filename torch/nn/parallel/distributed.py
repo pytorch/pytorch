@@ -228,7 +228,7 @@ class DistributedDataParallel(Module):
         # for tensors / parameters
         if 'bucket_map' in state.keys():
             for p in state['bucket_map'].keys():
-                state[id(p)] = state.pop(p)
+                state['bucket_map'][id(p)] = state['bucket_map'].pop(p)
 
         super(DistributedDataParallel, self).__setstate__(state)
         self._register_grad_hooks()
