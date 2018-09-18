@@ -166,7 +166,7 @@ void FusedKernel::launch_with_tensors(
     if (chunk.isNoop()) {
       addTensorInfo(input_desc[i], tensor);
     } else {
-      size_t chunk_offset = map_size[chunk.dim] * tensor.stride(chunk.dim) * elementSize(tensor.type().scalarType());
+      size_t chunk_offset = map_size[chunk.dim] * tensor.stride(chunk.dim) * tensor.storage().itemsize();
       char * data_ptr = reinterpret_cast<char*>(tensor.data_ptr());
       for (size_t chunks = 0; chunks < chunk.nSubtensors; ++chunks) {
         addTensorInfoRaw(*chunk.subtensorDesc, data_ptr, map_size, tensor.strides());
