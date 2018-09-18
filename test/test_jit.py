@@ -7743,9 +7743,6 @@ def assert_fully_differentiable_graph(graph):
 #
 # disable_autodiff_subgraph_inlining:
 #   Don't inline autodiff subgraphs so we can test autodiff
-# check_fully_differentiable_graph:
-#   Checks if the entire graph is an autodiff subgraph.
-#   Only makes sense if any of the inputs require grad.
 def create_traced_fn(self, fn,
                      disable_autodiff_subgraph_inlining=False):
     def traced_fn(*inputs, **kwargs):
