@@ -32,7 +32,7 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
       (InputSize() == 2) ? Input(SEQ_LEN).data<int>() : nullptr;
 
   vector<int> values_cach;
-  output_len->Resize(vector<TIndex>{batch_size});
+  output_len->Resize(vector<int64_t>{batch_size});
   int* output_len_data = output_len->template mutable_data<int>();
 
   for (int32_t i = 0; i < batch_size; ++i) {
@@ -54,7 +54,7 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
   }
 
   int32_t values_cach_size = values_cach.size();
-  values->Resize(vector<TIndex>{values_cach_size});
+  values->Resize(vector<int64_t>{values_cach_size});
   int* values_data = values->mutable_data<int>();
   for (int i = 0; i < values_cach.size(); ++i) {
     values_data[i] = values_cach.at(i);

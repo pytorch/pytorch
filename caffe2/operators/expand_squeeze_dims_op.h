@@ -85,7 +85,7 @@ class SqueezeOp : public Operator<Context> {
   }
 
   static std::vector<int> ComputeDims(
-      std::vector<TIndex> inputDims,
+      std::vector<int64_t> inputDims,
       std::vector<int> dims) {
     int j = 0;
     std::vector<int> newDims;

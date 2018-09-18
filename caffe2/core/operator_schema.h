@@ -383,11 +383,11 @@ class CAFFE2_API OpSchema {
   OpSchema& DisallowInputFillers();
 
   std::vector<TensorFiller> InputFillers(
-      const std::vector<std::vector<TIndex>>& shapes) const;
+      const std::vector<std::vector<int64_t>>& shapes) const;
 
  private:
   std::vector<TensorFiller> SupplyDenseFillers(
-      const std::vector<std::vector<TIndex>>& shapes);
+      const std::vector<std::vector<int64_t>>& shapes);
 
  private:
   string type_;
@@ -438,9 +438,9 @@ class CAFFE2_API OpSchema {
       };
 
   std::function<std::vector<TensorFiller>(
-      const std::vector<std::vector<TIndex>>&)>
+      const std::vector<std::vector<int64_t>>&)>
       filler_supplier_ =
-          [this](const std::vector<std::vector<TIndex>>& shapes) {
+          [this](const std::vector<std::vector<int64_t>>& shapes) {
             return SupplyDenseFillers(shapes);
           };
 };
@@ -508,8 +508,8 @@ inline TensorShape CreateTensorShape(
 }
 
 // Helper function
-inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
-  vector<TIndex> dims;
+inline vector<int64_t> GetDimsVector(const TensorShape& shape) {
+  vector<int64_t> dims;
   for (auto d : shape.dims()) {
     dims.push_back(d);
   }

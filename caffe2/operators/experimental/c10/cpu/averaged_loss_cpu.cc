@@ -4,7 +4,7 @@
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
-using caffe2::TIndex;
+using caffe2::int64_t;
 using std::vector;
 
 namespace caffe2 {
@@ -16,7 +16,7 @@ void averaged_loss_op_cpu_impl(
     Tensor* sum,
     caffe2::ops::AveragedLoss::State* state,
     BaseContext* context) {
-  sum->Resize(vector<TIndex>());
+  sum->Resize(vector<int64_t>());
 
   T* data = sum->template mutable_data<T>();
 
