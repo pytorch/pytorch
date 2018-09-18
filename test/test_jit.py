@@ -23,7 +23,8 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
-from test_autograd import method_tests, create_input, unpack_variables, \
+from test_autograd import method_tests as autograd_method_tests
+from test_autograd import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
@@ -7732,12 +7733,27 @@ def partial_apply_nontensors(fn, args, **kwargs):
     return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
 
 
+def assert_fully_differentiable_graph(graph):
+    nodes = list(graph.nodes())
+    if not (len(nodes) == 1 and 'prim::DifferentiableGraph' in str(nodes[0])):
+        raise RuntimeError('expected graph to be fully differentiable:\n{}'.format(graph))
+
+
 # create a trace function from input fn
-def create_traced_fn(self, fn):
+#
+# disable_autodiff_subgraph_inlining:
+#   Don't inline autodiff subgraphs so we can test autodiff
+# check_fully_differentiable_graph:
+#   Checks if the entire graph is an autodiff subgraph.
+#   Only makes sense if any of the inputs require grad.
+def create_traced_fn(self, fn,
+                     disable_autodiff_subgraph_inlining=False):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(fn_tensors, inputs_tensors)
         self.assertExportImport(traced.graph, inputs_tensors)
+        if disable_autodiff_subgraph_inlining:
+            traced.debug_disable_autodiff_subgraph_inlining()
         output = traced(*inputs_tensors)
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)
         return output
@@ -7758,7 +7774,8 @@ def get_constant(x):
 # create a script function from (name, func_type, output_process_fn),
 # returns a function takes in (args, kwargs) and runs the compiled function and
 # then applies the post process fn to the outputs
-def create_script_fn(self, method_name, func_type, output_process_fn):
+def create_script_fn(self, method_name, func_type, output_process_fn,
+                     disable_autodiff_subgraph_inlining=False):
     def script_fn(*args, **kwargs):
         formals = []
         tensors = []
@@ -7789,6 +7806,8 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
         import math
 
         CU = torch.jit.CompilationUnit(script)
+        if disable_autodiff_subgraph_inlining:
+            CU.the_method.debug_disable_autodiff_subgraph_inlining()
         self.assertExportImport(CU.the_method.graph, tensors)
         output = output_process_fn(CU.the_method(*tensors))
         script_fn.last_graph = CU.the_method.graph_for(*tensors)
@@ -8126,7 +8145,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
 ])
 
 
-def add_test(
+def add_autograd_test(
         name,
         self_size,
         args,
@@ -8169,14 +8188,20 @@ def add_test(
                 check_types = test_name not in EXCLUDE_TYPE_CHECK
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
+                    # Test with disable_autodiff_subgraph_inlining, which forces the graph
+                    # to contain DifferentiableGraph nodes whenever possible. This allows us
+                    # to test autodiff; we assume that autograd is correct and use autodiff for backprop
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(self, fn),
+                        check_against_reference(self,
+                                                create_traced_fn(self, fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(self, name, 'method', output_process_fn),
+                                                create_script_fn(self, name, 'method', output_process_fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
 
@@ -8190,12 +8215,15 @@ def add_test(
                     f_args_tensor = (self_tensor,) + args_tensor
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(self, fn), fn,
-                                                f_args_variable, kwargs_variable, check_types=check_types)
+                        check_against_reference(self,
+                                                create_traced_fn(self, fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
+                                                fn, f_args_variable, kwargs_variable, check_types=check_types)
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(self, name, 'functional', output_process_fn),
+                                                create_script_fn(self, name, 'functional', output_process_fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
                                                 fn, f_args_variable, kwargs_variable,
                                                 check_types=check_types)
 
@@ -8250,8 +8278,8 @@ def post_add_test(test_name, skipTestIf, do_test):
         setattr(TestJitGenerated, test_name, do_test)
 
 
-for test in method_tests:
-    add_test(*test)
+for test in autograd_method_tests:
+    add_autograd_test(*test)
 
 for test in nn_functional_tests:
     add_nn_test(*test)

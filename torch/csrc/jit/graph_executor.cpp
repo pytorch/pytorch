@@ -361,8 +361,19 @@ struct GraphExecutorImpl {
     return state;
   }
 
+  // This function should be used only for testing purposes
+  void debugDisableAutodiffSubgraphInlining() {
+    // Allow single-node autodiff subgraphs
+    autodiffSubgraphNodeThreshold = 1;
+    // Don't inline autodiff subgraphs into autograd functions
+    autodiffSubgraphInlineThreshold = 1;
+  }
+
 private:
   friend struct GraphExecutor;
+
+  size_t autodiffSubgraphNodeThreshold = 2;
+  size_t autodiffSubgraphInlineThreshold = 5;
 
   const ExecutionPlan & getOrCompileFallback() {
     std::lock_guard<std::mutex> lock(compile_mutex);
@@ -416,14 +427,14 @@ private:
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
     //          (or the whole grpah if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
-      auto diff_nodes = CreateAutodiffSubgraphs(*opt_graph);
+      auto diff_nodes = CreateAutodiffSubgraphs(*opt_graph, autodiffSubgraphNodeThreshold);
       for (Node * dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
       }
-      InlineAutodiffSubgraphs(opt_graph);
+      InlineAutodiffSubgraphs(opt_graph, autodiffSubgraphInlineThreshold);
     } else {
       runNondiffOptimization(opt_graph);
     }
@@ -542,6 +553,10 @@ std::shared_ptr<Graph> GraphExecutor::graphFor(const Stack& inputs) const {
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+void GraphExecutor::debugDisableAutodiffSubgraphInlining() {
+  return pImpl->debugDisableAutodiffSubgraphInlining();
 }
 
 
