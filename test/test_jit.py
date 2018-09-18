@@ -7042,6 +7042,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_dcgan_models(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @skipIfRocm
     def test_dcgan_models_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_dcgan_models(self, device='cuda', check_export_import=False)
@@ -7164,6 +7165,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_mnist(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @skipIfRocm
     def test_mnist_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_mnist(self, device='cuda', check_export_import=False)
