@@ -7134,14 +7134,14 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                         export_import=check_export_import,
                         ir_export_import=False)
         self.assertExportImportModelIRGraph(
-                DCGANGenerator(nz, ngf, nc).to(device),
-                (torch.rand(bs, nz, 1, 1, device=device),))
+            DCGANGenerator(nz, ngf, nc).to(device),
+            (torch.rand(bs, nz, 1, 1, device=device),))
         example_input = DCGANGenerator(nz, ngf, nc).to(device)(torch.rand(bs, nz, 1, 1, device=device))
         self.checkTrace(DCGANDiscriminator(nc, ndf).to(device), (example_input,),
                         export_import=check_export_import,
                         ir_export_import=False)
         self.assertExportImportModelIRGraph(
-                DCGANDiscriminator(nc, ndf).to(device), (example_input,))
+            DCGANDiscriminator(nc, ndf).to(device), (example_input,))
 
     def test_dcgan_models(self):
         self._test_dcgan_models(self, device='cpu')
@@ -7249,7 +7249,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 out = self.conv2d(out)
                 return out
 
-        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 64, 64),), export_import=check_export_import, ir_export_import=False)
+        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 64, 64),),
+                        export_import=check_export_import, ir_export_import=False)
         self.assertExportImportModelIRGraph(TransformerNet(), (torch.rand(5, 3, 64, 64),))
 
     def test_neural_style(self):
@@ -7267,7 +7268,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                         export_import=check_export_import,
                         ir_export_import=False)
         self.assertExportImportModelIRGraph(
-                MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),))
+            MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),))
 
     def test_mnist(self):
         self._test_mnist(self, device='cpu')
@@ -7319,7 +7320,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                         export_import=test_export_import,
                         ir_export_import=False)
         self.assertExportImportModelIRGraph(
-                Policy().to(device), (torch.rand(1, 4, device=device),))
+            Policy().to(device), (torch.rand(1, 4, device=device),))
 
     def test_reinforcement_learning(self):
         self._test_reinforcement_learning(self, device='cpu')
@@ -7421,7 +7422,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                         inputs_require_grads=False, export_import=check_export_import,
                         ir_export_import=False)
         self.assertExportImportModelIRGraph(
-                SNLIClassifier(Config()).to(device), (premise, hypothesis))
+            SNLIClassifier(Config()).to(device), (premise, hypothesis))
 
     @skipIfRocm
     def test_snli(self):
@@ -7461,7 +7462,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                         export_import=check_export_import,
                         ir_export_import=False)
         self.assertExportImportModelIRGraph(
-                Net(upscale_factor=4).to(device), (torch.rand(5, 1, 64, 64, device=device),))
+            Net(upscale_factor=4).to(device), (torch.rand(5, 1, 64, 64, device=device),))
 
     @skipIfRocm
     def test_super_resolution(self):
@@ -7573,7 +7574,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                         export_import=check_export_import,
                         ir_export_import=False)
         self.assertExportImportModelIRGraph(
-                VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device), ))
+            VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device), ))
 
     def test_vae(self):
         self._test_vae(self, device='cpu')
