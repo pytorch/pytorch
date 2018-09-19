@@ -312,7 +312,6 @@ inline T fmadd(const T& a, const T& b, const T& c) {
   return a * b + c;
 }
 
-<<<<<<< HEAD
 template <int64_t scale = 1, typename T = void>
 c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
 inline gather(T const* base_addr, const Vec256<int_same_size_t<T>>& vindex) {
@@ -437,7 +436,8 @@ interleave2(const Vec256<T>& a, const Vec256<T>& b) {
   }
   return std::make_pair(Vec256<T>::loadu(static_cast<void*>(buffer1)),
                         Vec256<T>::loadu(static_cast<void*>(buffer2)));
-=======
+}
+
 template <typename src_T, typename dst_T>
 void convert(const src_T *src, dst_T *dst, int64_t n) {
 #pragma unroll
@@ -446,7 +446,6 @@ void convert(const src_T *src, dst_T *dst, int64_t n) {
     src++;
     dst++;
   }
->>>>>>> Move mkl specific bernoulli generation kernel to ATen
 }
 
 }}}
