@@ -1027,6 +1027,10 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
       if (auto shape = node->get<std::vector<int64_t>>(shape_input)) {
         return tensor_types.at(0)->withDim(shape->size());
       }
+      auto input_node = node->namedInput(shape_input)->node();
+      if (input_node->kind() == prim::ListConstruct) {
+        return tensor_types.at(0)->withDim(input_node->inputs().size());
+      }
       return nullptr;
     };
   const auto getSingleOutputType = [&]() -> TypePtr {
