@@ -1437,6 +1437,7 @@ class TestSparse(TestCase):
         test_tensor(indices, values, False, True)  # An empty tensor's data_ptr is always equal to 0
 
     @cpu_only  # just run once, we test both cpu and cuda
+    @skipIfRocm
     def test_constructor_device_legacy(self):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
         v = torch.tensor([3., 4., 5.])
