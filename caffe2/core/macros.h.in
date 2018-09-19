@@ -47,7 +47,10 @@ static_assert(
 #cmakedefine CAFFE2_USE_NVTX
 #cmakedefine CAFFE2_USE_TRT
 #cmakedefine CAFFE2_DISABLE_NUMA
+
+#ifndef USE_NUMPY
 #cmakedefine USE_NUMPY
+#endif
 
 #ifndef EIGEN_MPL2_ONLY
 #cmakedefine EIGEN_MPL2_ONLY
@@ -60,7 +63,6 @@ static_assert(
   {"BUILD_TYPE", "${CMAKE_BUILD_TYPE}"}, \
   {"BLAS", "${BLAS}"}, \
   {"USE_CUDA", "${USE_CUDA}"}, \
-  {"USE_NUMPY", "${USE_NUMPY}"}, \
   {"USE_NCCL", "${USE_NCCL}"}, \
   {"USE_MPI", "${USE_MPI}"}, \
   {"USE_GFLAGS", "${USE_GFLAGS}"}, \
