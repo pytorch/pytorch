@@ -449,6 +449,14 @@ Convert the data into a `torch.Tensor`.  If the data is already a `Tensor` of th
 will be performed.  Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and the `device` is the cpu,
 no copy will be performed.
 
+.. warning::
+
+    When attr:`data` is a tensor `x` with different attr:`dtype` or attr:`device`,
+    :func:`as_tensor()` reads out 'the data' from whatever it is passed,
+    and constructs a leaf variable. Therefore ``tensor.as_tensor(x, dtype=dtype, device=device)``
+    is equivalent to ``x.clone().detach().to(dtype, device)``.
+    The equivalents using ``clone()`` and ``detach()`` are recommended.
+
 Args:
     {data}
     {dtype}

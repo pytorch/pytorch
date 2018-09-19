@@ -2404,16 +2404,21 @@ class TestTorch(TestCase):
             self.assertTrue(copy.requires_grad == copy_requires_grad)
 
         source = torch.randn(5, 5, requires_grad=True)
-        # == test torch.tensor() ==
+        # test torch.tensor()
         check_copy(torch.tensor(source), True, False)
         check_copy(torch.tensor(source, requires_grad=False), True, False)
         check_copy(torch.tensor(source, requires_grad=True), True, True)
 
-        # == test tensor.new_tensor() ==
+        # test tensor.new_tensor()
         copy = torch.randn(1)
         check_copy(copy.new_tensor(source), True, False)
         check_copy(copy.new_tensor(source, requires_grad=False), True, False)
         check_copy(copy.new_tensor(source, requires_grad=True), True, True)
+
+        # test torch.as_tensor()
+        source = source.add(1)  # make source non-leaf
+        check_copy(torch.as_tensor(source), source.is_leaf, source.requires_grad)
+        check_copy(torch.as_tensor(source, dtype=torch.float), True, False)
 
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):
