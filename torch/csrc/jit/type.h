@@ -356,6 +356,11 @@ struct TORCH_API ListType : public Type {
     }
     return false;
   }
+  // bool isSubtypeOf(const TypePtr rhs) const override {
+  //   if (rhs->kind() == TypeKind::DynamicType)
+  //     return true;
+  //   return *this == *rhs;
+  // }
   std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";

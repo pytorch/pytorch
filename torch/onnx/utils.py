@@ -42,9 +42,9 @@ def set_training(model, mode):
             model.train(old_mode)
 
 
-def export(model, args, f, export_params=True, verbose=False, training=False,
+def export(model, args, f=None, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
-           operator_export_type=None):
+           export_type=None, operator_export_type=None):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -100,8 +100,14 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
         else:
             operator_export_type = OperatorExportTypes.ONNX
-    _export(model, args, f, export_params, verbose, training, input_names, output_names,
-            operator_export_type=operator_export_type)
+    if export_type is None:
+        export_type = ExportTypes.PROTOBUF_FILE
+    if export_type is not ExportTypes.PROTOBUF_STRING:
+        assert f is not None
+    ret = _export(model, args, f, export_params, verbose, training, input_names, output_names,
+                  export_type=export_type, operator_export_type=operator_export_type)
+    if export_type is ExportTypes.PROTOBUF_STRING:
+        return ret
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -128,8 +134,9 @@ def _optimize_graph(graph, operator_export_type):
     # into a trace where we previously recorded constants
     # use constant prop to maintain our current level of onnx support
     # without implementing symbolics for all of them
-    torch._C._jit_pass_constant_propagation(graph)
-    _split_tensor_list_constants(graph, graph)
+    if operator_export_type != OperatorExportTypes.RAW:
+        torch._C._jit_pass_constant_propagation(graph)
+        _split_tensor_list_constants(graph, graph)
     # run dce to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
     torch._C._jit_pass_dce(graph)
@@ -141,12 +148,13 @@ def _optimize_graph(graph, operator_export_type):
     torch._C._jit_pass_peephole(graph)
     torch._C._jit_pass_lint(graph)
 
-    # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
-    torch._C._jit_pass_prepare_division_for_onnx(graph)
-    # onnx only supports tensors, so we turn all out number types into tensors
-    torch._C._jit_pass_erase_number_types(graph)
-    # onnx does not support tuples, so try to remove them
-    torch._C._jit_pass_lower_all_tuples(graph)
+    if operator_export_type != OperatorExportTypes.RAW:
+        # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
+        torch._C._jit_pass_prepare_division_for_onnx(graph)
+        # onnx only supports tensors, so we turn all out number types into tensors
+        torch._C._jit_pass_erase_number_types(graph)
+        # onnx does not support tuples, so try to remove them
+        torch._C._jit_pass_lower_all_tuples(graph)
     torch._C._jit_pass_peephole(graph)
     torch._C._jit_pass_lint(graph)
 
@@ -155,12 +163,14 @@ def _optimize_graph(graph, operator_export_type):
         torch._C._jit_pass_lint(graph)
         torch._C._jit_pass_onnx_peephole(graph)
         torch._C._jit_pass_lint(graph)
+
     torch._C._jit_pass_dce(graph)
     torch._C._jit_pass_lint(graph)
     torch._C._jit_pass_fixup_onnx_loops(graph)
     torch._C._jit_pass_lint(graph)
     graph = torch._C._jit_pass_canonicalize(graph)
     torch._C._jit_pass_lint(graph)
+
     return graph
 
 
@@ -197,7 +207,7 @@ def _trace_and_get_graph_from_model(model, args, training):
     return trace.graph(), torch_out
 
 
-def _model_to_graph(model, args, f, verbose=False, training=False,
+def _model_to_graph(model, args, verbose=False, training=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
                     example_outputs=None, propagate=False):
@@ -239,7 +249,11 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
     return graph, params, torch_out
 
 
-def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
+def import_ir_graph(proto_str):
+    return torch._C.import_ir_graph(proto_str)
+
+
+def export_to_pretty_string(model, args, export_params=True, verbose=False, training=False,
                             input_names=None, output_names=None, aten=False, export_raw_ir=False,
                             operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
                             example_outputs=None, propagate=False, google_printer=False):
@@ -249,16 +263,16 @@ def export_to_pretty_string(model, args, f, export_params=True, verbose=False, t
         operator_export_type = OperatorExportTypes.ATEN if aten else OperatorExportTypes.RAW
     elif operator_export_type is None:
         operator_export_type = OperatorExportTypes.ONNX
-    return _export_to_pretty_string(model, args, f, export_params, verbose, training,
+    return _export_to_pretty_string(model, args, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, propagate, google_printer)
 
 
-def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
+def _export_to_pretty_string(model, args, export_params=True, verbose=False, training=False,
                              input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False):
-    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
+    graph, params, torch_out = _model_to_graph(model, args, verbose,
                                                training, input_names,
                                                output_names, operator_export_type,
                                                example_outputs, propagate)
@@ -271,17 +285,17 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
 # the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
 # this output will be None, since we are not doing any tracing but rather
 # directly extracting the graph.
-def _export(model, args, f, export_params=True, verbose=False, training=False,
+def _export(model, args, f=None, export_params=True, verbose=False, training=False,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False):
-    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
+    graph, params, torch_out = _model_to_graph(model, args, verbose,
                                                training, input_names,
                                                output_names, operator_export_type,
                                                example_outputs, propagate)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     from torch.onnx.symbolic import _onnx_opset_version
-    defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
+    defer_weight_export = export_type not in [ExportTypes.PROTOBUF_FILE, ExportTypes.PROTOBUF_STRING]
     if export_params:
         proto, export_map = graph.export(params, _onnx_opset_version, defer_weight_export, operator_export_type)
     else:
@@ -290,6 +304,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)
         torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+    elif export_type == ExportTypes.PROTOBUF_STRING:
+        return proto
     elif export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
         import zipfile
         compression = zipfile.ZIP_DEFLATED \

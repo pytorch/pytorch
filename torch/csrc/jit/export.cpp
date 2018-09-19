@@ -422,33 +422,26 @@ void GraphEncoder::EncodeTensor(
   }
 }
 
-class ModuleEncoder: public EncoderBase {
+class IRGraphEncoder: public EncoderBase {
  public:
-  ModuleEncoder(const script::Module &module,
-                const std::string &filename);
+  IRGraphEncoder(const std::shared_ptr<Graph> &graph,
+                 int64_t onnx_opset_version,
+                 onnx_torch::OperatorExportTypes operator_export_type,
+                 const std::vector<at::Tensor> &initializers,
+                 bool defer_weight_export,
+                 bool strip_doc);
 
- private:
-  void EncodeModule(onnx::GraphProto *graph_proto, const script::Module &module);
+  IRGraphEncoder(onnx_torch::OperatorExportTypes operator_export_type,
+                 bool strip_doc);
 
-  void EncodeParameters(onnx::GraphProto *graph_proto,
-                        const script::Module &module,
-                        const std::string prefix);
+  RawDataExportMap get_raw_data_export_map() {
+    return raw_data_export_map_;
+  }
 
-  void EncodeParameter(onnx::TensorProto *tensor_proto,
-                       const script::NamedParameter &parameter,
-                       const std::string prefix);
-
-  void EncodeMethods(onnx::GraphProto *graph_proto,
-                     const script::Module &module,
-                     const std::string prefix);
-
-  void EncodeMethod(onnx::NodeProto *node_proto,
-                    script::Method &method,
-                    const std::string prefix);
-
+ protected:
   virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
                             const at::Tensor &tensor,
-                            const at::optional<std::string> external_ref) override;
+                            const at::optional<std::string> external_ref = {}) override;
 
   virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
                                            const Value* n) override;
@@ -462,32 +455,42 @@ class ModuleEncoder: public EncoderBase {
                       const TypePtr& type,
                       const std::string& name);
 
-  PyTorchFileWriter file_writer_;
-  // Used to deduplicate tensor storages
-  std::unordered_map<const void*, uint64_t> storage_dedup_map_;
-
-  // Used to keep track of Parameter names so Methods can refer to them
-  std::unordered_map<at::Tensor*, std::string> parameter_map_;
-
-  // Used to create sequential dummy names for node types
+  RawDataExportMap raw_data_export_map_;
+  bool defer_weight_export_;
   size_t type_counter_ = 0;
 };
 
-ModuleEncoder::ModuleEncoder(
-    const script::Module &module,
-    const std::string &filename)
-    : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      file_writer_(filename) {
-  model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
-  EncodeModule(model_proto_.mutable_graph(), module);
+IRGraphEncoder::IRGraphEncoder(
+    const std::shared_ptr<Graph> &graph,
+    int64_t onnx_opset_version,
+    onnx_torch::OperatorExportTypes operator_export_type,
+    const std::vector<at::Tensor> &initializers,
+    bool defer_weight_export,
+    bool strip_doc)
+    : EncoderBase(operator_export_type, strip_doc),
+      defer_weight_export_(defer_weight_export) {
+  if (operator_export_type != onnx_torch::OperatorExportTypes::RAW) {
+    validateGraph(graph, operator_export_type);
+  }
+
+  auto* imp = model_proto_.add_opset_import();
+  // This is the version of ONNX operator set we are targeting
+  imp->set_version(onnx_opset_version);
+
+  EncodeGraph(model_proto_.mutable_graph(), graph, initializers);
 }
 
-void ModuleEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, const Value *n) {
+IRGraphEncoder::IRGraphEncoder(
+    onnx_torch::OperatorExportTypes operator_export_type,
+    bool strip_doc)
+    : EncoderBase(operator_export_type, strip_doc) {}
+
+void IRGraphEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, const Value *n) {
   auto v = graph_proto->add_value_info();
   EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
 }
 
-void ModuleEncoder::EncodeTypeInfo(
+void IRGraphEncoder::EncodeTypeInfo(
     onnx::GraphProto *graph_proto,
     onnx::ValueInfoProto* v,
     const TypePtr& type,
@@ -569,11 +572,85 @@ void ModuleEncoder::EncodeTypeInfo(
   }
 }
 
-void ModuleEncoder::EncodeValueInfo(
+void IRGraphEncoder::EncodeValueInfo(
     onnx::GraphProto *graph_proto,
     onnx::ValueInfoProto* v,
     const Value* n) {
   EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
+}
+
+void IRGraphEncoder::EncodeTensor(
+      onnx::TensorProto *tensor_proto,
+      const at::Tensor &tensor,
+      const at::optional<std::string> external_ref) {
+  for(auto d : tensor.sizes()) {
+    tensor_proto->add_dims(d);
+  }
+  tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.type().scalarType()));
+  // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
+  auto t = tensor.contiguous().cpu();
+  // Add a buffer to the raw_data_export_map for the caller to dump into an
+  // external data store. If external_ref is not specified, we instead dump
+  // the contiguous data into the protobuf itself
+  if (defer_weight_export_ && external_ref) {
+    // For now, we use the name of the tensor as the external lookup name to
+    // avoid ONNX protobuf changes.
+    JIT_ASSERT(external_ref.value() == tensor_proto->name());
+    JIT_ASSERT(raw_data_export_map_.count(external_ref.value()) == 0);
+    raw_data_export_map_[external_ref.value()] = t;
+    tensor_proto->set_raw_data("__EXTERNAL");
+  } else {
+    JIT_ASSERT(t.is_contiguous());
+    tensor_proto->set_raw_data(std::string(static_cast<char*>(t.data_ptr()),  t.type().elementSizeInBytes() * t.numel()));
+  }
+}
+
+class ModuleEncoder: public IRGraphEncoder {
+ public:
+  ModuleEncoder(const script::Module &module,
+                const std::string &filename);
+
+ private:
+  virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
+                            const at::Tensor &tensor,
+                            const at::optional<std::string> external_ref = {}) override;
+
+  void EncodeModule(onnx::GraphProto *graph_proto, const script::Module &module);
+
+  void EncodeParameters(onnx::GraphProto *graph_proto,
+                        const script::Module &module,
+                        const std::string prefix);
+
+  void EncodeParameter(onnx::TensorProto *tensor_proto,
+                       const script::NamedParameter &parameter,
+                       const std::string prefix);
+
+  void EncodeMethods(onnx::GraphProto *graph_proto,
+                     const script::Module &module,
+                     const std::string prefix);
+
+  void EncodeMethod(onnx::NodeProto *node_proto,
+                    script::Method &method,
+                    const std::string prefix);
+
+  PyTorchFileWriter file_writer_;
+  // Used to deduplicate tensor storages
+  std::unordered_map<const void*, uint64_t> storage_dedup_map_;
+
+  // Used to keep track of Parameter names so Methods can refer to them
+  std::unordered_map<at::Tensor*, std::string> parameter_map_;
+
+  // Used to create sequential dummy names for node types
+  //size_t type_counter_ = 0;
+};
+
+ModuleEncoder::ModuleEncoder(
+    const script::Module &module,
+    const std::string &filename)
+    : IRGraphEncoder(onnx_torch::OperatorExportTypes::RAW, false),
+      file_writer_(filename) {
+  model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
+  EncodeModule(model_proto_.mutable_graph(), module);
 }
 
 void ModuleEncoder::EncodeModule(
@@ -670,7 +747,7 @@ void ModuleEncoder::EncodeMethod(
 void ModuleEncoder::EncodeTensor(
     onnx::TensorProto *tensor_proto,
     const at::Tensor &tensor,
-    const at::optional<std::string> external_ref = {}) {
+    const at::optional<std::string> external_ref) {
   auto storage_ptr = tensor.storage().unsafeGetStorageImpl();
   auto dedup_it = storage_dedup_map_.find(storage_ptr);
   if (dedup_it != storage_dedup_map_.end()) {
@@ -909,8 +986,16 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
                         int64_t onnx_opset_version,
                         bool defer_weight_export,
                         ::torch::onnx::OperatorExportTypes operator_export_type) {
+
+  if (operator_export_type == onnx_torch::OperatorExportTypes::RAW) {
+    auto graph_encoder = IRGraphEncoder(
+        graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export, false);
+    return std::make_tuple(graph_encoder.get_model_proto().SerializeAsString(),
+        graph_encoder.get_raw_data_export_map());
+  }
+
   auto graph_encoder = GraphEncoder(
-    graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export, false);
+        graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export, false);
   return std::make_tuple(graph_encoder.get_model_proto().SerializeAsString(),
                          graph_encoder.get_raw_data_export_map());
 }

@@ -5,6 +5,7 @@
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -502,5 +503,10 @@ void initPythonIRBindings(PyObject * module_) {
   py::class_<Use>(m,"Use")
   .def_readonly("user",&Use::user)
   .def_readonly("offset",&Use::offset);
+
+  m.def("import_ir_graph", [](const std::string &proto_str) {
+    return import_ir_graph(proto_str);
+  });
+
 }
 }}
