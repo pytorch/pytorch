@@ -1,8 +1,12 @@
 #pragma once
+
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 #include <cstddef>
 
 namespace torch { namespace jit {
 
+struct Node;
 struct Graph;
 
 // insert GraphExecutor nodes that group together
