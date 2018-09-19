@@ -7,6 +7,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/utils/cuda_enabled.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
 
 #include <ATen/ATen.h>
 
@@ -71,7 +72,7 @@ PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
   auto attype = at::globalContext().getNonVariableTypeOpt(
       deviceTypeToBackend(storage.device_type()),
-      at::dataTypeToScalarType(storage.dtype()));
+      at::dataTypeToScalarType(storage.dtype().id()));
   auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {
     return it->second;
@@ -99,6 +100,9 @@ void registerLayoutObject(THPLayout *layout, at::Backend backend) {
 
 at::Type& getVariableType(at::ScalarType scalarType, const THPLayout& layout, const at::Device& device) {
   const at::Backend backend = get_backend(device.type() == at::Device::Type::CUDA, layout.layout == at::Layout::Sparse);
+  if (device.is_cuda()) {
+    torch::utils::cuda_lazy_init();
+  }
   auto baseType = at::globalContext().getNonVariableTypeOpt(backend, scalarType);
   if (!baseType) {
     std::ostringstream oss;

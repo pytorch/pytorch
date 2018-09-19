@@ -1,4 +1,4 @@
-#include <torch/op.h>
+#include <torch/script.h>
 
 #include "op.h"
 
@@ -22,9 +22,12 @@ void get_operator_from_registry_and_execute() {
   std::vector<at::Tensor> output;
   torch::jit::pop(stack, output);
 
+  const auto manual = custom_op(torch::ones(5), 2.0, 3);
+
   assert(output.size() == 3);
-  for (const auto& tensor : output) {
-    assert(tensor.allclose(torch::ones(5) * 2));
+  for (size_t i = 0; i < output.size(); ++i) {
+    assert(output[i].allclose(torch::ones(5) * 2));
+    assert(output[i].allclose(manual[i]));
   }
 }
 
@@ -71,10 +74,9 @@ void test_argument_checking_for_serialized_modules(
     module->forward({});
     assert(false);
   } catch (const at::Error& error) {
-    std::cout << error.what_without_backtrace() << std::endl;
     assert(
         std::string(error.what_without_backtrace())
-            .find("custom::op() is missing value for argument 'tensor'") == 0);
+            .find("forward() is missing value for argument 'input'") == 0);
   }
 }
 

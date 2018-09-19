@@ -36,7 +36,7 @@ struct InputMetadata {
   }
 
   at::Tensor zeros_like() const {
-    return at::zeros(shape_, at::TensorOptions(*type_, static_cast<int32_t>(device_)));
+    return at::zeros(shape_, type_->options(static_cast<int32_t>(device_)));
   }
 
 private:

@@ -3,20 +3,20 @@
 namespace caffe2 {
 
 // TODO: rename context.h -> context_cpu.h & context_base.h -> context.h
-std::array<BaseStaticContext*, COMPILE_TIME_MAX_DEVICE_TYPES>&
-GetStaticContexts() {
-  static std::array<BaseStaticContext*, COMPILE_TIME_MAX_DEVICE_TYPES>
-      static_contexts;
+StaticContextMap& GetStaticContexts() {
+  static StaticContextMap static_contexts;
   return static_contexts;
 }
 
-void set_static_context(int d, BaseStaticContext* ptr) {
+void set_static_context(DeviceType t, BaseStaticContext* ptr) {
   auto& static_contexts = GetStaticContexts();
-  static_contexts[d] = ptr;
+  static_contexts[t] = ptr;
 }
 
-BaseStaticContext* get_static_context(int d) {
-  return GetStaticContexts()[d];
+BaseStaticContext* get_static_context(DeviceType t) {
+  auto* ptr = GetStaticContexts()[t];
+  CAFFE_ENFORCE(ptr, "StaticContext is not registered yet.");
+  return ptr;
 }
 
 } // namespace caffe2

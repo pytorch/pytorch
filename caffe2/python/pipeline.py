@@ -324,7 +324,8 @@ def _pipe_step(
     elif hasattr(input, 'reader'):
         reader = input.reader()
     else:
-        raise ValueError('in must be a reader, queue or stream.')
+        raise ValueError(
+            'Input must be a reader, queue or stream. Got {}'.format(type(input)))
 
     if processor is not None:
         reader = ProcessingReader(reader, processor)

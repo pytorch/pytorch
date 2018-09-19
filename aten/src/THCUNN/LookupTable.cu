@@ -2,7 +2,7 @@
 #include "common.h"
 #include "THCThrustAllocator.cuh"
 #include <thrust/unique.h>
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCTensorSort.cuh"
 #include "../THC/THCTensorMathReduce.cuh"

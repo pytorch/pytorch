@@ -78,7 +78,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   LongTensor rowIndices = indices.select(0, 0);
   LongTensor colIndices = indices.select(0, 1);
   IntTensor csr = _to_csr_int(rowIndices, m, nnz);
-  IntTensor colIndicesInt = at::empty({colIndices.size(0)}, indices.type().toScalarType(kInt));
+  IntTensor colIndicesInt = at::empty({colIndices.size(0)}, indices.options().dtype(kInt));
   colIndicesInt.copy_(colIndices);
 
   // No half support, so we don't have to use CUDATypeConversion
@@ -94,7 +94,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
             r_.copy_(t);
           }
         } else {
-          at::mul_out(r_, t, beta.toTensor());
+          at::mul_out(r_, t, scalar_to_tensor(beta));
         }
 
         /* r_ */
@@ -153,7 +153,7 @@ Tensor s_addmm_sparse_dense_cuda(
     Scalar beta,
     Scalar alpha
 ) {
-  Tensor r = t.type().tensor();
+  Tensor r = at::empty({0}, t.options());
   s_addmm_out_sparse_dense_cuda(r, t, sparse, dense, beta, alpha);
   return r;
 }
@@ -208,7 +208,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 
   LongTensor indices = at::empty({1, nnz}, CUDA(kLong));
   // create values in column-major format to avoid copying in spaddmm
-  Tensor values = at::empty({n, nnz}, dense.type());
+  Tensor values = at::empty({n, nnz}, dense.options());
   values.transpose_(0, 1);
 
   // why does sparse need to be cloned? If this is really necessary maybe we
@@ -434,7 +434,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   Tensor t_values_ = t._values();
   LongTensor s_indices_ = src._indices();
   Tensor s_values_ = src._values();
-  LongTensor r_indices_ = t_indices_.type().tensor({sparseDims, max_nnz});
+  LongTensor r_indices_ = at::empty({sparseDims, max_nnz}, t_indices_.options());
   Tensor r_values_ = _new_values_with_size_of(t_values_, max_nnz).zero_();
   r_.resize_as_(src);
   _get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);

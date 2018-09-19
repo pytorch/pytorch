@@ -18,7 +18,7 @@
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/functions/utils.h"
 
-#include <ATen/detail/VariableHooksInterface.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 #include <array>
 #include <cstddef>
@@ -42,7 +42,7 @@ using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 
-VariableType::VariableType(Context* context, Type* baseType)
+VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
   : TypeDefault(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
   , baseType(baseType)
   , id_(context->freshTypeID()) {
@@ -52,13 +52,18 @@ VariableType::VariableType(Context* context, Type* baseType)
 ScalarType VariableType::scalarType() const {
   return baseType->scalarType();
 }
+caffe2::TypeMeta VariableType::typeMeta() const {
+  return baseType->typeMeta();
+}
 Backend VariableType::backend() const {
   return baseType->backend();
 }
-bool VariableType::is_cuda() const { return baseType->is_cuda(); }
-bool VariableType::is_sparse() const { return baseType->is_sparse(); }
-bool VariableType::is_distributed() const { return baseType->is_distributed(); }
-
+Allocator* VariableType::allocator() const {
+  return baseType->allocator();
+}
+Device VariableType::getDeviceFromPtr(void * data) const {
+  return baseType->getDeviceFromPtr(data);
+}
 Storage VariableType::storage(bool resizable) const {
   return baseType->storage();
 }
@@ -97,14 +102,10 @@ TypeID VariableType::ID() const {
   return static_cast<TypeID>(id_);
 }
 
-const char * VariableType::typeString() {
-  return "VariableType";
-}
-
 std::vector<std::unique_ptr<Type>> type_to_variable_type;
 
 // XXX - this is not threadsafe with uses of Variables
-void register_variable_type_for(Type* baseType) {
+void register_variable_type_for(TypeExtendedInterface* baseType) {
   AT_ASSERT(baseType);
   size_t base_id = static_cast<size_t>(baseType->ID());
   if(type_to_variable_type.size() <= base_id) {
@@ -129,7 +130,7 @@ struct VariableTypeRegistry {
 
 struct VariableHooks : public at::VariableHooksInterface {
   VariableHooks(at::VariableHooksArgs) {}
-  void registerVariableTypeFor(at::Context*, at::Backend, at::ScalarType) const override;
+  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend, at::ScalarType) const override;
   at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
 };
 
@@ -163,9 +164,9 @@ static VariableTypeRegistry registry;
 REGISTER_VARIABLE_HOOKS(VariableHooks)
 
 // Pre-condition: backend/scalar_type is a valid type in the type_registry
-void VariableHooks::registerVariableTypeFor(at::Context* context, at::Backend backend, at::ScalarType scalar_type) const {
+void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend, at::ScalarType scalar_type) const {
   auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
-  register_variable_type_for(baseType);
+  register_variable_type_for(static_cast<at::TypeExtendedInterface*>(baseType));
 }
 
 at::Type& VariableHooks::getVariableTypeFromBaseType(const at::Type& baseType) const {
@@ -380,7 +381,25 @@ static bool isFloatingPoint(ScalarType s) {
   return s == kFloat || s == kDouble || s == kHalf;
 }
 
+void VariableType::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  as_variable_ref(self).backward(gradient, keep_graph, create_graph);
+}
+
+void VariableType::set_data(Tensor & self, Tensor new_data) const {
+  as_variable_ref(self).set_data(new_data);
+}
 Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
+  jit::Node* node = nullptr;
+  if(torch::jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    // if you have no views of self, then an in place copy is equivalent to
+    // making sure we expand src to the same size as self
+    node = graph->create(jit::aten::expand_as, /*outputs=*/0);
+    jit::tracer::addInputs(node, "src", src);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+    jit::tracer::ensureUnique("copy_ (possibly due to an assignment)", self);
+  }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -400,6 +419,9 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   baseType->s_copy_(self_, src_, non_blocking);
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
+  if(torch::jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
   return self;
 }
 
@@ -432,6 +454,46 @@ Tensor VariableType::contiguous(const Tensor & self) const {
     return self;
   }
   return self.clone();
+}
+
+Tensor VariableType::detach(const Tensor & self) const {
+  profiler::RecordFunction profiler("detach");
+  torch::jit::Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    node = graph->create(jit::aten::detach, /*outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+
+  }
+  // <NON_GENERATED_CODE>
+  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach();
+  // </NON_GENERATED_CODE>
+  if (jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, result);
+  }
+  return result;
+}
+
+Tensor & VariableType::detach_(Tensor & self) const {
+  profiler::RecordFunction profiler("detach_");
+  torch::jit::Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    node = graph->create(jit::aten::detach, /*outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+    jit::tracer::ensureUnique("detach_", self);
+  }
+  // <NON_GENERATED_CODE>
+  as_variable_ref(self).detach_();
+  // </NON_GENERATED_CODE>
+  if (jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
+  return self;
 }
 
 static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {

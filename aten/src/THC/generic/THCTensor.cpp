@@ -63,13 +63,21 @@ scalar_t *THCTensor_(data)(THCState *state, const THCTensor *self)
 /* Empty init */
 THCTensor *THCTensor_(new)(THCState *state)
 {
-  return c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(THCStorage_(new)(state), at::CUDATensorId(), false).release();
+  return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
+    at::CUDATensorId(),
+    false
+  ).release();
 }
 
 /* Pointer-copy init */
 THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 {
-  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(THCStorage_(new)(state), at::CUDATensorId(), false).release();
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
+    at::CUDATensorId(),
+    false
+  ).release();
   THCTensor_(setStorageNd)(state,
                            self,
                            THTensor_getStoragePtr(tensor),
@@ -85,7 +93,11 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
   if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
-  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(THCStorage_(new)(state), at::CUDATensorId(), false).release();
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
+    at::CUDATensorId(),
+    false
+  ).release();
   THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
 
@@ -594,13 +606,13 @@ int THCTensor_(checkGPU)(THCState *state, unsigned int nTensors, ...)
     }
 
     const int tensorDev = THCTensor_(getDevice)(state, tensor);
-    
+
     // Skips CPU tensors
     if (tensorDev == -1) { continue; }
 
     // Checks all tensors are on the same device
-    if (tensorDev != curDev) { 
-      valid = 0; 
+    if (tensorDev != curDev) {
+      valid = 0;
       break;
     }
   }

@@ -54,13 +54,21 @@ scalar_t *THTensor_(data)(const THTensor *self) {
 /* Empty init */
 THTensor *THTensor_(new)(void)
 {
-  return c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(THStorage_(new)(), at::CPUTensorId(), false).release();
+  return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
+    at::CPUTensorId(),
+    false
+  ).release();
 }
 
 /* Pointer-copy init */
 THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
-  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(THStorage_(new)(), at::CPUTensorId(), false).release();
+  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
+    at::CPUTensorId(),
+    false
+  ).release();
   THTensor_(setStorageNd)(self,
                           THTensor_getStoragePtr(tensor),
                           tensor->storage_offset(),
@@ -75,7 +83,11 @@ THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
   if (strides.data()) {
     AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
-  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensor>(THStorage_(new)(), at::CPUTensorId(), false).release();
+  THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
+    at::CPUTensorId(),
+    false
+  ).release();
   THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
 
@@ -547,7 +559,7 @@ ptrdiff_t THTensor_(nElement)(const THTensor *self)
   }
 }
 
-// NB: It is INVALID to call this on an UndefinedTensor
+// NB: It is INVALID to call this on an UndefinedTensorImpl
 void THTensor_(retain)(THTensor *self)
 {
   c10::raw::intrusive_ptr::incref(self);

@@ -29,28 +29,49 @@ class NNModule(object):
     def dataFlow(self):
         return self._NNModule.dataFlow()
 
-    def dumpDataFlow(self):
-        s = self._NNModule.dotString()
-        cmd_exists = lambda x: any(
-            os.access(os.path.join(path, x), os.X_OK)
-            for path in os.environ["PATH"].split(os.pathsep)
-        )
-        if cmd_exists("graph-easy"):
-            p = Popen("graph-easy", stdin=PIPE)
-            try:
-                p.stdin.write(s.encode("utf-8"))
-            except IOError as e:
-                if e.errno == errno.EPIPE or e.errno == errno.EINVAL:
-                    pass
-                else:
-                    # Raise any other error.
-                    raise
+    def convertToCaffe2Proto(self, old_proto=None):
+        if not old_proto:
+            old_proto = caffe2_pb2.NetDef()
+        output = self._NNModule.convertToCaffe2Proto(old_proto)
+        new_proto = caffe2_pb2.NetDef()
+        new_proto.ParseFromString(output)
+        return new_proto
 
-            p.stdin.close()
-            p.wait()
-        else:
-            print(s)
+    def match(self, pattern):
+        for n in self.dataFlow.getMutableNodes():
+            m = C.matchSubgraph(n, pattern)
+            if m:
+                yield m
+
+
+def render(s):
+    s = str(s)
+    cmd_exists = lambda x: any(
+        os.access(os.path.join(path, x), os.X_OK)
+        for path in os.environ["PATH"].split(os.pathsep)
+    )
+    if cmd_exists("graph-easy"):
+        p = Popen("graph-easy", stdin=PIPE)
+        try:
+            p.stdin.write(s.encode("utf-8"))
+        except IOError as e:
+            if e.errno == errno.EPIPE or e.errno == errno.EINVAL:
+                pass
+            else:
+                # Raise any other error.
+                raise
+
+        p.stdin.close()
+        p.wait()
+    else:
+        print(s)
 
 
 NeuralNetOperator = C.NeuralNetOperator
+Operator = C.NeuralNetOperator
 NeuralNetData = C.NeuralNetData
+Data = C.NeuralNetData
+NNSubgraph = C.NNSubgraph
+NNMatchGraph = C.NNMatchGraph
+Graph = C.Graph
+Annotation = C.Annotation

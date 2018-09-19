@@ -20,7 +20,7 @@ struct Fan {
     const auto dimensions = tensor.ndimension();
     AT_CHECK(
         dimensions >= 2,
-        "Fan in and fan out can not be computed for tensor with less than 2 dimensions");
+        "Fan in and fan out can not be computed for tensor with fewer than 2 dimensions");
 
     if (dimensions == 2) {
       in = tensor.size(1);
@@ -69,11 +69,11 @@ Tensor dirac_(Tensor tensor) {
   return tensor;
 }
 
-Tensor eye_(Tensor tensor) {
+Tensor eye_(Tensor matrix) {
   NoGradGuard guard;
   AT_CHECK(
-      tensor.ndimension() == 2, "Only tensors with 2 dimensions are supported");
-  return torch::eye_out(tensor, tensor.size(0), tensor.size(1));
+      matrix.ndimension() == 2, "Only tensors with 2 dimensions are supported");
+  return torch::eye_out(matrix, matrix.size(0), matrix.size(1));
 }
 
 Tensor normal_(Tensor tensor, double mean, double std) {

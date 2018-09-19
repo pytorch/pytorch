@@ -8,7 +8,7 @@
 
 #include <numeric>
 
-// NB: This is NOT valid on UndefinedTensor
+// NB: This is NOT valid on UndefinedTensorImpl
 void THTensor_free(THTensor *self)
 {
   if (!self) return;
@@ -39,14 +39,14 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = at::dataTypeToScalarType(THTensor_getStoragePtr(self)->dtype());
+    auto data_type = THTensor_getStoragePtr(self)->dtype();
     if(storage)
     {
       c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     }
     else {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(scalar_type));
+      THTensor_stealAndSetStoragePtr(self, THStorage_new(data_type));
     }
   }
 
@@ -123,7 +123,7 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
   if(totalSize+self->storage_offset() > 0)
   {
     if(!THTensor_getStoragePtr(self)) {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(self->scalar_type()));
+      THTensor_stealAndSetStoragePtr(self, THStorage_new(self->dtype()));
     }
     if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->numel()) {
       THStorage_resize(THTensor_getStoragePtr(self), totalSize+self->storage_offset());
@@ -202,5 +202,5 @@ void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 might have tensors whose storages are null, but we
   // don't allow it in PyTorch.
   AT_ASSERT(storage);
-  tensor->storage_ = at::Storage(storage);
+  tensor->storage_ = at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage));
 }

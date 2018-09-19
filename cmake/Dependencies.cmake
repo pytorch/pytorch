@@ -83,9 +83,10 @@ elseif(BLAS STREQUAL "MKL")
   else()
     find_package(MKL QUIET)
   endif()
+  include(${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake)
   if(MKL_FOUND)
     include_directories(SYSTEM ${MKL_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${MKL_LIBRARIES})
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -184,18 +185,21 @@ endif()
 
 # ---[ Googletest and benchmark
 if(BUILD_TEST)
+  # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+
   # We will build gtest as static libs and embed it directly into the binary.
-  set(BUILD_SHARED_LIBS OFF)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+
   # For gtest, we will simply embed it into our test binaries, so we won't
   # need to install it.
-  set(BUILD_GTEST ON)
-  set(INSTALL_GTEST OFF)
+  set(BUILD_GTEST ON CACHE BOOL "Build gtest" FORCE)
+  set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
   # We currently don't need gmock right now.
-  set(BUILD_GMOCK OFF)
+  set(BUILD_GMOCK OFF CACHE BOOL "Build gmock." FORCE)
   # For Windows, we will check the runtime used is correctly passed in.
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
-    set(gtest_force_shared_crt ON)
+      set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
   include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
@@ -207,8 +211,8 @@ if(BUILD_TEST)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
   include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark/include)
 
-  # Recover the build shared libs option.
-  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+  # Recover build options.
+  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 endif()
 
 # ---[ LMDB
@@ -323,11 +327,17 @@ endif()
 # ---[ EIGEN
 # Due to license considerations, we will only use the MPL2 parts of Eigen.
 set(EIGEN_MPL2_ONLY 1)
-find_package(Eigen3)
-if(EIGEN3_FOUND)
-  message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+if (USE_SYSTEM_EIGEN_INSTALL)
+  find_package(Eigen3)
+  if(EIGEN3_FOUND)
+    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+  else()
+    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
+    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
+  endif()
 else()
-  message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+  message(STATUS "Using third party subdirectory Eigen.")
   set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
 endif()
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
@@ -339,7 +349,9 @@ if(BUILD_PYTHON)
     execute_process(
       COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
     if(${_exitcode} EQUAL 0)
-      string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      if (NOT MSVC)
+        string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      endif()
       message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
     endif()
   endif()
@@ -378,7 +390,11 @@ if(BUILD_PYTHON)
     pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       SET(PYTHON_LIBRARY "${_py_lib}")
-      message(STATUS "Setting Python's library to ${_py_lib}")
+      if (MSVC)
+        STRING(REPLACE "Lib" "libs" _py_static_lib ${_py_lib})
+        link_directories(${_py_static_lib})
+      endif()
+      message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
     endif()
   endif(NOT DEFINED PYTHON_LIBRARY)
 
@@ -399,11 +415,18 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-find_package(pybind11)
-if(pybind11_FOUND)
-  include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
+find_package(pybind11 CONFIG)
+if((DEFINED pybind11_DIR) AND pybind11_DIR)
+  get_target_property(pybind11_INCLUDE_DIRS pybind11::pybind11 INTERFACE_INCLUDE_DIRECTORIES)
 else()
-  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
+  message("pybind11 config not found. Fallback to legacy find.")
+  find_package(pybind11)
+endif()
+
+if(pybind11_FOUND)
+    include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
+else()
+    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
 endif()
 
 # ---[ MPI
@@ -525,6 +548,7 @@ if(NOT BUILD_ATEN_MOBILE)
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-negative")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-overflow")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-duplicate-decl-specifier")
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
@@ -750,10 +774,7 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-# TODO(orionr): Enable all of this for Windows DLL when we
-# can figure out how to get it to build
-if (NOT (MSVC AND BUILD_SHARED_LIBS))
-if (NOT BUILD_ATEN_MOBILE)
+if (NOT BUILD_ATEN_MOBILE AND BUILD_CAFFE2_OPS)
   if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
     if (USE_CUDA)
@@ -761,7 +782,6 @@ if (NOT BUILD_ATEN_MOBILE)
     endif()
     include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
   endif()
-endif()
 endif()
 
 if (USE_ZSTD)
@@ -779,6 +799,11 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   # We will build onnx as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF)
+  if (MSVC AND BUILD_SHARED_LIBS)
+    # That also means we want to export all symbols from the shared
+    # library we are building
+    set(ONNX_BUILD_MAIN_LIB ON)
+  endif()
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
   set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
   # If linking local protobuf, make sure ONNX has the same protobuf

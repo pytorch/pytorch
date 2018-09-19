@@ -78,7 +78,7 @@ class ProcessGroupMPI : public ProcessGroup {
     virtual ~WorkMPI();
 
     // Checks if request has completed. Non-blocking operation.
-    bool isCompleted() const override;
+    bool isCompleted() override;
 
     // Returns if the work completed successfully
     // if false, the exception function can be called to get details.
@@ -105,6 +105,28 @@ class ProcessGroupMPI : public ProcessGroup {
     std::exception_ptr workException_;
 
     friend class ProcessGroupMPI;
+  };
+
+  class AsyncWork : public ProcessGroup::Work {
+   public:
+    AsyncWork(at::Tensor tensor, MPI_Request request, int* srcRank = nullptr);
+    virtual ~AsyncWork();
+
+    bool isCompleted() override;
+
+    bool isSuccess() const override;
+
+    void synchronize() override;
+
+    bool wait() override;
+
+    const std::exception& exception() const override;
+
+   protected:
+    at::Tensor tensor_;
+    MPI_Request request_;
+    int* const srcRank_;
+    MPI_Status status_;
   };
 
   // Constructor will spawn up the worker thread loop
@@ -143,15 +165,18 @@ class ProcessGroupMPI : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
-      int dstRank);
+      int dstRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
-      int srcRank);
+      int srcRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensor,
-      int* srcRank);
+      int* srcRank,
+      int tag);
 
   std::shared_ptr<ProcessGroup::Work> barrier();
 

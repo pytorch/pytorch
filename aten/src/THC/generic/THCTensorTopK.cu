@@ -2,11 +2,11 @@
 #define THC_GENERIC_FILE "generic/THCTensorTopK.cu"
 #else
 
-THC_API void THCTensor_(topk)(THCState* state,
-                               THCTensor *topK,
-                               THCudaLongTensor *indices,
-                               THCTensor *input_,
-                               int64_t k, int dim, int dir, int sorted) {
+void THCTensor_(topk)(THCState* state,
+                      THCTensor *topK,
+                      THCudaLongTensor *indices,
+                      THCTensor *input_,
+                      int64_t k, int dim, int dir, int sorted) {
   THAssert(topK != NULL && indices != NULL && input_ != NULL);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);

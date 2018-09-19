@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include "catch_utils.hpp"
 
 #include <torch/nn/modules/any.h>
 #include <torch/torch.h>
@@ -13,37 +13,39 @@ using namespace torch::detail;
 using Catch::Contains;
 using Catch::StartsWith;
 
-TEST_CASE("any-module") {
+CATCH_TEST_CASE("any-module") {
   torch::manual_seed(0);
-  SECTION("int()") {
+  CATCH_SECTION("int()") {
     struct M : torch::nn::Module {
       int forward() {
         return 123;
       }
     };
     AnyModule any(M{});
-    REQUIRE(any.forward().get<int>() == 123);
+    CATCH_REQUIRE(any.forward<int>() == 123);
   }
-  SECTION("int(int)") {
+
+  CATCH_SECTION("int(int)") {
     struct M : torch::nn::Module {
       int forward(int x) {
         return x;
       }
     };
     AnyModule any(M{});
-    REQUIRE(any.forward(5).get<int>() == 5);
+    CATCH_REQUIRE(any.forward<int>(5) == 5);
   }
-  SECTION("const char*(const char*)") {
+
+  CATCH_SECTION("const char*(const char*)") {
     struct M : torch::nn::Module {
       const char* forward(const char* x) {
         return x;
       }
     };
     AnyModule any(M{});
-    REQUIRE(any.forward("hello").get<const char*>() == std::string("hello"));
+    CATCH_REQUIRE(any.forward<const char*>("hello") == std::string("hello"));
   }
 
-  SECTION("string(int, const double)") {
+  CATCH_SECTION("string(int, const double)") {
     struct M : torch::nn::Module {
       std::string forward(int x, const double f) {
         return std::to_string(static_cast<int>(x + f));
@@ -51,10 +53,10 @@ TEST_CASE("any-module") {
     };
     AnyModule any(M{});
     int x = 4;
-    REQUIRE(any.forward(x, 3.14).get<std::string>() == std::string("7"));
+    CATCH_REQUIRE(any.forward<std::string>(x, 3.14) == std::string("7"));
   }
 
-  SECTION("Tensor(string, const string&, string&&)") {
+  CATCH_SECTION("Tensor(string, const string&, string&&)") {
     struct M : torch::nn::Module {
       torch::Tensor forward(
           std::string a,
@@ -65,42 +67,42 @@ TEST_CASE("any-module") {
       }
     };
     AnyModule any(M{});
-    REQUIRE(
-        any.forward(std::string("a"), std::string("ab"), std::string("abc"))
-            .get<torch::Tensor>()
+    CATCH_REQUIRE(
+        any.forward(
+               std::string("a"), std::string("ab"), std::string("abc"))
             .sum()
             .toCInt() == 6);
   }
-  SECTION("wrong argument type") {
+  CATCH_SECTION("wrong argument type") {
     struct M : torch::nn::Module {
       int forward(float x) {
         return x;
       }
     };
     AnyModule any(M{});
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         any.forward(5.0),
         StartsWith("Expected argument #0 to be of type float, "
                    "but received value of type double"));
   }
-  SECTION("wrong number of arguments") {
+  CATCH_SECTION("wrong number of arguments") {
     struct M : torch::nn::Module {
       int forward(int a, int b) {
         return a + b;
       }
     };
     AnyModule any(M{});
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         any.forward(),
         Contains("M's forward() method expects 2 arguments, but received 0"));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         any.forward(5),
         Contains("M's forward() method expects 2 arguments, but received 1"));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         any.forward(1, 2, 3),
         Contains("M's forward() method expects 2 arguments, but received 3"));
   }
-  SECTION("get()") {
+  CATCH_SECTION("get()") {
     struct M : torch::nn::Module {
       explicit M(int value_) : torch::nn::Module("M"), value(value_) {}
       int value;
@@ -110,16 +112,16 @@ TEST_CASE("any-module") {
     };
     AnyModule any(M{5});
 
-    SECTION("good cast") {
-      REQUIRE(any.get<M>().value == 5);
+    CATCH_SECTION("good cast") {
+      CATCH_REQUIRE(any.get<M>().value == 5);
     }
 
-    SECTION("bad cast") {
+    CATCH_SECTION("bad cast") {
       struct N : torch::nn::Module {};
-      REQUIRE_THROWS_WITH(any.get<N>(), StartsWith("Attempted to cast module"));
+      CATCH_REQUIRE_THROWS_WITH(any.get<N>(), StartsWith("Attempted to cast module"));
     }
   }
-  SECTION("ptr()") {
+  CATCH_SECTION("ptr()") {
     struct M : torch::nn::Module {
       explicit M(int value_) : torch::nn::Module("M"), value(value_) {}
       int value;
@@ -129,24 +131,24 @@ TEST_CASE("any-module") {
     };
     AnyModule any(M{5});
 
-    SECTION("base class cast") {
+    CATCH_SECTION("base class cast") {
       auto ptr = any.ptr();
-      REQUIRE(ptr != nullptr);
-      REQUIRE(ptr->name() == "M");
+      CATCH_REQUIRE(ptr != nullptr);
+      CATCH_REQUIRE(ptr->name() == "M");
     }
 
-    SECTION("good downcast") {
+    CATCH_SECTION("good downcast") {
       auto ptr = any.ptr<M>();
-      REQUIRE(ptr != nullptr);
-      REQUIRE(ptr->value == 5);
+      CATCH_REQUIRE(ptr != nullptr);
+      CATCH_REQUIRE(ptr->value == 5);
     }
 
-    SECTION("bad downcast") {
+    CATCH_SECTION("bad downcast") {
       struct N : torch::nn::Module {};
-      REQUIRE_THROWS_WITH(any.ptr<N>(), StartsWith("Attempted to cast module"));
+      CATCH_REQUIRE_THROWS_WITH(any.ptr<N>(), StartsWith("Attempted to cast module"));
     }
   }
-  SECTION("default state is empty") {
+  CATCH_SECTION("default state is empty") {
     struct M : torch::nn::Module {
       explicit M(int value_) : value(value_) {}
       int value;
@@ -155,33 +157,33 @@ TEST_CASE("any-module") {
       }
     };
     AnyModule any;
-    REQUIRE(any.is_empty());
+    CATCH_REQUIRE(any.is_empty());
     any = std::make_shared<M>(5);
-    REQUIRE(!any.is_empty());
-    REQUIRE(any.get<M>().value == 5);
+    CATCH_REQUIRE(!any.is_empty());
+    CATCH_REQUIRE(any.get<M>().value == 5);
   }
-  SECTION("all methods throw for empty AnyModule") {
+  CATCH_SECTION("all methods throw for empty AnyModule") {
     struct M : torch::nn::Module {
       int forward(int x) {
         return x;
       }
     };
     AnyModule any;
-    REQUIRE(any.is_empty());
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE(any.is_empty());
+    CATCH_REQUIRE_THROWS_WITH(
         any.get<M>(), StartsWith("Cannot call get() on an empty AnyModule"));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         any.ptr<M>(), StartsWith("Cannot call ptr() on an empty AnyModule"));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         any.ptr(), StartsWith("Cannot call ptr() on an empty AnyModule"));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         any.type_info(),
         StartsWith("Cannot call type_info() on an empty AnyModule"));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         any.forward<int>(5),
         StartsWith("Cannot call forward() on an empty AnyModule"));
   }
-  SECTION("can move assign differentm modules") {
+  CATCH_SECTION("can move assign different modules") {
     struct M : torch::nn::Module {
       std::string forward(int x) {
         return std::to_string(x);
@@ -193,15 +195,15 @@ TEST_CASE("any-module") {
       }
     };
     AnyModule any;
-    REQUIRE(any.is_empty());
+    CATCH_REQUIRE(any.is_empty());
     any = std::make_shared<M>();
-    REQUIRE(!any.is_empty());
-    REQUIRE(any.forward(5).get<std::string>() == "5");
+    CATCH_REQUIRE(!any.is_empty());
+    CATCH_REQUIRE(any.forward<std::string>(5) == "5");
     any = std::make_shared<N>();
-    REQUIRE(!any.is_empty());
-    REQUIRE(any.forward(5.0f).get<int>() == 8);
+    CATCH_REQUIRE(!any.is_empty());
+    CATCH_REQUIRE(any.forward<int>(5.0f) == 8);
   }
-  SECTION("constructs from ModuleHolder") {
+  CATCH_SECTION("constructs from ModuleHolder") {
     struct MImpl : torch::nn::Module {
       explicit MImpl(int value_) : torch::nn::Module("M"), value(value_) {}
       int value;
@@ -216,10 +218,14 @@ TEST_CASE("any-module") {
     };
 
     AnyModule any(M{5});
-    REQUIRE(any.get<MImpl>().value == 5);
-    REQUIRE(any.get<M>()->value == 5);
+    CATCH_REQUIRE(any.get<MImpl>().value == 5);
+    CATCH_REQUIRE(any.get<M>()->value == 5);
+
+    AnyModule module(Linear(3, 4));
+    std::shared_ptr<Module> ptr = module.ptr();
+    Linear linear(module.get<Linear>());
   }
-  SECTION("converts autograd::Variable to torch::Tensor correctly") {
+  CATCH_SECTION("converts autograd::Variable to torch::Tensor correctly") {
     struct M : torch::nn::Module {
       torch::Tensor forward(torch::Tensor input) {
         return input;
@@ -230,14 +236,12 @@ TEST_CASE("any-module") {
       // torch::Tensor before being passed to the function (to avoid a type
       // mismatch).
       AnyModule any(M{});
-      REQUIRE(
+      CATCH_REQUIRE(
           any.forward(torch::autograd::Variable(torch::ones(5)))
-              .get<torch::Tensor>()
               .sum()
               .toCFloat() == 5);
       // at::Tensors that are not variables work too.
-      REQUIRE(
-          any.forward(at::ones(5)).get<torch::Tensor>().sum().toCFloat() == 5);
+      CATCH_REQUIRE(any.forward(at::ones(5)).sum().toCFloat() == 5);
     }
   }
 }
@@ -259,92 +263,92 @@ AnyModule::Value make_value(T&& value) {
 } // namespace nn
 } // namespace torch
 
-TEST_CASE("any-value") {
+CATCH_TEST_CASE("any-value") {
   torch::manual_seed(0);
-  SECTION("gets the correct value for the right type") {
-    SECTION("int") {
+  CATCH_SECTION("gets the correct value for the right type") {
+    CATCH_SECTION("int") {
       auto value = make_value(5);
       // const and non-const types have the same typeid()
-      REQUIRE(value.try_get<int>() != nullptr);
-      REQUIRE(value.try_get<const int>() != nullptr);
-      REQUIRE(value.get<int>() == 5);
+      CATCH_REQUIRE(value.try_get<int>() != nullptr);
+      CATCH_REQUIRE(value.try_get<const int>() != nullptr);
+      CATCH_REQUIRE(value.get<int>() == 5);
     }
-    SECTION("const int") {
+    CATCH_SECTION("const int") {
       auto value = make_value(5);
-      REQUIRE(value.try_get<const int>() != nullptr);
-      REQUIRE(value.try_get<int>() != nullptr);
-      REQUIRE(value.get<const int>() == 5);
+      CATCH_REQUIRE(value.try_get<const int>() != nullptr);
+      CATCH_REQUIRE(value.try_get<int>() != nullptr);
+      CATCH_REQUIRE(value.get<const int>() == 5);
     }
-    SECTION("const char*") {
+    CATCH_SECTION("const char*") {
       auto value = make_value("hello");
-      REQUIRE(value.try_get<const char*>() != nullptr);
-      REQUIRE(value.get<const char*>() == std::string("hello"));
+      CATCH_REQUIRE(value.try_get<const char*>() != nullptr);
+      CATCH_REQUIRE(value.get<const char*>() == std::string("hello"));
     }
-    SECTION("std::string") {
+    CATCH_SECTION("std::string") {
       auto value = make_value(std::string("hello"));
-      REQUIRE(value.try_get<std::string>() != nullptr);
-      REQUIRE(value.get<std::string>() == "hello");
+      CATCH_REQUIRE(value.try_get<std::string>() != nullptr);
+      CATCH_REQUIRE(value.get<std::string>() == "hello");
     }
-    SECTION("pointers") {
+    CATCH_SECTION("pointers") {
       std::string s("hello");
       std::string* p = &s;
       auto value = make_value(p);
-      REQUIRE(value.try_get<std::string*>() != nullptr);
-      REQUIRE(*value.get<std::string*>() == "hello");
+      CATCH_REQUIRE(value.try_get<std::string*>() != nullptr);
+      CATCH_REQUIRE(*value.get<std::string*>() == "hello");
     }
-    SECTION("references") {
+    CATCH_SECTION("references") {
       std::string s("hello");
       const std::string& t = s;
       auto value = make_value(t);
-      REQUIRE(value.try_get<std::string>() != nullptr);
-      REQUIRE(value.get<std::string>() == "hello");
+      CATCH_REQUIRE(value.try_get<std::string>() != nullptr);
+      CATCH_REQUIRE(value.get<std::string>() == "hello");
     }
   }
-  SECTION("try_get returns nullptr for the wrong type") {
+  CATCH_SECTION("try_get returns nullptr for the wrong type") {
     auto value = make_value(5);
-    REQUIRE(value.try_get<int>() != nullptr);
-    REQUIRE(value.try_get<float>() == nullptr);
-    REQUIRE(value.try_get<long>() == nullptr);
-    REQUIRE(value.try_get<std::string>() == nullptr);
+    CATCH_REQUIRE(value.try_get<int>() != nullptr);
+    CATCH_REQUIRE(value.try_get<float>() == nullptr);
+    CATCH_REQUIRE(value.try_get<long>() == nullptr);
+    CATCH_REQUIRE(value.try_get<std::string>() == nullptr);
   }
-  SECTION("get throws for the wrong type") {
+  CATCH_SECTION("get throws for the wrong type") {
     auto value = make_value(5);
-    REQUIRE(value.try_get<int>() != nullptr);
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE(value.try_get<int>() != nullptr);
+    CATCH_REQUIRE_THROWS_WITH(
         value.get<float>(),
         StartsWith("Attempted to cast Value to float, "
                    "but its actual type is int"));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         value.get<long>(),
         StartsWith("Attempted to cast Value to long, "
                    "but its actual type is int"));
   }
-  SECTION("move is allowed") {
+  CATCH_SECTION("move is allowed") {
     auto value = make_value(5);
-    SECTION("construction") {
+    CATCH_SECTION("construction") {
       auto copy = make_value(std::move(value));
-      REQUIRE(copy.try_get<int>() != nullptr);
-      REQUIRE(copy.get<int>() == 5);
+      CATCH_REQUIRE(copy.try_get<int>() != nullptr);
+      CATCH_REQUIRE(copy.get<int>() == 5);
     }
-    SECTION("assignment") {
+    CATCH_SECTION("assignment") {
       auto copy = make_value(10);
       copy = std::move(value);
-      REQUIRE(copy.try_get<int>() != nullptr);
-      REQUIRE(copy.get<int>() == 5);
+      CATCH_REQUIRE(copy.try_get<int>() != nullptr);
+      CATCH_REQUIRE(copy.get<int>() == 5);
     }
   }
-  SECTION("type_info is correct") {
-    SECTION("int") {
+  CATCH_SECTION("type_info is correct") {
+    CATCH_SECTION("int") {
       auto value = make_value(5);
-      REQUIRE(value.type_info().hash_code() == typeid(int).hash_code());
+      CATCH_REQUIRE(value.type_info().hash_code() == typeid(int).hash_code());
     }
-    SECTION("const char") {
+    CATCH_SECTION("const char") {
       auto value = make_value("hello");
-      REQUIRE(value.type_info().hash_code() == typeid(const char*).hash_code());
+      CATCH_REQUIRE(value.type_info().hash_code() == typeid(const char*).hash_code());
     }
-    SECTION("std::string") {
+    CATCH_SECTION("std::string") {
       auto value = make_value(std::string("hello"));
-      REQUIRE(value.type_info().hash_code() == typeid(std::string).hash_code());
+      CATCH_REQUIRE(value.type_info().hash_code() == typeid(std::string).hash_code());
     }
   }
 }

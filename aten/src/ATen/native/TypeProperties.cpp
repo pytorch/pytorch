@@ -13,6 +13,10 @@ bool is_distributed(const Tensor& self) {
   return self.type().is_distributed();
 }
 
+bool is_complex(const Tensor& self) {
+  return at::isComplexType(self.type().scalarType());
+}
+
 bool is_floating_point(const Tensor& self) {
   return at::isFloatingType(self.type().scalarType());
 }

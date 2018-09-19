@@ -167,7 +167,7 @@ static void BM_OperatorCreationCPU(benchmark::State& state) {
   OperatorDef def;
   Workspace ws;
   def.set_type("DummyEmpty");
-  def.mutable_device_option()->set_device_type(CPU);
+  def.mutable_device_option()->set_device_type(PROTO_CPU);
   while (state.KeepRunning()) {
     op = CreateOperator(def, &ws);
   }
@@ -180,7 +180,7 @@ static void BM_OperatorCreationCUDA(benchmark::State& state) {
   OperatorDef def;
   Workspace ws;
   def.set_type("DummyEmpty");
-  def.mutable_device_option()->set_device_type(CUDA);
+  def.mutable_device_option()->set_device_type(PROTO_CUDA);
   while (state.KeepRunning()) {
     op = CreateOperator(def, &ws);
   }

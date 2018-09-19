@@ -1,5 +1,5 @@
 #include "ATen/cuda/CUDAContext.h"
-#include "THC/THCGeneral.h"
+#include "THC/THCGeneral.hpp"
 
 namespace at { namespace cuda { 
 
@@ -14,6 +14,10 @@ int64_t current_device() {
   int cur_device;
   AT_CUDA_CHECK(cudaGetDevice(&cur_device));
   return cur_device;
+}
+
+void set_device(int64_t device) {
+  AT_CUDA_CHECK(cudaSetDevice((int)device));
 }
 
 cudaDeviceProp* getCurrentDeviceProperties() {
@@ -43,6 +47,10 @@ void setCurrentCUDAStream(CUDAStream stream) {
 }
 void uncheckedSetCurrentCUDAStream(CUDAStream stream) {
   detail::CUDAStream_uncheckedSetStream(stream.internals());
+}
+
+Allocator* getCUDADeviceAllocator() {
+  return at::globalContext().getTHCState()->cudaDeviceAllocator;
 }
 
 /* Handles */

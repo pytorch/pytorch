@@ -5,6 +5,8 @@
 
 #include <unordered_map>
 #include <sstream>
+#include <limits>
+#include <type_traits>
 #include <ATen/ATen.h>
 #include <THC/THC.h>
 #include <THC/THCStream.h>
@@ -26,7 +28,7 @@ struct NcclCommList {
   int ndevices;
   NcclCommList(const std::vector<int>& devices)
     : comms(new ncclComm_t[devices.size()]), ndevices(devices.size()) {
-    CHECK(ncclCommInitAll(comms.get(), devices.size(), devices.data()));
+    NCCL_CHECK(ncclCommInitAll(comms.get(), devices.size(), devices.data()));
   }
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {
@@ -177,6 +179,28 @@ std::uint64_t version() {
 #endif
 }
 
+namespace {
+  // NCCL changed the numerical type used for count between NCCL1 and NCCL2.
+  // So we use the following struct, which gets the type of the second argument
+  // of T, if T is a function type, with ncclBcast, to get that type statically
+  // and programmatically.
+
+  template<typename T>
+  struct GetSecondArgType;
+
+  template<typename R, typename Arg0, typename Arg1, typename ...Args>
+  struct GetSecondArgType<R(Arg0, Arg1, Args...)> {
+    typedef typename std::decay<Arg1>::type type;
+  };
+
+  constexpr auto count_max = std::numeric_limits<GetSecondArgType<decltype(ncclBcast)>::type>::max();
+}
+
+size_t get_max_count() {
+  return count_max;
+}
+
+
 void broadcast(TensorList tensors, const stream_list& streams, const comm_list& user_comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
@@ -192,7 +216,10 @@ void broadcast(TensorList tensors, const stream_list& streams, const comm_list& 
     device_guard.set_index(tensors[i].get_device());
     // TODO: use current stream
     const auto stream = (streams.empty() || !streams[i]) ? nullptr : THCStream_stream(streams[i]);
-    CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
+    AT_CHECK(static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
+             "Broadcast tensor has ", numel, " elements, which exceeds the "
+             "maximum NCCL supports (", count_max, ")");
+    NCCL_CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
   }
 #else
   throw std::runtime_error("PyTorch built without NCCL support");
