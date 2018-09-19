@@ -202,7 +202,7 @@ public:
 #if defined(__cpp_deduction_guides) && __cpp_deduction_guides >= 201606
   template<typename _Tp, typename... _Up>
   array(_Tp, _Up...) ->
-    array<enable_if_t<(is_same_v<_Tp, _Up> && ...), _Tp>, 1 + sizeof...(_Up)>;
+    array<enable_if_t<(std::is_same<_Tp, _Up>::value && ...), _Tp>, 1 + sizeof...(_Up)>;
 #endif
 
 // Array comparisons.
