@@ -81,6 +81,8 @@ class reduce_op(object):
                       "torch.distributed.ReduceOp instead")
         return getattr(ReduceOp, key)
 
+reduce_op = reduce_op()
+
 
 class group(object):
     WORLD = object()
