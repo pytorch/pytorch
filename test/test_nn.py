@@ -6187,7 +6187,7 @@ class TestNNInit(TestCase):
                 flattened_tensor = input_tensor.view(rows, cols)
                 identities = torch.mm(flattened_tensor, flattened_tensor.t())
                 for i in range(0, rows, cols):
-                    identity = identities[i:i+cols, i:i+cols]
+                    identity = identities[i:i + cols, i:i + cols]
                     self.assertEqual(identity, torch.eye(identity.size(0)) * gain ** 2, prec=1e-6)
 
     def test_deprecation(self):
