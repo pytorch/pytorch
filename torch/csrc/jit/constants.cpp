@@ -29,7 +29,7 @@ Value* insertConstant(
     n->output()->setType(BoolType::get());
   } else if (val.isBoolList()) {
     auto bool_list = val.toBoolList()->elements();
-    n->is_(attr::value, std::vector<long>(bool_list.begin(), bool_list.end()));
+    n->is_(attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
     n->output()->setType(ListType::ofBools());
   } else if(val.isIntList()) {
     n->is_(attr::value, val.toIntList()->elements());

@@ -224,14 +224,14 @@ struct AT_API IValue final {
   }
 
   // BoolList
-  IValue(Shared<BoolList> v);
+  IValue(c10::intrusive_ptr<BoolList> v);
   IValue(std::vector<bool> v);
-  bool isBoolList() const { return Tag::BoolList == tag; }
-  Shared<BoolList> toBoolList() && {
+  bool isBoolList() const { return Tag::DoubleList == tag; }
+  c10::intrusive_ptr<BoolList> toBoolList() && {
     AT_ASSERT(isBoolList());
     return moveToIntrusivePtr<BoolList>();
   }
-  Shared<BoolList> toBoolList() const & {
+  c10::intrusive_ptr<BoolList> toBoolList() const & {
     AT_ASSERT(isBoolList());
     return toIntrusivePtr<BoolList>();
   }
