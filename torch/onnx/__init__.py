@@ -15,6 +15,7 @@ class ExportTypes:
     ZIP_ARCHIVE = 2
     COMPRESSED_ZIP_ARCHIVE = 3
     DIRECTORY = 4
+    PROTOBUF_STRING = 5
 
 
 def _export(*args, **kwargs):
@@ -25,6 +26,18 @@ def _export(*args, **kwargs):
 def export(*args, **kwargs):
     from torch.onnx import utils
     return utils.export(*args, **kwargs)
+
+
+def export_ir_graph(*args, **kwargs):
+    from torch.onnx import utils
+    kwargs['operator_export_type'] = OperatorExportTypes.RAW
+    kwargs['export_type'] = ExportTypes.PROTOBUF_STRING
+    return utils.export(*args, **kwargs)
+
+
+def import_ir_graph(*args, **kwargs):
+    from torch.onnx import utils
+    return utils.import_ir_graph(*args, **kwargs)
 
 
 def export_to_pretty_string(*args, **kwargs):

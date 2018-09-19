@@ -6,6 +6,9 @@
 namespace torch {
 namespace jit {
 
+TORCH_API std::tuple<std::shared_ptr<Graph>, std::vector<at::Tensor>>
+    import_ir_graph(const std::string &proto_str);
+
 using ModuleLookup = std::function<std::shared_ptr<script::Module>(
     const std::vector<std::string>&)>;
 

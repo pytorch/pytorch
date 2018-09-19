@@ -178,15 +178,14 @@ void DecoderBase::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
   }
 }
 
-class ModuleDecoder : DecoderBase {
+class IRGraphDecoder : public DecoderBase {
  public:
-  ModuleDecoder(ModuleLookup module_lookup,
-                const std::string& filename);
+  IRGraphDecoder() {}
 
- private:
+  std::tuple<std::shared_ptr<Graph>, std::vector<at::Tensor>> decode(const onnx::GraphProto& graph_proto);
+
+ protected:
   virtual std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto) override;
-
-  virtual at::Tensor buildTensor(const onnx::TensorProto& tensor_proto) override;
 
   TypePtr buildType(const onnx::TypeProto& type_proto);
 
@@ -194,30 +193,31 @@ class ModuleDecoder : DecoderBase {
 
   virtual void buildIntermediateValue(Value* value, const std::string& name) override;
 
-  at::Tensor buildParameter(const onnx::TensorProto& tensor_proto);
-
-  at::Tensor buildTensorCommon(const onnx::TensorProto& tensor_proto,
-                               const uint64_t record_number,
-                               const int64_t storage_offset,
-                               const std::vector<int64_t>& strides);
-
-  std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
-      ModuleLookup module_lookup,
-      const std::string fullname);
-
-  PyTorchFileReader file_reader_;
-  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
   std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
-std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx::GraphProto& graph_proto) {
+std::tuple<std::shared_ptr<Graph>, std::vector<at::Tensor>> IRGraphDecoder::decode(const onnx::GraphProto& graph_proto) {
+  auto graph = buildGraph(graph_proto);
+
+  std::vector<at::Tensor> initializers;
+
+  for (auto &tensor_proto : graph_proto.initializer()) {
+    auto tensor = buildTensor(tensor_proto);
+    auto var = autograd::make_variable(tensor);
+    initializers.push_back(std::move(var));
+  }
+
+  return std::make_tuple(graph, std::move(initializers));
+}
+
+std::shared_ptr<Graph> IRGraphDecoder::buildGraph(const onnx::GraphProto& graph_proto) {
   for (auto &subtype : graph_proto.value_info()) {
     value_type_map_[subtype.name()] = &subtype.type();
   }
   return DecoderBase::buildGraph(graph_proto);
 }
 
-TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
+TypePtr IRGraphDecoder::buildType(const onnx::TypeProto& type_proto) {
   auto tensortype_proto = type_proto.tensor_type();
   auto shape_proto = tensortype_proto.shape();
   auto kind = type_proto.denotation();
@@ -267,15 +267,38 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   }
 }
 
-void ModuleDecoder::buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) {
+void IRGraphDecoder::buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) {
   value->setType(buildType(valueinfo_proto.type()));
 }
 
-void ModuleDecoder::buildIntermediateValue(Value* value, const std::string& name) {
+void IRGraphDecoder::buildIntermediateValue(Value* value, const std::string& name) {
   auto it = value_type_map_.find(name);
   JIT_ASSERT(it != value_type_map_.end());
   value->setType(buildType(*it->second));
 }
+
+class ModuleDecoder : IRGraphDecoder {
+ public:
+  ModuleDecoder(ModuleLookup module_lookup,
+                const std::string& filename);
+
+ private:
+  virtual at::Tensor buildTensor(const onnx::TensorProto& tensor_proto) override;
+
+  at::Tensor buildParameter(const onnx::TensorProto& tensor_proto);
+
+  at::Tensor buildTensorCommon(const onnx::TensorProto& tensor_proto,
+                               const uint64_t record_number,
+                               const int64_t storage_offset,
+                               const std::vector<int64_t>& strides);
+
+  std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
+      ModuleLookup module_lookup,
+      const std::string fullname);
+
+  PyTorchFileReader file_reader_;
+  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
+};
 
 at::Tensor ModuleDecoder::buildParameter(const onnx::TensorProto& tensor_proto) {
   std::vector<int64_t> strides;
@@ -389,6 +412,17 @@ ModuleDecoder::ModuleDecoder(
 }
 
 }  // namespace
+
+std::tuple<std::shared_ptr<Graph>, std::vector<at::Tensor>>
+import_ir_graph(const std::string &proto_str) {
+  auto model_proto = ::ONNX_NAMESPACE::ModelProto();
+  model_proto.ParseFromString(proto_str);
+  auto graph_proto = model_proto.graph();
+
+  auto decoder = IRGraphDecoder();
+
+  return decoder.decode(graph_proto);
+}
 
 void import_ir_module(
     ModuleLookup module_lookup,

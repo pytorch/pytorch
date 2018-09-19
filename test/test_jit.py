@@ -30,6 +30,7 @@ import random
 
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
+from torch.onnx.symbolic import _onnx_opset_version
 
 # For testing truediv in python 2
 from test_module.future_div import div_int_future, div_float_future
@@ -244,6 +245,30 @@ class JitTestCase(TestCase):
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
 
+    def assertExportImportIRGraph(self, trace, args):
+        if isinstance(trace, torch._C.Graph):
+            graph = trace
+        else:
+            graph = trace.graph
+
+        proto, _ = graph.export([], _onnx_opset_version, False,
+                                torch.onnx.OperatorExportTypes.RAW)
+
+        imported_graph, _ = torch.onnx.import_ir_graph(proto)
+
+        ge = torch._C.GraphExecutor(graph)
+        imported_ge = torch._C.GraphExecutor(imported_graph)
+
+        self.assertEqual(ge(*args), imported_ge(*args))
+
+    def assertExportImportModelIRGraph(self, model, args):
+        proto = torch.onnx.export_ir_graph(model.eval(), args)
+        graph, initializers = torch.onnx.import_ir_graph(proto)
+
+        ge = torch._C.GraphExecutor(graph)
+
+        self.assertEqual(model(*args), ge(*(args + tuple(initializers))))
+
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
         torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
@@ -281,7 +306,8 @@ class JitTestCase(TestCase):
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    optimize=True, drop=None, allow_unused=False, verbose=False,
-                   inputs_require_grads=True, check_tolerance=1e-5, export_import=True):
+                   inputs_require_grads=True, check_tolerance=1e-5, export_import=True,
+                   ir_export_import=True):
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
@@ -304,6 +330,9 @@ class JitTestCase(TestCase):
             ge = torch._C.GraphExecutor(func, optimize)
         else:
             ge = torch.jit.trace(func, input_tensors, optimize=optimize, check_tolerance=check_tolerance)
+
+        if ir_export_import:
+            self.assertExportImportIRGraph(ge, input_tensors)
 
         if export_import:
             ge = self.getExportImportCopy(ge)
@@ -7102,10 +7131,17 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         bs, nz, ngf, nc, ndf = 5, 6, 9, 3, 10
         self.checkTrace(DCGANGenerator(nz, ngf, nc).to(device),
                         (torch.rand(bs, nz, 1, 1, device=device),),
-                        export_import=check_export_import)
+                        export_import=check_export_import,
+                        ir_export_import=False)
+        self.assertExportImportModelIRGraph(
+                DCGANGenerator(nz, ngf, nc).to(device),
+                (torch.rand(bs, nz, 1, 1, device=device),))
         example_input = DCGANGenerator(nz, ngf, nc).to(device)(torch.rand(bs, nz, 1, 1, device=device))
         self.checkTrace(DCGANDiscriminator(nc, ndf).to(device), (example_input,),
-                        export_import=check_export_import)
+                        export_import=check_export_import,
+                        ir_export_import=False)
+        self.assertExportImportModelIRGraph(
+                DCGANDiscriminator(nc, ndf).to(device), (example_input,))
 
     def test_dcgan_models(self):
         self._test_dcgan_models(self, device='cpu')
@@ -7213,7 +7249,8 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 out = self.conv2d(out)
                 return out
 
-        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 64, 64),), export_import=check_export_import)
+        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 64, 64),), export_import=check_export_import, ir_export_import=False)
+        self.assertExportImportModelIRGraph(TransformerNet(), (torch.rand(5, 3, 64, 64),))
 
     def test_neural_style(self):
         self._test_neural_style(self, device='cpu')
@@ -7227,7 +7264,10 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
     def _test_mnist(self, device, check_export_import=True):
         # eval() is present because dropout makes this nondeterministic
         self.checkTrace(MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),),
-                        export_import=check_export_import)
+                        export_import=check_export_import,
+                        ir_export_import=False)
+        self.assertExportImportModelIRGraph(
+                MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),))
 
     def test_mnist(self):
         self._test_mnist(self, device='cpu')
@@ -7276,7 +7316,10 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                 return F.softmax(action_scores, dim=1)
 
         self.checkTrace(Policy().to(device), (torch.rand(1, 4, device=device),),
-                        export_import=test_export_import)
+                        export_import=test_export_import,
+                        ir_export_import=False)
+        self.assertExportImportModelIRGraph(
+                Policy().to(device), (torch.rand(1, 4, device=device),))
 
     def test_reinforcement_learning(self):
         self._test_reinforcement_learning(self, device='cpu')
@@ -7375,7 +7418,10 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         hypothesis = torch.LongTensor(24, 128).random_(0, 100).to(device)
 
         self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
-                        inputs_require_grads=False, export_import=check_export_import)
+                        inputs_require_grads=False, export_import=check_export_import,
+                        ir_export_import=False)
+        self.assertExportImportModelIRGraph(
+                SNLIClassifier(Config()).to(device), (premise, hypothesis))
 
     @skipIfRocm
     def test_snli(self):
@@ -7412,7 +7458,10 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         net = Net(upscale_factor=4).to(device)
         self.checkTrace(net, (torch.rand(5, 1, 64, 64, device=device),),
-                        export_import=check_export_import)
+                        export_import=check_export_import,
+                        ir_export_import=False)
+        self.assertExportImportModelIRGraph(
+                Net(upscale_factor=4).to(device), (torch.rand(5, 1, 64, 64, device=device),))
 
     @skipIfRocm
     def test_super_resolution(self):
@@ -7480,7 +7529,11 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         # TODO: toggle export_import once above issues are fixed
         self.checkTrace(Sequence(), (torch.rand(3, 4),),
-                        export_import=False)
+                        export_import=False,
+                        ir_export_import=False)
+        # TODO: uncomment once above issues are fixed
+        # self.assertExportImportModelIRGraph(
+        #         Sequence(), (torch.rand(3, 4),))
 
     @staticmethod
     def _test_vae(self, device, check_export_import=True):
@@ -7517,7 +7570,10 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
         # eval() is present because randn_like makes this nondeterministic
         self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
-                        export_import=check_export_import)
+                        export_import=check_export_import,
+                        ir_export_import=False)
+        self.assertExportImportModelIRGraph(
+                VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device), ))
 
     def test_vae(self):
         self._test_vae(self, device='cpu')
