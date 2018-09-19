@@ -3,12 +3,12 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/TensorImpl.h>
 #include <ATen/core/context_base.h>
+#include <ATen/core/context_base.h>
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/context_base.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -21,6 +21,9 @@ CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace caffe2 {
+
+// Defined by protobuf
+class DeviceOption;
 
 /**
  * A utility function to convert vector<int> to vector<TIndex>.
