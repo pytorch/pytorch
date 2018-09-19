@@ -452,7 +452,7 @@ class DataLoader(object):
               :ref:`dataloader-workers-random-seed` section in FAQ.) You may
               use :func:`torch.initial_seed()` to access the PyTorch seed for
               each worker in :attr:`worker_init_fn`, and use it to set other
-             seeds  before data loading.
+              seeds before data loading.
 
     .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
