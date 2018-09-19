@@ -236,7 +236,12 @@ Collective functions
 
 .. autoclass:: ReduceOp
 
-.. autoclass:: reduce_op
+.. class:: reduce_op
+
+    Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
+    ``MIN``, and ``MAX``.
+
+    :class:`~torch.distributed.ReduceOp` is recommended to use instead.
 
 
 Multi-GPU collective functions

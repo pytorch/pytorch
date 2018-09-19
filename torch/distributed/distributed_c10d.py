@@ -73,13 +73,19 @@ class reduce_op(object):
     Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
     ``MIN``, and ``MAX``.
 
-    :class:`ReduceOp` is recommended to use instead.
+    :class:`~torch.distributed.ReduceOp` is recommended to use instead.
     """
 
-    def __getattr__(self, key):
+    def __init__(self):
+        # __members__ is a dict storing key-value pairs for enum classes
+        for k, v in ReduceOp.__members__.items():
+            setattr(self, k, v)
+        self.__members__ = ReduceOp.__members__
+
+    def __getattribute__(self, key):
         warnings.warn("torch.distributed.reduce_op is deprecated, please use "
                       "torch.distributed.ReduceOp instead")
-        return getattr(ReduceOp, key)
+        return object.__getattribute__(self, key)
 
 reduce_op = reduce_op()
 
