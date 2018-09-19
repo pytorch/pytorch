@@ -19,7 +19,7 @@ DECLARE_DISPATCH(rnn_packed_fn, gru_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_tanh_packed_cudnn_stub);
 DECLARE_DISPATCH(rnn_packed_fn, rnn_relu_packed_cudnn_stub);
 
-void check_device(const Tensor& input, const TensorList& params, const TensorList& hiddens) {
+inline void check_device(const Tensor& input, const TensorList& params, const TensorList& hiddens) {
   auto input_device = input.device();
 
   auto check_tensors = [&](const std::string& name, const Tensor& t) {
