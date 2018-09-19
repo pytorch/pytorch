@@ -101,7 +101,7 @@ int CaffeToNumpyType(const TypeMeta& meta) {
   const auto it = numpy_type_map.find(meta.id());
   return it == numpy_type_map.end() ? -1 : it->second;
 #else
-  return -1;
+  CAFFE_THROW("Caffe2 compiled without NumPy support.");
 #endif // USE_NUMPY
 }
 
@@ -131,8 +131,7 @@ const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
   const auto it = caffe_type_map.find(numpy_type);
   return it == caffe_type_map.end() ? unknown_type : it->second;
 #else
-  static TypeMeta unknown_type;
-  return unknown_type;
+  CAFFE_THROW("Caffe2 compiled without NumPy support.");
 #endif // USE_NUMPY
 }
 
@@ -758,7 +757,7 @@ void addObjectMethods(py::module& m) {
                   DeviceOption(), array, &tensors_data.at(name));
 #else
               CAFFE_THROW("Caffe2 was compiled without NumPy support.");
-#endif
+#endif // USE_NUMPY
             }
             caffe2::Predictor::TensorList out;
             instance.RunMap(tensors_data, &out);
@@ -902,7 +901,7 @@ void addObjectMethods(py::module& m) {
             }
 #else
             CAFFE_THROW("Caffe2 was compiled without NumPy support.");
-#endif
+#endif // USE_NUMPY
             std::vector<TensorCPU> out;
             instance(tensors_data, &out);
             std::vector<py::object> pyout;
