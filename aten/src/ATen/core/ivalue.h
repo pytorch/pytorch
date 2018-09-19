@@ -226,7 +226,7 @@ struct AT_API IValue final {
   // BoolList
   IValue(c10::intrusive_ptr<BoolList> v);
   IValue(std::vector<bool> v);
-  bool isBoolList() const { return Tag::DoubleList == tag; }
+  bool isBoolList() const { return Tag::BoolList == tag; }
   c10::intrusive_ptr<BoolList> toBoolList() && {
     AT_ASSERT(isBoolList());
     return moveToIntrusivePtr<BoolList>();
