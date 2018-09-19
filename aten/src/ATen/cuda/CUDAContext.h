@@ -9,6 +9,7 @@
 
 #include "cuda_runtime_api.h"
 #include "cusparse.h"
+#include "cublas_v2.h"
 
 namespace at {
 namespace cuda {
@@ -61,6 +62,7 @@ AT_API Allocator* getCUDADeviceAllocator();
 /* Handles */
 #ifndef __HIP_PLATFORM_HCC__
   AT_API cusparseHandle_t getCurrentCUDASparseHandle();
+  AT_API cublasHandle_t getCurrentCUDABlasHandle();
 #endif
 
 
