@@ -4,15 +4,16 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
-import unittest
 import os
+import unittest
 
 from hypothesis import given, settings
 import hypothesis.strategies as st
 
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, utils
 from caffe2.proto import caffe2_pb2
+from caffe2.python import core, utils
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 #
 # Should match original Detectron code at
@@ -129,17 +130,17 @@ def collect_and_distribute_fpn_rpn_ref(*inputs):
     return outputs
 
 
-class TestCollectAndDistributeFpnRpnProposals(hu.HypothesisTestCase):
+class TestCollectAndDistributeFpnRpnProposals(serial.SerializedTestCase):
     @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
-    @given(proposal_count=st.integers(min_value=1000, max_value=8000),
-           rpn_min_level=st.integers(min_value=1, max_value=4),
-           rpn_num_levels=st.integers(min_value=1, max_value=6),
-           roi_min_level=st.integers(min_value=1, max_value=4),
-           roi_num_levels=st.integers(min_value=1, max_value=6),
-           rpn_post_nms_topN=st.integers(min_value=1000, max_value=4000),
-           roi_canonical_scale=st.integers(min_value=100, max_value=300),
-           roi_canonical_level=st.integers(min_value=1, max_value=8),
-           **hu.gcs_cpu_only)
+    @serial.given(proposal_count=st.integers(min_value=1000, max_value=8000),
+                  rpn_min_level=st.integers(min_value=1, max_value=4),
+                  rpn_num_levels=st.integers(min_value=1, max_value=6),
+                  roi_min_level=st.integers(min_value=1, max_value=4),
+                  roi_num_levels=st.integers(min_value=1, max_value=6),
+                  rpn_post_nms_topN=st.integers(min_value=1000, max_value=4000),
+                  roi_canonical_scale=st.integers(min_value=100, max_value=300),
+                  roi_canonical_level=st.integers(min_value=1, max_value=8),
+                  **hu.gcs_cpu_only)
     def test_collect_and_dist(
         self,
         proposal_count,

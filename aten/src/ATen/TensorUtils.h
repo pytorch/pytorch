@@ -78,4 +78,11 @@ AT_API void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend back
 AT_API void * maybe_data_ptr(const Tensor& tensor);
 AT_API void * maybe_data_ptr(const TensorArg& tensor);
 
+// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
+// Although we cache is_contiguous in tensor now, this is till useful because it
+// allows checking if a particular geometry is contiguous without explicitly
+// constructing a tensor, e.g., when you want to choose a kernel strategy based
+// on whether a subgeometry is contiguous.
+AT_API bool geometry_is_contiguous(IntList sizes, IntList strides);
+
 }

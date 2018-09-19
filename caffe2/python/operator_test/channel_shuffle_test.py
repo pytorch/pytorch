@@ -3,14 +3,15 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import numpy as np
-import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
 import hypothesis.strategies as st
+import numpy as np
 
 
-class ChannelShuffleOpsTest(hu.HypothesisTestCase):
+class ChannelShuffleOpsTest(serial.SerializedTestCase):
     def _channel_shuffle_nchw_ref(self, X, group):
         dims = X.shape
         N = dims[0]
@@ -31,7 +32,7 @@ class ChannelShuffleOpsTest(hu.HypothesisTestCase):
         Y = np.transpose(X, axes=(0, 1, 3, 2))
         return [Y.reshape(dims)]
 
-    @given(N=st.integers(1, 5), G=st.integers(1, 5), K=st.integers(1, 5),
+    @serial.given(N=st.integers(1, 5), G=st.integers(1, 5), K=st.integers(1, 5),
            H=st.integers(1, 5), W=st.integers(1, 5),
            order=st.sampled_from(["NCHW", "NHWC"]), **hu.gcs)
     def test_channel_shuffle(self, N, G, K, H, W, order, gc, dc):
