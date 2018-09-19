@@ -25,10 +25,11 @@ Value* insertConstant(
     n->f_(attr::value, val.toDouble());
     n->output()->setType(FloatType::get());
   } else if (val.isBool()) {
-    n->b_(attr::value, val.toBool());
+    n->i_(attr::value, val.toBool());
     n->output()->setType(BoolType::get());
   } else if (val.isBoolList()) {
-    n->bs_(attr::value, val.toBoolList()->elements());
+    auto bool_list = val.toBoolList()->elements();
+    n->is_(attr::value, std::vector<long>(bool_list.begin(), bool_list.end()));
     n->output()->setType(ListType::ofBools());
   } else if(val.isIntList()) {
     n->is_(attr::value, val.toIntList()->elements());
@@ -65,10 +66,8 @@ RegisterOperators reg({
             stack.push_back(t);
             return 0;
           };
-        } else if (
-            type->isSubtypeOf(BoolType::get()) &&
-            node->kindOf(attr::value) == AttributeKind::b) {
-          auto b = node->b(attr::value);
+        } else if (type->isSubtypeOf(BoolType::get())) {
+          bool b = node->i(attr::value);
           return [b](Stack& stack) {
             push(stack, b);
             return 0;
@@ -96,7 +95,7 @@ RegisterOperators reg({
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofBools())) {
-          auto bs = node->bs(attr::value);
+          auto bs = node->is(attr::value);
           return [bs](Stack& stack) {
             push(stack, bs);
             return 0;
@@ -113,15 +112,6 @@ RegisterOperators reg({
           auto s = node->s(attr::value);
           return [s](Stack& stack) {
             push(stack, s);
-            return 0;
-          };
-        } else if (
-            type->isSubtypeOf(BoolType::get()) &&
-            node->kindOf(attr::value) == AttributeKind::i) {
-          // Handle int -> bool conversion
-          auto i = node->i(attr::value);
-          return [i](Stack& stack) {
-            push(stack, i != 0);
             return 0;
           };
         } else {

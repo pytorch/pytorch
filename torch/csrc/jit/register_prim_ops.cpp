@@ -705,9 +705,6 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::le, a <= b)
     DEFINE_COMPARISON_OP(aten::ge, a >= b)
 
-    DEFINE_INT_OP(aten::__and__, a&& b)
-    DEFINE_INT_OP(aten::__or__, a || b)
-
     DEFINE_BOOL_OP(aten::__and__, a && b)
     DEFINE_BOOL_OP(aten::__or__, a || b)
 

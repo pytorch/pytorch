@@ -403,21 +403,6 @@ public:
     return inputs_.at(i);
   }
 
-  std::string dump2() const {
-    std::ostringstream oss;
-
-    oss << "node[" << kind().toQualString() << " || in: ";
-    for (auto in : inputs()) {
-      oss << in->uniqueName() << ", ";
-    }
-    oss << " || out: ";
-    for (auto in : outputs()) {
-      oss << in->uniqueName() << ", ";
-    }
-    oss << "]";
-    return oss.str();
-  }
-
   Value* namedInput(Symbol name) const;
 
   at::optional<IValue> get(Symbol name) const;
@@ -1078,9 +1063,9 @@ public:
     result->output()->setType(type);
     return result;
   }
-  Node* createTensorToBool(const TypePtr& type, Value* value) {
+  Node* createTensorToBool(Value* value) {
     auto* result = create(prim::TensorToBool, {value});
-    result->output()->setType(type);
+    result->output()->setType(BoolType::get());
     return result;
   }
   Node* createIntToFloat(Value* value) {

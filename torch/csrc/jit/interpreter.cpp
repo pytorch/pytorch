@@ -399,7 +399,7 @@ struct CodeImpl {
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
       auto t = pop(stack).toBool();
-      return !t ? offset : 0;
+      return t ? 0 : offset;
     };
     inst.debug_name = prim::JumpZ;
   }

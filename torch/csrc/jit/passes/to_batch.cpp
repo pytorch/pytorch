@@ -63,7 +63,7 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
         to_scalar_node = res_graph->createTensorToNum(FloatType::get(), outputs[0]);
       }
       else if(n->outputs()[0]->type() == BoolType::get()){
-        to_scalar_node = res_graph->createTensorToBool(BoolType::get(), outputs[0]);
+        to_scalar_node = res_graph->createTensorToBool(outputs[0]);
       }
       else{
         throw std::runtime_error("NYI: scalar types other than int, float, and bool are not supported yet");
@@ -356,7 +356,7 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
     auto cond = batch_map.at(n->inputs()[1]);
     auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
     auto to_bool_node =
-        res_graph->createTensorToBool(BoolType::get(), cond_any[0]);
+        res_graph->createTensorToBool(cond_any[0]);
     res_graph->insertNode(to_bool_node);
     rn_env[n->inputs()[1]] = to_bool_node->output();
   }
@@ -441,7 +441,7 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
     auto cond = batch_map.at(n->blocks()[0]->outputs()[0]);
     auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
     auto to_bool_node =
-        res_graph->createTensorToBool(BoolType::get(), cond_any[0]);
+        res_graph->createTensorToBool(cond_any[0]);
     res_graph->insertNode(to_bool_node);
     loop_block->insertOutput(0, to_bool_node->output());
     for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){

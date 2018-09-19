@@ -348,8 +348,6 @@ void initPythonIRBindings(PyObject * module_) {
     .def(#method, [](Node & n, const char * name) { \
       return n.method(Symbol::attr(name)); \
     })
-    .CREATE_ACCESSOR(Bool,b)
-    .CREATE_ACCESSOR(Bools,bs)
     .CREATE_ACCESSOR(Float,f)
     .CREATE_ACCESSOR(Floats,fs)
     .CREATE_ACCESSOR(String,s)

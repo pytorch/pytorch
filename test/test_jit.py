@@ -511,7 +511,7 @@ class TestJit(JitTestCase):
 
             @torch.jit.script_method
             def forward(self, input):
-                if self.training == 1:
+                if self.training:
                     x = 2 * input
                 else:
                     x = -input
@@ -3849,18 +3849,38 @@ a")
             throwsAnd(t)
 
     def test_type_cast(self):
+        @torch.jit.script
         def test_int_to_float():
             b = float(2)
             return b + 1.0
 
+        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+            @torch.jit.script
+            def test_int_to_bool():
+                return bool(5)
+
+        @torch.jit.script
         def test_float_to_int():
-            b = int(2.0)
+            b = int(5.0)
             return b + 1
 
-        graph1 = torch.jit.script(test_int_to_float).graph
-        self.assertExpectedGraph(graph1, subname="int_to_float")
-        graph2 = torch.jit.script(test_float_to_int).graph
-        self.assertExpectedGraph(graph2, subname="float_to_int")
+        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+            @torch.jit.script
+            def test_float_to_bool():
+                return bool(5.0)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+            @torch.jit.script
+            def test_bool_to_float():
+                return float(True)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+            @torch.jit.script
+            def test_bool_to_int():
+                return int(True)
+
+        self.assertExpectedGraph(test_int_to_float.graph, "test_int_to_float")
+        self.assertExpectedGraph(test_float_to_int.graph, "test_float_to_int")
 
     def test_multiple_assignment(self):
         def outer_func(x):
