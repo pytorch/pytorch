@@ -590,11 +590,14 @@ class StackTransform(Transform):
         self.transforms = list(tseq)
         self.dim = dim
 
+    def _slice(self, z):
+        return [z.select(self.dim, i) for i in range(z.shape[self.dim])]
+
     def _call(self, x):
         assert -len(x.shape) <= self.dim < len(x.shape)
         assert x.shape[self.dim] == len(self.transforms)
         yslices = []
-        for xslice, trans in zip(x.chunk(x.shape[self.dim], self.dim), self.transforms):
+        for xslice, trans in zip(self._slice(x), self.transforms):
             yslices.append(trans(xslice))
         return torch.stack(yslices, dim=self.dim)
 
@@ -602,7 +605,7 @@ class StackTransform(Transform):
         assert -len(y.shape) <= self.dim < len(y.shape)
         assert y.shape[self.dim] == len(self.transforms)
         xslices = []
-        for yslice, trans in zip(y.chunk(y.shape[self.dim], self.dim), self.transforms):
+        for yslice, trans in zip(self._slice(y), self.transforms):
             xslices.append(trans.inv(yslice))
         return torch.stack(xslices, dim=self.dim)
 
@@ -612,8 +615,8 @@ class StackTransform(Transform):
         assert -len(y.shape) <= self.dim < len(y.shape)
         assert y.shape[self.dim] == len(self.transforms)
         logdetjacs = []
-        yslices = y.chunk(y.shape[self.dim], self.dim)
-        xslices = x.chunk(x.shape[self.dim], self.dim)
+        yslices = self._slice(y)
+        xslices = self._slice(x)
         for xslice, yslice, trans in zip(xslices, yslices, self.transforms):
             logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
         return torch.stack(logdetjacs, dim=self.dim)
