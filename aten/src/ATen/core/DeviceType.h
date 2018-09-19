@@ -8,7 +8,6 @@
 #include <ATen/core/Macros.h>
 
 #include <ostream>
-#include <functional>
 
 namespace at {
 
@@ -33,11 +32,3 @@ AT_CORE_API std::string DeviceTypeName(
 AT_CORE_API std::ostream& operator<<(std::ostream& stream, at::DeviceType type);
 
 } // namespace at
-
-namespace std {
-template <> struct hash<at::DeviceType> {
-  std::size_t operator()(const at::DeviceType &k) const {
-    return std::hash<int>()(static_cast<int>(k));
-  }
-};
-} // namespace std
