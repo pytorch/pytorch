@@ -622,7 +622,6 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             hingeembeddingloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -633,7 +632,6 @@ criterion_tests = [
             hingeembeddingloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -739,7 +737,6 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             cosineembeddingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CosineEmbeddingLoss',
@@ -750,7 +747,6 @@ criterion_tests = [
             cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
-        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MarginRankingLoss',
