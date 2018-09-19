@@ -544,6 +544,11 @@ class LowerCholeskyTransform(Transform):
 
 
 class CatTransform(Transform):
+    """
+    Transform functor that applies a sequence of transforms `tseq`
+    component-wise to each submatrix at `dim` in a way compatible
+    with `torch.cat`.
+    """
     def __init__(self, tseq, dim=0):
         assert all(isinstance(t, Transform) for t in tseq)
         super(CatTransform, self).__init__()
@@ -551,29 +556,29 @@ class CatTransform(Transform):
         self.dim = dim
     
     def _call(self, x):
-        assert -len(x.shape) <= self.dim < len(x.shape)
-        assert x.shape[self.dim] == len(self.transforms)
+        assert -x.dim() <= self.dim < x.dim()
+        assert x.size(self.dim) == len(self.transforms)
         yslices = []
-        for xslice, trans in zip(x.chunk(x.shape[self.dim], self.dim), self.transforms):
+        for xslice, trans in zip(x.chunk(x.size(self.dim), self.dim), self.transforms):
             yslices.append(trans(xslice))
         return torch.cat(yslices, dim=self.dim)
 
     def _inverse(self, y):
-        assert -len(y.shape) <= self.dim < len(y.shape)
-        assert y.shape[self.dim] == len(self.transforms)
+        assert -y.dim() <= self.dim < y.dim()
+        assert y.size(self.dim) == len(self.transforms)
         xslices = []
-        for yslice, trans in zip(y.chunk(y.shape[self.dim], self.dim), self.transforms):
+        for yslice, trans in zip(y.chunk(y.size(self.dim), self.dim), self.transforms):
             xslices.append(trans.inv(yslice))
         return torch.cat(xslices, dim=self.dim)
 
     def log_abs_det_jacobian(self, x, y):
-        assert -len(x.shape) <= self.dim < len(x.shape)
-        assert x.shape[self.dim] == len(self.transforms)
-        assert -len(y.shape) <= self.dim < len(y.shape)
-        assert y.shape[self.dim] == len(self.transforms)
+        assert -x.dim() <= self.dim < x.dim()
+        assert x.size(self.dim) == len(self.transforms)
+        assert -y.dim() <= self.dim < y.dim()
+        assert y.size(self.dim) == len(self.transforms)
         logdetjacs = []
-        yslices = y.chunk(y.shape[self.dim], self.dim)
-        xslices = x.chunk(x.shape[self.dim], self.dim)
+        yslices = y.chunk(y.size(self.dim), self.dim)
+        xslices = x.chunk(x.size(self.dim), self.dim)
         for xslice, yslice, trans in zip(xslices, yslices, self.transforms):
             logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
         return torch.cat(logdetjacs, dim=self.dim)
@@ -582,8 +587,21 @@ class CatTransform(Transform):
     def bijective(self):
         return all(t.bijective for t in self.transforms)
 
+    @constraints.dependent_property
+    def domain(self):
+        return constraints.cat([t.domain for t in self.transforms], self.dim)
+
+    @constraints.dependent_property
+    def codomain(self):
+        return constraints.cat([t.codomain for t in self.transforms], self.dim)
+
 
 class StackTransform(Transform):
+    """
+    Transform functor that applies a sequence of transforms `tseq`
+    component-wise to each submatrix at `dim` in a way compatible
+    with `torch.stack`.
+    """
     def __init__(self, tseq, dim=0):
         assert all(isinstance(t, Transform) for t in tseq)
         super(StackTransform, self).__init__()
@@ -591,29 +609,29 @@ class StackTransform(Transform):
         self.dim = dim
 
     def _slice(self, z):
-        return [z.select(self.dim, i) for i in range(z.shape[self.dim])]
+        return [z.select(self.dim, i) for i in range(z.size(self.dim))]
 
     def _call(self, x):
-        assert -len(x.shape) <= self.dim < len(x.shape)
-        assert x.shape[self.dim] == len(self.transforms)
+        assert -x.dim() <= self.dim < x.dim()
+        assert x.size(self.dim) == len(self.transforms)
         yslices = []
         for xslice, trans in zip(self._slice(x), self.transforms):
             yslices.append(trans(xslice))
         return torch.stack(yslices, dim=self.dim)
 
     def _inverse(self, y):
-        assert -len(y.shape) <= self.dim < len(y.shape)
-        assert y.shape[self.dim] == len(self.transforms)
+        assert -y.dim() <= self.dim < y.dim()
+        assert y.size(self.dim) == len(self.transforms)
         xslices = []
         for yslice, trans in zip(self._slice(y), self.transforms):
             xslices.append(trans.inv(yslice))
         return torch.stack(xslices, dim=self.dim)
 
     def log_abs_det_jacobian(self, x, y):
-        assert -len(x.shape) <= self.dim < len(x.shape)
-        assert x.shape[self.dim] == len(self.transforms)
-        assert -len(y.shape) <= self.dim < len(y.shape)
-        assert y.shape[self.dim] == len(self.transforms)
+        assert -x.dim() <= self.dim < x.dim()
+        assert x.size(self.dim) == len(self.transforms)
+        assert -y.dim() <= self.dim < y.dim()
+        assert y.size(self.dim) == len(self.transforms)
         logdetjacs = []
         yslices = self._slice(y)
         xslices = self._slice(x)
@@ -624,3 +642,11 @@ class StackTransform(Transform):
     @property
     def bijective(self):
         return all(t.bijective for t in self.transforms)
+
+    @constraints.dependent_property
+    def domain(self):
+        return constraints.stack([t.domain for t in self.transforms], self.dim)
+
+    @constraints.dependent_property
+    def codomain(self):
+        return constraints.stack([t.codomain for t in self.transforms], self.dim)

@@ -16,6 +16,8 @@ The following constraints are implemented:
 - ``constraints.real_vector``
 - ``constraints.simplex``
 - ``constraints.unit_interval``
+- ``constraints.cat``
+- ``constraints.stack``
 """
 
 import torch
@@ -24,6 +26,7 @@ from torch.distributions.utils import batch_tril
 __all__ = [
     'Constraint',
     'boolean',
+    'cat',
     'dependent',
     'dependent_property',
     'greater_than',
@@ -42,6 +45,7 @@ __all__ = [
     'real',
     'real_vector',
     'simplex',
+    'stack',
     'unit_interval',
 ]
 
@@ -297,6 +301,41 @@ class _RealVector(Constraint):
         return (value == value).all()  # False for NANs.
 
 
+class _Cat(Constraint):
+    """
+    Constraint functor that applies a sequence of constraints
+    `cseq` at the submatrixes at dimension `dim`
+    in a way compatible with `torch.cat`.
+    """
+    def __init__(self, cseq, dim=0):
+        assert all(isinstance(c, Constraint) for c in cseq)
+        self.cseq = cseq
+        self.dim = dim
+
+    def check(self, value):
+        assert -len(value.shape) <= self.dim < len(value.shape)
+        vs = value.chunk(value.shape[self.dim], self.dim)
+        return all(constr.check(v) 
+                   for v, constr in zip(vs, self.cseq))
+
+
+class _Stack(Constraint):
+    """
+    Constraint functor that applies a sequence of constraints
+    `cseq` at the submatrixes at dimension `dim`
+    in a way compatible with `torch.stack`.
+    """
+    def __init__(self, cseq, dim=0):
+        assert all(isinstance(c, Constraint) for c in cseq)
+        self.cseq = cseq
+        self.dim = dim
+
+    def check(self, value):
+        assert -len(value.shape) <= self.dim < len(value.shape)
+        vs = [value.select(self.dim, i) for i in range(value.shape[self.dim])]
+        return all(constr.check(v) 
+                   for v, constr in zip(vs, self.cseq))
+
 # Public interface.
 dependent = _Dependent()
 dependent_property = _DependentProperty
@@ -317,3 +356,5 @@ simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 positive_definite = _PositiveDefinite()
+cat = _Cat
+stack = _Stack
