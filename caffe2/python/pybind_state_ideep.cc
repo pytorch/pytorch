@@ -10,6 +10,7 @@
 #include <pybind11/stl.h>
 
 #include "caffe2/ideep/operators/operator_fallback_ideep.h"
+#include <ideep_pin_singletons.hpp>
 #include <caffe2/ideep/ideep_utils.h>
 
 namespace caffe2 {

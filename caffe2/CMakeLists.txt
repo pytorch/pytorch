@@ -333,7 +333,7 @@ if(USE_CUDA)
   # NB: This must be target_compile_definitions, not target_compile_options,
   # as the latter is not respected by nvcc
   if (MSVC)
-	  target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_CUDA_BUILD_MAIN_LIB")
+      target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_CUDA_BUILD_MAIN_LIB")
   endif()
 
   # Set standard properties on the target
@@ -503,16 +503,14 @@ if (BUILD_PYTHON)
   target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
   target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
 
-  target_link_libraries(
-      caffe2_pybind11_state caffe2_library)
+  target_link_libraries(caffe2_pybind11_state caffe2)
   if (WIN32)
     target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
   endif(WIN32)
 
   # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
   # so it needs an rpath to find libcaffe2
-  set_target_properties(
-      caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+  set_target_properties(caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
       ${CMAKE_BINARY_DIR}/caffe2/python)
   install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
   set_target_properties(caffe2_pybind11_state PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
@@ -531,7 +529,7 @@ if (BUILD_PYTHON)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
     target_link_libraries(
-        caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
+        caffe2_pybind11_state_gpu caffe2 caffe2_gpu_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
     endif(WIN32)
@@ -559,7 +557,7 @@ if (BUILD_PYTHON)
     target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE})
     target_link_libraries(
-        caffe2_pybind11_state_hip caffe2_library caffe2_hip_library)
+        caffe2_pybind11_state_hip caffe2 caffe2_hip_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state_hip ${PYTHON_LIBRARIES})
     endif(WIN32)

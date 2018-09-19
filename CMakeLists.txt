@@ -135,6 +135,10 @@ if (ANDROID OR IOS)
   set(BUILD_ATEN_MOBILE ON)
 endif()
 
+if (USE_MKLDNN)
+  set(USE_IDEEP ON CACHE BOOL "Enforce to enable USE_IDEEP" FORCE)
+endif()
+
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
