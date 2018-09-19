@@ -529,7 +529,7 @@ private:
 
 struct BoolType;
 using BoolTypePtr = std::shared_ptr<BoolType>;
-// This node represents a Python int number value
+// This node represents a Python bool value
 struct TORCH_API BoolType : public Type {
   template<typename ... T>
   static BoolTypePtr create( T&& ... all ) {
