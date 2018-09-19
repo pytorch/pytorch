@@ -22,7 +22,7 @@
 struct THDefaultAllocator final : public at::Allocator {
   at::DataPtr allocate(size_t size) const override {
     auto* ptr = THAlloc(size);
-    return {ptr, ptr, &THFree, at::kCPU};
+    return {ptr, ptr, &THFree, at::DeviceType::CPU};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &THFree;
@@ -537,25 +537,25 @@ THRefcountedMapAllocator* THRefcountedMapAllocator::fromDataPtr(const at::DataPt
 at::DataPtr THMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new THMapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
-  return {context->data(), context, &deleteTHMapAllocator, at::kCPU};
+  return {context->data(), context, &deleteTHMapAllocator, at::DeviceType::CPU};
 }
 
 at::DataPtr THMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new THMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
-  return {context->data(), context, &deleteTHMapAllocator, at::kCPU};
+  return {context->data(), context, &deleteTHMapAllocator, at::DeviceType::CPU};
 }
 
 at::DataPtr THRefcountedMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new THRefcountedMapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = context->size() - TH_ALLOC_ALIGNMENT;
-  return {context->data(), context, &deleteTHRefcountedMapAllocator, at::kCPU};
+  return {context->data(), context, &deleteTHRefcountedMapAllocator, at::DeviceType::CPU};
 }
 
 at::DataPtr THRefcountedMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new THRefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size() - TH_ALLOC_ALIGNMENT;
-  return {context->data(), context, &deleteTHRefcountedMapAllocator, at::kCPU};
+  return {context->data(), context, &deleteTHRefcountedMapAllocator, at::DeviceType::CPU};
 }
 
 void* THRefcountedMapAllocator::data() const {

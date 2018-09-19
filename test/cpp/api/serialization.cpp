@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include "catch_utils.hpp"
 
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
@@ -30,12 +30,12 @@ Sequential xor_model() {
 }
 } // namespace
 
-TEST_CASE("serialization") {
+CATCH_TEST_CASE("serialization") {
   torch::manual_seed(0);
-  SECTION("undefined") {
+  CATCH_SECTION("undefined") {
     auto x = torch::Tensor();
 
-    REQUIRE(!x.defined());
+    CATCH_REQUIRE(!x.defined());
 
     auto y = torch::randn({5});
 
@@ -43,14 +43,17 @@ TEST_CASE("serialization") {
     torch::save(ss, &x);
     torch::load(ss, &y);
 
-    REQUIRE(!y.defined());
+    CATCH_REQUIRE(!y.defined());
   }
 
-  SECTION("cputypes") {
+  CATCH_SECTION("cputypes") {
     for (int i = 0; i < static_cast<int>(torch::Dtype::NumOptions); i++) {
       if (i == static_cast<int>(torch::Dtype::Half)) {
         // XXX can't serialize half tensors at the moment since contiguous() is
         // not implemented for this type;
+        continue;
+      } else if (at::isComplexType(static_cast<torch::Dtype>(i))) {
+        // Not supported yet
         continue;
       } else if (i == static_cast<int>(torch::Dtype::Undefined)) {
         // We can't construct a tensor for this type. This is tested in
@@ -59,24 +62,24 @@ TEST_CASE("serialization") {
       }
 
       auto x = torch::ones(
-          {5, 5}, torch::getType(torch::kCPU, static_cast<torch::Dtype>(i)));
+          {5, 5}, static_cast<torch::Dtype>(i));
       auto y = torch::empty({});
 
       std::stringstream ss;
       torch::save(ss, &x);
       torch::load(ss, &y);
 
-      REQUIRE(y.defined());
-      REQUIRE(x.sizes().vec() == y.sizes().vec());
+      CATCH_REQUIRE(y.defined());
+      CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
       if (torch::isIntegralType(static_cast<torch::Dtype>(i))) {
-        REQUIRE(x.equal(y));
+        CATCH_REQUIRE(x.equal(y));
       } else {
-        REQUIRE(x.allclose(y));
+        CATCH_REQUIRE(x.allclose(y));
       }
     }
   }
 
-  SECTION("binary") {
+  CATCH_SECTION("binary") {
     auto x = torch::randn({5, 5});
     auto y = torch::Tensor();
 
@@ -90,11 +93,11 @@ TEST_CASE("serialization") {
       archive(y);
     }
 
-    REQUIRE(y.defined());
-    REQUIRE(x.sizes().vec() == y.sizes().vec());
-    REQUIRE(x.allclose(y));
+    CATCH_REQUIRE(y.defined());
+    CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
+    CATCH_REQUIRE(x.allclose(y));
   }
-  SECTION("portable_binary") {
+  CATCH_SECTION("portable_binary") {
     auto x = torch::randn({5, 5});
     auto y = torch::Tensor();
 
@@ -108,12 +111,12 @@ TEST_CASE("serialization") {
       archive(y);
     }
 
-    REQUIRE(y.defined());
-    REQUIRE(x.sizes().vec() == y.sizes().vec());
-    REQUIRE(x.allclose(y));
+    CATCH_REQUIRE(y.defined());
+    CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
+    CATCH_REQUIRE(x.allclose(y));
   }
 
-  SECTION("resized") {
+  CATCH_SECTION("resized") {
     auto x = torch::randn({11, 5});
     x.resize_({5, 5});
     auto y = torch::Tensor();
@@ -128,11 +131,11 @@ TEST_CASE("serialization") {
       archive(y);
     }
 
-    REQUIRE(y.defined());
-    REQUIRE(x.sizes().vec() == y.sizes().vec());
-    REQUIRE(x.allclose(y));
+    CATCH_REQUIRE(y.defined());
+    CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
+    CATCH_REQUIRE(x.allclose(y));
   }
-  SECTION("sliced") {
+  CATCH_SECTION("sliced") {
     auto x = torch::randn({11, 5});
     x = x.slice(0, 1, 3);
     auto y = torch::Tensor();
@@ -147,12 +150,12 @@ TEST_CASE("serialization") {
       archive(y);
     }
 
-    REQUIRE(y.defined());
-    REQUIRE(x.sizes().vec() == y.sizes().vec());
-    REQUIRE(x.allclose(y));
+    CATCH_REQUIRE(y.defined());
+    CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
+    CATCH_REQUIRE(x.allclose(y));
   }
 
-  SECTION("noncontig") {
+  CATCH_SECTION("noncontig") {
     auto x = torch::randn({11, 5});
     x = x.slice(1, 1, 4);
     auto y = torch::Tensor();
@@ -167,12 +170,12 @@ TEST_CASE("serialization") {
       archive(y);
     }
 
-    REQUIRE(y.defined());
-    REQUIRE(x.sizes().vec() == y.sizes().vec());
-    REQUIRE(x.allclose(y));
+    CATCH_REQUIRE(y.defined());
+    CATCH_REQUIRE(x.sizes().vec() == y.sizes().vec());
+    CATCH_REQUIRE(x.allclose(y));
   }
 
-  SECTION("xor") {
+  CATCH_SECTION("xor") {
     // We better be able to save and load a XOR model!
     auto getLoss = [](Sequential model, uint32_t batch_size) {
       auto inputs = torch::empty({batch_size, 2});
@@ -203,8 +206,8 @@ TEST_CASE("serialization") {
       loss.backward();
       optimizer.step();
 
-      running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
-      REQUIRE(epoch < 3000);
+      running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
+      CATCH_REQUIRE(epoch < 3000);
       epoch++;
     }
 
@@ -213,10 +216,10 @@ TEST_CASE("serialization") {
     torch::load(ss, model2);
 
     auto loss = getLoss(model2, 100);
-    REQUIRE(loss.toCFloat() < 0.1);
+    CATCH_REQUIRE(loss.toCFloat() < 0.1);
   }
 
-  SECTION("optim") {
+  CATCH_SECTION("optim") {
     auto model1 = Linear(5, 2);
     auto model2 = Linear(5, 2);
     auto model3 = Linear(5, 2);
@@ -227,6 +230,14 @@ TEST_CASE("serialization") {
     torch::load(ss, model2.get());
     ss.seekg(0, std::ios::beg);
     torch::load(ss, model3.get());
+
+    auto param1 = model1->parameters();
+    auto param2 = model2->parameters();
+    auto param3 = model3->parameters();
+    for (const auto& p : param1) {
+      CATCH_REQUIRE(param1[p.key].allclose(param2[p.key]));
+      CATCH_REQUIRE(param2[p.key].allclose(param3[p.key]));
+    }
 
     // Make some optimizers with momentum (and thus state)
     auto optim1 = torch::optim::SGD(
@@ -240,9 +251,9 @@ TEST_CASE("serialization") {
     auto optim3_2 = torch::optim::SGD(
         model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
 
-    auto x = torch::ones({10, 5}, torch::requires_grad());
+    auto x = torch::ones({10, 5});
 
-    auto step = [&](torch::optim::Optimizer& optimizer, Linear model) {
+    auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
       optimizer.zero_grad();
       auto y = model->forward(x).sum();
       y.backward();
@@ -264,19 +275,19 @@ TEST_CASE("serialization") {
     torch::load(ss, &optim3_2);
     step(optim3_2, model3);
 
-    auto param1 = model1->parameters();
-    auto param2 = model2->parameters();
-    auto param3 = model3->parameters();
-    for (auto& p : param1) {
-      auto& name = p.key;
+    param1 = model1->parameters();
+    param2 = model2->parameters();
+    param3 = model3->parameters();
+    for (const auto& p : param1) {
+      const auto& name = p.key;
       // Model 1 and 3 should be the same
-      REQUIRE(param1[name].norm().toCFloat() == param3[name].norm().toCFloat());
-      REQUIRE(param1[name].norm().toCFloat() != param2[name].norm().toCFloat());
+      CATCH_REQUIRE(param1[name].norm().toCFloat() == param3[name].norm().toCFloat());
+      CATCH_REQUIRE(param1[name].norm().toCFloat() != param2[name].norm().toCFloat());
     }
   }
 }
 
-TEST_CASE("serialization_cuda", "[cuda]") {
+CATCH_TEST_CASE("serialization_cuda", "[cuda]") {
   torch::manual_seed(0);
   // We better be able to save and load a XOR model!
   auto getLoss = [](Sequential model, uint32_t batch_size) {
@@ -306,8 +317,8 @@ TEST_CASE("serialization_cuda", "[cuda]") {
     loss.backward();
     optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
-    REQUIRE(epoch < 3000);
+    running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
+    CATCH_REQUIRE(epoch < 3000);
     epoch++;
   }
 
@@ -316,7 +327,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
   torch::load(ss, model2);
 
   auto loss = getLoss(model2, 100);
-  REQUIRE(loss.toCFloat() < 0.1);
+  CATCH_REQUIRE(loss.toCFloat() < 0.1);
 
   model2->to(torch::kCUDA);
   ss.clear();
@@ -324,5 +335,5 @@ TEST_CASE("serialization_cuda", "[cuda]") {
   torch::load(ss, model3);
 
   loss = getLoss(model3, 100);
-  REQUIRE(loss.toCFloat() < 0.1);
+  CATCH_REQUIRE(loss.toCFloat() < 0.1);
 }

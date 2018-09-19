@@ -29,8 +29,8 @@ class SigmoidCrossEntropyLossOp final : public Operator<Context> {
  public:
   SigmoidCrossEntropyLossOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        normalize_(OperatorBase::GetSingleArgument<int>("normalize", 1)) {
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        normalize_(this->template GetSingleArgument<int>("normalize", 1)) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE(normalize_ == 0 || normalize_ == 1);
   }
@@ -54,8 +54,8 @@ class SigmoidCrossEntropyLossGradientOp final : public Operator<Context> {
  public:
   SigmoidCrossEntropyLossGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
-        normalize_(OperatorBase::GetSingleArgument<int>("normalize", 1)) {
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
+        normalize_(this->template GetSingleArgument<int>("normalize", 1)) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE(normalize_ == 0 || normalize_ == 1);
   }

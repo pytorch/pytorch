@@ -37,7 +37,7 @@ TEST(TypeMetaTest, Names) {
   EXPECT_TRUE(
       string(string_meta.name()) != typeid(string).name());
   EXPECT_TRUE(
-      string(string_meta.name()) == Demangle(typeid(string).name()));
+      string(string_meta.name()) == at::demangle(typeid(string).name()));
 #endif  // __GXX_RTTI
 }
 

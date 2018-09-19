@@ -40,7 +40,7 @@ class AsyncPollingNet : public AsyncNetBase {
   void reset() override;
   std::atomic<bool> has_chain_failed_;
 
-  DISABLE_COPY_AND_ASSIGN(AsyncPollingNet);
+  AT_DISABLE_COPY_AND_ASSIGN(AsyncPollingNet);
 };
 
 } // namespace caffe2

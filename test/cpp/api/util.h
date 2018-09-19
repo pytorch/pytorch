@@ -22,8 +22,8 @@ class SimpleContainer : public nn::Cloneable<SimpleContainer> {
   }
 };
 
-inline bool pointer_equal(torch::Tensor first, torch::Tensor second) {
-  return first.data().data<float>() == second.data().data<float>();
+inline bool pointer_equal(at::Tensor first, at::Tensor second) {
+  return first.data<float>() == second.data<float>();
 }
 } // namespace test
 } // namespace torch

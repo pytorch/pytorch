@@ -14,7 +14,7 @@ class LambdaRankNdcgOp final : public Operator<Context> {
  public:
   LambdaRankNdcgOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        use_ndcg_as_loss_(OperatorBase::template GetSingleArgument<bool>(
+        use_ndcg_as_loss_(this->template GetSingleArgument<bool>(
             "use_ndcg_as_loss",
             false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;

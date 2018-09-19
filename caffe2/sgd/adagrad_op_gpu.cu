@@ -120,8 +120,8 @@ class CUDASparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   CUDASparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {
-    const T decay = OperatorBase::GetSingleArgument<T>("decay", 1.0f);
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {
+    const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
   }
 

@@ -8,8 +8,8 @@
 #include <algorithm>
 
 #include "caffe2/core/common.h"
-#include "caffe/proto/caffe.pb.h"
 #include "caffe2/core/db.h"
+#include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/cast.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/thread_pool.h"
@@ -451,7 +451,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
   info = default_arg_;
   if (use_caffe_datum_) {
     // The input is a caffe datum format.
-    caffe::Datum datum;
+    CaffeDatum datum;
     CAFFE_ENFORCE(datum.ParseFromString(value));
 
     prefetched_label_.mutable_data<int>()[item_id] = datum.label();

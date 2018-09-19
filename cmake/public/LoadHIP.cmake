@@ -31,13 +31,6 @@ ELSE()
   SET(HSA_PATH $ENV{HSA_PATH})
 ENDIF()
 
-# HIPBLAS_PATH
-IF(NOT DEFINED ENV{HIPBLAS_PATH})
-  SET(HIPBLAS_PATH ${ROCM_PATH}/hipblas)
-ELSE()
-  SET(HIPBLAS_PATH $ENV{HIPBLAS_PATH})
-ENDIF()
-
 # ROCBLAS_PATH
 IF(NOT DEFINED ENV{ROCBLAS_PATH})
   SET(ROCBLAS_PATH ${ROCM_PATH}/rocblas)
@@ -45,16 +38,23 @@ ELSE()
   SET(ROCBLAS_PATH $ENV{ROCBLAS_PATH})
 ENDIF()
 
-# HIPRNG_PATH
-IF(NOT DEFINED ENV{HIPRNG_PATH})
-  SET(HIPRNG_PATH ${ROCM_PATH}/hcrng)
+# ROCSPARSE_PATH
+IF(NOT DEFINED ENV{ROCSPARSE_PATH})
+  SET(ROCSPARSE_PATH ${ROCM_PATH}/rocsparse)
 ELSE()
-  SET(HIPRNG_PATH $ENV{HIPRNG_PATH})
+  SET(ROCSPARSE_PATH $ENV{ROCSPARSE_PATH})
+ENDIF()
+
+# ROCFFT_PATH
+IF(NOT DEFINED ENV{ROCFFT_PATH})
+  SET(ROCBLAS_PATH ${ROCM_PATH}/rocfft)
+ELSE()
+  SET(ROCFFT_PATH $ENV{ROCFFT_PATH})
 ENDIF()
 
 # HIPSPARSE_PATH
 IF(NOT DEFINED ENV{HIPSPARSE_PATH})
-  SET(HIPSPARSE_PATH ${ROCM_PATH}/hcsparse)
+  SET(HIPSPARSE_PATH ${ROCM_PATH}/hipsparse)
 ELSE()
   SET(HIPSPARSE_PATH $ENV{HIPSPARSE_PATH})
 ENDIF()
@@ -119,14 +119,17 @@ IF(HIP_FOUND)
   set(hiprand_DIR ${HIPRAND_PATH}/lib/cmake/hiprand)
   set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
   set(miopen_DIR ${MIOPEN_PATH}/lib/cmake/miopen)
-  set(hipblas_DIR ${HIPBLAS_PATH}/lib/cmake/hipblas)
+  set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
+  set(rocfft_DIR ${ROCFFT_PATH}/lib/cmake/rocfft)
   set(hipsparse_DIR ${HIPSPARSE_PATH}/lib/cmake/hipsparse)
+  set(rocsparse_DIR ${ROCSPARSE_PATH}/lib/cmake/rocsparse)
 
   find_package(rocrand REQUIRED)
   find_package(hiprand REQUIRED)
   find_package(rocblas REQUIRED)
+  find_package(rocfft REQUIRED)
   find_package(miopen REQUIRED)
-  #find_package(hipblas REQUIRED) There's a bug with the CMake file in the Hipblas package.
+  #find_package(rocsparse REQUIRED)
   #find_package(hipsparse REQUIRED)
 
   # TODO: hip_hcc has an interface include flag "-hc" which is only
@@ -138,8 +141,7 @@ IF(HIP_FOUND)
   # however currently it's just the lib name
   FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
   FIND_LIBRARY(hiprand_LIBRARIES hiprand HINTS ${HIPRAND_PATH}/lib)
-  FIND_LIBRARY(hiprng_LIBRARIES hcrng HINTS ${HIPRNG_PATH}/lib)
-  FIND_LIBRARY(hipblas_LIBRARIES hipblas HINTS ${HIPBLAS_PATH}/lib)
+  FIND_LIBRARY(rocsparse_LIBRARIES rocsparse HINTS ${ROCSPARSE_PATH}/lib)
   FIND_LIBRARY(hipsparse_LIBRARIES hipsparse HINTS ${HIPSPARSE_PATH}/lib)
 
 

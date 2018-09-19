@@ -1,7 +1,7 @@
 #include "THCUNN.h"
 #include "THCTensor.hpp"
 #include "common.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 
 // Kernel for fast unfold+copy

@@ -12,6 +12,7 @@ import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.nn import Parameter
 from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN
+from multiprocessing.reduction import ForkingPickler
 
 
 TEST_REPEATS = 30
@@ -86,18 +87,28 @@ def cuda_multiply_two(queue, ready, done):
         del cuda_event
 
 
-def autograd_sharing(queue, ready, master_modified):
+def requires_grad_variable_sharing(queue, ready):
+    var = queue.get()
+    ready.set()
+    queue.put(var.requires_grad)
+
+
+def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     var = queue.get()
     ready.set()
     master_modified.wait()
 
-    expected_var = torch.arange(1., 26).view(5, 5)
+    expected_var = torch.arange(1., 26, device=device).view(5, 5)
     expected_var[0, 0] = 1000
     is_ok = var.data.equal(expected_var)
-    var.data[:] = torch.ones(5, 5)
+    var.data[:] = torch.ones(5, 5, device=device)
 
     is_ok &= var.grad is None
-    var._grad = Variable(torch.ones(5, 5), requires_grad=False)
+    if is_parameter:
+        is_ok &= type(var) == Parameter
+    else:
+        is_ok &= type(var) == torch.Tensor
+    var._grad = torch.ones(5, 5, device=device)
 
     queue.put(is_ok)
 
@@ -349,6 +360,8 @@ class TestMultiprocessing(TestCase):
         p.join()
         self.assertIsInstance(outq.get(), RuntimeError)
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_event(self):
         ctx = mp.get_context('spawn')
@@ -389,38 +402,83 @@ class TestMultiprocessing(TestCase):
         self._test_empty_tensor_sharing(torch.float32, torch.device('cuda'))
         self._test_empty_tensor_sharing(torch.int64, torch.device('cuda'))
 
-    def _test_autograd_sharing(self, var):
-        ready = mp.Event()
-        master_modified = mp.Event()
-        queue = mp.Queue()
-        p = mp.Process(target=autograd_sharing, args=(queue, ready, master_modified))
+    def _test_autograd_sharing(self, var, ctx=mp, is_parameter=False):
+        device = 'cuda' if var.is_cuda else 'cpu'
+
+        ready = ctx.Event()
+        master_modified = ctx.Event()
+        queue = ctx.Queue()
+        p = ctx.Process(target=autograd_sharing, args=(queue, ready, master_modified, device, is_parameter))
         p.daemon = True
         p.start()
-        var._grad = Variable(torch.zeros(5, 5), requires_grad=False)
+        var._grad = torch.zeros(5, 5, device=device)
         queue.put(var)
 
         ready.wait()
         var.data[0, 0] = 1000
-        var.grad.data[:] = torch.ones(5, 5) * 4
+        var.grad.data[:] = torch.ones(5, 5, device=device) * 4
         master_modified.set()
 
         worker_ok = queue.get()
         self.assertTrue(worker_ok)
 
-        self.assertEqual(var.data, torch.ones(5, 5))
-        self.assertEqual(var.grad.data, torch.ones(5, 5) * 4)
+        self.assertEqual(var.data, torch.ones(5, 5, device=device))
+        self.assertEqual(var.grad.data, torch.ones(5, 5, device=device) * 4)
         p.join(1)
         self.assertFalse(p.is_alive())
 
     def test_variable_sharing(self):
         for requires_grad in [True, False]:
-            var = Variable(torch.arange(1., 26).view(5, 5),
-                           requires_grad=requires_grad)
+            var = torch.arange(1., 26).view(5, 5).requires_grad_(requires_grad)
             self._test_autograd_sharing(var)
+
+    def test_leaf_variable_sharing(self):
+        devices = ['cpu']
+        if torch.cuda.is_available() and not NO_MULTIPROCESSING_SPAWN and TEST_CUDA_IPC:
+            devices.append('cuda')
+        for device in devices:
+            for requires_grad in [True, False]:
+                var = torch.arange(1., 26, device=device).view(5, 5).requires_grad_(requires_grad)
+                self.assertTrue(var.is_leaf)
+                ctx = mp.get_context('spawn') if device == 'cuda' else mp
+                ready = ctx.Event()
+                queue = ctx.Queue()
+                p = ctx.Process(target=requires_grad_variable_sharing, args=(queue, ready))
+                p.daemon = True
+                p.start()
+                queue.put(var)
+                ready.wait()
+                worker_requires_grad = queue.get()
+                self.assertTrue(worker_requires_grad == requires_grad)
+
+    def test_non_leaf_variable_sharing(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            var0 = torch.arange(1., 26, device=device).view(5, 5).requires_grad_(True)
+            var = var0 * 2
+            # Don't use a regular Queue; it uses a background thread (which
+            # means we can't catch the exceptions)
+            queue = mp.SimpleQueue()
+            self.assertRaisesRegex(RuntimeError, r'requires_grad', lambda: queue.put(var))
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_cuda_variable_sharing(self):
+        for requires_grad in [True, False]:
+            var = torch.arange(1., 26, device='cuda').view(5, 5).requires_grad_(requires_grad)
+            self._test_autograd_sharing(var, mp.get_context('spawn'))
 
     def test_parameter_sharing(self):
         param = Parameter(torch.arange(1., 26).view(5, 5))
-        self._test_autograd_sharing(param)
+        self._test_autograd_sharing(param, is_parameter=True)
+
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    def test_cuda_parameter_sharing(self):
+        param = Parameter(torch.arange(1., 26, device='cuda').view(5, 5))
+        self._test_autograd_sharing(param, mp.get_context('spawn'), is_parameter=True)
 
     def test_empty_shared(self):
         t = torch.Tensor()

@@ -486,7 +486,7 @@ bool THC_reduceDim(THCState* state,
       state, out, THCTensor_nDimensionLegacyAll(state, in), dim, keepdim);
 
   // Resize out
-  std::vector<int64_t> sizes = in->sizes().vec();
+  std::vector<int64_t> sizes = THTensor_sizesLegacyNoScalars(in);
   sizes[dim] = 1;
   THCTensor_resize(state, out, sizes, {});
 
@@ -517,9 +517,9 @@ bool THC_reduceDim(THCState* state,
         (TYPE) outElements, init, modifyOp, reduceOp, finalizeOp);      \
     }                                                                   \
     else                                                                \
-    {                                                                        \
-        void* stagingData;                                                   \
-        void* semaphores;                                                    \
+    {                                                                   \
+        void* stagingData = nullptr;                                    \
+        void* semaphores = nullptr;                                     \
                                                                              \
         if(grid.y > 1)                                                       \
         {                                                                    \

@@ -13,10 +13,10 @@ class MatMulOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   MatMulOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_a_(OperatorBase::GetSingleArgument<int>("axis_a", 1)),
-        axis_b_(OperatorBase::GetSingleArgument<int>("axis_b", 1)),
-        trans_a_(OperatorBase::GetSingleArgument<int>("trans_a", 0)),
-        trans_b_(OperatorBase::GetSingleArgument<int>("trans_b", 0)) {}
+        axis_a_(this->template GetSingleArgument<int>("axis_a", 1)),
+        axis_b_(this->template GetSingleArgument<int>("axis_b", 1)),
+        trans_a_(this->template GetSingleArgument<int>("trans_a", 0)),
+        trans_b_(this->template GetSingleArgument<int>("trans_b", 0)) {}
   ~MatMulOp() {}
 
   bool RunOnDevice() override {

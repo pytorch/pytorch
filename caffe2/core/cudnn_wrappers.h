@@ -89,7 +89,7 @@ class CuDNNState {
   cudaStream_t stream_{nullptr};
   CuDNNWorkspace workspace_;
   size_t gpu_id_{0};
-  DISABLE_COPY_AND_ASSIGN(CuDNNState);
+  AT_DISABLE_COPY_AND_ASSIGN(CuDNNState);
 };
 
 /**
@@ -153,7 +153,7 @@ class CuDNNWrapper {
       CAFFE2_COMPILE_TIME_MAX_GPUS>;
   static PerGPUCuDNNStates& cudnn_states();
 
-  DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
+  AT_DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
 };
 
 }; // namespace caffe2

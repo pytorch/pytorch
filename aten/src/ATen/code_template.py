@@ -11,13 +11,13 @@ import re
 
 
 class CodeTemplate(object):
-    substitution_str = '(^[^\n\S]*)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})'
+    substitution_str = r'(^[^\n\S]*)?\$([^\d\W]\w*|\{,?[^\d\W]\w*\,?})'
 
     # older versions of Python have a bug where \w* does not work,
     # so we need to replace with the non-shortened version [a-zA-Z0-9_]*
     # https://bugs.python.org/issue18647
 
-    substitution_str = substitution_str.replace('\w', '[a-zA-Z0-9_]')
+    substitution_str = substitution_str.replace(r'\w', r'[a-zA-Z0-9_]')
 
     subtitution = re.compile(substitution_str, re.MULTILINE)
 

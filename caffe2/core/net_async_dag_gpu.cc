@@ -8,7 +8,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
 #include "caffe2/core/context_gpu.h"
@@ -71,7 +71,7 @@ class ProfiledRange {
 
  private:
   nvtxRangeId_t range_ = 0;
-  DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+  AT_DISABLE_COPY_AND_ASSIGN(ProfiledRange);
 };
 
 #else
@@ -81,7 +81,7 @@ class ProfiledRange {
   ProfiledRange(const OperatorDef& def, Color color) {}
 
  private:
-  DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+  AT_DISABLE_COPY_AND_ASSIGN(ProfiledRange);
 };
 
 #endif // ifdef CAFFE2_USE_NVTX
@@ -111,7 +111,7 @@ AsyncDAGNet::AsyncDAGNet(
 
 int AsyncDAGNet::stream(const DeviceOption& device_option) {
   int stream_id = 0;
-  if (device_option.device_type() == CUDA) {
+  if (device_option.device_type() == PROTO_CUDA) {
     int gpu_id = device_option.cuda_gpu_id();
     CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
     if ((unsigned)gpu_id >= stream_counters_.size()) {

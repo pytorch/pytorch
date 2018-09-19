@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCUNN.h"
 #else
 
-#include "Reduction.h"
+#include <ATen/core/Reduction.h>
 
 THC_API void THNN_(Abs_updateOutput)(
                   THCState *state,
@@ -233,44 +233,6 @@ THC_API void THNN_(LeakyReLU_updateGradInput)(
                   THCTensor *gradInput,
                   accreal negval,
                   bool inplace);
-
-THC_API void THNN_(GRUFused_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *hidden,
-                  THCTensor *bias1, // [OPTIONAL]
-                  THCTensor *bias2, // [OPTIONAL]
-                  THCTensor *hx,
-                  THCTensor *hy,
-                  THCTensor *storage);
-
-THC_API void THNN_(GRUFused_updateGradInput)(
-                  THCState *state,
-                  THCTensor *gradInInput,
-                  THCTensor *gradInHidden,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInputHx,
-                  THCTensor *storage);
-
-THC_API void THNN_(LSTMFused_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *hidden,
-                  THCTensor *bias1, // [OPTIONAL]
-                  THCTensor *bias2, // [OPTIONAL]
-                  THCTensor *cx,
-                  THCTensor *hy,
-                  THCTensor *cy);
-
-THC_API void THNN_(LSTMFused_updateGradInput)(
-                  THCState *state,
-                  THCTensor *storage,
-                  THCTensor *gradInGates,
-                  THCTensor *prevC,
-                  THCTensor *cy,
-                  THCTensor *gradOutput,
-                  THCTensor *gradOutputCell,
-                  THCTensor *gradInputCx);
 
 THC_API void THNN_(LogSigmoid_updateOutput)(
                   THCState *state,

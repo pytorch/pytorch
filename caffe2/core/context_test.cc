@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 #include "caffe2/core/context.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 

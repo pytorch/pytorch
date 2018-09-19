@@ -37,6 +37,9 @@ case NNKind::Receive:
 case NNKind::BatchNormalization:
   return "BatchNormalization";
 
+case NNKind::Clip:
+  return "Clip";
+
 case NNKind::FC:
   return "FC";
 
@@ -60,6 +63,12 @@ case NNKind::Reshape:
 
 case NNKind::Flatten:
   return "Flatten";
+
+case NNKind::CopyToOpenCL:
+  return "CopyToOpenCL";
+
+case NNKind::CopyFromOpenCL:
+  return "CopyFromOpenCL";
 
 case NNKind::NCHW2NHWC:
   return "NCHW2NHWC";

@@ -3,11 +3,9 @@
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
+#include <torch/serialization.h>
 
 #include <ATen/ATen.h>
-
-#include <cereal/access.hpp>
-#include <cereal/cereal.hpp>
 
 #include <utility>
 #include <vector>
@@ -30,38 +28,39 @@ class Adam : public Optimizer {
   template <typename ParameterContainer>
   explicit Adam(ParameterContainer&& parameters, const AdamOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options),
-        step_buffers_(parameters_.size(), 0),
-        exp_average_buffers_(zero_buffers_like(parameters_)),
-        exp_average_sq_buffers_(zero_buffers_like(parameters_)) {
-    if (options_.amsgrad_) {
-      max_exp_average_sq_buffers_ = zero_buffers_like(parameters_);
-    }
-  }
+        options(options) {}
 
   void step() override;
 
   template <class Archive>
   void serialize(Archive& ar) {
+#if defined(TORCH_USE_CEREAL)
     ar(CEREAL_NVP(step_buffers_),
        CEREAL_NVP(exp_average_buffers_),
        CEREAL_NVP(exp_average_sq_buffers_),
        CEREAL_NVP(max_exp_average_sq_buffers_));
+#endif // defined(TORCH_USE_CEREAL)
   }
 
-  const AdamOptions& options() const noexcept;
+  AdamOptions options;
 
  private:
+#if defined(TORCH_USE_CEREAL)
   friend class cereal::access;
-  Adam() : options_(0) {}
-
-  AdamOptions options_;
+#endif // defined(TORCH_USE_CEREAL)
+  Adam() : options(0) {}
 
   std::vector<int64_t> step_buffers_;
   std::vector<Tensor> exp_average_buffers_;
   std::vector<Tensor> exp_average_sq_buffers_;
   std::vector<Tensor> max_exp_average_sq_buffers_;
 };
-
 } // namespace optim
 } // namespace torch
+
+#if defined(TORCH_USE_CEREAL)
+CEREAL_REGISTER_TYPE(torch::optim::Adam);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::Adam);
+#endif // defined(TORCH_USE_CEREAL)

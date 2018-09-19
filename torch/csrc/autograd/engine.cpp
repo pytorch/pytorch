@@ -8,6 +8,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Error.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -63,7 +64,7 @@ struct FunctionTask {
 
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
     : base(base)
-    , fn(fn)
+    , fn(std::move(fn))
     , inputs(std::move(inputs)) {}
 };
 
@@ -170,15 +171,10 @@ struct GraphTask {
   }
 
   GraphTask(bool keep_graph, bool grad_mode)
-    : exception()
-    , has_error(false)
+    : has_error(false)
     , outstanding_tasks(0)
     , keep_graph(keep_graph)
     , grad_mode(grad_mode)
-    , mutex()
-    , not_done()
-    , not_ready()
-    , dependencies()
     , owner(NO_DEVICE) {}
 };
 
@@ -194,12 +190,12 @@ auto ReadyQueue::push(FunctionTask item) -> void {
 auto ReadyQueue::pop() -> FunctionTask {
   std::unique_lock<std::mutex> lock(mutex);
   not_empty.wait(lock, [this]{ return !heap.empty(); });
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto task = std::move(const_cast<FunctionTask&>(heap.top())); heap.pop();
   return task;
 }
 
-Engine::Engine() : ready_queues() {
-}
+Engine::Engine() = default;
 
 // This Engine's ReadyQueues and their corresponding threads are leaked here
 Engine::~Engine() = default;
@@ -307,7 +303,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
     ss << edges.size() << ", but got " << grads.size();
-    throw std::runtime_error(format_error(ss.str()));
+    AT_ERROR(format_error(ss.str()));
   }
   for (size_t i = 0; i < grads.size(); i++) {
     const auto& edge = edges[i];
@@ -319,7 +315,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
-      // throw std::runtime_error(format_error(ss.str()));
+      // AT_ERROR(format_error(ss.str()));
       continue;
     }
     if (!grads[i].sizes().equals(metadata.shape())) {
@@ -328,7 +324,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
         ss << "invalid gradient at index " << i << " - got ";
         ss << grads[i].sizes() << " but expected shape compatible with ";
         ss << metadata.shape();
-        throw std::runtime_error(format_error(ss.str()));
+        AT_ERROR(format_error(ss.str()));
       }
       grads[i] = at::sum_to(grads[i], metadata.shape());
     }
@@ -336,7 +332,14 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected type ";
       ss << metadata.type() << " but got " << grads[i].type();
-      throw std::runtime_error(format_error(ss.str()));
+      AT_ERROR(format_error(ss.str()));
+    }
+    const auto output_device = output.is_cuda() ? output.get_device() : -1;
+    if (output_device != metadata.device()) {
+      std::stringstream ss;
+      ss << "invalid gradient at index " << i << " - expected device ";
+      ss << metadata.device() << " but got " << output_device;
+      AT_ERROR(format_error(ss.str()));
     }
   }
 }
@@ -369,6 +372,7 @@ static variable_list call_function(FunctionTask& task) {
   checkpoint_valid = prev_checkpoint_valid_state;
 
   if(has_post_hooks){
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     return call_post_hooks(fn, std::move(outputs), std::move(inputs));
   }
   return outputs;
@@ -471,7 +475,7 @@ auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies;
-  while (queue.size() > 0) {
+  while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
@@ -506,6 +510,7 @@ auto Engine::execute(const edge_list& roots,
                      const edge_list& outputs) -> variable_list {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
   });
@@ -552,6 +557,9 @@ auto Engine::execute(const edge_list& roots,
   // more callbacks (or they can be registered from other threads
   // while it's waiting.
   std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
+  // WARNING: Don't use a range-for loop here because more callbacks may be
+  // added in between callback calls, so iterators may become invalidated.
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < final_callbacks.size(); ++i) {
     cb_lock.unlock();
     final_callbacks[i]();

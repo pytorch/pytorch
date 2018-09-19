@@ -3,13 +3,12 @@
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
+#include <torch/serialization.h>
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
 
-#include <cereal/access.hpp>
-#include <cereal/cereal.hpp>
-
+#include <cstddef>
 #include <utility>
 #include <vector>
 
@@ -30,29 +29,35 @@ class SGD : public Optimizer {
   template <typename ParameterContainer>
   explicit SGD(ParameterContainer&& parameters, const SGDOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options) {
-    if (options_.momentum_ > 0) {
-      momentum_buffers_ = zero_buffers_like(parameters_);
-    }
-  }
+        options(options) {}
 
   void step() override;
 
   template <class Archive>
   void serialize(Archive& ar) {
+#if defined(TORCH_USE_CEREAL)
     ar(CEREAL_NVP(momentum_buffers_));
+#endif // defined(TORCH_USE_CEREAL)
   }
 
-  const SGDOptions& options() const noexcept;
+  SGDOptions options;
 
  private:
+#if defined(TORCH_USE_CEREAL)
   friend class cereal::access;
-  SGD() : options_(0) {}
+#endif // defined(TORCH_USE_CEREAL)
+  SGD() : options(0) {}
 
-  SGDOptions options_;
   std::vector<Tensor> momentum_buffers_;
   /// Counts how often `step()` is called, for dampening.
   size_t iteration_{0};
 };
 } // namespace optim
 } // namespace torch
+
+#if defined(TORCH_USE_CEREAL)
+CEREAL_REGISTER_TYPE(torch::optim::SGD);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::SGD);
+#endif // defined(TORCH_USE_CEREAL)

@@ -4,7 +4,7 @@
 #include "THCTensor.hpp"
 #include "THCStorage.hpp"
 
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 
 #include "generic/Col2Im.cu"

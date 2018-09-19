@@ -11,9 +11,6 @@ import hypothesis.strategies as st
 import numpy as np
 
 
-dyndep.InitOpsLibrary('@/caffe2/caffe2/contrib/aten:aten_op')
-
-
 class TestATen(hu.HypothesisTestCase):
 
     @given(inputs=hu.tensors(n=2), **hu.gcs)

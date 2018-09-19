@@ -17,20 +17,12 @@
 #include <memory>
 #include <mutex>
 
+#include <ATen/core/Registry.h>
+
 #include "caffe2/core/common.h"
 #include "caffe2/core/typeid.h"
 
 namespace caffe2 {
-
-template <typename KeyType>
-inline void PrintOffendingKey(const KeyType& /*key*/) {
-  printf("[key type printing not supported]\n");
-}
-
-template <>
-inline void PrintOffendingKey(const string& key) {
-  printf("Offending key: %s.\n", key.c_str());
-}
 
 /**
  * @brief A template class that allows one to register classes by keys.
@@ -59,7 +51,7 @@ class Registry {
     std::lock_guard<std::mutex> lock(register_mutex_);
     if (registry_.count(key) != 0) {
       printf("Key already registered.\n");
-      PrintOffendingKey(key);
+      at::PrintOffendingKey(key);
       std::exit(1);
     }
     registry_[key] = creator;
@@ -108,7 +100,7 @@ class Registry {
   CaffeMap<SrcType, string> help_message_;
   std::mutex register_mutex_;
 
-  DISABLE_COPY_AND_ASSIGN(Registry);
+  AT_DISABLE_COPY_AND_ASSIGN(Registry);
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
@@ -152,13 +144,15 @@ class Registerer {
  */
 #define CAFFE_DECLARE_TYPED_REGISTRY(                                    \
     RegistryName, SrcType, ObjectType, PtrType, ...)                     \
-  Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName(); \
+  CAFFE2_EXPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*   \
+  RegistryName();                                                        \
   typedef Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>        \
       Registerer##RegistryName;
 
 #define CAFFE_DEFINE_TYPED_REGISTRY(                                         \
     RegistryName, SrcType, ObjectType, PtrType, ...)                         \
-  Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName() {    \
+  CAFFE2_EXPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*       \
+  RegistryName() {                                                           \
     static Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* registry = \
         new Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>();         \
     return registry;                                                         \
@@ -178,7 +172,7 @@ class Registerer {
       key,                                                                    \
       RegistryName(),                                                         \
       Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
-      DemangleType<__VA_ARGS__>());                                           \
+      at::demangle_type<__VA_ARGS__>());                                           \
   }
 
 // CAFFE_DECLARE_REGISTRY and CAFFE_DEFINE_REGISTRY are hard-wired to use string

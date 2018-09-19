@@ -30,6 +30,12 @@ static std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarTy
       return std::make_pair("int16", "short");
     case at::ScalarType::Half:
       return std::make_pair("float16", "half");
+    case at::ScalarType::ComplexHalf:
+      return std::make_pair("complex32", "");
+    case at::ScalarType::ComplexFloat:
+      return std::make_pair("complex64", "");
+    case at::ScalarType::ComplexDouble:
+      return std::make_pair("complex128", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }
@@ -42,7 +48,7 @@ void initializeDtypes() {
 #define DEFINE_SCALAR_TYPE(_1,n,_2) at::ScalarType::n,
 
   at::ScalarType all_scalar_types[] = {
-    AT_FORALL_SCALAR_TYPES(DEFINE_SCALAR_TYPE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_SCALAR_TYPE)
   };
 
   for (at::ScalarType scalarType: all_scalar_types) {

@@ -11,12 +11,15 @@ __all__ = [
     'argsort',
     'btrifact',
     'btriunpack',
+    'einsum',
     'broadcast_tensors',
     'isfinite',
     'isinf',
     'isnan',
+    'meshgrid',
     'split',
     'stft',
+    'tensordot',
     'unique',
 ]
 
@@ -48,7 +51,7 @@ def split(tensor, split_size_or_sections, dim=0):
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
     be split into equally sized chunks (if possible). Last chunk will be smaller if
-    the tensor size along the given dimension :attr:`dim= is not divisible by
+    the tensor size along the given dimension :attr:`dim` is not divisible by
     :attr:`split_size`.
 
     If :attr:`split_size_or_sections` is a list, then :attr:`tensor` will be split
@@ -164,6 +167,80 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
+def einsum(equation, *operands):
+    r"""einsum(equation, *operands) -> Tensor
+
+This function provides a way of computing multilinear expressions (i.e. sums of products) using the
+Einstein summation convention.
+
+Args:
+    equation (string): The equation is given in terms of lower case letters (indices) to be associated
+           with each dimension of the operands and result. The left hand side lists the operands
+           dimensions, separated by commas. There should be one index letter per tensor dimension.
+           The right hand side follows after `->` and gives the indices for the output.
+           If the `->` and right hand side are omitted, it implicitly defined as the alphabetically
+           sorted list of all indices appearing exactly once in the left hand side.
+           The indices not apprearing in the output are summed over after multiplying the operands
+           entries.
+           If an index appears several times for the same operand, a diagonal is taken.
+           Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
+           the ellipsis dimensions are at the beginning of the output.
+    operands (list of Tensors): The operands to compute the Einstein sum of.
+           Note that the operands are passed as a list, not as individual arguments.
+
+Examples::
+
+    >>> x = torch.randn(5)
+    >>> y = torch.randn(4)
+    >>> torch.einsum('i,j->ij', x, y)  # outer product
+    tensor([[-0.0570, -0.0286, -0.0231,  0.0197],
+            [ 1.2616,  0.6335,  0.5113, -0.4351],
+            [ 1.4452,  0.7257,  0.5857, -0.4984],
+            [-0.4647, -0.2333, -0.1883,  0.1603],
+            [-1.1130, -0.5588, -0.4510,  0.3838]])
+
+
+    >>> A = torch.randn(3,5,4)
+    >>> l = torch.randn(2,5)
+    >>> r = torch.randn(2,4)
+    >>> torch.einsum('bn,anm,bm->ba', l, A, r) # compare torch.nn.functional.bilinear
+    tensor([[-0.3430, -5.2405,  0.4494],
+            [ 0.3311,  5.5201, -3.0356]])
+
+
+    >>> As = torch.randn(3,2,5)
+    >>> Bs = torch.randn(3,5,4)
+    >>> torch.einsum('bij,bjk->bik', As, Bs) # batch matrix multiplication
+    tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+             [-1.6706, -0.8097, -0.8025, -2.1183]],
+
+            [[ 4.2239,  0.3107, -0.5756, -0.2354],
+             [-1.4558, -0.3460,  1.5087, -0.8530]],
+
+            [[ 2.8153,  1.8787, -4.3839, -1.2112],
+             [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+
+    >>> A = torch.randn(3, 3)
+    >>> torch.einsum('ii->i', A) # diagonal
+    tensor([-0.7825,  0.8291, -0.1936])
+
+    >>> A = torch.randn(4, 3, 3)
+    >>> torch.einsum('...ii->...i', A) # batch diagonal
+    tensor([[-1.0864,  0.7292,  0.0569],
+            [-0.9725, -1.0270,  0.6493],
+            [ 0.5832, -1.1716, -1.5084],
+            [ 0.4041, -1.1690,  0.8570]])
+
+    >>> A = torch.randn(2, 3, 4, 5)
+    >>> torch.einsum('...ij->...ji', A).shape # batch permute
+    torch.Size([2, 3, 5, 4])
+"""
+    if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
+        # the old interface of passing the operands as one list argument
+        operands = operands[0]
+    return torch._C._VariableFunctions.einsum(equation, operands)
+
+
 def isfinite(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
 
@@ -202,6 +279,43 @@ def isinf(tensor):
     return tensor.abs() == inf
 
 
+def meshgrid(*tensors, **kwargs):
+    r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
+vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
+expanding the :math:`i`th input over dimensions defined by other inputs.
+
+
+    Args:
+        tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
+        treated as tensors of size :math:`(1,)` automatically
+
+    Returns:
+        seq (sequence of Tensors): If the input has :math:`k` tensors of size
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+    Example::
+
+        >>> x = torch.tensor([1, 2, 3])
+        >>> y = torch.tensor([4, 5, 6])
+        >>> grid_x, grid_y = torch.meshgrid(x, y)
+        >>> grid_x
+        tensor([[1, 1, 1],
+                [2, 2, 2],
+                [3, 3, 3]])
+        >>> grid_y
+        tensor([[4, 5, 6],
+                [4, 5, 6],
+                [4, 5, 6]])
+    """
+    if kwargs:
+        raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
+    if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
+        # the old interface of passing the operands as one list argument
+        tensors = tensors[0]
+    return torch._C._VariableFunctions.meshgrid(tensors)
+
+
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
     r"""Short-time Fourier transform (STFT).
@@ -211,8 +325,8 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     .. math::
         X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
-                            window[k]\ input[m \times hop_length + k]\ %
-                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}},
+                            \text{window}[k]\ \text{input}[m \times \text{hop\_length} + k]\ %
+                            \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right),
 
     where :math:`m` is the index of the sliding window, and :math:`\omega` is
     the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
@@ -269,7 +383,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         win_length (int): the size of window frame and STFT filter.
             Default: ``None``  (treated as equal to :attr:`n_fft`)
         window (Tensor, optional): the optional window function.
-            Default: ``None`` (treated as window of all :math:`1`s)
+            Default: ``None`` (treated as window of all :math:`1` s)
         center (bool, optional): whether to pad :attr:`input` on both sides so
             that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
             Default: ``True``
@@ -314,7 +428,7 @@ def isnan(tensor):
     return tensor != tensor
 
 
-def unique(input, sorted=False, return_inverse=False):
+def unique(input, sorted=False, return_inverse=False, dim=None):
     r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
 
     Arguments:
@@ -356,11 +470,19 @@ def unique(input, sorted=False, return_inverse=False):
                 [ 1,  2]])
 
     """
-    output, inverse_indices = torch._unique(
-        input,
-        sorted=sorted,
-        return_inverse=return_inverse,
-    )
+    if dim is not None:
+        output, inverse_indices = torch._unique_dim(
+            input,
+            dim,
+            sorted=sorted,
+            return_inverse=return_inverse
+        )
+    else:
+        output, inverse_indices = torch._unique(
+            input,
+            sorted=sorted,
+            return_inverse=return_inverse,
+        )
     if return_inverse:
         return output, inverse_indices
     else:
@@ -368,7 +490,7 @@ def unique(input, sorted=False, return_inverse=False):
 
 
 def argmax(input, dim=None, keepdim=False):
-    """Returns the indices of the maximum values of a tensor across a dimension.
+    r"""Returns the indices of the maximum values of a tensor across a dimension.
 
     This is the second value returned by :meth:`torch.max`. See its
     documentation for the exact semantics of this method.
@@ -399,7 +521,7 @@ def argmax(input, dim=None, keepdim=False):
 
 
 def argmin(input, dim=None, keepdim=False):
-    """Returns the indices of the minimum values of a tensor across a dimension.
+    r"""Returns the indices of the minimum values of a tensor across a dimension.
 
     This is the second value returned by :meth:`torch.min`. See its
     documentation for the exact semantics of this method.
@@ -429,8 +551,63 @@ def argmin(input, dim=None, keepdim=False):
     return torch._argmin(input, dim, keepdim)
 
 
+def tensordot(a, b, dims=2):
+    r"""Returns a contraction of a and b over multiple dimensions.
+
+    :attr:`tensordot` implements a generalizes the matrix product.
+
+    Args:
+      a (Tensor): Left tensor to contract
+      b (Tensor): Right tensor to contract
+      dims (int or tuple of two lists of integers): number of dimensions to
+         contract or explicit lists of dimensions for :attr:`a` and
+         :attr:`b` respectively
+
+    When called with an integer argument :attr:`dims` = :math:`d`, and the number of
+    dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`, respectively,
+    it computes
+
+    .. math::
+        r_{i_0,...,i_{m-d}, i_d,...,i_n}
+          = \sum_{k_0,...,k_{d-1}} a_{i_0,...,i_{m-d},k_0,...,k_{d-1}} \times b_{k_0,...,k_{d-1}, i_d,...,i_n}.
+
+    When called with :attr:`dims` of the list form, the given dimensions will be contracted
+    in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
+    in these dimensions must match, but :attr:`tensordot` will deal with broadcasted
+    dimensions.
+
+    Examples::
+
+        >>> a = torch.arange(60.).reshape(3, 4, 5)
+        >>> b = torch.arange(24.).reshape(4, 3, 2)
+        >>> torch.tensordot(a, b, dims=([1, 0], [0, 1]))
+        tensor([[4400., 4730.],
+                [4532., 4874.],
+                [4664., 5018.],
+                [4796., 5162.],
+                [4928., 5306.]])
+
+        >>> a = torch.randn(3, 4, 5, device='cuda')
+        >>> b = torch.randn(4, 5, 6, device='cuda')
+        >>> c = torch.tensordot(a, b, dims=2).cpu()
+        tensor([[ 8.3504, -2.5436,  6.2922,  2.7556, -1.0732,  3.2741],
+                [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
+                [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
+
+    """
+    if isinstance(dims, (list, tuple)) or \
+       (isinstance(dims, torch.Tensor) and dims.numel() > 1):
+        dims_a, dims_b = dims
+    else:
+        if isinstance(dims, torch.Tensor):
+            dims = dims.item()
+        dims_a = list(range(-dims, 0))
+        dims_b = list(range(dims))
+    return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
+
+
 def argsort(input, dim=None, descending=False):
-    """Returns the indices that sort a tensor along a given dimension in ascending
+    r"""Returns the indices that sort a tensor along a given dimension in ascending
     order by value.
 
     This is the second value returned by :meth:`torch.sort`.  See its documentation

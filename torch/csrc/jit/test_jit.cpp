@@ -1,18 +1,18 @@
 #ifdef USE_CATCH
 
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 using Catch::StartsWith;
 
 #else
 
-#define REQUIRE JIT_ASSERT
+#define CATCH_REQUIRE JIT_ASSERT
 
 #endif
 
 #include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"
@@ -26,6 +26,7 @@ using Catch::StartsWith;
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/operator.h"
@@ -34,7 +35,6 @@ using Catch::StartsWith;
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/jit/passes/shape_analysis.h"
 
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
@@ -110,9 +110,9 @@ static void codeTemplateTest() {
     e.v("what",{"is","this"});
     TemplateEnv c(e);
     c.s("hi","foo2");
-    REQUIRE(e.s("hi") == "foo");
-    REQUIRE(c.s("hi") == "foo2");
-    REQUIRE(e.v("what")[0] == "is");
+    CATCH_REQUIRE(e.s("hi") == "foo");
+    CATCH_REQUIRE(c.s("hi") == "foo2");
+    CATCH_REQUIRE(e.v("what")[0] == "is");
   }
 
   {
@@ -126,7 +126,7 @@ static void codeTemplateTest() {
     auto s = ct.format(e);
     //std::cout << "'" << s << "'\n";
     //std::cout << "'" << ct_expect << "'\n";
-    REQUIRE(s == ct_expect);
+    CATCH_REQUIRE(s == ct_expect);
   }
 }
 
@@ -136,8 +136,6 @@ Value * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
 
 
 static void fusionTests() {
-  FusionCompiler comp;
-
   auto testSimple = [&] {
     Graph graph;
     Var i0 = Var::asNewInput(graph);
@@ -147,11 +145,12 @@ static void fusionTests() {
     auto a = at::rand({3,4}, at::kCUDA);
     auto b = at::rand({4,3}, at::kCUDA).transpose(0,1);
     auto o = at::zeros({3,4}, at::kCUDA);
-    comp.debugLaunchGraph(graph, 0, {a,b}, {o});
+    auto outputs = debugLaunchGraph(graph, 0, {a,b});
+    CATCH_REQUIRE(outputs.size() == 1);
     auto o2 = a*b;
-    float max_diff = (o2 - o).abs().max().toCDouble();
+    float max_diff = (o2 - outputs[0]).abs().max().toCDouble();
     //std::cout << "max diff: " << max_diff << "\n";
-    REQUIRE(max_diff == 0);
+    CATCH_REQUIRE(max_diff == 0);
   };
   testSimple();
 
@@ -180,7 +179,6 @@ static void fusionTests() {
     graph.lint();
 
     std::vector<at::Tensor> inputs;
-    std::vector<at::Tensor> outputs;
     // We want to generate input/output tensors with dimension 128x128x32, but
     // with different internal strides.  To do this, we generate a tensor
     // with the "wrong" dimensions, and then use transpose to get an appropriately
@@ -189,11 +187,6 @@ static void fusionTests() {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti],dims[tj]);
       inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
-    }
-    for(size_t i = 0; i < graph.outputs().size(); i++) {
-      std::vector<int64_t> dims = {128, 128, 32};
-      std::swap(dims[toi],dims[toj]);
-      outputs.push_back(at::zeros(dims, at::kCUDA).transpose(toi,toj));
     }
 
     auto t22 = inputs[4].sigmoid();
@@ -206,12 +199,11 @@ static void fusionTests() {
     auto t5 = out1.tanh();
     auto out0 = t16*t5;
 
-
-    //auto out0 = inputs[0]*inputs[1];
-    comp.debugLaunchGraph(graph, 0, inputs, outputs);
-    REQUIRE(out0.is_same_size(outputs.front()));
+    auto outputs = debugLaunchGraph(graph, 0, inputs);
+    CATCH_REQUIRE(outputs.size() == graph.outputs().size());
+    CATCH_REQUIRE(out0.is_same_size(outputs.front()));
     float max_diff = (outputs.front() - out0).abs().max().toCDouble();
-    REQUIRE(max_diff < 1e-6);
+    CATCH_REQUIRE(max_diff < 1e-6);
 
   };
   testOne(0,0,0,0);
@@ -238,17 +230,16 @@ static void fusionTests() {
 
     auto a = at::rand({3,4,5}, at::kCUDA);
     auto b = at::rand({4,3,5}, at::kCUDA).transpose(0,1);
-    auto o = at::zeros({3,4,5}, at::kCUDA);
 
     auto o_r = a*b;
     auto o2_r = at::cat({a, o_r}, dim);
-    auto o2 = at::zeros(o2_r.sizes(), at::kCUDA);
-    comp.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
+    auto outputs = debugLaunchGraph(graph, 0, {a,b});
+    CATCH_REQUIRE(outputs.size() == 2);
 
-    float max_diff = (o_r - o).abs().max().toCDouble();
-    REQUIRE(max_diff == 0);
-    float max_diff2 = (o2_r - o2).abs().max().toCDouble();
-    REQUIRE(max_diff2 == 0);
+    float max_diff = (o_r - outputs[0]).abs().max().toCDouble();
+    CATCH_REQUIRE(max_diff == 0);
+    float max_diff2 = (o2_r - outputs[1]).abs().max().toCDouble();
+    CATCH_REQUIRE(max_diff2 == 0);
   };
   testConcat(0);
   testConcat(1);
@@ -264,58 +255,58 @@ void attributesTest() {
   auto four = attr::perm;
   Attr attr;
   attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
-  REQUIRE(attr.f(one) == 3.4);
-  REQUIRE(attr.s(three) == "what");
-  REQUIRE(attr.i(two) == 5);
+  CATCH_REQUIRE(attr.f(one) == 3.4);
+  CATCH_REQUIRE(attr.s(three) == "what");
+  CATCH_REQUIRE(attr.i(two) == 5);
   attr.s_(one,"no");
-  REQUIRE(attr.s(one) == "no");
-  REQUIRE(attr.hasAttribute(three));
-  REQUIRE(!attr.hasAttribute(four));
+  CATCH_REQUIRE(attr.s(one) == "no");
+  CATCH_REQUIRE(attr.hasAttribute(three));
+  CATCH_REQUIRE(!attr.hasAttribute(four));
   attr.ss_(two, {"hi", "now"});
-  REQUIRE(attr.ss(two).at(1) == "now");
+  CATCH_REQUIRE(attr.ss(two).at(1) == "now");
 
   Attr attr2;
   attr2.copyAttributes(attr);
-  REQUIRE(attr2.s(one) == "no");
+  CATCH_REQUIRE(attr2.s(one) == "no");
   attr2.f_(one,5);
-  REQUIRE(attr.s(one) == "no");
-  REQUIRE(attr2.f(one) == 5);
+  CATCH_REQUIRE(attr.s(one) == "no");
+  CATCH_REQUIRE(attr2.f(one) == 5);
 }
 
 void internedStringsTests () {
 
-  REQUIRE(prim::Param == Symbol::prim("Param"));
-  REQUIRE(prim::Return == Symbol::prim("Return"));
-  REQUIRE(prim::Return.toUnqualString() == std::string("Return"));
-  REQUIRE(prim::Return.toQualString() == std::string("prim::Return"));
+  CATCH_REQUIRE(prim::Param == Symbol::prim("Param"));
+  CATCH_REQUIRE(prim::Return == Symbol::prim("Return"));
+  CATCH_REQUIRE(prim::Return.toUnqualString() == std::string("Return"));
+  CATCH_REQUIRE(prim::Return.toQualString() == std::string("prim::Return"));
   Symbol newsym = Symbol::aten("__NEW_SYMBOL");
   size_t symstart = newsym;
-  REQUIRE(newsym.toQualString() == std::string("aten::__NEW_SYMBOL"));
+  CATCH_REQUIRE(newsym.toQualString() == std::string("aten::__NEW_SYMBOL"));
   // TODO: This test is a bit too close to the implementation details.
-  REQUIRE(Symbol::aten("What") == symstart+1);
-  REQUIRE(Symbol::aten("What2") == symstart+2);
-  REQUIRE(Symbol::aten("What") == symstart+1);
-  REQUIRE(Symbol::aten("What2") == symstart+2);
-  REQUIRE(Symbol(symstart+2).toUnqualString() == std::string("What2"));
+  CATCH_REQUIRE(Symbol::aten("What") == symstart+1);
+  CATCH_REQUIRE(Symbol::aten("What2") == symstart+2);
+  CATCH_REQUIRE(Symbol::aten("What") == symstart+1);
+  CATCH_REQUIRE(Symbol::aten("What2") == symstart+2);
+  CATCH_REQUIRE(Symbol(symstart+2).toUnqualString() == std::string("What2"));
 }
 
 void fromQualStringTests() {
-  REQUIRE(Symbol::fromQualString("prim::Param") == Symbol::prim("Param"));
-  REQUIRE(Symbol::fromQualString("aten::mm") == Symbol::aten("mm"));
-  REQUIRE(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
-  REQUIRE(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
-  REQUIRE(Symbol::fromQualString("scope::") == Symbol::scope(""));
-  REQUIRE(Symbol::fromQualString("::").toUnqualString() == std::string(""));
-  REQUIRE(Symbol::fromQualString("::").ns().toQualString() == std::string("namespaces::"));
-  REQUIRE(Symbol::fromQualString("new_ns::param").toUnqualString() == std::string("param"));
-  REQUIRE(Symbol::fromQualString("new_ns::param").ns().toUnqualString() == std::string("new_ns"));
-  REQUIRE(Symbol::fromQualString("new_ns::param").ns() == Symbol::fromQualString("namespaces::new_ns"));
+  CATCH_REQUIRE(Symbol::fromQualString("prim::Param") == Symbol::prim("Param"));
+  CATCH_REQUIRE(Symbol::fromQualString("aten::mm") == Symbol::aten("mm"));
+  CATCH_REQUIRE(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
+  CATCH_REQUIRE(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
+  CATCH_REQUIRE(Symbol::fromQualString("scope::") == Symbol::scope(""));
+  CATCH_REQUIRE(Symbol::fromQualString("::").toUnqualString() == std::string(""));
+  CATCH_REQUIRE(Symbol::fromQualString("::").ns().toQualString() == std::string("namespaces::"));
+  CATCH_REQUIRE(Symbol::fromQualString("new_ns::param").toUnqualString() == std::string("param"));
+  CATCH_REQUIRE(Symbol::fromQualString("new_ns::param").ns().toUnqualString() == std::string("new_ns"));
+  CATCH_REQUIRE(Symbol::fromQualString("new_ns::param").ns() == Symbol::fromQualString("namespaces::new_ns"));
 
   auto bad_inputs = {"scope", ":", ""};
   for (auto input : bad_inputs) {
     try {
       Symbol::fromQualString(input);
-      REQUIRE(0);
+      CATCH_REQUIRE(0);
     } catch (std::runtime_error c) {
     }
   }
@@ -476,8 +467,8 @@ void interpTest() {
     std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
 
     //std::cout << almostEqual(outputs[0],hx) << "\n";
-    REQUIRE(exactlyEqual(outputs[0],hx));
-    REQUIRE(exactlyEqual(outputs[1],cx));
+    CATCH_REQUIRE(exactlyEqual(outputs[0],hx));
+    CATCH_REQUIRE(exactlyEqual(outputs[1],cx));
 }
 
 void interpStageTest() {
@@ -509,8 +500,8 @@ void interpStageTest() {
     std::tie(hx, cx) = lstm(input[0], hx, cx1, w_ih, w_hh);
 
     //std::cout << almostEqual(outputs[0],hx) << "\n";
-    REQUIRE(exactlyEqual(outputs[0],hx));
-    REQUIRE(exactlyEqual(outputs[1],cx));
+    CATCH_REQUIRE(exactlyEqual(outputs[0],hx));
+    CATCH_REQUIRE(exactlyEqual(outputs[1],cx));
 }
 
 using var_meta_type = std::vector<int64_t>;
@@ -548,10 +539,11 @@ variable_list get_grad_outputs(const variable_list& vars) {
 
 std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
   std::shared_ptr<tracer::TracingState> state;
-  variable_list trace_vars_in;
-  std::tie(state, trace_vars_in) = tracer::enter(vars_in);
+  Stack trace_stack_in;
+  std::tie(state, trace_stack_in) = tracer::enter(fmap<IValue>(vars_in));
+  variable_list trace_vars_in = fmap(trace_stack_in, [](const IValue& v) { return Variable(v.toTensor()); });
   auto trace_vars_out = test(trace_vars_in);
-  tracer::exit(trace_vars_out);
+  tracer::exit(fmap<IValue>(trace_vars_out));
   return state->graph;
 }
 
@@ -562,10 +554,10 @@ variable_list grad(const variable_list& outputs, const variable_list& inputs, co
 }
 
 void assertAllClose(const tensor_list& a, const tensor_list& b) {
-  REQUIRE(a.size() == b.size());
+  CATCH_REQUIRE(a.size() == b.size());
   for (size_t i = 0; i < a.size(); ++i) {
-    REQUIRE(a[i].is_same_size(b[i]));
-    REQUIRE(a[i].allclose(b[i]));
+    CATCH_REQUIRE(a[i].is_same_size(b[i]));
+    CATCH_REQUIRE(a[i].allclose(b[i]));
   }
 }
 
@@ -607,10 +599,11 @@ void testADFormulas() {
     {"tanh",    unary_pointwise,  [](const VL& v) -> VL { return {v[0].tanh()}; }},
     {"t",       unary_pointwise_2d,  [](const VL& v) -> VL { return {v[0].t()}; }},
     {"mm",      {{10, 12}, {12, 15}}, [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
-    {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
-    {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},
-    {"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(4, 1)); }},
-    {"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(3, 2)); }},
+    // TODO: enable once we'll be able to capture lists accross stages
+    //{"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
+    //{"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},
+    //{"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(4, 1)); }},
+    //{"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(3, 2)); }},
   };
 
   for (const auto & test : ad_tests) {
@@ -623,7 +616,7 @@ void testADFormulas() {
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
-    auto grad_spec = differentiate(graph, std::vector<bool>(vars_in.size(), true));
+    auto grad_spec = differentiate(graph);
     LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter
     auto tensors_in                = fmap(vars_in, unwrap);
@@ -648,7 +641,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
+  auto type = CompleteTensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -656,16 +649,16 @@ void testDifferentiate(std::ostream & out) {
   auto c = a * b * a + b;
   graph->registerOutput(c.value());
 
-  auto grad_spec = differentiate(graph, {true, true});
+  auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_captured_inputs = {0, 1};
   std::vector<size_t> expected_captured_outputs = {1};
   std::vector<size_t> expected_input_vjps = {0, 1};
   std::vector<size_t> expected_output_vjps = {0, 1};
-  REQUIRE(grad_spec.f_real_outputs == 1);
-  REQUIRE(grad_spec.df_input_captured_inputs == expected_captured_inputs);
-  REQUIRE(grad_spec.df_input_captured_outputs == expected_captured_outputs);
-  REQUIRE(grad_spec.df_input_vjps == expected_input_vjps);
-  REQUIRE(grad_spec.df_output_vjps == expected_output_vjps);
+  CATCH_REQUIRE(grad_spec.f_real_outputs == 1);
+  CATCH_REQUIRE(grad_spec.df_input_captured_inputs == expected_captured_inputs);
+  CATCH_REQUIRE(grad_spec.df_input_captured_outputs == expected_captured_outputs);
+  CATCH_REQUIRE(grad_spec.df_input_vjps == expected_input_vjps);
+  CATCH_REQUIRE(grad_spec.df_output_vjps == expected_output_vjps);
   out << "testDifferentiate\n";
   out << *grad_spec.f;
   out << *grad_spec.df;
@@ -673,26 +666,29 @@ void testDifferentiate(std::ostream & out) {
 }
 
 void testDifferentiateWithRequiresGrad(std::ostream & out) {
-  auto graph = std::make_shared<Graph>();
-  at::ScalarType s = at::ScalarType::Float;
-  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
-
   // Build up a fake graph
-  auto a = SymbolicVariable::asNewInput(*graph, type);
-  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto graph = std::make_shared<Graph>();
+  auto a = SymbolicVariable::asNewInput(*graph);
+  auto b = SymbolicVariable::asNewInput(*graph);
   auto d = b * b + b;
   auto e = (d + a) * a + b;
   graph->registerOutput(d.value());
   graph->registerOutput(e.value());
 
-  auto grad_spec = differentiate(graph, {true, false});
+  auto a_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), true);
+  auto b_var = autograd::make_variable(at::CPU(at::kFloat).tensor(2, 2), false);
+  ArgumentSpec spec (true, {a_var, b_var});
+  PropagateInputShapes(*graph, spec);
+  PropagateRequiresGrad(graph, spec);
+
+  auto grad_spec = differentiate(graph);
   std::vector<size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
   std::vector<size_t> expected_output_vjps = {0};    // only a requires grad
-  REQUIRE(grad_spec.f_real_outputs == 2);              // we need one temporary %4 = (d + a)
-  REQUIRE(grad_spec.df_input_captured_inputs == std::vector<size_t>({0}));
-  REQUIRE(grad_spec.df_input_captured_outputs == std::vector<size_t>({2}));
-  REQUIRE(grad_spec.df_input_vjps == expected_input_vjps);
-  REQUIRE(grad_spec.df_output_vjps == expected_output_vjps);
+  CATCH_REQUIRE(grad_spec.f_real_outputs == 2);              // we need one temporary %4 = (d + a)
+  CATCH_REQUIRE(grad_spec.df_input_captured_inputs == std::vector<size_t>({0}));
+  CATCH_REQUIRE(grad_spec.df_input_captured_outputs == std::vector<size_t>({2}));
+  CATCH_REQUIRE(grad_spec.df_input_vjps == expected_input_vjps);
+  CATCH_REQUIRE(grad_spec.df_output_vjps == expected_output_vjps);
   out << "testDifferentiateWithRequiresGrad\n";
   out << *grad_spec.f;
   out << *grad_spec.df;
@@ -707,7 +703,7 @@ void testCreateAutodiffSubgraphs(std::ostream & out) {
 }
 
 autograd::Variable var(at::Type & t, at::IntList sizes, bool requires_grad) {
-  return autograd::make_variable(at::rand(sizes, t), requires_grad);
+  return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
 }
 autograd::Variable undef() {
   return autograd::Variable();
@@ -721,8 +717,8 @@ bool isEqual(at::IntList lhs, at::IntList rhs) {
   return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
-bool isEqual(const ArgumentInfo & ti, const autograd::Variable & v) {
-  REQUIRE(ti.isTensor());
+bool isEqual(const CompleteArgumentInfo & ti, const autograd::Variable & v) {
+  CATCH_REQUIRE(ti.isTensor());
   if(!ti.defined())
     return ti.defined() == v.defined();
   return
@@ -756,63 +752,36 @@ void argumentSpecTest() {
   list2[1].toTensor().transpose_(0, 1);
 
 
-  ArgumentSpec a(true, list);
-  ArgumentSpec b(true, list);
-  REQUIRE(a.hashCode() == b.hashCode());
+  CompleteArgumentSpec a(true, list);
+  CompleteArgumentSpec b(true, list);
+  CATCH_REQUIRE(a.hashCode() == b.hashCode());
 
-  REQUIRE(a == b);
-  ArgumentSpec d(true, list2);
-  REQUIRE(d == a);
-  REQUIRE(d.hashCode() == a.hashCode());
+  CATCH_REQUIRE(a == b);
+  CompleteArgumentSpec d(true, list2);
+  CATCH_REQUIRE(d == a);
+  CATCH_REQUIRE(d.hashCode() == a.hashCode());
 
   for(size_t i = 0; i < list.size(); ++i) {
-    REQUIRE(isEqual(a.at(i), list[i].toTensor()));
+    CATCH_REQUIRE(isEqual(a.at(i), list[i].toTensor()));
   }
-  ArgumentSpec no_grad(/*with_grad=*/false, list);
-  REQUIRE(no_grad != a);
+  CompleteArgumentSpec no_grad(/*with_grad=*/false, list);
+  CATCH_REQUIRE(no_grad != a);
 
-  std::unordered_set<ArgumentSpec> spec;
+  std::unordered_set<CompleteArgumentSpec> spec;
   spec.insert(std::move(a));
-  REQUIRE(spec.count(b) > 0);
-  REQUIRE(spec.count(no_grad) == 0);
+  CATCH_REQUIRE(spec.count(b) > 0);
+  CATCH_REQUIRE(spec.count(no_grad) == 0);
   spec.insert(std::move(no_grad));
-  REQUIRE(spec.count(ArgumentSpec(true,list)) == 1);
+  CATCH_REQUIRE(spec.count(CompleteArgumentSpec(true,list)) == 1);
 
   list2[1].toTensor().transpose_(0,1);
-  ArgumentSpec c(true, list2); // same as list, except for one stride
-  REQUIRE(!(c == a));
-  REQUIRE(spec.count(c) == 0);
+  CompleteArgumentSpec c(true, list2); // same as list, except for one stride
+  CATCH_REQUIRE(!(c == a));
+  CATCH_REQUIRE(spec.count(c) == 0);
 
   Stack stack = { var(CF, {1,2}, true), 3, var(CF, {1,2}, true) };
-  ArgumentSpec with_const(true, stack);
-  REQUIRE(with_const.at(2).sizes().size() == 2);
-}
-
-void shapeAnalysisTest() {
-
-  constexpr int batch_size = 4;
-  constexpr int input_size = 256;
-
-  int hidden_size = 2*input_size;
-
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
-
-  auto input = at::randn({batch_size, input_size}, at::kCUDA);
-  auto hx    = at::randn({batch_size, hidden_size}, at::kCUDA);
-  auto cx    = at::randn({batch_size, hidden_size}, at::kCUDA);
-  auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
-  auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
-
-  auto g = build_lstm();
-  ArgumentSpec spec(false, createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
-  PropagateInputShapes(*g, spec);
-  at::Tensor r0, r1;
-  std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  auto o0 = g->outputs()[0]->type()->expect<TensorType>();
-  auto o1 = g->outputs()[1]->type()->expect<TensorType>();
-  REQUIRE(o0->sizes() == std::vector<int64_t>(r0.sizes().begin(), r0.sizes().end()));
-  REQUIRE(o1->sizes() == std::vector<int64_t>(r1.sizes().begin(), r1.sizes().end()));
-
+  CompleteArgumentSpec with_const(true, stack);
+  CATCH_REQUIRE(with_const.at(2).sizes().size() == 2);
 }
 
 void testGraphExecutor() {
@@ -833,11 +802,11 @@ void testGraphExecutor() {
   GraphExecutor executor(g);
   auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
   executor.run(stack);
-  REQUIRE(stack.size() == 2);
+  CATCH_REQUIRE(stack.size() == 2);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  REQUIRE(almostEqual(Variable(stack[0].toTensor()).data(), r0));
-  REQUIRE(almostEqual(Variable(stack[1].toTensor()).data(), r1));
+  CATCH_REQUIRE(almostEqual(Variable(stack[0].toTensor()).data(), r0));
+  CATCH_REQUIRE(almostEqual(Variable(stack[1].toTensor()).data(), r1));
 }
 
 void testBlocks(std::ostream & out) {
@@ -876,25 +845,25 @@ const static auto cf_examples = R"JIT(
       # FIXME: use 0 instead of a.
       # c = 0
       c = a
-      if a < b:
+      if bool(a < b):
         c = b
       else:
         c = a
       return c
   def if_one(a, b):
     c = b
-    if a < b:
+    if bool(a < b):
       c = a
     return c
   def while_test(a, i):
-    while i < 3:
+    while bool(i < 3):
       a *= a
       i += 1
     return a
 )JIT";
 void testControlFlow() {
   script::Module cu;
-  script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver(), nullptr);
+  script::defineMethodsInModule(cu, cf_examples, torch::jit::script::nativeResolver, nullptr);
   auto run = [&](const std::string & name, std::vector<IValue> stack) {
     auto graph = cu.get_method(name).graph();
     Code code(graph);
@@ -903,37 +872,37 @@ void testControlFlow() {
     return stack;
   };
 
-  auto L = [](int64_t l) { return IValue(autograd::make_variable(at::Scalar(l).toTensor())); };
-  auto V = [](IValue t) { return at::Scalar(std::move(t).toTensor()).toLong(); };
+  auto L = [](int64_t l) { return IValue(autograd::make_variable(scalar_to_tensor(at::Scalar(l)))); };
+  auto V = [](IValue t) { return std::move(t).toTensor().toCLong(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);
   };
-  REQUIRE(2 == run_binary("if_test", 1, 2));
-  REQUIRE(3 == run_binary("if_test", 3, 2));
-  REQUIRE(2 == run_binary("if_one", 2, 3));
-  REQUIRE(2 == run_binary("if_one", 3, 2));
-  REQUIRE(256 == run_binary("while_test",2,0));
+  CATCH_REQUIRE(2 == run_binary("if_test", 1, 2));
+  CATCH_REQUIRE(3 == run_binary("if_test", 3, 2));
+  CATCH_REQUIRE(2 == run_binary("if_one", 2, 3));
+  CATCH_REQUIRE(2 == run_binary("if_one", 3, 2));
+  CATCH_REQUIRE(256 == run_binary("while_test",2,0));
 }
 
 void testIValue() {
   Shared<IntList> foo = IntList::create({3, 4, 5});
-  JIT_ASSERT(foo->use_count() == 1);
+  JIT_ASSERT(foo.use_count() == 1);
   IValue bar(foo);
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   auto baz = bar;
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   auto foo2 = std::move(bar);
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   JIT_ASSERT(foo2.isIntList());
   JIT_ASSERT(bar.isNone());
   foo2 = IValue(4.0);
   JIT_ASSERT(foo2.isDouble());
   JIT_ASSERT(foo2.toDouble() == 4.0);
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   JIT_ASSERT(ArrayRef<int64_t>(baz.toIntList()->elements()).equals({3,4,5}));
 
   auto move_it = std::move(baz).toIntList();
-  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(foo.use_count() == 2);
   JIT_ASSERT(baz.isNone());
   IValue i(4);
   JIT_ASSERT(i.isInt() && i.toInt() == 4);
@@ -946,18 +915,18 @@ void testIValue() {
   dlist = IValue(DoubleList::create({3.4}));
   JIT_ASSERT(ArrayRef<double>(dlist.toDoubleList()->elements()).equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
-  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo.use_count() == 3);
   JIT_ASSERT(the_list.isTuple());
   auto first = std::move(the_list).toTuple()->elements().at(1);
   JIT_ASSERT(first.toInt() == 4);
   at::Tensor tv = at::rand({3,4});
   IValue ten(tv);
-  JIT_ASSERT(tv.get()->use_count() == 2);
+  JIT_ASSERT(tv.use_count() == 2);
   auto ten2 = ten;
-  JIT_ASSERT(tv.get()->use_count() == 3);
+  JIT_ASSERT(tv.use_count() == 3);
   JIT_ASSERT(ten2.toTensor().equal(ten.toTensor()));
   std::move(ten2).toTensor();
-  JIT_ASSERT(tv.get()->use_count() == 2);
+  JIT_ASSERT(tv.use_count() == 2);
 }
 
 void testProto() {
@@ -970,27 +939,26 @@ void testCustomOperators() {
     RegisterOperators reg({createOperator(
         "foo::bar", [](double a, at::Tensor b) { return a + b; })});
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::bar"));
-    REQUIRE(ops.size() == 1);
+    CATCH_REQUIRE(ops.size() == 1);
 
     auto& op = ops.front();
-    REQUIRE(op->schema().name == "foo::bar");
+    CATCH_REQUIRE(op->schema().name == "foo::bar");
 
-    REQUIRE(op->schema().arguments.size() == 2);
-    REQUIRE(op->schema().arguments[0].name == "_0");
-    REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
-    REQUIRE(op->schema().arguments[1].name == "_1");
-    REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
+    CATCH_REQUIRE(op->schema().arguments.size() == 2);
+    CATCH_REQUIRE(op->schema().arguments[0].name == "_0");
+    CATCH_REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
+    CATCH_REQUIRE(op->schema().arguments[1].name == "_1");
+    CATCH_REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
 
-    REQUIRE(op->schema().returns.size() == 1);
-    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
+    CATCH_REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
 
     Stack stack;
-    push(stack, 2.0f, at::ones(5));
+    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
     op->getOperation()(stack);
     at::Tensor output;
     pop(stack, output);
 
-    REQUIRE(output.allclose(at::full(5, 3.0f)));
+    CATCH_REQUIRE(output.allclose(autograd::make_variable(at::full(5, 3.0f))));
   }
   {
     RegisterOperators reg({createOperator(
@@ -999,27 +967,27 @@ void testCustomOperators() {
 
     auto& ops =
         getAllOperatorsFor(Symbol::fromQualString("foo::bar_with_schema"));
-    REQUIRE(ops.size() == 1);
+    CATCH_REQUIRE(ops.size() == 1);
 
     auto& op = ops.front();
-    REQUIRE(op->schema().name == "foo::bar_with_schema");
+    CATCH_REQUIRE(op->schema().name == "foo::bar_with_schema");
 
-    REQUIRE(op->schema().arguments.size() == 2);
-    REQUIRE(op->schema().arguments[0].name == "a");
-    REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
-    REQUIRE(op->schema().arguments[1].name == "b");
-    REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
+    CATCH_REQUIRE(op->schema().arguments.size() == 2);
+    CATCH_REQUIRE(op->schema().arguments[0].name == "a");
+    CATCH_REQUIRE(op->schema().arguments[0].type->kind() == TypeKind::FloatType);
+    CATCH_REQUIRE(op->schema().arguments[1].name == "b");
+    CATCH_REQUIRE(op->schema().arguments[1].type->kind() == TypeKind::DynamicType);
 
-    REQUIRE(op->schema().returns.size() == 1);
-    REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
+    CATCH_REQUIRE(op->schema().returns.size() == 1);
+    CATCH_REQUIRE(op->schema().returns[0].type->kind() == TypeKind::DynamicType);
 
     Stack stack;
-    push(stack, 2.0f, at::ones(5));
+    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
     op->getOperation()(stack);
     at::Tensor output;
     pop(stack, output);
 
-    REQUIRE(output.allclose(at::full(5, 3.0f)));
+    CATCH_REQUIRE(output.allclose(autograd::make_variable(at::full(5, 3.0f))));
   }
   {
     // Check that lists work well.
@@ -1031,56 +999,84 @@ void testCustomOperators() {
 
     auto& ops =
         getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
-    REQUIRE(ops.size() == 1);
+    CATCH_REQUIRE(ops.size() == 1);
 
     auto& op = ops.front();
-    REQUIRE(op->schema().name == "foo::lists");
+    CATCH_REQUIRE(op->schema().name == "foo::lists");
 
-    REQUIRE(op->schema().arguments.size() == 3);
-    REQUIRE(op->schema().arguments[0].name == "ints");
-    REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
-    REQUIRE(op->schema().arguments[1].name == "floats");
-    REQUIRE(op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
-    REQUIRE(op->schema().arguments[2].name == "tensors");
-    REQUIRE(op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
+    CATCH_REQUIRE(op->schema().arguments.size() == 3);
+    CATCH_REQUIRE(op->schema().arguments[0].name == "ints");
+    CATCH_REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofInts()));
+    CATCH_REQUIRE(op->schema().arguments[1].name == "floats");
+    CATCH_REQUIRE(op->schema().arguments[1].type->isSubtypeOf(ListType::ofFloats()));
+    CATCH_REQUIRE(op->schema().arguments[2].name == "tensors");
+    CATCH_REQUIRE(op->schema().arguments[2].type->isSubtypeOf(ListType::ofTensors()));
 
-    REQUIRE(op->schema().returns.size() == 1);
-    REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
+    CATCH_REQUIRE(op->schema().returns.size() == 1);
+    CATCH_REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofFloats()));
 
     Stack stack;
     push(stack, std::vector<int64_t>{1, 2});
     push(stack, std::vector<double>{1.0, 2.0});
-    push(stack, std::vector<at::Tensor>{at::ones(5)});
+    push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
     op->getOperation()(stack);
     std::vector<double> output;
     pop(stack, output);
 
-    REQUIRE(output.size() == 2);
-    REQUIRE(output[0] == 1.0);
-    REQUIRE(output[1] == 2.0);
+    CATCH_REQUIRE(output.size() == 2);
+    CATCH_REQUIRE(output[0] == 1.0);
+    CATCH_REQUIRE(output[1] == 2.0);
+  }
+  {
+    RegisterOperators reg(
+        "foo::lists2(Tensor[] tensors) -> Tensor[]",
+        [](std::vector<at::Tensor> tensors) { return tensors; });
+
+    auto& ops =
+        getAllOperatorsFor(Symbol::fromQualString("foo::lists2"));
+    CATCH_REQUIRE(ops.size() == 1);
+
+    auto& op = ops.front();
+    CATCH_REQUIRE(op->schema().name == "foo::lists2");
+
+    CATCH_REQUIRE(op->schema().arguments.size() == 1);
+    CATCH_REQUIRE(op->schema().arguments[0].name == "tensors");
+    CATCH_REQUIRE(op->schema().arguments[0].type->isSubtypeOf(ListType::ofTensors()));
+
+    CATCH_REQUIRE(op->schema().returns.size() == 1);
+    CATCH_REQUIRE(op->schema().returns[0].type->isSubtypeOf(ListType::ofTensors()));
+
+    Stack stack;
+    push(stack, std::vector<at::Tensor>{autograd::make_variable(at::ones(5))});
+    op->getOperation()(stack);
+    std::vector<at::Tensor> output;
+    pop(stack, output);
+
+    CATCH_REQUIRE(output.size() == 1);
+    CATCH_REQUIRE(output[0].allclose(autograd::make_variable(at::ones(5))));
   }
   {
 #ifdef USE_CATCH
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         createOperator(
             "foo::bar_with_bad_schema(Tensor a) -> Tensor",
             [](double a, at::Tensor b) { return a + b; }),
         StartsWith("Inferred 2 argument(s) for operator implementation, "
                    "but the provided schema specified 1 argument(s)."));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         createOperator(
             "foo::bar_with_bad_schema(Tensor a) -> Tensor",
             [](double a) { return a; }),
         StartsWith("Inferred type for argument #0 was float, "
                    "but the provided schema specified type Dynamic "
                    "for the argument in that position"));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         createOperator(
             "foo::bar_with_bad_schema(float a) -> (float, float)",
             [](double a) { return a; }),
         StartsWith("Inferred 1 return value(s) for operator implementation, "
                    "but the provided schema specified 2 return value(s)."));
-    REQUIRE_THROWS_WITH(
+    CATCH_REQUIRE_THROWS_WITH(
         createOperator(
             "foo::bar_with_bad_schema(float a) -> Tensor",
             [](double a) { return a; }),
@@ -1088,6 +1084,50 @@ void testCustomOperators() {
                    "but the provided schema specified type Dynamic "
                    "for the return value in that position"));
 #endif // USE_CATCH
+  }
+  {
+    auto op = createOperator(
+        "traced::op(float a, Tensor b) -> Tensor",
+        [](double a, at::Tensor b) { return a + b; });
+
+    std::shared_ptr<tracer::TracingState> state;
+    std::tie(state, std::ignore) = tracer::enter({});
+
+    Stack stack;
+    push(stack, 2.0f, autograd::make_variable(at::ones(5)));
+    op.getOperation()(stack);
+    at::Tensor output = autograd::make_variable(at::empty({}));
+    pop(stack, output);
+
+    tracer::exit({IValue(output)});
+
+    std::string op_name("traced::op");
+    bool contains_traced_op = false;
+    for (const auto& node : state->graph->nodes()) {
+      if (std::string(node->kind().toQualString()) == op_name) {
+        contains_traced_op = true;
+        break;
+      }
+    }
+    CATCH_REQUIRE(contains_traced_op);
+  }
+  {
+#ifdef USE_CATCH
+    // vector<double> is not supported yet.
+    auto op = createOperator(
+        "traced::op(float[] f) -> int",
+        [](const std::vector<double>& f) -> int64_t { return f.size(); });
+
+    std::shared_ptr<tracer::TracingState> state;
+    std::tie(state, std::ignore) = tracer::enter({});
+
+    Stack stack;
+    push(stack, std::vector<double>{1.0});
+
+    CATCH_REQUIRE_THROWS_WITH(
+        op.getOperation()(stack),
+        StartsWith("Tracing float lists currently not supported!"));
+#endif
   }
 }
 
@@ -1109,7 +1149,6 @@ TORCH_API std::string runJITCPPTests() {
   internedStringsTests();
   fromQualStringTests();
   argumentSpecTest();
-  shapeAnalysisTest();
   testProto();
   testCustomOperators();
   return out.str();
@@ -1117,45 +1156,43 @@ TORCH_API std::string runJITCPPTests() {
 
 #ifdef USE_CATCH
 
-TEST_CASE( "jit test CPU", "[cpu]" ) {
+CATCH_TEST_CASE( "jit test CPU", "[cpu]" ) {
 
   std::stringstream out;
-  SECTION( "control flow" )
+  CATCH_SECTION( "control flow" )
     testControlFlow();
-  SECTION( "blocks" )
+  CATCH_SECTION( "blocks" )
     testBlocks(out);
-  SECTION( "create autodiff subgraphs" )
+  CATCH_SECTION( "create autodiff subgraphs" )
     testCreateAutodiffSubgraphs(out);
-  SECTION( "differentiate" )
+  CATCH_SECTION( "differentiate" )
     testDifferentiate(out);
-  SECTION( "differentiate with requires grad" )
+  CATCH_SECTION( "differentiate with requires grad" )
     testDifferentiateWithRequiresGrad(out);
-  SECTION( "AD formulas" )
+  CATCH_SECTION( "AD formulas" )
     testADFormulas();
-  SECTION( "code template" )
+  CATCH_SECTION( "code template" )
     codeTemplateTest();
-  SECTION( "attributes" )
+  CATCH_SECTION( "attributes" )
     attributesTest();
-  SECTION( "interned strings" )
+  CATCH_SECTION( "interned strings" )
     internedStringsTests();
-  SECTION( "custom operators" )
+  CATCH_SECTION( "custom operators" )
     testCustomOperators();
 }
 
-TEST_CASE( "jit test CUDA", "[cuda]" ) {
+CATCH_TEST_CASE( "jit test CUDA", "[cuda]" ) {
 
-  SECTION( "graph executor" )
+  CATCH_SECTION( "graph executor" )
     testGraphExecutor();
-  SECTION( "fusion" )
+  CATCH_SECTION( "fusion" )
     fusionTests();
-  SECTION( "interp" )
+  CATCH_SECTION( "interp" )
     interpTest();
-  SECTION( "interp stage" )
+  CATCH_SECTION( "interp stage" )
     interpStageTest();
-  SECTION( "argument spec" )
+  CATCH_SECTION( "argument spec" )
     argumentSpecTest();
-  SECTION( "shape analysis" )
-    shapeAnalysisTest();
 }
 
 #endif

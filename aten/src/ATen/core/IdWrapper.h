@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <ATen/core/Macros.h>
 
 namespace at {
 
@@ -21,7 +22,7 @@ namespace at {
  * for you, given the underlying type supports it.
  */
 template <class ConcreteType, class UnderlyingType>
-class IdWrapper {
+class AT_CORE_API IdWrapper {
  public:
   using underlying_type = UnderlyingType;
   using concrete_type = ConcreteType;

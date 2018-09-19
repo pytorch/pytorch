@@ -1,6 +1,7 @@
 import torch
 import os
 import weakref
+import threading
 import multiprocessing
 from multiprocessing.reduction import ForkingPickler
 import sys
@@ -15,19 +16,54 @@ except ImportError:
     pass
 
 
-class StorageRef(object):
-    # An object with a cdata field which may be set to None. We subclass object
-    # instead of using a dict() to support weak references.
+class StorageWeakRef(object):
+    r"""A weak reference to a Storage.
 
-    def __init__(self, ptr):
-        self.cdata = ptr
+    The cdata member is a Python number containing the integer representation of
+    the Storage pointer."""
+
+    def __init__(self, storage):
+        self.cdata = storage._weak_ref()
+        # Save a direct reference to _free_weak_ref because the `torch` module
+        # might be cleared during Python shutdown before this module is cleared.
+        self._free_weak_ref = torch.Storage._free_weak_ref
+
+    def expired(self):
+        return torch.Storage._expired(self.cdata)
 
     def __del__(self):
-        torch.Storage._free_weak_ref(self.cdata)
+        self._free_weak_ref(self.cdata)
 
 
-# mapping from handles to StorageRef objects
-shared_cache = weakref.WeakValueDictionary()
+class SharedCache(dict):
+    """dictionary from multiprocessing handles to StorageWeakRef"""
+
+    def __init__(self):
+        # free_dead_references() is called if the len exceeds the currrent
+        # limit. The limit scales with the number of remaining live objects.
+        self.limit = 128
+        self.lock = threading.Lock()
+
+    def __setitem__(self, key, storage_ref):
+        dict.__setitem__(self, key, storage_ref)
+        if len(self) > self.limit:
+            self.free_dead_references()
+
+    def free_dead_references(self):
+        # Multiple Python threads may call free_dead_references() concurrently.
+        # Without a lock, they may try deleting the same entry multiple times.
+        with self.lock:
+            live = 0
+            for key, storage_ref in list(self.items()):
+                if storage_ref.expired():
+                    del self[key]
+                else:
+                    live += 1
+            self.limit = max(128, live * 2)
+
+
+# mapping from handles to StorageWeakRef objects
+shared_cache = SharedCache()
 
 
 def rebuild_event(handle):
@@ -39,24 +75,40 @@ def reduce_event(event):
 
 
 def rebuild_tensor(cls, storage, metadata):
-    storage_offset, size, stride = metadata
-    return torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
+    storage_offset, size, stride, requires_grad, backward_hooks = metadata
+    t = torch._utils._rebuild_tensor(storage, storage_offset, size, stride)
+    if cls == torch.nn.parameter.Parameter:
+        t = torch.nn.parameter.Parameter(t)
+    t.requires_grad = requires_grad
+    t._backward_hooks = backward_hooks
+    return t
 
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
-                        storage_cls, storage_device, storage_handle, storage_size):
+                        storage_cls, storage_device, storage_handle, storage_size, requires_grad, backward_hooks):
 
     storage = storage_from_cache(storage_cls, storage_handle)
     if storage is None:
         torch.cuda._lazy_init()
         storage = storage_cls._new_shared_cuda(storage_device, storage_handle, storage_size)
-        shared_cache[storage_handle] = storage._weak_ref(StorageRef)
+        shared_cache[storage_handle] = StorageWeakRef(storage)
 
-    return torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
+    t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
+    if tensor_cls == torch.nn.parameter.Parameter:
+        t = torch.nn.parameter.Parameter(t)
+    t.requires_grad = requires_grad
+    t._backward_hooks = backward_hooks
+    return t
 
 
 def reduce_tensor(tensor):
     storage = tensor.storage()
+
+    if tensor.requires_grad and not tensor.is_leaf:
+        raise RuntimeError("Cowardly refusing to serialize non-leaf tensor which requires_grad, "
+                           "since autograd does not support crossing process boundaries.  "
+                           "If you just want to transfer the data, call detach() on the tensor "
+                           "before serializing (e.g., putting it on the queue).")
 
     # Note [CUDA IPC and the caching allocator]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -109,11 +161,7 @@ def reduce_tensor(tensor):
         (device, handle, storage_size, storage_offset) = storage._share_cuda_()
         tensor_offset = tensor.storage_offset()
 
-        # WARNING!  This call to _weak_ref could lead to O(n) deleter
-        # behavior, if you repeatedly call it on the same Storage (all
-        # other sites are guarded by shared_cache; maybe this site
-        # should be too?)
-        shared_cache[handle] = storage._weak_ref(StorageRef)
+        shared_cache[handle] = StorageWeakRef(storage)
 
         return (rebuild_cuda_tensor,
                 (type(tensor),
@@ -123,9 +171,11 @@ def reduce_tensor(tensor):
                  type(storage),
                  device,
                  handle,
-                 storage_size))
+                 storage_size,
+                 tensor.requires_grad,
+                 tensor._backward_hooks))
 
-    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride())
+    metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad, tensor._backward_hooks)
     return (rebuild_tensor, (type(tensor), storage, metadata))
 
 
@@ -141,7 +191,7 @@ def storage_from_cache(cls, key):
     storage_ref = shared_cache.get(key)
     if storage_ref is None:
         return None
-    return cls._new_with_weak_ptr(storage_ref)
+    return cls._new_with_weak_ptr(storage_ref.cdata)
 
 
 def rebuild_storage_fd(cls, df, size):
@@ -154,7 +204,7 @@ def rebuild_storage_fd(cls, df, size):
         if storage is not None:
             return storage
         storage = cls._new_shared_fd(fd, size)
-        shared_cache[fd_id(fd)] = storage._weak_ref(StorageRef)
+        shared_cache[fd_id(fd)] = StorageWeakRef(storage)
         return storage
     finally:
         os.close(fd)
@@ -165,7 +215,7 @@ def rebuild_storage_filename(cls, manager, handle, size):
     if storage is not None:
         return storage._shared_decref()
     storage = cls._new_shared_filename(manager, handle, size)
-    shared_cache[handle] = storage._weak_ref(StorageRef)
+    shared_cache[handle] = StorageWeakRef(storage)
     return storage._shared_decref()
 
 
@@ -196,11 +246,7 @@ def reduce_storage(storage):
         metadata = (df, size)
         rebuild = rebuild_storage_fd
 
-    # WARNING!  This call to _weak_ref could lead to O(n) deleter
-    # behavior, if you repeatedly call it on the same Storage (all
-    # other sites are guarded by shared_cache; maybe this site
-    # should be too?)
-    shared_cache[cache_key] = storage._weak_ref(StorageRef)
+    shared_cache[cache_key] = StorageWeakRef(storage)
     return (rebuild, (type(storage),) + metadata)
 
 
@@ -215,3 +261,4 @@ def init_reductions():
 
     # TODO: Maybe this should be in tensor_classes? :)
     ForkingPickler.register(torch.Tensor, reduce_tensor)
+    ForkingPickler.register(torch.nn.parameter.Parameter, reduce_tensor)

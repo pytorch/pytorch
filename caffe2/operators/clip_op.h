@@ -19,10 +19,10 @@ class ClipOp final : public Operator<Context> {
         min_(std::numeric_limits<T>::lowest()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {
-      min_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("min", 0));
+      min_ = static_cast<T>(this->template GetSingleArgument<float>("min", 0));
     }
     if (HasArgument("max")) {
-      max_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("max", 0));
+      max_ = static_cast<T>(this->template GetSingleArgument<float>("max", 0));
     }
   }
 
@@ -42,10 +42,10 @@ class ClipGradientOp final : public Operator<Context> {
         min_(std::numeric_limits<T>::lowest()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {
-      min_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("min", 0));
+      min_ = static_cast<T>(this->template GetSingleArgument<float>("min", 0));
     }
     if (HasArgument("max")) {
-      max_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("max", 0));
+      max_ = static_cast<T>(this->template GetSingleArgument<float>("max", 0));
     }
   }
 

@@ -47,14 +47,18 @@ __global__ void embedding_backward_feature_kernel
     if(batch_start + tid < n)
       indices_batch[tid] = (int)indices[batch_start + tid];
 
+    int batch_end = batch_start + blockDim.x*blockDim.y < n ? 
+                    batch_start + blockDim.x*blockDim.y : n;
+
     // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
-    for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
+    for(int chunk_start = batch_start; chunk_start < batch_end; chunk_start += blockDim.y)
     {
       // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group
       // leaders are done with their accumulates before other warps start loading again.
       __syncthreads();
 
-      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y;
+      int n_this_chunk = (batch_end - chunk_start) < blockDim.y ? 
+                         (batch_end - chunk_start) : blockDim.y;
 
       int src_row = chunk_start + threadIdx.y;
       int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight

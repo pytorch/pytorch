@@ -13,7 +13,7 @@ class PReluOp final : public Operator<Context> {
   PReluOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {}
+            this->template GetSingleArgument<string>("order", "NCHW"))) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -29,7 +29,7 @@ class PReluGradientOp final : public Operator<Context> {
   PReluGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {}
+            this->template GetSingleArgument<string>("order", "NCHW"))) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;

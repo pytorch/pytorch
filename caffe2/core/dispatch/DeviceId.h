@@ -14,15 +14,15 @@ enum class DeviceTypeId : uint8_t {
     UNDEFINED
 };
 
-}
-
-inline std::ostream& operator<<(std::ostream& stream, c10::DeviceTypeId device_type_id) {
+inline std::ostream& operator<<(std::ostream& stream, DeviceTypeId device_type_id) {
     switch(device_type_id) {
         case c10::DeviceTypeId::CPU: return stream << "DeviceTypeId(CPU)";
         case c10::DeviceTypeId::CUDA: return stream << "DeviceTypeId(CUDA)";
         case c10::DeviceTypeId::UNDEFINED: return stream << "DeviceTypeId(UNDEFINED)";
     }
     throw std::logic_error("Unknown DeviceTypeId: " + c10::guts::to_string(static_cast<int>(device_type_id)));
+}
+
 }
 
 namespace std {

@@ -231,79 +231,133 @@ bool SliceImplGpu(
 
 } // namespace
 
-template <>
-bool SliceOp<int, CUDAContext>::RunOnDevice() {
-  auto* output = Output(0);
-  auto& data = Input(0);
+template<>
+class SliceOp<CUDAContext> : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  SliceOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws),
+        starts_(this->template GetRepeatedArgument<TIndex>("starts")),
+        ends_(this->template GetRepeatedArgument<TIndex>("ends")),
+        statically_inited_(false) {}
 
-  if (InputSize() > 1) {
-    starts_host_.CopyFrom(Input(1));
-    ends_host_.CopyFrom(Input(2));
-  } else {
-    if (!statically_inited_) {
-      CAFFE_ENFORCE(HasArgument("starts"));
-      CAFFE_ENFORCE(HasArgument("ends"));
-      CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
-
-      starts_host_.Resize(starts_.size());
-      ends_host_.Resize(ends_.size());
-
-      memcpy(
-          starts_host_.mutable_data<int>(),
-          starts_.data(),
-          sizeof(int) * starts_.size());
-      memcpy(
-          ends_host_.mutable_data<int>(),
-          ends_.data(),
-          sizeof(int) * ends_.size());
-      statically_inited_ = true;
+  bool RunOnDevice() override {
+    if (InputSize() > 1) {
+      return DispatchHelper<TensorTypes<int, TIndex>>::call(this, Input(1));
+    } else {
+      return DoRunWithType<TIndex>();
     }
   }
 
-  return SliceImplGpu<int, CUDAContext>(
-      output, data, starts_host_, ends_host_, &context_);
-}
+  template <typename SIndex>
+  bool DoRunWithType() {
+    auto* output = Output(0);
+    auto& data = Input(0);
 
-REGISTER_CUDA_OPERATOR(Slice, SliceOp<int, CUDAContext>);
+    if (InputSize() > 1) {
+      starts_host_.CopyFrom(Input(1));
+      ends_host_.CopyFrom(Input(2));
+    } else {
+      if (!statically_inited_) {
+        CAFFE_ENFORCE(HasArgument("starts"));
+        CAFFE_ENFORCE(HasArgument("ends"));
+        CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
+
+        starts_host_.Resize(starts_.size());
+        ends_host_.Resize(ends_.size());
+
+        memcpy(
+            starts_host_.mutable_data<SIndex>(),
+            starts_.data(),
+            sizeof(SIndex) * starts_.size());
+        memcpy(
+            ends_host_.mutable_data<SIndex>(),
+            ends_.data(),
+            sizeof(SIndex) * ends_.size());
+        statically_inited_ = true;
+      }
+    }
+
+    return SliceImplGpu<SIndex, CUDAContext>(
+        output, data, starts_host_, ends_host_, &context_);
+  }
+ private:
+  std::vector<TIndex> starts_;
+  std::vector<TIndex> ends_;
+  bool statically_inited_;
+  Tensor starts_host_{CPU};
+  Tensor ends_host_{CPU};
+
+};  // class SliceOp<CUDAContext>
+
+REGISTER_CUDA_OPERATOR(Slice, SliceOp<CUDAContext>);
 
 template <>
-bool SliceGradientOp<int, CUDAContext>::RunOnDevice() {
-  auto* gdata = Output(0);
-  auto& data = Input(0);
+class SliceGradientOp<CUDAContext> : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_FUNCTIONS(CUDAContext);
+  SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws),
+        starts_(this->template GetRepeatedArgument<TIndex>("starts")),
+        ends_(this->template GetRepeatedArgument<TIndex>("ends")),
+        statically_inited_(false) {}
 
-  if (InputSize() == 4) {
-    starts_host_.CopyFrom(Input(1));
-    ends_host_.CopyFrom(Input(2));
+  AT_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
 
-    auto& go = Input(3);
-
-    return SliceImplGpu<int, CUDAContext>(
-        nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
-  } else {
-    if (!statically_inited_) {
-      CAFFE_ENFORCE(HasArgument("starts"));
-      CAFFE_ENFORCE(HasArgument("ends"));
-      CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
-
-      starts_host_.Resize(starts_.size());
-      ends_host_.Resize(ends_.size());
-
-      memcpy(
-          starts_host_.mutable_data<int>(),
-          starts_.data(),
-          sizeof(int) * starts_.size());
-      memcpy(
-          ends_host_.mutable_data<int>(),
-          ends_.data(),
-          sizeof(int) * ends_.size());
-
-      statically_inited_ = true;
+  bool RunOnDevice() override {
+    if (InputSize() == 4) {
+      return DispatchHelper<TensorTypes<int, TIndex>>::call(this, Input(1));
+    } else {
+      return DoRunWithType<TIndex>();
     }
-    auto& go = Input(1);
-
-    return SliceImplGpu<int, CUDAContext>(
-        nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
   }
-}
-REGISTER_CUDA_OPERATOR(SliceGradient, SliceGradientOp<int, CUDAContext>);
+
+  template <typename SIndex>
+  bool DoRunWithType() {
+    auto* gdata = Output(0);
+    auto& data = Input(0);
+
+    if (InputSize() == 4) {
+      starts_host_.CopyFrom(Input(1));
+      ends_host_.CopyFrom(Input(2));
+
+      auto& go = Input(3);
+
+      return SliceImplGpu<SIndex, CUDAContext>(
+          nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+    } else {
+      if (!statically_inited_) {
+        CAFFE_ENFORCE(HasArgument("starts"));
+        CAFFE_ENFORCE(HasArgument("ends"));
+        CAFFE_ENFORCE_EQ(starts_.size(), ends_.size());
+
+        starts_host_.Resize(starts_.size());
+        ends_host_.Resize(ends_.size());
+
+        memcpy(
+            starts_host_.mutable_data<SIndex>(),
+            starts_.data(),
+            sizeof(SIndex) * starts_.size());
+        memcpy(
+            ends_host_.mutable_data<SIndex>(),
+            ends_.data(),
+            sizeof(SIndex) * ends_.size());
+
+        statically_inited_ = true;
+      }
+      auto& go = Input(1);
+
+      return SliceImplGpu<SIndex, CUDAContext>(
+          nullptr, data, starts_host_, ends_host_, &context_, gdata, &go);
+    }
+  }
+ private:
+
+  std::vector<TIndex> starts_;
+  std::vector<TIndex> ends_;
+  bool statically_inited_;
+  Tensor starts_host_{CPU};
+  Tensor ends_host_{CPU};
+};  // class SliceGradientOp<CUDAContext>
+REGISTER_CUDA_OPERATOR(SliceGradient, SliceGradientOp<CUDAContext>);
 } // namespace caffe2

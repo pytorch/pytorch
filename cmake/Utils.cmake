@@ -137,8 +137,6 @@ function(caffe_autogen_init_py_files)
   list(REMOVE_DUPLICATES python_paths_need_init_py)
   # Since the _pb2.py files are yet to be created, we will need to manually
   # add them to the list.
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe)
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe/proto)
   list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe2/proto)
 
   foreach(tmp ${python_paths_need_init_py})

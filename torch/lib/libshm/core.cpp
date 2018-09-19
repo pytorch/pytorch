@@ -118,7 +118,7 @@ static void deleteTHManagedMapAllocator(void* ptr) {
 
 at::DataPtr THManagedMapAllocator::makeDataPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size) {
   auto* context = new THManagedMapAllocator(manager_handle, filename, flags, size);
-  return {context->data(), context, &deleteTHManagedMapAllocator, at::kCPU};
+  return {context->data(), context, &deleteTHManagedMapAllocator, at::DeviceType::CPU};
 }
 
 THManagedMapAllocator* THManagedMapAllocator::fromDataPtr(const at::DataPtr& dptr) {

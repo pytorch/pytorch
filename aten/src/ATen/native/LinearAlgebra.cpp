@@ -1,6 +1,10 @@
 #include "ATen/ATen.h"
 #include "ATen/ExpandUtils.h"
+#include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/native/LinearAlgebraUtils.h"
+#include "ATen/TensorUtils.h"
+#include "ATen/Parallel.h"
 #include <functional>
 #include <numeric>
 #include <vector>
@@ -89,7 +93,7 @@ Tensor inverse(const Tensor& self) {
 }
 
 Tensor& inverse_out(Tensor &result, const Tensor &self) {
-  AT_CHECK(self.type().backend() == kCPU || self.type().backend() == kCUDA,
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "tensor should have CPU or CUDA backend");
   AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
   AT_CHECK(self.size(0) == self.size(1), "tensor should be square");
@@ -105,16 +109,47 @@ Tensor pinverse(const Tensor& self, double rcond) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
-  AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
   if (self.numel() == 0) {
     // Match NumPy
     return self.type().tensor({self.size(1), self.size(0)});
   }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
-  double max_val = S[0].toCDouble();
+  Tensor max_val = S[0];
   Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
   return V.mm(S_pseudoinv.diag().mm(U.t()));
+}
+
+static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
+  Tensor S;
+  if (!symmetric) {
+    Tensor U, V;
+    std::tie(U, S, V) = self.svd();
+  } else {
+    Tensor eigvecs;
+    std::tie(S, eigvecs) = self.symeig();
+    S = S.abs();
+  }
+  return S;
+}
+
+Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+           "of floating types");
+
+  Tensor S = _matrix_rank_helper(self, symmetric);
+  return (S > tol).sum();
+}
+
+Tensor matrix_rank(const Tensor& self, bool symmetric) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+           "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+           "of floating types");
+
+  Tensor S = _matrix_rank_helper(self, symmetric);
+  double tol = _get_epsilon(self.type().scalarType()) * std::max(self.size(0), self.size(1));
+  return (S > S.max().mul_(tol)).sum();
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
@@ -137,14 +172,14 @@ Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
     return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
   }
-  return self.type()._mm(self, mat2);
+  return at::_mm(self, mat2);
 }
 
 Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm_out(result, at::zeros({}, mat2.type()), self, mat2, 0, 1);
+    return at::addmm_out(result, at::zeros({}, mat2.options()), self, mat2, 0, 1);
   }
-  return self.type()._mm_out(result, self, mat2);
+  return at::_mm_out(result, self, mat2);
 }
 
 Tensor mv(const Tensor& self, const Tensor& vec) {
@@ -164,7 +199,7 @@ Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar be
 
 Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
   check_1d(vec, "vec", "addmv");
-  return self._addmv_(mat, vec, beta, alpha);
+  return at::_addmv_(self, mat, vec, beta, alpha);
 }
 
 Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
@@ -181,7 +216,7 @@ Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar b
 Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
-  return self._addr_(vec1, vec2, beta, alpha);
+  return at::_addr_(self, vec1, vec2, beta, alpha);
 }
 
 Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
@@ -190,10 +225,157 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
   return at::_addr_out(result, self, vec1, vec2, beta, alpha);
 }
 
+template <typename scalar_t, bool is_bmm>
+inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
+  int64_t bs = result.size(0);
+  int64_t is = result.size(1);
+  int64_t js = result.size(2);
+  int64_t ks = self.size(2);
+
+  scalar_t alpha = alpha_.to<scalar_t>();
+  scalar_t beta = beta_.to<scalar_t>();
+
+  auto r0 = result.accessor<scalar_t, 3>();
+  auto s0 = self.accessor<scalar_t, 3>();
+  auto m0 = mat2.accessor<scalar_t, 3>();
+
+  int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
+      for (int64_t b = b_begin; b < b_end; b++) {
+        auto r1 = r0[b];
+        auto s1 = s0[b];
+        auto m1 = m0[b];
+        for (int64_t i = 0; i < is; i++) {
+          auto r2 = r1[i];
+          auto s2 = s1[i];
+          for (int64_t j = 0; j < js; j++) {
+            scalar_t &r = r2[j];
+            if (is_bmm) {
+              r = 0;
+              for (int64_t k = 0; k < ks; k++) {
+                r += s2[k] * m1[k][j];
+              }
+            } else {
+              r *= beta;
+              for (int64_t k = 0; k < ks; k++) {
+                r += alpha * s2[k] * m1[k][j];
+              }
+            }
+          }
+        }
+      }
+    });
+}
+
+// This tries to apply some optimizations to bmm/baddbmm:
+// - When the operand size is small, computation are parallelized over the batch
+//   dimension using OMP and naive matrix multiplication is applied.
+// - When the operand size is larger than the threshold, if compiled with MKL, MKL's batch gemm is used.
+// - Otherwise, we use a series of matrix multiplications.
+// The threshold of 400 for the first has not been thoroughly benchmarked yet and may have room for further
+// optimization, it likely depends on the characteristics of the CPU, MKL will be different from non-MKL etc.,
+// but this seems to be a first starting point.
+
+static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha, bool is_bmm_out) {
+  // is_bmm_out: true for bmm_out, false for baddbmm_
+  // self_or_result is "self" for baddbmm_ and "result" for bmm_out
+  CheckedFrom c = (is_bmm_out ? "bmm" : "baddbmm");
+  TensorArg self_arg(self_or_result, is_bmm_out ? "self" : "result", 0);
+  TensorArg b1_arg(batch1, "batch1", 1);
+  TensorArg b2_arg(batch2, "batch2", 2);
+  checkDim(c, b1_arg, 3);
+  checkDim(c, b2_arg, 3);
+
+  int64_t bs = batch1.size(0);
+  checkSize(c, b2_arg, 0, bs);
+  int64_t contraction_size = batch1.size(2);
+  int64_t res_rows = batch1.size(1);
+  int64_t res_cols = batch2.size(2);
+  checkSize(c, b2_arg, 1, contraction_size);
+
+  if (is_bmm_out) {
+    self_or_result.resize_({bs, res_rows, res_cols});
+  } else {
+    checkSize(c, self_arg, 0, bs);
+    checkSize(c, self_arg, 1, res_rows);
+    checkSize(c, self_arg, 2, res_cols);
+  }
+
+  // handle pathological cases that blas may not like
+  if (self_or_result.numel() == 0) {
+    return self_or_result;
+  } else if (contraction_size == 0) {
+    return self_or_result.zero_();
+  }
+  
+  auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
+    return (t.stride(2) == 1 && t.stride(1) == t.size(2))
+            || (t.stride(1) == 1 && t.stride(2) == t.size(1));
+  };
+
+  if (contraction_size * res_rows * res_cols < 400) {
+    if (is_bmm_out) {
+      AT_DISPATCH_ALL_TYPES(batch1.type(), "bmm", [&] {
+          baddbmm_cpu_kernel<scalar_t, true>(self_or_result, batch1, batch2, beta, alpha);
+        });
+    } else {
+      AT_DISPATCH_ALL_TYPES(batch1.type(), "baddbmm", [&] {
+          baddbmm_cpu_kernel<scalar_t, false>(self_or_result, batch1, batch2, beta, alpha);
+        });
+    }
+  } else if (at::hasMKL() && at::native::is_floating_point(self_or_result)
+	     && batch_items_contiguous_or_transposed(batch1)
+	     && batch_items_contiguous_or_transposed(batch2)
+	     && self_or_result.is_contiguous()) {
+    at::native::_baddbmm_mkl_(self_or_result, batch1, batch2, beta, alpha);
+  } else { // split along batch dimension
+    if (is_bmm_out) {
+      for (int64_t b = 0; b < bs; b++) {
+        auto r = self_or_result.select(0, b);
+        at::native::mm_out(r, batch1.select(0, b), batch2.select(0, b));
+      }
+    } else {
+      for (int64_t b = 0; b < bs; b++) {
+        self_or_result.select(0, b).addmm_(batch1.select(0, b), batch2.select(0, b), beta, alpha);
+      }
+    }
+  }
+  return self_or_result;
+}
+
+
+Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor result = self.type().tensor();
+  return at::native::baddbmm_out_cpu(result, self, batch1, batch2, beta, alpha);
+}
+
+Tensor& baddbmm_out_cpu(Tensor &result, const Tensor& self_, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  Tensor self;
+  std::tie(self) = expand_size(self_, {batch1.size(0), batch1.size(1), batch2.size(2)}, "baddbmm");
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return at::native::baddbmm__cpu(result, batch1, batch2, beta, alpha);
+}
+
+Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
+  return bmm_out_or_baddbmm_(self, batch1, batch2, beta, alpha, false);
+}
+
+Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
+  Tensor result = self.type().tensor();
+  return at::native::bmm_out_cpu(result, self, mat2);
+}
+
+Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
+  Scalar beta(0.0);
+  Scalar alpha(1.0);
+  return bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+}
+
 Tensor dot(const Tensor& self, const Tensor& tensor) {
   check_1d(self, "self", "dot");
   check_1d(tensor, "tensor", "dot");
-  return self._dot(tensor);
+  return at::_dot(self, tensor);
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
@@ -315,5 +497,44 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+Tensor matrix_power(const Tensor& a, int64_t n) {
+  AT_CHECK(a.dim() >= 2 && at::isFloatingType(a.type().scalarType()),
+           "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
+           "of floating types with dim at least 2");
+  if (n == 0) {
+    return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
+  } else if (n < 0) {
+    AT_CHECK(a.dim() == 2, "Negative powers for batch matrices are currently not supported");
+    Tensor a_ = at::inverse(a);
+    n *= -1;
+    return at::native::matrix_power(a_, n);
+  } else if (n == 1) {
+    return a.clone();
+  } else if (n == 2) {
+    return at::native::matmul(a, a);
+  } else if (n == 3) {
+    return at::native::matmul(at::native::matmul(a, a), a);
+  }
+
+  // This is a binary decomposition of n.
+  // Moving from the least significant bit to the most significant bit
+  // This is done to reduce the number of matrix multiplications
+  // by raising the input matrix in powers of 2
+  // The total number of matrix multiplications are
+  // number of bits + number of bits that equal 1 ~ O(log n)
+  // instead of O(n)
+  Tensor result, z;
+  int64_t r;
+  while (n > 0) {
+    z = (!z.defined()) ? a.clone() : at::native::matmul(z, z);
+    r = n % 2;
+    n = n / 2;
+    if (r == 1) {
+      result = (!result.defined()) ? z.clone() : at::native::matmul(result, z);
+    }
+  }
+  return result;
 }
-}
+
+} // namespace native
+} // namespace at

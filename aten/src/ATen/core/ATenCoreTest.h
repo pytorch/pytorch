@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/CoreAPI.h>
+#include <ATen/core/Macros.h>
 
 namespace at {
 

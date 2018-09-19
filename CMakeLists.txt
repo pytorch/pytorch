@@ -54,12 +54,13 @@ endif()
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
-option(BUILD_CAFFE2 "Build Caffe2" ON)
-option(BUILD_ATEN "Build ATen" OFF)
-option(BUILD_BINARY "Build C++ binaries" ON)
+option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
+option(BUILD_ATEN_MOBILE "Build ATen for Android and iOS" OFF)
+option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
+option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -67,15 +68,12 @@ cmake_dependent_option(
 cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
-cmake_dependent_option(
-    BUILD_TEST "Build Caffe2 C++ test binaries (need gtest and gbenchmark)" OFF
-    "BUILD_CAFFE2" OFF)
+option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" OFF
     "BUILD_TEST" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
-option(USE_ATEN "Use ATen" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_ROCM "Use ROCm" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -83,32 +81,13 @@ cmake_dependent_option(
     USE_CUDNN "Use cuDNN" ON
     "USE_CUDA" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
-cmake_dependent_option(
-    USE_GFLAGS "Use GFLAGS" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_GLOG "Use GLOG" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_GLOO "Use Gloo" ON
-    "BUILD_CAFFE2" OFF)
-option(USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed support" OFF)
-cmake_dependent_option(
-    USE_LEVELDB "Use LEVELDB" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_GFLAGS "Use GFLAGS" ON)
+option(USE_GLOG "Use GLOG" ON)
+option(USE_LEVELDB "Use LEVELDB" ON)
 option(USE_LITE_PROTO "Use lite protobuf instead of full." OFF)
-cmake_dependent_option(
-    USE_LMDB "Use LMDB" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_METAL "Use Metal for iOS build" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON
-    "BUILD_CAFFE2" OFF)
-cmake_dependent_option(
-    USE_MPI "Use MPI" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_LMDB "Use LMDB" ON)
+option(USE_METAL "Use Metal for iOS build" ON)
+option(USE_MOBILE_OPENGL "Use OpenGL for mobile code" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 option(USE_NCCL "Use NCCL" ON)
 option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
@@ -121,32 +100,39 @@ cmake_dependent_option(
     "USE_CUDA" OFF)
 option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
-cmake_dependent_option(
-    USE_OPENCV "Use OpenCV" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_OPENCV "Use OpenCV" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
 option(USE_REDIS "Use Redis" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
+option(USE_SYSTEM_EIGEN_INSTALL
+    "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 option(USE_MKLDNN "Use MKLDNN" OFF)
+option(USE_IDEEP "Use IDEEP interface in MKL BLAS" ON)
+option(USE_MKLML "Use MKLML interface in MKL BLAS" ON)
+option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
-  USE_IDEEP "Use IDEEP interface in MKL BLAS" ON
-    "BUILD_CAFFE2" OFF)
+    USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
+    "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
-  USE_MKLML "Use MKLML interface in MKL BLAS" ON
-    "BUILD_CAFFE2" OFF)
-option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
-option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
+    USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
+    "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
+    "USE_GLOO" OFF)
+option(TORCH_USE_CEREAL "Build the C++ API with Cereal for serialization support" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
 
-if (USE_ATEN)
-    set(BUILD_ATEN ${USE_ATEN})
+SET(ONNX_NAMESPACE "onnx_c2" CACHE STRING "onnx namespace")
+
+if (ANDROID OR IOS)
+  set(BUILD_ATEN_MOBILE ON)
 endif()
 
 # ---[ CMake scripts + modules
@@ -214,7 +200,12 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-overflow")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-strict-aliasing")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
+  if (CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
+  endif()
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=pedantic")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=redundant-decls")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=old-style-cast")
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
@@ -230,13 +221,17 @@ if(NOT MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Qunused-arguments")
   endif()
   if ((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
-    OR (CMAKE_COMPILER_IS_GNUCXX 
+    OR (CMAKE_COMPILER_IS_GNUCXX
     AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
   endif()
   if ($ENV{WERROR})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
   endif($ENV{WERROR})
+  if (NOT APPLE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-but-set-variable")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-maybe-uninitialized")
+  endif()
 else()
   foreach(flag_var
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
@@ -261,6 +256,17 @@ set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-fram
 if (USE_ASAN)
     set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
     set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
+endif()
+
+if (APPLE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-private-field")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-c++14-extensions")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-constexpr-not-const")
+endif()
+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
 endif()
 
 if(ANDROID)
@@ -288,11 +294,6 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 
-# ---[ Old caffe protobuf
-if(BUILD_CAFFE2)
-  add_subdirectory(caffe/proto)
-endif()
-
 # ---[ Main build
 add_subdirectory(caffe2)
 
@@ -310,7 +311,7 @@ if(BUILD_DOCS)
 
     if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
       file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/docs)
-    endif (EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
+    endif()
 
     file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/docs)
     configure_file(${DOXYGEN_C_IN} ${DOXYGEN_C_OUT} @ONLY)
@@ -327,10 +328,10 @@ if(BUILD_DOCS)
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Generating Python API documentation with Doxygen"
         VERBATIM)
-  else (DOXYGEN_FOUND)
+  else()
     message(FATAL_ERROR "Doxygen needs to be installed to generate the documentation")
-  endif (DOXYGEN_FOUND)
-endif (BUILD_DOCS)
+  endif()
+endif()
 
 # ---[ CMake related files
 # Uninistall option.
@@ -385,6 +386,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
@@ -404,19 +406,15 @@ else()
 endif()
 
 # ---[ Modules
-if (BUILD_CAFFE2)
-  add_subdirectory(modules)
-endif()
+add_subdirectory(modules)
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules
 # are built. For the binaries, they will be linked to the Caffe2 main
 # libraries, as well as all the modules that are built with Caffe2 (the ones
 # built in the previous Modules section above).
-if (BUILD_CAFFE2)
-  if (BUILD_BINARY)
-    add_subdirectory(binaries)
-  endif()
+if (BUILD_BINARY)
+  add_subdirectory(binaries)
 endif()
 
 include(cmake/Summary.cmake)

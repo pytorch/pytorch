@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/THNN.h"
 #else
 
-#include "Reduction.h"
+#include <ATen/core/Reduction.h>
 
 TH_API void THNN_(Abs_updateOutput)(
           THNNState *state,            // library's state
@@ -206,42 +206,6 @@ TH_API void THNN_(LeakyReLU_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. the input
           accreal negval,              // negative part slope
           bool inplace);               // if true, modifies gradOutput and sets gradInput onto it (no additional memory is allocated)
-
-TH_API void THNN_(GRUFused_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *hidden,
-          THTensor *bias1, // [OPTIONAL]
-          THTensor *bias2, // [OPTIONAL]
-          THTensor *hx,
-          THTensor *output,
-          THTensor *storage);
-TH_API void THNN_(GRUFused_updateGradInput)(
-          THNNState *state,
-          THTensor *gradInInput,
-          THTensor *gradInHidden,
-          THTensor *gradOutput,
-          THTensor *gradInputHx,
-          THTensor *storage);
-
-TH_API void THNN_(LSTMFused_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *hidden,
-          THTensor *bias1, // [OPTIONAL]
-          THTensor *bias2, // [OPTIONAL]
-          THTensor *cell,
-          THTensor *output,
-          THTensor *outputCell);
-TH_API void THNN_(LSTMFused_updateGradInput)(
-          THNNState *state,
-          THTensor *storage,
-          THTensor *gradInGates,
-          THTensor *cx,
-          THTensor *cy,
-          THTensor *gradOutput,
-          THTensor *gradOutputCell,
-          THTensor *gradInputCx);
 
 TH_API void THNN_(LogSigmoid_updateOutput)(
           THNNState *state,            // library's state

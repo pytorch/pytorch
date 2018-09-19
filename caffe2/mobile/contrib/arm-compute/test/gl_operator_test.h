@@ -7,12 +7,12 @@
 
 namespace caffe2 {
 
-#define DECLARE_OPENGL_OPERATOR(_name)                                         \
-  OperatorDef _name;                                                           \
-  _name.mutable_device_option()->set_device_type(OPENGL);
+#define DECLARE_OPENGL_OPERATOR(_name) \
+  OperatorDef _name;                   \
+  _name.mutable_device_option()->set_device_type(PROTO_OPENGL);
 
-#define MAKE_OPENGL_OPERATOR(_op)                                              \
-  _op->mutable_device_option()->set_device_type(OPENGL);
+#define MAKE_OPENGL_OPERATOR(_op) \
+  _op->mutable_device_option()->set_device_type(PROTO_OPENGL);
 
 #define ADD_ARG(_op, _name, _type, _val)                                       \
   {                                                                            \

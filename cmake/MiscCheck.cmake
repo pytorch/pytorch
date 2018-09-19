@@ -167,7 +167,8 @@ endif()
 # -runtime.
 check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
 if (${COMPILER_SUPPORTS_RDYNAMIC})
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -rdynamic")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
 endif()
 
 # ---[ If we are using msvc, set no warning flags

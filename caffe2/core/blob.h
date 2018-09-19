@@ -12,7 +12,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/typeid.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -23,35 +23,22 @@ namespace caffe2 {
  * properly when the blob is deallocated or re-allocated with a new type. A blob
  * could contain anything, although the most common case is to contain a Tensor.
  */
-class Blob {
+class CAFFE2_API Blob final {
  public:
-  typedef void (*DestroyCall)(void*);
+  using DestroyCall = void(void*);
 
   /**
    * Initializes an empty Blob.
    */
-  Blob() : meta_(), pointer_(nullptr) {}
+  Blob() noexcept : meta_(), pointer_(nullptr), destroy_(nullptr) {}
   ~Blob() { Reset(); }
 
-  Blob(Blob&& other) noexcept
-      : meta_(std::move(other.meta_)),
-        pointer_(std::move(other.pointer_)),
-        destroy_(std::move(other.destroy_)) {
-    other.meta_ = {};
-    other.pointer_ = nullptr;
-    other.destroy_ = nullptr;
+  Blob(Blob&& other) noexcept : Blob() {
+    swap(other);
   }
 
   Blob& operator=(Blob&& other) noexcept {
-    if (pointer_ && destroy_) {
-      destroy_(pointer_);
-    }
-    meta_ = std::move(other.meta_);
-    pointer_ = std::move(other.pointer_);
-    destroy_ = std::move(other.destroy_);
-    other.meta_ = {};
-    other.pointer_ = nullptr;
-    other.destroy_ = nullptr;
+    Blob(std::move(other)).swap(*this);
     return *this;
   }
 
@@ -59,18 +46,12 @@ class Blob {
    * Checks if the content stored in the blob is of type T.
    */
   template <class T>
-  bool IsType() const {
+  bool IsType() const noexcept {
     return meta_.Match<T>();
   }
 
-  // TODO(jerryzh): Remove template
-  template <class T>
-  bool IsType(DeviceType device_type) const {
-    static_assert(
-        std::is_same<T, Tensor>::value,
-        "IsType(DeviceType) only available on "
-        "Tensor types.");
-    bool is_match = meta_.Match<T>();
+  bool IsTensorType(DeviceType device_type) const {
+    bool is_match = meta_.Match<Tensor>();
     auto* tensor = static_cast<Tensor*>(pointer_);
     if (is_match && tensor && tensor->GetDeviceType() == device_type) {
       return true;
@@ -81,12 +62,12 @@ class Blob {
   /**
    * Returns the meta info of the blob.
    */
-  inline const TypeMeta& meta() const { return meta_; }
+  inline const TypeMeta& meta() const noexcept { return meta_; }
 
   /**
    * Returns a printable typename of the blob.
    */
-  inline const char* TypeName() const { return meta_.name(); }
+  inline const char* TypeName() const noexcept { return meta_.name(); }
 
   /**
    * @brief Gets the const reference of the stored object. The code checks if
@@ -107,10 +88,10 @@ class Blob {
     return *static_cast<const T*>(pointer_);
   }
 
-  const void* GetRaw() const {
+  const void* GetRaw() const noexcept {
     return pointer_;
   }
-  void* GetRaw() {
+  void* GetRaw() noexcept {
     return pointer_;
   }
 
@@ -128,6 +109,9 @@ class Blob {
         std::is_default_constructible<T>::value,
         "GetMutable can't be called with non-default-constructible types. "
         "Try using specialized methods");
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "Use GetMutableTensor(DeviceType) instead");
     if (IsType<T>()) {
       return static_cast<T*>(pointer_);
     } else {
@@ -146,7 +130,7 @@ class Blob {
   }
 
   inline Tensor* GetMutableTensor(DeviceType device_type) {
-    if (IsType<Tensor>(device_type)) {
+    if (IsTensorType(device_type)) {
       return static_cast<Tensor*>(pointer_);
     } else {
       VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
@@ -175,7 +159,7 @@ class Blob {
   }
 
   inline void*
-  Reset(void* allocated, const TypeMeta& meta, const DestroyCall& destroy) {
+  Reset(void* allocated, const TypeMeta& meta, DestroyCall* destroy) {
     if (pointer_ && destroy_) {
       destroy_(pointer_);
     }
@@ -189,8 +173,8 @@ class Blob {
    * Releases the ownership, if any, this Blob has on the underlying pointer.
    * The user is then responsible for freeing the data if needed
    */
-  inline DestroyCall Release() {
-    DestroyCall d = destroy_;
+  inline DestroyCall* Release() {
+    DestroyCall* d = destroy_;
     destroy_ = nullptr;
     return d;
   }
@@ -286,9 +270,9 @@ class Blob {
   }
   TypeMeta meta_;
   void* pointer_ = nullptr;
-  DestroyCall destroy_ = nullptr;
+  DestroyCall* destroy_ = nullptr;
 
-  DISABLE_COPY_AND_ASSIGN(Blob);
+  AT_DISABLE_COPY_AND_ASSIGN(Blob);
 };
 
 inline void swap(Blob& lhs, Blob& rhs) {

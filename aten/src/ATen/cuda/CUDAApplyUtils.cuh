@@ -1,6 +1,6 @@
 #pragma once
 
-#include "detail/IndexUtils.cuh"
+#include "ATen/cuda/detail/IndexUtils.cuh"
 #include "ATen/TensorUtils.h"
 #include "THC/THCAtomics.cuh"
 #include "ATen/cuda/CUDAContext.h"
@@ -323,7 +323,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
                         scalar1,                                        \
                         scalar2,                                        \
                         TYPE, A, B>                                     \
-   <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(    \
+   <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(    \
        aInfo, bInfo, (TYPE) totalElements, op);
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
@@ -338,7 +338,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
       HANDLE_CASE(TYPE, A, -1);             \
       break;                                \
   }                                         \
-}                                           
+}
 
 #define HANDLE_A_CASE(TYPE, A, B) {         \
   switch (A) {                              \
@@ -382,7 +382,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (aInfo.dims == 1 && bInfo.dims == 1) {
       kernelPointwiseApply2<Op,
@@ -411,7 +411,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    oldA._copy_ignoring_overlaps_(a);
+    at::_copy_ignoring_overlaps_(oldA, a);
     a = oldA;
   }
 
@@ -419,7 +419,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    oldB._copy_ignoring_overlaps_(b);
+    at::_copy_ignoring_overlaps_(oldB, b);
     b = oldB;
   }
 
@@ -503,7 +503,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
                         scalar2,                                        \
                         scalar3,                                        \
                         TYPE, A, B, C>                                  \
-    <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
+    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(   \
       aInfo, bInfo, cInfo, (TYPE) totalElements, op);
 
 #define HANDLE_C_CASE(TYPE, A, B, C) {      \
@@ -587,7 +587,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1) {
       kernelPointwiseApply3<Op,
@@ -620,7 +620,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    oldA._copy_ignoring_overlaps_(a);
+    at::_copy_ignoring_overlaps_(oldA, a);
     a = oldA;
   }
 
@@ -628,7 +628,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    oldB._copy_ignoring_overlaps_(b);
+    at::_copy_ignoring_overlaps_(oldB, b);
     b = oldB;
   }
 
@@ -636,7 +636,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    oldC._copy_ignoring_overlaps_(c);
+    at::_copy_ignoring_overlaps_(oldC, c);
     c = oldC;
   }
 
@@ -731,7 +731,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
                         scalar3,                                        \
                         scalar4,                                        \
                         TYPE, A, B, C, D>                               \
-    <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(   \
+    <<<grid, block, 0, at::cuda::getCurrentCUDAStream(curDevice)>>>(   \
     aInfo, bInfo, cInfo, dInfo, (TYPE) totalElements, op);
 
 #define HANDLE_D_CASE(TYPE, A, B, C, D) {       \
@@ -838,7 +838,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
 
     /*
     Only instantiates the all 1D special case and the fallback all nD case for
-    large (64-bit indexed) tensors to reduce compilation time. 
+    large (64-bit indexed) tensors to reduce compilation time.
     */
     if (aInfo.dims == 1 && bInfo.dims == 1 && cInfo.dims == 1 && dInfo.dims == 1) {
       kernelPointwiseApply4<Op,
@@ -874,7 +874,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    oldA._copy_ignoring_overlaps_(a);
+    at::_copy_ignoring_overlaps_(oldA, a);
     a = oldA;
   }
 
@@ -882,7 +882,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    oldB._copy_ignoring_overlaps_(b);
+    at::_copy_ignoring_overlaps_(oldB, b);
     b = oldB;
   }
 
@@ -890,7 +890,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    oldC._copy_ignoring_overlaps_(c);
+    at::_copy_ignoring_overlaps_(oldC, c);
     c = oldC;
   }
 
@@ -898,7 +898,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    oldD._copy_ignoring_overlaps_(c);
+    at::_copy_ignoring_overlaps_(oldD, c);
     d = oldD;
   }
 

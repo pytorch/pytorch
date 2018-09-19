@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/custom_operator.h"
 
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
@@ -47,10 +48,6 @@ std::array<bool, N> as_bool_array(at::ArrayRef<int64_t> vec) {
   JIT_ASSERT(vec.size() == N);
   std::copy(vec.begin(), vec.end(), res.begin());
   return res;
-}
-
-at::Device as_device(ArrayRef<int64_t> elements) {
-  return at::Device(static_cast<at::Device::Type>(elements[0]), elements[1]);
 }
 
 RegisterOperators reg({

@@ -69,7 +69,9 @@ void CUDARecurrentNetworkExecutor::_ExecRange(int from, int to) {
         continue;
       }
 
-      if (gpu_id == -1 && rnn_op.op->device_option().device_type() == DeviceType::CUDA) {
+      if (gpu_id == -1 &&
+          rnn_op.op->device_option().device_type() ==
+              DeviceTypeProto::PROTO_CUDA) {
         gpu_id = rnn_op.op->device_option().cuda_gpu_id();
       } else {
         CAFFE_ENFORCE(

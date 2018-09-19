@@ -23,7 +23,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 #define MIOPEN_VERSION 1399
 
@@ -164,7 +164,7 @@ class miopenTensorDescWrapper
     miopenTensorDescriptor_t desc_;
     miopenDataType_t type_;
     vector<int> dims_;
-    DISABLE_COPY_AND_ASSIGN(miopenTensorDescWrapper);
+    AT_DISABLE_COPY_AND_ASSIGN(miopenTensorDescWrapper);
 };
 
 } // namespace caffe2

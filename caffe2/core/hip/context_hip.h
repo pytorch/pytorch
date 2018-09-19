@@ -12,7 +12,7 @@
 #include "caffe2/core/numa.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -269,7 +269,7 @@ class HIPContext final : public BaseContext {
     return hipStreamQuery(stream) == hipSuccess;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return HIP;
   }
 
@@ -392,7 +392,7 @@ class HIPStaticContext final : public BaseStaticContext {
   }
 
   void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(GetDeviceType());
+    device->set_device_type(TypeToProto(GetDeviceType()));
     device->set_hip_gpu_id(GetGPUIDForPointer(data));
   }
 

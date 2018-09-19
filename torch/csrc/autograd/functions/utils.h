@@ -54,7 +54,7 @@ inline void set_history(
   if (grad_fn) {
     if (variable.defined()) {
       auto output_nr =
-          grad_fn->add_input_metadata(variable.type(), variable.sizes());
+          grad_fn->add_input_metadata(variable);
       as_variable_ref(variable).set_gradient_edge({grad_fn, output_nr});
     } else {
       grad_fn->add_input_metadata(Function::undefined_input());

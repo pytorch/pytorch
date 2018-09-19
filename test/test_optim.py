@@ -11,7 +11,7 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
-from common import TestCase, run_tests, TEST_WITH_UBSAN, TEST_WITH_ROCM
+from common import TestCase, run_tests, TEST_WITH_UBSAN, skipIfRocm
 
 
 def rosenbrock(tensor):
@@ -365,6 +365,7 @@ class TestOptim(TestCase):
             lambda params: optim.Adagrad(params, lr=1e-1)
         )
 
+    @skipIfRocm
     def test_adamax(self):
         self._test_rosenbrock(
             lambda params: optim.Adamax(params, lr=1e-1),
@@ -437,7 +438,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_rprop(self):
         self._test_rosenbrock(
             lambda params: optim.Rprop(params, lr=1e-3),

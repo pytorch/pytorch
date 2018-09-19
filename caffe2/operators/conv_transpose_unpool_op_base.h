@@ -20,17 +20,17 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   ConvTransposeUnpoolBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         legacy_pad_(
-            static_cast<LegacyPadding>(OperatorBase::GetSingleArgument<int>(
+            static_cast<LegacyPadding>(this->template GetSingleArgument<int>(
                 "legacy_pad",
                 LegacyPadding::NOTSET))),
-        kernel_(OperatorBase::GetRepeatedArgument<int>("kernels")),
-        stride_(OperatorBase::GetRepeatedArgument<int>("strides")),
-        pads_(OperatorBase::GetRepeatedArgument<int>("pads")),
-        adj_(OperatorBase::GetRepeatedArgument<int>("adjs")),
+        kernel_(this->template GetRepeatedArgument<int>("kernels")),
+        stride_(this->template GetRepeatedArgument<int>("strides")),
+        pads_(this->template GetRepeatedArgument<int>("pads")),
+        adj_(this->template GetRepeatedArgument<int>("adjs")),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+            this->template GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
-            OperatorBase::GetSingleArgument<int>("shared_buffer", 0)),
+            this->template GetSingleArgument<int>("shared_buffer", 0)),
         ws_(ws) {
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
@@ -43,30 +43,30 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     }
     // Get old arguments values.
     if (OperatorBase::HasArgument("kernel")) {
-      kernel_.resize(2, OperatorBase::GetSingleArgument<int>("kernel", 0));
+      kernel_.resize(2, this->template GetSingleArgument<int>("kernel", 0));
     } else if (
         OperatorBase::HasArgument("kernel_h") &&
         OperatorBase::HasArgument("kernel_w")) {
-      kernel_.push_back(OperatorBase::GetSingleArgument<int>("kernel_h", 0));
-      kernel_.push_back(OperatorBase::GetSingleArgument<int>("kernel_w", 0));
+      kernel_.push_back(this->template GetSingleArgument<int>("kernel_h", 0));
+      kernel_.push_back(this->template GetSingleArgument<int>("kernel_w", 0));
     }
 
     if (OperatorBase::HasArgument("stride")) {
-      stride_.resize(2, OperatorBase::GetSingleArgument<int>("stride", 0));
+      stride_.resize(2, this->template GetSingleArgument<int>("stride", 0));
     } else if (
         OperatorBase::HasArgument("stride_h") &&
         OperatorBase::HasArgument("stride_w")) {
-      stride_.push_back(OperatorBase::GetSingleArgument<int>("stride_h", 0));
-      stride_.push_back(OperatorBase::GetSingleArgument<int>("stride_w", 0));
+      stride_.push_back(this->template GetSingleArgument<int>("stride_h", 0));
+      stride_.push_back(this->template GetSingleArgument<int>("stride_w", 0));
     }
 
     if (OperatorBase::HasArgument("adj")) {
-      adj_.resize(2, OperatorBase::GetSingleArgument<int>("adj", 0));
+      adj_.resize(2, this->template GetSingleArgument<int>("adj", 0));
     } else if (
         OperatorBase::HasArgument("adj_h") &&
         OperatorBase::HasArgument("adj_w")) {
-      adj_.push_back(OperatorBase::GetSingleArgument<int>("adj_h", 0));
-      adj_.push_back(OperatorBase::GetSingleArgument<int>("adj_w", 0));
+      adj_.push_back(this->template GetSingleArgument<int>("adj_h", 0));
+      adj_.push_back(this->template GetSingleArgument<int>("adj_w", 0));
     }
 
     if (OperatorBase::HasArgument("pad")) {
@@ -75,7 +75,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
               legacy_pad_ != LegacyPadding::SAME,
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
-      pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
+      pads_.resize(4, this->template GetSingleArgument<int>("pad", 0));
     } else if (
         OperatorBase::HasArgument("pad_t") &&
         OperatorBase::HasArgument("pad_l") &&
@@ -86,10 +86,10 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
               legacy_pad_ != LegacyPadding::SAME,
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_r", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_t", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_l", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_b", 0));
+      pads_.push_back(this->template GetSingleArgument<int>("pad_r", 0));
     }
 
     // Fill default values.

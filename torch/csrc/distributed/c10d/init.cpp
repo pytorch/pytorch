@@ -9,6 +9,11 @@
 #include <c10d/ProcessGroupNCCL.hpp>
 #endif
 
+#ifdef USE_C10D_MPI
+#include <c10d/ProcessGroupMPI.hpp>
+#endif
+
+#include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
 #include <gloo/transport/tcp/device.h>
 #include <pybind11/chrono.h>
@@ -29,7 +34,7 @@ using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
   auto c10d_module =
-      THPObjectPtr(PyImport_ImportModule("torch.distributed.c10d"));
+      THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
   }
@@ -50,6 +55,20 @@ PyObject* c10d_init(PyObject* _unused) {
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
       .value("MAX", ::c10d::ReduceOp::MAX);
+
+  py::class_<::c10d::ReduceOptions>(module, "ReduceOptions")
+      .def(py::init<>())
+      .def_readwrite("reduceOp", &::c10d::ReduceOptions::reduceOp)
+      .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
+      .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor);
+
+  py::class_<::c10d::ScatterOptions>(module, "ScatterOptions")
+      .def(py::init<>())
+      .def_readwrite("rootRank", &::c10d::ScatterOptions::rootRank);
+
+  py::class_<::c10d::GatherOptions>(module, "GatherOptions")
+      .def(py::init<>())
+      .def_readwrite("rootRank", &::c10d::GatherOptions::rootRank);
 
   auto store =
       shared_ptr_class_<::c10d::Store>(module, "Store")
@@ -78,8 +97,22 @@ PyObject* c10d_init(PyObject* _unused) {
               &::c10d::Store::add,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "set_timeout",
+              &::c10d::Store::setTimeout,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "wait",
-              &::c10d::Store::wait,
+              [](::c10d::Store& store, const std::vector<std::string>& keys) {
+                store.wait(keys);
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "wait",
+              [](::c10d::Store& store,
+                 const std::vector<std::string>& keys,
+                 const std::chrono::milliseconds& timeout) {
+                store.wait(keys, timeout);
+              },
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
@@ -87,6 +120,9 @@ PyObject* c10d_init(PyObject* _unused) {
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
       .def(py::init<const std::string&, int, bool>());
+
+  shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
+      .def(py::init<const std::string&, ::c10d::Store&>());
 
   auto processGroup =
       shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
@@ -122,6 +158,139 @@ PyObject* c10d_init(PyObject* _unused) {
               },
               py::arg("tensor"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "reduce",
+              &::c10d::ProcessGroup::reduce,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "reduce",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& x,
+                 int rootRank,
+                 ::c10d::ReduceOp op) {
+                ::c10d::ReduceOptions opts;
+                opts.reduceOp = op;
+                opts.rootRank = rootRank;
+                std::vector<at::Tensor> xs = {x};
+                return pg.reduce(xs, opts);
+              },
+              py::arg("tensor"),
+              py::arg("root"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "allgather",
+              &::c10d::ProcessGroup::allgather,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "allgather",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& output,
+                 at::Tensor& input) {
+                std::vector<std::vector<at::Tensor>> outputs = {output};
+                std::vector<at::Tensor> inputs = {input};
+                return pg.allgather(outputs, inputs);
+              },
+              py::arg("output_tensors"),
+              py::arg("tensor"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "gather",
+              &::c10d::ProcessGroup::gather,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "gather",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& output,
+                 at::Tensor& input,
+                 int rootRank) {
+                ::c10d::GatherOptions opts;
+                opts.rootRank = rootRank;
+                std::vector<std::vector<at::Tensor>> outputs = {output};
+                std::vector<at::Tensor> inputs = {input};
+                return pg.gather(outputs, inputs, opts);
+              },
+              py::arg("output_tensors"),
+              py::arg("tensor"),
+              py::arg("root"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "scatter",
+              &::c10d::ProcessGroup::scatter,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "scatter",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& output,
+                 std::vector<at::Tensor>& input,
+                 int rootRank) {
+                ::c10d::ScatterOptions opts;
+                opts.rootRank = rootRank;
+                std::vector<std::vector<at::Tensor>> inputs = {input};
+                std::vector<at::Tensor> outputs = {output};
+                return pg.scatter(outputs, inputs, opts);
+              },
+              py::arg("output_tensor"),
+              py::arg("tensors"),
+              py::arg("root"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "send",
+              &::c10d::ProcessGroup::send,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "recv",
+              &::c10d::ProcessGroup::recv,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "recv_anysource",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& input,
+                 at::Tensor& srcRankTensor,
+                 int tag) {
+                if (srcRankTensor.type().scalarType() != at::kInt) {
+                  throw std::runtime_error(
+                      "source rank tensor needs to be "
+                      "CPU int tensor");
+                }
+                if (srcRankTensor.numel() != 1) {
+                  throw std::runtime_error(
+                      "source rank tensor needs to "
+                      "contain only one element");
+                }
+                return pg.recvAnysource(
+                    input, static_cast<int*>(srcRankTensor.data_ptr()), tag);
+              },
+              py::arg("tensors"),
+              py::arg("src_rank"),
+              py::arg("tag"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "abort",
+              &::c10d::ProcessGroup::barrier,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "barrier",
+              &::c10d::ProcessGroup::barrier,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "group_ranks",
+              &::c10d::ProcessGroup::getGroupRank,
               py::call_guard<py::gil_scoped_release>());
 
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
@@ -190,9 +359,17 @@ PyObject* c10d_init(PyObject* _unused) {
       .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
 #endif
 
+#ifdef USE_C10D_MPI
+  shared_ptr_class_<::c10d::ProcessGroupMPI>(
+      module, "ProcessGroupMPI", processGroup)
+      .def(py::init([](std::vector<int> ranks) {
+        return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+      }));
+#endif
+
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
-      .def("isCompleted", &::c10d::ProcessGroup::Work::isCompleted)
-      .def("isSuccess", &::c10d::ProcessGroup::Work::isSuccess)
+      .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+      .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(
@@ -200,7 +377,25 @@ PyObject* c10d_init(PyObject* _unused) {
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_dist_broadcast_coalesced", &::c10d::distBroadcastCoalesced);
+#ifdef USE_CUDA
+  module.def(
+      "_dist_broadcast_coalesced",
+      &::c10d::distBroadcastCoalesced,
+      py::arg("tensors"),
+      py::arg("buffer_size"),
+      py::arg("process_group"),
+      py::call_guard<py::gil_scoped_release>());
+  module.def(
+      "_sync_params",
+      &::c10d::syncParams,
+      py::arg("process_group"),
+      py::arg("parameter_data"),
+      py::arg("buffer_data"),
+      py::arg("devices"),
+      py::arg("broadcast_bucket_size"),
+      py::arg("broadcast_buffers"),
+      py::call_guard<py::gil_scoped_release>());
+#endif
 
   Py_RETURN_TRUE;
 }
