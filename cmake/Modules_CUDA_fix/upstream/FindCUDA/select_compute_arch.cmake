@@ -88,6 +88,10 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
               RUN_OUTPUT_VARIABLE compute_capabilities)
     endif()
 
+    # Working around CUDA-level nvrm_gpu log statements to stdout on some embedded platforms (ex. Drive PX2)
+    # See https://github.com/pytorch/pytorch/issues/11518#issue-359113249 for fuller context
+    string(REGEX MATCHALL "[0-9]+\\.[0-9]+" compute_capabilities "${compute_capabilities}")
+
     if(run_result EQUAL 0)
       string(REPLACE "2.1" "2.1(2.0)" compute_capabilities "${compute_capabilities}")
       set(CUDA_GPU_DETECT_OUTPUT ${compute_capabilities}
