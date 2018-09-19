@@ -6185,12 +6185,10 @@ class TestNNInit(TestCase):
 
                 rows, cols = tensor_size[0], reduce(mul, tensor_size[1:])
                 flattened_tensor = input_tensor.view(rows, cols)
-                if rows > cols:
-                    self.assertEqual(torch.mm(flattened_tensor.t(), flattened_tensor),
-                                     torch.eye(cols) * gain ** 2, prec=1e-6)
-                else:
-                    self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
-                                     torch.eye(rows) * gain ** 2, prec=1e-6)
+                identities = torch.mm(flattened_tensor, flattened_tensor.t())
+                for i in range(0, rows, cols):
+                    identity = identities[i:i+cols, i:i+cols]
+                    self.assertEqual(identity, torch.eye(identity.size(0)) * gain ** 2, prec=1e-6)
 
     def test_deprecation(self):
         x = torch.randn(3, 3)
