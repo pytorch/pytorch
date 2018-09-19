@@ -207,9 +207,11 @@ Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt
   }
 
   if (THPVariable_Check(data)) {
-      PyErr_WarnEx(PyExc_UserWarning,
-        "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-        "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
+      if (copy_variables) {
+        PyErr_WarnEx(PyExc_UserWarning,
+          "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
+          "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
+      }
 
       auto var = reinterpret_cast<THPVariable*>(data)->cdata;
       auto type_inference_device_type = device_opt.has_value() ? device_opt->type()
