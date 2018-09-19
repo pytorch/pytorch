@@ -417,6 +417,7 @@ def _make_deprecate(meth):
 
     See :func:`~torch.nn.init.{new_name}` for details.""".format(
         old_name=old_name, new_name=new_name)
+    deprecated_init.__name__ = old_name
     return deprecated_init
 
 
