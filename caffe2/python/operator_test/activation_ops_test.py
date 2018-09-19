@@ -16,7 +16,7 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import unittest
 
 
-class TestActivations(hu.HypothesisTestCase):
+class TestActivations(serial.SerializedTestCase):
     @serial.given(X=hu.tensor(), in_place=st.booleans(),
            engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN"]), **mu.gcs)
 
