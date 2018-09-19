@@ -1177,6 +1177,7 @@ class TestSparse(TestCase):
         self.assertNotEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
 
     @cpu_only  # just run once, we test both cpu and cuda
+    @skipIfRocm
     def test_constructor_device_legacy(self):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
         v = torch.tensor([3., 4., 5.])
