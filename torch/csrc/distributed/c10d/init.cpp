@@ -50,9 +50,10 @@ PyObject* c10d_init(PyObject* _unused) {
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
-An enum-like class of available reduce operations: SUM, PRODUCT, MIN, MAX.
+An enum-like class of available reduce operations: ``SUM``, ``PRODUCT``,
+``MIN``, and ``MAX``.
 
-The values of this class can be accessed as attributes, e.g., ``reduce_op.SUM``.
+The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
       .value("SUM", ::c10d::ReduceOp::SUM)

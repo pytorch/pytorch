@@ -1,11 +1,12 @@
 import torch
+import warnings
 from torch._six import string_classes
 from datetime import timedelta
 
 from .rendezvous import rendezvous, register_rendezvous_handler
 from . import BroadcastOptions, AllreduceOptions, ReduceOptions, \
     ScatterOptions, GatherOptions
-from . import ReduceOp as reduce_op
+from . import ReduceOp
 from . import PrefixStore
 from . import ProcessGroupGloo
 
@@ -60,11 +61,25 @@ class Backend(object):
             raise ValueError("Invalid backend: '{}'".format(name))
         return value
 
-# The following two values are here to maintain backward compatibility with
+# The following three values are here to maintain backward compatibility with
 # pre-c10d distributed package.
 # TODO: remove them when users are ready to take a hard dependency on PyTorch 1.
 _backend = Backend.UNDEFINED
 dist_backend = Backend
+
+
+class reduce_op(object):
+    r"""
+    Deprecated enum-like class for reduction operations: ``SUM``, ``PRODUCT``,
+    ``MIN``, and ``MAX``.
+
+    :class:`ReduceOp` is recommended to use instead.
+    """
+
+    def __getattr__(self, key):
+        warnings.warn("torch.distributed.reduce_op is deprecated, please use "
+                      "torch.distributed.ReduceOp instead")
+        return getattr(ReduceOp, key)
 
 
 class group(object):
@@ -676,7 +691,7 @@ def broadcast(tensor,
 
 
 def all_reduce_multigpu(tensor_list,
-                        op=reduce_op.SUM,
+                        op=ReduceOp.SUM,
                         group=group.WORLD,
                         async_op=False):
     r"""
@@ -699,7 +714,7 @@ def all_reduce_multigpu(tensor_list,
             You also need to make sure that ``len(tensor_list)`` is the same for
             all the distributed processes calling this function.
         op (optional): One of the values from
-            ``torch.distributed.reduce_op``
+            ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
@@ -727,7 +742,7 @@ def all_reduce_multigpu(tensor_list,
 
 
 def all_reduce(tensor,
-               op=reduce_op.SUM,
+               op=ReduceOp.SUM,
                group=group.WORLD,
                async_op=False):
     """
@@ -740,7 +755,7 @@ def all_reduce(tensor,
         tensor (Tensor): Input and output of the collective. The function
             operates in-place.
         op (optional): One of the values from
-            ``torch.distributed.reduce_op``
+            ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
@@ -769,7 +784,7 @@ def all_reduce(tensor,
 
 def reduce_multigpu(tensor_list,
                     dst,
-                    op=reduce_op.SUM,
+                    op=ReduceOp.SUM,
                     group=group.WORLD,
                     async_op=False,
                     dst_tensor=0):
@@ -790,7 +805,7 @@ def reduce_multigpu(tensor_list,
             all the distributed processes calling this function.
         dst (int): Destination rank
         op (optional): One of the values from
-            ``torch.distributed.reduce_op``
+            ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
@@ -826,7 +841,7 @@ def reduce_multigpu(tensor_list,
 
 def reduce(tensor,
            dst,
-           op=reduce_op.SUM,
+           op=ReduceOp.SUM,
            group=group.WORLD,
            async_op=False):
     """
@@ -839,7 +854,7 @@ def reduce(tensor,
             operates in-place.
         dst (int): Destination rank
         op (optional): One of the values from
-            ``torch.distributed.reduce_op``
+            ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
