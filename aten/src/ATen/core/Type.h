@@ -397,12 +397,10 @@ struct AT_API Type {
   virtual Tensor & atan_(Tensor & self) const = 0;
   virtual Tensor baddbmm(const Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & baddbmm_(Tensor & self, const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) const = 0;
-  virtual Tensor bernoulli(const Tensor & self, const Tensor & p, Generator * generator) const = 0;
-  virtual Tensor bernoulli(const Tensor & self, double p, Generator * generator) const = 0;
-  virtual Tensor bernoulli(const Tensor & self) const = 0;
+  virtual Tensor bernoulli(const Tensor & self, Generator * generator) const = 0;
   virtual Tensor & bernoulli_(Tensor & self, const Tensor & p, Generator * generator) const = 0;
   virtual Tensor & bernoulli_(Tensor & self, double p, Generator * generator) const = 0;
-  virtual Tensor & bernoulli_(Tensor & self) const = 0;
+  virtual Tensor bernoulli(const Tensor & self, double p, Generator * generator) const = 0;
   virtual Tensor bincount(const Tensor & self, const Tensor & weights, int64_t minlength) const = 0;
   virtual Tensor bmm(const Tensor & self, const Tensor & mat2) const = 0;
   virtual Tensor ceil(const Tensor & self) const = 0;

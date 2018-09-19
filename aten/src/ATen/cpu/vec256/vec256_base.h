@@ -438,4 +438,14 @@ interleave2(const Vec256<T>& a, const Vec256<T>& b) {
                         Vec256<T>::loadu(static_cast<void*>(buffer2)));
 }
 
+template <typename src_T, typename dst_T>
+void convert(const src_T *src, dst_T *dst, int64_t n) {
+#pragma unroll
+  for (int64_t i = 0; i < n; i++) {
+    *dst = static_cast<dst_T>(*src);
+    src++;
+    dst++;
+  }
+}
+
 }}}
