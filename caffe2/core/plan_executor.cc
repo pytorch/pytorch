@@ -9,7 +9,7 @@
 
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
@@ -478,13 +478,13 @@ bool RunPlanOnWorkspace(
     Workspace* ws,
     const PlanDef& plan,
     ShouldContinue shouldContinue) {
-  LOG(INFO) << "Started executing plan.";
+  LOG(INFO) << "Started executing plan " << plan.name();
   if (plan.execution_step_size() == 0) {
     LOG(WARNING) << "Nothing to run - did you define a correct plan?";
     // We will do nothing, but the plan is still legal so we will return true.
     return true;
   }
-  LOG(INFO) << "Initializing networks.";
+  LOG(INFO) << "Initializing networks for plan " << plan.name();
 
   NetDefMap net_defs;
   for (const NetDef& net_def : plan.network()) {
@@ -508,11 +508,12 @@ bool RunPlanOnWorkspace(
       LOG(ERROR) << "Failed initializing step " << step.name();
       return false;
     }
-    LOG(INFO) << "Step " << step.name() << " took " << step_timer.Seconds()
-              << " seconds.";
+    LOG(INFO) << "Step " << step.name() << " in plan " << plan.name()
+              << " took " << step_timer.Seconds() << " seconds.";
   }
-  LOG(INFO) << "Total plan took " << plan_timer.Seconds() << " seconds.";
-  LOG(INFO) << "Plan executed successfully.";
+  LOG(INFO) << "Total plan " << plan.name() << " took " << plan_timer.Seconds()
+            << " seconds.";
+  LOG(INFO) << "Plan " << plan.name() << " executed successfully.";
   return true;
 }
 }

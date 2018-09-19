@@ -29,12 +29,19 @@ void OptimizerBase::add_parameters(const ParameterCursor& cursor) {
 
 void OptimizerBase::zero_grad() {
   for (auto& parameter : parameters_) {
-    auto& grad = parameter.grad();
-    if (grad.defined()) {
-      grad = grad.detach();
-      Tensor(grad).data().zero_();
+    if (parameter.grad().defined()) {
+      parameter.grad().detach_();
+      parameter.grad().zero_();
     }
   }
+}
+
+const std::vector<Tensor>& OptimizerBase::parameters() const noexcept {
+  return parameters_;
+}
+
+std::vector<Tensor>& OptimizerBase::parameters() noexcept {
+  return parameters_;
 }
 
 size_t OptimizerBase::size() const noexcept {

@@ -24,29 +24,23 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
            const bool inverse, IntList signal_sizes, const bool normalized,
            const bool onesided) {
 
-  if (signal_ndim < 1 || signal_ndim > 3) {
-    std::ostringstream ss;
-    ss << "Expected signal_ndim to be 1, 2, or 3, but got signal_ndim="
-       << signal_ndim;
-    throw std::runtime_error(ss.str());
-  }
-  if (!at::isFloatingType(self.type().scalarType())) {
-    std::ostringstream ss;
-    ss << "Expected an input tensor of floating types, but got input="
-       << self.type() << self.sizes();
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(signal_ndim >= 1 && signal_ndim <= 3,
+           "Expected signal_ndim to be 1, 2, or 3, but got signal_ndim=",
+           signal_ndim);
+  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+           "Expected an input tensor of floating types, but got input=",
+           self.type(), self.sizes());
 
   auto signal_tensor_ndim = signal_ndim + static_cast<int64_t>(complex_input);  // add complex dim
   if (self.dim() < signal_tensor_ndim) {
     std::ostringstream ss;
     ss << "Given signal_ndim=" << signal_ndim << ", expected an input tensor "
-       << "of at least" << signal_tensor_ndim << "D";
+       << "of at least " << signal_tensor_ndim << "D";
     if (complex_input) {
       ss << " (complex input adds an extra dimension)";
     }
     ss << ", but got input=" << self.type() << self.sizes();
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
 
   auto self_shape = self.sizes();
@@ -68,22 +62,16 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
   // now we assume that input is batched as [ B x signal_dims... ]
 
   if (complex_input) {
-    if (input.size(signal_ndim + 1) != 2) {
-      std::ostringstream ss;
-      ss << "Expected an input tensor with a last dimension of size 2 "
-         << "representing real + imaginary components, but got input "
-         << self.type() << self.sizes();
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(input.size(signal_ndim + 1) == 2,
+             "Expected an input tensor with a last dimension of size 2 "
+             "representing real + imaginary components, but got input ",
+             self.type(), self.sizes());
   }
 
   // build signal_sizes and output_size
-  if (signal_sizes.size() > 0 && static_cast<int64_t>(signal_sizes.size()) != signal_ndim) {
-    std::ostringstream ss;
-    ss << "Expected signal_sizes to be empty (default) or of signal_ndim="
-       << signal_ndim << "D, but got signal_sizes=" << signal_sizes;
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(signal_sizes.size() == 0 || static_cast<int64_t>(signal_sizes.size()) == signal_ndim,
+           "Expected signal_sizes to be empty (default) or of signal_ndim=",
+           signal_ndim, "D, but got signal_sizes=", signal_sizes);
   std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int64_t>(complex_output));
   output_sizes[0] = input.size(0);  // batch size
   std::vector<int64_t> checked_signal_sizes(signal_ndim);
@@ -110,14 +98,11 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
         output_sizes[i + 1] = input_size;
       }
       checked_signal_sizes[i] = input_size;
-      if (signal_sizes.size() > 0 && signal_sizes[i] != checked_signal_sizes[i]) {
-        std::ostringstream ss;
-        ss << "Expected given signal_sizes=" << signal_sizes << " to have same "
-           << "shape with input at signal dimension " << i << ", but got "
-           << "signal_sizes=" << signal_sizes << " and input=" << self.type()
-           << self.sizes();
-        throw std::runtime_error(ss.str());
-      }
+      AT_CHECK(signal_sizes.size() == 0 || signal_sizes[i] == checked_signal_sizes[i],
+               "Expected given signal_sizes=", signal_sizes," to have same "
+               "shape with input at signal dimension ", i, ", but got "
+               "signal_sizes=", signal_sizes, " and input=", self.type(),
+               self.sizes());
     }
   }
   if (complex_output) {
@@ -222,7 +207,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
   if (hop_length <= 0) {
     std::ostringstream ss;
     REPR(ss) << ": expected hop_length > 0, but got hop_length=" << hop_length;
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
   if (win_length <= 0 || win_length > n_fft) {
     std::ostringstream ss;

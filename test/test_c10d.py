@@ -1,19 +1,21 @@
 import copy
 import math
 import multiprocessing
-import socket
 import sys
 import tempfile
+import time
 import unittest
+from datetime import timedelta
 
 from functools import wraps
 from collections import namedtuple
 
 import torch
+import common
 from torch import nn
 import torch.nn.functional as F
-from torch.distributed import c10d
-from torch.nn.parallel import distributed_c10d
+import torch.distributed as c10d
+from torch.nn.parallel import DistributedDataParallel
 
 from common import TestCase
 
@@ -23,7 +25,7 @@ if not c10d.is_available():
     sys.exit(0)
 
 
-TIMEOUT_DEFAULT = 5
+TIMEOUT_DEFAULT = 15
 TIMEOUT_OVERRIDE = {}
 
 TestSkip = namedtuple('TestSkip', 'exit_code, message')
@@ -58,15 +60,6 @@ def skip_if_not_nccl(func):
 
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
-
-
-def find_free_port():
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('localhost', 0))
-    sockname = sock.getsockname()
-    sock.close()
-    return sockname[1]
 
 
 def gpus_for_rank(world_size):
@@ -107,14 +100,44 @@ class FileStoreTest(TestCase, StoreTestBase):
         self.file.close()
 
     def _create_store(self):
-        return c10d.FileStore(self.file.name)
+        store = c10d.FileStore(self.file.name)
+        store.set_timeout(timedelta(seconds=300))
+        return store
+
+
+class PrefixFileStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        self.file = tempfile.NamedTemporaryFile()
+        self.filestore = c10d.FileStore(self.file.name)
+        self.prefix = "test_prefix"
+        self.filestore.set_timeout(timedelta(seconds=300))
+
+    def tearDown(self):
+        self.file.close()
+
+    def _create_store(self):
+        return c10d.PrefixStore(self.prefix, self.filestore)
 
 
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         addr = 'localhost'
-        port = find_free_port()
-        return c10d.TCPStore(addr, port, True)
+        port = common.find_free_port()
+        store = c10d.TCPStore(addr, port, True)
+        store.set_timeout(timedelta(seconds=300))
+        return store
+
+
+class PrefixTCPStoreTest(TestCase, StoreTestBase):
+    def setUp(self):
+        addr = 'localhost'
+        port = common.find_free_port()
+        self.tcpstore = c10d.TCPStore(addr, port, True)
+        self.prefix = "test_prefix"
+        self.tcpstore.set_timeout(timedelta(seconds=300))
+
+    def _create_store(self):
+        return c10d.PrefixStore(self.prefix, self.tcpstore)
 
 
 class RendezvousTest(TestCase):
@@ -126,10 +149,10 @@ class RendezvousTest(TestCase):
 class RendezvousFileTest(TestCase):
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, 'path missing'):
-            gen = c10d.rendezvous('file://?rank=0&size=1')
+            gen = c10d.rendezvous('file://?rank=0&world_size=1')
             next(gen)
         with self.assertRaisesRegex(ValueError, 'rank parameter missing'):
-            gen = c10d.rendezvous('file:///tmp/foo?size=1')
+            gen = c10d.rendezvous('file:///tmp/foo?world_size=1')
             next(gen)
         with self.assertRaisesRegex(ValueError, 'size parameter missing'):
             gen = c10d.rendezvous('file:///tmp/foo?rank=0')
@@ -137,7 +160,7 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile() as file:
-            url = 'file://%s?size=%d' % (file.name, 2)
+            url = 'file://%s?world_size=%d' % (file.name, 2)
             gen0 = c10d.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
@@ -159,10 +182,10 @@ class RendezvousFileTest(TestCase):
 class RendezvousTCPTest(TestCase):
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, 'port number missing'):
-            gen = c10d.rendezvous('tcp://127.0.0.1?rank=0&size=1')
+            gen = c10d.rendezvous('tcp://127.0.0.1?rank=0&world_size=1')
             next(gen)
         with self.assertRaisesRegex(ValueError, 'rank parameter missing'):
-            gen = c10d.rendezvous('tcp://127.0.0.1:23456?size=1')
+            gen = c10d.rendezvous('tcp://127.0.0.1:23456?world_size=1')
             next(gen)
         with self.assertRaisesRegex(ValueError, 'size parameter missing'):
             gen = c10d.rendezvous('tcp://127.0.0.1:23456?rank=0')
@@ -170,8 +193,8 @@ class RendezvousTCPTest(TestCase):
 
     def test_nominal(self):
         addr = 'localhost'
-        port = find_free_port()
-        url = 'tcp://%s:%d?size=%d' % (addr, port, 2)
+        port = common.find_free_port()
+        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 2)
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
@@ -221,7 +244,7 @@ class MultiProcessTestCase(TestCase):
     def setUp(self):
         self.rank = self.MAIN_PROCESS_RANK
         self.file = tempfile.NamedTemporaryFile()
-        self.port = find_free_port()
+        self.port = common.find_free_port()
         self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
 
     def tearDown(self):
@@ -245,22 +268,30 @@ class MultiProcessTestCase(TestCase):
 
     def _join_processes(self, fn):
         timeout = get_timeout(self.id())
+        start_time = time.time()
         for p in self.processes:
             p.join(timeout)
-        self._check_return_codes()
+        elapsed_time = time.time() - start_time
+        self._check_return_codes(elapsed_time)
 
-    def _check_return_codes(self):
+    def _check_return_codes(self, elapsed_time):
         """
         Checks that the return codes of all spawned processes match, and skips
         tests if they returned a return code indicating a skipping condition.
         """
         first_process = self.processes[0]
-        for p in self.processes:
+        for i, p in enumerate(self.processes):
+            if p.exitcode is None:
+                raise RuntimeError('Process {} terminated or timed out after {} seconds'.format(i, elapsed_time))
             self.assertEqual(p.exitcode, first_process.exitcode)
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
                 raise unittest.SkipTest(skip.message)
         self.assertEqual(first_process.exitcode, 0)
+
+    @property
+    def is_master(self):
+        return self.rank == 0
 
 
 class ProcessGroupGlooTest(MultiProcessTestCase):
@@ -335,6 +366,42 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         work.wait()
         self.assertEqual(torch.Tensor([float(self.world_size * (self.world_size + 1) / 2)]), x)
 
+    def test_send_recv_all_to_all(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+
+        # Preallocate tensors for input/output
+        inputs = [torch.Tensor([self.rank]) for _ in range(self.world_size)]
+        outputs = [torch.Tensor([-1]) for _ in range(self.world_size)]
+
+        # Issue sends
+        send_work = []
+        for i in range(self.world_size):
+            if i == self.rank:
+                continue
+            send_work.append(pg.send([inputs[i]], i, 0))
+
+        # Issue recvs
+        recv_work = []
+        for i in range(self.world_size):
+            if i == self.rank:
+                continue
+            recv_work.append(pg.recv([outputs[i]], i, 0))
+
+        # Wait for sends to complete
+        for work in send_work:
+            work.wait()
+
+        # Wait for recvs to complete
+        for work in recv_work:
+            work.wait()
+
+        # Test that every output other than our own contains the respective rank
+        for i in range(self.world_size):
+            if i == self.rank:
+                continue
+            self.assertEqual(torch.Tensor([i]), outputs[i])
+
 
 class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
@@ -348,11 +415,12 @@ class ProcessGroupNCCLTest(TestCase):
         self.world_size = 1
         self.file = tempfile.NamedTemporaryFile()
         self.num_gpus = torch.cuda.device_count()
+        if self.num_gpus < 2:
+            raise unittest.SkipTest("NCCL test requires 2+ GPUs")
 
     def tearDown(self):
         self.file.close()
 
-    @skip_if_not_nccl
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -375,7 +443,6 @@ class ProcessGroupNCCLTest(TestCase):
             for i in range(self.num_gpus):
                 self.assertEqual(tensors[i], tensors[rt])
 
-    @skip_if_not_nccl
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -430,6 +497,54 @@ class ProcessGroupNCCLTest(TestCase):
         for i in range(self.num_gpus):
             self.assertEqual(torch.Tensor([self.num_gpus]), tensors[i])
 
+    def test_reduce_ops(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce(xs, rootRank, rootTensor):
+            opts = c10d.ReduceOptions()
+            opts.rootRank = rootRank
+            opts.rootTensor = rootTensor
+            work = pg.reduce(xs, opts)
+            work.wait()
+
+        # for every root tensor
+        for rt in range(self.num_gpus):
+            tensors = []
+            for i in range(self.num_gpus):
+                tensors.append(torch.Tensor([i + 1]).cuda(i))
+
+            reduce(tensors, self.rank, rt)
+
+            self.assertEqual(
+                torch.Tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
+                tensors[rt])
+
+    def test_allgather_ops(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allgather(output_ts, input_ts):
+            work = pg.allgather(output_ts, input_ts)
+            work.wait()
+
+        tensors = []
+        output_ts = [[] for _ in range(self.num_gpus)]
+
+        for idx, ls in enumerate(output_ts):
+            for _ in range(self.world_size * self.num_gpus):
+                ls.append(torch.Tensor([0]).cuda(idx))
+
+        for i in range(self.num_gpus):
+            tensors.append(torch.Tensor([i]).cuda(i))
+
+        allgather(output_ts, tensors)
+
+        # Verification
+        for device_ts in output_ts:
+            for s_idx, t in enumerate(device_ts):
+                self.assertEqual(torch.Tensor([s_idx]), t)
+
 
 class Net(nn.Module):
     def __init__(self):
@@ -452,13 +567,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-    def _test_ddp_with_process_group(self, process_group):
-        gpus = gpus_for_rank(self.world_size)[self.rank]
+    def _test_ddp_with_process_group(self, process_group, gpus):
         model = Net()
-        ddp_model = distributed_c10d._DistributedDataParallelC10d(
+        ddp_model = DistributedDataParallel(
             copy.deepcopy(model).cuda(gpus[0]),
-            process_group,
-            device_ids=gpus)
+            device_ids=gpus,
+            process_group=process_group)
+
         model.cuda(gpus[0])
 
         local_batch_size = len(gpus)
@@ -500,18 +615,146 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @skip_if_not_multigpu
     def test_gloo_backend(self):
-        store = c10d.TCPStore('localhost', self.port, self.rank == 0)
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-        self._test_ddp_with_process_group(process_group)
+        gpus = gpus_for_rank(self.world_size)[self.rank]
+        self._test_ddp_with_process_group(process_group, gpus)
+        self._test_ddp_with_process_group(process_group, list(map(lambda i: torch.device('cuda:' + str(i)), gpus)))
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
     def test_nccl_backend(self):
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        gpus = gpus_for_rank(self.world_size)[self.rank]
+        self._test_ddp_with_process_group(process_group, gpus)
+        self._test_ddp_with_process_group(process_group, list(map(lambda i: torch.device('cuda:' + str(i)), gpus)))
+
+    @skip_if_not_multigpu
+    def test_dist_broadcast_coalesced(self):
+        # Set up process group.
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+
+        device = torch.device('cuda')
+
+        target = torch.arange(10, dtype=torch.float64, device=device).chunk(5)
+
+        if self.is_master:
+            # All processes should have these tensors in the end.
+            tensors = target
+        else:
+            # Non-master processes start with empty tensors and should be
+            # filled with the tensors from the master.
+            tensors = torch.zeros(10, device=device).chunk(5)
+
+        c10d._dist_broadcast_coalesced(
+            tensors,
+            buffer_size=10,
+            process_group=process_group)
+
+        if not self.is_master:
+            self.assertEqual(tensors, target)
+
+    @skip_if_not_multigpu
+    def test_sync_params_no_buffers(self):
+        # Set up process group.
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+
+        # Use all available devices on every process here (data is small, so should be fine).
+        devices = gpus_for_rank(self.world_size)[self.rank]
+        target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
+        parameter_data = [target]
+        parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+        buffer_data = [[]] * len(parameter_data)
+
+        c10d._sync_params(
+            process_group,
+            parameter_data=parameter_data,
+            buffer_data=buffer_data,
+            devices=devices,
+            broadcast_bucket_size=10,
+            broadcast_buffers=False)
+
+        for device_data in parameter_data:
+            for i, parameter in enumerate(device_data):
+                self.assertEqual(parameter, target[i])
+
+    @skip_if_not_multigpu
+    def test_sync_params_with_buffers(self):
+        # Set up process group.
+        store = c10d.TCPStore('localhost', self.port, self.is_master)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+
+        devices = gpus_for_rank(self.world_size)[self.rank]
+        target = torch.arange(10, dtype=torch.float64, device='cuda:0').chunk(5)
+        parameter_data = [target]
+        parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+
+        # sync_params should do a dist_broadcast for buffers, so we only populate the master buffers and
+        # then check that other processes' tensors end up matching.
+
+        if self.is_master:
+            buffer_data = [target]
+            buffer_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+        else:
+            buffer_data = [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices]
+
+        c10d._sync_params(
+            process_group,
+            parameter_data=parameter_data,
+            buffer_data=buffer_data,
+            devices=devices,
+            broadcast_bucket_size=10,
+            broadcast_buffers=True)
+
+        for device_data in parameter_data:
+            for i, parameter in enumerate(device_data):
+                self.assertEqual(parameter, target[i])
+
+        for device_data in buffer_data:
+            for i, buffer in enumerate(device_data):
+                self.assertEqual(buffer, target[i])
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_fp16(self):
         store = c10d.TCPStore('localhost', self.port, self.rank == 0)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        self._test_ddp_with_process_group(process_group)
+
+        gpus = gpus_for_rank(self.world_size)[self.rank]
+        model = nn.Linear(1, 1, bias=False).cuda(gpus[0]).half()
+        nn.init.constant_(model.weight, 1)
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=[gpus[0]],
+            process_group=process_group,
+            bucket_cap_mb=1,
+        )
+
+        # Input 2**15, so that the gradients will overflow with a
+        # world_size of 2, unless we normalize the gradient by the
+        # world_size before the reduction
+        input = torch.Tensor([[2**15]]).cuda(gpus[0]).half()
+
+        # Step model
+        ddp_model.train()
+        output = ddp_model(input)
+        loss = output.sum()
+        loss.backward()
+
+        self.assertFalse(
+            any(torch.isinf(p.grad).any() for p in ddp_model.parameters())
+        )
 
 if __name__ == '__main__':
     assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"

@@ -15,11 +15,11 @@ class ONNXWhileOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         parent_ws_(ws),
         has_trip_count_(
-            OperatorBase::GetSingleArgument<int64_t>("has_trip_count", 0)),
-        has_cond_(OperatorBase::GetSingleArgument<int64_t>("has_cond", 0)),
-        save_scopes_(OperatorBase::GetSingleArgument<int64_t>("save_scopes", 0)),
-        disable_scopes_(OperatorBase::GetSingleArgument<int64_t>("disable_scopes", 0)),
-        num_loop_carried_deps_(OperatorBase::GetSingleArgument<int64_t>("num_loop_carried_deps", -1)) {
+            this->template GetSingleArgument<int64_t>("has_trip_count", 0)),
+        has_cond_(this->template GetSingleArgument<int64_t>("has_cond", 0)),
+        save_scopes_(this->template GetSingleArgument<int64_t>("save_scopes", 0)),
+        disable_scopes_(this->template GetSingleArgument<int64_t>("disable_scopes", 0)),
+        num_loop_carried_deps_(this->template GetSingleArgument<int64_t>("num_loop_carried_deps", -1)) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("body"),
         "body net must be specified in ONNXWhile operator");

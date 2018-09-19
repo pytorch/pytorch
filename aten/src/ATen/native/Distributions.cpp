@@ -7,7 +7,7 @@
 
 #include "ATen/CPUGenerator.h"
 #include "ATen/CheckGenerator.h"
-#include "ATen/Generator.h"
+#include "ATen/core/Generator.h"
 #include "ATen/native/Distributions.h"
 
 #include <functional>
@@ -49,7 +49,7 @@ namespace {
  */
 
 THGenerator* get_generator(at::Generator* gen) {
-  auto default_gen = &at::globalContext().defaultGenerator(at::Backend::CPU);
+  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
   auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
   return gen_->generator;
 }
@@ -145,7 +145,7 @@ Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
 }
 
 Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
-    self._bernoulli_(p, gen);
+    at::_bernoulli_(self, p, gen);
     return self;
 }
 

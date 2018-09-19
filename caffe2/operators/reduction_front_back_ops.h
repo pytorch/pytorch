@@ -14,7 +14,7 @@ class SumReduceDimsOp final : public Operator<Context> {
   SumReduceDimsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         num_reduce_dims_(
-            OperatorBase::GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
+            this->template GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -90,7 +90,7 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
   SumReduceDimsGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         num_reduce_dims_(
-            OperatorBase::GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
+            this->template GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -166,7 +166,7 @@ class MaxReduceDimsOp final : public Operator<Context> {
   MaxReduceDimsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         num_reduce_dims_(
-            OperatorBase::GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
+            this->template GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
@@ -234,7 +234,7 @@ class MaxReduceDimsGradientOp final : public Operator<Context> {
   MaxReduceDimsGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         num_reduce_dims_(
-            OperatorBase::GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
+            this->template GetSingleArgument<int32_t>("num_reduce_dim", 1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 

@@ -29,6 +29,9 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseLengthsSum8BitsRowwise)
     .NumInputs(4)
     .NumOutputs(1)
+    .ValueLengthInputFillers(
+        SparseLengths8BitsRowwiseOp<CPUContext>::DATA,
+        SparseLengths8BitsRowwiseOp<CPUContext>::LENGTHS)
     .SetDoc(R"DOC(
 Variation of SparseLengthsSum operator, where DATA is
 stored using 8bits. DATA was quantized with 8Bit row-wise
@@ -61,6 +64,9 @@ and biases.
 OPERATOR_SCHEMA(SparseLengthsWeightedSum8BitsRowwise)
     .NumInputs(5)
     .NumOutputs(1)
+    .ValueLengthInputFillers(
+        SparseLengths8BitsRowwiseOp<CPUContext, 1>::DATA,
+        SparseLengths8BitsRowwiseOp<CPUContext, 1>::LENGTHS)
     .SetDoc(R"DOC(
 Variation of SparseLengthsWeightedSum operator, where
 DATA is stored using 8bits. DATA was quantized with 8Bit row-wise
@@ -97,6 +103,9 @@ and biases.
 OPERATOR_SCHEMA(SparseLengthsMean8BitsRowwise)
     .NumInputs(4)
     .NumOutputs(1)
+    .ValueLengthInputFillers(
+        SparseLengths8BitsRowwiseOp<CPUContext, 0, 1>::DATA,
+        SparseLengths8BitsRowwiseOp<CPUContext, 0, 1>::LENGTHS)
     .SetDoc(R"DOC(
 Variation of SparseLengthsMean operator, where DATA is
 stored using 8bits. DATA was quantized with 8Bit row-wise
@@ -129,6 +138,9 @@ and biases.
 OPERATOR_SCHEMA(SparseLengthsWeightedMean8BitsRowwise)
     .NumInputs(5)
     .NumOutputs(1)
+    .ValueLengthInputFillers(
+        SparseLengths8BitsRowwiseOp<CPUContext, 1, 1>::DATA,
+        SparseLengths8BitsRowwiseOp<CPUContext, 1, 1>::LENGTHS)
     .SetDoc(R"DOC(
 Variation of SparseLengthsWeightedMean operator, where
 DATA is stored using 8bits. DATA was quantized with 8Bit row-wise
@@ -165,6 +177,9 @@ and biases.
 OPERATOR_SCHEMA(FloatToRowwiseQuantized8Bits)
     .NumInputs(1)
     .NumOutputs(2)
+    .ValueLengthInputFillers(
+        SparseLengths8BitsRowwiseOp<CPUContext>::DATA,
+        SparseLengths8BitsRowwiseOp<CPUContext>::LENGTHS)
     .SetDoc(R"DOC(
 This operator applies 8Bit row-wise quantization to
 input tensor and returns quantized tensor. Row wise quantization of
@@ -189,6 +204,9 @@ restore input tensor (with losses).
 OPERATOR_SCHEMA(Rowwise8BitQuantizedToFloat)
     .NumInputs(2)
     .NumOutputs(1)
+    .ValueLengthInputFillers(
+        SparseLengths8BitsRowwiseOp<CPUContext>::DATA,
+        SparseLengths8BitsRowwiseOp<CPUContext>::LENGTHS)
     .SetDoc(R"DOC(
 Given uint8 tensor, quantized using 8bit row-wise
 quantization, and auxiliary scales and biases, this operator

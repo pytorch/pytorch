@@ -24,7 +24,7 @@ class MKLMemoryFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
     const MKLMemory<T>& src = blob.Get<MKLMemory<T>>();
-    CAFFE_ENFORCE(src.buffer(), "Trying to fetch unitilized tensor");
+    CAFFE_ENFORCE(src.buffer(), "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(TypeMeta::Make<T>());
     CAFFE_ENFORCE(
         numpy_type != -1,

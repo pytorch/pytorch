@@ -3,7 +3,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/python/dlpack.h"
 
 #include <pybind11/pybind11.h>
@@ -108,16 +108,21 @@ class DLPackWrapper {
     }
 
     tensor->Resize(dims);
-    const auto& meta = DLTypeToCaffe(dlTensor->dtype);
+    caffe2::TypeMeta meta = DLTypeToCaffe(dlTensor->dtype);
+    at::Device device = at::Device(tensor->GetDeviceType());
     tensor->ShareExternalPointer(
-        ((int8_t*)dlTensor->data) + dlTensor->byte_offset,
+        at::DataPtr(
+            (void*)(((int8_t*)dlTensor->data) + dlTensor->byte_offset),
+            static_cast<void*>(dlMTensor),
+            [](void* t_ptr) -> void {
+              DLManagedTensor* mt_ptr = static_cast<DLManagedTensor*>(t_ptr);
+              if (mt_ptr->destructor) {
+                mt_ptr->destructor(mt_ptr);
+              }
+            },
+            device),
         meta,
-        0,
-        [dlMTensor](void*) {
-          if (dlMTensor->destructor) {
-            dlMTensor->destructor(dlMTensor);
-          }
-        });
+        0);
   }
 
   Tensor* tensor;

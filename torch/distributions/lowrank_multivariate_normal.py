@@ -4,9 +4,8 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import (_batch_diag, _batch_mahalanobis, _batch_mv,
-                                                     _batch_potrf_lower, _batch_trtrs_lower,
-                                                     _get_batch_shape)
-from torch.distributions.utils import lazy_property
+                                                     _batch_potrf_lower, _batch_trtrs_lower)
+from torch.distributions.utils import _standard_normal, lazy_property
 
 
 def _batch_vector_diag(bvec):
@@ -58,12 +57,12 @@ def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril):
 class LowRankMultivariateNormal(Distribution):
     r"""
     Creates a multivariate normal distribution with covariance matrix having a low-rank form
-    parameterized by `cov_factor` and `cov_diag`::
+    parameterized by :attr:`cov_factor` and :attr:`cov_diag`::
         covariance_matrix = cov_factor @ cov_factor.T + cov_diag
 
     Example:
 
-        >>> m = MultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
+        >>> m = LowRankMultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
         >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[1,0]`, cov_diag=`[1,1]`
         tensor([-0.2102, -0.5429])
 
@@ -102,26 +101,40 @@ class LowRankMultivariateNormal(Distribution):
         if cov_diag.shape[-1:] != event_shape:
             raise ValueError("cov_diag must be a batch of vectors with shape {}".format(event_shape))
 
-        scale_batch_shape = _get_batch_shape(cov_factor, cov_diag)
+        loc_ = loc.unsqueeze(-1)
+        cov_diag_ = cov_diag.unsqueeze(-1)
         try:
-            batch_shape = torch._C._infer_size(loc.shape[:-1], scale_batch_shape)
+            loc_, self.cov_factor, cov_diag_ = torch.broadcast_tensors(loc_, cov_factor, cov_diag_)
         except RuntimeError:
             raise ValueError("Incompatible batch shapes: loc {}, cov_factor {}, cov_diag {}"
                              .format(loc.shape, cov_factor.shape, cov_diag.shape))
+        self.loc = loc_[..., 0]
+        self.cov_diag = cov_diag_[..., 0]
+        batch_shape = self.loc.shape[:-1]
 
-        loc_shape = batch_shape + event_shape
-        self.loc = loc.expand(loc_shape)
-        self.cov_factor = cov_factor.expand(loc_shape + cov_factor.shape[-1:])
-        self.cov_diag = cov_diag.expand(loc_shape)
         self._capacitance_tril = _batch_capacitance_tril(self.cov_factor, self.cov_diag)
         super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
                                                         validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(LowRankMultivariateNormal, _instance)
+        batch_shape = torch.Size(batch_shape)
+        loc_shape = batch_shape + self.event_shape
+        new.loc = self.loc.expand(loc_shape)
+        new.cov_diag = self.cov_diag.expand(loc_shape)
+        new.cov_factor = self.cov_factor.expand(loc_shape + self.cov_factor.shape[-1:])
+        new._capacitance_tril = self._capacitance_tril.expand(batch_shape + self._capacitance_tril.shape[-2:])
+        super(LowRankMultivariateNormal, new).__init__(batch_shape,
+                                                       self.event_shape,
+                                                       validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @property
     def mean(self):
         return self.loc
 
-    @property
+    @lazy_property
     def variance(self):
         return self.cov_factor.pow(2).sum(-1) + self.cov_diag
 
@@ -156,8 +169,9 @@ class LowRankMultivariateNormal(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps_W = self.loc.new_empty(shape[:-1] + (self.cov_factor.size(-1),)).normal_()
-        eps_D = self.loc.new_empty(shape).normal_()
+        W_shape = shape[:-1] + self.cov_factor.shape[-1:]
+        eps_W = _standard_normal(W_shape, dtype=self.loc.dtype, device=self.loc.device)
+        eps_D = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + _batch_mv(self.cov_factor, eps_W) + self.cov_diag.sqrt() * eps_D
 
     def log_prob(self, value):

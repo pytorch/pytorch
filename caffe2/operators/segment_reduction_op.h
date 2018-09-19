@@ -373,7 +373,7 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
   template <int FixedSize>
   bool DoRunWithValue() {
     auto& reduction_grad = Input(REDUCTION_GRAD);
-    auto& source_shape = OperatorBase::Input<Tensor>(SOURCE_SHAPE, CPU);
+    auto& source_shape = this->template Input<Tensor>(SOURCE_SHAPE, CPU);
 
     auto* data_grads = Output(0);
 

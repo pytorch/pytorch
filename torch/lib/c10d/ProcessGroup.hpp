@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 #include <ATen/ATen.h>
@@ -37,7 +38,7 @@ class ProcessGroup {
     virtual ~Work();
 
     // Checks if request has completed. Non-blocking operation.
-    virtual bool isCompleted() const = 0;
+    virtual bool isCompleted() = 0;
 
     // Returns if the work completed successfully.
     // If false, the exception function can be called to get details.
@@ -93,6 +94,43 @@ class ProcessGroup {
   virtual std::shared_ptr<Work> allreduce(
       std::vector<at::Tensor>& data,
       const AllreduceOptions& opts = AllreduceOptions()) = 0;
+
+  virtual std::shared_ptr<ProcessGroup::Work> reduce(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) = 0;
+
+  virtual std::shared_ptr<ProcessGroup::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors) = 0;
+
+  virtual std::shared_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) = 0;
+
+  virtual std::shared_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) = 0;
+
+  virtual std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) = 0;
+
+  virtual std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank,
+      int tag) = 0;
+
+  virtual std::shared_ptr<ProcessGroup::Work> recvAnysource(
+      std::vector<at::Tensor>& tensors,
+      int* srcRank,
+      int tag) = 0;
+
+  virtual std::shared_ptr<ProcessGroup::Work> barrier() = 0;
+
+  virtual std::unordered_map<int, int> getGroupRank() = 0;
 
  protected:
   const int rank_;

@@ -281,14 +281,11 @@ Returns True if all elements in the tensor are non-zero, False otherwise.
 
 Example::
 
-    >>> a = torch.randn(1, 3).mul(2).byte()
+    >>> a = torch.randn(1, 3).byte() % 2
     >>> a
-
-     1  1  0
-    [torch.ByteTensor of size 1x3]
-
+    tensor([[1, 0, 0]], dtype=torch.uint8)
     >>> a.all()
-    False
+    tensor(0, dtype=torch.uint8)
 
 .. function:: all(dim, keepdim=False, out=None) -> Tensor
 
@@ -307,22 +304,22 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 2).mul(2).byte()
+    >>> a = torch.randn(4, 2).byte() % 2
     >>> a
-
-     1  1
-     1  0
-     0  0
-     1  0
-    [torch.ByteTensor of size 4x2]
-
+    tensor([[0, 0],
+            [0, 0],
+            [0, 1],
+            [1, 1]], dtype=torch.uint8)
     >>> a.all(dim=1)
+    tensor([0, 0, 0, 1], dtype=torch.uint8)
 
-     1
-     0
-     0
-     0
-    [torch.ByteTensor of size 4]
+""")
+
+add_docstr_all('allclose',
+               r"""
+allclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
+
+See :func:`torch.allclose`
 """)
 
 add_docstr_all('any',
@@ -333,14 +330,11 @@ Returns True if any elements in the tensor are non-zero, False otherwise.
 
 Example::
 
-    >>> a = torch.randn(1, 3).mul(2).byte()
+    >>> a = torch.randn(1, 3).byte() % 2
     >>> a
-
-     1  1  0
-    [torch.ByteTensor of size 1x3]
-
+    tensor([[0, 0, 1]], dtype=torch.uint8)
     >>> a.any()
-    True
+    tensor(1, dtype=torch.uint8)
 
 .. function:: any(dim, keepdim=False, out=None) -> Tensor
 
@@ -359,22 +353,15 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 2).mul(2).byte()
+    >>> a = torch.randn(4, 2).byte() % 2
     >>> a
-
-     1  1
-     1  0
-     0  0
-     1  0
-    [torch.ByteTensor of size 4x2]
-
+    tensor([[1, 0],
+            [0, 0],
+            [0, 1],
+            [0, 0]], dtype=torch.uint8)
     >>> a.any(dim=1)
+    tensor([1, 0, 1, 0], dtype=torch.uint8)
 
-     1
-     1
-     0
-     1
-    [torch.ByteTensor of size 4]
 """)
 
 add_docstr_all('apply_',
@@ -459,6 +446,13 @@ bernoulli_() -> Tensor
 In-place version of :meth:`~Tensor.bernoulli`
 """)
 
+add_docstr_all('bincount',
+               r"""
+bincount(weights=None, minlength=0) -> Tensor
+
+See :func:`torch.bincount`
+""")
+
 add_docstr_all('bmm',
                r"""
 bmm(batch2) -> Tensor
@@ -473,6 +467,13 @@ btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
 See :func:`torch.btrifact_with_info`
 """)
 
+add_docstr_all('btrisolve',
+               r"""
+btrisolve(LU_data, LU_pivots) -> Tensor
+
+See :func:`torch.btrisolve`
+""")
+
 add_docstr_all('cauchy_',
                r"""
 cauchy_(median=0, sigma=1, *, generator=None) -> Tensor
@@ -481,7 +482,7 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 
 .. math::
 
-    f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - median)^2 + \sigma^2}
+    f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - \text{median})^2 + \sigma^2}
 """)
 
 add_docstr_all('ceil',
@@ -580,6 +581,16 @@ cosh_() -> Tensor
 In-place version of :meth:`~Tensor.cosh`
 """)
 
+add_docstr_all('cpu',
+               r"""
+cpu() -> Tensor
+
+Returns a copy of this object in CPU memory.
+
+If this object is already in CPU memory and on the correct device,
+then no copy is performed and the original object is returned.
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor
@@ -630,6 +641,34 @@ add_docstr_all('diag',
 diag(diagonal=0) -> Tensor
 
 See :func:`torch.diag`
+""")
+
+add_docstr_all('diagflat',
+               r"""
+diagflat(diagonal=0) -> Tensor
+
+See :func:`torch.diagflat`
+""")
+
+add_docstr_all('diagonal',
+               r"""
+diagonal(offset=0, dim1=0, dim2=1) -> Tensor
+
+See :func:`torch.diagonal`
+""")
+
+add_docstr_all('digamma',
+               r"""
+digamma() -> Tensor
+
+See :func:`torch.digamma`
+""")
+
+add_docstr_all('digamma_',
+               r"""
+digamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.digamma`
 """)
 
 add_docstr_all('dim',
@@ -717,11 +756,25 @@ erf() -> Tensor
 See :func:`torch.erf`
 """)
 
+add_docstr_all('erf_',
+               r"""
+erf_() -> Tensor
+
+In-place version of :meth:`~Tensor.erf`
+""")
+
 add_docstr_all('erfc',
                r"""
-erf() -> Tensor
+erfc() -> Tensor
 
 See :func:`torch.erfc`
+""")
+
+add_docstr_all('erfc_',
+               r"""
+erfc_() -> Tensor
+
+In-place version of :meth:`~Tensor.erfc`
 """)
 
 add_docstr_all('erfinv',
@@ -729,6 +782,13 @@ add_docstr_all('erfinv',
 erfinv() -> Tensor
 
 See :func:`torch.erfinv`
+""")
+
+add_docstr_all('erfinv_',
+               r"""
+erfinv_() -> Tensor
+
+In-place version of :meth:`~Tensor.erfinv`
 """)
 
 add_docstr_all('exp',
@@ -782,6 +842,13 @@ add_docstr_all('floor',
 floor() -> Tensor
 
 See :func:`torch.floor`
+""")
+
+add_docstr_all('flip',
+               r"""
+flip(dims) -> Tensor
+
+See :func:`torch.flip`
 """)
 
 add_docstr_all('floor_',
@@ -914,6 +981,13 @@ add_docstr_all('gt_',
 gt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.gt`
+""")
+
+add_docstr_all('hardshrink',
+               r"""
+hardshrink(lambd=0.5) -> Tensor
+
+See :func:`torch.nn.functional.hardshrink`
 """)
 
 add_docstr_all('histc',
@@ -1155,17 +1229,18 @@ log2_() -> Tensor
 In-place version of :meth:`~Tensor.log2`
 """)
 
-add_docstr_all('log_normal_', u"""
+add_docstr_all('log_normal_', r"""
 log_normal_(mean=1, std=2, *, generator=None)
 
 Fills :attr:`self` tensor with numbers samples from the log-normal distribution
-parameterized by the given mean (\u00B5) and standard deviation (\u03C3).
-Note that :attr:`mean` and :attr:`stdv` are the mean and standard deviation of
-the underlying normal distribution, and not of the returned distribution:
+parameterized by the given mean :math:`\mu` and standard deviation
+:math:`\sigma`. Note that :attr:`mean` and :attr:`std` are the mean and
+standard deviation of the underlying normal distribution, and not of the
+returned distribution:
 
 .. math::
 
-    f(x) = \\dfrac{1}{x \\sigma \\sqrt{2\\pi}}\ e^{-\\dfrac{(\\ln x - \\mu)^2}{2\\sigma^2}}
+    f(x) = \dfrac{1}{x \sigma \sqrt{2\pi}}\ e^{-\frac{(\ln x - \mu)^2}{2\sigma^2}}
 """)
 
 add_docstr_all('logsumexp',
@@ -1241,6 +1316,13 @@ add_docstr_all('masked_select',
 masked_select(mask) -> Tensor
 
 See :func:`torch.masked_select`
+""")
+
+add_docstr_all('matrix_power',
+               r"""
+matrix_power(n) -> Tensor
+
+See :func:`torch.matrix_power`
 """)
 
 add_docstr_all('max',
@@ -1331,14 +1413,7 @@ add_docstr_all('narrow',
                r"""
 narrow(dimension, start, length) -> Tensor
 
-Returns a new tensor that is a narrowed version of :attr:`self` tensor. The
-dimension :attr:`dim` is narrowed from :attr:`start` to :attr:`start + length`. The
-returned tensor and :attr:`self` tensor share the same underlying storage.
-
-Args:
-    dimension (int): the dimension along which to narrow
-    start (int): the starting dimension
-    length (int): the distance to the ending dimension
+See :func:`torch.narrow`
 
 Example::
 
@@ -1671,13 +1746,16 @@ add_docstr_all('reshape',
                r"""
 reshape(*shape) -> Tensor
 
-Returns a tensor with the same data and number of elements as :attr:`self`,
-but with the specified shape.
+Returns a tensor with the same data and number of elements as :attr:`self`
+but with the specified shape. This method returns a view if :attr:`shape` is
+compatible with the current shape. See :meth:`torch.Tensor.view` on when it is
+possible to return a view.
+
+See :func:`torch.reshape`
 
 Args:
     shape (tuple of ints or int...): the desired shape
 
-See :func:`torch.reshape`
 """)
 
 add_docstr_all('reshape_as',
@@ -1686,8 +1764,10 @@ reshape_as(other) -> Tensor
 
 Returns this tensor as the same shape as :attr:`other`.
 ``self.reshape_as(other)`` is equivalent to ``self.reshape(other.sizes())``.
+This method returns a view if ``other.sizes()`` is compatible with the current
+shape. See :meth:`torch.Tensor.view` on when it is possible to return a view.
 
-Please see :meth:`~Tensor.reshape` for more information about ``reshape``.
+Please see :meth:`reshape` for more information about ``reshape``.
 
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same shape
@@ -1721,6 +1801,13 @@ resize_as_(tensor) -> Tensor
 
 Resizes the :attr:`self` tensor to be the same size as the specified
 :attr:`tensor`. This is equivalent to ``self.resize_(tensor.size())``.
+""")
+
+add_docstr_all('rot90',
+               r"""
+rot90(k, dims) -> Tensor
+
+See :func:`torch.rot90`
 """)
 
 add_docstr_all('round',
@@ -2443,10 +2530,10 @@ See :func:`torch.var`
 
 add_docstr_all('view',
                r"""
-view(*args) -> Tensor
+view(*shape) -> Tensor
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
-different size.
+different :attr:`shape`.
 
 The returned tensor shares the same data and must have the same number
 of elements, but may have a different size. For a tensor to be viewed, the new
@@ -2457,13 +2544,14 @@ contiguity-like condition that :math:`\forall i = 0, \dots, k-1`,
 
 .. math::
 
-  stride[i] = stride[i+1] \times size[i+1]
+  \text{stride}[i] = \text{stride}[i+1] \times \text{size}[i+1]
 
-Otherwise, :func:`contiguous` needs to be called before the tensor can be
-viewed.
+Otherwise, :meth:`contiguous` needs to be called before the tensor can be
+viewed. See also: :meth:`reshape`, which returns a view if the shapes are
+compatible, and copies (equivalent to calling :meth:`contiguous`) otherwise.
 
 Args:
-    args (torch.Size or int...): the desired size
+    shape (torch.Size or int...): the desired size
 
 Example::
 

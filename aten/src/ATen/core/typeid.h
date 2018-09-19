@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <complex>
 #ifdef __GXX_RTTI
 #include <typeinfo>
 #endif
@@ -30,12 +31,6 @@
 // is not fixed at the moment.
 
 namespace caffe2 {
-class TypeIdentifier;
-}
-
-std::ostream& operator<<(std::ostream& stream, caffe2::TypeIdentifier typeId);
-
-namespace caffe2 {
 
 class TypeMeta;
 
@@ -45,18 +40,18 @@ class TypeMeta;
  * use TypeIdentifier with custom types. This is for example used to store the
  * dtype of tensors.
  */
-class TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
+class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
  public:
   static TypeIdentifier createTypeId();
 
-  friend std::ostream& ::operator<<(
+  friend std::ostream& operator<<(
       std::ostream& stream,
       TypeIdentifier typeId);
   friend bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
 
-  // This is 8, because 0 is uint8_t (due to ScalarType BC constraint)
+  // 0 is uint8_t (due to ScalarType BC constraint)
   static constexpr TypeIdentifier uninitialized() {
-    return TypeIdentifier(8);
+    return TypeIdentifier(11);
   }
 
  private:
@@ -70,26 +65,30 @@ inline bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
   return lhs.underlyingId() < rhs.underlyingId();
 }
 
-} // namespace caffe2
-
-AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
-
 inline std::ostream& operator<<(
     std::ostream& stream,
     caffe2::TypeIdentifier typeId) {
   return stream << typeId.underlyingId();
 }
 
+} // namespace caffe2
+
+namespace at {
+using DataType = caffe2::TypeIdentifier;
+}
+
+AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
+
 namespace caffe2 {
 
-std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
-std::unordered_set<std::string>& gRegisteredTypeNames();
+AT_CORE_API std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
+AT_CORE_API std::unordered_set<std::string>& gRegisteredTypeNames();
 
 // A utility function to return an exception std::string by prepending its
-// exception type before its what() content.
-std::string GetExceptionString(const std::exception& e);
+// exception type before its what() content
+AT_CORE_API std::string GetExceptionString(const std::exception& e);
 
-std::mutex& gTypeRegistrationMutex();
+AT_CORE_API std::mutex& gTypeRegistrationMutex();
 
 template <typename T>
 struct TypeNameRegisterer {
@@ -136,7 +135,7 @@ struct TypeNameRegisterer {
  * stores some additional data such as the item size and the name of the type
  * for run-time inspection.
  */
-class TypeMeta {
+class AT_CORE_API TypeMeta {
  public:
   using PlacementNew = void(void*, size_t);
   using TypedCopy = void(const void*, void*, size_t);
@@ -223,7 +222,7 @@ class TypeMeta {
   friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
-  bool Match() const {
+  bool Match() const noexcept {
     return (id_ == Id<T>());
   }
 
@@ -399,11 +398,14 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
-
+// TODO(jiayq): AT_CORE_API below is not correct, because we may use the
+// definition in third party dependent libraries. The proper way is to use
+// CAFFE2_EXPORT (which explicitly requires dllexport). Marking this as a
+// todo item when the unified build is finished.
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {                          \
+  AT_CORE_EXPORT TypeIdentifier TypeMeta::Id<T>() {                       \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
@@ -425,10 +427,10 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * for your own types to allocate dynamic ids for them.
  */
 #ifdef _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)     \
-  template <>                                           \
-  inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() { \
-    return TypeIdentifier(PreallocatedId);              \
+#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)       \
+  template <>                                             \
+  inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {   \
+    return TypeIdentifier(PreallocatedId);                \
   }
 #else // _MSC_VER
 #define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T) \
@@ -450,41 +452,42 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 
 class Tensor;
 
-// Note: we have preallocated the numbers 0-8 so they line up exactly
+// Note: we have preallocated the numbers so they line up exactly
 // with at::ScalarType's numbering.  All other numbers do not matter.
-//
-// Notably, the "uninitialized" type id is 8, not 0, for hysterical raisins.
 
 struct _CaffeHighestPreallocatedTypeId final {};
 
-CAFFE_DECLARE_KNOWN_TYPE(0, uint8_t);
-CAFFE_DECLARE_KNOWN_TYPE(1, int8_t);
-CAFFE_DECLARE_KNOWN_TYPE(2, int16_t);
-CAFFE_DECLARE_KNOWN_TYPE(3, int);
-CAFFE_DECLARE_KNOWN_TYPE(4, int64_t);
-CAFFE_DECLARE_KNOWN_TYPE(5, at::Half);
-CAFFE_DECLARE_KNOWN_TYPE(6, float);
-CAFFE_DECLARE_KNOWN_TYPE(7, double);
-// 8 = undefined type id
+CAFFE_DECLARE_KNOWN_TYPE(0, uint8_t)
+CAFFE_DECLARE_KNOWN_TYPE(1, int8_t)
+CAFFE_DECLARE_KNOWN_TYPE(2, int16_t)
+CAFFE_DECLARE_KNOWN_TYPE(3, int)
+CAFFE_DECLARE_KNOWN_TYPE(4, int64_t)
+CAFFE_DECLARE_KNOWN_TYPE(5, at::Half)
+CAFFE_DECLARE_KNOWN_TYPE(6, float)
+CAFFE_DECLARE_KNOWN_TYPE(7, double)
+CAFFE_DECLARE_KNOWN_TYPE(8, at::ComplexHalf)
+CAFFE_DECLARE_KNOWN_TYPE(9, std::complex<float>)
+CAFFE_DECLARE_KNOWN_TYPE(10, std::complex<double>)
+// 11 = undefined type id
 
-CAFFE_DECLARE_KNOWN_TYPE(9, Tensor);
-CAFFE_DECLARE_KNOWN_TYPE(10, std::string);
-CAFFE_DECLARE_KNOWN_TYPE(11, bool);
-CAFFE_DECLARE_KNOWN_TYPE(12, uint16_t);
-CAFFE_DECLARE_KNOWN_TYPE(13, char);
-CAFFE_DECLARE_KNOWN_TYPE(14, std::unique_ptr<std::mutex>);
-CAFFE_DECLARE_KNOWN_TYPE(15, std::unique_ptr<std::atomic<bool>>);
-CAFFE_DECLARE_KNOWN_TYPE(16, std::vector<int32_t>);
-CAFFE_DECLARE_KNOWN_TYPE(17, std::vector<int64_t>);
-CAFFE_DECLARE_KNOWN_TYPE(18, std::vector<unsigned long>);
-CAFFE_DECLARE_KNOWN_TYPE(19, bool*);
-CAFFE_DECLARE_KNOWN_TYPE(20, char*);
-CAFFE_DECLARE_KNOWN_TYPE(21, int*);
+CAFFE_DECLARE_KNOWN_TYPE(12, Tensor)
+CAFFE_DECLARE_KNOWN_TYPE(13, std::string)
+CAFFE_DECLARE_KNOWN_TYPE(14, bool)
+CAFFE_DECLARE_KNOWN_TYPE(15, uint16_t)
+CAFFE_DECLARE_KNOWN_TYPE(16, char)
+CAFFE_DECLARE_KNOWN_TYPE(17, std::unique_ptr<std::mutex>)
+CAFFE_DECLARE_KNOWN_TYPE(18, std::unique_ptr<std::atomic<bool>>)
+CAFFE_DECLARE_KNOWN_TYPE(19, std::vector<int32_t>)
+CAFFE_DECLARE_KNOWN_TYPE(20, std::vector<int64_t>)
+CAFFE_DECLARE_KNOWN_TYPE(21, std::vector<unsigned long>)
+CAFFE_DECLARE_KNOWN_TYPE(22, bool*)
+CAFFE_DECLARE_KNOWN_TYPE(23, char*)
+CAFFE_DECLARE_KNOWN_TYPE(24, int*)
 
 #ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-CAFFE_DECLARE_KNOWN_TYPE(22, long);
-CAFFE_DECLARE_KNOWN_TYPE(23, std::vector<long>);
+CAFFE_DECLARE_KNOWN_TYPE(25, long)
+CAFFE_DECLARE_KNOWN_TYPE(26, std::vector<long>)
 #endif // CAFFE2_UNIQUE_LONG_TYPEMETA
 
-CAFFE_DECLARE_KNOWN_TYPE(24, _CaffeHighestPreallocatedTypeId);
+CAFFE_DECLARE_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

@@ -281,6 +281,7 @@ del ByteStorageBase
 
 import torch.cuda
 import torch.autograd
+from torch.autograd import no_grad, enable_grad, set_grad_enabled
 import torch.nn
 import torch.optim
 import torch.multiprocessing
@@ -293,7 +294,6 @@ import torch.distributions
 import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
-from torch.autograd import no_grad, enable_grad, set_grad_enabled
 
 _C._init_names(list(torch._storage_classes))
 

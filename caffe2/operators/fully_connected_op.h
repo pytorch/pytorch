@@ -18,10 +18,10 @@ class FullyConnectedOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   FullyConnectedOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
-        axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+        axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
+        axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
         float16_compute_(
-            OperatorBase::GetSingleArgument<bool>("float16_compute", false)) {}
+            this->template GetSingleArgument<bool>("float16_compute", false)) {}
   ~FullyConnectedOp() {}
 
   template <
@@ -159,10 +159,10 @@ class FullyConnectedGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   FullyConnectedGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
-        axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
+        axis_(this->template GetSingleArgument<int32_t>("axis", 1)),
+        axis_w_(this->template GetSingleArgument<int32_t>("axis_w", 1)),
         float16_compute_(
-            OperatorBase::GetSingleArgument<bool>("float16_compute", false)) {}
+            this->template GetSingleArgument<bool>("float16_compute", false)) {}
   ~FullyConnectedGradientOp() {}
 
   template <

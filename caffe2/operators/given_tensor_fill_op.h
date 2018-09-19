@@ -59,7 +59,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   template <typename Type>
   void ExtractValues() {
     auto source_values =
-        OperatorBase::template GetRepeatedArgument<Type>("values");
+        this->template GetRepeatedArgument<Type>("values");
     values_.Resize(source_values.size());
     Type* values_data = values_.template mutable_data<Type>();
     for (int i = 0; i < source_values.size(); i++) {

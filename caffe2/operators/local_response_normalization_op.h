@@ -14,12 +14,12 @@ class LRNOpBase : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LRNOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        size_(OperatorBase::GetSingleArgument<int>("size", 0)),
-        alpha_(OperatorBase::GetSingleArgument<float>("alpha", 0)),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 0)),
-        bias_(OperatorBase::GetSingleArgument<float>("bias", 1)),
+        size_(this->template GetSingleArgument<int>("size", 0)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 0)),
+        beta_(this->template GetSingleArgument<float>("beta", 0)),
+        bias_(this->template GetSingleArgument<float>("bias", 1)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+            this->template GetSingleArgument<string>("order", "NCHW"))),
         pre_pad_((size_ - 1) / 2) {
     DCHECK_GT(size_, 0);
     DCHECK_EQ(size_ % 2, 1);

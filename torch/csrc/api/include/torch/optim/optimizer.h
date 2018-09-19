@@ -31,20 +31,19 @@ class OptimizerBase {
   virtual ~OptimizerBase() = default;
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
-  /// Override this method if you want to modify the way parameters are added to
-  /// the `Optimizer`.
-  virtual void add_parameters(const std::vector<Tensor>& parameters);
+  void add_parameters(const std::vector<Tensor>& parameters);
 
   /// Adds the `ParameterCursor`'s parameters to the optimizer's parameter list.
-  /// NOTE: Calls the `vector<Tensor>` overload of `add_parameters` -- override
-  /// that method if you want to modify the behavior of `add_parameters`.
-  virtual void add_parameters(const ParameterCursor& cursor);
+  void add_parameters(const ParameterCursor& cursor);
 
   /// Zeros out the gradients of all parameters.
   virtual void zero_grad();
 
-  /// Provides a reference to the parameters this optimizer holds.
+  /// Provides a const reference to the parameters this optimizer holds.
   const std::vector<Tensor>& parameters() const noexcept;
+
+  /// Provides a reference to the parameters this optimizer holds.
+  std::vector<Tensor>& parameters() noexcept;
 
   /// Returns the number of parameters referenced by the optimizer.
   size_t size() const noexcept;
@@ -52,22 +51,9 @@ class OptimizerBase {
  protected:
   OptimizerBase() = default;
 
-  /// Helper function to construct a vector of zero-d out variables, each the
-  /// same shape as the variable at the corresponding index in the input
-  /// container.
-  template <typename ParameterContainer>
-  std::vector<Tensor> zero_buffers_like(const ParameterContainer& parameters) {
-    std::vector<Tensor> result;
-    result.reserve(parameters.size());
-    for (auto& parameter : parameters) {
-      result.push_back(torch::zeros_like(parameter));
-    }
-    return result;
-  }
-
   /// Accesses a buffer at the given index.
   /// Additionally, zeros out the buffers when this is called on the index
-  template<typename T>
+  template <typename T>
   T& buffer_at(std::vector<T>& buffers, size_t index) {
     if (buffers.size() <= index) {
       const auto old_size = buffers.size();
@@ -82,7 +68,8 @@ class OptimizerBase {
   /// Additionally, zeros out the buffers when this is called on the index
   Tensor& buffer_at(std::vector<Tensor>& buffers, size_t index) {
     if (buffers.size() <= index) {
-      for (auto i = buffers.size(); i <= index; i++) {
+      buffers.reserve(index);
+      for (auto i = buffers.size(); i <= index; ++i) {
         buffers.push_back(torch::zeros_like(parameters_.at(i)));
       }
     }

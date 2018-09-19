@@ -16,7 +16,7 @@ class SparseToDenseOp final : public Operator<Context> {
   SparseToDenseOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         output_first_dim_(
-            OperatorBase::GetSingleArgument<int>("output_first_dim", 0)) {}
+            this->template GetSingleArgument<int>("output_first_dim", 0)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(

@@ -24,7 +24,7 @@ class ReplaceNaNOp final : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    T value = OperatorBase::GetSingleArgument<T>("value", 0);
+    T value = this->template GetSingleArgument<T>("value", 0);
 
     auto& input = Input(0);
     auto* output = Output(0);

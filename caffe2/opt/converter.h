@@ -3,7 +3,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/ControlFlow.h"
 #include "nomnigraph/Representations/NeuralNet.h"
@@ -19,8 +19,12 @@ public:
       : Annotation(AnnotationKind::Caffe2), Device(device) {}
   virtual ~Caffe2Annotation() {}
 
-  void setDevice(std::string device) { Device = device; }
-  const std::string getDevice() const { return Device; }
+  void setDevice(std::string device) {
+    Device = device;
+  }
+  const std::string getDevice() const {
+    return Device;
+  }
 
   void setDeviceType(int device) {
     DeviceType = device;
@@ -33,6 +37,11 @@ public:
     OpDef = opDef;
     OpDefExists = true;
   }
+
+  bool hasOperatorDef() const {
+    return OpDefExists;
+  }
+
   const caffe2::OperatorDef& getOperatorDef() const {
     CAFFE_ENFORCE(
         OpDefExists,
@@ -54,28 +63,32 @@ private:
   std::string Device = "";
   caffe2::OperatorDef OpDef;
   bool OpDefExists = false;
-  int DeviceType = caffe2::DeviceType::CPU;
+  int DeviceType = caffe2::DeviceTypeProto::PROTO_CPU;
 };
 
-nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
+CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict = false);
 
-caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
+CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 
 // Pass in an oldNet to copy all the attributes of that network.
 // Be warned that transformations that modify the graph's inputs or outputs
 // are not reflected in changes to external_input or external_output.
-caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&, const caffe2::NetDef& oldNet);
+CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&, const caffe2::NetDef& oldNet);
 
 // Use these functions instead of the registry directly.
-std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+CAFFE2_API std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
     const caffe2::OperatorDef& op);
 
-caffe2::OperatorDef convertToOperatorDef(
+CAFFE2_API caffe2::OperatorDef convertToOperatorDef(
     const nom::repr::NNGraph::NodeRef& instrNode);
 
-class Converter {
+// If the annotation doesn't exist, attempt to add it
+CAFFE2_API Caffe2Annotation
+getOrAddCaffe2Annotation(nom::repr::NNGraph::NodeRef& instrNode);
+
+class CAFFE2_API Converter {
  public:
-  explicit Converter() {}
+  explicit Converter() = default;
   virtual std::unique_ptr<nom::repr::NeuralNetOperator>
   convertToNeuralNetOperator(const OperatorDef&) = 0;
   virtual OperatorDef convertToOperatorDef(const nom::repr::NeuralNetOperator*);

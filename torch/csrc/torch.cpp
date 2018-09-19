@@ -3,20 +3,20 @@
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch {
-at::Type& getType(at::Backend backend, at::ScalarType type) {
-  return *autograd::VariableType::getType(at::getType(backend, type));
+at::Type& getVariableType(at::Backend backend, at::ScalarType type) {
+  return *autograd::VariableType::getVariableTypeFromBaseType(at::getNonVariableType(backend, type));
 }
 
 at::Type& CPU(at::ScalarType type) {
-  return torch::getType(at::kCPU, type);
+  return torch::getVariableType(at::Backend::CPU, type);
 }
 
 at::Type& CUDA(at::ScalarType type) {
-  return torch::getType(at::kCUDA, type);
+  return torch::getVariableType(at::Backend::CUDA, type);
 }
 
 at::Tensor toTensor(const at::Scalar& scalar) {
-  return autograd::make_variable(scalar.toTensor());
+  return autograd::make_variable(scalar_to_tensor(scalar));
 }
 
 void set_requires_grad(at::Tensor& tensor, bool requires_grad) noexcept {

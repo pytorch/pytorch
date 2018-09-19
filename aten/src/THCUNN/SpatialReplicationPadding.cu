@@ -7,7 +7,7 @@
 #include "THCReduceApplyUtils.cuh"
 #include <THC/THCApply.cuh>
 
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
 

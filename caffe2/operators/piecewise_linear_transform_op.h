@@ -13,12 +13,12 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
 
   PiecewiseLinearTransformOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    binary_ = OperatorBase::GetSingleArgument<bool>("binary", false);
+    binary_ = this->template GetSingleArgument<bool>("binary", false);
 
     // Retrieve transform params (i.e., the linear functions).
-    bounds_from_arg_ = OperatorBase::GetRepeatedArgument<T>("bounds");
-    slopes_from_arg_ = OperatorBase::GetRepeatedArgument<T>("slopes");
-    intercepts_from_arg_ = OperatorBase::GetRepeatedArgument<T>("intercepts");
+    bounds_from_arg_ = this->template GetRepeatedArgument<T>("bounds");
+    slopes_from_arg_ = this->template GetRepeatedArgument<T>("slopes");
+    intercepts_from_arg_ = this->template GetRepeatedArgument<T>("intercepts");
     transform_param_from_arg_ = CheckTransParamFromArg();
   }
 

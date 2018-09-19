@@ -41,20 +41,20 @@ typedef struct at_Storage_Impl at_Storage_Impl;
 #define THIntStorage THStorage
 #define THLongStorage THStorage
 
-TH_API real* THStorage_(data)(const THStorage*);
+TH_API scalar_t* THStorage_(data)(const THStorage*);
 TH_API ptrdiff_t THStorage_(size)(const THStorage*);
 TH_API size_t THStorage_(elementSize)(void);
 
 /* slow access -- checks everything */
-TH_API void THStorage_(set)(THStorage*, ptrdiff_t, real);
-TH_API real THStorage_(get)(const THStorage*, ptrdiff_t);
+TH_API void THStorage_(set)(THStorage*, ptrdiff_t, scalar_t);
+TH_API scalar_t THStorage_(get)(const THStorage*, ptrdiff_t);
 
 TH_API THStorage* THStorage_(new)(void);
 TH_API THStorage* THStorage_(newWithSize)(ptrdiff_t size);
-TH_API THStorage* THStorage_(newWithSize1)(real);
-TH_API THStorage* THStorage_(newWithSize2)(real, real);
-TH_API THStorage* THStorage_(newWithSize3)(real, real, real);
-TH_API THStorage* THStorage_(newWithSize4)(real, real, real, real);
+TH_API THStorage* THStorage_(newWithSize1)(scalar_t);
+TH_API THStorage* THStorage_(newWithSize2)(scalar_t, scalar_t);
+TH_API THStorage* THStorage_(newWithSize3)(scalar_t, scalar_t, scalar_t);
+TH_API THStorage* THStorage_(newWithSize4)(scalar_t, scalar_t, scalar_t, scalar_t);
 TH_API THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags);
 
 TH_API THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
@@ -73,6 +73,6 @@ TH_API void THStorage_(swap)(THStorage *storage1, THStorage *storage2);
 /* might differ with other API (like CUDA) */
 TH_API void THStorage_(free)(THStorage *storage);
 TH_API void THStorage_(resize)(THStorage *storage, ptrdiff_t size);
-TH_API void THStorage_(fill)(THStorage *storage, real value);
+TH_API void THStorage_(fill)(THStorage *storage, scalar_t value);
 
 #endif

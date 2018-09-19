@@ -5,6 +5,7 @@ import torch._C as _C
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
+PYTORCH_ONNX_CAFFE2_BUNDLE = _C._onnx.PYTORCH_ONNX_CAFFE2_BUNDLE
 
 ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
@@ -95,7 +96,11 @@ def symbolic_override(symbolic_fn):
 
             # This must come after the calls to get_value_trace, lest we
             # lose information due to in-place operations.
-            output_vars = fn(*args, **kwargs)
+
+            # temporarily disable tracing so that we don't cause errors
+            # for things inside of fn that may not be tracable
+            with torch.jit._disable_tracing():
+                output_vars = fn(*args, **kwargs)
 
             symbolic_args = function._unflatten(arg_values, args)
             output_vals = symbolic_fn(tstate.graph(), *symbolic_args, **kwargs)

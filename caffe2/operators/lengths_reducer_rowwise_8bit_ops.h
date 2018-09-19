@@ -87,8 +87,6 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
     return true;
   }
 
-  USE_VALUE_LENGTH_INPUT_FILLERS(Context, DATA, LENGTHS)
-
   enum {
     DATA = 0,
     WEIGHTS = 1,

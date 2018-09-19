@@ -120,6 +120,7 @@ struct AT_API TensorIterator {
   }
   ScalarType dtype(int arg) const { return type(arg).scalarType(); }
   Backend backend(int arg=0) const { return type(arg).backend(); }
+  DeviceType device_type(int arg=0) const { return type(arg).device_type(); }
   bool is_scalar(int arg) const;
   bool is_cpu_scalar(int arg) const;
 
@@ -183,6 +184,7 @@ private:
   DimVector shape_;
   DimVector perm_;
   SmallVector<OperandInfo, 4> operands_;
+  SmallVector<Tensor, 4> cast_tensors_;
   int num_outputs_ = 0;
   bool has_coalesced_dimensions_ = false;
 };

@@ -25,7 +25,7 @@ void THNN_(GatedLinear_updateOutput)(
   THCTensor *secondHalf = THCTensor_(newNarrow)(state, input, dim, inputSize, inputSize);
 
   // x = x1:cmul( sigmoid(x2) )
-  THC_pointwiseApply3<real, real, real>(state, output, secondHalf, firstHalf, gatedLinearCSigMul_functor<real, accreal>());
+  THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, output, secondHalf, firstHalf, gatedLinearCSigMul_functor<scalar_t, accreal>());
 
   THCTensor_(free)(state, firstHalf);
   THCTensor_(free)(state, secondHalf);
@@ -50,7 +50,7 @@ void THNN_(GatedLinear_updateGradInput)(
   THCTensor *gradInputfirstHalf = THCTensor_(newNarrow)(state, gradInput, dim, 0, inputSize);
   const int64_t stride_i = THCTensor_(stride)(state, input, dim) * inputSize;
   const int64_t stride_gI = THCTensor_(stride)(state, gradInput, dim) * inputSize;
-  THC_pointwiseApply3<real, real, real>(state, gradInputfirstHalf, gradOutput, firstHalf, gatedLinearDerivative<real,accreal>(stride_i, stride_gI)); 
+  THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, gradInputfirstHalf, gradOutput, firstHalf, gatedLinearDerivative<scalar_t,accreal>(stride_i, stride_gI)); 
   THCTensor_(free)(state, firstHalf);
   THCTensor_(free)(state, gradInputfirstHalf);
 }

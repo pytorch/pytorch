@@ -16,7 +16,7 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
       Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
-    featureIDs_ = OperatorBase::GetRepeatedArgument<int64_t>("feature_ids");
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
   virtual ~MergeSingleScalarFeatureTensorsOp() noexcept {}
 
@@ -137,7 +137,7 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
-    featureIDs_ = OperatorBase::GetRepeatedArgument<int64_t>("feature_ids");
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
   virtual ~MergeSingleListFeatureTensorsOp() noexcept {}
 
@@ -295,7 +295,7 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
-    featureIDs_ = OperatorBase::GetRepeatedArgument<int64_t>("feature_ids");
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
   virtual ~MergeSingleMapFeatureTensorsOp() noexcept {}
 

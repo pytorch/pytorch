@@ -18,7 +18,7 @@ inline bool check_type(PyObject* obj, at::TypeID typeID) {
 
 template<typename T>
 inline T* unpack(PyObject* obj) {
-  return (T*) ((THPVariable*)obj)->cdata.data().unsafeGetTH(false);
+  return (T*) ((THPVariable*)obj)->cdata.data().unsafeGetTensorImpl();
 }
 
 }} // namespace torch::nn

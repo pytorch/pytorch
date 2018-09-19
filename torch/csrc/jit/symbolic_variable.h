@@ -10,7 +10,7 @@ struct SymbolicVariable {
   /* implicit */ SymbolicVariable(Value * v) : v(v) {}
   // we allow implicit conversions to/from Value since
   // this type truly just provides more methods for value
-  operator Value*() {
+  operator Value*() const {
     return v;
   }
   static SymbolicVariable asNewInput(Graph & g, std::string name = "") {
@@ -19,10 +19,10 @@ struct SymbolicVariable {
   static SymbolicVariable asNewInput(Graph & g, TypePtr type) {
     return g.addInput()->setType(std::move(type));
   }
-  const std::vector<int64_t>& sizes() {
-    return v->type()->expect<TensorType>()->sizes();
+  const std::vector<int64_t>& sizes() const {
+    return v->type()->expect<CompleteTensorType>()->sizes();
   }
-  void addAsOutput() {
+  void addAsOutput() const {
     v->owningGraph()->registerOutput(v);
   }
   static std::vector<SymbolicVariable> create(Symbol kind, ArrayRef<SymbolicVariable> inputs,
@@ -110,7 +110,10 @@ struct SymbolicVariable {
     return create(aten::tanh, {*this})[0].typeLike(*this);
   }
   std::vector<SymbolicVariable> chunk(int64_t chunks, int dim) const {
-    return create(t("chunk"), { *this , insertConstant(chunks), insertConstant(dim) }, chunks);
+    Node *chunk;
+    auto outputs = create(prim::ConstantChunk, {value()}, chunks, &chunk);
+    chunk->i_(attr::chunks, chunks)->i_(attr::dim, dim);
+    return outputs;
   }
   SymbolicVariable type_as(const SymbolicVariable rhs) const {
     return create(aten::type_as, {*this, rhs})[0].typeLikeWithRhsScalarType(*this, rhs);
@@ -120,8 +123,13 @@ struct SymbolicVariable {
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, Value* dim) {
     Graph *g = dim->owningGraph();
-    auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
-    Value *input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    Value * input_list;
+    if (inputs.size() == 1 && inputs[0].value()->type()->isSubtypeOf(ListType::ofTensors())) {
+      input_list = inputs[0];
+    } else {
+      auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
+      input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    }
     return create(aten::cat, {input_list, dim})[0];
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int dim) {
@@ -137,6 +145,15 @@ struct SymbolicVariable {
   static SymbolicVariable stack(ArrayRef<SymbolicVariable> inputs, int dim) {
     JIT_ASSERT(inputs.size() > 0);
     return SymbolicVariable::stack(inputs, inputs[0].insertConstant(dim));
+  }
+  static std::vector<SymbolicVariable> broadcast_tensors(ArrayRef<SymbolicVariable> inputs) {
+    JIT_ASSERT(inputs.size() > 0);
+    Graph *g = inputs[0].value()->owningGraph();
+    auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
+    Value * input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    Value * output_list = g->insert(aten::broadcast_tensors, {input_list});
+    Node * unpack = g->insertNode(g->create(prim::ListUnpack, {output_list}, inputs.size()));
+    return fmap<SymbolicVariable>(unpack->outputs());
   }
   SymbolicVariable sum() const {
     return create(t("sum"), {*this})[0];
@@ -169,7 +186,7 @@ struct SymbolicVariable {
     return reshape(insertConstant(sizes));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
-    return create(aten::addmm, {*this, mat1, mat2, insertConstant(1.0), insertConstant(1.0)})[0];
+    return create(aten::addmm, {*this, mat1, mat2, insertConstant(1), insertConstant(1)})[0];
   }
   Value * value() const {
     return v;
@@ -178,21 +195,25 @@ private:
   Value * insertConstant(IValue value) const {
     return v->owningGraph()->insertConstant(value);
   }
-  SymbolicVariable typeLike(SymbolicVariable other) {
-    if (auto other_type = other.v->type()->cast<TensorType>())
+  SymbolicVariable typeLike(SymbolicVariable other) const {
+    if (auto other_type = other.v->type()->cast<CompleteTensorType>())
       v->setType(other_type->contiguous());
     return *this;
   }
-  SymbolicVariable typeLikeWithScalarType(SymbolicVariable other, at::ScalarType type) {
-    if (auto other_type = other.v->type()->cast<TensorType>()){
+  SymbolicVariable typeLikeWithScalarType(
+      SymbolicVariable other,
+      at::ScalarType type) const {
+    if (auto other_type = other.v->type()->cast<CompleteTensorType>()){
       auto new_type = other_type->toScalarType(type)->contiguous();
       v->setType(new_type);
     }
     return *this;
   }
-  SymbolicVariable typeLikeWithRhsScalarType(SymbolicVariable other, SymbolicVariable rhs) {
-    auto other_type = other.v->type()->cast<TensorType>();
-    auto rhs_type = rhs.v->type()->cast<TensorType>();
+  SymbolicVariable typeLikeWithRhsScalarType(
+      SymbolicVariable other,
+      SymbolicVariable rhs) const {
+    auto other_type = other.v->type()->cast<CompleteTensorType>();
+    auto rhs_type = rhs.v->type()->cast<CompleteTensorType>();
     if (other_type && rhs_type){
       auto new_type = other_type->toScalarType(rhs_type->scalarType())->contiguous();
       v->setType(new_type);

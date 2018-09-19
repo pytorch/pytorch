@@ -2,11 +2,9 @@
 
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
+#include <torch/serialization.h>
 
 #include <ATen/ATen.h>
-
-#include <cereal/access.hpp>
-#include <cereal/cereal.hpp>
 
 #include <functional>
 #include <memory>
@@ -33,15 +31,7 @@ class RMSprop : public Optimizer {
       ParameterContainer&& parameters,
       const RMSpropOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options(options),
-        square_average_buffers_(zero_buffers_like(parameters_)) {
-    if (options.centered_ > 0) {
-      grad_average_buffers_ = zero_buffers_like(parameters_);
-    }
-    if (options.momentum_ > 0) {
-      momentum_buffers_ = zero_buffers_like(parameters_);
-    }
-  }
+        options(options) {}
 
   void step() override;
 
@@ -49,19 +39,29 @@ class RMSprop : public Optimizer {
 
   template <class Archive>
   void serialize(Archive& ar) {
+#if defined(TORCH_USE_CEREAL)
     ar(CEREAL_NVP(square_average_buffers_));
     ar(CEREAL_NVP(momentum_buffers_));
     ar(CEREAL_NVP(grad_average_buffers_));
+#endif // defined(TORCH_USE_CEREAL)
   }
 
  private:
+#if defined(TORCH_USE_CEREAL)
   friend class cereal::access;
+#endif // defined(TORCH_USE_CEREAL)
   RMSprop() : options(0) {}
 
   std::vector<Tensor> square_average_buffers_;
   std::vector<Tensor> momentum_buffers_;
   std::vector<Tensor> grad_average_buffers_;
 };
-
 } // namespace optim
 } // namespace torch
+
+#if defined(TORCH_USE_CEREAL)
+CEREAL_REGISTER_TYPE(torch::optim::RMSprop);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::RMSprop);
+#endif // defined(TORCH_USE_CEREAL)

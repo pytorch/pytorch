@@ -12,13 +12,13 @@ namespace at { namespace native {
 Tensor cudnn_affine_grid_generator_forward(
     const Tensor& theta,
     int64_t N, int64_t C, int64_t H, int64_t W) {
-  throw std::runtime_error("cudnn_affine_grid_generator_forward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_affine_grid_generator_forward: ATen not compiled with cuDNN support");
 }
 
 Tensor cudnn_affine_grid_generator_backward(
     const Tensor& grad_theta,
     int64_t N, int64_t C, int64_t H, int64_t W) {
-  throw std::runtime_error("cudnn_affine_grid_generator_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_affine_grid_generator_backward: ATen not compiled with cuDNN support");
 }
 
 }}
@@ -26,7 +26,7 @@ Tensor cudnn_affine_grid_generator_backward(
 #else // AT_CUDNN_ENABLED()
 
 #include <ATen/cudnn/cudnn-wrapper.h>
-#include <ATen/cudnn/Handles.h>
+#include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>

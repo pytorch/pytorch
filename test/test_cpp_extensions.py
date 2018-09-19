@@ -1,3 +1,4 @@
+import os
 import unittest
 import sys
 
@@ -15,7 +16,10 @@ import common
 
 from torch.utils.cpp_extension import CUDA_HOME
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_available()
+TEST_CUDNN = False
+if TEST_CUDA:
+    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, 'include/cudnn.h'))
+    TEST_CUDNN = TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
 
 
 class TestCppExtension(common.TestCase):
@@ -261,6 +265,55 @@ class TestCppExtension(common.TestCase):
         y = torch.zeros(100, dtype=torch.float32)
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
+
+    def test_complex_registration(self):
+        module = torch.utils.cpp_extension.load(
+            name='complex_registration_extension',
+            sources='cpp_extensions/complex_registration_extension.cpp',
+            verbose=True)
+
+        torch.empty(2, 2, dtype=torch.complex64)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_half_support(self):
+        '''
+        Checks for an issue with operator< ambiguity for half when certain
+        THC headers are included.
+
+        See https://github.com/pytorch/pytorch/pull/10301#issuecomment-416773333
+        for the corresponding issue.
+        '''
+        cuda_source = '''
+        #include <THC/THCNumerics.cuh>
+
+        template<typename T, typename U>
+        __global__ void half_test_kernel(const T* input, U* output) {
+            if (input[0] < input[1] || input[0] >= input[1]) {
+                output[0] = 123;
+            }
+        }
+
+        at::Tensor half_test(at::Tensor input) {
+            auto output = at::empty(1, input.options().dtype(at::kFloat));
+            AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "half_test", [&] {
+                half_test_kernel<scalar_t><<<1, 1>>>(
+                    input.data<scalar_t>(),
+                    output.data<float>());
+            });
+            return output;
+        }
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='half_test_extension',
+            cpp_sources='at::Tensor half_test(at::Tensor input);',
+            cuda_sources=cuda_source,
+            functions=['half_test'],
+            verbose=True)
+
+        x = torch.randn(3, device='cuda', dtype=torch.half)
+        result = module.half_test(x)
+        self.assertEqual(result[0], 123)
 
 
 if __name__ == '__main__':

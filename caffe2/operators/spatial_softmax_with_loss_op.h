@@ -13,9 +13,9 @@ class SpatialSoftmaxWithLossOp final : public Operator<Context> {
  public:
   SpatialSoftmaxWithLossOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
@@ -42,10 +42,10 @@ class SpatialSoftmaxWithLossGradientOp final : public Operator<Context> {
  public:
   SpatialSoftmaxWithLossGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
-        only_loss_(OperatorBase::GetSingleArgument<bool>("only_loss", false)) {
+            this->template GetSingleArgument<string>("order", "NCHW"))),
+        only_loss_(this->template GetSingleArgument<bool>("only_loss", false)) {
     CAFFE_ENFORCE(scale_ >= 0);
     CAFFE_ENFORCE_EQ(
         order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");

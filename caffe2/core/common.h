@@ -88,17 +88,10 @@ using std::vector;
 #define CAFFE2_ALIGNED(x) __attribute__((aligned(x)))
 #endif
 
-/**
- * Macro for marking functions as having public visibility.
- * Ported from folly/CPortability.h
- */
-#ifndef __GNUC_PREREQ
-#if defined __GNUC__ && defined __GNUC_MINOR__
-#define __GNUC_PREREQ(maj, min) \
-  ((__GNUC__ << 16) + __GNUC_MINOR__ >= ((maj) << 16) + (min))
+#if defined(_MSC_VER)
+#define CAFFE2_NORETURN __declspec(noreturn)
 #else
-#define __GNUC_PREREQ(maj, min) 0
-#endif
+#define CAFFE2_NORETURN __attribute__((noreturn))
 #endif
 
 // Defines CAFFE2_EXPORT and CAFFE2_IMPORT. On Windows, this corresponds to
@@ -114,11 +107,7 @@ using std::vector;
 #endif
 #else
 #if defined(__GNUC__)
-#if __GNUC_PREREQ(4, 9)
-#define CAFFE2_EXPORT [[gnu::visibility("default")]]
-#else
 #define CAFFE2_EXPORT __attribute__((__visibility__("default")))
-#endif
 #else
 #define CAFFE2_EXPORT
 #endif
@@ -272,18 +261,18 @@ class SkipIndices<> {
 // linked. This function should not be used in static initialization functions
 // as the underlying boolean variable is going to be switched on when one
 // loads libcaffe2_gpu.so.
-bool HasCudaRuntime();
-bool HasHipRuntime();
+CAFFE2_API bool HasCudaRuntime();
+CAFFE2_API bool HasHipRuntime();
 namespace internal {
 // Sets the Cuda Runtime flag that is used by HasCudaRuntime(). You should
 // never use this function - it is only used by the Caffe2 gpu code to notify
 // Caffe2 core that cuda runtime has been loaded.
-void SetCudaRuntimeFlag();
-void SetHipRuntimeFlag();
+CAFFE2_API void SetCudaRuntimeFlag();
+CAFFE2_API void SetHipRuntimeFlag();
 }
 // Returns which setting Caffe2 was configured and built with (exported from
 // CMake)
-const std::map<string, string>& GetBuildOptions();
+CAFFE2_API const std::map<string, string>& GetBuildOptions();
 
 }  // namespace caffe2
 

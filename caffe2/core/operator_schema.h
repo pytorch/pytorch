@@ -12,7 +12,8 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/registry.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/utils/filler.h"
 
 namespace caffe2 {
 
@@ -35,10 +36,11 @@ constexpr int kCannotComputeNumOutputs = -1;
  *     OPERATOR_SCHEMA(name)
  *         .NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
  */
-class OpSchema {
+class CAFFE2_API OpSchema {
  public:
-  OpSchema() : file_("unknown"), line_(0) {}
-  OpSchema(const string& file, const int line) : file_(file), line_(line) {}
+  OpSchema() : type_("unknown"), file_("unknown"), line_(0) {}
+  OpSchema(const string& type, const string& file, const int line)
+      : type_(type), file_(file), line_(line) {}
 
   /**
    * @brief Returns the file that the op schema is registered from.
@@ -188,7 +190,7 @@ class OpSchema {
     uint64_t flops{0}; // Floating point operations.
     uint64_t bytes_read{0}; // Total memory read.
     uint64_t bytes_written{0}; // Total memory written.
-    uint64_t params_bytes{0}; // Memory footprint of parameters
+    uint64_t params_bytes{0}; // Memory read for parameters.
   };
   /**
    * @brief Registers a function that takes in an OperatorDef
@@ -261,8 +263,8 @@ class OpSchema {
   Arg(const char* name, const char* description, bool required = false);
 
 #define DECLARE_STANDARD_ARG(name, str)     \
-  CAFFE2_API static const char* Arg_##name; \
-  CAFFE2_API OpSchema& Arg##name(const char* description);
+  static const char* Arg_##name; \
+  OpSchema& Arg##name(const char* description);
 
   DECLARE_STANDARD_ARG(IsTest, is_test)
 
@@ -322,7 +324,11 @@ class OpSchema {
     return std::numeric_limits<int>::max();
   }
 
-  friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
+  bool inplace_enforced(int x, int y) const {
+    return inplace_enforced_(x, y);
+  }
+
+  CAFFE2_API friend std::ostream& operator<<(std::ostream& out, const OpSchema& schema);
 
   const std::vector<Argument>& args() const {
     return args_;
@@ -358,7 +364,33 @@ class OpSchema {
     return device_inference_function_(def);
   }
 
+  // The helper is build sparse input with values, keys, and lengths; e.g.:
+  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+  // keys    = [0, 1, 4, 0, 1, 2, 5, 1, 2]
+  //            \_____/  \________/  \__/
+  // lengths =    [3,        4,       2]
+  OpSchema& ValueKeyLengthInputFillers(
+      size_t value_index,
+      size_t key_index,
+      size_t length_index);
+
+  // The helper is build sparse input with values and lengths; e.g.:
+  // values  = [1, 2, 3, 2, 4, 6, 7, 3, 6]
+  //            \_____/  \________/  \__/
+  // lengths =    [3,        4,       2]
+  OpSchema& ValueLengthInputFillers(size_t value_index, size_t length_index);
+
+  OpSchema& DisallowInputFillers();
+
+  std::vector<TensorFiller> InputFillers(
+      const std::vector<std::vector<TIndex>>& shapes) const;
+
  private:
+  std::vector<TensorFiller> SupplyDenseFillers(
+      const std::vector<std::vector<TIndex>>& shapes);
+
+ private:
+  string type_;
   string file_;
   string doc_;
   string onnx_schema_;
@@ -404,12 +436,19 @@ class OpSchema {
         vector<DeviceOption> out_dev(def.output_size(), op_device);
         return std::make_pair(in_dev, out_dev);
       };
+
+  std::function<std::vector<TensorFiller>(
+      const std::vector<std::vector<TIndex>>&)>
+      filler_supplier_ =
+          [this](const std::vector<std::vector<TIndex>>& shapes) {
+            return SupplyDenseFillers(shapes);
+          };
 };
 
 /**
  * @brief A registry to hold all the operator schemas.
  */
-class OpSchemaRegistry {
+class CAFFE2_API OpSchemaRegistry {
  public:
   static OpSchema&
   NewSchema(const string& key, const string& file, const int line) {
@@ -424,7 +463,7 @@ class OpSchemaRegistry {
                 << " line " << schema.line();
       abort();
     }
-    m.emplace(std::make_pair(key, OpSchema(file, line)));
+    m.emplace(std::make_pair(key, OpSchema(key, file, line)));
     return m[key];
   }
 
@@ -479,8 +518,22 @@ inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
 
 // Helper function
 inline uint64_t nElemFromDim(const TensorShape& X, int dim = 0) {
+  CAFFE_ENFORCE_GE(dim, 0, "Invalid maximum index specified");
+
   uint64_t nElem = 1;
   for (int i = dim; i < X.dims_size(); ++i) {
+    nElem *= X.dims(i);
+  }
+  return nElem;
+}
+
+// Helper function
+inline uint64_t nElemBetweenDim(const TensorShape& X, int start, int stop) {
+  CAFFE_ENFORCE_GE(start, 0, "Invalid maximum index specified");
+  CAFFE_ENFORCE_LE(stop, X.dims_size(), "Invalid maximum index specified");
+
+  uint64_t nElem = 1;
+  for (int i = start; i < stop; ++i) {
     nElem *= X.dims(i);
   }
   return nElem;
@@ -524,14 +577,14 @@ OpSchema::Cost PointwiseCostInference(
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
 #define OPERATOR_SCHEMA(name)                                     \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
+  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
   static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
 #define OPERATOR_SCHEMA(name)                                     \
-  void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
+  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
   static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 

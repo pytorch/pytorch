@@ -35,21 +35,35 @@ using ConstEigenVectorArrayMap =
 
 using EigenOuterStride = Eigen::OuterStride<Eigen::Dynamic>;
 using EigenInnerStride = Eigen::InnerStride<Eigen::Dynamic>;
-using EigenStride = Eigen::Stride<Eigen::Dynamic, 2>;
+using EigenStride = Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>;
 template <typename T>
 using EigenOuterStridedMatrixMap = Eigen::
     Map<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>, 0, EigenOuterStride>;
+template <typename T>
+using EigenOuterStridedArrayMap = Eigen::
+    Map<Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>, 0, EigenOuterStride>;
 template <typename T>
 using ConstEigenOuterStridedMatrixMap = Eigen::Map<
     const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>,
     0,
     EigenOuterStride>;
 template <typename T>
+using ConstEigenOuterStridedArrayMap = Eigen::Map<
+    const Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>,
+    0,
+    EigenOuterStride>;
+template <typename T>
 using EigenStridedMatrixMap = Eigen::
     Map<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>, 0, EigenStride>;
 template <typename T>
+using EigenStridedArrayMap =
+    Eigen::Map<Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>, 0, EigenStride>;
+template <typename T>
 using ConstEigenStridedMatrixMap = Eigen::
     Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>, 0, EigenStride>;
+template <typename T>
+using ConstEigenStridedArrayMap = Eigen::
+    Map<const Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>, 0, EigenStride>;
 
 // 1-d array
 template <typename T>

@@ -60,6 +60,39 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 }
 
+inline at::Tensor newLikeFlat(
+    std::vector<std::vector<at::Tensor>>& tensors,
+    size_t deviceIdx) {
+  if (tensors.size() == 0 || tensors[0].size() == 0) {
+    throw std::runtime_error("Received an empty list");
+  }
+  if (deviceIdx >= tensors.size()) {
+    throw std::runtime_error("Invalid device index");
+  }
+  auto& t = tensors[deviceIdx][0];
+  auto device = t.is_cuda() ? t.get_device() : -1;
+  for (size_t i = 1; i < tensors[deviceIdx].size(); ++i) {
+    if (tensors[deviceIdx][i].get_device() != device) {
+      throw std::runtime_error("Expecting all tensors on the same device");
+    }
+  }
+  at::DeviceGuard gpuGuard(device);
+  std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
+  sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
+  return t.type().tensor(sizes);
+}
+
+inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
+  if (tensors.size() == 0) {
+    throw std::runtime_error("Received an empty list");
+  }
+  auto& t = tensors[0];
+  at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
+  std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
+  sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
+  return t.type().tensor(sizes);
+}
+
 inline std::vector<std::vector<int64_t>> getSizes(
     const std::vector<at::Tensor>& tensors) {
   std::vector<std::vector<int64_t>> sizes(tensors.size());
@@ -73,7 +106,7 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].type().is_cuda()) {
     for (size_t i = 0; i < tensors.size(); i++) {
-      devices[i] = tensors[i].storage()->pImpl()->getDevice();
+      devices[i] = tensors[i].storage().device().index();
     }
   }
   return devices;
@@ -83,7 +116,8 @@ template <typename T>
 std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   std::vector<T*> ptrs(tensors.size());
   for (size_t i = 0; i < tensors.size(); i++) {
-    ptrs[i] = static_cast<T*>(tensors[i].storage()->pImpl()->data());
+    // NB: This does NOT respect storage_offset from the tensor
+    ptrs[i] = static_cast<T*>(tensors[i].storage().data());
   }
   return ptrs;
 }

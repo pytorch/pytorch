@@ -13,10 +13,11 @@ import hypothesis.strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestMatMul(hu.HypothesisTestCase):
-    @given(
+class TestMatMul(serial.SerializedTestCase):
+    @serial.given(
         M=st.integers(min_value=1, max_value=10),
         K=st.integers(min_value=1, max_value=10),
         N=st.integers(min_value=1, max_value=10),
@@ -125,7 +126,7 @@ class TestMatMul(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
 
-class TestBatchMatMul(hu.HypothesisTestCase):
+class TestBatchMatMul(serial.SerializedTestCase):
     @settings(max_examples=30)
     @given(
         C=st.integers(min_value=0, max_value=3),  # number of batch dims
@@ -214,7 +215,7 @@ class TestBatchMatMul(hu.HypothesisTestCase):
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X, Y], [0])
 
-    @given(
+    @serial.given(
         C_1=st.integers(min_value=0, max_value=3),  # number of batch dims
         C_2=st.integers(min_value=0, max_value=3),
         M=st.integers(min_value=1, max_value=10),

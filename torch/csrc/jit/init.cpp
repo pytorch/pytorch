@@ -1,4 +1,5 @@
 #include "torch/csrc/utils/pybind.h"
+#include "torch/csrc/utils/auto_gil.h"
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
@@ -11,16 +12,18 @@
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/erase_number_types.h"
+#include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
-#include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/canonicalize_ops.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/to_batch.h"
+#include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
@@ -30,8 +33,16 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/fusers/interface.h"
 
 #include <pybind11/functional.h>
+
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
 
 namespace torch  { namespace jit {
 
@@ -60,6 +71,7 @@ void initJITBindings(PyObject *module) {
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
+   .def("_jit_pass_lower_all_tuples", LowerAllTuples)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
    .def("_jit_pass_fuse", FuseGraph)
    .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g) {
@@ -76,12 +88,17 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
      PropagateInputShapes(graph, ArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
    })
+   .def("_jit_pass_complete_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
+     PropagateInputShapes(graph, CompleteArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+   })
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
+   .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
    .def("_jit_pass_constant_propagation", [](std::shared_ptr<Graph>& g) {
      return ConstantPropagation(g);
    })
+   .def("_jit_pass_erase_shape_information", EraseShapeInformation)
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
@@ -98,25 +115,27 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_pass_onnx_block", BlockToONNX)
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
-   .def("_jit_pass_decompose_addmm", DecomposeAddmm)
-    .def("_jit_pass_specialize_undef", specializeUndef)
-   .def("_jit_differentiate", [](Graph &g, const std::vector<bool>& requires_grad) {
+   .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
+   .def("_jit_pass_specialize_undef", specializeUndef)
+   .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
+   .def("_jit_differentiate", [](Graph &g) {
        // the python binding slightly differs in semantics
        // it makes a copy of the input Graph, and works on that
        // jit::differentiate mutates the input Graph
        auto g_clone = g.copy();
-       return differentiate(g_clone, requires_grad);
+       return differentiate(g_clone);
    });
 
-  py::class_<ArgumentSpec>(m, "ArgumentSpec")
-      .def("__repr__", [](ArgumentSpec& self) {
+  py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
+      .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;
         s << self;
         return s.str();
       });
+  py::class_<ArgumentSpec>(m, "ArgumentSpec");
   py::class_<Code>(m, "Code")
-      .def("executors", [](Code& c) {
-        return py::make_iterator(c.executors().begin(), c.executors().end());
+      .def("grad_executors", [](Code& c) {
+        return py::make_iterator(c.grad_executors().begin(), c.grad_executors().end());
       });
 
   py::class_<ExecutionPlanState>(m, "ExecutionPlanState")
@@ -124,10 +143,7 @@ void initJITBindings(PyObject *module) {
       return s.graph;
     })
     .def_property_readonly("code", [](ExecutionPlanState& s) {
-      return s.f;
-    })
-    .def_property_readonly("grad_executor", [](ExecutionPlanState& s) {
-      return s.grad_executor.get();
+      return s.code;
     });
 
   py::class_<Gradient>(m, "Gradient")
@@ -160,20 +176,16 @@ void initJITBindings(PyObject *module) {
     .def_property_readonly("execution_plans", [](GraphExecutorState& s) {
       return s.execution_plans;
     })
-    .def_property_readonly("autograd_fallback", [](GraphExecutorState& s) {
-      return s.autograd_fallback;
-    })
-    .def_property_readonly("autograd_fallback_graph", [](GraphExecutorState& s) {
-      return s.autograd_fallback_graph;
+    .def_property_readonly("fallback", [](GraphExecutorState& s) {
+      return s.fallback;
     });
 
   py::class_<GraphExecutor>(m, "GraphExecutor", py::dynamic_attr())
       .def(
           py::init([](py::function func,
-                      variable_list inputs,
+                      py::tuple inputs,
                       bool optimize) {
-              size_t num_inputs = inputs.size();
-              auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
+              auto graph = tracer::createGraphByTracing(func, toStack(inputs));
               return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),
@@ -197,7 +209,10 @@ void initJITBindings(PyObject *module) {
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
         const auto & graph = ge.graph();
         auto stack = evilDeprecatedBadCreateStackDoNotUse(args, graph->inputs());
-        ge.run(stack);
+        {
+          AutoNoGIL no_gil_guard;
+          ge.run(stack);
+        }
         return createPyObjectForStack(std::move(stack));
       });
 
@@ -210,13 +225,13 @@ void initJITBindings(PyObject *module) {
     py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
       .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecordWithKey(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
       })
       .def("get_last_record", [](PyTorchFileReader &self){
-        std::shared_ptr<void> data;
+        at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getLastRecord();
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
@@ -232,14 +247,43 @@ void initJITBindings(PyObject *module) {
           "Found ", operations.size(), " overloads for operator ",
           qualified_name, "! Overloads are not supported from Python.");
       std::shared_ptr<Operator> op = operations[0];
+      AT_ASSERT(op != nullptr);
+      std::ostringstream docstring;
+      docstring << "Automatically bound operator '" << qualified_name
+                << "' with schema: " << op->schema();
       return py::cpp_function([op](py::args args, py::kwargs kwargs) {
         return invokeOperatorFromPython(
             *op, std::move(args), std::move(kwargs));
-      });
+      }, py::name(qualified_name.c_str()), py::doc(docstring.str().c_str()));
     } catch (const at::Error& error) {
       throw std::runtime_error(error.what_without_backtrace());
     }
   }, py::arg("qualified_name"));
+
+  py::class_<FunctionSchema>(m, "FunctionSchema")
+  .def_property_readonly("name", [](FunctionSchema& self) { return self.name; })
+  .def_property_readonly("arguments", [](FunctionSchema& self) { return self.arguments; })
+  .def_property_readonly("returns", [](FunctionSchema& self) { return self.returns; });
+  py::class_<Argument>(m, "Argument")
+  .def_property_readonly("name", [](Argument& self) { return self.name; })
+  .def_property_readonly("type", [](Argument& self) { return self.type; })
+  .def_property_readonly("N", [](Argument& self) -> py::object {
+    return (self.N) ? py::cast(*self.N) :  py::none();
+  })
+  .def_property_readonly("default_value", [](Argument& self) -> py::object {
+    if(!self.default_value)
+      return py::none();
+    IValue v = *self.default_value;
+    return toPyObject(std::move(v));
+  });
+  m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
+    auto symbol = Symbol::fromQualString(qualified_name);
+    auto operations = getAllOperatorsFor(std::move(symbol));
+    return fmap(operations, [](const std::shared_ptr<Operator>& op) {
+        return op->schema();
+      });
+  });
+
 
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);

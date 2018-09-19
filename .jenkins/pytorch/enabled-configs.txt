@@ -42,3 +42,7 @@ short-perf-test-cpu
 short-perf-test-gpu
 py2-clang3.8-rocm1.7.1-ubuntu16.04-build
 py2-clang3.8-rocm1.7.1-ubuntu16.04-test
+pytorch-ppc64le-cuda9.2-cudnn7-py3-build
+pytorch-ppc64le-cuda9.2-cudnn7-py3-test
+pytorch-ppc64le-cuda9.1-cudnn7-py3-build
+pytorch-ppc64le-cuda9.1-cudnn7-py3-test

@@ -11,10 +11,11 @@ import unittest
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestNumpyTile(hu.HypothesisTestCase):
-    @given(ndim=st.integers(min_value=1, max_value=4),
+class TestNumpyTile(serial.SerializedTestCase):
+    @serial.given(ndim=st.integers(min_value=1, max_value=4),
            seed=st.integers(min_value=0, max_value=65536),
            **hu.gcs_cpu_only)
     def test_numpy_tile(self, ndim, seed, gc, dc):

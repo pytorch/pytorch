@@ -21,6 +21,10 @@ namespace torch { namespace autograd {
 /// numbers.
 thread_local uint64_t Function_next_sequence_nr_ = 0;
 
+uint64_t Function::peek_at_next_sequence_nr() {
+  return Function_next_sequence_nr_;
+}
+
 uint64_t& Function::get_next_sequence_nr() {
   return Function_next_sequence_nr_;
 }
@@ -79,9 +83,9 @@ thread_local size_t deleteFunctionRecursionDepth = 0;
  *   times have gotten the following numbers: ~8300, 3669
  */
 #ifdef _WIN32
-constexpr size_t kDeleteFunctionMaxRecursionDepth = 3000;
+size_t deleteFunctionMaxRecursionDepth = 3000;
 #else
-constexpr size_t kDeleteFunctionMaxRecursionDepth = 10000;
+size_t deleteFunctionMaxRecursionDepth = 10000;
 #endif
 
 struct RecursionDepthCounter {
@@ -107,21 +111,21 @@ struct RecursionDepthCounter {
 void deleteFunction(Function* function) {
   RecursionDepthCounter recursion_depth;
 
-  if (recursion_depth.value() > kDeleteFunctionMaxRecursionDepth) {
+  if (recursion_depth.value() > deleteFunctionMaxRecursionDepth) {
     deleteFunctionQueue.push_back(function);
     return;
   }
 
   delete function;
 
-  if (deleteFunctionQueue.size() == 0) {
+  if (deleteFunctionQueue.empty()) {
     return;
   }
-  if (recursion_depth.value() != kDeleteFunctionMaxRecursionDepth) {
+  if (recursion_depth.value() != deleteFunctionMaxRecursionDepth) {
     AT_ERROR("Only one deleter per thread should be able to process "
              "the delete queue. Please open an issue.");
   }
-  while (deleteFunctionQueue.size() > 0) {
+  while (!deleteFunctionQueue.empty()) {
     auto queued_function = deleteFunctionQueue.front();
     deleteFunctionQueue.pop_front();
     delete queued_function;
