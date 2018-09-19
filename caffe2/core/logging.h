@@ -9,7 +9,6 @@
 
 #include <ATen/core/Error.h>
 #include "caffe2/core/flags.h"
-#include "caffe2/proto/caffe2_pb.h"
 
 // CAFFE2_LOG_THRESHOLD is a compile time flag that would allow us to turn off
 // logging at compile time so no logging message below that level is produced
@@ -105,9 +104,6 @@ inline string Join(const string& delimiter, const Container& v) {
 size_t ReplaceAll(string& s, const char* from, const char* to);
 
 CAFFE2_API void SetStackTraceFetcher(std::function<string(void)> fetcher);
-
-CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
-std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 using EnforceNotMet = at::Error;
 
