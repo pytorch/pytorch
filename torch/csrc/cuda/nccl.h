@@ -12,7 +12,7 @@ namespace detail {
 
 void throw_nccl_error(ncclResult_t status);
 
-static inline void CHECK(ncclResult_t status) {
+static inline void NCCL_CHECK(ncclResult_t status) {
   if (status != ncclSuccess) {
     throw_nccl_error(status);
   }
@@ -21,12 +21,12 @@ static inline void CHECK(ncclResult_t status) {
 struct AutoNcclGroup {
   AutoNcclGroup() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    CHECK(ncclGroupStart());
+    NCCL_CHECK(ncclGroupStart());
 #endif
   }
   ~AutoNcclGroup() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    CHECK(ncclGroupEnd());
+    NCCL_CHECK(ncclGroupEnd());
 #endif
   }
 };

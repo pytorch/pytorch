@@ -52,17 +52,6 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
-static std::function<void(const OperatorDef&)> OperatorLogger =
-    [](const OperatorDef&) { return; };
-
-void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer) {
-  OperatorLogger = tracer;
-}
-
-std::function<void(const OperatorDef&)> GetOperatorLogger() {
-  return OperatorLogger;
-}
-
 }  // namespace caffe2
 
 
