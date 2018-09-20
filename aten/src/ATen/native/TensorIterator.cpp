@@ -110,7 +110,7 @@ void TensorIterator::compute_common_type() {
     if (!op.type) {
       op.type = &type;
       op.needs_cast = needs_cast(*op.tensor, type);
-      if (op.needs_cast && op.tensor->dim() == 0) {
+      if (op.needs_cast && op.tensor->dim() == 0 && !op.is_output) {
         cast_tensors_.emplace_back(op.tensor->toType(type));
         op.tensor = &(cast_tensors_.back());
         op.needs_cast = false;
