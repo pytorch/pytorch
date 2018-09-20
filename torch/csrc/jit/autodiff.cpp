@@ -201,13 +201,13 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       return {grads.at(0) * inputs.at(0).sign()};
 
     } else if (node->matches("aten::acos(Tensor self) -> Tensor")) {
-      return {grads.at(0) * -((-inputs.at(0) * inputs.at(0) + 1.).rsqrt())};
+      return {grads.at(0) * -((-inputs.at(0) * inputs.at(0) + at::Scalar(1)).rsqrt())};
 
     } else if (node->matches("aten::asin(Tensor self) -> Tensor")) {
-      return {grads.at(0) * (-inputs.at(0) * inputs.at(0) + 1.).rsqrt()};
+      return {grads.at(0) * (-inputs.at(0) * inputs.at(0) + at::Scalar(1)).rsqrt()};
 
     } else if (node->matches("aten::atan(Tensor self) -> Tensor")) {
-      return {grads.at(0) / (inputs.at(0) * inputs.at(0) + 1.)};
+      return {grads.at(0) / (inputs.at(0) * inputs.at(0) + at::Scalar(1))};
 
     } else if (node->matches("aten::ceil(Tensor self) -> Tensor")) {
       return {SymbolicVariable::zeros_like(grads.at(0))};
@@ -222,7 +222,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       return {grads.at(0) * outputs.at(0)};
 
     } else if (node->matches("aten::expm1(Tensor self) -> Tensor")) {
-      return {grads.at(0) * (outputs.at(0) + 1.)};
+      return {grads.at(0) * (outputs.at(0) + at::Scalar(1))};
 
     } else if (node->matches("aten::floor(Tensor self) -> Tensor")) {
       return {SymbolicVariable::zeros_like(grads.at(0))};
@@ -240,7 +240,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       return {grads.at(0) / (inputs.at(0) * 2.3025850929940456)};
 
     } else if (node->matches("aten::log1p(Tensor self) -> Tensor")) {
-      return {grads.at(0) / (inputs.at(0) + 1.)};
+      return {grads.at(0) / (inputs.at(0) + at::Scalar(1))};
 
     } else if (node->matches("aten::log2(Tensor self) -> Tensor")) {
       return {grads.at(0) / (inputs.at(0) * 0.6931471805599453)};
