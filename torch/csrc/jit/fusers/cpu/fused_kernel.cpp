@@ -37,6 +37,18 @@ static const std::string compile_string =
 #endif
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
+static void checkSystemFailure(const std::string& activity, int retval, int errnum) {
+  if (retval == 0) {
+    return;
+  } else if (retval == -1) {
+    AT_ERROR("Failed to ", activity, ": system() returned '", strerror(errnum), "'");
+  } else if (retval == 127) {
+    AT_ERROR("Failed to ", activity, ": shell could not be executed in child process");
+  } else {
+    AT_ERROR("Failed to ", activity, ": child process exited with return value ", retval);
+  }
+}
+
 static void runCompiler(
   CPUFusionCompilerConfig& config
 , const std::string& cpp_file
@@ -47,13 +59,13 @@ static void runCompiler(
   env.s("cpp_file",cpp_file);
   env.s("so_file",so_file);
   std::string result = format(compile_string, env);
-  int r = system(result.c_str());
+  int r = runCommand(result.c_str());
   if (config.openmp && r != 0) {
     std::cerr << "warning: pytorch jit fuser failed to compile with openmp, trying without it...\n";
     config.openmp = false; // disable for future compiles
     return runCompiler(config, cpp_file, so_file);
   }
-  JIT_ASSERTM(r == 0, "Failed to compile a fused CPU kernel");
+  checkSystemFailure("compile a fused CPU kernel", /*retval=*/r, errno);
 }
 
 static const std::string disas_string =
@@ -62,8 +74,8 @@ static void disas(const std::string& so_file) {
   TemplateEnv env;
   env.s("so_file", so_file);
   std::string cmd = format(disas_string, env);
-  int r = system(cmd.c_str());
-  JIT_ASSERT(r == 0);
+  int r = runCommand(cmd.c_str());
+  checkSystemFailure("objdump", /*retval=*/r, errno);
 }
 
 CPUFusedKernel::CPUFusedKernel(

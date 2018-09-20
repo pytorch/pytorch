@@ -14,6 +14,8 @@
 #include <sstream>
 #include <tuple>
 
+#include <malloc.h> // for malloc_trim
+
 namespace torch { namespace jit { namespace cpufuser {
 
 CPUFusionCompiler& getFusionCompiler() {
@@ -21,12 +23,20 @@ CPUFusionCompiler& getFusionCompiler() {
   return compiler;
 }
 
+int runCommand(const std::string& command) {
+  // XXX: system() uses fork(), which can fail if the malloc allocator uses
+  // too much memory. Ask the allocator nicely to free its memory for now, but
+  // we should rethink using system() in the future.
+  malloc_trim(/*pad=*/0);
+  return system(command.c_str());
+}
+
 static const std::string check_exists_string = "which '${program}' > /dev/null";
 static bool programExists(const std::string& program) {
   TemplateEnv env;
   env.s("program", program);
   std::string cmd = format(check_exists_string, env);
-  return 0 == system(cmd.c_str());
+  return 0 == runCommand(cmd);
 }
 
 CPUFusionCompiler::CPUFusionCompiler() {
@@ -38,7 +48,7 @@ CPUFusionCompiler::CPUFusionCompiler() {
   if (!programExists(config_.cxx)) {
     config_.cxx = "";
   }
-  
+
   const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
   config_.debug = debug_env && atoi(debug_env) != 0;
 }

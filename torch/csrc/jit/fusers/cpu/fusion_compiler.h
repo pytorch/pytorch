@@ -31,7 +31,7 @@ struct CPUFusionCompiler {
   ~CPUFusionCompiler() = default;
 
   std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group);
-  
+
   std::vector<at::Tensor> debugLaunchGraph(
     Graph& graph
   , int device
@@ -48,8 +48,14 @@ private:
 
 CPUFusionCompiler& getFusionCompiler();
 
+// XXX: A replacement for stdlib.h's `system` function.
+// `system` calls fork. Depending on the machine, even if COW is enabled,
+// fork can fail if the process uses up more than half the machine's memory.
+// We try to avoid these problems in runCommand
+int runCommand(const std::string& command);
+
 } // namespace cudafuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
 
 #endif // USE_CPU_FUSER
