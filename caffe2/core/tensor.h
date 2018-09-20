@@ -8,6 +8,8 @@
 
 namespace caffe2 {
 
+using at::canonical_axis_index_;
+
 class CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
   UndefinedTensorImpl() : TensorImpl(CPU){};
 

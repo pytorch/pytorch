@@ -69,16 +69,6 @@ inline int64_t size_between_dim_(int k, int l, const std::vector<int64_t>& dims)
   return r;
 }
 
-// Wrap around axis_index if it is negative, s.t., -1 is the last dim
-inline int canonical_axis_index_(int axis_index, int ndims) {
-  CAFFE_ENFORCE_GE(axis_index, -ndims);
-  CAFFE_ENFORCE_LT(axis_index, ndims);
-  if (axis_index < 0) {
-    return axis_index + ndims;
-  }
-  return axis_index;
-}
-
 /**
  * @brief TensorImpl is the implementation of a tensor and the basic class
  * in Caffe2 that stores a contiguous memory with its shape information.
