@@ -28,13 +28,13 @@ namespace {
 //
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, at::ScalarType scalar_type)
-    : TensorImpl(type_id, scalar_type, nullptr, false)
+SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type)
+    : TensorImpl(type_id, data_type, nullptr, false)
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
     , indices_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), ScalarType::Long)->tensor({1, 0}))
-    , values_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), scalar_type)->tensor()) {}
+    , values_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), dataTypeToScalarType(data_type.id()))->tensor()) {}
 
 IntList SparseTensorImpl::sizes() const {
   return size_;

@@ -3,7 +3,7 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
@@ -13,10 +13,12 @@
 
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
+#include <string>
 #include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
@@ -53,10 +55,10 @@ RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
-          auto kernel_cache = sharedFusionCompiler().getOrCompile(node);
-          return [kernel_cache](Stack& stack) {
+          auto handle = getFusionHandle(node);
+          return [handle](Stack& stack) {
             autograd::profiler::RecordFunction record("FusionGroup");
-            kernel_cache->run(stack);
+            handle->run(stack);
             return 0;
           };
         }),
@@ -131,6 +133,21 @@ RegisterOperators reg({
             double d;
             pop(stack, d);
             push(stack, (int64_t)d);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::StringToFloat,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto s = pop(stack).toString();
+            if (s->string() != "inf") {
+              AT_ERROR(
+                  "Only 'inf' can be cast to a float, but got '",
+                  s->string(),
+                  "'");
+            }
+            push(stack, std::numeric_limits<double>::infinity());
             return 0;
           };
         }),

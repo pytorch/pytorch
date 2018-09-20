@@ -4,6 +4,7 @@
 #include <ATen/core/ScalarType.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/Error.h>
+#include <ATen/core/optional.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <cstddef>
@@ -25,6 +26,12 @@ struct DeviceGuard {
   explicit DeviceGuard(Device device) {
     if (device.is_cuda()) {
       set_index(device.index());
+    }
+  }
+
+  explicit DeviceGuard(optional<Device> device_opt) {
+    if (device_opt.has_value() && device_opt.value().is_cuda()) {
+      set_index(device_opt.value().index());
     }
   }
 

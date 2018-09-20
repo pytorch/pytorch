@@ -12,6 +12,8 @@
 
 namespace torch { namespace jit {
 
+constexpr int max_tensor_display_size = 10;
+
 enum class AttributeKind {
   f,fs,i,is,s,ss,t,ts,g,gs
 };
@@ -199,6 +201,89 @@ struct Attributes {
   }
   const TensorsAttr::ValueType& ts(Symbol name) const {
     return get<TensorsAttr>(name);
+  }
+
+  template<typename T>
+  static void printPrimList(std::ostream & out, const std::vector<T> & items) {
+    out << "[";
+    int i = 0;
+    for(auto & item : items) {
+      if(i++ > 0)
+        out << ", ";
+      out << item;
+    }
+    out << "]";
+  }
+
+  static std::string escapeString(std::string s) {
+    std::vector<char> search = {'\n', '\t', '\v'};
+    std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
+    for (size_t i = 0; i < search.size(); i++) {
+      size_t pos = s.find(search[i]);
+      while(pos != std::string::npos) {
+        s.replace(pos, 1, replace[i]);
+        pos = s.find(search[i], pos + 1);
+      }
+    }
+    return s;
+  }
+
+  void printValue(std::ostream & out, Symbol & name) const {
+    switch(kindOf(name)) {
+      case AttributeKind::f:
+        out << f(name);
+        break;
+      case AttributeKind::fs:
+        printPrimList(out, fs(name));
+        break;
+      case AttributeKind::i:
+        out << i(name);
+        break;
+      case AttributeKind::is:
+        printPrimList(out, is(name));
+        break;
+      case AttributeKind::s:
+        out << "\"" << escapeString(s(name)) << "\"";
+        break;
+      case AttributeKind::ss:
+        printPrimList(out,ss(name));
+        break;
+      case AttributeKind::t:
+        {
+          at::Tensor tensor = t(name);
+          // 1-elem tensors are usually boxed scalars, so print them like it
+          if (tensor.numel() == 1) {
+            auto scalar_tensor = at::_local_scalar(tensor.view({}));
+            out << "{";
+            if (scalar_tensor.isFloatingPoint()) {
+              out << scalar_tensor.toDouble();
+            } else {
+              out << scalar_tensor.toLong();
+            }
+            out << "}";
+          } else if (tensor.numel() <= max_tensor_display_size) {
+            // TODO: This is awful code.  Also it doesn't work on Windows.
+            std::ostringstream tensor_ss;
+            tensor_ss << tensor;
+            std::string tensor_s{tensor_ss.str()};
+            // Remove newlines
+            std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
+            out << tensor_s;
+          } else {
+            out << "<Tensor>";
+          }
+          break;
+        }
+      case AttributeKind::ts:
+        out << "[<Tensors>]";
+        break;
+      case AttributeKind::g:
+        out << "<Graph>";
+        break;
+      case AttributeKind::gs:
+        out << "[<Graphs>]";
+        break;
+    }
   }
 
 private:

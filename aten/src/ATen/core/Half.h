@@ -30,14 +30,6 @@
 #include <hip/hip_fp16.h>
 #endif
 
-#ifndef AT_HOSTDEVICE
-#ifdef __CUDACC__
-#define AT_HOSTDEVICE __host__ __device__
-#else
-#define AT_HOSTDEVICE
-#endif
-#endif
-
 namespace at {
 
 namespace detail {
@@ -55,18 +47,18 @@ struct alignas(2) Half {
 
   // HIP wants __host__ __device__ tag, CUDA does not
 #ifdef __HIP_PLATFORM_HCC__
-  AT_HOSTDEVICE Half() = default;
+  AT_HOST_DEVICE Half() = default;
 #else
   Half() = default;
 #endif
 
-  constexpr AT_HOSTDEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
-  inline AT_HOSTDEVICE Half(float value);
-  inline AT_HOSTDEVICE operator float() const;
+  constexpr AT_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
+  inline AT_HOST_DEVICE Half(float value);
+  inline AT_HOST_DEVICE operator float() const;
 
 #ifdef __CUDACC__
-  inline AT_HOSTDEVICE Half(const __half& value);
-  inline AT_HOSTDEVICE operator __half() const;
+  inline AT_HOST_DEVICE Half(const __half& value);
+  inline AT_HOST_DEVICE operator __half() const;
 #endif
 };
 
@@ -186,17 +178,8 @@ To checked_convert(From f, const char* name) {
   return convert<To, From>(f);
 }
 
-template <typename To, typename From>
-To HalfFix(From h) {
-  To ret;
-  ret.x = h.x;
-  return ret;
-}
-
 AT_CORE_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace at
 
 #include "ATen/core/Half-inl.h"
-
-#undef AT_HOSTDEVICE

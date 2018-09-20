@@ -105,6 +105,34 @@ if((NOT BLAS_LIBRARIES)
   ENDIF(MKL_FOUND)
 endif()
 
+# Apple BLAS library?
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "accelerate")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "Accelerate")
+  if (BLAS_LIBRARIES)
+    set(BLAS_INFO "accelerate")
+    set(BLAS_IS_ACCELERATE 1)
+  endif (BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "veclib")))
+  check_fortran_libraries(
+    BLAS_LIBRARIES
+    BLAS
+    sgemm
+    ""
+    "vecLib")
+  if (BLAS_LIBRARIES)
+    set(BLAS_INFO "veclib")
+  endif (BLAS_LIBRARIES)
+endif()
+
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "open")))
   check_fortran_libraries(
@@ -180,34 +208,6 @@ if((NOT BLAS_LIBRARIES)
   "acml;gfortran")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "acml")
-  endif (BLAS_LIBRARIES)
-endif()
-
-# Apple BLAS library?
-if((NOT BLAS_LIBRARIES)
-    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "accelerate")))
-  check_fortran_libraries(
-  BLAS_LIBRARIES
-  BLAS
-  sgemm
-  ""
-  "Accelerate")
-  if (BLAS_LIBRARIES)
-    set(BLAS_INFO "accelerate")
-    set(BLAS_IS_ACCELERATE 1)
-  endif (BLAS_LIBRARIES)
-endif()
-
-if((NOT BLAS_LIBRARIES)
-    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "veclib")))
-  check_fortran_libraries(
-    BLAS_LIBRARIES
-    BLAS
-    sgemm
-    ""
-    "vecLib")
-  if (BLAS_LIBRARIES)
-    set(BLAS_INFO "veclib")
   endif (BLAS_LIBRARIES)
 endif()
 

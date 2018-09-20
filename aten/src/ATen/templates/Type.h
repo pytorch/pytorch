@@ -8,7 +8,6 @@
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Tensor.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
@@ -34,6 +33,7 @@ class Context;
 struct Allocator;
 struct Generator;
 struct Storage;
+struct Tensor;
 
 static inline void noop_deleter(void*) {}
 
@@ -143,20 +143,6 @@ protected:
 
 };
 
-inline bool Tensor::is_variable() const noexcept {
-  return type().is_variable();
-}
-
-inline ScalarType Tensor::dtype() const noexcept {
-  return type().scalarType();
-}
-
-inline Layout Tensor::layout() const noexcept {
-  return type().layout();
-}
-
-inline Device Tensor::device() const {
-  return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
-}
-
 } // namespace at
+
+#include "ATen/core/Tensor.h"
