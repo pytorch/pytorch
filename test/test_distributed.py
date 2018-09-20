@@ -947,18 +947,18 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports barrier")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support barrier")
     def test_barrier(self):
         group, group_id, rank = self._init_global_test()
         self._test_barrier_helper(group, group_id, rank)
 
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports barrier")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support barrier")
     def test_barrier_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports barrier")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support barrier")
     def test_barrier_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_barrier_helper(group, group_id, rank)
