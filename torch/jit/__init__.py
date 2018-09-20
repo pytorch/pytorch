@@ -86,6 +86,34 @@ def load(filename):
     return m
 
 
+def load_from_buffer(buffer):
+    r"""
+        Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.ScriptModule.save>`
+
+        .. DANGER::
+           All previously saved modules, no matter their device, are always loaded onto the CPU.
+           This is different from :func:`torch.load`'s semantics and may change in the future.
+
+        Arguments:
+            buffer (string): the buffer containing the contents of the file
+
+        Returns:
+            A ``ScriptModule`` object.
+    """
+    m = ScriptModule()
+
+    def module_lookup(names):
+        curr = m
+        for name in names:
+            if not hasattr(curr, name):
+                setattr(curr, name, ScriptModule())
+            curr = getattr(curr, name)
+        return curr
+
+    torch._C.import_ir_module_from_buffer(module_lookup, buffer)
+    return m
+
+
 def get_trace_graph(f, args=(), kwargs=None):
     """
     Trace a function or model, returning a tuple consisting of the both the
