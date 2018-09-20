@@ -236,7 +236,9 @@ const TypeMetaData TypeMetaDataRegistry<T, c10::guts::enable_if_t<!(std::is_fund
  * for run-time inspection.
  */
 class AT_CORE_API TypeMeta {
- public:
+private:
+    static constexpr detail::TypeMetaData uninitialized_ = {0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)"};
+public:
   using PlacementNew = detail::TypeMetaData::PlacementNew;
   using TypedCopy = detail::TypeMetaData::TypedCopy;
   using TypedDestructor = detail::TypeMetaData::TypedDestructor;
@@ -303,11 +305,11 @@ class AT_CORE_API TypeMeta {
     return data_->name_;
   }
 
-  friend constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
+  friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
   constexpr bool Match() const noexcept {
-    return (data_ == Make<T>().data_);
+    return (data_->id_ == Id<T>());
   }
 
   // Below are static functions that can be called by passing a specific type.
@@ -338,14 +340,12 @@ class AT_CORE_API TypeMeta {
  private:
 
   const detail::TypeMetaData* data_;
-
-  static constexpr detail::TypeMetaData uninitialized_ = detail::TypeMetaData {0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)"};
 };
 
-inline constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
-  return (lhs.data_ == rhs.data_);
+inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+  return (lhs.data_->id_ == rhs.data_->id_);
 }
-inline constexpr bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 

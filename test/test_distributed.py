@@ -234,6 +234,36 @@ class _DistTestBase(object):
         default_grp = dist.get_default_group()
         self.assertNotEqual(default_grp, None)
 
+    def test_get_backend(self):
+        if dist.get_world_size() > 2:
+            group = [1, 2]
+        else:
+            group = [0, 1]
+        group_id = dist.new_group(group)
+        backend_str = BACKEND.lower()
+        self.assertEqual(dist.get_backend(), backend_str)
+        if dist.get_rank() in group:
+            self.assertEqual(dist.get_backend(group_id), backend_str)
+        else:
+            with self.assertRaisesRegex(RuntimeError, "Invalid process group specified"):
+                dist.get_backend(group_id)
+
+    def test_DistBackend(self):
+        # test parsing
+        backend = BACKEND.lower()
+        self.assertEqual(dist.DistBackend(BACKEND.upper()), backend)
+        self.assertEqual(dist.DistBackend(BACKEND), backend)
+        with self.assertRaisesRegex(ValueError, "Invalid backend: 'undefined'"):
+            dist.DistBackend("undefined")
+        with self.assertRaisesRegex(ValueError, "Invalid backend: 'xYz'"):
+            dist.DistBackend("xYz")
+        with self.assertRaises(ValueError):
+            dist.DistBackend(None)
+        with self.assertRaises(ValueError):
+            dist.DistBackend(3)
+        with self.assertRaises(ValueError):
+            dist.DistBackend(["gloo"])
+
     # Test destroy
     def test_destroy_group(self):
         if dist.get_world_size() > 2:

@@ -1,5 +1,5 @@
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 #include <iostream>
 // define constants like M_PI and C keywords for MSVC
@@ -33,25 +33,25 @@ struct Foo<Half> {
 
 void test_overflow() {
   auto s1 = Scalar(M_PI);
-  REQUIRE(s1.toFloat() == static_cast<float>(M_PI));
+  CATCH_REQUIRE(s1.toFloat() == static_cast<float>(M_PI));
   s1.toHalf();
 
   s1 = Scalar(100000);
-  REQUIRE(s1.toFloat() == 100000.0);
-  REQUIRE(s1.toInt() == 100000);
+  CATCH_REQUIRE(s1.toFloat() == 100000.0);
+  CATCH_REQUIRE(s1.toInt() == 100000);
 
-  REQUIRE_THROWS_AS(s1.toHalf(), std::domain_error);
+  CATCH_REQUIRE_THROWS_AS(s1.toHalf(), std::domain_error);
 
   s1 = Scalar(NAN);
-  REQUIRE(std::isnan(s1.toFloat()));
-  REQUIRE_THROWS_AS(s1.toInt(), std::domain_error);
+  CATCH_REQUIRE(std::isnan(s1.toFloat()));
+  CATCH_REQUIRE_THROWS_AS(s1.toInt(), std::domain_error);
 
   s1 = Scalar(INFINITY);
-  REQUIRE(std::isinf(s1.toFloat()));
-  REQUIRE_THROWS_AS(s1.toInt(), std::domain_error);
+  CATCH_REQUIRE(std::isinf(s1.toFloat()));
+  CATCH_REQUIRE_THROWS_AS(s1.toInt(), std::domain_error);
 }
 
-TEST_CASE( "scalar test", "[]" ) {
+CATCH_TEST_CASE( "scalar test", "[]" ) {
 
   manual_seed(123, at::kCPU);
   manual_seed(123, at::kCUDA);
@@ -62,7 +62,7 @@ TEST_CASE( "scalar test", "[]" ) {
   Scalar h2 = h;
   cout << "H2: " << h2.toDouble() << " " << what.toFloat() << " " << bar.toDouble() << " " << what.isIntegral() <<  "\n";
   Generator & gen = at::globalContext().defaultGenerator(at::kCPU);
-  REQUIRE_NOTHROW(gen.seed());
+  CATCH_REQUIRE_NOTHROW(gen.seed());
   auto && C = at::globalContext();
   if(at::hasCUDA()) {
     auto t2 = zeros({4,4}, at::kCUDA);
@@ -71,12 +71,12 @@ TEST_CASE( "scalar test", "[]" ) {
   auto t = ones({4,4});
 
   auto wha2 = zeros({4,4}).add(t).sum();
-  REQUIRE( wha2.toCDouble() == 16.0 );
+  CATCH_REQUIRE( wha2.toCDouble() == 16.0 );
 
-  REQUIRE( t.sizes()[0] == 4 );
-  REQUIRE( t.sizes()[1] == 4 );
-  REQUIRE( t.strides()[0] == 4 );
-  REQUIRE( t.strides()[1] == 1 );
+  CATCH_REQUIRE( t.sizes()[0] == 4 );
+  CATCH_REQUIRE( t.sizes()[1] == 4 );
+  CATCH_REQUIRE( t.strides()[0] == 4 );
+  CATCH_REQUIRE( t.strides()[1] == 1 );
 
   Type & T = CPU(Float);
   Tensor x = randn({1,10}, T);
@@ -88,26 +88,26 @@ TEST_CASE( "scalar test", "[]" ) {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  REQUIRE_THROWS(at::_local_scalar(Tensor{}));
+  _CATCH_REQUIRE_THROWS(at::_local_scalar(Tensor{}));
 
   test_overflow();
 
   if(at::hasCUDA()) {
     auto r = CUDA(Float).copy(next_h);
-    REQUIRE(CPU(Float).copy(r).equal(next_h));
+    CATCH_REQUIRE(CPU(Float).copy(r).equal(next_h));
   }
-  REQUIRE_NOTHROW(randn({10,10,2}, T));
+  CATCH_REQUIRE_NOTHROW(randn({10,10,2}, T));
 
   // check Scalar.toTensor on Scalars backed by different data types
-  REQUIRE(scalar_to_tensor(bar).type().scalarType() == kDouble);
-  REQUIRE(scalar_to_tensor(what).type().scalarType() == kLong);
-  REQUIRE(scalar_to_tensor(ones({})._local_scalar()).type().scalarType() == kDouble);
+  CATCH_REQUIRE(scalar_to_tensor(bar).type().scalarType() == kDouble);
+  CATCH_REQUIRE(scalar_to_tensor(what).type().scalarType() == kLong);
+  CATCH_REQUIRE(scalar_to_tensor(ones({})._local_scalar()).type().scalarType() == kDouble);
 
   if (x.type().scalarType() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
       scalar_t s = 1;
       std::stringstream ss;
-      REQUIRE_NOTHROW(ss << "hello, dispatch" << x.type().toString() << s << "\n");
+      CATCH_REQUIRE_NOTHROW(ss << "hello, dispatch" << x.type().toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
     });
@@ -116,10 +116,10 @@ TEST_CASE( "scalar test", "[]" ) {
   // test direct C-scalar type conversions
   {
     auto x = ones({1,2}, T);
-    REQUIRE_THROWS(x.toCFloat());
+    _CATCH_REQUIRE_THROWS(x.toCFloat());
   }
   auto float_one = ones({}, T);
-  REQUIRE(float_one.toCFloat() == 1);
-  REQUIRE(float_one.toCInt() == 1);
-  REQUIRE((float_one.toCHalf() == 1));
+  CATCH_REQUIRE(float_one.toCFloat() == 1);
+  CATCH_REQUIRE(float_one.toCInt() == 1);
+  CATCH_REQUIRE((float_one.toCHalf() == 1));
 }

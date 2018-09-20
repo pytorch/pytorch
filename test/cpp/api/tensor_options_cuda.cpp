@@ -1,4 +1,4 @@
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
@@ -10,18 +10,18 @@ using namespace at;
 
 // A macro so we don't lose location information when an assertion fails.
 #define REQUIRE_OPTIONS(device_, index_, type_, layout_)                    \
-  REQUIRE(options.device().type() == Device((device_), (index_)).type());   \
-  REQUIRE(options.device().index() == Device((device_), (index_)).index()); \
-  REQUIRE(options.dtype() == (type_));                                      \
-  REQUIRE(options.layout() == (layout_))
+  CATCH_REQUIRE(options.device().type() == Device((device_), (index_)).type());   \
+  CATCH_REQUIRE(options.device().index() == Device((device_), (index_)).index()); \
+  CATCH_REQUIRE(options.dtype() == (type_));                                      \
+  CATCH_REQUIRE(options.layout() == (layout_))
 
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
-  REQUIRE(tensor.device().type() == Device((device_), (index_)).type());   \
-  REQUIRE(tensor.device().index() == Device((device_), (index_)).index()); \
-  REQUIRE(tensor.type().scalarType() == (type_));                          \
-  REQUIRE(tensor.type().layout() == (layout_))
+  CATCH_REQUIRE(tensor.device().type() == Device((device_), (index_)).type());   \
+  CATCH_REQUIRE(tensor.device().index() == Device((device_), (index_)).index()); \
+  CATCH_REQUIRE(tensor.type().scalarType() == (type_));                          \
+  CATCH_REQUIRE(tensor.type().layout() == (layout_))
 
-TEST_CASE("TensorOptions/ConstructsWellFromCUDATypes", "[cuda]") {
+CATCH_TEST_CASE("TensorOptions/ConstructsWellFromCUDATypes", "[cuda]") {
   auto options = CUDA(kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kStrided);
 
@@ -41,7 +41,7 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATypes", "[cuda]") {
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
-TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[multi-cuda]") {
+CATCH_TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[multi-cuda]") {
   auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
@@ -66,7 +66,7 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[multi-cuda]") {
   }
 }
 
-TEST_CASE("OptionsGuardCUDA", "[multi-cuda]") {
+CATCH_TEST_CASE("OptionsGuardCUDA", "[multi-cuda]") {
   Tensor tensor;
   {
     OptionsGuard guard(device(kCUDA));
@@ -87,7 +87,7 @@ TEST_CASE("OptionsGuardCUDA", "[multi-cuda]") {
   REQUIRE_TENSOR_OPTIONS(kCUDA, 0, kInt, kStrided);
 }
 
-TEST_CASE("DeviceGuardOptionsGuardInteraction", "[multi-cuda]") {
+CATCH_TEST_CASE("DeviceGuardOptionsGuardInteraction", "[multi-cuda]") {
   Tensor tensor;
   {
     // Check that OptionsGuard respects any active device before construction.
@@ -112,17 +112,17 @@ TEST_CASE("DeviceGuardOptionsGuardInteraction", "[multi-cuda]") {
   }
 }
 
-TEST_CASE("DeviceGuardIsMovable", "[cuda]") {
+CATCH_TEST_CASE("DeviceGuardIsMovable", "[cuda]") {
   DeviceGuard first(1);
-  REQUIRE(first.original_index() == 0);
-  REQUIRE(first.last_index() == 1);
+  CATCH_REQUIRE(first.original_index() == 0);
+  CATCH_REQUIRE(first.last_index() == 1);
   DeviceGuard second(std::move(first));
-  REQUIRE(second.original_index() == 0);
-  REQUIRE(second.last_index() == 1);
-  REQUIRE(first.original_index() == -1);
+  CATCH_REQUIRE(second.original_index() == 0);
+  CATCH_REQUIRE(second.last_index() == 1);
+  CATCH_REQUIRE(first.original_index() == -1);
   DeviceGuard third;
   third = std::move(second);
-  REQUIRE(third.original_index() == 0);
-  REQUIRE(third.last_index() == 1);
-  REQUIRE(second.original_index() == -1);
+  CATCH_REQUIRE(third.original_index() == 0);
+  CATCH_REQUIRE(third.last_index() == 1);
+  CATCH_REQUIRE(second.original_index() == -1);
 }

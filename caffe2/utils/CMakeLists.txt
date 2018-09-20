@@ -1,4 +1,5 @@
 list(APPEND Caffe2_CPU_SRCS
+  utils/proto_convert.cc
   utils/proto_wrap.cc
   utils/proto_utils.cc
   utils/murmur_hash3.cc

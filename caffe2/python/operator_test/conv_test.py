@@ -13,10 +13,12 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, workspace
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
+import caffe2.python.serialized_test.serialized_test_util as serial
 import caffe2.python._import_c_extension as C
 
 import unittest
 import os
+
 
 def _cudnn_supports(
         dilation=False,
@@ -54,7 +56,7 @@ def _cudnn_convolution_algo_count(direction):
         return st.sampled_from([-1])
 
 
-class TestConvolution(hu.HypothesisTestCase):
+class TestConvolution(serial.SerializedTestCase):
     # CUDNN does NOT support different padding values and we skip it
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
            stride_h=st.integers(1, 3),
@@ -636,14 +638,15 @@ class TestConvolution(hu.HypothesisTestCase):
                         self.assertEqual(model.Proto().op[-1].engine,
                                          expected_engine)
 
-    @given(op_type=st.sampled_from(["Conv", "Conv2D"]), N=st.integers(1, 4),
-           G=st.integers(1, 4), DX=st.integers(1, 4), DY=st.integers(1, 4),
-           H=st.integers(1, 4), W=st.integers(1, 4), use_bias=st.booleans(),
-           order=st.sampled_from(["NCHW", "NHWC"]),
-           force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
-           force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
-           force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
-           **hu.gcs)
+    @serial.given(
+        op_type=st.sampled_from(["Conv", "Conv2D"]), N=st.integers(1, 4),
+        G=st.integers(1, 4), DX=st.integers(1, 4), DY=st.integers(1, 4),
+        H=st.integers(1, 4), W=st.integers(1, 4), use_bias=st.booleans(),
+        order=st.sampled_from(["NCHW", "NHWC"]),
+        force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
+        force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
+        force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
+        **hu.gcs)
     def test_1x1_conv(self, op_type, N, G, DX, DY, H, W, use_bias, order,
                       force_algo_fwd, force_algo_dgrad,
                       force_algo_wgrad, gc, dc):

@@ -1,5 +1,5 @@
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 #include "ATen/ATen.h"
 #include "test_seed.h"
@@ -22,7 +22,7 @@ __global__ void test_tensor_packed_accessor_kernel(PackedTensorAccessor<float,1,
   }
 }
 
-TEST_CASE( "test PackedTensorAccessor and Tensor.packed_accessor", "[cuda]" ) {
+CATCH_TEST_CASE( "test PackedTensorAccessor and Tensor.packed_accessor", "[cuda]" ) {
   manual_seed(123, at::kCPU);
   manual_seed(123, at::kCUDA);
 
@@ -38,9 +38,9 @@ TEST_CASE( "test PackedTensorAccessor and Tensor.packed_accessor", "[cuda]" ) {
   
   test_tensor_packed_accessor_kernel<<<1, 1, 0, stream>>>(resa, t1a, t2a);
   cudaError_t err = cudaDeviceSynchronize();
-  REQUIRE(err == cudaSuccess);
+  CATCH_REQUIRE(err == cudaSuccess);
 
   auto expected = mv(t1, t2);
 
-  REQUIRE(res.allclose(expected));
+  CATCH_REQUIRE(res.allclose(expected));
 }
