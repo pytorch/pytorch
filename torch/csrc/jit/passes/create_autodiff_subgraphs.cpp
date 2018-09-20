@@ -74,8 +74,6 @@ Node* mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
   return group_node;
 }
 
-}
-
 void CreateAutodiffSubgraphs(Block * block, size_t threshold, std::vector<Node*>& diff_graphs) {
   // This implementation is not optimal, but it is simple.
   // It just scans through the list in order looking for runs of
@@ -116,11 +114,12 @@ void CreateAutodiffSubgraphs(Block * block, size_t threshold, std::vector<Node*>
   }
 }
 
+} // anonymous namespace
+
 std::vector<Node*> CreateAutodiffSubgraphs(Graph & graph, size_t threshold) {
   std::vector<Node*> diff_nodes;
   CreateAutodiffSubgraphs(graph.block(), threshold, diff_nodes);
   return diff_nodes;
 }
-
 
 }}
