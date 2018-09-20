@@ -548,6 +548,13 @@ class CatTransform(Transform):
     Transform functor that applies a sequence of transforms `tseq`
     component-wise to each submatrix at `dim`, of length `lengths[dim]`,
     in a way compatible with :func:`torch.cat`.
+
+    Example::
+       x0 = torch.cat([torch.range(1, 10), torch.range(1, 10)], dim=0)
+       x = torch.cat([x0, x0], dim=0)
+       t0 = CatTransform([ExpTransform(), identity_transform], dim=0, lengths=[10, 10])
+       t = CatTransform([t0, t0], dim=0, lengths=[20, 20])
+       y = t(x)
     """
     def __init__(self, tseq, dim=0, lengths=None):
         assert all(isinstance(t, Transform) for t in tseq)
@@ -619,6 +626,11 @@ class StackTransform(Transform):
     Transform functor that applies a sequence of transforms `tseq`
     component-wise to each submatrix at `dim`
     in a way compatible with :func:`torch.stack`.
+
+    Example::
+       x = torch.stack([torch.range(1, 10), torch.range(1, 10)], dim=1)
+       t = StackTransform([ExpTransform(), identity_transform], dim=1)
+       y = t(x)
     """
     def __init__(self, tseq, dim=0):
         assert all(isinstance(t, Transform) for t in tseq)
