@@ -28,7 +28,7 @@ class DeviceOption;
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
  */
-inline std::vector<int64_t> ToVectorint64_t(const std::vector<int>& src) {
+inline std::vector<int64_t> ToVectorTIndex(const std::vector<int>& src) {
   return std::vector<int64_t>(src.begin(), src.end());
 }
 
@@ -387,7 +387,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   inline void Reshape(const std::vector<int>& dims) {
-    Reshape(ToVectorint64_t(dims));
+    Reshape(ToVectorTIndex(dims));
   }
 
   /**
