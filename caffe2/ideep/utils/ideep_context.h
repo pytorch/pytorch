@@ -8,7 +8,15 @@
 
 namespace caffe2 {
 
-BaseStaticContext* GetIDEEPStaticContext();
+#ifdef _WIN32
+#define CAFFE2_IDEEP_EXPORT __declspec(dllexport)
+#elif defined(__GNUC__)
+#define CAFFE2_IDEEP_EXPORT __attribute__((__visibility__("default")))
+#else
+#define CAFFE2_IDEEP_EXPORT
+#endif
+
+BaseStaticContext* GetIDEEPStaticContext() CAFFE2_IDEEP_EXPORT;
 
 class IDEEPContext final : public BaseContext {
  public:
