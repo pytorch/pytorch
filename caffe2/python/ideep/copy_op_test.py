@@ -9,7 +9,7 @@ from random import randint
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
-@unittest.skipIf(not workspace.C.use_ideep, "No IDEEP support.")
+@unittest.skipIf(not workspace.C.use_mkldnn, "No MKLDNN support.")
 class CopyTest(unittest.TestCase):
     def _get_deep_device(self):
         return caffe2_pb2.DeviceOption(device_type=caffe2_pb2.IDEEP)

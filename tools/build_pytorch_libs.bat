@@ -48,10 +48,10 @@ IF "%~1"=="--use-qnnpack" (
 )
 
 IF "%~1"=="--use-mkldnn" (
-  set /a NO_MKLDNN=0
+  set /a USE_MKLDNN=1
   shift
 ) ELSE (
-  set /a NO_MKLDNN=1
+  set /a USE_MKLDNN=0
 )
 
 IF "%~1"=="--use-gloo-ibverbs" (
@@ -205,10 +205,7 @@ goto:eof
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
-                  -DNO_MKLDNN=%NO_MKLDNN% ^
-                  -DMKLDNN_INCLUDE_DIR="%MKLDNN_INCLUDE_DIR%" ^
-                  -DMKLDNN_LIB_DIR="%MKLDNN_LIB_DIR%" ^
-                  -DMKLDNN_LIBRARY="%MKLDNN_LIBRARY%" ^
+                  -DUSE_MKLDNN=%USE_MKLDNN% ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
