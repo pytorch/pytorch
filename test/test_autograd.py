@@ -1006,8 +1006,6 @@ class TestAutograd(TestCase):
 
     def test_grad_assignment(self):
         x = torch.randn(5, 5)
-        a = torch.randn(2, 2)  # size mismatch
-        b = Variable(torch.randn(5, 5).long())  # type mismatch
 
         with self.assertRaises(RuntimeError):
             x.grad = torch.randn(2, 2)
@@ -1020,6 +1018,8 @@ class TestAutograd(TestCase):
             raise unittest.SkipTest("CUDA not available")
         with self.assertRaises(RuntimeError):
             x.grad = Variable(torch.randn(5, 5).cuda())
+        x = x.cuda().half()
+        x.grad = torch.zeros_like(x)  # would raise an error unless sparse type is properly handled
 
         if torch.cuda.device_count() < 2:
             raise unittest.SkipTest("At least 2 CUDA devices needed")
@@ -2995,16 +2995,28 @@ method_tests = [
     ('zero_', (), NO_ARGS, 'scalar'),
     ('logsumexp', (S, S), (1,)),
     ('logsumexp', (), (0,), 'scalar'),
-    ('norm', (S, S), (2,)),
+    ('norm', (S, S), (), 'default'),
+    ('norm', (S, S), (2,), '2'),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),
     ('norm', (S, S), (1,), '1'),
     ('norm', (S, S), (3,), '3'),
     ('norm', (S, S), (inf,), 'inf'),
+    ('norm', (S, S), ('fro',), 'fro_default'),
+    ('norm', (S, S), ('fro', [0, 1],), 'fro'),
+    ('norm', (S, S), ('nuc',), 'nuc'),
     ('norm', (S, S), (-1,), 'neg_1'),
+    ('norm', (S, S), (-2,), 'neg_2'),
     ('norm', (S, S), (-0.5,), 'neg_0_5'),
     ('norm', (S, S), (-1.5,), 'neg_1_5'),
-    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5'),
+    ('norm', (S, S), (-2, 1,), 'neg_2_2_dim', [1]),
+    ('norm', (S, S), (-1, 1,), 'neg_1_2_dim', [1]),
+    ('norm', (S, S), (0, 1,), '0_2_dim', [1]),
+    ('norm', (S, S), (1, 1,), '1_2_dim', [1]),
+    ('norm', (S, S), (2, 1,), '2_2_dim', [1]),
+    ('norm', (S, S), (3, 1,), '3_2_dim', [1]),
+    ('norm', (S, S), (inf, 1,), 'inf_2_dim'),
+    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5_default'),
     ('norm', (S, S, S), (2, 1), '2_dim', [1]),
     ('norm', (S, S, S), (3, 1), '3_dim', [1]),
     ('norm', torch.rand(S, S, S) + 5e-2, (1.5, 1), '1_5_dim', [1]),

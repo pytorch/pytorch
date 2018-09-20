@@ -216,6 +216,11 @@ void initPythonIRBindings(PyObject * module_) {
     .def("return_node", [](Graph &g) {
       return g.block()->return_node();
     })
+    .def("pretty_print", [](Graph &g) {
+      std::ostringstream oss;
+      g.prettyPrint(oss);
+      return oss.str();
+    })
     .GS(createFusionGroup)
     .def("createClone",[](Graph & g, Node * n, py::object fn) {
       return g.createClone(n, [&](Value * e) {

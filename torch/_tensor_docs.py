@@ -434,16 +434,35 @@ In-place version of :meth:`~Tensor.baddbmm`
 
 add_docstr_all('bernoulli',
                r"""
-bernoulli() -> Tensor
+bernoulli(*, generator=None) -> Tensor
+
+Returns a result tensor where each :math:`\texttt{result[i]}` is independently
+sampled from :math:`\text{Bernoulli}(\texttt{self[i]})`. :attr:`self` must have
+floating point ``dtype``, and the result will have the same ``dtype``.
 
 See :func:`torch.bernoulli`
 """)
 
 add_docstr_all('bernoulli_',
                r"""
-bernoulli_() -> Tensor
+.. function:: bernoulli_(p=0.5, *, generator=None) -> Tensor
 
-In-place version of :meth:`~Tensor.bernoulli`
+    Fills each location of :attr:`self` with an independent sample from
+    :math:`\text{Bernoulli}(\texttt{p})`. :attr:`self` can have integral
+    ``dtype``.
+
+.. function:: bernoulli_(p_tensor, *, generator=None) -> Tensor
+
+    :attr:`p_tensor` should be a tensor containing probabilities to be used for
+    drawing the binary random number.
+
+    The :math:`\text{i}^{th}` element of :attr:`self` tensor will be set to a
+    value sampled from :math:`\text{Bernoulli}(\texttt{p\_tensor[i]})`.
+
+    :attr:`self` can have integral ``dtype``, but :attr`p_tensor` must have
+    floating point ``dtype``.
+
+See also :meth:`~Tensor.bernoulli` and :func:`torch.bernoulli`
 """)
 
 add_docstr_all('bincount',

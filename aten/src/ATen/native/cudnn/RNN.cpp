@@ -8,6 +8,7 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/native/RNN.h>
+#include <ATen/TensorUtils.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -655,6 +656,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& fn_dropout_state
     ) {
 
+  check_device(input_r, weight, {hx, cx});
   auto input = input_r;
   auto weight_buf = weight_buf_r;
   if (fn_dropout_state.defined()) {

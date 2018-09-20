@@ -27,7 +27,6 @@ TESTS = [
     'distributions',
     'indexing',
     'jit',
-    'legacy_nn',
     'multiprocessing',
     'nccl',
     'nn',

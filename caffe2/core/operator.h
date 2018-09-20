@@ -988,6 +988,10 @@ CAFFE2_API std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTenso
 // Get a set of registered operator names
 CAFFE2_API std::set<std::string> GetRegisteredOperators();
 
+// Operator logging capabilities
+CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
+std::function<void(const OperatorDef&)> GetOperatorLogger();
+
 }  // namespace caffe2
 
 #endif  // CAFFE2_CORE_OPERATOR_H_

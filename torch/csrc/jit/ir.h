@@ -972,6 +972,9 @@ public:
     new_node_stage_ = s;
     return ResourceGuard([prev_stage, this]() { this->new_node_stage_ = prev_stage; });
   }
+  const std::unordered_map<std::string, Value*>& uniqueNames() const {
+    return unique_names_;
+  }
 
   size_t registerOutput(Value * n) {
     return block_->registerOutput(n);
@@ -1170,6 +1173,10 @@ public:
   }
 
   friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
+
+  TORCH_API std::ostream& prettyPrint(std::ostream & out);
+  TORCH_API void dumpPretty();
+
   TORCH_API std::shared_ptr<Graph> copy();
 
 private:

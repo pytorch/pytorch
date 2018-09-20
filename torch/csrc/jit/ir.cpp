@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/passes/pretty_print.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -20,8 +21,6 @@ namespace torch { namespace jit {
 
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 constexpr Symbol PythonOp::Kind;
-
-constexpr int max_tensor_display_size = 10;
 
 void printValueRef(std::ostream & out, const Value * n) {
   out << "%" << n->uniqueName();
@@ -72,30 +71,6 @@ std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
   }
   return out;
 }
-template<typename T>
-void printPrimList(std::ostream & out, const std::vector<T> & items) {
-  out << "[";
-  int i = 0;
-  for(auto & item : items) {
-    if(i++ > 0)
-      out << ", ";
-    out << item;
-  }
-  out << "]";
-}
-
-std::string escapeString(std::string s) {
-  std::vector<char> search = {'\n', '\t', '\v'};
-  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
-  for (size_t i = 0; i < search.size(); i++) {
-    size_t pos = s.find(search[i]);
-    while(pos != std::string::npos) {
-      s.replace(pos, 1, replace[i]);
-      pos = s.find(search[i], pos + 1);
-    }
-  }
-  return s;
-}
 
 void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
@@ -110,62 +85,9 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
     // don't want to print the qualifier since it should always
     // be attribute, but you might be able to track down a weird
     // bug by printing it out.
-    out << name.toUnqualString() <<"=";
-    switch(n->kindOf(name)) {
-      case AttributeKind::f:
-        out << n->f(name);
-        break;
-      case AttributeKind::fs:
-        printPrimList(out,n->fs(name));
-        break;
-      case AttributeKind::i:
-        out << n->i(name);
-        break;
-      case AttributeKind::is:
-        printPrimList(out,n->is(name));
-        break;
-      case AttributeKind::s:
-        out << "\"" << escapeString(n->s(name)) << "\"";
-        break;
-      case AttributeKind::ss:
-        printPrimList(out,n->ss(name));
-        break;
-      case AttributeKind::t:
-        {
-          at::Tensor t = n->t(name);
-          // 1-elem tensors are usually boxed scalars, so print them like it
-          if (t.numel() == 1) {
-            auto scalar_tensor = at::_local_scalar(t.view({}));
-            out << "{";
-            if (scalar_tensor.isFloatingPoint()) {
-              out << scalar_tensor.toDouble();
-            } else {
-              out << scalar_tensor.toLong();
-            }
-            out << "}";
-          } else if (t.numel() <= max_tensor_display_size) {
-            // TODO: This is awful code.  Also it doesn't work on Windows.
-            std::ostringstream tensor_ss;
-            tensor_ss << t;
-            std::string tensor_s{tensor_ss.str()};
-            // Remove newlines
-            std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
-            out << tensor_s;
-          } else {
-            out << "<Tensor>";
-          }
-          break;
-        }
-      case AttributeKind::ts:
-        out << "[<Tensors>]";
-        break;
-      case AttributeKind::g:
-        out << "<Graph>";
-        break;
-      case AttributeKind::gs:
-        out << "[<Graphs>]";
-        break;
-    }
+    out << name.toUnqualString() << "=";
+
+    n->printValue(out, name);
   }
   out << "]";
 }
@@ -249,6 +171,15 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
   }
   */
   return out;
+}
+
+std::ostream& Graph::prettyPrint(std::ostream & out) {
+  PrettyPrint(out, *this);
+  return out;
+}
+
+void Graph::dumpPretty() {
+  PrettyPrint(std::cout, *this);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -627,10 +558,8 @@ const OperatorSet& nondeterminstic_aten_ops() {
     "aten::dropout(Tensor input, float p, int train) -> Tensor",
     "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
     "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
-    "aten::_th_bernoulli(Tensor self, *, Generator generator) -> Tensor",
-    "aten::bernoulli(Tensor self) -> Tensor",
-    "aten::bernoulli(Tensor self, Tensor p, Generator generator) -> Tensor",
-    "aten::bernoulli(Tensor self, float p, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, *, Generator generator) -> Tensor",
     "aten::multinomial(Tensor self, int num_samples, int replacement, *, Generator generator) -> Tensor",
     "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
     "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
