@@ -45,13 +45,32 @@ class Categorical(Distribution):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
+            if probs.dim() < 1:
+                raise ValueError("`probs` parameter must be at least one-dimensional.")
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
+            if logits.dim() < 1:
+                raise ValueError("`logits` parameter must be at least one-dimensional.")
             self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
         super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Categorical, _instance)
+        batch_shape = torch.Size(batch_shape)
+        param_shape = batch_shape + torch.Size((self._num_events,))
+        if 'probs' in self.__dict__:
+            new.probs = self.probs.expand(param_shape)
+            new._param = new.probs
+        else:
+            new.logits = self.logits.expand(param_shape)
+            new._param = new.logits
+        new._num_events = self._num_events
+        super(Categorical, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
@@ -105,10 +124,8 @@ class Categorical(Distribution):
 
     def enumerate_support(self, expand=True):
         num_events = self._num_events
-        values = torch.arange(num_events).long()
+        values = torch.arange(num_events, dtype=torch.long, device=self._param.device)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         if expand:
             values = values.expand((-1,) + self._batch_shape)
-        if self._param.is_cuda:
-            values = values.cuda(self._param.get_device())
         return values

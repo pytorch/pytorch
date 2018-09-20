@@ -198,7 +198,45 @@ void addNomnigraphMethods(pybind11::module& m) {
             CAFFE_ENFORCE(nn::is<nom::repr::Tensor>(n));
             return nn::get<nom::repr::Tensor>(n);
           },
-          py::return_value_policy::reference_internal);
+          py::return_value_policy::reference_internal)
+      .def(
+          "getAnnotation",
+          [](NNGraph::NodeRef n) { return getOrAddCaffe2Annotation(n); })
+      .def(
+          "setAnnotation",
+          [](NNGraph::NodeRef n, Caffe2Annotation annot) {
+            auto* nnOp = nn::get<NeuralNetOperator>(n);
+            nnOp->setAnnotation(
+                nom::util::make_unique<Caffe2Annotation>(annot));
+          })
+      .def(
+          "getOperatorPredecessors",
+          [](NNGraph::NodeRef n) {
+            CAFFE_ENFORCE(nn::is<NeuralNetOperator>(n));
+            std::vector<NNGraph::NodeRef> pred;
+            for (const auto& inEdge : n->getInEdges()) {
+              auto data = inEdge->tail();
+              if (nn::hasProducer(data)) {
+                pred.emplace_back(nn::getProducer(data));
+              }
+            }
+            return pred;
+          },
+          py::return_value_policy::reference)
+      .def(
+          "getOperatorSuccessors",
+          [](NNGraph::NodeRef n) {
+            CAFFE_ENFORCE(nn::is<NeuralNetOperator>(n));
+            std::vector<NNGraph::NodeRef> succ;
+            for (const auto& outEdge : n->getOutEdges()) {
+              auto data = outEdge->head();
+              for (const auto& consumer : nn::getConsumers(data)) {
+                succ.emplace_back(consumer);
+              }
+            }
+            return succ;
+          },
+          py::return_value_policy::reference);
 
   py::class_<GenericOperator> nnop(m, "NeuralNetOperator");
   py::class_<nom::repr::Tensor> nndata(m, "NeuralNetData");
@@ -233,9 +271,11 @@ void addNomnigraphMethods(pybind11::module& m) {
                   auto nnOp = nn::get<NeuralNetOperator>(node);
                   return opName == nnOp->getName();
                 });
-            return g->createNode(
-                nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(
-                    match, true, 1, !strict));
+            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            if (!strict) {
+              node.nonTerminal();
+            }
+            return g->createNode(std::move(node));
           },
           py::return_value_policy::reference_internal,
           py::arg("node"),
@@ -243,9 +283,11 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "createNode",
           [](nn::NNMatchGraph* g, nom::repr::Tensor& tensor, bool strict) {
-            return g->createNode(
-                nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(
-                    nn::matchTensor(), true, 1, !strict));
+            auto node = nn::NNMatchNode(nn::matchTensor());
+            if (!strict) {
+              node.nonTerminal();
+            }
+            return g->createNode(std::move(node));
           },
           py::return_value_policy::reference_internal,
           py::arg("tensor"),
@@ -255,9 +297,11 @@ void addNomnigraphMethods(pybind11::module& m) {
           [](nn::NNMatchGraph* g, bool strict) {
             auto match = nn::NNNodeMatchCriteria(
                 [](NNGraph::NodeRef node) { return true; });
-            return g->createNode(
-                nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(
-                    match, true, 1, !strict));
+            auto node = nom::matcher::MatchNode<nn::NNNodeMatchCriteria>(match);
+            if (!strict) {
+              node.nonTerminal();
+            }
+            return g->createNode(std::move(node));
           },
           py::return_value_policy::reference_internal,
           py::arg("strict") = false)
@@ -276,6 +320,14 @@ void addNomnigraphMethods(pybind11::module& m) {
     }
     return NNSubgraph();
   });
+
+  // Annotation API
+  py::class_<Caffe2Annotation> annotation(m, "Annotation");
+  annotation.def(py::init<>())
+      .def("setDevice", &Caffe2Annotation::setDevice)
+      .def("getDevice", &Caffe2Annotation::getDevice)
+      .def("setDeviceType", &Caffe2Annotation::setDeviceType)
+      .def("getDeviceType", &Caffe2Annotation::getDeviceType);
 }
 
 REGISTER_PYBIND_ADDITION(addNomnigraphMethods);

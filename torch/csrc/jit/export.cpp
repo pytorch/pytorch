@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/autograd/symbolic.h"
-#include "onnx/onnx.pb.h"
+#include "onnx/onnx_pb.h"
 #include "torch/csrc/onnx/onnx.h"
 
 #include "torch/csrc/utils/functional.h"
@@ -179,6 +179,8 @@ void EncoderBase::EncodeValueInfo(
       shape->mutable_dim(i)->set_dim_value(sizes[i]);
     }
     tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
+  } else {
+    tensor_type->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   }
 }
 
@@ -500,6 +502,7 @@ void ModuleEncoder::EncodeTypeInfo(
   auto kind = type->kind();
   if (kind == TypeKind::DynamicType) {
     type_proto->set_denotation("DynamicType");
+    tensortype_proto->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   } else if (kind == TypeKind::TensorType) {
     type_proto->set_denotation("TensorType");
     // encode the number of dimensions by pushing that number of ones into the shape proto
@@ -557,8 +560,11 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("IntType");
   } else if (kind == TypeKind::NoneType) {
     type_proto->set_denotation("NoneType");
-  }
-  else {
+  } else if (kind == TypeKind::GeneratorType) {
+    type_proto->set_denotation("GeneratorType");
+  } else if (kind == TypeKind::StringType) {
+    type_proto->set_denotation("StringType");
+  } else {
     throw std::runtime_error("unexpected type kind");
   }
 }
@@ -684,7 +690,7 @@ void ModuleEncoder::EncodeTensor(
     }
 
     auto record_number = file_writer_.writeRecord(
-      static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.numel());
+      static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.storage().size());
     tensor_proto->add_int64_data(record_number);
     storage_dedup_map_[storage_ptr] = record_number;
   }

@@ -371,6 +371,7 @@ class TestDataLoader(TestCase):
         finally:
             p.terminate()
 
+    @skipIfRocm
     def test_timeout(self):
         p = ErrorTrackingProcess(target=_test_timeout)
         p.start()

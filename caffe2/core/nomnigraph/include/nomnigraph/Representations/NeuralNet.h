@@ -53,9 +53,6 @@ class CAFFE2_API Annotation {
     return kind_;
   }
 
-  Annotation(const Annotation&) = delete;
-  Annotation& operator=(Annotation&) = delete;
-
  private:
   const AnnotationKind kind_;
 };
@@ -427,7 +424,7 @@ CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 template <NNGraph* G>
 struct CAFFE2_EXPORT NodeHelper {};
 
-struct CAFFE2_API NNNodeMatchCriteria {
+struct NNNodeMatchCriteria {
   std::function<bool(NNGraph::NodeRef)> predicate;
   std::string debugString;
 
@@ -474,8 +471,6 @@ NNNodeMatchCriteria matchOp(const std::string& debugString = "matchOp") {
       debugString);
 }
 
-CAFFE2_API NNNodeMatchCriteria matchTensor();
-
 template <typename NodeType>
 NNNodeMatchCriteria matchOp(
     const std::function<bool(const NodeType&)> predicate,
@@ -489,6 +484,12 @@ NNNodeMatchCriteria matchOp(
       debugString);
 };
 
+CAFFE2_API NNNodeMatchCriteria
+matchTensor(const std::string& debugString = "matchTensor");
+
+CAFFE2_API NNMatchNode
+matchExternalTensorNode(const std::string& debugString = "matchExternalTensor");
+
 struct CAFFE2_API NNNodeMatch {
   static bool isMatch(
       const NNGraph::NodeRef& node,
@@ -499,15 +500,6 @@ struct CAFFE2_API NNNodeMatch {
 
 using NNSubgraphMatcher =
     nom::matcher::SubgraphMatcher<NNGraph, NNNodeMatchCriteria, NNNodeMatch>;
-
-// This helper method makes it easy to create matching criteria in NNGraph.
-// For example, operatorSubgraph(opMatch, ...) will refer to a tree like this:
-// ... -> opMatch -> opMatch_Output
-CAFFE2_API NNMatchGraph::NodeRef operatorSubgraph(
-    NNMatchGraph& g,
-    const NNNodeMatchCriteria& root,
-    const std::vector<NNMatchGraph::NodeRef>& childrenCriteria = {},
-    int count = 1);
 
 } // namespace nn
 

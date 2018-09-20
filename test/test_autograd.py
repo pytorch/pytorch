@@ -14,8 +14,12 @@ from torch._six import inf, nan
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
-from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
-    suppress_warnings, skipIfRocm
+from common import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
+                    suppress_warnings, skipIfRocm,
+                    prod_single_zero, random_square_matrix_of_rank,
+                    random_symmetric_matrix, random_symmetric_psd_matrix,
+                    random_symmetric_pd_matrix, make_nonzero_det,
+                    random_fullrank_matrix_distinct_singular_value)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -724,6 +728,12 @@ class TestAutograd(TestCase):
         self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
         self.assertIsNone(z.grad_fn)
 
+        # test nested decorator and with-statement on no_grad
+        with torch.no_grad():
+            self.assertFalse(torch.is_grad_enabled())
+            w = adder(x, y)
+            self.assertFalse(torch.is_grad_enabled())
+
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
         x = torch.ones(5, 5, requires_grad=True)
@@ -1368,6 +1378,36 @@ class TestAutograd(TestCase):
         expected_grad = torch.zeros(10, 10)
         expected_grad[:2] = grad_output
         self.assertEqual(x.grad.data, expected_grad)
+
+    @skipIfRocm
+    def test_ctc_loss(self):
+        batch_size = 64
+        num_labels = 101
+        target_length = 15
+        gradcheck_input_size = 10
+
+        # device, input_length
+        tests = [('cpu', 150)]
+        if torch.cuda.is_available():
+            tests += [('cuda', 50),
+                      ('cuda', 150)]
+
+        for device, input_length in tests:
+            targets = torch.randint(1, num_labels, (batch_size, target_length),
+                                    device=device, dtype=torch.long)
+            x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
+            tile_factors = torch.randn(input_length * batch_size * num_labels // gradcheck_input_size + 1,
+                                       device=device)
+            input_lengths = [input_length for _ in range(batch_size)]
+            target_lengths = [target_length for _ in range(batch_size)]
+
+            def ctc_after_softmax(x):
+                x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
+                          .view(input_length, batch_size, num_labels))
+                log_probs = torch.log_softmax(x_full, 2)
+                return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+            gradcheck(ctc_after_softmax, [x])
 
     def test_gc_in_destructor(self):
         """
@@ -2557,60 +2597,6 @@ def prod_zeros(dim_size, dim_select):
     return result
 
 
-def prod_single_zero(dim_size):
-    result = torch.randn(dim_size, dim_size)
-    result[0, 1] = 0
-    return result
-
-
-def random_square_matrix_of_rank(l, rank):
-    assert rank <= l
-    A = torch.randn(l, l)
-    u, s, v = A.svd()
-    for i in range(l):
-        if i >= rank:
-            s[i] = 0
-        elif s[i] == 0:
-            s[i] = 1
-    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
-
-
-def random_symmetric_matrix(l):
-    A = torch.randn(l, l)
-    for i in range(l):
-        for j in range(i):
-            A[i, j] = A[j, i]
-    return A
-
-
-def random_symmetric_psd_matrix(l):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1))
-
-
-def random_symmetric_pd_matrix(l, eps=1e-5):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
-
-
-def make_nonzero_det(A, sign=None, min_singular_value=0.1):
-    u, s, v = A.svd()
-    s[s < min_singular_value] = min_singular_value
-    A = u.mm(torch.diag(s)).mm(v.t())
-    det = A.det().item()
-    if sign is not None:
-        if (det < 0) ^ (sign < 0):
-            A[0, :].neg_()
-    return A
-
-
-def random_fullrank_matrix_distinct_singular_value(l):
-    A = torch.randn(l, l)
-    u, _, v = A.svd()
-    s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-    return u.mm(torch.diag(s)).mm(v.t())
-
-
 def uniform_scalar(offset=0, requires_grad=False):
     v = torch.rand(()) + offset
     v.requires_grad = requires_grad
@@ -3142,11 +3128,15 @@ method_tests = [
      'tall_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
      'large', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S, S), ((S, S, S),), 'batched', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (2, 3, S, S), ((2, 3, S, S),), 'batched_dims', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (2, 2, S, S), ((1, S, S),), 'batched_broadcast_A', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (1, S, S), ((2, 2, S, S),), 'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (S, S), (random_fullrank_matrix_distinct_singular_value(S),), '', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S),),
+     'batched', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 3),),
+     'batched_dims', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (2, 2, S, S), (random_fullrank_matrix_distinct_singular_value(S, 1),),
+     'batched_broadcast_A', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (1, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 2),),
+     'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t torch.tensor(1)

@@ -1176,6 +1176,36 @@ class TestSparse(TestCase):
         self.assertNotEqual(indices.data_ptr(), sparse_tensor._indices().data_ptr())
         self.assertNotEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
 
+    @cpu_only  # just run once, we test both cpu and cuda
+    @skipIfRocm
+    def test_constructor_device_legacy(self):
+        i = torch.tensor([[0, 1, 1], [2, 0, 2]])
+        v = torch.tensor([3., 4., 5.])
+        size = torch.Size([2, 3])
+
+        self.assertRaises(RuntimeError, lambda: torch.sparse.FloatTensor(device='cuda'))
+        self.assertRaises(RuntimeError, lambda: torch.sparse.FloatTensor(i, v, device='cuda'))
+        self.assertRaises(RuntimeError, lambda: torch.sparse.FloatTensor(i, v, size, device='cuda'))
+        self.assertRaises(RuntimeError, lambda: torch.sparse.FloatTensor(torch.Size([2, 3, 4]), device='cuda'))
+
+        x = torch.sparse_coo_tensor(i, v, size, device='cpu')
+        self.assertRaises(RuntimeError, lambda: x.new(device='cuda'))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, device='cuda'))
+        self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cuda'))
+        self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cuda'))
+
+        if torch.cuda.is_available():
+            self.assertRaises(RuntimeError, lambda: torch.cuda.sparse.FloatTensor(device='cpu'))
+            self.assertRaises(RuntimeError, lambda: torch.cuda.sparse.FloatTensor(i, v, device='cpu'))
+            self.assertRaises(RuntimeError, lambda: torch.cuda.sparse.FloatTensor(i, v, size, device='cpu'))
+            self.assertRaises(RuntimeError, lambda: torch.cuda.sparse.FloatTensor(torch.Size([2, 3, 4]), device='cpu'))
+
+            x = torch.sparse_coo_tensor(i, v, size, device='cuda')
+            self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
+            self.assertRaises(RuntimeError, lambda: x.new(i, v, device='cpu'))
+            self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cpu'))
+            self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
+
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
         all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]

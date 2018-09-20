@@ -180,29 +180,6 @@ void initPythonIRBindings(PyObject * module_) {
        py::arg("defer_weight_export")=false,
        py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::ONNX,
        py::arg("google_printer")=false)
-    .def("wrapPyFuncWithSymbolic", [](Graph &g, py::function func, std::vector<Value*> inputs, size_t n_outputs, py::function symbolic) {
-      // This function should be used for situations where we have a Python function
-      // that should have different behavior when exporting for JIT interpreter
-      // execution v.s. for ONNX export. For example, nn.utils.rnn.pack_padded_sequence
-      // emits a placeholder under ONNX export, but we want to keep the ability to
-      // run this in the interpreter, thus we emit a PythonOp for that use case.
-
-      // Concretely, this function emits a PythonOp wrapping the passed-in
-      // parameter `func`, while storing the function `symbolic` for use by the
-      // ONNX export
-      std::string cconv(inputs.size(), 't');
-      func.attr("symbolic") = symbolic;
-      Node* new_node = g.insertNode(g.createPythonOp(
-        THPObjectPtr(func.release().ptr()), cconv, {}));
-      for (auto i : inputs)
-        new_node->addInput(i);
-      std::vector<Value*> outputs;
-      for (size_t i = 0; i < n_outputs; ++i)
-        new_node->addOutput();
-      auto sl = std::make_shared<StringSourceLocation>(tracer::getPythonInterpreterStackTrace());
-      new_node->setSourceLocation(sl);
-      return py::make_iterator(new_node->outputs().begin(), new_node->outputs().end());
-    }, py::return_value_policy::reference_internal)
     .def("inputs",[](Graph &g) {
       return py::make_iterator(g.inputs().begin(), g.inputs().end());
     })
@@ -440,6 +417,11 @@ void initPythonIRBindings(PyObject * module_) {
     .def("__repr__",[](Type & t) {
       return t.python_str();
     })
+    .def("str",[](Type & t) {
+      std::ostringstream s;
+      s << t;
+      return s.str();
+    })
     .def("kind",[](Type& t_) {
       Type * t = &t_;
       switch(t->kind()) {
@@ -486,7 +468,8 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("isSubtypeOf", [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
         return self->isSubtypeOf(other);
-    });
+    })
+    .def_static("inferFrom", inferTypeFrom);
 
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
     .def_static("get", &NumberType::get);

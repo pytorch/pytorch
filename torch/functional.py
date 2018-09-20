@@ -16,6 +16,7 @@ __all__ = [
     'isfinite',
     'isinf',
     'isnan',
+    'meshgrid',
     'split',
     'stft',
     'tensordot',
@@ -50,7 +51,7 @@ def split(tensor, split_size_or_sections, dim=0):
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
     be split into equally sized chunks (if possible). Last chunk will be smaller if
-    the tensor size along the given dimension :attr:`dim= is not divisible by
+    the tensor size along the given dimension :attr:`dim` is not divisible by
     :attr:`split_size`.
 
     If :attr:`split_size_or_sections` is a list, then :attr:`tensor` will be split
@@ -278,6 +279,43 @@ def isinf(tensor):
     return tensor.abs() == inf
 
 
+def meshgrid(*tensors, **kwargs):
+    r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
+vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
+expanding the :math:`i`th input over dimensions defined by other inputs.
+
+
+    Args:
+        tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
+        treated as tensors of size :math:`(1,)` automatically
+
+    Returns:
+        seq (sequence of Tensors): If the input has :math:`k` tensors of size
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+    Example::
+
+        >>> x = torch.tensor([1, 2, 3])
+        >>> y = torch.tensor([4, 5, 6])
+        >>> grid_x, grid_y = torch.meshgrid(x, y)
+        >>> grid_x
+        tensor([[1, 1, 1],
+                [2, 2, 2],
+                [3, 3, 3]])
+        >>> grid_y
+        tensor([[4, 5, 6],
+                [4, 5, 6],
+                [4, 5, 6]])
+    """
+    if kwargs:
+        raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
+    if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
+        # the old interface of passing the operands as one list argument
+        tensors = tensors[0]
+    return torch._C._VariableFunctions.meshgrid(tensors)
+
+
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
     r"""Short-time Fourier transform (STFT).
@@ -287,8 +325,8 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     .. math::
         X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
-                            window[k]\ input[m \times hop_length + k]\ %
-                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}},
+                            \text{window}[k]\ \text{input}[m \times \text{hop\_length} + k]\ %
+                            \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right),
 
     where :math:`m` is the index of the sliding window, and :math:`\omega` is
     the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
@@ -345,7 +383,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         win_length (int): the size of window frame and STFT filter.
             Default: ``None``  (treated as equal to :attr:`n_fft`)
         window (Tensor, optional): the optional window function.
-            Default: ``None`` (treated as window of all :math:`1`s)
+            Default: ``None`` (treated as window of all :math:`1` s)
         center (bool, optional): whether to pad :attr:`input` on both sides so
             that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
             Default: ``True``
@@ -452,7 +490,7 @@ def unique(input, sorted=False, return_inverse=False, dim=None):
 
 
 def argmax(input, dim=None, keepdim=False):
-    """Returns the indices of the maximum values of a tensor across a dimension.
+    r"""Returns the indices of the maximum values of a tensor across a dimension.
 
     This is the second value returned by :meth:`torch.max`. See its
     documentation for the exact semantics of this method.
@@ -483,7 +521,7 @@ def argmax(input, dim=None, keepdim=False):
 
 
 def argmin(input, dim=None, keepdim=False):
-    """Returns the indices of the minimum values of a tensor across a dimension.
+    r"""Returns the indices of the minimum values of a tensor across a dimension.
 
     This is the second value returned by :meth:`torch.min`. See its
     documentation for the exact semantics of this method.
@@ -514,7 +552,7 @@ def argmin(input, dim=None, keepdim=False):
 
 
 def tensordot(a, b, dims=2):
-    """Returns a contraction of a and b over multiple dimensions.
+    r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalizes the matrix product.
 
@@ -531,7 +569,7 @@ def tensordot(a, b, dims=2):
 
     .. math::
         r_{i_0,...,i_{m-d}, i_d,...,i_n}
-          = \sum_{k_0,...,k_{d-1}} a_{i_0,...,i_{m-d},k_0,...,k_{d-1}} * b_{k_0,...,k_{d-1}, i_d,...,i_n}.
+          = \sum_{k_0,...,k_{d-1}} a_{i_0,...,i_{m-d},k_0,...,k_{d-1}} \times b_{k_0,...,k_{d-1}, i_d,...,i_n}.
 
     When called with :attr:`dims` of the list form, the given dimensions will be contracted
     in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
@@ -569,7 +607,7 @@ def tensordot(a, b, dims=2):
 
 
 def argsort(input, dim=None, descending=False):
-    """Returns the indices that sort a tensor along a given dimension in ascending
+    r"""Returns the indices that sort a tensor along a given dimension in ascending
     order by value.
 
     This is the second value returned by :meth:`torch.sort`.  See its documentation

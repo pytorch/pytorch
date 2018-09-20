@@ -130,7 +130,7 @@ __global__ void BroadcastBinaryOpCUDAKernel(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator>
-void BinaryOpWith2DBroadcasting(
+CAFFE2_CUDA_EXPORT void BinaryOpWith2DBroadcasting(
     const int rows,
     const int cols,
     const bool rowwise_broadcast,
@@ -177,7 +177,7 @@ void BinaryOpWith2DBroadcasting(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator, int D>
-void BroadcastBinaryOpImpl(
+CAFFE2_CUDA_EXPORT void BroadcastBinaryOpImpl(
     const int* A_dims,
     const int* B_dims,
     const int* C_dims,
@@ -212,7 +212,7 @@ void BroadcastBinaryOpImpl(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator>
-void BroadcastBinaryOp(
+CAFFE2_CUDA_EXPORT void BroadcastBinaryOp(
     const int A_ndim,
     const int* A_dims,
     const int B_ndim,
@@ -294,7 +294,7 @@ void BroadcastBinaryOp(
     }                                                               \
   }                                                                 \
   template <>                                                       \
-  void Func<T, CUDAContext>(                                        \
+  CAFFE2_CUDA_EXPORT void Func<T, CUDAContext>(                                        \
       const int N, const T* x, T* y, CUDAContext* context) {        \
     Func##CUDAKernel<<<                                             \
         CAFFE_GET_BLOCKS(N),                                        \
@@ -362,7 +362,7 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
 
 #define CAFFE2_SPECIALIZED_CUDA_SINCOS(T)                            \
   template <>                                                        \
-  void SinCos<T, CUDAContext>(                                       \
+  CAFFE2_CUDA_EXPORT void SinCos<T, CUDAContext>(                                       \
       const int N, const T* x, T* ys, T* yc, CUDAContext* context) { \
     SinCosCUDAKernel<<<                                              \
         CAFFE_GET_BLOCKS(N),                                         \
@@ -376,7 +376,7 @@ CAFFE2_SPECIALIZED_CUDA_SINCOS(double)
 
 #define DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op) \
   template <>                                                     \
-  void Func<TIn, CUDAContext>(                                    \
+  CAFFE2_CUDA_EXPORT void Func<TIn, CUDAContext>(                                    \
       const int N,                                                \
       const TIn* A,                                               \
       const TIn* B,                                               \
@@ -444,7 +444,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
 
 #define DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op)   \
   template <>                                                             \
-  void Rowwise##Func<TIn, CUDAContext, true>(                             \
+  CAFFE2_CUDA_EXPORT void Rowwise##Func<TIn, CUDAContext, true>(                             \
       const int rows,                                                     \
       const int cols,                                                     \
       const TIn* A,                                                       \
@@ -463,7 +463,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
            context->cuda_stream()>>>(size, cols_div, Op<TIn>(), A, B, C); \
   }                                                                       \
   template <>                                                             \
-  void Rowwise##Func<TIn, CUDAContext, false>(                            \
+  CAFFE2_CUDA_EXPORT void Rowwise##Func<TIn, CUDAContext, false>(                            \
       const int rows,                                                     \
       const int cols,                                                     \
       const TIn* A,                                                       \
@@ -482,7 +482,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
            context->cuda_stream()>>>(size, cols_div, Op<TIn>(), A, B, C); \
   }                                                                       \
   template <>                                                             \
-  void Colwise##Func<TIn, CUDAContext, true>(                             \
+  CAFFE2_CUDA_EXPORT void Colwise##Func<TIn, CUDAContext, true>(                             \
       const int rows,                                                     \
       const int cols,                                                     \
       const TIn* A,                                                       \
@@ -501,7 +501,7 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
            context->cuda_stream()>>>(size, cols_div, Op<TIn>(), A, B, C); \
   }                                                                       \
   template <>                                                             \
-  void Colwise##Func<TIn, CUDAContext, false>(                            \
+  CAFFE2_CUDA_EXPORT void Colwise##Func<TIn, CUDAContext, false>(                            \
       const int rows,                                                     \
       const int cols,                                                     \
       const TIn* A,                                                       \
@@ -573,7 +573,7 @@ DEFINE_2D_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
 
 #define DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op)  \
   template <>                                                         \
-  void Func<TIn, CUDAContext>(                                        \
+  CAFFE2_CUDA_EXPORT void Func<TIn, CUDAContext>(                                        \
       const int A_ndim,                                               \
       const int* A_dims,                                              \
       const int B_ndim,                                               \
@@ -638,7 +638,7 @@ DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
 
 #define DELEGATE_REDUCTION_FUNCTION(T, Funcname, func)                  \
   template <>                                                           \
-  void Funcname<T, CUDAContext>(                                        \
+  CAFFE2_CUDA_EXPORT void Funcname<T, CUDAContext>(                                        \
       const int N,                                                      \
       const T* src,                                                     \
       T* dst,                                                           \
@@ -669,7 +669,7 @@ DELEGATE_REDUCTION_FUNCTION(int64_t, ReduceMax, Max)
 // Caffe2 gemm provides a simpler interface to the gemm functions, with the
 // limitation that the data has to be contiguous in memory.
 template <>
-void Gemm<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Gemm<float, CUDAContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -710,7 +710,7 @@ void Gemm<float, CUDAContext>(
 }
 
 template <>
-void Gemm<float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Gemm<float16, CUDAContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -781,7 +781,7 @@ void Gemm<float16, CUDAContext>(
 }
 
 template <>
-void BiasCHW<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void BiasCHW<float, CUDAContext>(
     const float* bias,
     const float* bias_multiplier,
     const int bias_channels,
@@ -803,7 +803,7 @@ void BiasCHW<float, CUDAContext>(
 }
 
 template <>
-void GemmBatched<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void GemmBatched<float, CUDAContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -869,7 +869,7 @@ void GemmBatched<float, CUDAContext>(
 }
 
 template <>
-void GemmStridedBatched<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void GemmStridedBatched<float, CUDAContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -930,7 +930,7 @@ void GemmStridedBatched<float, CUDAContext>(
 }
 
 template <>
-void GemmBatched<float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void GemmBatched<float16, CUDAContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -1059,7 +1059,7 @@ void GemmBatched<float16, CUDAContext>(
 }
 
 template <>
-void GemmStridedBatched<float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void GemmStridedBatched<float16, CUDAContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -1168,7 +1168,7 @@ void GemmStridedBatched<float16, CUDAContext>(
 
 // No change, but required. Defer to default CUDA engine
 template <>
-void Gemm<float, CUDAContext, TensorCoreEngine>(
+CAFFE2_CUDA_EXPORT void Gemm<float, CUDAContext, TensorCoreEngine>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -1186,7 +1186,7 @@ void Gemm<float, CUDAContext, TensorCoreEngine>(
 }
 
 template <>
-void Gemm<float16, CUDAContext, TensorCoreEngine>(
+CAFFE2_CUDA_EXPORT void Gemm<float16, CUDAContext, TensorCoreEngine>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -1245,7 +1245,7 @@ void Gemm<float16, CUDAContext, TensorCoreEngine>(
 }
 
 template <>
-void GemmStridedBatched<float, CUDAContext, TensorCoreEngine>(
+CAFFE2_CUDA_EXPORT void GemmStridedBatched<float, CUDAContext, TensorCoreEngine>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -1282,7 +1282,7 @@ void GemmStridedBatched<float, CUDAContext, TensorCoreEngine>(
 }
 
 template <>
-void GemmStridedBatched<float16, CUDAContext, TensorCoreEngine>(
+CAFFE2_CUDA_EXPORT void GemmStridedBatched<float16, CUDAContext, TensorCoreEngine>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
@@ -1321,7 +1321,7 @@ void GemmStridedBatched<float16, CUDAContext, TensorCoreEngine>(
 #endif // CUDA_VERSION >= 9000
 
 template <>
-void GemmEx<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void GemmEx<float, CUDAContext>(
     const CBLAS_TRANSPOSE trans_A,
     const CBLAS_TRANSPOSE trans_B,
     const int M,
@@ -1362,7 +1362,7 @@ void GemmEx<float, CUDAContext>(
 }
 
 template <>
-void Gemv<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Gemv<float, CUDAContext>(
     const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
@@ -1415,7 +1415,7 @@ __global__ void AddStripedBatchKernel(
 
 #define CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH(T)              \
   template <>                                                     \
-  void AddStripedBatch<T, CUDAContext>(                           \
+  CAFFE2_CUDA_EXPORT void AddStripedBatch<T, CUDAContext>(                           \
       const int N,                                                \
       const T* first,                                             \
       T* Y,                                                       \
@@ -1434,7 +1434,7 @@ CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH(float16);
 #undef CAFFE2_SPECIALIZED_CUDA_ADD_STRIPED_BATCH
 
 template <>
-void Gemv<float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Gemv<float16, CUDAContext>(
     const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
@@ -1514,7 +1514,7 @@ __global__ void SetKernel(const int N, const T alpha, T* Y) {
 
 #define CAFFE2_SPECIALIZED_CUDA_SET(T)                              \
   template <>                                                       \
-  void Set<T, CUDAContext>(                                         \
+  CAFFE2_CUDA_API void Set<T, CUDAContext>(                         \
       const size_t N, const T alpha, T* Y, CUDAContext* context) {  \
     if (N == 0) {                                                   \
       return;                                                       \
@@ -1542,7 +1542,7 @@ CAFFE2_SPECIALIZED_CUDA_SET(uint16_t);
 #undef CAFFE2_SPECIALIZED_CUDA_SET
 
 template <>
-void Set<float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Set<float16, CUDAContext>(
     const size_t N,
     const float16 alpha,
     float16* Y,
@@ -1577,7 +1577,7 @@ UniformIntFit(const size_t N, const int min, const int max, unsigned int* x) {
 } // namespace
 
 template <>
-void RandUniform<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void RandUniform<float, CUDAContext>(
     const size_t n,
     const float min,
     const float max,
@@ -1592,7 +1592,7 @@ void RandUniform<float, CUDAContext>(
 }
 
 template <>
-void RandUniform<double, CUDAContext>(
+CAFFE2_CUDA_EXPORT void RandUniform<double, CUDAContext>(
     const size_t n,
     const double min,
     const double max,
@@ -1608,7 +1608,7 @@ void RandUniform<double, CUDAContext>(
 }
 
 template <>
-void RandUniform<int, CUDAContext>(
+CAFFE2_CUDA_EXPORT void RandUniform<int, CUDAContext>(
     const size_t n,
     const int min,
     const int max,
@@ -1642,7 +1642,7 @@ size_t HandleOddLengthRandGaussian(
 }
 
 template <>
-void RandGaussian<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void RandGaussian<float, CUDAContext>(
     const size_t n,
     const float mean,
     const float std,
@@ -1658,7 +1658,7 @@ void RandGaussian<float, CUDAContext>(
 }
 
 template <>
-void RandGaussian<double, CUDAContext>(
+CAFFE2_CUDA_EXPORT void RandGaussian<double, CUDAContext>(
     const size_t n,
     const double mean,
     const double std,
@@ -1671,7 +1671,7 @@ void RandGaussian<double, CUDAContext>(
 }
 
 template <>
-void Dot<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Dot<float, CUDAContext>(
     const int n,
     const float* a,
     const float* b,
@@ -1683,7 +1683,7 @@ void Dot<float, CUDAContext>(
 }
 
 template <>
-void Dot<float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Dot<float16, CUDAContext>(
     const int n,
     const float16* a,
     const float16* b,
@@ -1760,7 +1760,7 @@ __global__ void SumConvertKernel(float* sum, T* dest) {
 }
 
 template <typename T, typename IterT>
-void SumGenericIter(
+CAFFE2_CUDA_EXPORT void SumGenericIter(
     const int N,
     IterT it,
     T*& dest,
@@ -1789,7 +1789,7 @@ void SumGenericIter(
 } // namespace
 
 template <>
-void Sum<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Sum<float, CUDAContext>(
     const int N,
     const float* x,
     float* y,
@@ -1804,7 +1804,7 @@ void Sum<float, CUDAContext>(
 }
 
 template <>
-void Sum<int32_t, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Sum<int32_t, CUDAContext>(
     const int N,
     const int32_t* x,
     int32_t* y,
@@ -1829,7 +1829,7 @@ struct FloatTransform {
 
 #define CAFFE2_MATH_SUM_FUNC(T)                                           \
   template <>                                                             \
-  void Sum<T, CUDAContext>(                                               \
+  CAFFE2_CUDA_EXPORT void Sum<T, CUDAContext>(                                               \
       const int N,                                                        \
       const T* x,                                                         \
       T* y,                                                               \
@@ -1861,7 +1861,7 @@ struct SqrTransform {
 } //  namespace
 
 template <>
-void SumSqr<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void SumSqr<float, CUDAContext>(
     const int N,
     const float* x,
     float* y,
@@ -1880,7 +1880,7 @@ void SumSqr<float, CUDAContext>(
 
 #define CAFFE2_MATH_SUMSQR_FUNC(T)                                      \
   template <>                                                           \
-  void SumSqr<T, CUDAContext>(                                          \
+  CAFFE2_CUDA_EXPORT void SumSqr<T, CUDAContext>(                                          \
       const int N,                                                      \
       const T* x,                                                       \
       T* y,                                                             \
@@ -1920,7 +1920,7 @@ SelectKernel(const int N, const int D, const T* x, const int* idx, T* y) {
 } // namespace
 
 template <>
-void Select<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Select<float, CUDAContext>(
     const int N,
     const int D,
     const float* x,
@@ -1935,7 +1935,7 @@ void Select<float, CUDAContext>(
 }
 
 template <>
-void Select<float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Select<float16, CUDAContext>(
     const int N,
     const int D,
     const float16* x,
@@ -1985,7 +1985,7 @@ __global__ void PowKernel(const int n, const T* x, const T exponent, T* y) {
 } // namespace
 
 template <>
-void Powx<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Powx<float, CUDAContext>(
     const int N,
     const float* a,
     const float b,
@@ -2000,7 +2000,7 @@ void Powx<float, CUDAContext>(
 
 #define DELEGATE_CUBLAS_SCALE_FUNCTION(TAlpha, TData, CuBLASFunc)            \
   template <>                                                                \
-  void Scale<TAlpha, TData, CUDAContext>(                                    \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                                    \
       const int N,                                                           \
       const TAlpha alpha,                                                    \
       const TData* x,                                                        \
@@ -2024,7 +2024,7 @@ void Powx<float, CUDAContext>(
     }                                                                        \
   }                                                                          \
   template <>                                                                \
-  void Scale<TAlpha, TData, CUDAContext>(                                    \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(                                    \
       const int N,                                                           \
       const TAlpha* alpha,                                                   \
       const TData* x,                                                        \
@@ -2051,7 +2051,7 @@ DELEGATE_CUBLAS_SCALE_FUNCTION(double, double, cublasDscal)
 
 #define CAFFE2_SPECIALIZED_CUDA_SCALE(TAlpha, TData)  \
   template <>                                         \
-  void Scale<TAlpha, TData, CUDAContext>(             \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(             \
       const int N,                                    \
       const TAlpha alpha,                             \
       const TData* x,                                 \
@@ -2078,7 +2078,7 @@ DELEGATE_CUBLAS_SCALE_FUNCTION(double, double, cublasDscal)
            context->cuda_stream()>>>(N, alpha, x, y); \
   }                                                   \
   template <>                                         \
-  void Scale<TAlpha, TData, CUDAContext>(             \
+  CAFFE2_CUDA_EXPORT void Scale<TAlpha, TData, CUDAContext>(             \
       const int N,                                    \
       const TAlpha* alpha,                            \
       const TData* x,                                 \
@@ -2098,7 +2098,7 @@ CAFFE2_SPECIALIZED_CUDA_SCALE(std::int64_t, std::int64_t)
 #undef CAFFE2_SPECIALIZED_CUDA_SCALE
 
 template <>
-void Scale<float16, float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Scale<float16, float16, CUDAContext>(
     const int N,
     const float16 alpha,
     const float16* x,
@@ -2129,7 +2129,7 @@ void Scale<float16, float16, CUDAContext>(
 }
 
 template <>
-void Scale<float16, float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Scale<float16, float16, CUDAContext>(
     const int N,
     const float16* alpha,
     const float16* x,
@@ -2160,7 +2160,7 @@ void Scale<float16, float16, CUDAContext>(
 }
 
 template <>
-void Scale<float, float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Scale<float, float16, CUDAContext>(
     const int N,
     const float alpha,
     const float16* x,
@@ -2193,7 +2193,7 @@ void Scale<float, float16, CUDAContext>(
 }
 
 template <>
-void Scale<float, float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Scale<float, float16, CUDAContext>(
     const int N,
     const float* alpha,
     const float16* x,
@@ -2224,7 +2224,7 @@ void Scale<float, float16, CUDAContext>(
 }
 
 template <>
-void Axpy<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Axpy<float, CUDAContext>(
     const int N,
     const float alpha,
     const float* X,
@@ -2236,7 +2236,7 @@ void Axpy<float, CUDAContext>(
 }
 
 template <>
-void Axpy<double, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Axpy<double, CUDAContext>(
     const int N,
     const float alpha,
     const double* X,
@@ -2250,7 +2250,7 @@ void Axpy<double, CUDAContext>(
 }
 
 template <>
-void Axpy<float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Axpy<float16, CUDAContext>(
     const int N,
     const float alpha,
     const float16* X,
@@ -2273,7 +2273,7 @@ void Axpy<float16, CUDAContext>(
 }
 
 template <>
-void Axpy<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Axpy<float, CUDAContext>(
     const int N,
     const float* alpha,
     const float* X,
@@ -2285,7 +2285,7 @@ void Axpy<float, CUDAContext>(
 }
 
 template <>
-void Axpy<float16, CUDAContext>(
+CAFFE2_CUDA_EXPORT void Axpy<float16, CUDAContext>(
     const int N,
     const float* alpha,
     const float16* X,
@@ -2379,7 +2379,7 @@ __global__ void AxpbyCUDAKernel<float, float16>(
 
 #define CAFFE2_SPECIALIZED_CUDA_AXPBY(TCoeff, TData) \
   template <>                                        \
-  void Axpby<TCoeff, TData, CUDAContext>(            \
+  CAFFE2_CUDA_EXPORT void Axpby<TCoeff, TData, CUDAContext>(            \
       const int n,                                   \
       const TCoeff a,                                \
       const TData* x,                                \
@@ -2393,7 +2393,7 @@ __global__ void AxpbyCUDAKernel<float, float16>(
            context->cuda_stream()>>>(n, a, x, b, y); \
   }                                                  \
   template <>                                        \
-  void Axpby<TCoeff, TData, CUDAContext>(            \
+  CAFFE2_CUDA_EXPORT void Axpby<TCoeff, TData, CUDAContext>(            \
       const int n,                                   \
       const TCoeff* a,                               \
       const TData* x,                                \
@@ -2468,7 +2468,7 @@ __global__ void Im2ColNCHWCUDAKernel(
 }
 
 template <typename T>
-__global__ void Im2ColNHWCCUDAKernel(
+__global__  void Im2ColNHWCCUDAKernel(
     const int n,
     const int input_h,
     const int input_w,
@@ -2519,7 +2519,7 @@ __global__ void Im2ColNHWCCUDAKernel(
 }
 
 template <typename T>
-__global__ void Col2ImNCHWCUDAKernel(
+__global__  void Col2ImNCHWCUDAKernel(
     const int n,
     const int input_h,
     const int input_w,
@@ -2574,7 +2574,7 @@ __global__ void Col2ImNCHWCUDAKernel(
 }
 
 template <typename T>
-__global__ void Col2ImNHWCCUDAKernel(
+__global__  void Col2ImNHWCCUDAKernel(
     const int n,
     const int input_w,
     const int channels,
@@ -2627,7 +2627,7 @@ __global__ void Col2ImNHWCCUDAKernel(
 }
 
 template <typename T, int N, bool kCol2Im>
-__global__ void Im2ColNdNCHWCUDAKernel(
+__global__  void Im2ColNdNCHWCUDAKernel(
     const int outer_size,
     const int inner_size,
     const int kernel_size,
@@ -2683,7 +2683,7 @@ __global__ void Im2ColNdNCHWCUDAKernel(
 }
 
 template <typename T, int N>
-void Im2ColNdNCHWCUDAImpl(
+CAFFE2_CUDA_EXPORT void Im2ColNdNCHWCUDAImpl(
     const int img_size,
     const int col_size,
     const int* img_shape,
@@ -2730,7 +2730,7 @@ void Im2ColNdNCHWCUDAImpl(
 }
 
 template <typename T, int N>
-void Col2ImNdNCHWCUDAImpl(
+CAFFE2_CUDA_EXPORT void Col2ImNdNCHWCUDAImpl(
     const int img_size,
     const int col_size,
     const int* img_shape,
@@ -2780,7 +2780,7 @@ void Col2ImNdNCHWCUDAImpl(
 } // namespace
 
 template <>
-void Im2Col<float, CUDAContext, StorageOrder::NCHW>(
+CAFFE2_CUDA_EXPORT void Im2Col<float, CUDAContext, StorageOrder::NCHW>(
     const int channels,
     const int height,
     const int width,
@@ -2826,7 +2826,7 @@ void Im2Col<float, CUDAContext, StorageOrder::NCHW>(
 }
 
 template <>
-void Im2Col<float, CUDAContext, StorageOrder::NHWC>(
+CAFFE2_CUDA_EXPORT void Im2Col<float, CUDAContext, StorageOrder::NHWC>(
     const int channels,
     const int height,
     const int width,
@@ -2874,7 +2874,7 @@ void Im2Col<float, CUDAContext, StorageOrder::NHWC>(
 }
 
 template <>
-void Col2Im<float, CUDAContext, StorageOrder::NCHW>(
+CAFFE2_CUDA_EXPORT void Col2Im<float, CUDAContext, StorageOrder::NCHW>(
     const int channels,
     const int height,
     const int width,
@@ -2920,7 +2920,7 @@ void Col2Im<float, CUDAContext, StorageOrder::NCHW>(
 }
 
 template <>
-void Col2Im<float, CUDAContext, StorageOrder::NHWC>(
+CAFFE2_CUDA_EXPORT void Col2Im<float, CUDAContext, StorageOrder::NHWC>(
     const int channels,
     const int height,
     const int width,
@@ -2968,7 +2968,7 @@ void Col2Im<float, CUDAContext, StorageOrder::NHWC>(
 }
 
 template <>
-void Im2ColNd<float, CUDAContext, StorageOrder::NCHW>(
+CAFFE2_CUDA_EXPORT void Im2ColNd<float, CUDAContext, StorageOrder::NCHW>(
     const int N,
     const int img_size,
     const int col_size,
@@ -2999,7 +2999,7 @@ void Im2ColNd<float, CUDAContext, StorageOrder::NCHW>(
 }
 
 template <>
-void Col2ImNd<float, CUDAContext, StorageOrder::NCHW>(
+CAFFE2_CUDA_EXPORT void Col2ImNd<float, CUDAContext, StorageOrder::NCHW>(
     const int N,
     const int img_size,
     const int col_size,
@@ -3030,7 +3030,7 @@ void Col2ImNd<float, CUDAContext, StorageOrder::NCHW>(
 }
 
 template <>
-void CopyMatrix<CUDAContext>(
+CAFFE2_CUDA_EXPORT void CopyMatrix<CUDAContext>(
     const size_t itemsize,
     const int M,
     const int N,
@@ -3082,7 +3082,7 @@ CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(TIndex)
 #undef CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX
 
 template <>
-void CopyVector<float, CUDAContext>(
+CAFFE2_CUDA_EXPORT void CopyVector<float, CUDAContext>(
     const int N,
     const float* src,
     float* dst,
@@ -3152,7 +3152,7 @@ __global__ void ColwiseReduceKernel(
 
 #define CAFFE2_SPECIALIZED_CUDA_ROWWISE_MAX(T)                            \
   template <>                                                             \
-  void RowwiseMax<T, CUDAContext>(                                        \
+  CAFFE2_CUDA_EXPORT void RowwiseMax<T, CUDAContext>(                                        \
       const int N, const int D, const T* x, T* y, CUDAContext* context) { \
     RowwiseReduceKernel<<<                                                \
         std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),                            \
@@ -3166,7 +3166,7 @@ CAFFE2_SPECIALIZED_CUDA_ROWWISE_MAX(float)
 
 #define CAFFE2_SPECIALIZED_CUDA_COLWISE_MAX(T)                            \
   template <>                                                             \
-  void ColwiseMax<T, CUDAContext>(                                        \
+  CAFFE2_CUDA_EXPORT void ColwiseMax<T, CUDAContext>(                                        \
       const int N, const int D, const T* x, T* y, CUDAContext* context) { \
     ColwiseReduceKernel<<<                                                \
         std::min(D, CAFFE_MAXIMUM_NUM_BLOCKS),                            \
@@ -3188,7 +3188,7 @@ maximum_kernel(const int N, const float alpha, const float* x, float* y) {
 } // namespace
 
 template <>
-void Maximum(
+CAFFE2_CUDA_EXPORT void Maximum(
     const int N,
     const float alpha,
     const float* x,
@@ -3241,7 +3241,7 @@ __global__ void ReduceTensorCUDAKernel(
 }
 
 template <typename T, class Reducer, int D>
-void ReduceTensorCUDAImpl(
+CAFFE2_CUDA_EXPORT void ReduceTensorCUDAImpl(
     const int outer_size,
     const int inner_size,
     const int* dims,
@@ -3275,7 +3275,7 @@ void ReduceTensorCUDAImpl(
 }
 
 template <typename T, class Reducer>
-void ReduceTensorCUDA(
+CAFFE2_CUDA_EXPORT void ReduceTensorCUDA(
     const int num_dims,
     const int* dims,
     const int num_axes,
@@ -3353,7 +3353,7 @@ void ReduceTensorCUDA(
 
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(T) \
   template <>                                 \
-  void ReduceMin<T, CUDAContext>(             \
+  CAFFE2_CUDA_EXPORT void ReduceMin<T, CUDAContext>(             \
       const int num_dims,                     \
       const int* dims,                        \
       const int num_axes,                     \
@@ -3382,7 +3382,7 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_MIN(double)
 
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(T) \
   template <>                                 \
-  void ReduceMax<T, CUDAContext>(             \
+  CAFFE2_CUDA_EXPORT void ReduceMax<T, CUDAContext>(             \
       const int num_dims,                     \
       const int* dims,                        \
       const int num_axes,                     \
@@ -3411,7 +3411,7 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_MAX(double)
 
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(T) \
   template <>                                 \
-  void ReduceSum<T, CUDAContext>(             \
+  CAFFE2_CUDA_EXPORT void ReduceSum<T, CUDAContext>(             \
       const int num_dims,                     \
       const int* dims,                        \
       const int num_axes,                     \
@@ -3440,7 +3440,7 @@ CAFFE2_SPECIALIZED_CUDA_REDUCE_SUM(double)
 
 #define CAFFE2_SPECIALIZED_CUDA_REDUCE_MEAN(T) \
   template <>                                  \
-  void ReduceMean<T, CUDAContext>(             \
+  CAFFE2_CUDA_EXPORT void ReduceMean<T, CUDAContext>(             \
       const int num_dims,                      \
       const int* dims,                         \
       const int num_axes,                      \
@@ -3496,7 +3496,7 @@ __global__ void BroadcastCUDAKernel(
 }
 
 template <typename T, int D>
-void BroadcastCUDAImpl(
+CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
     const int X_ndim,
     const int* X_dims,
     const int* Y_dims,
@@ -3534,7 +3534,7 @@ void BroadcastCUDAImpl(
 
 #define CAFFE2_SPECIALIZED_CUDA_BROADCAST(T) \
   template <>                                \
-  void Broadcast<T, CUDAContext>(            \
+  CAFFE2_CUDA_EXPORT void Broadcast<T, CUDAContext>(            \
       const int X_ndim,                      \
       const int* X_dims,                     \
       const int Y_ndim,                      \
@@ -3676,7 +3676,7 @@ __global__ void MomentsCUDAKernel(
 }
 
 template <typename T, int D>
-void MomentsCUDAImpl(
+CAFFE2_CUDA_EXPORT void MomentsCUDAImpl(
     const int outer_size,
     const int inner_size,
     const int* dims,
@@ -3700,7 +3700,7 @@ void MomentsCUDAImpl(
 }
 
 template <typename T>
-void MomentsCUDA(
+CAFFE2_CUDA_EXPORT void MomentsCUDA(
     const int num_dims,
     const int* dims,
     const int num_axes,
@@ -3783,7 +3783,7 @@ void MomentsCUDA(
 
 #define CAFFE2_SPECIALIZED_CUDA_MOMENTS(T)                           \
   template <>                                                        \
-  void Moments<T, CUDAContext>(                                      \
+  CAFFE2_CUDA_EXPORT void Moments<T, CUDAContext>(                                      \
       const int num_dims,                                            \
       const int* dims,                                               \
       const int num_axes,                                            \
@@ -3819,7 +3819,7 @@ DELEGATE_INV_STD_KERNEL_FUNCTION(float, rsqrtf)
 
 #define CAFFE2_SPECIALIZED_CUDA_INV_STD(T)                      \
   template <>                                                   \
-  void InvStd<T, CUDAContext>(                                  \
+  CAFFE2_CUDA_EXPORT void InvStd<T, CUDAContext>(                                  \
       const int N,                                              \
       const T epsilon,                                          \
       const T* var,                                             \
@@ -3861,7 +3861,7 @@ __global__ void TransposeCUDAKernel(
 }
 
 template <typename T, int D>
-void TransposeCUDAImpl(
+CAFFE2_CUDA_EXPORT void TransposeCUDAImpl(
     const int* dims,
     const int* axes,
     const T* X,
@@ -3886,7 +3886,7 @@ void TransposeCUDAImpl(
 
 #define CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(T)                             \
   template <>                                                            \
-  void Transpose<T, CUDAContext>(                                        \
+  CAFFE2_CUDA_EXPORT void Transpose<T, CUDAContext>(                                        \
       const int ndim,                                                    \
       const int* dims,                                                   \
       const int* axes,                                                   \
@@ -3933,7 +3933,7 @@ __global__ void AffineChannelCUDAKernel(
 
 #define CAFFE2_SPECIALIZED_CUDA_AFFINE_CHANNEL(T, kOrder)              \
   template <>                                                          \
-  void AffineChannel<T, CUDAContext, kOrder>(                          \
+  CAFFE2_CUDA_EXPORT void AffineChannel<T, CUDAContext, kOrder>(                          \
       const int N,                                                     \
       const int C,                                                     \
       const int HxW,                                                   \

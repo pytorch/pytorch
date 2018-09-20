@@ -647,7 +647,7 @@ class TestDistributions(TestCase):
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
         if s.is_floating_point():
-            s.detach_().requires_grad_()
+            s = s.detach().requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
         self.assertEqual(s.size(), expected_shape)
@@ -792,6 +792,53 @@ class TestDistributions(TestCase):
                     and Dist is not Distribution and Dist is not ExponentialFamily:
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
+
+    def test_distribution_expand(self):
+        shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
+        for Dist, params in EXAMPLES:
+            for param in params:
+                for shape in shapes:
+                    d = Dist(**param)
+                    expanded_shape = shape + d.batch_shape
+                    original_shape = d.batch_shape + d.event_shape
+                    expected_shape = shape + original_shape
+                    expanded = d.expand(batch_shape=list(expanded_shape))
+                    sample = expanded.sample()
+                    actual_shape = expanded.sample().shape
+                    self.assertEqual(expanded.__class__, d.__class__)
+                    self.assertEqual(d.sample().shape, original_shape)
+                    self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
+                    self.assertEqual(actual_shape, expected_shape)
+                    self.assertEqual(expanded.batch_shape, expanded_shape)
+                    try:
+                        self.assertEqual(expanded.mean,
+                                         d.mean.expand(expanded_shape + d.event_shape),
+                                         allow_inf=True)
+                        self.assertEqual(expanded.variance,
+                                         d.variance.expand(expanded_shape + d.event_shape),
+                                         allow_inf=True)
+                    except NotImplementedError:
+                        pass
+
+    def test_distribution_subclass_expand(self):
+        expand_by = torch.Size((2,))
+        for Dist, params in EXAMPLES:
+
+            class SubClass(Dist):
+                pass
+
+            for param in params:
+                d = SubClass(**param)
+                expanded_shape = expand_by + d.batch_shape
+                original_shape = d.batch_shape + d.event_shape
+                expected_shape = expand_by + original_shape
+                expanded = d.expand(batch_shape=expanded_shape)
+                sample = expanded.sample()
+                actual_shape = expanded.sample().shape
+                self.assertEqual(expanded.__class__, d.__class__)
+                self.assertEqual(d.sample().shape, original_shape)
+                self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
+                self.assertEqual(actual_shape, expected_shape)
 
     def test_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
@@ -2180,6 +2227,24 @@ class TestDistributions(TestCase):
                     except NotImplementedError:
                         pass
 
+    def test_independent_expand(self):
+        for Dist, params in EXAMPLES:
+            for param in params:
+                base_dist = Dist(**param)
+                for reinterpreted_batch_ndims in range(len(base_dist.batch_shape) + 1):
+                    for s in [torch.Size(), torch.Size((2,)), torch.Size((2, 3))]:
+                        indep_dist = Independent(base_dist, reinterpreted_batch_ndims)
+                        expanded_shape = s + indep_dist.batch_shape
+                        expanded = indep_dist.expand(expanded_shape)
+                        expanded_sample = expanded.sample()
+                        expected_shape = expanded_shape + indep_dist.event_shape
+                        self.assertEqual(expanded_sample.shape, expected_shape)
+                        self.assertEqual(expanded.log_prob(expanded_sample),
+                                         indep_dist.log_prob(expanded_sample))
+                        self.assertEqual(expanded.event_shape, indep_dist.event_shape)
+                        self.assertEqual(expanded.batch_shape, expanded_shape)
+
+    @skipIfRocm
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
         for Dist, params in EXAMPLES:
@@ -3913,6 +3978,55 @@ class TestTransforms(TestCase):
             except NotImplementedError:
                 continue
 
+    def test_jit_fwd(self):
+        for transform in self.unique_transforms:
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
+
+            def f(x):
+                return transform(x)
+
+            try:
+                traced_f = torch.jit.trace(f, (x,))
+            except NotImplementedError:
+                continue
+
+            # check on different inputs
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
+            self.assertEqual(f(x), traced_f(x))
+
+    def test_jit_inv(self):
+        for transform in self.unique_transforms:
+            y = torch.tensor(self._generate_data(transform.inv), requires_grad=True)
+
+            def f(y):
+                return transform.inv(y)
+
+            try:
+                traced_f = torch.jit.trace(f, (y,))
+            except NotImplementedError:
+                continue
+
+            # check on different inputs
+            y = torch.tensor(self._generate_data(transform.inv), requires_grad=True)
+            self.assertEqual(f(y), traced_f(y))
+
+    def test_jit_jacobian(self):
+        for transform in self.unique_transforms:
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
+
+            def f(x):
+                y = transform(x)
+                return transform.log_abs_det_jacobian(x, y)
+
+            try:
+                traced_f = torch.jit.trace(f, (x,))
+            except NotImplementedError:
+                continue
+
+            # check on different inputs
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
+            self.assertEqual(f(x), traced_f(x))
+
 
 class TestConstraintRegistry(TestCase):
     def get_constraints(self, is_cuda=False):
@@ -4034,6 +4148,243 @@ class TestValidation(TestCase):
     def tearDown(self):
         super(TestCase, self).tearDown()
         Distribution.set_default_validate_args(False)
+
+
+class TestJit(TestCase):
+    def _examples(self):
+        for Dist, params in EXAMPLES:
+            for param in params:
+                keys = param.keys()
+                values = tuple(param[key] for key in keys)
+                if not all(isinstance(x, torch.Tensor) for x in values):
+                    continue
+                sample = Dist(**param).sample()
+                yield Dist, keys, values, sample
+
+    def _perturb_tensor(self, value, constraint):
+        if isinstance(constraint, constraints._IntegerGreaterThan):
+            return value + 1
+        if isinstance(constraint, constraints._PositiveDefinite):
+            return value + torch.eye(value.shape[-1])
+        if value.dtype in [torch.float, torch.double]:
+            transform = transform_to(constraint)
+            delta = value.new(value.shape).normal_()
+            return transform(transform.inv(value) + delta)
+        if value.dtype == torch.long:
+            result = value.clone()
+            result[value == 0] = 1
+            result[value == 1] = 0
+            return result
+        raise NotImplementedError
+
+    def _perturb(self, Dist, keys, values, sample):
+        with torch.no_grad():
+            if Dist is Uniform:
+                param = dict(zip(keys, values))
+                param['low'] = param['low'] - torch.rand(param['low'].shape)
+                param['high'] = param['high'] + torch.rand(param['high'].shape)
+                values = [param[key] for key in keys]
+            else:
+                values = [self._perturb_tensor(value, Dist.arg_constraints.get(key, constraints.real))
+                          for key, value in zip(keys, values)]
+            param = dict(zip(keys, values))
+            sample = Dist(**param).sample()
+            return values, sample
+
+    def test_sample(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.sample()
+
+            traced_f = torch.jit.trace(f, values, check_trace=False)
+
+            # FIXME Schema not found for node
+            xfail = [
+                Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
+                HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
+            ]
+            if Dist in xfail:
+                continue
+
+            with torch.random.fork_rng():
+                sample = f(*values)
+            traced_sample = traced_f(*values)
+            self.assertEqual(sample, traced_sample)
+
+            # FIXME no nondeterministic nodes found in trace
+            xfail = [Beta, Dirichlet]
+            if Dist not in xfail:
+                self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
+
+    def test_rsample(self):
+        for Dist, keys, values, sample in self._examples():
+            if not Dist.has_rsample:
+                continue
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.rsample()
+
+            traced_f = torch.jit.trace(f, values, check_trace=False)
+
+            # FIXME Schema not found for node
+            xfail = [
+                Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
+                HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
+            ]
+            if Dist in xfail:
+                continue
+
+            with torch.random.fork_rng():
+                sample = f(*values)
+            traced_sample = traced_f(*values)
+            self.assertEqual(sample, traced_sample)
+
+            # FIXME no nondeterministic nodes found in trace
+            xfail = [Beta, Dirichlet]
+            if Dist not in xfail:
+                self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
+
+    def test_log_prob(self):
+        for Dist, keys, values, sample in self._examples():
+            # FIXME traced functions produce incorrect results
+            xfail = [LowRankMultivariateNormal, MultivariateNormal]
+            if Dist in xfail:
+                continue
+
+            def f(sample, *values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.log_prob(sample)
+
+            traced_f = torch.jit.trace(f, (sample,) + values)
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(sample, *values)
+            actual = traced_f(sample, *values)
+            self.assertEqual(expected, actual,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+
+    def test_enumerate_support(self):
+        for Dist, keys, values, sample in self._examples():
+            # FIXME traced functions produce incorrect results
+            xfail = [Binomial]
+            if Dist in xfail:
+                continue
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.enumerate_support()
+
+            try:
+                traced_f = torch.jit.trace(f, values)
+            except NotImplementedError:
+                continue
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(*values)
+            actual = traced_f(*values)
+            self.assertEqual(expected, actual,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+
+    def test_mean(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.mean
+
+            try:
+                traced_f = torch.jit.trace(f, values)
+            except NotImplementedError:
+                continue
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(*values)
+            actual = traced_f(*values)
+            expected[expected == float('inf')] = 0.
+            actual[actual == float('inf')] = 0.
+            self.assertEqual(expected, actual, allow_inf=True,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+
+    def test_variance(self):
+        for Dist, keys, values, sample in self._examples():
+            if Dist in [Cauchy, HalfCauchy]:
+                continue  # infinite variance
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.variance
+
+            try:
+                traced_f = torch.jit.trace(f, values)
+            except NotImplementedError:
+                continue
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(*values)
+            actual = traced_f(*values)
+            expected[expected == float('inf')] = 0.
+            actual[actual == float('inf')] = 0.
+            self.assertEqual(expected, actual, allow_inf=True,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+
+    def test_entropy(self):
+        for Dist, keys, values, sample in self._examples():
+            # FIXME traced functions produce incorrect results
+            xfail = [LowRankMultivariateNormal, MultivariateNormal]
+            if Dist in xfail:
+                continue
+
+            def f(*values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                return dist.entropy()
+
+            try:
+                traced_f = torch.jit.trace(f, values)
+            except NotImplementedError:
+                continue
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(*values)
+            actual = traced_f(*values)
+            self.assertEqual(expected, actual, allow_inf=True,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+
+    def test_cdf(self):
+        for Dist, keys, values, sample in self._examples():
+
+            def f(sample, *values):
+                param = dict(zip(keys, values))
+                dist = Dist(**param)
+                cdf = dist.cdf(sample)
+                return dist.icdf(cdf)
+
+            try:
+                traced_f = torch.jit.trace(f, (sample,) + values)
+            except NotImplementedError:
+                continue
+
+            # check on different data
+            values, sample = self._perturb(Dist, keys, values, sample)
+            expected = f(sample, *values)
+            actual = traced_f(sample, *values)
+            self.assertEqual(expected, actual,
+                             message='{}\nExpected:\n{}\nActual:\n{}'.format(Dist.__name__, expected, actual))
+
 
 if __name__ == '__main__':
     run_tests()

@@ -22,8 +22,11 @@ Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking
   return s_copy_(self, b_src, non_blocking);
 }
 
-Tensor TypeDefault::copy(const Tensor & src, bool non_blocking) const {
-  // TODO(psag): have a DeviceGuard here
+Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device> to_device) const {
+  DeviceGuard device_guard;
+  if (to_device.has_value()) {
+    device_guard.set_index(to_device.value().index());
+  }
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   if (is_sparse()) {
     auto indices = src._indices();
@@ -91,29 +94,33 @@ Tensor TypeDefault::tensorWithAllocator(IntList sizes, IntList strides, Allocato
 }
 
 Storage TypeDefault::storage(bool resizable) const {
-  return Storage(scalarType(), 0, allocator(), resizable);
+  return Storage(typeMeta(), 0, allocator(), resizable);
 }
 Storage TypeDefault::storage(size_t size, bool resizable) const {
-  return Storage(scalarType(), size, allocator(), resizable);
+  return Storage(typeMeta(), size, allocator(), resizable);
 }
 Storage TypeDefault::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
     return Storage(
-      scalarType(),
+      typeMeta(),
       InefficientStdFunctionContext::makeDataPtr(data, deleter, getDeviceFromPtr(data)),
       size,
       deleter);
 }
 Storage TypeDefault::storageWithAllocator(int64_t size, Allocator* allocator) const {
-    return Storage(scalarType(), size, allocator);
+    return Storage(typeMeta(), size, allocator);
 }
 Tensor TypeDefault::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return Tensor(static_cast<TensorImpl*>(th_pointer), retain);
+  auto tensor_impl = c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(static_cast<TensorImpl*>(th_pointer));
+  if (retain && tensor_impl.get() != UndefinedTensorImpl::singleton()) {
+    c10::raw::intrusive_ptr::incref(tensor_impl.get());
+  }
+  return Tensor(std::move(tensor_impl));
 }
 Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain && th_pointer) {
     c10::raw::intrusive_ptr::incref(static_cast<StorageImpl*>(th_pointer));
   }
-  return Storage(static_cast<StorageImpl*>(th_pointer));
+  return Storage(c10::intrusive_ptr<StorageImpl>::reclaim(static_cast<StorageImpl*>(th_pointer)));
 }
 
 

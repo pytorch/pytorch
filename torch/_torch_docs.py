@@ -117,7 +117,7 @@ Adds the scalar :attr:`value` to each element of the input :attr:`input`
 and returns a new resulting tensor.
 
 .. math::
-    out = input + value
+    \text{out} = \text{input} + \text{value}
 
 If :attr:`input` is of type FloatTensor or DoubleTensor, :attr:`value` must be
 a real number, otherwise it should be an integer.
@@ -147,7 +147,7 @@ The shapes of :attr:`input` and :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    out = input + value \times other
+    \text{out} = \text{input} + \text{value} \times \text{other}
 
 If :attr:`other` is of type FloatTensor or DoubleTensor, :attr:`value` must be
 a real number, otherwise it should be an integer.
@@ -197,7 +197,7 @@ If :attr:`batch1` is a :math:`(b \times n \times m)` tensor, :attr:`batch2` is a
 and :attr:`out` will be a :math:`(n \times p)` tensor.
 
 .. math::
-    out = \beta\ mat + \alpha\ (\sum_{i=0}^{b} batch1_i \mathbin{@} batch2_i)
+    out = \beta\ \text{mat} + \alpha\ (\sum_{i=0}^{b} \text{batch1}_i \mathbin{@} \text{batch2}_i)
 
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and :attr:`alpha`
 must be real numbers, otherwise they should be integers.
@@ -229,7 +229,7 @@ Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`tensor`.
 
 .. math::
-    out_i = tensor_i + value \times \frac{tensor1_i}{tensor2_i}
+    \text{out}_i = \text{tensor}_i + \text{value} \times \frac{\text{tensor1}_i}{\text{tensor2}_i}
 
 The shapes of :attr:`tensor`, :attr:`tensor1`, and :attr:`tensor2` must be
 :ref:`broadcastable <broadcasting-semantics>`.
@@ -239,7 +239,7 @@ a real number, otherwise an integer.
 
 Args:
     tensor (Tensor): the tensor to be added
-    value (Number, optional): multiplier for :math:`tensor1 ./ tensor2`
+    value (Number, optional): multiplier for :math:`\text{tensor1} / \text{tensor2}`
     tensor1 (Tensor): the numerator tensor
     tensor2 (Tensor): the denominator tensor
     out (Tensor, optional): the output tensor
@@ -264,7 +264,7 @@ by :attr:`tensor2`, multiply the result by the scalar :attr:`value`
 and add it to :attr:`tensor`.
 
 .. math::
-    out_i = tensor_i + value \times tensor1_i \times tensor2_i
+    \text{out}_i = \text{tensor}_i + \text{value} \times \text{tensor1}_i \times \text{tensor2}_i
 
 The shapes of :attr:`tensor`, :attr:`tensor1`, and :attr:`tensor2` must be
 :ref:`broadcastable <broadcasting-semantics>`.
@@ -306,7 +306,7 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 :attr:`mat1` and :attr`mat2` and the added matrix :attr:`mat` respectively.
 
 .. math::
-    out = \beta\ mat + \alpha\ (mat1_i \mathbin{@} mat2_i)
+    \text{out} = \beta\ \text{mat} + \alpha\ (\text{mat1}_i \mathbin{@} \text{mat2}_i)
 
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
@@ -346,7 +346,7 @@ size `m`, then :attr:`tensor` must be
 :attr:`mat` and :attr:`vec` and the added tensor :attr:`tensor` respectively.
 
 .. math::
-    out = \beta\ tensor + \alpha\ (mat \mathbin{@} vec)
+    \text{out} = \beta\ \text{tensor} + \alpha\ (\text{mat} \mathbin{@} \text{vec})
 
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
@@ -380,7 +380,7 @@ outer product between :attr:`vec1` and :attr:`vec2` and the added matrix
 :attr:`mat` respectively.
 
 .. math::
-    out = \beta\ mat + \alpha\ (vec1 \otimes vec2)
+    \text{out} = \beta\ \text{mat} + \alpha\ (\text{vec1} \otimes \text{vec2})
 
 If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector
 of size `m`, then :attr:`mat` must be
@@ -394,7 +394,7 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 Args:
     beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
     mat (Tensor): matrix to be added
-    alpha (Number, optional): multiplier for :math:`vec1 \otimes vec2` (:math:`\alpha`)
+    alpha (Number, optional): multiplier for :math:`\text{vec1} \otimes \text{vec2}` (:math:`\alpha`)
     vec1 (Tensor): the first vector of the outer product
     vec2 (Tensor): the second vector of the outer product
     out (Tensor, optional): the output tensor
@@ -427,7 +427,7 @@ Args:
     other (Tensor): second tensor to compare
     atol (float, optional): absolute tolerance. Default: 1e-08
     rtol (float, optional): relative tolerance. Default: 1e-05
-    equal_nan (float, optional): if ``True``, then two ``NaN``s will be compared as ``True``. Default: ``False``
+    equal_nan (float, optional): if ``True``, then two ``NaN`` s will be compared as equal. Default: ``False``
 
 Example::
 
@@ -560,7 +560,7 @@ If :attr:`batch1` is a :math:`(b \times n \times m)` tensor, :attr:`batch2` is a
 same as the scaling factors used in :meth:`torch.addbmm`.
 
 .. math::
-    out_i = \beta\ mat_i + \alpha\ (batch1_i \mathbin{@} batch2_i)
+    \text{out}_i = \beta\ \text{mat}_i + \alpha\ (\text{batch1}_i \mathbin{@} \text{batch2}_i)
 
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
@@ -568,7 +568,7 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 Args:
     beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
     mat (Tensor): the tensor to be added
-    alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
+    alpha (Number, optional): multiplier for :math:`\text{batch1} \mathbin{@} \text{batch2}` (:math:`\alpha`)
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
     out (Tensor, optional): the output tensor
@@ -609,7 +609,7 @@ Args:
 
 Example::
 
-    >>> a = torch.empty(3, 3).uniform_(0, 1) # generate a uniform random matrix with range [0, 1]
+    >>> a = torch.empty(3, 3).uniform_(0, 1)  # generate a uniform random matrix with range [0, 1]
     >>> a
     tensor([[ 0.1737,  0.0950,  0.3609],
             [ 0.7148,  0.0289,  0.2676],
@@ -642,8 +642,8 @@ The number of bins (size 1) is one larger than the largest value in
 tensor of size 0. If :attr:`minlength` is specified, the number of bins is at least
 :attr:`minlength` and if :attr:`input` is empty, then the result is tensor of size
 :attr:`minlength` filled with zeros. If ``n`` is the value at position ``i``,
-:math:`out[n] += weights[i]` if :attr:`weights` is specified else
-:math:`out[n] += 1`.
+``out[n] += weights[i]`` if :attr:`weights` is specified else
+``out[n] += 1``.
 
 Arguments:
     input (Tensor): 1-d int tensor
@@ -651,9 +651,9 @@ Arguments:
         Should be of same size as input tensor.
     minlength (int): optional, minimum number of bins. Should be non-negative.
 
-Shape:
-    output (Tensor): ``Size([max(input) + 1])`` if :attr:`input` is non-empty, else
-                     ``Size(0)``
+Returns:
+    output (Tensor): a tensor of shape ``Size([max(input) + 1])`` if
+    :attr:`input` is non-empty, else ``Size(0)``
 
 Example::
 
@@ -685,7 +685,7 @@ If :attr:`batch1` is a :math:`(b \times n \times m)` tensor, :attr:`batch2` is a
 :math:`(b \times n \times p)` tensor.
 
 .. math::
-    out_i = batch1_i \mathbin{@} batch2_i
+    \text{out}_i = \text{batch1}_i \mathbin{@} \text{batch2}_i
 
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
           For broadcasting matrix products, see :func:`torch.matmul`.
@@ -1259,7 +1259,7 @@ Divides each element of the input :attr:`input` with the scalar :attr:`value`
 and returns a new resulting tensor.
 
 .. math::
-    out_i = \frac{input_i}{value}
+    \text{out}_i = \frac{\text{input}_i}{\text{value}}
 
 If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value`
 should be a real number, otherwise it should be an integer
@@ -1285,7 +1285,7 @@ of the tensor :attr:`other`. The resulting tensor is returned. The shapes of
 :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    out_i = \frac{input_i}{other_i}
+    \text{out}_i = \frac{\text{input}_i}{\text{other}_i}
 
 Args:
     input (Tensor): the numerator tensor
@@ -1341,16 +1341,17 @@ Returns:
     (Tensor, Tensor): A tuple containing
 
         - **e** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``a``,
-            where the first element is the real part and the second element is the imaginary part.
-            The eigenvalues are not necessarily ordered.
+          where the first element is the real part and the second element is the imaginary part.
+          The eigenvalues are not necessarily ordered.
         - **v** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
-            Otherwise, this tensor of shape :math:`(n \times n)` can be used to compute normalized (unit length)
-            eigenvectors of corresponding eigenvalues ``e`` as follows.
-            If the corresponding e[j] is a real number, column v[:, j] is the eigenvector corresponding to
-            eigenvalue e[j].
-            If the corresponding e[j] and e[j + 1] eigenvalues form a complex conjugate pair, then the true eigenvectors
-            can be computed as
-            :math:`eigenvector[j] = v[:, j] + i * v[:, j + 1], eigenvector[j + 1] = v[:, j] - i * v[:, j + 1]`.
+          Otherwise, this tensor of shape :math:`(n \times n)` can be used to compute normalized (unit length)
+          eigenvectors of corresponding eigenvalues ``e`` as follows.
+          If the corresponding e[j] is a real number, column v[:, j] is the eigenvector corresponding to
+          eigenvalue e[j].
+          If the corresponding e[j] and e[j + 1] eigenvalues form a complex conjugate pair, then the true eigenvectors
+          can be computed as
+          :math:`\text{eigenvector}[j] = v[:, j] + i \times v[:, j + 1]`,
+          :math:`\text{eigenvector}[j + 1] = v[:, j] - i \times v[:, j + 1]`.
 """)
 
 add_docstr(torch.eq,
@@ -1645,7 +1646,7 @@ For a 3-D tensor the output is specified by::
 
 If :attr:`input` is an n-dimensional tensor with size
 :math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
-and :attr:`dim` :math:`= i`, then :attr:`index` must be an :math:`n`-dimensional tensor with
+and ``dim = i``, then :attr:`index` must be an :math:`n`-dimensional tensor with
 size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
 and :attr:`out` will have the same size as :attr:`index`.
 
@@ -1667,7 +1668,7 @@ add_docstr(torch.ge,
            r"""
 ge(input, other, out=None) -> Tensor
 
-Computes :math:`input \geq other` element-wise.
+Computes :math:`\text{input} \geq \text{other}` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -1693,7 +1694,7 @@ gels(B, A, out=None) -> Tensor
 
 Computes the solution to the least squares and least norm problems for a full
 rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
-size :math:`(n \times k)`.
+size :math:`(m \times k)`.
 
 If :math:`m \geq n`, :func:`gels` solves the least-squares problem:
 
@@ -1708,11 +1709,11 @@ If :math:`m < n`, :func:`gels` solves the least-norm problem:
 .. math::
 
    \begin{array}{ll}
-   \min_X & \|X\|_2 & \mbox{subject to} & AX = B.
+   \min_X & \|X\|_2 & \text{subject to} & AX = B.
    \end{array}
 
 Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
-rows of :math:`X` contains the solution. If :math`m \geq n`, the residual sum of squares
+rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
 for the solution in each column is given by the sum of squares of elements in the
 remaining :math:`m - n` rows of that column.
 
@@ -1821,7 +1822,7 @@ batched outputs `X, LU`.
 
 .. note::
 
-    The `out` keyword only supports 2D matrix inputs, that is,
+    The :attr:`out` keyword only supports 2D matrix inputs, that is,
     `B, A` must be 2D matrices.
 
 .. note::
@@ -1832,10 +1833,10 @@ batched outputs `X, LU`.
     `A.contiguous().transpose(-1, -2).strides()` respectively.
 
 Args:
-    B (Tensor): input matrix of size :math:`(*, m, k)` , where `*`
-    is zero or more batch dimensions.
+    B (Tensor): input matrix of size :math:`(*, m, k)` , where :math:`*`
+                is zero or more batch dimensions.
     A (Tensor): input square matrix of size :math:`(*, m, m)`, where
-    `*` is zero or more batch dimensions.
+                :math:`*` is zero or more batch dimensions.
     out ((Tensor, Tensor), optional): optional output tuple.
 
 Example::
@@ -1893,7 +1894,7 @@ add_docstr(torch.gt,
            r"""
 gt(input, other, out=None) -> Tensor
 
-Computes :math:`input > other` element-wise.
+Computes :math:`\text{input} > \text{other}` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -2054,7 +2055,7 @@ add_docstr(torch.le,
            r"""
 le(input, other, out=None) -> Tensor
 
-Computes :math:`input \leq other` element-wise.
+Computes :math:`\text{input} \leq \text{other}` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -2082,7 +2083,7 @@ Does a linear interpolation of two tensors :attr:`start` and :attr:`end` based
 on a scalar :attr:`weight` and returns the resulting :attr:`out` tensor.
 
 .. math::
-    out_i = start_i + weight \times (end_i - start_i)
+    \text{out}_i = \text{start}_i + \text{weight} \times (\text{end}_i - \text{start}_i)
 
 The shapes of :attr:`start` and :attr:`end` must be
 :ref:`broadcastable <broadcasting-semantics>`.
@@ -2299,7 +2300,7 @@ add_docstr(torch.lt,
            r"""
 lt(input, other, out=None) -> Tensor
 
-Computes :math:`input < other` element-wise.
+Computes :math:`\text{input} < \text{other}` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -2471,7 +2472,7 @@ The shapes of :attr:`input` and :attr:`other` don't need to match,
 but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    out_i = \max(tensor_i, other_i)
+    \text{out}_i = \max(\text{tensor}_i, \text{other}_i)
 
 .. note:: When the shapes do not match, the shape of the returned output tensor
           follows the :ref:`broadcasting rules <broadcasting-semantics>`.
@@ -2647,7 +2648,7 @@ The shapes of :attr:`input` and :attr:`other` don't need to match,
 but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    out_i = \min(tensor_i, other_i)
+    \text{out}_i = \min(\text{tensor}_i, \text{other}_i)
 
 .. note:: When the shapes do not match, the shape of the returned output tensor
           follows the :ref:`broadcasting rules <broadcasting-semantics>`.
@@ -2803,7 +2804,7 @@ Multiplies each element of the input :attr:`input` with the scalar
 :attr:`value` and returns a new resulting tensor.
 
 .. math::
-    out_i = value \times input_i
+    \text{out}_i = \text{value} \times \text{input}_i
 
 If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`value`
 should be a real number, otherwise it should be an integer
@@ -2830,7 +2831,7 @@ The shapes of :attr:`input` and :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    out_i = input_i \times other_i
+    \text{out}_i = \text{input}_i \times \text{other}_i
 
 Args:
     input (Tensor): the first multiplicand tensor
@@ -2874,7 +2875,7 @@ Indices are ordered from left to right according to when each was sampled
 If :attr:`input` is a vector, :attr:`out` is a vector of size :attr:`num_samples`.
 
 If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
-:math:`(m \times num\_samples)`.
+:math:`(m \times \text{num\_samples})`.
 
 If replacement is ``True``, samples are drawn with replacement.
 
@@ -2953,6 +2954,32 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
+add_docstr(torch.narrow,
+           r"""
+narrow(input, dimension, start, length) -> Tensor
+
+Returns a new tensor that is a narrowed version of :attr:`input` tensor. The
+dimension :attr:`dim` is input from :attr:`start` to :attr:`start + length`. The
+returned tensor and :attr:`self` tensor share the same underlying storage.
+
+Args:
+    input (Tensor): the tensor to narrow
+    dimension (int): the dimension along which to narrow
+    start (int): the starting dimension
+    length (int): the distance to the ending dimension
+
+Example::
+
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> torch.narrow(x, 0, 0, 2)
+    tensor([[ 1,  2,  3],
+            [ 4,  5,  6]])
+    >>> torch.narrow(x, 1, 1, 2)
+    tensor([[ 2,  3],
+            [ 5,  6],
+            [ 8,  9]])
+""")
+
 add_docstr(torch.ne,
            r"""
 ne(input, other, out=None) -> Tensor
@@ -2984,7 +3011,7 @@ neg(input, out=None) -> Tensor
 Returns a new tensor with the negative of the elements of :attr:`input`.
 
 .. math::
-    out = -1 \times input
+    \text{out} = -1 \times \text{input}
 
 Args:
     input (Tensor): the input tensor
@@ -3313,13 +3340,13 @@ Computes the inverse of a positive semidefinite matrix given its
 Cholesky factor :attr:`u`: returns matrix `inv`
 
 If :attr:`upper` is ``True`` or not provided, :attr:`u` is upper
-triangular such that:
+triangular such that the returned tensor is
 
 .. math::
     inv = (u^T u)^{-1}
 
 If :attr:`upper` is ``False``, :attr:`u` is lower triangular
-such that:
+such that the returned tensor is
 
 .. math::
     inv = (uu^{T})^{-1}
@@ -3412,12 +3439,12 @@ with the same number of elements as :attr:`input`.
 When :attr:`exponent` is a scalar value, the operation applied is:
 
 .. math::
-    out_i = x_i ^ {exponent}
+    \text{out}_i = x_i ^ \text{exponent}
 
 When :attr:`exponent` is a tensor, the operation applied is:
 
 .. math::
-    out_i = x_i ^ {exponent_i}
+    \text{out}_i = x_i ^ {\text{exponent}_i}
 
 When :attr:`exponent` is a tensor, the shapes of :attr:`input`
 and :attr:`exponent` must be :ref:`broadcastable <broadcasting-semantics>`.
@@ -3623,7 +3650,7 @@ Example::
     >>> torch.rand(2, 3)
     tensor([[ 0.8237,  0.5781,  0.6879],
             [ 0.3816,  0.7249,  0.0998]])
-""")
+""".format(**factory_common_args))
 
 add_docstr(torch.rand_like,
            r"""
@@ -3791,6 +3818,13 @@ Constructs a tensor with :attr:`data`.
     If you have a NumPy ``ndarray`` and want to avoid a copy, use
     :func:`torch.from_numpy`.
 
+.. warning::
+
+    When data is a tensor `x`, :func:`torch.tensor` reads out 'the data' from whatever it is passed,
+    and constructs a leaf variable. Therefore ``torch.tensor(x)`` is equivalent to ``x.clone().detach()``
+    and ``torch.tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
+    The equivalents use ``clone()`` and ``detach()`` are recommended.
+
 Args:
     {data}
     {dtype}
@@ -3824,13 +3858,13 @@ add_docstr(torch.range,
            r"""
 range(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a 1-D tensor of size :math:`\left\lfloor \frac{{end - start}}{{step}} \right\rfloor + 1`
+Returns a 1-D tensor of size :math:`\left\lfloor \frac{\text{end} - \text{start}}{\text{step}} \right\rfloor + 1`
 with values from :attr:`start` to :attr:`end` with step :attr:`step`. Step is
 the gap between two values in the tensor.
 
 .. math::
-    \text{{out}}_{{i+1}} = \text{{out}}_i + step.
-
+    \text{out}_{i+1} = \text{out}_i + \text{step}.
+""" + r"""
 .. warning::
     This function is deprecated in favor of :func:`torch.arange`.
 
@@ -3856,7 +3890,7 @@ add_docstr(torch.arange,
            r"""
 arange(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a 1-D tensor of size :math:`\left\lfloor \frac{{end - start}}{{step}} \right\rfloor`
+Returns a 1-D tensor of size :math:`\left\lfloor \frac{\text{end} - \text{start}}{\text{step}} \right\rfloor`
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
@@ -3865,8 +3899,8 @@ comparing against :attr:`end`; to avoid inconsistency, we advise adding a small 
 in such cases.
 
 .. math::
-    \text{{out}}_{{i+1}} = \text{{out}}_{{i}} + \text{{step}}
-
+    \text{out}_{{i+1}} = \text{out}_{i} + \text{step}
+""" + r"""
 Args:
     start (Number): the starting value for the set of points. Default: ``0``.
     end (Number): the ending value for the set of points
@@ -3965,6 +3999,8 @@ but with the specified shape. When possible, the returned tensor will be a view
 of :attr:`input`. Otherwise, it will be a copy. Contiguous inputs and inputs
 with compatible strides can be reshaped without copying, but you should not
 depend on the copying vs. viewing behavior.
+
+See :meth:`torch.Tensor.view` on when it is possible to return a view.
 
 A single dimension may be -1, in which case it's inferred from the remaining
 dimensions and the number of elements in :attr:`input`.
@@ -4293,8 +4329,8 @@ will be of shape: :math:`(A \times B \times C \times D)`.
 
 When :attr:`dim` is given, a squeeze operation is done only in the given
 dimension. If `input` is of shape: :math:`(A \times 1 \times B)`,
-`squeeze(input, 0)` leaves the tensor unchanged, but :func:`squeeze(input, 1)` will
-squeeze the tensor to the shape :math:`(A \times B)`.
+``squeeze(input, 0)`` leaves the tensor unchanged, but ``squeeze(input, 1)``
+will squeeze the tensor to the shape :math:`(A \times B)`.
 
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
@@ -4504,7 +4540,7 @@ of a real symmetric matrix :attr:`input`, represented by a tuple :math:`(e, V)`.
 :math:`m` dimensional vector.
 
 This function calculates all eigenvalues (and vectors) of :attr:`input`
-such that :math:`input = V diag(e) V^T`.
+such that :math:`\text{input} = V \text{diag}(e) V^T`.
 
 The boolean argument :attr:`eigenvectors` defines computation of
 eigenvectors or eigenvalues only.
@@ -4530,10 +4566,10 @@ Returns:
     (Tensor, Tensor): A tuple containing
 
         - **e** (*Tensor*): Shape :math:`(m)`. Each element is an eigenvalue of ``input``,
-            The eigenvalues are in ascending order.
+          The eigenvalues are in ascending order.
         - **V** (*Tensor*): Shape :math:`(m \times m)`.
-            If ``eigenvectors=False``, it's a tensor filled with zeros.
-            Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
+          If ``eigenvectors=False``, it's a tensor filled with zeros.
+          Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::
 
@@ -4561,7 +4597,7 @@ t(input) -> Tensor
 Expects :attr:`input` to be a matrix (2-D tensor) and transposes dimensions 0
 and 1.
 
-Can be seen as a short-hand function for :meth:`transpose(input, 0, 1)`
+Can be seen as a short-hand function for ``transpose(input, 0, 1)``.
 
 Args:
     input (Tensor): the input tensor
@@ -4907,28 +4943,28 @@ add_docstr(torch.trtrs,
            r"""
 trtrs(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
-Solves a system of equations with a triangular coefficient matrix `A`
-and multiple right-hand sides `b`.
+Solves a system of equations with a triangular coefficient matrix :math:`A`
+and multiple right-hand sides :attr:`b`.
 
-In particular, solves :math:`AX = b` and assumes `A` is upper-triangular
+In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
 with the default keyword arguments.
 
 Args:
     A (Tensor): the input triangular coefficient matrix
-    b (Tensor): multiple right-hand sides. Each column of `b` is a
+    b (Tensor): multiple right-hand sides. Each column of :math:`b` is a
         right-hand side for the system of equations.
     upper (bool, optional): whether to solve the upper-triangular system
         of equations (default) or the lower-triangular system of equations. Default: True.
-    transpose (bool, optional): whether `A` should be transposed before
+    transpose (bool, optional): whether :math:`A` should be transposed before
         being sent into the solver. Default: False.
-    unitriangular (bool, optional): whether `A` is unit triangular.
-        If True, the diagonal elements of `A` are assumed to be
-        1 and not referenced from `A`. Default: False.
+    unitriangular (bool, optional): whether :math:`A` is unit triangular.
+        If True, the diagonal elements of :math:`A` are assumed to be
+        1 and not referenced from :math:`A`. Default: False.
 
 Returns:
-    A tuple (X, M) where `M` is a clone of `A` and `X` is the solution to
-    `AX = b` (or whatever variant of the system of equations, depending on
-    the keyword arguments.)
+    A tuple :math:`(X, M)` where :math:`M` is a clone of :math:`A` and :math:`X`
+    is the solution to :math:`AX = b` (or whatever variant of the system of
+    equations, depending on the keyword arguments.)
 
 Shape:
     - A: :math:`(N, N)`
@@ -5281,7 +5317,7 @@ The operation is defined as:
 
 .. math::
     out_i = \begin{cases}
-        x_i & \text{if } condition_i \\
+        x_i & \text{if } \text{condition}_i \\
         y_i & \text{otherwise} \\
     \end{cases}
 
@@ -5960,37 +5996,4 @@ Example::
     >>>                            [4, 5, 6],
     >>>                            [7, 8, 9]]))
     (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
-""")
-
-
-add_docstr(torch.meshgrid,
-           r"""
-meshgrid(seq) -> seq
-
-Take a sequence of :math:`N` tensors, each of which can be either scalar or 1-dimensional
-vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
-expanding the :math:`i`th input over dimensions defined by other inputs.
-
-Arguments:
-    seq (sequence of Tensors): sequence of scalars or 1 dimensional tensors. Scalars will be
-        treated as tensors of size :math:`(1,)` automatically.
-
-Returns:
-    seq (sequence of Tensors): If the input has :math:`k` tensors of size
-        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
-        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
-
-Example::
-
-    >>> x = torch.tensor([1, 2, 3])
-    >>> y = torch.tensor([4, 5, 6])
-    >>> grid_x, grid_y = torch.meshgrid([x, y])
-    >>> grid_x
-    tensor([[1, 1, 1],
-            [2, 2, 2],
-            [3, 3, 3]])
-    >>> grid_y
-    tensor([[4, 5, 6],
-            [4, 5, 6],
-            [4, 5, 6]])
 """)

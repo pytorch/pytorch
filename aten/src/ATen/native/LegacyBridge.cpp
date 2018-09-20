@@ -22,14 +22,6 @@ namespace {
 
 // TODO: Maybe the foo_ variants should call th_foo_
 
-Tensor norm(const Tensor & self, Scalar p) {
-  if (_has_native(self)) {
-    return native_norm(self, p);
-  } else {
-    return th_norm(self, p);
-  }
-}
-
 Tensor clone(const Tensor& self) {
   if (_has_native(self)) {
     return native_clone(self);
@@ -144,34 +136,34 @@ Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta
 
 Tensor tensor(const Type& dtype) {
   if (_type_has_native(dtype)) {
-    return dtype.native_tensor();
+    return at::getType(dtype.options()).native_tensor();
   } else {
-    return dtype.th_tensor();
+    return at::getType(dtype.options()).th_tensor();
   }
 }
 
 Tensor tensor(const Type& dtype, ArrayRef<int64_t> size) {
   if (_type_has_native(dtype)) {
-    return dtype.native_tensor(size);
+    return at::getType(dtype.options()).native_tensor(size);
   } else {
-    return dtype.th_tensor(size);
+    return at::getType(dtype.options()).th_tensor(size);
   }
 }
 
 Tensor sparse_coo_tensor(const Type& dtype, ArrayRef<int64_t> size) {
-  return dtype.toSparse().native_sparse_coo_tensor(size);
+  return at::getType(dtype.options().layout(at::kSparse)).native_sparse_coo_tensor(size);
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values) {
-  return values.type().toSparse().native_sparse_coo_tensor(indices, values);
+  return at::getType(values.options().layout(at::kSparse)).native_sparse_coo_tensor(indices, values);
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {
-  return values.type().toSparse().native_sparse_coo_tensor(indices, values, size);
+  return at::getType(values.options().layout(at::kSparse)).native_sparse_coo_tensor(indices, values, size);
 }
 
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {
-  return values.type().toSparse()._native_sparse_coo_tensor_unsafe(indices, values, size);
+  return at::getType(values.options().layout(at::kSparse))._native_sparse_coo_tensor_unsafe(indices, values, size);
 }
 
 int64_t get_device(const Tensor& self) {

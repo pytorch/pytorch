@@ -51,6 +51,7 @@ namespace torch { namespace jit {
   _(prim, ImplicitTensorToNum)     \
   _(prim, IntToFloat)              \
   _(prim, FloatToInt)              \
+  _(prim, StringToFloat)           \
   _(prim, AutogradAdd)             \
   _(prim, GradOf)                  \
   _(prim, AnyDefined)              \
@@ -109,7 +110,6 @@ namespace torch { namespace jit {
   _(attr, transA)                  \
   _(attr, transB)                  \
   _(attr, name)                    \
-  _(attr, string)                  \
   _(attr, a)                       \
   _(attr, b)
 

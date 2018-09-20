@@ -155,70 +155,51 @@ static void check_input_shape_forward(const at::Tensor& input,
   int64_t k = input.ndimension();
   int64_t weight_dim = weight.ndimension();
 
-  if (weight_dim != k) {
-    std::stringstream ss;
-    ss << "Expected " << weight_dim << "-dimensional input for " << weight_dim
-       << "-dimensional weight " << weight.sizes() << ", but got input of size "
-       << input.sizes() << " instead";
-    throw std::runtime_error(ss.str());
-  }
-  if (weight.size(0) < groups) {
-    std::stringstream ss;
-    ss << "Given groups=" << groups << ", expected weight to be at least "
-       << groups << " at dimension 0, but got weight of size " << weight.sizes()
-       << " instead";
-    throw std::runtime_error(ss.str());
-  }
-  if (weight.size(0) % groups != 0) {
-    std::stringstream ss;
-    ss << "Given groups=" << groups << ", expected weight to be divisible by "
-       << groups << " at dimension 0, but got weight of size " << weight.sizes()
-       << " instead";
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(weight_dim == k,
+           "Expected ", weight_dim, "-dimensional input for ", weight_dim,
+           "-dimensional weight ", weight.sizes(), ", but got ", k, "-dimensional input of size ",
+           input.sizes(), " instead");
+  AT_CHECK(weight.size(0) >= groups,
+           "Given groups=", groups, ", expected weight to be at least ", groups,
+           " at dimension 0, but got weight of size ", weight.sizes(), " instead");
+  AT_CHECK(weight.size(0) % groups == 0,
+           "Given groups=", groups, ", expected weight to be divisible by ",
+           groups, " at dimension 0, but got weight of size ", weight.sizes(),
+           " instead");
 
   if (!transposed) {
-    if (input.size(1) != (weight.size(1) * groups)) {
-      std::stringstream ss;
-      ss << "Given groups=" << groups << ", weight of size " << weight.sizes()
-         << ", expected input" << input.sizes() << " to have "
-         << (weight.size(1) * groups) << " channels, but got " << input.size(1)
-         << " channels instead";
-      throw std::runtime_error(ss.str());
-    }
-    if (bias.defined() && (bias.ndimension() != 1 || bias.size(0) != weight.size(0))) {
-      std::stringstream ss;
-      ss << "Given weight of size " << weight.sizes()
-         << ", expected bias to be 1-dimensional with " << weight.size(0) << " elements"
-         << ", but got bias of size " << bias.sizes() << " instead";
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(input.size(1) == (weight.size(1) * groups),
+             "Given groups=", groups, ", weight of size ", weight.sizes(),
+             ", expected input", input.sizes(), " to have ",
+             (weight.size(1) * groups), " channels, but got ", input.size(1),
+             " channels instead");
+    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight.size(0)),
+             "Given weight of size ", weight.sizes(),
+             ", expected bias to be 1-dimensional with ", weight.size(0), " elements",
+             ", but got bias of size ", bias.sizes(), " instead");
   } else { // transposed
-    if (input.size(1) != weight.size(0)) {
-      std::stringstream ss;
-      ss << "Given transposed=" << transposed << ", weight of size " << weight.sizes()
-         << ", expected input" << input.sizes() << " to have "
-         << weight.size(0) << " channels, but got " << input.size(1)
-         << " channels instead";
-      throw std::runtime_error(ss.str());
-    }
-    if (bias.defined() && (bias.ndimension() != 1 || bias.size(0) != weight.size(1) * groups)) {
-      std::stringstream ss;
-      ss << "Given transposed=" << transposed << ", weight of size " << weight.sizes()
-         << ", expected bias to be 1-dimensional with " << weight.size(1) * groups << " elements"
-         << ", but got bias of size " << bias.sizes() << " instead";
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(input.size(1) == weight.size(0),
+             "Given transposed=", transposed, ", weight of size ", weight.sizes(),
+             ", expected input", input.sizes(), " to have ", weight.size(0),
+             " channels, but got ", input.size(1), " channels instead");
+    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight.size(1) * groups),
+             "Given transposed=", transposed, ", weight of size ", weight.sizes(),
+             ", expected bias to be 1-dimensional with ", weight.size(1) * groups, " elements",
+             ", but got bias of size ", bias.sizes(), " instead");
   }
 }
 
 static auto view4d(const at::Tensor& tensor) -> at::Tensor {
-  if (tensor.ndimension() != 3) throw std::runtime_error("expected 3D tensor");
+  AT_CHECK(tensor.ndimension() == 3,
+           "expected 3D tensor, got tensor with ", tensor.ndimension(),
+           " dimensions instead");
   return tensor.unsqueeze(2);
 }
 
 static auto view3d(const at::Tensor& tensor) -> at::Tensor {
-  if (tensor.ndimension() != 4) throw std::runtime_error("expected 4D tensor");
+  AT_CHECK(tensor.ndimension() == 4,
+           "expected 4D tensor, got tensor with ", tensor.ndimension(),
+           " dimensions instead");
   return tensor.squeeze(2);
 }
 
@@ -293,7 +274,7 @@ static inline std::vector<int64_t> convolution_expand_param_if_needed(
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
        << "dimensions, but got " << param_name << "=" << list_param;
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   } else {
     return list_param.vec();
   }
@@ -311,9 +292,7 @@ at::Tensor _convolution(
   auto k = weight.ndimension();
   int64_t dim = k - 2;
 
-  if (dim <= 0) {
-    throw std::runtime_error("weight should have at least two dimensions");
-  }
+  AT_CHECK(dim > 0, "weight should at least have at least two dimensions");
 
   ConvParams params;
   params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);
@@ -326,8 +305,8 @@ at::Tensor _convolution(
   params.deterministic = deterministic;
   params.cudnn_enabled = cudnn_enabled;
 
-  if (params.is_padding_neg()) throw std::runtime_error("negative padding is not supported");
-  if (params.is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
+  AT_CHECK(!params.is_padding_neg(), "negative padding is not supported");
+  AT_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
 
   check_input_shape_forward(input, weight, bias, params.groups, params.transposed);
 
@@ -349,16 +328,12 @@ at::Tensor _convolution(
 
       output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
   } else if (params.use_cudnn(input)) {
-    if (input.type() != weight.type()){
-      std::stringstream ss;
-      ss << "Input type (" << input.type().toString() << ") and weight type (" << weight.type().toString() << ") should be the same";
-      throw std::runtime_error(ss.str());
-    }
-    if (bias.defined() && input.type() != bias.type()){
-      std::stringstream ss;
-      ss << "Input type (" << input.type().toString() << ") and bias type (" << bias.type().toString() << ") should be the same";
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(input.type() == weight.type(),
+             "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
+             ") should be the same");
+    AT_CHECK(!bias.defined() || (input.type() == bias.type()),
+             "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
+             ") should be the same");
 
     if (params.transposed) {
       output = at::cudnn_convolution_transpose(
@@ -370,16 +345,12 @@ at::Tensor _convolution(
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
   } else if (params.use_miopen(input)) {
-    if (input.type() != weight.type()){
-      std::stringstream ss;
-      ss << "Input type (" << input.type().toString() << ") and weight type (" << weight.type().toString() << ") should be the same";
-      throw std::runtime_error(ss.str());
-    }
-    if (bias.defined() && input.type() != bias.type()){
-      std::stringstream ss;
-      ss << "Input type (" << input.type().toString() << ") and bias type (" << bias.type().toString() << ") should be the same";
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(input.type() == weight.type(),
+             "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
+             ") should be the same");
+    AT_CHECK(!bias.defined() || (input.type() == bias.type()),
+             "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
+             ") should be the same");
 
     if (params.transposed) {
       output = at::miopen_convolution_transpose(
@@ -392,16 +363,12 @@ at::Tensor _convolution(
     }
   } else if (params.use_mkldnn(input)) {
 #if AT_MKLDNN_ENABLED()
-    if (input.type() != weight.type()){
-      std::stringstream ss;
-      ss << "Input type (" << input.toString() << ") and weight type (" << weight.toString() << ") should be the same";
-      throw std::runtime_error(ss.str());
-    }
-    if (bias.defined() && input.type() != bias.type()){
-      std::stringstream ss;
-      ss << "Input type (" << input.toString() << ") and bias type (" << bias.toString() << ") should be the same";
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(input.type() == weight.type(),
+             "Input type (", input.type().toString(), ") and weight type (", weight.type().toString(),
+             ") should be the same");
+    AT_CHECK(!bias.defined() || (input.type() == bias.type()),
+             "Input type (", input.type().toString(), ") and bias type (", bias.type().toString(),
+             ") should be the same");
 
     output = at::mkldnn_convolution(input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
 #endif
@@ -487,7 +454,7 @@ at::Tensor _convolution_nogroup(
     }
   }
 
-  throw std::runtime_error("unsupported ConvNd parameters");
+  AT_ERROR("unsupported ConvNd parameters");
 }
 
 static Tensor subvariable(const Tensor& var, int dim, int groups, int g) {

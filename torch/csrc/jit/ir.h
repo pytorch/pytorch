@@ -190,6 +190,9 @@ public:
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
+  bool requires_grad() const {
+    return type()->requires_grad();
+  }
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
@@ -993,7 +996,9 @@ public:
     return create(prim::Undefined);
   }
   Node * createNoneGenerator() {
-    return create(prim::NoneGenerator);
+    auto n = create(prim::NoneGenerator);
+    n->output()->setType(GeneratorType::get());
+    return n;
   }
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
@@ -1059,6 +1064,12 @@ public:
     JIT_ASSERT(*value->type() == *FloatType::get());
     auto* result = create(prim::FloatToInt, {value});
     result->output()->setType(IntType::get());
+    return result;
+  }
+  Node* createStringToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *StringType::get());
+    auto* result = create(prim::StringToFloat, {value});
+    result->output()->setType(FloatType::get());
     return result;
   }
   Node* createPythonOp(
@@ -1391,8 +1402,8 @@ struct PythonOp : public Node {
   // TraceInterpreterState for execution semantics.
   THPObjectPtr pyobj;
   // The calling convention for the Python function.
-  // 's' -- python scalar argument
-  // 't' -- tensor argument
+  // 'c' -- constant argument
+  // 'd' -- dynamic argument
   std::string cconv;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.

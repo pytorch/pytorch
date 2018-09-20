@@ -91,8 +91,8 @@ class PrintOp final : public Operator<Context> {
       return true;
     }
 
-    if (!this->template InputIsType<Tensor>(0, Context::GetDeviceType()) &&
-        !this->template InputIsType<Tensor>(0, CPU)) {
+    if (!this->InputIsTensorType(0, Context::GetDeviceType()) &&
+        !this->InputIsTensorType(0, CPU)) {
       LOG(INFO) << "Blob of type: "
                 << OperatorBase::Inputs().at(0)->meta().name();
       return true;
@@ -113,7 +113,7 @@ class PrintOp final : public Operator<Context> {
         unsigned char,
         std::string>;
 
-    if (this->template InputIsType<Tensor>(0, CPU)) {
+    if (this->InputIsTensorType(0, CPU)) {
       return DispatchHelper<Types>::call(
           this, this->template Input<Tensor>(0, CPU));
     } else {
@@ -129,7 +129,7 @@ class PrintOp final : public Operator<Context> {
     // will handle memory deallocation itself so no smart pointer is needed.
     const TensorCPU* tensor;
     Tensor tensor_copy_if_needed(CPU);
-    if (this->template InputIsType<Tensor>(0, CPU)) {
+    if (this->InputIsTensorType(0, CPU)) {
       tensor = &this->template Input<Tensor>(0, CPU);
     } else {
       tensor_copy_if_needed.CopyFrom(Input(0), &context_);
@@ -325,7 +325,7 @@ class WeightedSumOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    const int input_size = InputSize();
+    const int input_size = this->InputSize();
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
@@ -696,33 +696,6 @@ class ScatterAssignOp : public Operator<Context> {
   }
 
   INPUT_TAGS(DATA, INDICES, SLICES);
-};
-
-template <class Context, class DstContext, class SrcContext>
-class CopyOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(CopyOp);
-
-  bool RunOnDevice() override {
-    auto& input = this->template Input<Tensor>(0, SrcContext::GetDeviceType());
-    auto* output =
-        this->template Output<Tensor>(0, DstContext::GetDeviceType());
-    output->ResizeLike(input);
-    this->context_.template CopyItems<SrcContext, DstContext>(
-        input.meta(),
-        input.size(),
-        input.raw_data(),
-        output->raw_mutable_data(input.meta()));
-    return true;
-  }
-};
-
-template <class Context, class DstContext, class SrcContext>
-class CopyOnDeviceLikeOp : public CopyOp<Context, DstContext, SrcContext> {
- public:
-  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
-      : CopyOp<Context, DstContext, SrcContext>(operator_def, ws) {}
 };
 
 template <class Context>

@@ -28,7 +28,7 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
     'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice', 'randint(_out)?',
     '_local_scalar', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear'
+    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -427,9 +427,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['actuals'] = actuals
 
         if has_tensor_options:
-            env['initialize_cuda'] = 'maybe_initialize_cuda(at::getType(options));'
+            env['initialize_cuda'] = 'maybe_initialize_cuda(options);'
         else:
-            env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(type_args[0]['name']) if type_args else ''
+            env['initialize_cuda'] = ''
 
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']

@@ -124,17 +124,19 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-profiler::RecordFunction profiler("${name}");""")
+profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr());""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
 torch::jit::Node* node = nullptr;
+std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
-  auto& graph = jit::tracer::getTracingState()->graph;
-  node = graph->create(jit::aten::${trace_name}, /*outputs=*/0);
+  tracer_state = jit::tracer::getTracingState();
+  node = tracer_state->graph->create(jit::aten::${trace_name}, /*outputs=*/0);
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
-  graph->appendNode(node);
+  tracer_state->graph->appendNode(node);
   ${inplace_guard}
+  jit::tracer::setTracingState(nullptr);
 }
 """)
 
@@ -145,34 +147,19 @@ jit::tracer::ensureUnique("${name}", ${mutable_input});
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
-if (jit::tracer::isTracing()) {
+if (tracer_state) {
+  jit::tracer::setTracingState(std::move(tracer_state));
   ${record_trace_outputs}
 }
 """)
 
-RECORD_ATTRIBUTE = CodeTemplate("""\
-setattr(trace_info.n, jit::attr::${attr_name}, ${name});""")
-
-RECORD_POSITIONAL_ATTRIBUTE = CodeTemplate("""\
-setposattr(trace_info.n, ${i}, "${name}", ${name});""")
-
-POSITIONAL_ATTR_NYI = """\
-throw std::runtime_error("Can't have size-dependent arguments to functions that "
-                         "take variable number of tensor arguments");
-"""
-
 
 def should_trace(declaration):
-    # Operations involving Generator, Storage, Type are not traceable
-    # at the moment
-    if any(arg['simple_type'] in {'Generator', 'Storage', 'ScalarType', 'Type', 'optional<ScalarType>'}
-            for arg in declaration['arguments']):
+    # Operations involving Storage or Type are not traceable at the moment
+    if any(arg['simple_type'] in {'Storage', 'Type'} for arg in declaration['arguments']):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
     if 'Tensor' not in declaration['return_type']:
-        return False
-    tensor_args = [arg for arg in declaration['arguments'] if arg['simple_type'] in {'Tensor', 'TensorList'}]
-    if len(tensor_args) == 0:
         return False
     name = declaration['name']
     base_name = name[:-1] if declaration['inplace'] else name[:-4] if name.endswith('_out') else name

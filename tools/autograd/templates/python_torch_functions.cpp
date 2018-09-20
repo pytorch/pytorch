@@ -19,6 +19,7 @@
 #include "torch/csrc/utils/tensor_layouts.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
@@ -64,7 +65,7 @@ inline Tensor dispatch_arange(Scalar end, Tensor result) {
 }
 
 inline Tensor dispatch_arange(Scalar end, const TensorOptions& options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::arange(end, options);
 }
@@ -75,7 +76,7 @@ inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor resu
 }
 
 inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::arange(start, end, step, options);
 }
@@ -146,7 +147,7 @@ inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, Tensor resul
 }
 
 inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   DeviceGuard device_guard(options.device());
   return torch::range(start, end, step, options);
@@ -188,7 +189,7 @@ inline Tensor dispatch_randint(int64_t high, IntList size, Generator * generator
   return at::randint_out(result, high, size, generator);
 }
 inline Tensor dispatch_randint(int64_t high, IntList size, Generator * generator, const TensorOptions & options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(high, size, generator, options);
 }
@@ -197,7 +198,7 @@ inline Tensor dispatch_randint(int64_t high, IntList size, Tensor result) {
   return at::randint_out(result, high, size);
 }
 inline Tensor dispatch_randint(int64_t high, IntList size, const TensorOptions & options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(high, size, options);
 }
@@ -206,7 +207,7 @@ inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Generato
   return at::randint_out(result, low, high, size, generator);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Generator * generator, const TensorOptions & options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(low, high, size, generator, options);
 }
@@ -215,7 +216,7 @@ inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, Tensor r
   return at::randint_out(result, low, high, size);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntList size, const TensorOptions & options) {
-  maybe_initialize_cuda(at::getType(options));
+  maybe_initialize_cuda(options);
   AutoNoGIL no_gil;
   return torch::randint(low, high, size, options);
 }
@@ -320,6 +321,7 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.as_tensor", jit::tracer::WARN_CONSTRUCTOR);
   return THPVariable_Wrap(torch::utils::as_tensor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -327,6 +329,7 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
 static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.from_numpy", jit::tracer::WARN_CONSTRUCTOR);
   auto data = torch::utils::tensor_from_numpy(arg);
   return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
   END_HANDLE_TH_ERRORS
@@ -351,6 +354,7 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
 static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.sparse_coo_tensor", jit::tracer::WARN_CONSTRUCTOR);
   return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
@@ -358,6 +362,7 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.tensor", jit::tracer::WARN_CONSTRUCTOR);
   return THPVariable_Wrap(torch::utils::tensor_ctor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }

@@ -1,7 +1,5 @@
 #pragma once
 
-// ${generated_comment}
-
 #include "ATen/core/Device.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
@@ -9,9 +7,9 @@
 #include "ATen/core/SparseTensorRef.h"
 #include "ATen/core/Storage.h"
 #include "ATen/core/TensorAccessor.h"
-#include "ATen/TensorImpl.h"
+#include "ATen/core/TensorImpl.h"
 #include "ATen/core/optional.h"
-#include "ATen/UndefinedTensor.h"
+#include "ATen/core/UndefinedTensorImpl.h"
 #include "ATen/core/Error.h"
 
 namespace at {
@@ -41,20 +39,12 @@ namespace at {
 // special care must be taken to handle this.
 struct AT_API Tensor {
   Tensor(){};
-  Tensor(TensorImpl* tensor_impl, bool retain)
-      : tensor_impl_(c10::intrusive_ptr<TensorImpl, UndefinedTensor>::reclaim(
-            tensor_impl)) {
-    if (tensor_impl == nullptr) {
+  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
+      : tensor_impl_(std::move(tensor_impl)) {
+    if (tensor_impl_.get() == nullptr) {
       throw std::runtime_error("TensorBaseImpl with nullptr not supported");
     }
-    if (retain && tensor_impl != UndefinedTensor::singleton()) {
-      c10::raw::intrusive_ptr::incref(tensor_impl);
-    }
   }
-  Tensor(const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& ptr)
-      : tensor_impl_(ptr) {}
-  Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensor>&& ptr)
-      : tensor_impl_(std::move(ptr)) {}
 
   Tensor(const Tensor&) = default;
   Tensor(Tensor&&) = default;
@@ -69,7 +59,7 @@ struct AT_API Tensor {
   TensorImpl * unsafeReleaseTensorImpl() {
     return tensor_impl_.release();
   }
-  const c10::intrusive_ptr<TensorImpl, UndefinedTensor>& getIntrusivePtr() const {
+  const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr() const {
     return tensor_impl_;
   }
 
@@ -152,7 +142,7 @@ struct AT_API Tensor {
     return tensor_impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return tensor_impl_->scalar_type();
+    return dataTypeToScalarType(tensor_impl_->dtype().id());
   }
   const Storage& storage() const {
     return tensor_impl_->storage();
@@ -161,12 +151,6 @@ struct AT_API Tensor {
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
   Tensor toType(ScalarType t) const;
   Tensor toBackend(Backend b) const;
-
-  /// New-style `to()` methods.
-  /// NB: These methods are defined in TensorOptions.h.
-  Tensor to(Device device, ScalarType dtype, bool non_blocking = false) const;
-  Tensor to(ScalarType dtype, bool non_blocking = false) const;
-  Tensor to(Device device, bool non_blocking = false) const;
 
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
   /// Defined in Type.h because of include order issues.
@@ -202,6 +186,8 @@ struct AT_API Tensor {
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_C_TYPE)
   #undef TO_C_TYPE
 
+  // Return a `TensorAccessor` for CPU `Tensor`s. You have to specify scalar type and
+  // dimension.
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() const& {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
@@ -210,6 +196,20 @@ struct AT_API Tensor {
   }
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() && = delete;
+
+  // Return a `PackedTensorAccessor` for CUDA `Tensor`s. You have to specify scalar type and
+  // dimension. You can optionally specify RestrictPtrTraits as a template parameter to
+  // cast the data pointer to a __restrict__ pointer.
+  // In order to use this, your CUDA kernel has to take a corresponding PackedTensorAccessor
+  // as an argument.
+  template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
+    PackedTensorAccessor<T,N,PtrTraits> packed_accessor() const& {
+    static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
+    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
+    return PackedTensorAccessor<T,N,PtrTraits>(static_cast<typename PtrTraits<T>::PtrType>(data<T>()),sizes().data(),strides().data());
+  }
+  template<typename T, size_t N,  template <typename U> class PtrTraits = DefaultPtrTraits>
+  PackedTensorAccessor<T,N> packed_accessor() && = delete;
 
   Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
@@ -267,7 +267,7 @@ struct AT_API Tensor {
   friend struct WeakTensor;
 
 protected:
-  c10::intrusive_ptr<TensorImpl, UndefinedTensor> tensor_impl_;
+  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl_;
 };
 
 struct AT_API WeakTensor {
@@ -295,6 +295,8 @@ struct AT_API WeakTensor {
   }
 
 private:
-  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensor> weak_tensor_impl_;
+  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_tensor_impl_;
 };
 } // namespace at
+
+#include "ATen/core/TensorMethods.h"

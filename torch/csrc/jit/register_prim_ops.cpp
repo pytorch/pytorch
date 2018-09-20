@@ -3,7 +3,7 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
@@ -13,10 +13,12 @@
 
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
+#include <string>
 #include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
@@ -53,10 +55,10 @@ RegisterOperators reg({
     Operator(
         prim::FusionGroup,
         [](Node* node) {
-          auto kernel_cache = sharedFusionCompiler().getOrCompile(node);
-          return [kernel_cache](Stack& stack) {
+          auto handle = getFusionHandle(node);
+          return [handle](Stack& stack) {
             autograd::profiler::RecordFunction record("FusionGroup");
-            kernel_cache->run(stack);
+            handle->run(stack);
             return 0;
           };
         }),
@@ -135,6 +137,21 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::StringToFloat,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto s = pop(stack).toString();
+            if (s->string() != "inf") {
+              AT_ERROR(
+                  "Only 'inf' can be cast to a float, but got '",
+                  s->string(),
+                  "'");
+            }
+            push(stack, std::numeric_limits<double>::infinity());
+            return 0;
+          };
+        }),
+    Operator(
         prim::Undefined,
         [](Node* node) {
           return [](Stack& stack) {
@@ -146,7 +163,7 @@ RegisterOperators reg({
         prim::NoneGenerator,
         [](Node* node) {
           return [](Stack& stack) {
-            stack.push_back(at::Tensor());
+            stack.emplace_back();
             return 0;
           };
         }),
@@ -390,14 +407,14 @@ RegisterOperators reg({
 });
 
 // define implementations for primitive number ops
-#define DEFINE_GENERIC_OP(aten_op, op, float_result)                        \
+#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, float_result)          \
   Operator(                                                                 \
       #aten_op "(int a, int b) -> int",                                     \
       [](Node* node) {                                                      \
         return [=](Stack& stack) {                                          \
           int64_t a, b;                                                     \
           pop(stack, a, b);                                                 \
-          push(stack, op);                                                  \
+          push(stack, int_op);                                                  \
           return 0;                                                         \
         };                                                                  \
       }),                                                                   \
@@ -406,7 +423,7 @@ RegisterOperators reg({
         return [=](Stack& stack) {                                          \
           double a, b;                                                      \
           pop(stack, a, b);                                                 \
-          push(stack, op);                                                  \
+          push(stack, float_op);                                                  \
           return 0;                                                         \
         };                                                                  \
       }),
@@ -421,8 +438,8 @@ RegisterOperators reg({
     };                                                        \
   }),
 
-#define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, float)
-#define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, int)
+#define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, float)
+#define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, int)
 
 // define helpers for where aten is missing scalar overloads
 // note: it would be better to define these in a standard library as
@@ -617,6 +634,11 @@ RegisterOperators reg2({
     DEFINE_BINARY_OP(aten::sub, a - b)
     DEFINE_BINARY_OP(aten::mul, a * b)
     DEFINE_BINARY_OP(aten::pow, static_cast<decltype(a)>(pow(a, b)))
+
+    // Pass in two ops for handling int and float separately as % in C++ only works for int
+    // The modulus calculation is different between C++ and Python (on negative), we preserve
+    // the python behavior as it's more common and match python syntax, hence the conversion.
+    DEFINE_GENERIC_OP(aten::remainder, (b + (a % b)) % b, fmod((b + fmod(a, b)), b), float)
 
     // TODO: Support python floordiv (//)
     // Right now aten::floordiv is only used by loop unrolling

@@ -12,7 +12,7 @@ from functools import reduce, wraps
 
 import torch
 import torch.cuda
-import torch.distributed.c10d as dist
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -234,6 +234,36 @@ class _DistTestBase(object):
         default_grp = dist.get_default_group()
         self.assertNotEqual(default_grp, None)
 
+    def test_get_backend(self):
+        if dist.get_world_size() > 2:
+            group = [1, 2]
+        else:
+            group = [0, 1]
+        group_id = dist.new_group(group)
+        backend_str = BACKEND.lower()
+        self.assertEqual(dist.get_backend(), backend_str)
+        if dist.get_rank() in group:
+            self.assertEqual(dist.get_backend(group_id), backend_str)
+        else:
+            with self.assertRaisesRegex(RuntimeError, "Invalid process group specified"):
+                dist.get_backend(group_id)
+
+    def test_DistBackend(self):
+        # test parsing
+        backend = BACKEND.lower()
+        self.assertEqual(dist.DistBackend(BACKEND.upper()), backend)
+        self.assertEqual(dist.DistBackend(BACKEND), backend)
+        with self.assertRaisesRegex(ValueError, "Invalid backend: 'undefined'"):
+            dist.DistBackend("undefined")
+        with self.assertRaisesRegex(ValueError, "Invalid backend: 'xYz'"):
+            dist.DistBackend("xYz")
+        with self.assertRaises(ValueError):
+            dist.DistBackend(None)
+        with self.assertRaises(ValueError):
+            dist.DistBackend(3)
+        with self.assertRaises(ValueError):
+            dist.DistBackend(["gloo"])
+
     # Test destroy
     def test_destroy_group(self):
         if dist.get_world_size() > 2:
@@ -321,6 +351,26 @@ class _DistTestBase(object):
 
         self.assertEqual(len(recv_ranks), dist.get_world_size() - 1)
         self._barrier()
+
+    # SEND RECV WITH TAG
+    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support send/recv")
+    def test_send_recv_with_tag(self):
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        tensor = _build_tensor(10, value=rank)
+
+        for dst in range(0, world_size):
+            if dst == rank:
+                # Recv mode
+                for src in range(0, world_size):
+                    if src == rank:
+                        continue
+                    output_tensor = _build_tensor(10, value=-1)
+                    dist.recv(output_tensor, src, tag=src)
+                    self.assertTrue(output_tensor.eq(src).all())
+            else:
+                # Send mode
+                dist.send(tensor, dst, tag=rank)
 
     # ISEND
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support isend")
@@ -1126,30 +1176,21 @@ class _DistTestBase(object):
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(batch_size)]
 
-    @unittest.skipIf(
-        BACKEND != "nccl" and BACKEND != "gloo",
-        "Only Nccl & Gloo backend support DistributedDataParallel",
-    )
-    @skip_if_no_cuda_distributed
-    @skip_if_no_gpu
-    def test_DistributedDataParallel(self):
+    def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None):
         # Run a simple end to end DDP model, use result of single node model
         # as baseline
-        group, group_id, rank = self._init_global_test()
-        rank_to_GPU = self._init_multigpu_helper()
 
         # cpu training setup
         model = self._create_Net()
 
         # single gpu training setup
         model_gpu = copy.deepcopy(model)
-        gpu_subset = list(rank_to_GPU[rank])
         model_gpu.cuda(gpu_subset[0])
 
         # DDP training setup
         model_DDP = copy.deepcopy(model)
         model_DDP.cuda(gpu_subset[0])
-        model_DDP = nn.parallel._DistributedDataParallelC10d(
+        model_DDP = nn.parallel.DistributedDataParallel(
             model_DDP, device_ids=gpu_subset
         )
 
@@ -1183,7 +1224,7 @@ class _DistTestBase(object):
 
         # DDP-CPU training setup
         model_DDP = copy.deepcopy(model_base)
-        model_DDP = nn.parallel._DistributedDataParallelC10dCPU(model_DDP)
+        model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
 
         # dummy data initialization
         local_bs = 2
@@ -1195,6 +1236,22 @@ class _DistTestBase(object):
         )
         self._barrier()
 
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_gpu
+    def test_DistributedDataParallel(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        gpus = list(rank_to_GPU[rank])
+        self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank)
+
+        # test output_device
+        self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
+
+        # test device_ids
+        gpus = list(map(lambda i: torch.device('cuda:' + str(i)), gpus))
+        self._test_DistributedDataParallel(gpu_subset=gpus, rank=rank, output_device=torch.device('cuda'))
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
@@ -1265,6 +1322,12 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     sys.exit(SKIP_IF_BACKEND_UNAVAILABLE)
                     # sys.exit(0)
                 raise
+
+            # Execute barrier prior to running test to ensure that every process
+            # has finished initialization and that the following test
+            # immediately exiting due to a skip doesn't cause flakiness.
+            self._barrier()
+
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
             getattr(self, self.id().split(".")[2])()

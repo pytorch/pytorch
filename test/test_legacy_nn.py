@@ -1,10 +1,10 @@
 import math
 import random
 import unittest
-import collections
 from copy import deepcopy
 
 import torch
+from torch._six import container_abcs
 import torch.legacy.nn as nn
 from common import to_gpu, freeze_rng_state, run_tests, skipIfRocm, TEST_WITH_ROCM
 from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
@@ -699,7 +699,7 @@ def require_grad(input):
         input = input.detach()
         input.requires_grad = True
         return input
-    elif isinstance(input, collections.Iterable):
+    elif isinstance(input, container_abcs.Iterable):
         return type(input)(require_grad(e) for e in input)
     return input
 

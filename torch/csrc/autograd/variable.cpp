@@ -22,7 +22,7 @@
 namespace torch {
 namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(data.type().type_id(), data.type().scalarType(), data.type().allocator(), /* is variable */ true),
+    : TensorImpl(data.type().type_id(), data.type().typeMeta(), data.type().allocator(), /* is variable */ true),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
@@ -108,7 +108,9 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   if (result)
     return result;
 
-  result = std::make_shared<AccumulateGrad>(Variable(this, true));
+  c10::raw::intrusive_ptr::incref(this);
+  auto intrusive_from_this = c10::intrusive_ptr<Variable::Impl>::reclaim(this);
+  result = std::make_shared<AccumulateGrad>(Variable(std::move(intrusive_from_this)));
   grad_accumulator_ = result;
   return result;
 }
@@ -157,7 +159,7 @@ void Variable::Impl::set_data(Tensor new_data) {
   }
 
   // Updates metadata
-  scalar_type_ = new_data.type().scalarType();
+  data_type_ = new_data.type().typeMeta();
   type_id_ = new_data.type().type_id();
   is_variable_ = true;
   data_ = std::move(new_data);

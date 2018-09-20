@@ -3,15 +3,20 @@
 #include <gloo/allreduce_halving_doubling.h>
 #include <gloo/allreduce_ring_chunked.h>
 #include <gloo/broadcast_one_to_all.h>
+
+#ifdef USE_CUDA
 #include <gloo/cuda_allreduce_halving_doubling.h>
 #include <gloo/cuda_allreduce_ring_chunked.h>
 #include <gloo/cuda_broadcast_one_to_all.h>
+#endif
+
 #include <gloo/rendezvous/context.h>
 #include <gloo/transport/tcp/device.h>
 
+#ifdef USE_CUDA
 #include <THC.h>
-
 #include <c10d/private/CUDAUtils.hpp>
+#endif
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
@@ -94,6 +99,7 @@ const ::gloo::ReductionFunction<T>* reductionFunction(const ReduceOp& r) {
   throw std::runtime_error("Unhandled ReduceOp");
 }
 
+#ifdef USE_CUDA
 std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
   std::vector<cudaStream_t> streams(entry.streams.size());
   for (size_t i = 0; i < entry.streams.size(); i++) {
@@ -124,14 +130,22 @@ void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
     C10D_CUDA_CHECK(cudaStreamWaitEvent(privateStream, event, 0));
   }
 }
+#endif
 
 } // namespace
 
-ProcessGroupGloo::WorkGloo::WorkGloo() : completed_(false), cuda_(false) {}
+ProcessGroupGloo::WorkGloo::WorkGloo()
+    : completed_(false)
+#ifdef USE_CUDA
+      ,
+      cuda_(false)
+#endif
+{
+}
 
 ProcessGroupGloo::WorkGloo::~WorkGloo() {}
 
-bool ProcessGroupGloo::WorkGloo::isCompleted() const {
+bool ProcessGroupGloo::WorkGloo::isCompleted() {
   return completed_;
 }
 
@@ -140,6 +154,7 @@ bool ProcessGroupGloo::WorkGloo::isSuccess() const {
 }
 
 void ProcessGroupGloo::WorkGloo::synchronize() {
+#ifdef USE_CUDA
   if (cuda_) {
     auto thcState = ::at::globalContext().lazyInitCUDA();
     for (size_t i = 0; i < devices_.size(); i++) {
@@ -148,6 +163,7 @@ void ProcessGroupGloo::WorkGloo::synchronize() {
       C10D_CUDA_CHECK(cudaStreamWaitEvent(stream, event, 0));
     }
   }
+#endif
 }
 
 bool ProcessGroupGloo::WorkGloo::wait() {
@@ -170,8 +186,8 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
   {
     std::unique_lock<std::mutex> lock(m_);
     completed_ = true;
+#ifdef USE_CUDA
     cuda_ = entry.key.type->is_cuda();
-
     // Populate devices and events so that we can later synchronize
     // with the operation associated with this work finishing.
     if (cuda_) {
@@ -186,6 +202,7 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
         C10D_CUDA_CHECK(cudaEventRecord(event, stream));
       }
     }
+#endif
   }
   cv_.notify_all();
 }
@@ -203,11 +220,9 @@ void ProcessGroupGloo::WorkGloo::finishWithException(
 ProcessGroupGloo::SendWork::SendWork(
     at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
-    : tensor_(tensor),
-      buffer_(std::move(buffer)) {
-}
+    : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-bool ProcessGroupGloo::SendWork::isCompleted() const {
+bool ProcessGroupGloo::SendWork::isCompleted() {
   // No way to poll for completion yet
   return true;
 }
@@ -235,12 +250,9 @@ ProcessGroupGloo::RecvWork::RecvWork(
     at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
     int* srcRank)
-    : tensor_(tensor),
-      buffer_(std::move(buffer)),
-      srcRank_(srcRank) {
-}
+    : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(srcRank) {}
 
-bool ProcessGroupGloo::RecvWork::isCompleted() const {
+bool ProcessGroupGloo::RecvWork::isCompleted() {
   // No way to poll for completion yet
   return true;
 }
@@ -295,7 +307,9 @@ ProcessGroupGloo::ProcessGroupGloo(
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this);
   }
 
+#ifdef USE_CUDA
   thcState_ = ::at::globalContext().lazyInitCUDA();
+#endif
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -405,6 +419,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
     return;
   }
 
+#ifdef USE_CUDA
   if (backend == at::Backend::CUDA) {
     if (getSize() < 16) {
       entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
@@ -423,6 +438,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
     }
     return;
   }
+#endif
 
   throw std::runtime_error(
       "Unhandled backend: " + std::string(at::toString(backend)));
@@ -448,6 +464,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
     return;
   }
 
+#ifdef USE_CUDA
   if (backend == at::Backend::CUDA) {
     entry.algorithm =
         std::unique_ptr<::gloo::Algorithm>(new ::gloo::CudaBroadcastOneToAll<T>(
@@ -459,6 +476,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
             getStreamVector(entry)));
     return;
   }
+#endif
 
   throw std::runtime_error(
       "Unhandled backend: " + std::string(at::toString(backend)));
@@ -483,10 +501,18 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   auto& srcSizes = key.srcSizes;
   entry->src.resize(srcSizes.size());
   for (size_t i = 0; i < srcSizes.size(); i++) {
+#ifdef USE_CUDA
     deviceGuard.set_index(key.type->is_cuda() ? key.devices[i] : -1);
+#else
+    if (key.type->is_cuda()) {
+      throw std::runtime_error("ProcessGroupGloo is not built with CUDA");
+    }
+    deviceGuard.set_index(-1);
+#endif
     entry->src[i] = key.type->tensor(srcSizes[i]);
   }
 
+#ifdef USE_CUDA
   // If these are CUDA tensors, create streams and events
   if (key.type->is_cuda()) {
     entry->streams.resize(key.devices.size());
@@ -497,6 +523,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
       entry->events[i] = CUDAEvent::create();
     }
   }
+#endif
 
   return entry;
 }
@@ -561,6 +588,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     entry->src[opts.rootTensor].copy_(tensors[opts.rootTensor]);
   }
 
+#ifdef USE_CUDA
   // In case of CUDA, ensure that operations that are queued after
   // this collective wait for the collective to complete.
   if (key.type->is_cuda()) {
@@ -576,13 +604,16 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
       }
     };
   } else {
+#endif
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (size_t i = 0; i < tensors.size(); i++) {
         tensors[i].copy_(entry->src[i]);
       }
     };
+#ifdef USE_CUDA
   }
+#endif
 
   return enqueue(entry);
 }
@@ -607,6 +638,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     entry->src[i].copy_(tensors[i]);
   }
 
+#ifdef USE_CUDA
   // In case of CUDA, ensure that operations that are queued after
   // this collective wait for the collective to complete.
   if (key.type->is_cuda()) {
@@ -622,14 +654,16 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
       }
     };
   } else {
+#endif
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (size_t i = 0; i < tensors.size(); i++) {
         tensors[i].copy_(entry->src[i]);
       }
     };
+#ifdef USE_CUDA
   }
-
+#endif
   return enqueue(entry);
 }
 
@@ -673,17 +707,26 @@ at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   return tensor;
 }
 
+uint32_t checkTag(int32_t tag) {
+  if (tag < 0) {
+    throw std::runtime_error("Tag must be >= 0");
+  }
+  return (uint32_t) tag;
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
     std::vector<at::Tensor>& tensors,
-    int dstRank) {
+    int dstRank,
+    int tag) {
   auto& tensor = checkSingleTensor(tensors);
+  auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.type().elementSizeInBytes();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
   auto buf = context->createUnboundBuffer(ptr, size);
-  buf->send(dstRank, 0);
+  buf->send(dstRank, utag);
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the send.
@@ -692,15 +735,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
     std::vector<at::Tensor>& tensors,
-    int srcRank) {
+    int srcRank,
+    int tag) {
   auto& tensor = checkSingleTensor(tensors);
+  auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.type().elementSizeInBytes();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
   auto buf = context->createUnboundBuffer(ptr, size);
-  buf->recv(srcRank, 0);
+  buf->recv(srcRank, utag);
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
@@ -709,8 +754,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
     std::vector<at::Tensor>& tensors,
-    int* srcRank) {
+    int* srcRank,
+    int tag) {
   auto& tensor = checkSingleTensor(tensors);
+  auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.type().elementSizeInBytes();
 
@@ -727,7 +774,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
     srcRanks.push_back(i);
   }
 
-  buf->recv(srcRanks, 0);
+  buf->recv(srcRanks, utag);
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.

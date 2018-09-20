@@ -36,7 +36,7 @@ class MPIBroadcastOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     CAFFE_ENFORCE(
-        OperatorBase::OutputIsType<Tensor>(0, Context::GetDeviceType()),
+        OperatorBase::OutputIsTensorType(0, Context::GetDeviceType()),
         "Output is of wrong type.");
     auto* output = Output(0);
     // Make sure that output is already allocated.

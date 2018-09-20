@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/detail/static.h>
+#include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/any.h>
 #include <torch/nn/pimpl.h>
@@ -17,18 +18,81 @@
 
 namespace torch {
 namespace nn {
-/// A `Sequential` module is a container for any number of other modules. Its
-/// `forward()` method chains outputs to inputs and returns the final output.
-/// The `Sequential` class reference semantics.
+
+/// A list of `Module`s that acts as a `Module` itself.
+///
+/// A `Sequential` is fundamentally a list of `Module`s, each with a `forward()`
+/// method. `Sequential` provides a `forward()` method of its own, which accepts
+/// any input and forwards it to the first module it stores. It then "chains"
+/// outputs to inputs sequentially for each subsequent module, finally returning
+/// the output of the last module. For example:
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   torch::nn::Sequential seq(
+///     torch::nn::Linear(3, 4),
+///     torch::nn::BatchNorm(4),
+///     torch::nn::Dropout(0.5)
+///   );
+///
+///   auto output = seq->forward(torch::ones(3));
+///
+/// \endrst
+///
+/// This can conceptually be thought of as the following loop (using Python as
+/// pseudocode):
+///
+/// \rst
+/// .. code-block:: python
+///
+///   def forward(sequential, input):
+///     for module in sequential:
+///       input = module(input)
+///     return input
+///
+/// \endrst
+///
+/// Why should you use `Sequential` instead of a simple `std::vector`? The value
+/// a `Sequential` provides over manually calling a sequence of modules is that
+/// it allows treating the whole container *as a single module*, such that
+/// performing a transformation on the `Sequential` applies to each of the
+/// modules it stores (which are each a registered submodule of the
+/// `Sequential`). For example, calling
+/// `.to(torch::kCUDA)` on a `Sequential` will move each module in the list to
+/// CUDA memory. For example:
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   torch::nn::Sequential seq(
+///     torch::nn::Linear(3, 4),
+///     torch::nn::BatchNorm(4),
+///     torch::nn::Dropout(0.5)
+///   );
+///
+///   // Convert all modules to CUDA.
+///   seq->to(torch::kCUDA);
+///
+/// \endrst
+///
+/// Finally, `Sequential` provides a lightweight container API, such as allowing
+/// iteration over submodules, positional access, adding a new module after
+/// construction via `push_back`, as well as joining two `Sequential`s via
+/// `extend`.
+///
+/// \rst
+/// .. attention::
+///   One current limitation of `Sequential` is that all except the first module
+///   must accept a single argument. If your modules need to take multiple
+///   arguments, you should define them to take and return tuples.
+/// \endrst
 class SequentialImpl : public Cloneable<SequentialImpl> {
  public:
   using Iterator = std::vector<AnyModule>::iterator;
   using ConstIterator = std::vector<AnyModule>::const_iterator;
 
-  /// Constructs the `Sequential` from a pack of modules. Each module can either
-  /// be a plain value (e.g. `Linear`) or a boxed value (e.g.
-  /// `shared_ptr<Linear>`). Unboxed modules will be moved into `shared_ptr`s
-  /// internally.
+  /// Constructs the `Sequential` from a variadic list of modules.
   template <typename... Modules>
   explicit SequentialImpl(Modules&&... modules) {
     modules_.reserve(sizeof...(Modules));
@@ -46,21 +110,46 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     return clone;
   }
 
-  /// `reset()` is empty for `Sequential`, since it does not have parameter of
+  /// `reset()` is empty for `Sequential`, since it does not have parameters of
   /// its own.
   void reset() override {}
 
-  /// Feeds the `inputs` to the first module, then chains the output of each
-  /// module with the input of the next, in order of construction.
-  template <typename ReturnType = Tensor, typename... ArgumentTypes>
-  ReturnType forward(ArgumentTypes&&... arguments) {
+  /// Feeds `inputs` to the first module and then chains outputs to inputs,
+  /// returning the last output.
+  ///
+  /// Conceptually the following loop in Python:
+  ///
+  /// \rst
+  /// .. code-block:: python
+  ///
+  ///   def forward(sequential, input):
+  ///     for module in sequential:
+  ///       input = module(input)
+  ///     return input
+  ///
+  /// \endrst
+  ///
+  /// The return type is taken as the first template parameter. It defaults to
+  /// `Tensor`. If the last module in the `Sequential` returns another type `T`,
+  /// you should call `forward<T>(inputs)` instead of just `forward(inputs)`:
+  ///
+  /// \rst
+  /// .. code-block:: cpp
+  ///
+  ///   torch::Tensor tensor = sequential1->forward(inputs);
+  ///   int integer = sequential2->forward<int>(inputs);
+  ///   float value = sequential3->forward<float>(inputs);
+  ///
+  /// \endrst
+  template <typename ReturnType = Tensor, typename... InputTypes>
+  ReturnType forward(InputTypes&&... inputs) {
     AT_CHECK(!is_empty(), "Cannot call forward() on an empty Sequential");
 
     auto iterator = modules_.begin();
-    auto input = iterator->forward(std::forward<ArgumentTypes>(arguments)...);
+    auto input = iterator->any_forward(std::forward<InputTypes>(inputs)...);
 
     for (++iterator; iterator != modules_.end(); ++iterator) {
-      input = iterator->forward(std::move(input));
+      input = iterator->any_forward(std::move(input));
     }
 
     // Check the return value and give a nice error message if the requsted
@@ -124,6 +213,8 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   Iterator begin() {
     return modules_.begin();
   }
+
+  /// Returns a const iterator to the start of the `Sequential`.
   ConstIterator begin() const {
     return modules_.begin();
   }
@@ -132,6 +223,8 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   Iterator end() {
     return modules_.end();
   }
+
+  /// Returns a const iterator to the end of the `Sequential`.
   ConstIterator end() const {
     return modules_.end();
   }
@@ -225,6 +318,10 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   std::vector<AnyModule> modules_;
 };
 
+/// A `ModuleHolder` subclass for `SequentialImpl`.
+/// See the documentation for `SequentialImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(Sequential);
 } // namespace nn
 } // namespace torch

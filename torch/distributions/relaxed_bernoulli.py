@@ -46,6 +46,20 @@ class LogitRelaxedBernoulli(Distribution):
             batch_shape = self._param.size()
         super(LogitRelaxedBernoulli, self).__init__(batch_shape, validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(LogitRelaxedBernoulli, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.temperature = self.temperature
+        if 'probs' in self.__dict__:
+            new.probs = self.probs.expand(batch_shape)
+            new._param = new.probs
+        else:
+            new.logits = self.logits.expand(batch_shape)
+            new._param = new.logits
+        super(LogitRelaxedBernoulli, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
@@ -64,7 +78,7 @@ class LogitRelaxedBernoulli(Distribution):
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
-        uniforms = clamp_probs(self.probs.new(shape).uniform_())
+        uniforms = clamp_probs(torch.rand(shape, dtype=probs.dtype, device=probs.device))
         return (uniforms.log() - (-uniforms).log1p() + probs.log() - (-probs).log1p()) / self.temperature
 
     def log_prob(self, value):
@@ -99,8 +113,14 @@ class RelaxedBernoulli(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
-        super(RelaxedBernoulli, self).__init__(LogitRelaxedBernoulli(temperature, probs, logits),
-                                               SigmoidTransform(), validate_args=validate_args)
+        base_dist = LogitRelaxedBernoulli(temperature, probs, logits)
+        super(RelaxedBernoulli, self).__init__(base_dist,
+                                               SigmoidTransform(),
+                                               validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(RelaxedBernoulli, _instance)
+        return super(RelaxedBernoulli, self).expand(batch_shape, _instance=new)
 
     @property
     def temperature(self):

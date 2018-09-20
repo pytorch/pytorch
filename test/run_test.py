@@ -14,13 +14,14 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from common import TEST_WITH_ROCM
-import torch.distributed.c10d as c10d
+import torch.distributed as dist
 
 TESTS = [
     'autograd',
     'cpp_extensions',
     'c10d',
     'cuda',
+    'cuda_primary_ctx',
     'dataloader',
     'distributed',
     'distributions',
@@ -59,12 +60,12 @@ DISTRIBUTED_TESTS_CONFIG = {
 }
 
 
-if c10d.is_available():
-    if c10d.is_mpi_available():
+if dist.is_available():
+    if dist.is_mpi_available():
         DISTRIBUTED_TESTS_CONFIG['mpi'] = {
             'WORLD_SIZE': '3'
         }
-    if c10d.is_nccl_available():
+    if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }

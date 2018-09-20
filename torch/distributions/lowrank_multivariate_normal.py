@@ -5,7 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import (_batch_diag, _batch_mahalanobis, _batch_mv,
                                                      _batch_potrf_lower, _batch_trtrs_lower)
-from torch.distributions.utils import lazy_property
+from torch.distributions.utils import _standard_normal, lazy_property
 
 
 def _batch_vector_diag(bvec):
@@ -116,6 +116,20 @@ class LowRankMultivariateNormal(Distribution):
         super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
                                                         validate_args=validate_args)
 
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(LowRankMultivariateNormal, _instance)
+        batch_shape = torch.Size(batch_shape)
+        loc_shape = batch_shape + self.event_shape
+        new.loc = self.loc.expand(loc_shape)
+        new.cov_diag = self.cov_diag.expand(loc_shape)
+        new.cov_factor = self.cov_factor.expand(loc_shape + self.cov_factor.shape[-1:])
+        new._capacitance_tril = self._capacitance_tril.expand(batch_shape + self._capacitance_tril.shape[-2:])
+        super(LowRankMultivariateNormal, new).__init__(batch_shape,
+                                                       self.event_shape,
+                                                       validate_args=False)
+        new._validate_args = self._validate_args
+        return new
+
     @property
     def mean(self):
         return self.loc
@@ -155,8 +169,9 @@ class LowRankMultivariateNormal(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps_W = self.loc.new_empty(shape[:-1] + (self.cov_factor.size(-1),)).normal_()
-        eps_D = self.loc.new_empty(shape).normal_()
+        W_shape = shape[:-1] + self.cov_factor.shape[-1:]
+        eps_W = _standard_normal(W_shape, dtype=self.loc.dtype, device=self.loc.device)
+        eps_D = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + _batch_mv(self.cov_factor, eps_W) + self.cov_diag.sqrt() * eps_D
 
     def log_prob(self, value):

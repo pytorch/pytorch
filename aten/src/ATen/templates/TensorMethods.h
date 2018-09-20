@@ -1,13 +1,10 @@
 #pragma once
 
-// ${generated_comment}
-
-#include "ATen/Tensor.h"
+#include "ATen/core/Tensor.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/Type.h"
+#include "ATen/core/Type.h"
 #include "ATen/core/TensorOptions.h"
-#include "ATen/DeviceGuard.h"
 
 namespace at {
 
@@ -44,45 +41,6 @@ inline TensorOptions Tensor::options() const {
                         .is_variable(is_variable());
 }
 
-namespace detail {
-inline Tensor to(
-    const Tensor& tensor,
-    const TensorOptions& options,
-    bool non_blocking) {
-  // Don't copy if the options match.
-  if (tensor.options() == options) {
-    return tensor;
-  }
-  AT_CHECK(tensor.is_variable() == options.is_variable(),
-           "cannot change is_variable, from: ", tensor.is_variable(),
-           " to: ", options.is_variable());
-  DeviceGuard guard(options.device());
-  return tensor.type().toBackend(options.backend()).toScalarType(options.dtype()).copy(tensor, non_blocking);
-}
-} // namespace detail
-
-inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking)
-    const {
-  if (this->device() == device && this->dtype() == dtype) {
-    return *this;
-  }
-  return detail::to(*this, options().device(device).dtype(dtype), non_blocking);
-}
-
-inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) const {
-  if (this->dtype() == dtype) {
-    return *this;
-  }
-  return detail::to(*this, options().dtype(dtype), non_blocking);
-}
-
-inline Tensor Tensor::to(Device device, bool non_blocking) const {
-  if (this->device() == device) {
-    return *this;
-  }
-  return detail::to(*this, options().device(device), non_blocking);
-}
-
 inline void Tensor::backward(
     at::optional<Tensor> gradient,
     bool keep_graph,
@@ -96,6 +54,22 @@ inline void Tensor::set_data(Tensor new_data) {
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
+
+inline bool Tensor::is_variable() const noexcept {
+  return type().is_variable();
+}
+
+inline ScalarType Tensor::dtype() const noexcept {
+  return type().scalarType();
+}
+
+inline Layout Tensor::layout() const noexcept {
+  return type().layout();
+}
+
+inline Device Tensor::device() const {
+  return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
+}
 
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \

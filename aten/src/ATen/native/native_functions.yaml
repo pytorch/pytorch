@@ -245,6 +245,27 @@
     CPU: _atan_out_cpu
     CUDA: _atan_out_cuda
 
+- func: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: baddbmm_cpu
+    CUDA: baddbmm_cuda
+
+- func: baddbmm_(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method
+  dispatch:
+    CPU: baddbmm__cpu
+    CUDA: baddbmm__cuda
+
+- func: _baddbmm_mkl_(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+
+- func: baddbmm_out(Tensor result, Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: baddbmm_out_cpu
+    CUDA: baddbmm_out_cuda
+
 - func: bartlett_window(int64_t window_length, TensorOptions options={}) -> Tensor
 
 - func: bartlett_window(int64_t window_length, bool periodic, TensorOptions options={}) -> Tensor
@@ -280,6 +301,18 @@
 - func: blackman_window(int64_t window_length, TensorOptions options={}) -> Tensor
 
 - func: blackman_window(int64_t window_length, bool periodic, TensorOptions options={}) -> Tensor
+
+- func: bmm(Tensor self, Tensor mat2) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: bmm_cpu
+    CUDA: bmm_cuda
+
+- func: bmm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
+  variants: function
+  dispatch:
+    CPU: bmm_out_cpu
+    CUDA: bmm_out_cuda
 
 - func: broadcast_tensors(TensorList tensors) -> TensorList
 
@@ -374,7 +407,7 @@
 
 - func: conv3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1, int64_t groups=1) -> Tensor
 
-- func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad) -> Tensor
+- func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad=0) -> Tensor
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
 
@@ -840,6 +873,9 @@
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
   variants: function, method
 
+- func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, double momentum, double eps, bool cudnn_enabled) -> Tensor
+  variants: function
+
 - func: inverse(Tensor self) -> Tensor
   variants: function, method
 
@@ -1176,6 +1212,8 @@
 
 - func: permute(Tensor self, IntList dims) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: pixel_shuffle(Tensor self, int64_t upscale_factor) -> Tensor
 
 - func: pin_memory(Tensor self) -> Tensor
   variants: function, method
@@ -1713,6 +1751,27 @@
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
 
+- func: norm_except_dim(Tensor v, int64_t pow=2, int64_t dim=0) -> Tensor
+  variants: function
+
+# VariableType::_weight_norm does not want to be given a gap in the autograd graph,
+# so we don't define "dispatch" variants for it.
+- func: _weight_norm(Tensor v, Tensor g, int64_t dim=0) -> Tensor
+  variants: function
+
+- func: _weight_norm_cuda_interface(Tensor v, Tensor g, int64_t dim=0) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: weight_norm_cuda
+
+- func: _weight_norm_cuda_interface_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int64_t dim) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: weight_norm_cuda_backward
+
+- func: _weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int64_t dim) -> (Tensor, Tensor)
+  variants: function
+
 - func: zeros(IntList size, TensorOptions options={}) -> Tensor
 
 - func: zeros_out(Tensor result, IntList size) -> Tensor
@@ -2028,6 +2087,22 @@
 
 - func: get_device(Tensor self) -> int64_t
   variants: function, method
+  device_guard: False
+
+- func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
+- func: to(Tensor self, ScalarType dtype, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
+- func: to(Tensor self, Device device, bool non_blocking=false) -> Tensor
+  variants: method
+  device_guard: False
+
+- func: to(Tensor self, Tensor other, bool non_blocking=false) -> Tensor
+  variants: method
   device_guard: False
 
 - func: meshgrid(TensorList tensors) -> TensorList

@@ -1,4 +1,5 @@
-from collections import defaultdict, Iterable
+from collections import defaultdict
+from torch._six import container_abcs
 
 import torch
 from copy import deepcopy
@@ -123,7 +124,7 @@ class Optimizer(object):
                 return value
             elif isinstance(value, dict):
                 return {k: cast(param, v) for k, v in value.items()}
-            elif isinstance(value, Iterable):
+            elif isinstance(value, container_abcs.Iterable):
                 return type(value)(cast(param, v) for v in value)
             else:
                 return value

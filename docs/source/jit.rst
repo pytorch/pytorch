@@ -7,13 +7,13 @@ Torch Script
 .. currentmodule:: torch.jit
 
 Torch Script is a way to create serializable and optimizable models from PyTorch code.
-Anything code written in Torch Script can be saved from your Python
-process and loaded/run a process where there is no python dependency.
+Any code written in Torch Script can be saved from your Python
+process and loaded in a process where there is no Python dependency.
 
 We provide tools to incrementally transition a model from being a pure Python program
-to a Torch Script program that can be run independently from python, for instance, in a standalone C++ process.
+to a Torch Script program that can be run independently from Python, for instance, in a standalone C++ program.
 This makes it possible to train models in PyTorch using familiar tools and then export
-the model to a production environment where it is not a good idea to run models as python programs
+the model to a production environment where it is not a good idea to run models as Python programs
 for performance and multi-threading reasons.
 
 Creating Torch Script Code
@@ -33,6 +33,10 @@ Creating Torch Script Code
        To be able to save a module, it must not make any calls to native python functions.
        This means that all submodules must be subclasses of ScriptModules as well.
 
+       .. DANGER::
+          All modules, no matter their device, are always loaded onto the CPU during loading.
+          This is different from :func:`torch.load`'s semantics and may change in the future.
+
 
 .. autofunction:: load
 
@@ -43,7 +47,7 @@ Mixing Tracing and Scripting
 ----------------------------
 
 In many cases either tracing or script is an easier approach for converting a model.
-We allow you to compose tracing and scripting to suite the particular requirements
+We allow you to compose tracing and scripting to suit the particular requirements
 of a part of a model.
 
 Scripted functions can call traced ones. This is particularly useful when you need
@@ -75,6 +79,7 @@ Example:
 ::
 
     import torch
+
     @torch.jit.script
     def foo(x, y):
         if x.max() > y.max():
@@ -531,13 +536,253 @@ Python-defined Constants
 Debugging
 ~~~~~~~~~
 
-Print things
+Disable JIT for Debugging
+    If you want to disable all JIT modes (tracing and scripting) so you can
+    debug your program in raw Python, you can use the ``PYTORCH_JIT`` environment
+    variable. ``PYTORCH_JIT`` can be used to globally disable the
+    JIT by setting its value to ``0``. Given an example script::
 
-Use ``USE_PYTHON=0`` to debug in normal python mode
+        @torch.jit.script
+        def scripted_fn(x : torch.Tensor):
+            for i in range(12):
+                x = x + x
+            return x
 
-Look at the graph
 
-Pay attention to tracer warnings
+        def fn(x):
+            x = torch.neg(x)
+            import pdb; pdb.set_trace()
+            return scripted_fn(x)
+
+        traced_fn = torch.jit.trace(fn, (torch.rand(4, 5),))
+
+        traced_fn(torch.rand(3, 4))
+
+    Debugging this script with PDB works except for when we invoke the @script
+    function. We can globally disable JIT, so that we can call the @script
+    function as a normal python function and not compile it. If the above script
+    is called ``disable_jit_example.py``, we can invoke it like so::
+
+        $ PYTORCH_JIT=0 python disable_jit_example.py
+
+    and we will be able to step into the @script function as a normal Python
+    function.
+
+
+Interpreting Graphs
+    TorchScript uses a static single assignment (SSA) intermediate representation
+    (IR) to represent computation. The instructions in this format consist of
+    ATen (the C++ backend of PyTorch) operators and other primitive operators,
+    including control flow operators for loops and conditionals. As an example::
+
+        @torch.jit.script
+        def foo(len):
+          # type: (int) -> torch.Tensor
+          rv = torch.zeros(3, 4)
+          for i in range(len):
+            if i < 10:
+                rv = rv - 1.0
+            else:
+                rv = rv + 1.0
+          return rv
+
+        print(foo.graph)
+
+    A ``ScriptModule`` with a single ``forward`` method will have an attribute
+    ``graph``, which you can use to inspect the IR representing the computation.
+    If the ScriptModule has more than one method, you will need to access
+    ``.graph`` on the method itself and not the module. We can inspect the
+    graph of a method named ``bar`` on a ScriptModule by accessing ``.bar.graph``.
+
+    The example script above produces the graph::
+
+        graph(%len : int) {
+          %13 : float = prim::Constant[value=1]()
+          %10 : int = prim::Constant[value=10]()
+          %2 : int = prim::Constant[value=4]()
+          %1 : int = prim::Constant[value=3]()
+          %3 : int[] = prim::ListConstruct(%1, %2)
+          %4 : int = prim::Constant[value=6]()
+          %5 : int = prim::Constant[value=0]()
+          %6 : int[] = prim::Constant[value=[0, -1]]()
+          %rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)
+          %8 : int = prim::Constant[value=1]()
+          %rv : Dynamic = prim::Loop(%len, %8, %rv.1)
+            block0(%i : int, %12 : Dynamic) {
+              %11 : int = aten::lt(%i, %10)
+              %rv.4 : Dynamic = prim::If(%11)
+                block0() {
+                  %14 : int = prim::Constant[value=1]()
+                  %rv.2 : Dynamic = aten::sub(%12, %13, %14)
+                  -> (%rv.2)
+                }
+                block1() {
+                  %16 : int = prim::Constant[value=1]()
+                  %rv.3 : Dynamic = aten::add(%12, %13, %16)
+                  -> (%rv.3)
+                }
+              %19 : int = prim::Constant[value=1]()
+              -> (%19, %rv.4)
+            }
+          return (%rv);
+        }
+
+    Take the instruction ``%rv.1 : Dynamic = aten::zeros(%3, %4, %5, %6)`` for
+    example. ``%rv.1 : Dynamic`` means we assign the output to a (unique)
+    value named ``rv.1``, and that value is of ``Dynamic`` type, i.e. we do
+    not know its concrete shape. ``aten::zeros`` is the operator (equivalent
+    to ``torch.zeros``) and the input list ``(%3, %4, %5, %6)`` specifies which
+    values in scope should be passed as inputs. The schema for built-in functions
+    like ``aten::zeros`` can be found at `Builtin Functions`_.
+
+    Notice that operators can also have associated ``blocks``, namely the
+    ``prim::Loop`` and ``prim::If`` operators. In the graph print-out, these
+    operators are formatted to reflect their equivalent source code forms
+    to facilitate easy debugging.
+
+    Graphs can be inspected as shown to confirm that the computation described
+    by a ``ScriptModule`` is correct, in both automated and manual fashion, as
+    described below.
+
+
+Tracing Edge Cases
+    There are some edge cases that exist where the trace of a given Python
+    function/module will not be representative of the underlying code. These
+    cases can include:
+
+    * Tracing of control flow that is dependent on inputs (e.g. tensor shapes)
+    * Tracing of in-place operations of tensor views (e.g. indexing on the
+      left-hand side of an assignment)
+
+    Note that these cases may in fact be traceable in the future.
+
+
+Automatic Trace Checking
+    One way to automatically catch many errors in traces is by using ``check_inputs``
+    on the ``torch.jit.trace()`` API. ``check_inputs`` takes a list of tuples
+    of inputs that will be used to re-trace the computation and verify the
+    results. For example::
+
+        def loop_in_traced_fn(x):
+            result = x[0]
+            for i in range(x.size(0)):
+                result = result * x[i]
+            return result
+
+        inputs = (torch.rand(3, 4, 5),)
+        check_inputs = [(torch.rand(4, 5, 6),), (torch.rand(2, 3, 4),)]
+
+        traced = torch.jit.trace(loop_in_traced_fn, inputs, check_inputs=check_inputs)
+
+    Gives us the following diagnostic information::
+
+        ERROR: Graphs differed across invocations!
+        Graph diff:
+            graph(%0 : Dynamic) {
+                  %1 : int = prim::Constant[value=0]()
+                  %2 : int = prim::Constant[value=0]()
+                  %3 : Dynamic = aten::select(%0, %1, %2)
+                  %4 : int = prim::Constant[value=0]()
+                  %5 : int = prim::Constant[value=0]()
+                  %6 : Dynamic = aten::select(%0, %4, %5)
+                  %7 : Dynamic = aten::mul(%3, %6)
+                  %8 : int = prim::Constant[value=0]()
+                  %9 : int = prim::Constant[value=1]()
+                  %10 : Dynamic = aten::select(%0, %8, %9)
+                  %11 : Dynamic = aten::mul(%7, %10)
+                  %12 : int = prim::Constant[value=0]()
+                  %13 : int = prim::Constant[value=2]()
+                  %14 : Dynamic = aten::select(%0, %12, %13)
+                  %15 : Dynamic = aten::mul(%11, %14)
+              +   %16 : int = prim::Constant[value=0]()
+              +   %17 : int = prim::Constant[value=3]()
+              +   %18 : Dynamic = aten::select(%0, %16, %17)
+              +   %19 : Dynamic = aten::mul(%15, %18)
+              -   return (%15);
+              ?             ^
+              +   return (%19);
+              ?             ^
+            }
+
+
+    This message indicates to us that the computation differed between when
+    we first traced it and when we traced it with the ``check_inputs``. Indeed,
+    the loop within the body of ``loop_in_traced_fn`` depends on the shape
+    of the input ``x``, and thus when we try another ``x`` with a different
+    shape, the trace differs.
+
+    In this case, data-dependent control flow like this can be captured using
+    script instead::
+
+        def fn(x):
+            result = x[0]
+            for i in range(x.size(0)):
+                result = result * x[i]
+            return result
+
+        inputs = (torch.rand(3, 4, 5),)
+        check_inputs = [(torch.rand(4, 5, 6),), (torch.rand(2, 3, 4),)]
+
+        scripted_fn = torch.jit.script(fn)
+        print(scripted_fn.graph)
+
+        for input_tuple in [inputs] + check_inputs:
+            torch.testing.assert_allclose(fn(*input_tuple), scripted_fn(*input_tuple))
+
+
+    Which produces::
+
+        graph(%x : Dynamic) {
+          %1 : int = prim::Constant[value=0]()
+          %2 : int = prim::Constant[value=0]()
+          %result.1 : Dynamic = aten::select(%x, %2, %1)
+          %4 : int = aten::size(%x, %1)
+          %5 : int = prim::Constant[value=1]()
+          %result : Dynamic = prim::Loop(%4, %5, %result.1)
+            block0(%i : int, %7 : Dynamic) {
+              %9 : int = prim::Constant[value=0]()
+              %10 : Dynamic = aten::select(%x, %9, %i)
+              %result.2 : Dynamic = aten::mul(%7, %10)
+              %12 : int = prim::Constant[value=1]()
+              -> (%12, %result.2)
+            }
+          return (%result);
+        }
+
+
+Tracer Warnings
+    The tracer produces warnings for several problematic patterns in traced
+    computation. As an example, take a trace of a function that contains an
+    in-place assignment on a slice (a view) of a Tensor::
+
+        def fill_row_zero(x):
+            x[0] = torch.rand(*x.shape[1:2])
+            return x
+
+        traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
+        print(traced.graph)
+
+
+    Produces several warnings and a graph which simply returns the input::
+
+        fill_row_zero.py:4: TracerWarning: There are 2 live references to the data region being modified when tracing in-place operator copy_ (possibly due to an assignment). This might cause the trace to be incorrect, because all other views that also reference this data will not not reflect this change in the trace! On the other hand, if all other views use the same memory chunk, but are disjoint (e.g. are outputs of torch.split), this might still be safe.
+          x[0] = torch.rand(*x.shape[1:2])
+        fill_row_zero.py:6: TracerWarning: Output nr 1. of the traced function does not match the corresponding output of the Python function. Detailed error:
+        Not within tolerance rtol=1e-05 atol=1e-05 at input[0, 1] (0.09115803241729736 vs. 0.6782537698745728) and 3 other locations (33.00%)
+          traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
+        graph(%0 : Float(3, 4)) {
+          return (%0);
+        }
+
+    We can fix this by modifying the code to not use the in-place update, but
+    rather build up the result tensor out-of-place with `torch.cat`::
+
+        def fill_row_zero(x):
+            x = torch.cat((torch.rand(1, *x.shape[1:2]), x[1:2]), dim=0)
+            return x
+
+        traced = torch.jit.trace(fill_row_zero, (torch.rand(3, 4),))
+        print(traced.graph)
 
 
 Builtin Functions

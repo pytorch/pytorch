@@ -128,14 +128,6 @@ def skipCUDAMemoryLeakCheckIf(condition):
     return dec
 
 
-def get_cuda_memory_usage():
-    # we don't need CUDA synchronize because the statistics are not tracked at
-    # actual freeing, but at when marking the block as free.
-    num_devices = torch.cuda.device_count()
-    gc.collect()
-    return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
-
-
 def suppress_warnings(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -215,6 +207,38 @@ def is_iterable(obj):
         return False
 
 
+class CudaMemoryLeakCheck():
+    def __init__(self, testcase, name=None):
+        self.name = testcase.id() if name is None else name
+        self.testcase = testcase
+
+        # initialize context & RNG to prevent false positive detections
+        # when the test is the first to initialize those
+        from common_cuda import initialize_cuda_context_rng
+        initialize_cuda_context_rng()
+
+    @staticmethod
+    def get_cuda_memory_usage():
+        # we don't need CUDA synchronize because the statistics are not tracked at
+        # actual freeing, but at when marking the block as free.
+        num_devices = torch.cuda.device_count()
+        gc.collect()
+        return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+    def __enter__(self):
+        self.befores = self.get_cuda_memory_usage()
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # Don't check for leaks if an exception was thrown
+        if exec_type is not None:
+            return
+        afters = self.get_cuda_memory_usage()
+        for i, (before, after) in enumerate(zip(self.befores, afters)):
+            self.testcase.assertEqual(
+                before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                    self.name, after - before, i))
+
+
 class TestCase(unittest.TestCase):
     precision = 1e-5
     maxDiff = None
@@ -232,11 +256,11 @@ class TestCase(unittest.TestCase):
             from common_cuda import TEST_CUDA
             fullname = self.id().lower()  # class_name.method_name
             if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
-                # initialize context & RNG to prevent false positive detections
-                # when the test is the first to initialize those
-                from common_cuda import initialize_cuda_context_rng
-                initialize_cuda_context_rng()
                 setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
+
+    def assertLeaksNoCudaTensors(self, name=None):
+        name = self.id() if name is None else name
+        return CudaMemoryLeakCheck(self, name)
 
     def wrap_with_cuda_memory_check(self, method):
         # Assumes that `method` is the tested function in `self`.
@@ -247,12 +271,8 @@ class TestCase(unittest.TestCase):
         #       call in try-finally and always do the check.
         @wraps(method)
         def wrapper(self, *args, **kwargs):
-            befores = get_cuda_memory_usage()
-            method(*args, **kwargs)
-            afters = get_cuda_memory_usage()
-            for i, (before, after) in enumerate(zip(befores, afters)):
-                self.assertEqual(before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
-                                 self.id(), after - before, i))
+            with self.assertLeaksNoCudaTensors():
+                method(*args, **kwargs)
         return types.MethodType(wrapper, self)
 
     def setUp(self):
@@ -330,6 +350,13 @@ class TestCase(unittest.TestCase):
                     self.assertTrue(torch.equal(nan_mask, b != b), message)
                     diff = a - b
                     diff[nan_mask] = 0
+                    # inf check if allow_inf=True
+                    if allow_inf:
+                        inf_mask = (a == float("inf")) | (a == float("-inf"))
+                        self.assertTrue(torch.equal(inf_mask,
+                                                    (b == float("inf")) | (b == float("-inf"))),
+                                        message)
+                        diff[inf_mask] = 0
                     # TODO: implement abs on CharTensor
                     if diff.is_signed() and 'CharTensor' not in diff.type():
                         diff = diff.abs()
@@ -566,3 +593,68 @@ def find_free_port():
     sockname = sock.getsockname()
     sock.close()
     return sockname[1]
+
+
+# Methods for matrix generation
+# Used in test_autograd.py and test_torch.py
+def prod_single_zero(dim_size):
+    result = torch.randn(dim_size, dim_size)
+    result[0, 1] = 0
+    return result
+
+
+def random_square_matrix_of_rank(l, rank):
+    assert rank <= l
+    A = torch.randn(l, l)
+    u, s, v = A.svd()
+    for i in range(l):
+        if i >= rank:
+            s[i] = 0
+        elif s[i] == 0:
+            s[i] = 1
+    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+
+
+def random_symmetric_matrix(l):
+    A = torch.randn(l, l)
+    for i in range(l):
+        for j in range(i):
+            A[i, j] = A[j, i]
+    return A
+
+
+def random_symmetric_psd_matrix(l):
+    A = torch.randn(l, l)
+    return A.mm(A.transpose(0, 1))
+
+
+def random_symmetric_pd_matrix(l, eps=1e-5):
+    A = torch.randn(l, l)
+    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
+
+
+def make_nonzero_det(A, sign=None, min_singular_value=0.1):
+    u, s, v = A.svd()
+    s[s < min_singular_value] = min_singular_value
+    A = u.mm(torch.diag(s)).mm(v.t())
+    det = A.det().item()
+    if sign is not None:
+        if (det < 0) ^ (sign < 0):
+            A[0, :].neg_()
+    return A
+
+
+def random_fullrank_matrix_distinct_singular_value(l, *batches):
+    if len(batches) == 0:
+        A = torch.randn(l, l)
+        u, _, v = A.svd()
+        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+        return u.mm(torch.diag(s)).mm(v.t())
+    else:
+        all_matrices = []
+        for _ in range(0, torch.prod(torch.as_tensor(batches)).item()):
+            A = torch.randn(l, l)
+            u, _, v = A.svd()
+            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+            all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
+        return torch.stack(all_matrices).reshape(*(batches + (l, l)))

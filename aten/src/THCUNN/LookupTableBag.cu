@@ -11,7 +11,7 @@
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 #include <thrust/unique.h>
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCTensorSort.cuh"
 
