@@ -305,11 +305,11 @@ class _Cat(Constraint):
     """
     Constraint functor that applies a sequence of constraints
     `cseq` at the submatrixes at dimension `dim`
-    in a way compatible with `torch.cat`.
+    in a way compatible with :func:`torch.cat`.
     """
     def __init__(self, cseq, dim=0):
         assert all(isinstance(c, Constraint) for c in cseq)
-        self.cseq = cseq
+        self.cseq = list(cseq)
         self.dim = dim
 
     def check(self, value):
@@ -323,11 +323,11 @@ class _Stack(Constraint):
     """
     Constraint functor that applies a sequence of constraints
     `cseq` at the submatrixes at dimension `dim`
-    in a way compatible with `torch.stack`.
+    in a way compatible with :func:`torch.stack`.
     """
     def __init__(self, cseq, dim=0):
         assert all(isinstance(c, Constraint) for c in cseq)
-        self.cseq = cseq
+        self.cseq = list(cseq)
         self.dim = dim
 
     def check(self, value):
