@@ -305,7 +305,7 @@ class _Cat(Constraint):
     """
     Constraint functor that applies a sequence of constraints
     `cseq` at the submatrices at dimension `dim`,
-    each of len `lengths[dim]`, in a way compatible with :func:`torch.cat`.
+    each of size `lengths[dim]`, in a way compatible with :func:`torch.cat`.
     """
     def __init__(self, cseq, dim=0, lengths=None):
         assert all(isinstance(c, Constraint) for c in cseq)
@@ -323,26 +323,36 @@ class _Cat(Constraint):
         for constr, length in zip(self.cseq, self.lengths):
             v = value.narrow(self.dim, start, length)
             checks.append(constr.check(v))
-            start = start + length
+            start = start + length  # avoid += for jit compat
         return torch.cat(checks, self.dim)
 
 
 class _Stack(Constraint):
     """
     Constraint functor that applies a sequence of constraints
-    `cseq` at the submatrices at dimension `dim`
-    in a way compatible with :func:`torch.stack`.
+    `cseq` at the submatrices at dimension `dim`,
+    each of size `lengths[dim]` in a way compatible with :func:`torch.stack`.
     """
-    def __init__(self, cseq, dim=0):
+    def __init__(self, cseq, dim=0, lengths=None):
         assert all(isinstance(c, Constraint) for c in cseq)
         self.cseq = list(cseq)
+        if lengths is None:
+            lengths = [1] * len(self.cseq)
+        self.lengths = list(lengths)
+        assert len(self.lengths) == len(self.cseq)
         self.dim = dim
 
     def check(self, value):
         assert -value.dim() <= self.dim < value.dim()
-        vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
-        return torch.stack([constr.check(v)
-                            for v, constr in zip(vs, self.cseq)], self.dim)
+        checks = []
+        start = 0
+        for constr, length in zip(self.cseq, self.lengths):
+            v = torch.cat([value.select(self.dim, i)
+                          for i in range(start, start + length)],
+                          self.dim)
+            checks.append(constr.check(v))
+            start = start + length  # avoid += for jit compat
+        return torch.stack(checks, self.dim)
 
 # Public interface.
 dependent = _Dependent()

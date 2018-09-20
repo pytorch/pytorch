@@ -228,4 +228,5 @@ def _transform_to_cat(constraint):
 def _transform_to_stack(constraint):
     return transforms.StackTransform(
         [transform_to(c)
-         for c in constraint.cseq], constraint.dim)
+         for c in constraint.cseq],
+        constraint.dim, constraint.lengths)
