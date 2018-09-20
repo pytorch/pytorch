@@ -8,16 +8,16 @@ namespace caffe2 {
 template <class Context>
 void fp16_momentum_sgd_update(
     int N,
-    const float16* g,
-    const float16* m,
-    float16* ng,
-    float16* nm,
+    const at::Half* g,
+    const at::Half* m,
+    at::Half* ng,
+    at::Half* nm,
     const float* lr,
     float momentum,
     bool nesterov,
     float weight_decay,
     bool fp32_update,
-    float16* param,
+    at::Half* param,
     Context* /*context*/) {}
 
 template <typename T, class Context>

@@ -83,7 +83,7 @@ message TensorProto {
     UINT16 = 8;  // uint16_t
     INT16 = 9;  // int16_t
     INT64 = 10;  // int64_t
-    FLOAT16 = 12;  // caffe2::__f16, caffe2::float16
+    FLOAT16 = 12;  // at::Half
     DOUBLE = 13;  // double
   }
 ```

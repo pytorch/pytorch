@@ -26,7 +26,7 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
 
   ~CPUSparseLengthsReductionOp() {}
 
-  // Currently, we support float and float16 inputs for input data type, and
+  // Currently, we support float and at::Half inputs for input data type, and
   // int32_t and int64_t for the index type.
 
   bool RunOnDevice() override {

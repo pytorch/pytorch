@@ -212,7 +212,7 @@ private:
     #define DEFINE_IF(type,aten) \
       if(#type == name) \
         return at::k##aten;
-    DEFINE_IF(float16, Half)
+    DEFINE_IF(at::Half, Half)
     DEFINE_IF(float, Float)
     DEFINE_IF(double, Double)
     DEFINE_IF(uint8, Byte)
