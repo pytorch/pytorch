@@ -2,6 +2,7 @@ r"""
 The following constraints are implemented:
 
 - ``constraints.boolean``
+- ``constraints.cat``
 - ``constraints.dependent``
 - ``constraints.greater_than(lower_bound)``
 - ``constraints.integer_interval(lower_bound, upper_bound)``
@@ -15,9 +16,8 @@ The following constraints are implemented:
 - ``constraints.real``
 - ``constraints.real_vector``
 - ``constraints.simplex``
-- ``constraints.unit_interval``
-- ``constraints.cat``
 - ``constraints.stack``
+- ``constraints.unit_interval``
 """
 
 import torch
@@ -313,10 +313,10 @@ class _Cat(Constraint):
         self.dim = dim
 
     def check(self, value):
-        assert -len(value.shape) <= self.dim < len(value.shape)
-        vs = value.chunk(value.shape[self.dim], self.dim)
-        return all(constr.check(v)
-                   for v, constr in zip(vs, self.cseq))
+        assert -value.dim() <= self.dim < value.dim()
+        vs = value.chunk(value.size(self.dim), self.dim)
+        return torch.cat([constr.check(v)
+                          for v, constr in zip(vs, self.cseq)], self.dim)
 
 
 class _Stack(Constraint):
@@ -331,10 +331,10 @@ class _Stack(Constraint):
         self.dim = dim
 
     def check(self, value):
-        assert -len(value.shape) <= self.dim < len(value.shape)
-        vs = [value.select(self.dim, i) for i in range(value.shape[self.dim])]
-        return all(constr.check(v)
-                   for v, constr in zip(vs, self.cseq))
+        assert -value.dim() <= self.dim < value.dim()
+        vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
+        return torch.stack([constr.check(v)
+                            for v, constr in zip(vs, self.cseq)], self.dim)
 
 # Public interface.
 dependent = _Dependent()
