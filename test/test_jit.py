@@ -3462,7 +3462,7 @@ a")
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skip("this test is flaky, see #11360")
+    @enable_cpu_fuser
     def test_scalar_fusion(self):
         def fn(x, y):
             return x + y.type_as(x)
