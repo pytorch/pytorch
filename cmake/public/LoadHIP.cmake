@@ -96,8 +96,13 @@ set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
 # Disable Asserts In Code (Can't use asserts on HIP stack.)
 ADD_DEFINITIONS(-DNDEBUG)
 
+macro(find_package_and_print_version PACKAGE_NAME)
+  find_package("${PACKAGE_NAME}" ${ARGN})
+  message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
+endmacro()
+
 # Find the HIP Package
-FIND_PACKAGE(HIP 1.0)
+find_package_and_print_version(HIP 1.0)
 
 IF(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
@@ -119,18 +124,18 @@ IF(HIP_FOUND)
   set(hiprand_DIR ${HIPRAND_PATH}/lib/cmake/hiprand)
   set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
   set(miopen_DIR ${MIOPEN_PATH}/lib/cmake/miopen)
-  set(rocblas_DIR ${ROCBLAS_PATH}/lib/cmake/rocblas)
   set(rocfft_DIR ${ROCFFT_PATH}/lib/cmake/rocfft)
   set(hipsparse_DIR ${HIPSPARSE_PATH}/lib/cmake/hipsparse)
   set(rocsparse_DIR ${ROCSPARSE_PATH}/lib/cmake/rocsparse)
 
-  find_package(rocrand REQUIRED)
-  find_package(hiprand REQUIRED)
-  find_package(rocblas REQUIRED)
-  find_package(rocfft REQUIRED)
-  find_package(miopen REQUIRED)
-  #find_package(rocsparse REQUIRED)
-  #find_package(hipsparse REQUIRED)
+  find_package_and_print_version(rocrand REQUIRED)
+  find_package_and_print_version(hiprand REQUIRED)
+  find_package_and_print_version(rocblas REQUIRED)
+  find_package_and_print_version(miopen REQUIRED)
+  find_package_and_print_version(miopengemm)
+  find_package_and_print_version(rocfft REQUIRED)
+  #find_package_and_print_version(hipsparse REQUIRED)
+  find_package_and_print_version(rocsparse REQUIRED)
 
   # TODO: hip_hcc has an interface include flag "-hc" which is only
   # recognizable by hcc, but not gcc and clang. Right now in our
