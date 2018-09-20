@@ -1181,7 +1181,6 @@
     CUDA: narrow_copy_dense
     SparseCPU: narrow_copy_sparse
     SparseCUDA: narrow_copy_sparse
-    
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
   variants: function, method

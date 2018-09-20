@@ -1024,7 +1024,7 @@ class TestSparse(TestCase):
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
     def _test_narrow(self, input, narrow_args, dense=None):
-        if dense is None: 
+        if dense is None:
             dense = input.to_dense()
         expected = dense.narrow(*narrow_args)
         self.assertEqual(expected, input.narrow_copy(*narrow_args).to_dense())
@@ -1065,7 +1065,7 @@ class TestSparse(TestCase):
                                     [[0., 0.],
                                     [0., 0.],
                                     [3., 4.]]])
-        
+
         self._test_narrow(input, [0, 0, 2], dense)
         self._test_narrow(input, [2, 1, 1], dense)
 
