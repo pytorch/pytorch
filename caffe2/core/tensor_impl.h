@@ -3,7 +3,7 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/TensorImpl.h>
 #include <ATen/core/context_base.h>
-#include <ATen/core/context_base.h>
+#include <ATen/core/WrapDimMinimal.h>
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
@@ -21,6 +21,8 @@ CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace caffe2 {
+
+using at::canonical_axis_index_;
 
 // Defined by protobuf
 class DeviceOption;
