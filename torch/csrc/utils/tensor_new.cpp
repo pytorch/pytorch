@@ -207,16 +207,16 @@ Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt
   }
 
   if (THPVariable_Check(data)) {
-      auto var = reinterpret_cast<THPVariable*>(data)->cdata;
-      auto type_inference_device_type = device_opt.has_value() ? device_opt->type()
-                                                               : torch::getDeviceType(var.type());
-      // infer the scalar type and device type; it's not expected to infer the layout since these constructors
-      // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
-      const auto& type_inference_type = torch::getVariableType(var.type().scalarType(),
-                                                       *torch::getLayout(type.backend()),
-                                                       type_inference_device_type);
-      const auto& type_to_use = type_inference ? type_inference_type : type;
-      return copy_variables ? new_with_tensor_copy(type_to_use, var, device_index) :
+    auto var = reinterpret_cast<THPVariable*>(data)->cdata;
+    auto type_inference_device_type = device_opt.has_value() ? device_opt->type()
+                                                             : torch::getDeviceType(var.type());
+    // infer the scalar type and device type; it's not expected to infer the layout since these constructors
+    // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
+    const auto& type_inference_type = torch::getVariableType(var.type().scalarType(),
+                                                     *torch::getLayout(type.backend()),
+                                                     type_inference_device_type);
+    const auto& type_to_use = type_inference ? type_inference_type : type;
+    return copy_variables ? new_with_tensor_copy(type_to_use, var, device_index) :
                               new_with_type_conversion(type_to_use, var, device_index);
   }
 
@@ -515,7 +515,7 @@ Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
                true,
                true,
                type_inference);
-    new_tensor.detach_(); // making new_tensor a leaf node
+    new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
   }
@@ -531,39 +531,9 @@ Tensor as_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    at::optional<Device> device_opt = r.deviceOptional(2);
-    const Type & type_default = typeWithDefault(r, 1, 2, type);
-    PyObject* data = r.pyobject(0);
     bool type_inference = r.isNone(1);
-    bool is_copy = false;
-
-    if (THPVariable_Check(data)) {
-      auto var = reinterpret_cast<THPVariable*>(data)->cdata;
-      auto type_inference_device_type = device_opt.has_value() ? device_opt->type()
-                                                               : torch::getDeviceType(var.type());
-      auto& type_inference_type = torch::getVariableType(var.type().scalarType(),
-                                                         *torch::getLayout(type_default.backend()),
-                                                         type_inference_device_type);
-      if (type_inference_type != type_default) {
-        is_copy = true;
-        PyErr_WarnEx(PyExc_UserWarning,
-          "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-          "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.as_tensor(sourceTensor, dtype, deivce).", 1);
-      }
-    }
-
-    auto new_tensor = internal_new_from_data(
-        type_default,
-        device_opt,
-        data,
-        false,
-        false,
-        type_inference);
-    if (is_copy) {
-      new_tensor.detach_();
-      new_tensor.set_requires_grad(false);
-    }
-    return new_tensor;
+    return internal_new_from_data(
+        typeWithDefault(r, 1, 2, type), r.deviceOptional(2), r.pyobject(0), false, false, type_inference);
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
@@ -588,7 +558,7 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
                typeWithDefault(r, 1, 2, type),
                r.deviceOptional(2),
                data);
-    new_tensor.detach_(); // making new_tensor a leaf node
+    new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
   }

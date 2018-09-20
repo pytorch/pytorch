@@ -445,17 +445,10 @@ add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
-Convert the data into a `torch.Tensor`.  If the data is already a `Tensor` of the same `dtype` and `device`, no copy
-will be performed.  Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and the `device` is the cpu,
-no copy will be performed.
-
-.. warning::
-
-    When attr:`data` is a tensor `x` with different attr:`dtype` or attr:`device`,
-    :func:`as_tensor()` reads out 'the data' from whatever it is passed,
-    and constructs a leaf variable. Therefore ``tensor.as_tensor(x, dtype=dtype, device=device)``
-    is equivalent to ``x.clone().detach().to(dtype, device)``.
-    The equivalents using ``clone()`` and ``detach()`` are recommended.
+Convert the data into a `torch.Tensor`. If the data is already a `Tensor` with the same `dtype` and `device`,
+no copy will be performed, otherwise a new `Tensor` will be returned with computational graph retained if data
+`Tensor` has ``requires_grad=True``. Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and
+the `device` is the cpu, no copy will be performed.
 
 Args:
     {data}

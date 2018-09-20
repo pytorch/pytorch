@@ -2398,12 +2398,15 @@ class TestTorch(TestCase):
 
     def test_tensor_factory_copy_var(self):
 
-        def check_copy(copy, copy_is_leaf, copy_requires_grad):
+        def check_copy(copy, is_leaf, requires_grad, data_ptr=None):
+            if data_ptr is None:
+                data_ptr = copy.data_ptr
             self.assertEqual(copy.data, source.data)
-            self.assertTrue(copy.is_leaf == copy_is_leaf)
-            self.assertTrue(copy.requires_grad == copy_requires_grad)
+            self.assertTrue(copy.is_leaf == is_leaf)
+            self.assertTrue(copy.requires_grad == requires_grad)
+            self.assertTrue(copy.data_ptr == data_ptr)
 
-        source = torch.randn(5, 5, requires_grad=True)
+        source = torch.randn(5, 5, dtype=torch.double, requires_grad=True)
         # test torch.tensor()
         check_copy(torch.tensor(source), True, False)
         check_copy(torch.tensor(source, requires_grad=False), True, False)
@@ -2416,9 +2419,8 @@ class TestTorch(TestCase):
         check_copy(copy.new_tensor(source, requires_grad=True), True, True)
 
         # test torch.as_tensor()
-        source = source.add(1)  # make source non-leaf
-        check_copy(torch.as_tensor(source), source.is_leaf, source.requires_grad)
-        check_copy(torch.as_tensor(source, dtype=torch.float), True, False)
+        check_copy(torch.as_tensor(source), source.is_leaf, source.requires_grad, source.data_ptr)  # not copy
+        check_copy(torch.as_tensor(source, dtype=torch.float), False, True)  # copy and keep the graph
 
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):
