@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch._six import inf
 from operator import mul
 from functools import reduce
+from collections import Iterable
 import math
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     'isfinite',
     'isinf',
     'isnan',
+    'norm',
     'meshgrid',
     'split',
     'stft',
@@ -637,3 +639,81 @@ def argsort(input, dim=None, descending=False):
     if dim is None:
         return torch.sort(input, -1, descending)[1]
     return torch.sort(input, dim, descending)[1]
+
+
+def norm(input, p="fro", dim=None, keepdim=False, out=None):
+    r"""Returns the matrix norm or vector norm of a given tensor.
+
+    Args:
+        input (Tensor): the input tensor
+        p ({int, float, inf, -inf, 'fro', 'nuc'}): the order of norm
+            The following norms can be calculated:
+            =====  ============================  ==========================
+            ord    matrix norm                   vector norm
+            =====  ============================  ==========================
+            None   Frobenius norm                2-norm
+            'fro'  Frobenius norm                --
+            'nuc'  nuclear norm                  --
+            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
+            =====  ============================  ==========================
+        dim ({int, 2-tuple of ints, 2-list of ints}, optional): If it is an int,
+        vector norm will be calculated, if it is 2-tuple of ints, matrix norm
+        will be calculated. If the value is None, matrix norm will be calculated
+        when the input tensor only has two dimensions, vector norm will be
+        calculated when the input tensor only has one dimension. If the input
+        tensor has more than two dimensions, the vector norm will be applied to
+        last dimension.
+        keepdim (bool): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if attr:`dim`=``None`` and
+            :attr:`out`=``None``.
+        out (Tensor, optional): the output tensor. Ignored if
+        attr:`dim`=``None`` and :attr:`out`=``None``.
+
+    Example::
+        >>> import torch
+        >>> a = torch.arange(9, dtype= torch.float) - 4
+        >>> b = a.reshape((3, 3))
+        >>> torch.norm(a)
+        tensor(7.7460)
+        >>> torch.norm(b)
+        tensor(7.7460)
+        >>> torch.norm(a, float('inf'))
+        tensor(4.)
+        >>> torch.norm(b, float('inf'))
+        tensor([4., 3., 4.])
+        >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        >>> torch.norm(c, dim=0)
+        tensor([1.4142, 2.2361, 5.0000])
+        >>> torch.norm(c, dim=1)
+        tensor([3.7417, 4.2426])
+        >>> torch.norm(c, p=1, dim=1)
+        tensor([6., 6.])
+        >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
+        >>> torch.norm(d, dim=(1,2))
+        tensor([ 3.7417, 11.2250])
+        >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
+        (tensor(3.7417), tensor(11.2250))
+    """
+    ndim = input.dim()
+
+    # catch default case
+    if dim is None and out is None:
+        if p == "fro":
+            return torch._C._VariableFunctions.frobenius_norm(input)
+        elif p != "nuc":
+            return torch._C._VariableFunctions.norm(input, p)
+
+    if p == "fro":
+        if dim is None:
+            dim = tuple(range(ndim))
+        if out is None:
+            return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim)
+        return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim, out=out)
+    elif p == "nuc":
+        if out is None:
+            torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
+        return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+    else:
+        if out is None:
+            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
+    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)

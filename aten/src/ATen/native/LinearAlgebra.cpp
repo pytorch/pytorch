@@ -307,7 +307,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   } else if (contraction_size == 0) {
     return self_or_result.zero_();
   }
-  
+
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
     return (t.stride(2) == 1 && t.stride(1) == t.size(2))
             || (t.stride(1) == 1 && t.stride(2) == t.size(1));
@@ -534,6 +534,56 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
     }
   }
   return result;
+}
+
+Tensor frobenius_norm(const Tensor& self) {
+  return at::norm(self);
+}
+
+Tensor frobenius_norm(const Tensor& self, IntList dim, bool keepdim) {
+  AT_CHECK(
+      dim.size() <= 2,
+      "Expected at most 2 dimensions, but got ",
+      dim.size(),
+      " dimensions instead.");
+  if (dim.size() == 1) {
+    return at::norm(self, 2, dim[0], keepdim);
+  }
+  return at::sqrt(at::sum(self * self, dim, keepdim));
+}
+
+Tensor &frobenius_norm_out(
+    Tensor& result,
+    const Tensor& self,
+    IntList dim,
+    bool keepdim) {
+  AT_CHECK(
+      dim.size() <= 2,
+      "Expected at most 2 dimensions, but got ",
+      dim.size(),
+      " dimensions instead.");
+  if (dim.size() == 1) {
+    return at::norm_out(result, self, 2, dim[0], keepdim);
+  }
+  return at::sqrt_out(result, at::sum(self * self, dim, keepdim));
+}
+
+Tensor nuclear_norm(const Tensor& self, bool keepdim) {
+  AT_CHECK(
+      self.dim() == 2,
+      "Expected a tensor with 2 dimensions, but got a ",
+      self.dim(),
+      " dimensions tensor instead.");
+  return at::sum(std::get<1>(at::svd(self)), 0, keepdim);
+}
+
+Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
+  AT_CHECK(
+      self.dim() == 2,
+      "Expected a tensor with 2 dimensions, but got a ",
+      self.dim(),
+      " dimensions tensor instead.");
+  return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
 }
 
 } // namespace native
