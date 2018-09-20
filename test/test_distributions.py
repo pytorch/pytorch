@@ -4043,8 +4043,8 @@ class TestFunctors(TestCase):
         y = t(x)
         y1, y2, y3 = t1(x1), t2(x2), t3(x3)
         actual_jac = t.log_abs_det_jacobian(x, y)
-        expected_jac = torch.cat([t1.log_abs_det_jacobian(x1, y1), 
-                                  t2.log_abs_det_jacobian(x2, y2), 
+        expected_jac = torch.cat([t1.log_abs_det_jacobian(x1, y1),
+                                  t2.log_abs_det_jacobian(x2, y2),
                                   t3.log_abs_det_jacobian(x3, y3)], dim=dim)
         self.assertEqual(actual_jac, expected_jac)
 
@@ -4065,8 +4065,8 @@ class TestFunctors(TestCase):
         y = t(x)
         y1, y2, y3 = t1(x1), t2(x2), t3(x3)
         actual_jac = t.log_abs_det_jacobian(x, y)
-        expected_jac = torch.stack([t1.log_abs_det_jacobian(x1, y1), 
-                                    t2.log_abs_det_jacobian(x2, y2), 
+        expected_jac = torch.stack([t1.log_abs_det_jacobian(x1, y1),
+                                    t2.log_abs_det_jacobian(x2, y2),
                                     t3.log_abs_det_jacobian(x3, y3)], dim=dim)
         self.assertEqual(actual_jac, expected_jac)
 

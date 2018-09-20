@@ -315,7 +315,7 @@ class _Cat(Constraint):
     def check(self, value):
         assert -len(value.shape) <= self.dim < len(value.shape)
         vs = value.chunk(value.shape[self.dim], self.dim)
-        return all(constr.check(v) 
+        return all(constr.check(v)
                    for v, constr in zip(vs, self.cseq))
 
 
@@ -333,7 +333,7 @@ class _Stack(Constraint):
     def check(self, value):
         assert -len(value.shape) <= self.dim < len(value.shape)
         vs = [value.select(self.dim, i) for i in range(value.shape[self.dim])]
-        return all(constr.check(v) 
+        return all(constr.check(v)
                    for v, constr in zip(vs, self.cseq))
 
 # Public interface.

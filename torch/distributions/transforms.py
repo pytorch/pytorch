@@ -535,11 +535,11 @@ class LowerCholeskyTransform(Transform):
         return y.tril(-1) + y.diag().log().diag()
 
     def _call(self, x):
-        flat_x = x.contiguous().view((-1,) + x.shape[-2:])
+        flat_x = x.reshape((-1,) + x.shape[-2:])
         return torch.stack([self._call_on_event(z) for z in flat_x]).view(x.shape)
 
     def _inverse(self, y):
-        flat_y = y.contiguous().view((-1,) + y.shape[-2:])
+        flat_y = y.reshape((-1,) + y.shape[-2:])
         return torch.stack([self._inverse_on_event(z) for z in flat_y]).view(y.shape)
 
 
@@ -554,7 +554,7 @@ class CatTransform(Transform):
         super(CatTransform, self).__init__()
         self.transforms = list(tseq)
         self.dim = dim
-    
+
     def _call(self, x):
         assert -x.dim() <= self.dim < x.dim()
         assert x.size(self.dim) == len(self.transforms)
