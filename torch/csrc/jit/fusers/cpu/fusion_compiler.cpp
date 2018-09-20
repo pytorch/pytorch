@@ -14,7 +14,9 @@
 #include <sstream>
 #include <tuple>
 
+#ifndef __APPLE__
 #include <malloc.h> // for malloc_trim
+#endif
 
 namespace torch { namespace jit { namespace cpufuser {
 
@@ -27,7 +29,9 @@ int runCommand(const std::string& command) {
   // XXX: system() uses fork(), which can fail if the malloc allocator uses
   // too much memory. Ask the allocator nicely to free its memory for now, but
   // we should rethink using system() in the future.
+#ifndef __APPLE__
   malloc_trim(/*pad=*/0);
+#endif
   return system(command.c_str());
 }
 
