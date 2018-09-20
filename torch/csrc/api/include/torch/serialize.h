@@ -27,7 +27,6 @@ void load(nn::ModuleHolder<ModuleType>& module, InputArchive& archive) {
 }
 
 void save(const Tensor& tensor, OutputArchive& archive);
-void load(Tensor& tensor, InputArchive& archive);
 
 void save(const optim::Optimizer& optimizer, OutputArchive& archive);
 void load(optim::Optimizer& optimizer, InputArchive& archive);
@@ -45,4 +44,6 @@ void load(T& value, const std::string& filename) {
   serialize::InputArchive archive = serialize::load_from_file(filename);
   serialize::load(value, archive);
 }
+
+Tensor load(const std::string& filename);
 } // namespace torch

@@ -30,11 +30,9 @@ Sequential xor_model() {
 }
 
 torch::Tensor save_and_load(torch::Tensor input) {
-  auto output = torch::empty({});
-  const std::string filename = torch::test::get_tempfile();
-  torch::save(input, filename);
-  torch::load(output, filename);
-  return output;
+  torch::test::TempFile tempfile;
+  torch::save(input, tempfile.str());
+  return torch::load(tempfile.str());
 }
 } // namespace
 
@@ -119,9 +117,9 @@ CATCH_TEST_CASE("Serialize/Default/XOR") {
     epoch++;
   }
 
-  const std::string filename = torch::test::get_tempfile();
-  torch::save(model, filename);
-  torch::load(model2, filename);
+  torch::test::TempFile tempfile;
+  torch::save(model, tempfile.str());
+  torch::load(model2, tempfile.str());
 
   auto loss = getLoss(model2, 100);
   CATCH_REQUIRE(loss.toCFloat() < 0.1);
@@ -133,10 +131,10 @@ CATCH_TEST_CASE("Serialize/Default/Optim") {
   auto model3 = Linear(5, 2);
 
   // Models 1, 2, 3 will have the same parameters.
-  const std::string model_filename = torch::test::get_tempfile();
-  torch::save(model1, model_filename);
-  torch::load(model2, model_filename);
-  torch::load(model3, model_filename);
+  torch::test::TempFile model_tempfile;
+  torch::save(model1, model_tempfile.str());
+  torch::load(model2, model_tempfile.str());
+  torch::load(model3, model_tempfile.str());
 
   auto param1 = model1->parameters();
   auto param2 = model2->parameters();
@@ -178,9 +176,9 @@ CATCH_TEST_CASE("Serialize/Default/Optim") {
   // Do 2 steps of model 3 while saving the optimizer
   step(optim3, model3);
 
-  const std::string optim_filename = torch::test::get_tempfile();
-  torch::save(optim3, optim_filename);
-  torch::load(optim3_2, optim_filename);
+  torch::test::TempFile optim_tempfile;
+  torch::save(optim3, optim_tempfile.str());
+  torch::load(optim3_2, optim_tempfile.str());
   step(optim3_2, model3);
 
   param1 = model1->parameters();
@@ -231,17 +229,17 @@ CATCH_TEST_CASE("Serialize/Default/CUDA", "[cuda]") {
     epoch++;
   }
 
-  const std::string filename = torch::test::get_tempfile();
-  torch::save(model, filename);
-  torch::load(model2, filename);
+  torch::test::TempFile tempfile;
+  torch::save(model, tempfile.str());
+  torch::load(model2, tempfile.str());
 
   auto loss = getLoss(model2, 100);
   CATCH_REQUIRE(loss.toCFloat() < 0.1);
 
   model2->to(torch::kCUDA);
-  const std::string filename2 = torch::test::get_tempfile();
-  torch::save(model2, filename2);
-  torch::load(model3, filename2);
+  torch::test::TempFile tempfile2;
+  torch::save(model2, tempfile2.str());
+  torch::load(model3, tempfile2.str());
 
   loss = getLoss(model3, 100);
   CATCH_REQUIRE(loss.toCFloat() < 0.1);
