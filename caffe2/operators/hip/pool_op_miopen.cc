@@ -26,8 +26,6 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
         miopen_wrapper_(&context_),
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
-        do_backward_(
-            OperatorBase::GetSingleArgument<bool>("do_backward", false)),
         poolWs_(nullptr),
         poolWsSize_(0)
 
@@ -133,7 +131,6 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
   miopenTensorDescriptor_t top_desc_;
   miopenPoolingDescriptor_t pooling_desc_;
   miopenPoolingMode_t mode_;
-  bool do_backward_;
   const float alpha_;
   const float beta_;
 };
