@@ -140,8 +140,6 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   if (N > 0 && X.dims() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors.";
     miopen_input_dims_ = X.dims();
-    vector<int> dims = {N, C, H, W, D};
-    vector<int> strides = {C * H * W * D, H * W * D, W * D, D, 1};
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
@@ -276,8 +274,6 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   // See if we need to reshape.
   if (N > 0 && X.dims() != miopen_input_dims_) {
     miopen_input_dims_ = X.dims();
-    vector<int> dims = {N, C, H, W, D};
-    vector<int> strides = {C * H * W * D, H * W * D, W * D, D, 1};
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
