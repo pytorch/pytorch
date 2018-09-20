@@ -565,7 +565,7 @@ class CatTransform(Transform):
 
     def _call(self, x):
         assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == len(self.transforms)
+        assert x.size(self.dim) == self.length
         yslices = []
         start = 0
         for trans, length in zip(self.transforms, self.lengths):
@@ -576,7 +576,7 @@ class CatTransform(Transform):
 
     def _inverse(self, y):
         assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == len(self.transforms)
+        assert y.size(self.dim) == self.length
         xslices = []
         start = 0
         for trans, length in zip(self.transforms, self.lengths):
@@ -587,9 +587,9 @@ class CatTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         assert -x.dim() <= self.dim < x.dim()
-        assert x.size(self.dim) == len(self.transforms)
+        assert x.size(self.dim) == self.length
         assert -y.dim() <= self.dim < y.dim()
-        assert y.size(self.dim) == len(self.transforms)
+        assert y.size(self.dim) == self.length
         logdetjacs = []
         start = 0
         for trans, length in zip(self.transforms, self.lengths):
@@ -624,40 +624,25 @@ class StackTransform(Transform):
         assert all(isinstance(t, Transform) for t in tseq)
         super(StackTransform, self).__init__()
         self.transforms = list(tseq)
-        if lengths is None:
-            lengths = [1] * len(self.transforms)
-        self.lengths = list(lengths)
-        assert len(self.lengths) == len(self.transforms)
         self.dim = dim
 
-    @lazy_property
-    def length(self):
-        return sum(self.lengths)
+    def _slice(self, z):
+        return [z.select(self.dim, i) for i in range(z.size(self.dim))]
 
     def _call(self, x):
         assert -x.dim() <= self.dim < x.dim()
         assert x.size(self.dim) == len(self.transforms)
         yslices = []
-        start = 0
-        for trans, length in zip(self.transforms, self.lengths):
-            xslice = torch.cat([x.select(self.dim, i)
-                               for i in range(start, start + length)],
-                               self.dim)
+        for xslice, trans in zip(self._slice(x), self.transforms):
             yslices.append(trans(xslice))
-            start = start + length  # avoid += for jit compat
         return torch.stack(yslices, dim=self.dim)
 
     def _inverse(self, y):
         assert -y.dim() <= self.dim < y.dim()
         assert y.size(self.dim) == len(self.transforms)
         xslices = []
-        start = 0
-        for trans, length in zip(self.transforms, self.lengths):
-            yslice = torch.cat([y.select(self.dim, i)
-                               for i in range(start, start + length)],
-                               self.dim)
+        for yslice, trans in zip(self._slice(y), self.transforms):
             xslices.append(trans.inv(yslice))
-            start = start + length  # avoid += for jit compat
         return torch.stack(xslices, dim=self.dim)
 
     def log_abs_det_jacobian(self, x, y):
@@ -666,16 +651,10 @@ class StackTransform(Transform):
         assert -y.dim() <= self.dim < y.dim()
         assert y.size(self.dim) == len(self.transforms)
         logdetjacs = []
-        start = 0
-        for trans, length in zip(self.transforms, self.lengths):
-            xslice = torch.cat([x.select(self.dim, i)
-                               for i in range(start, start + length)],
-                               self.dim)
-            yslice = torch.cat([y.select(self.dim, i)
-                               for i in range(start, start + length)],
-                               self.dim)
+        yslices = self._slice(y)
+        xslices = self._slice(x)
+        for xslice, yslice, trans in zip(xslices, yslices, self.transforms):
             logdetjacs.append(trans.log_abs_det_jacobian(xslice, yslice))
-            start = start + length  # avoid += for jit compat
         return torch.stack(logdetjacs, dim=self.dim)
 
     @property
@@ -684,10 +663,8 @@ class StackTransform(Transform):
 
     @constraints.dependent_property
     def domain(self):
-        return constraints.stack([t.domain for t in self.transforms],
-                                 self.dim, self.lengths)
+        return constraints.stack([t.domain for t in self.transforms], self.dim)
 
     @constraints.dependent_property
     def codomain(self):
-        return constraints.stack([t.codomain for t in self.transforms],
-                                 self.dim, self.lengths)
+        return constraints.stack([t.codomain for t in self.transforms], self.dim)
