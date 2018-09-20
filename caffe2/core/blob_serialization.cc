@@ -506,9 +506,9 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
           context);
       break;
     case TensorProto_DataType_UNDEFINED: {
+      Blob temp_blob;
+      void* raw_ptr = nullptr;
       for (int i = 0; i < chunkSize; ++i) {
-        void* raw_ptr = nullptr;
-        Blob temp_blob;
         DeserializeBlob(proto.string_data(i), &temp_blob);
         if (i == 0) {
           raw_ptr = tensor->raw_mutable_data(temp_blob.meta());

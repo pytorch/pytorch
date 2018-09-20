@@ -3,15 +3,15 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from hypothesis import given
-import hypothesis.strategies as st
-import numpy as np
+from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, workspace
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
-from caffe2.proto import caffe2_pb2
+import caffe2.python.serialized_test.serialized_test_util as serial
 
-
+from hypothesis import given
+import hypothesis.strategies as st
+import numpy as np
 import unittest
 
 
@@ -20,9 +20,9 @@ def _run_in_hip(gc, dc):
         caffe2_pb2.HIP in {d.device_type for d in dc})
 
 
-class TestSpatialBN(hu.HypothesisTestCase):
+class TestSpatialBN(serial.SerializedTestCase):
 
-    @given(size=st.integers(7, 10),
+    @serial.given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
            batch_size=st.integers(0, 3),
            seed=st.integers(0, 65535),

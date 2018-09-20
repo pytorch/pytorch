@@ -1006,8 +1006,6 @@ class TestAutograd(TestCase):
 
     def test_grad_assignment(self):
         x = torch.randn(5, 5)
-        a = torch.randn(2, 2)  # size mismatch
-        b = Variable(torch.randn(5, 5).long())  # type mismatch
 
         with self.assertRaises(RuntimeError):
             x.grad = torch.randn(2, 2)
@@ -1020,6 +1018,8 @@ class TestAutograd(TestCase):
             raise unittest.SkipTest("CUDA not available")
         with self.assertRaises(RuntimeError):
             x.grad = Variable(torch.randn(5, 5).cuda())
+        x = x.cuda().half()
+        x.grad = torch.zeros_like(x)  # would raise an error unless sparse type is properly handled
 
         if torch.cuda.device_count() < 2:
             raise unittest.SkipTest("At least 2 CUDA devices needed")

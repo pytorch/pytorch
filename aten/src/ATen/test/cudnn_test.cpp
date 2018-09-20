@@ -1,5 +1,5 @@
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 #include "ATen/ATen.h"
 #include "ATen/cudnn/Descriptors.h"
@@ -9,7 +9,7 @@
 using namespace at;
 using namespace at::native;
 
-TEST_CASE( "cudnn", "[cuda]" ) {
+CATCH_TEST_CASE( "cudnn", "[cuda]" ) {
   manual_seed(123, at::kCUDA);
 
 #if CUDNN_VERSION < 7000
@@ -18,8 +18,8 @@ TEST_CASE( "cudnn", "[cuda]" ) {
   desc1.initialize_rng(at::CUDA(kByte), handle, 0.5, 42);
   desc2.set(handle, 0.5, desc1.state);
 
-  REQUIRE(desc1.desc()->dropout == desc2.desc()->dropout);
-  REQUIRE(desc1.desc()->nstates == desc2.desc()->nstates);
-  REQUIRE(desc1.desc()->states == desc2.desc()->states);
+  CATCH_REQUIRE(desc1.desc()->dropout == desc2.desc()->dropout);
+  CATCH_REQUIRE(desc1.desc()->nstates == desc2.desc()->nstates);
+  CATCH_REQUIRE(desc1.desc()->states == desc2.desc()->states);
 #endif
 }
