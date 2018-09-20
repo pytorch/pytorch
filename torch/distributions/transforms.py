@@ -617,10 +617,10 @@ class CatTransform(Transform):
 class StackTransform(Transform):
     """
     Transform functor that applies a sequence of transforms `tseq`
-    component-wise to each submatrix at `dim`, of size `lengths[dim]`
+    component-wise to each submatrix at `dim`
     in a way compatible with :func:`torch.stack`.
     """
-    def __init__(self, tseq, dim=0, lengths=None):
+    def __init__(self, tseq, dim=0):
         assert all(isinstance(t, Transform) for t in tseq)
         super(StackTransform, self).__init__()
         self.transforms = list(tseq)
