@@ -165,12 +165,6 @@
 
 - func: arange_out(Tensor result, Scalar end) -> Tensor
 
-- func: arange(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
-  deprecated: true
-
-- func: arange(Type dtype, Scalar end) -> Tensor
-  deprecated: true
-
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
 # bounds on arange.  Normal arange is not traceable because it does not take any tensor inputs;
 # if the range you need is based on another tensor, calling this function directly will
@@ -655,9 +649,6 @@
 
 - func: empty_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: empty(Type dtype, IntList size) -> Tensor
-  deprecated: true
-
 - func: erf(Tensor self) -> Tensor
   variants: function, method
 
@@ -734,9 +725,6 @@
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
-- func: eye(Type dtype, int64_t n, int64_t m=-1) -> Tensor
-  deprecated: true
-
 - func: flatten(Tensor self, int64_t start_dim=0, int64_t end_dim=-1) -> Tensor
   variants: function, method
 
@@ -767,9 +755,6 @@
 - func: full_like(Tensor self, Scalar fill_value) -> Tensor
 
 - func: full_like(Tensor self, Scalar fill_value, *, TensorOptions options) -> Tensor
-
-- func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
-  deprecated: true
 
 # NOTE [ grid_sampler Native Functions ]
 # `grid_sampler` does all the shape checking and then dispatches to one of
@@ -947,9 +932,6 @@
 
 - func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
 
-- func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
-  deprecated: true
-
 - func: log(Tensor self) -> Tensor
   variants: function, method
 
@@ -1020,9 +1002,6 @@
 - func: logspace_out(Tensor result, Scalar start, Scalar end) -> Tensor
 
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
-
-- func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
-  deprecated: true
 
 - func: log_softmax(Tensor self, int64_t dim) -> Tensor
   variants: function, method
@@ -1206,9 +1185,6 @@
 
 - func: ones_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: ones(Type dtype, IntList size) -> Tensor
-  deprecated: true
-
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
 
 - func: pdist(Tensor self, double p=2) -> Tensor
@@ -1240,9 +1216,6 @@
 
 - func: rand_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: rand(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
-
 - func: randint(int64_t high, IntList size, *, TensorOptions options={}) -> Tensor
 
 - func: randint(int64_t high, IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
@@ -1250,12 +1223,6 @@
 - func: randint(int64_t low, int64_t high, IntList size, *, TensorOptions options={}) -> Tensor
 
 - func: randint(int64_t low, int64_t high, IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
-
-- func: randint(Type dtype, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
-
-- func: randint(Type dtype, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
 
 - func: randint_out(Tensor result, int64_t high, IntList size, *) -> Tensor
 
@@ -1285,9 +1252,6 @@
 
 - func: randn_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
-
 - func: randperm(int64_t n, *, TensorOptions options={}) -> Tensor
 
 - func: randperm(int64_t n, *, Generator* generator, TensorOptions options={}) -> Tensor
@@ -1299,9 +1263,6 @@
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
-- func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
-
 - func: range(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
 
 - func: range(Scalar start, Scalar end, Scalar step, TensorOptions options={}) -> Tensor
@@ -1309,9 +1270,6 @@
 - func: range_out(Tensor result, Scalar start, Scalar end) -> Tensor
 
 - func: range_out(Tensor result, Scalar start, Scalar end, Scalar step) -> Tensor
-
-- func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
-  deprecated: true
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -1786,9 +1744,6 @@
 - func: zeros_like(Tensor self) -> Tensor
 
 - func: zeros_like(Tensor self, *, TensorOptions options) -> Tensor
-
-- func: zeros(Type dtype, IntList size) -> Tensor
-  deprecated: true
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   variants: function
