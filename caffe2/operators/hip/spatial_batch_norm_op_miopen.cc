@@ -275,6 +275,7 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   CAFFE_ENFORCE_EQ(scale.dim32(0), C);
   // See if we need to reshape.
   if (N > 0 && X.dims() != miopen_input_dims_) {
+    miopen_input_dims_ = X.dims();
     vector<int> dims = {N, C, H, W, D};
     vector<int> strides = {C * H * W * D, H * W * D, W * D, D, 1};
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
