@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/arg.h>
 #include <torch/csrc/utils/variadic.h>
 #include <torch/tensor.h>
 
@@ -154,20 +155,6 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 };
 } // namespace nn
 } // namespace torch
-
-#define TORCH_ARG(T, name)                                       \
-  auto name(const T& new_##name)->decltype(*this) { /* NOLINT */ \
-    this->name##_ = new_##name;                                  \
-    return *this;                                                \
-  }                                                              \
-  auto name(T&& new_##name)->decltype(*this) { /* NOLINT */      \
-    this->name##_ = std::move(new_##name);                       \
-    return *this;                                                \
-  }                                                              \
-  const T& name() const noexcept { /* NOLINT */                  \
-    return this->name##_;                                        \
-  }                                                              \
-  T name##_ /* NOLINT */
 
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
 /// wrapper over a `std::shared_ptr<Impl>`.
