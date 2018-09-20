@@ -92,7 +92,7 @@ class MatMulOp final : public Operator<Context> {
  protected:
   // A local vector to cache the output shape so we don't need to recreate
   // a vector object every time we run Run().
-  vector<TIndex> Y_shape_cache_{0, 0};
+  vector<int64_t> Y_shape_cache_{0, 0};
   int axis_a_{1};
   int axis_b_{1};
   bool trans_a_;

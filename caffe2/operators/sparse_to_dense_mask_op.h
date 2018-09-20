@@ -93,7 +93,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
         static_cast<const char*>(sparse_values.raw_data());
     const void* default_val = default_value.raw_data();
 
-    TIndex block_size = default_value.size();
+    int64_t block_size = default_value.size();
     size_t block_nbytes = default_value.nbytes();
 
     const int cols = this->featuresCount_;
@@ -105,7 +105,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     if (returnPresenceMask_) {
       presence_mask = Output(PRESENCEMASK);
     }
-    vector<TIndex> shape;
+    vector<int64_t> shape;
     if (InputSize() == 4) {
       auto& lengths = Input(LENGTHS);
       CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
@@ -204,7 +204,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
     CAFFE_ENFORCE_EQ(sparse_indices.ndim(), 1);
     auto& gradient_output = Input(GOUTPUT);
 
-    TIndex block_size = gradient_output.size_from_dim(1);
+    int64_t block_size = gradient_output.size_from_dim(1);
     size_t block_nbytes = gradient_output.itemsize() * block_size;
 
     const int cols = this->featuresCount_;
@@ -213,7 +213,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
     int32_t default_length = sparse_indices.dim32(0);
     const int32_t* lengths_vec = nullptr;
     auto* output = Output(GVALUES);
-    vector<TIndex> shape;
+    vector<int64_t> shape;
     if (InputSize() > LENGTHS) {
       // if the LENGTHS is set, the gradient_output has dim:
       // lengths * mask.size() * feature_dim

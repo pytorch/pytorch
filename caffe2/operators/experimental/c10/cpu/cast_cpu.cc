@@ -5,7 +5,6 @@
 using caffe2::CPUContext;
 using caffe2::Tensor;
 using caffe2::TensorProto_DataType;
-using caffe2::TIndex;
 
 namespace caffe2 {
 namespace {
@@ -16,7 +15,7 @@ void do_cast_(const Tensor& input, Tensor* output) {
   const auto* data = input.template data<SrcType>();
   auto* out = output->template mutable_data<DstType>();
   auto N = input.size();
-  for (TIndex i = 0; i < N; ++i) {
+  for (int64_t i = 0; i < N; ++i) {
     out[i] = static_cast<DstType>(data[i]);
   }
 }

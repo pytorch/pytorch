@@ -41,7 +41,7 @@ bool BatchGatherOp<CUDAContext>::DoRunWithType() {
   auto& indices = Input(INDICES);
   auto* output = Output(0);
 
-  vector<TIndex> shape;
+  vector<int64_t> shape;
   shape.push_back(data.dim(0));
   shape.insert(shape.end(), indices.dims().begin(), indices.dims().end());
   shape.insert(shape.end(), data.dims().begin() + 2, data.dims().end());
