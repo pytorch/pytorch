@@ -3,12 +3,12 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/TensorImpl.h>
 #include <ATen/core/context_base.h>
+#include <ATen/core/context_base.h>
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/context_base.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -21,6 +21,9 @@ CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace caffe2 {
+
+// Defined by protobuf
+class DeviceOption;
 
 /**
  * A utility function to convert vector<int> to vector<TIndex>.
@@ -152,17 +155,17 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (size() > 0) {
       if (data_type_.copy()) {
         CAFFE_ENFORCE(
-            GetDeviceType() == CPU,
+            GetDeviceType() == ::at::DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         CAFFE_ENFORCE(
-            src.GetDeviceType() == CPU,
+            src.GetDeviceType() == ::at::DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         data_type_.copy()(src.raw_data(), raw_mutable_data(), size());
       } else {
         // We'll need to use a non-CPU context to perform the copy if
         // one of the context is not CPU since only non-CPU context
         // knows how to copy between CPU and that context
-        if (src.GetDeviceType() != CPU || GetDeviceType() == CPU) {
+        if (src.GetDeviceType() != ::at::DeviceType::CPU || GetDeviceType() == ::at::DeviceType::CPU) {
           if (!context) {
             src.CreateContext()->CopyBytesToDevice(
                 nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());

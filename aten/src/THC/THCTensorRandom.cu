@@ -142,31 +142,6 @@ __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1, ARG2) 
   }                                                                                  \
 }
 
-template<typename T, typename U>
-struct is_same { static const bool value = false; };
-
-template<typename T>
-struct is_same<T, T> { static const bool value = true; };
-
-template<typename T, typename prob_type>
-__global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
-        T *result, prob_type *probs)
-{
-  int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-  int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
-  for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
-    if (is_same<prob_type, double>::value) {
-      double x = curand_uniform_double(&state[blockIdx.x]);
-      if (i < size)
-        result[i] = ScalarConvert<bool, T>::to(x <= probs[i]);
-    } else {
-      float x = curand_uniform(&state[blockIdx.x]);
-      if (i < size)
-        result[i] = ScalarConvert<bool, T>::to(x <= probs[i]);
-    }
-  }
-}
-
 // NOTE: curand_uniform is (0, 1] and we want [a, b)
 GENERATE_KERNEL2(generate_uniform, float, float a, float b, float, curand_uniform, reverse_bounds(x) * (b-a) + a)
 GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_uniform, reverse_bounds(x) * (b-a) + a)

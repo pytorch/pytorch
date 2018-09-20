@@ -239,7 +239,7 @@ You can then build the documentation by running ``make <format>`` from the
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](http://pytorch.org/previous-versions/).
+on [our website](http://pytorch.org/previous-versions).
 
 
 ## Getting Started

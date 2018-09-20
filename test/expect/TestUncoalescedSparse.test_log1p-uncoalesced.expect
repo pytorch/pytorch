@@ -1,1 +1,0 @@
-log1p: in-place on uncoalesced tensors is not supported yet!

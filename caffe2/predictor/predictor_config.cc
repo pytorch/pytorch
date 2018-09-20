@@ -1,8 +1,10 @@
 #include "predictor_config.h"
 #include "caffe2/core/init.h"
+#include "caffe2/utils/proto_utils.h"
 #ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
 #endif
+
 namespace caffe2 {
 
 namespace {
@@ -69,7 +71,8 @@ PredictorConfig makePredictorConfig(
 #if CAFFE2_MOBILE
   GlobalInit();
 #endif
-  if (optimization) {
+  if (optimization &&
+      !ArgumentHelper::HasArgument(*config.predict_net, "disable_nomnigraph")) {
 #ifdef CAFFE2_OPTIMIZER
     try {
       *config.predict_net =
