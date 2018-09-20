@@ -460,7 +460,7 @@ class MKLMemory {
     return dims_;
   }
 
-  inline const int ndim() const { return dims_.size(); }
+  inline int ndim() const { return dims_.size(); }
 
   inline int dim32(const int i) const {
     CAFFE_ENFORCE_LT(dims_.at(i), std::numeric_limits<int>::max());
