@@ -241,15 +241,15 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   // bbox_deltas: (num_images, A * box_dim, H, W)
   CAFFE_ENFORCE_EQ(
       bbox_deltas.dims(),
-      (vector<TIndex>{num_images, box_dim * A, height, width}));
+      (vector<int64_t>{num_images, box_dim * A, height, width}));
 
   // im_info_tensor: (num_images, 3), format [height, width, scale; ...]
-  CAFFE_ENFORCE_EQ(im_info_tensor.dims(), (vector<TIndex>{num_images, 3}));
+  CAFFE_ENFORCE_EQ(im_info_tensor.dims(), (vector<int64_t>{num_images, 3}));
   CAFFE_ENFORCE(
       im_info_tensor.template IsType<float>(), im_info_tensor.meta().name());
 
   // anchors: (A, box_dim)
-  CAFFE_ENFORCE_EQ(anchors.dims(), (vector<TIndex>{A, box_dim}));
+  CAFFE_ENFORCE_EQ(anchors.dims(), (vector<int64_t>{A, box_dim}));
   CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.meta().name());
 
   // Broadcast the anchors to all pixels
