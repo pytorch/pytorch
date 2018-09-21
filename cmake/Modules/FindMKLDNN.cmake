@@ -20,6 +20,11 @@ IF (NOT USE_MKLDNN)
   RETURN()
 ENDIF(NOT USE_MKLDNN)
 
+IF(MSVC)
+  MESSAGE(STATUS "MKL-DNN needs omp 3+ which is not supported in MSVC so far")
+  RETURN()
+ENDIF(MSVC )
+
 SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
 SET(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
 
