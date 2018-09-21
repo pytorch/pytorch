@@ -207,6 +207,7 @@ template <class T>
 const char* _TypeName() noexcept {
   static const char* literal_name = __TypeName<T>();
 #ifdef __GXX_RTTI
+  (void)(literal_name); // suppress unused warning
   static const std::string name = at::demangle(typeid(T).name());
   return name.c_str();
 #else
