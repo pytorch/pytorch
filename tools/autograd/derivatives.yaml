@@ -167,7 +167,10 @@
   self: not_implemented("btrisolve")
 
 - name: cat(TensorList tensors, int64_t dim)
-  tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
+  tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim, false)
+
+- name: cat(TensorList tensors, int64_t dim, Scalar pad_value)
+  tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim, true)
 
 - name: cauchy_(Tensor self, double median, double sigma, Generator generator)
   self: zeros_like(grad)
