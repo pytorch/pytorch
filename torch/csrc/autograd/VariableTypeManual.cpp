@@ -222,8 +222,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
     if (!t.defined()) {
-      AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor at position #", i, " "
-                    "for iterable argument #", pos, " '", name, "'");
+      continue;
     }
     if (!isVariableType(t.type())) {
       AT_ERROR("Expected object of type Variable but found type ", t.type().toString(), " at position #", i, " "

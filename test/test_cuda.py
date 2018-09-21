@@ -926,7 +926,7 @@ class TestCuda(TestCase):
 
             self.assertEqual(x * y, 4.5)
             self.assertEqual(y * x, 4.5)
-            with self.assertRaisesRegex(RuntimeError, 'expected type'):
+            with self.assertRaisesRegex(RuntimeError, "doesn't match the desired type"):
                 y *= x
             x *= y
             self.assertEqual(x, 4.5)
