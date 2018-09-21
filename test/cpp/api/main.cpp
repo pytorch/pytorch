@@ -21,7 +21,7 @@ int main(int argc, char* argv[]) {
   if (!torch::cuda::is_available()) {
     std::cout << "CUDA not available. Disabling CUDA and MultiCUDA tests"
               << std::endl;
-    ::testing::GTEST_FLAG(filter) = add_negative_flag("*_CUDA");
+    ::testing::GTEST_FLAG(filter) = add_negative_flag("*_CUDA:*_MultiCUDA");
   } else if (torch::cuda::device_count() < 2) {
     std::cout << "Only one CUDA device detected. Disabling MultiCUDA tests"
               << std::endl;
