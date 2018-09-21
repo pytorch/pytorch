@@ -103,7 +103,7 @@ class miopenTypeWrapper<float>
 };
 
 template <>
-class miopenTypeWrapper<float16>
+class miopenTypeWrapper<at::Half>
 {
     public:
     static const miopenDataType_t type = miopenHalf;

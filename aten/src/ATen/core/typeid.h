@@ -30,6 +30,13 @@
 // fix all of the call-sites, which I want to do later.  So the namespace
 // is not fixed at the moment.
 
+// Make at::Half a fundamental type.
+namespace std {
+template<>
+struct is_fundamental<at::Half> : std::true_type {
+};
+}  // namespace std
+
 namespace caffe2 {
 
 class TypeMeta;

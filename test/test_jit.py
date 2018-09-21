@@ -239,6 +239,13 @@ class JitTestCase(TestCase):
             imported = torch.jit.load(f.name)
         finally:
             os.unlink(f.name)
+        f = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            f.close()
+            imported.save(f.name)
+            imported = torch.jit.load(f.name)
+        finally:
+            os.unlink(f.name)
         return imported
 
     def assertGraphContains(self, graph, kind):
@@ -366,7 +373,10 @@ class JitTestCase(TestCase):
         return ge
 
     def assertAllFused(self, graph):
-        self.assertTrue(all(node.kind() in {'prim::Constant', 'prim::FusionGroup'} for node in graph.nodes()))
+        if [n.kind() for n in graph.nodes()] == ['prim::DifferentiableGraph']:
+            graph = next(graph.nodes()).g('Subgraph')
+        self.assertTrue(all(node.kind() in {'prim::Constant', 'prim::FusionGroup'} for node in graph.nodes()),
+                        'got {}'.format(graph))
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
 
     def assertExportImport(self, trace, inputs):
@@ -2690,6 +2700,23 @@ a")
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_clamp_fusion(self):
+        def func(a, b):
+            return torch.clamp(a + b, min=0, max=2)
+
+        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
+        b = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        s = self.checkScript(func, (a, b))
+        self.assertAllFused(s.graph_for(a, b))
+
+        c = s(a, b)
+        c.sum().backward()
+        self.assertAllFused(backward_graph(s))
 
     def test_mul(self):
         def func(a, b):
@@ -7625,6 +7652,12 @@ EXCLUDE_SCRIPT = {
     'test_var_dim_1d',
     'test_var_dim_1d_neg0',
     'test_var_dim_neg0',
+    'test_norm_inf',
+    'test_norm_inf_2_dim',
+    'test_norm_fro',
+    'test_norm_fro_default',
+    'test_norm_nuc',
+    'test_renorm_norm_inf',
     'test_matrix_power_n=-1',  # involves inverse
     'test_matrix_power_n=-3',  # involves inverse
     # skipped nn functional tests
