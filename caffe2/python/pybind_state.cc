@@ -392,7 +392,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "_reshape",
-          [](DLPackWrapper<CPUContext>* t, std::vector<TIndex> dims) {
+          [](DLPackWrapper<CPUContext>* t, std::vector<int64_t> dims) {
             auto* tensor = t->tensor;
             tensor->Resize(dims);
           });
@@ -430,7 +430,7 @@ void addObjectMethods(py::module& m) {
           "Copy data from this tensor into a new numpy array.")
       .def(
           "init",
-          [](Tensor* t, std::vector<TIndex> dims, int caffe_type) {
+          [](Tensor* t, std::vector<int64_t> dims, int caffe_type) {
             const auto& meta =
                 DataTypeToTypeMeta((TensorProto::DataType)caffe_type);
             CAFFE_ENFORCE(
@@ -443,7 +443,7 @@ void addObjectMethods(py::module& m) {
           "Fail if the given data type cannot be accessed from python.")
       .def_property_readonly(
           "_shape", [](const TensorCPU& t) { return t.dims(); })
-      .def("_reshape", [](TensorCPU* t, std::vector<TIndex> dims) {
+      .def("_reshape", [](TensorCPU* t, std::vector<int64_t> dims) {
         t->Resize(dims);
       });
 
@@ -1361,7 +1361,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "infer_shapes_and_types_from_map",
       [](const std::vector<py::bytes>& net_protos,
-         const std::map<std::string, std::vector<TIndex>> blob_dimensions) {
+         const std::map<std::string, std::vector<int64_t>> blob_dimensions) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
         std::vector<caffe2::NetDef*> nets_ptr;
@@ -1381,7 +1381,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "infer_shapes_and_types_from_map",
       [](const std::vector<py::bytes>& net_protos,
-         const std::map<std::string, std::vector<TIndex>> blob_dimensions,
+         const std::map<std::string, std::vector<int64_t>> blob_dimensions,
          const std::map<std::string, int> int_blob_types) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;

@@ -125,7 +125,7 @@ bool SigmoidFocalLossOp<float, CUDAContext>::RunOnDevice() {
   int H = X.dim32(2);
   int W = X.dim32(3);
 
-  avg_loss->Resize(vector<TIndex>());
+  avg_loss->Resize(vector<int64_t>());
   losses_.ResizeLike(X);
   float* avg_loss_data = avg_loss->mutable_data<float>();
 

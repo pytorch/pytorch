@@ -174,7 +174,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
       // Feed into workspace as CPU Tensors
       auto* blob = ws->CreateBlob(t.name());
       auto* cpu_tensor = blob->GetMutableTensor(CPU);
-      std::vector<TIndex> dims;
+      std::vector<int64_t> dims;
       for(const auto& d : t.dims()) {
         dims.push_back(d);
       }

@@ -55,7 +55,7 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnDropoutDescriptor_t dropout_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   float ratio_;
   bool is_test_;
@@ -113,7 +113,7 @@ class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnDropoutDescriptor_t dropout_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   Blob* scratch_blob_;
 

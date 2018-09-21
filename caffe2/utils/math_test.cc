@@ -171,9 +171,9 @@ class GemmBatchedTest
  protected:
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
-    X_.Resize(std::vector<TIndex>{3, 5, 10});
-    W_.Resize(std::vector<TIndex>{3, 6, 10});
-    Y_.Resize(std::vector<TIndex>{3, 5, 6});
+    X_.Resize(std::vector<int64_t>{3, 5, 10});
+    W_.Resize(std::vector<int64_t>{3, 6, 10});
+    Y_.Resize(std::vector<int64_t>{3, 5, 6});
     math::Set<float, CPUContext>(
         X_.size(), 1, X_.mutable_data<float>(), cpu_context_.get());
     math::Set<float, CPUContext>(
