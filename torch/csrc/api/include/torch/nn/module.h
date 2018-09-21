@@ -3,6 +3,7 @@
 #include <torch/detail/ordered_dict.h>
 #include <torch/nn/cursor.h>
 #include <torch/nn/pimpl.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
 #include <ATen/ATen.h>
@@ -208,14 +209,6 @@ class Module {
   /// Recursively zeros out the `grad` value of each registered parameter.
   virtual void zero_grad();
 
-  /// Serializes the `Module`.
-  template <class Archive>
-  void save(Archive& ar) const;
-
-  /// Deserializes the `Module`.
-  template <class Archive>
-  void load(Archive& ar);
-
   /// Attempts to cast this `Module` to the given `ModuleType`.
   ///
   /// This method is useful when calling `apply()` on a `ModuleCursor`.
@@ -254,6 +247,12 @@ class Module {
       typename ModuleType,
       typename = torch::detail::disable_if_module_holder_t<ModuleType>>
   ModuleType* as() noexcept;
+
+  /// Serializes the `Module` into the given `OutputArchive`.
+  virtual void save(serialize::OutputArchive& archive) const;
+
+  /// Deserializes the `Module` from the given `InputArchive`.
+  virtual void load(serialize::InputArchive& archive);
 
  protected:
   /// Registers a parameter with this `Module`.
@@ -358,28 +357,6 @@ class Module {
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ nn::Module ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-template <class Archive>
-void Module::save(Archive& ar) const {
-  auto params = parameters();
-  size_t size = params.size();
-  ar(size);
-  for (auto& p : params) {
-    ar(p.key, p.value);
-  }
-}
-
-template <class Archive>
-void Module::load(Archive& ar) {
-  auto params = parameters();
-  size_t size;
-  ar(size);
-  std::string name;
-  for (size_t i = 0; i < size; i++) {
-    ar(name);
-    ar(params[name]);
-  }
-}
 
 template <typename ModuleType>
 typename ModuleType::ContainedType* Module::as() noexcept {

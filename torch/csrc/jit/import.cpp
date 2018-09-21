@@ -334,6 +334,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
 std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFullName(
     ModuleLookup module_lookup,
     const std::string fullname) {
+  AT_ASSERT(!fullname.empty());
   std::vector<std::string> vec;
   std::stringstream ss(fullname);
   std::string name;
