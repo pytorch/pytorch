@@ -124,9 +124,6 @@
 #include "generic/Linear.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/PReLU.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/RReLU.c"
 #include "THGenerateFloatTypes.h"
 
