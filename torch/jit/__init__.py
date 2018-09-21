@@ -529,22 +529,27 @@ def createResolutionCallback(frames_up=0):
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
     the function which called createResolutionCallback (by default).
+
+    This is used to enable access in-scope Python variables inside
+    TorchScript fragments.
+
+    frames_up is number of additional frames to go up on the stack.
+    The default value is 0, which correspond to the frame of the caller
+    of createResolutionCallback. Also for example, if frames_up is set
+    to 1, then the frame of the caller's caller of createResolutionCallback
+    will be taken.
+
     For example, the following program prints 2::
 
         def bar():
-            cb = createResolutionCallback()
-            print(x("foo"))
+            cb = createResolutionCallback(1)
+            print(cb("foo"))
 
         def baz():
             foo = 2
             bar()
 
         baz()
-
-    This is used to enable access in-scope Python variables inside
-    TorchScript fragments.
-
-    frames_up is
     """
     frame = inspect.stack()[1 + frames_up][0]
 
