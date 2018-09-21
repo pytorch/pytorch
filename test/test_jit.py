@@ -8003,8 +8003,8 @@ class TestCustomOperators(JitTestCase):
     def test_passing_and_returning_lists(self):
         # Replace with actual test once we support lists.
         a, b = torch.rand(5), torch.rand(5)
-        output = torch.ops.aten.cat([a, b])
-        output_ref = torch.cat([a, b])
+        output = torch.ops.aten.meshgrid([a, b])
+        output_ref = torch.meshgrid([a, b])
         self.assertEqual(output, output_ref)
 
     def test_script_graph_contains_custom_op(self):
