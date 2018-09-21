@@ -318,27 +318,6 @@ TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
           int p,
           THTensor *weights,      // [OPTIONAL]
           accreal margin);
-
-TH_API void THNN_(PReLU_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight);
-TH_API void THNN_(PReLU_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *weight);
-TH_API void THNN_(PReLU_accGradParameters)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *weight,
-          THTensor *gradWeight,
-          accreal scale);
-
 TH_API void THNN_(Linear_updateOutput)(
           THNNState *state,
           THTensor *input,
