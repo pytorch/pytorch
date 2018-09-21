@@ -73,8 +73,8 @@ static bool needs_cast(const Tensor& tensor, const Type& dst_type) {
   if (!tensor.defined() || dst_type == tensor.type()) {
     return false;
   }
-  if (dst_type.backend() == Backend::CUDA &&
-      tensor.type().backend() == Backend::CPU &&
+  if (dst_type.device_type() == DeviceType::CUDA &&
+      tensor.type().device_type() == DeviceType::CPU &&
       tensor.dim() == 0) {
     // zero-dim CPU tensors used in CUDA operations can be used directly without
     // casting
