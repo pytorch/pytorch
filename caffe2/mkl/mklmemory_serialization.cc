@@ -18,7 +18,8 @@ class MKLMemorySerializer : public BlobSerializerBase {
   ~MKLMemorySerializer() {}
 
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
     BlobProto blob_proto;
@@ -28,8 +29,8 @@ class MKLMemorySerializer : public BlobSerializerBase {
     auto* device_detail = proto->mutable_device_detail();
     device_detail->set_device_type(PROTO_MKLDNN);
     proto->set_name(name);
-    if (blob.IsType<MKLMemory<float>>()) {
-      const MKLMemory<float>& src = blob.Get<MKLMemory<float>>();
+    if (typeMeta.Match<MKLMemory<float>>()) {
+      const MKLMemory<float>& src = *static_cast<const MKLMemory<float>*>(pointer);
       CAFFE_ENFORCE(
           src.buffer(), "Cannot serialize an empty MKLMemory object.");
       size_t total = 1;
@@ -42,8 +43,8 @@ class MKLMemorySerializer : public BlobSerializerBase {
         proto->add_float_data(0);
       }
       src.CopyTo(proto->mutable_float_data()->mutable_data());
-    } else if (blob.IsType<MKLMemory<double>>()) {
-      const MKLMemory<double>& src = blob.Get<MKLMemory<double>>();
+    } else if (typeMeta.Match<MKLMemory<double>>()) {
+      const MKLMemory<double>& src = *static_cast<const MKLMemory<double>*>(pointer);
       CAFFE_ENFORCE(
           src.buffer(), "Cannot serialize an empty MKLMemory object.");
       size_t total = 1;

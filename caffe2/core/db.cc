@@ -170,11 +170,12 @@ REGISTER_CAFFE2_DB(MiniDB, MiniDB);
 REGISTER_CAFFE2_DB(minidb, MiniDB);
 
 void DBReaderSerializer::Serialize(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  CAFFE_ENFORCE(blob.IsType<DBReader>());
-  auto& reader = blob.Get<DBReader>();
+  CAFFE_ENFORCE(typeMeta.Match<DBReader>());
+  const auto& reader = *static_cast<const DBReader*>(pointer);
   DBReaderProto proto;
   proto.set_name(name);
   proto.set_source(reader.source_);

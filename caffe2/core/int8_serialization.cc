@@ -11,10 +11,12 @@ namespace int8 {
 class Int8TensorCPUSerializer : public BlobSerializerBase {
  public:
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    const auto& tensor = blob.template Get<Int8TensorCPU>();
+    CAFFE_ENFORCE(typeMeta.Match<Int8TensorCPU>());
+    const auto& tensor = *static_cast<const Int8TensorCPU*>(pointer);
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type("Int8TensorCPU");
