@@ -14,12 +14,15 @@
 #include <type_traits>
 #include <unordered_map>
 
+// forward declarations confuse doxygen
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace torch {
 namespace detail {
 template <typename T>
 class CursorBase;
 } // namespace detail
 } // namespace torch
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 namespace torch {
 namespace nn {
@@ -260,7 +263,7 @@ class Module {
   /// methods such as `parameters()`, `clone()` or `to().`
   ///
   /// \rst
-  /// .. code-block: cpp
+  /// .. code-block:: cpp
   ///   MyModule::MyModule() {
   ///     weight_ = register_parameter("weight", torch::randn({A, B}));
   ///   }
@@ -277,7 +280,7 @@ class Module {
   /// to methods such as `buffers()`, `clone()` or `to().
   ///
   /// \rst
-  /// .. code-block: cpp
+  /// .. code-block:: cpp
   ///   MyModule::MyModule() {
   ///     mean_ = register_buffer("mean", torch::empty({num_features_}));
   ///   }
@@ -290,7 +293,7 @@ class Module {
   /// `clone()` or `to()`.
   ///
   /// \rst
-  /// .. code-block: cpp
+  /// .. code-block:: cpp
   ///   MyModule::MyModule() {
   ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
   ///   }
@@ -308,7 +311,7 @@ class Module {
   /// `clone()` or `to()`.
   ///
   /// \rst
-  /// .. code-block: cpp
+  /// .. code-block:: cpp
   ///   MyModule::MyModule() {
   ///     submodule_ = register_module("linear", torch::nn::Linear(3, 4));
   ///   }

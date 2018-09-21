@@ -28,7 +28,7 @@ void runWithSharedBuffer<CPUContext>(
   auto* mutexPtr = mutexBlob->GetMutable<std::unique_ptr<std::mutex>>();
   std::lock_guard<std::mutex> g(**mutexPtr);
   auto* buffer =
-      ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU__")->GetMutableTensor(CPU);
+      BlobGetMutableTensor(ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU__"), CPU);
   f(buffer);
 }
 }

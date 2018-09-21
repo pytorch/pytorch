@@ -30,7 +30,7 @@ class BatchMatMulOpGPUTest : public testing::Test {
       const float value,
       const string& name) {
     Blob* blob = ws_.CreateBlob(name);
-    auto* tensor = blob->GetMutableTensor(CUDA);
+    auto* tensor = BlobGetMutableTensor(blob, CUDA);
     tensor->Resize(dims);
     math::Set<float, CUDAContext>(
         tensor->size(),

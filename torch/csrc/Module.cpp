@@ -605,6 +605,10 @@ static PyObject* initModule() {
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
 
+
+  py::reinterpret_borrow<py::module>(module)
+    .def("_demangle", &at::demangle);
+
   // Set ATen warnings to issue Python warnings
   at::Warning::set_warning_handler(&warning_handler);
 

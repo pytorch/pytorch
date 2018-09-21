@@ -40,7 +40,7 @@ TEST(OperatorFallbackTest, IncrementByOneOp) {
   for (int i = 0; i < 6; ++i) {
     source_tensor.mutable_data<float>()[i] = i;
   }
-  ws.CreateBlob("X")->GetMutableTensor(CPU)->CopyFrom(source_tensor);
+  BlobGetMutableTensor(ws.CreateBlob("X"), CPU)->CopyFrom(source_tensor);
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
   EXPECT_TRUE(op.get() != nullptr);
   EXPECT_TRUE(op->Run());
@@ -64,7 +64,7 @@ TEST(OperatorFallbackTest, GPUIncrementByOneOp) {
   for (int i = 0; i < 6; ++i) {
     source_tensor.mutable_data<float>()[i] = i;
   }
-  ws.CreateBlob("X")->GetMutableTensor(CUDA)->CopyFrom(source_tensor);
+  BlobGetMutableTensor(ws.CreateBlob("X"), CUDA)->CopyFrom(source_tensor);
   unique_ptr<OperatorBase> op(CreateOperator(op_def, &ws));
   EXPECT_TRUE(op.get() != nullptr);
   EXPECT_TRUE(op->Run());

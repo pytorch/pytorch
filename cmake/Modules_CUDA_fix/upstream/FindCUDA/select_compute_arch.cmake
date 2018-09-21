@@ -88,6 +88,9 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
               RUN_OUTPUT_VARIABLE compute_capabilities)
     endif()
 
+    # Filter unrelated content out of the output.
+    string(REGEX MATCHALL "[0-9]+\\.[0-9]+" compute_capabilities "${compute_capabilities}")
+
     if(run_result EQUAL 0)
       string(REPLACE "2.1" "2.1(2.0)" compute_capabilities "${compute_capabilities}")
       set(CUDA_GPU_DETECT_OUTPUT ${compute_capabilities}

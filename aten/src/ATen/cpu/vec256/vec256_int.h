@@ -209,6 +209,38 @@ struct Vec256<int32_t> : public Vec256i {
 };
 
 template <>
+void convert(const int32_t *src, float *dst, int64_t n) {
+  int64_t i;
+  // int32_t and float have same size
+#pragma unroll
+  for (i = 0; i <= (n - Vec256<int32_t>::size); i += Vec256<int32_t>::size) {
+    auto input_vec = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(src + i));
+    auto output_vec = _mm256_cvtepi32_ps(input_vec);
+    _mm256_storeu_ps(reinterpret_cast<float*>(dst + i), output_vec);
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = static_cast<float>(src[i]);
+  }
+}
+
+template <>
+void convert(const int32_t *src, double *dst, int64_t n) {
+  int64_t i;
+  // int32_t has half the size of double
+#pragma unroll
+  for (i = 0; i <= (n - Vec256<double>::size); i += Vec256<double>::size) {
+    auto input_128_vec = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + i));
+    auto output_vec = _mm256_cvtepi32_pd(input_128_vec);
+    _mm256_storeu_pd(reinterpret_cast<double*>(dst + i), output_vec);
+  }
+#pragma unroll
+  for (; i < n; i++) {
+    dst[i] = static_cast<double>(src[i]);
+  }
+}
+
+template <>
 struct Vec256<int16_t> : public Vec256i {
   static constexpr int size = 16;
   using Vec256i::Vec256i;

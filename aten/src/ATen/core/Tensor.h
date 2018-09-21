@@ -142,7 +142,7 @@ struct AT_API Tensor {
     return tensor_impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return tensor_impl_->scalar_type();
+    return dataTypeToScalarType(tensor_impl_->dtype().id());
   }
   const Storage& storage() const {
     return tensor_impl_->storage();
@@ -441,12 +441,10 @@ struct AT_API Tensor {
   Tensor & atan_();
   Tensor baddbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & baddbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
-  Tensor bernoulli(const Tensor & p, Generator * generator=nullptr) const;
-  Tensor bernoulli(double p, Generator * generator=nullptr) const;
-  Tensor bernoulli() const;
+  Tensor bernoulli(Generator * generator=nullptr) const;
   Tensor & bernoulli_(const Tensor & p, Generator * generator=nullptr);
-  Tensor & bernoulli_(double p, Generator * generator=nullptr);
-  Tensor & bernoulli_();
+  Tensor & bernoulli_(double p=0.5, Generator * generator=nullptr);
+  Tensor bernoulli(double p, Generator * generator=nullptr) const;
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
@@ -684,3 +682,5 @@ private:
   c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_tensor_impl_;
 };
 } // namespace at
+
+#include "ATen/core/TensorMethods.h"

@@ -21,7 +21,7 @@ TEST(MKLTest, MKLMemorySerialization) {
   blob.Reset<MKLMemory<float>>(new MKLMemory<float>(shape));
   MKLMemory<float>* mkl_memory = blob.GetMutable<MKLMemory<float>>();
   mkl_memory->CopyFrom(data);
-  string serialized = blob.Serialize("test");
+  string serialized = SerializeBlob(blob, "test");
   BlobProto proto;
   CHECK(proto.ParseFromString(serialized));
   EXPECT_EQ(proto.name(), "test");
@@ -35,7 +35,7 @@ TEST(MKLTest, MKLMemorySerialization) {
     EXPECT_EQ(tensor_proto.float_data(i), static_cast<float>(i));
   }
   Blob new_blob;
-  EXPECT_NO_THROW(new_blob.Deserialize(serialized));
+  EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));
   EXPECT_TRUE(new_blob.IsType<MKLMemory<float>>());
   const auto& new_mkl_memory = blob.Get<MKLMemory<float>>();
   EXPECT_EQ(new_mkl_memory.dims().size(), 3);

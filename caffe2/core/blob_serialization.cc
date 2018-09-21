@@ -62,24 +62,25 @@ class StringDeserializer : public BlobDeserializerBase {
 };
 
 // The blob serialization member function implementation.
-void Blob::Serialize(
+void SerializeBlob(
+    const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
-    int chunk_size) const {
-  std::unique_ptr<BlobSerializerBase> serializer(CreateSerializer(meta_.id()));
-  CAFFE_ENFORCE(serializer, "No known serializer for ", meta_.name());
-  serializer->SerializeWithChunkSize(*this, name, acceptor, chunk_size);
+    int chunk_size) {
+  std::unique_ptr<BlobSerializerBase> serializer(CreateSerializer(blob.meta().id()));
+  CAFFE_ENFORCE(serializer, "No known serializer for ", blob.meta().name());
+  serializer->SerializeWithChunkSize(blob, name, acceptor, chunk_size);
 }
 
 // The blob serialization member function implementation.
-std::string Blob::Serialize(const string& name) const {
+std::string SerializeBlob(const Blob& blob, const string& name) {
   std::string data;
   BlobSerializerBase::SerializationAcceptor acceptor = [&data](
-      const std::string&, const std::string& blob) {
+      const std::string&, const std::string& blob_str) {
     DCHECK(data.empty()); // should be called once with kNoChunking
-    data = blob;
+    data = blob_str;
   };
-  this->Serialize(name, acceptor, kNoChunking);
+  SerializeBlob(blob, name, acceptor, kNoChunking);
   return data;
 }
 
@@ -304,7 +305,7 @@ void TensorSerializer::Serialize(
       for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
         temp_blob.ShareExternal(
             const_cast<char*>(raw_data + i * input.itemsize()), input.meta());
-        proto.add_string_data(temp_blob.Serialize(""));
+        proto.add_string_data(SerializeBlob(temp_blob, ""));
       }
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
@@ -328,15 +329,15 @@ CAFFE_DEFINE_TYPED_REGISTRY(
 
 CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
-void Blob::Deserialize(const string& content) {
+void DeserializeBlob(const string& content, Blob* result) {
   BlobProto blob_proto;
   CAFFE_ENFORCE(
       blob_proto.ParseFromString(content),
       "Cannot parse content into a BlobProto.");
-  Deserialize(blob_proto);
+  DeserializeBlob(blob_proto, result);
 }
 
-void Blob::Deserialize(const BlobProto& blob_proto) {
+void DeserializeBlob(const BlobProto& blob_proto, Blob* result) {
   if (blob_proto.type() == kTensorBlobType) {
     // This is a tensor object. Depending on the device type, we will
     // use the corresponding TensorDeserializer.
@@ -346,14 +347,14 @@ void Blob::Deserialize(const BlobProto& blob_proto) {
     // Tensor's deserializer should always be registered, but we will double
     // check if it is not null anyway.
     CAFFE_ENFORCE(deserializer.get());
-    deserializer->Deserialize(blob_proto, this);
+    deserializer->Deserialize(blob_proto, result);
   } else {
     auto deserializer = CreateDeserializer(blob_proto.type());
     CAFFE_ENFORCE(
         deserializer.get(),
         "No registered deserializer for type ",
         blob_proto.type());
-    deserializer->Deserialize(blob_proto, this);
+    deserializer->Deserialize(blob_proto, result);
   }
 }
 
@@ -361,7 +362,7 @@ void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
   auto tensor_proto = blob_proto.tensor();
   Deserialize(
       tensor_proto,
-      blob->GetMutableTensor(
+      BlobGetMutableTensor(blob, 
           static_cast<DeviceType>(tensor_proto.device_detail().device_type())));
 }
 
@@ -508,7 +509,7 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       Blob temp_blob;
       void* raw_ptr = nullptr;
       for (int i = 0; i < chunkSize; ++i) {
-        temp_blob.Deserialize(proto.string_data(i));
+        DeserializeBlob(proto.string_data(i), &temp_blob);
         if (i == 0) {
           raw_ptr = tensor->raw_mutable_data(temp_blob.meta());
         }

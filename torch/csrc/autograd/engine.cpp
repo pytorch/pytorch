@@ -8,6 +8,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Error.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -302,7 +303,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
     ss << edges.size() << ", but got " << grads.size();
-    throw std::runtime_error(format_error(ss.str()));
+    AT_ERROR(format_error(ss.str()));
   }
   for (size_t i = 0; i < grads.size(); i++) {
     const auto& edge = edges[i];
@@ -314,7 +315,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
-      // throw std::runtime_error(format_error(ss.str()));
+      // AT_ERROR(format_error(ss.str()));
       continue;
     }
     if (!grads[i].sizes().equals(metadata.shape())) {
@@ -323,7 +324,7 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
         ss << "invalid gradient at index " << i << " - got ";
         ss << grads[i].sizes() << " but expected shape compatible with ";
         ss << metadata.shape();
-        throw std::runtime_error(format_error(ss.str()));
+        AT_ERROR(format_error(ss.str()));
       }
       grads[i] = at::sum_to(grads[i], metadata.shape());
     }
@@ -331,14 +332,14 @@ static void validate_outputs(const edge_list& edges, variable_list& grads, const
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected type ";
       ss << metadata.type() << " but got " << grads[i].type();
-      throw std::runtime_error(format_error(ss.str()));
+      AT_ERROR(format_error(ss.str()));
     }
     const auto output_device = output.is_cuda() ? output.get_device() : -1;
     if (output_device != metadata.device()) {
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected device ";
       ss << metadata.device() << " but got " << output_device;
-      throw std::runtime_error(format_error(ss.str()));
+      AT_ERROR(format_error(ss.str()));
     }
   }
 }

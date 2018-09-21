@@ -289,13 +289,13 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
     def.add_arg()->CopyFrom(MakeArgument("pad_r", args.pad_r));
     def.add_arg()->CopyFrom(MakeArgument("pad_t", args.pad_t));
     def.add_arg()->CopyFrom(MakeArgument("pad_b", args.pad_b));
-    auto* Xws = ws.CreateBlob("X")->GetMutableTensor(CPU);
+    auto* Xws = BlobGetMutableTensor(ws.CreateBlob("X"), CPU);
     Xws->ResizeLike(X);
     Xws->ShareExternalPointer(X.mutable_data<float>(), X.size());
-    auto* Wws = ws.CreateBlob("W")->GetMutableTensor(CPU);
+    auto* Wws = BlobGetMutableTensor(ws.CreateBlob("W"), CPU);
     Wws->ResizeLike(W_);
     Wws->ShareExternalPointer(W_.mutable_data<float>(), W_.size());
-    auto* bws = ws.CreateBlob("b")->GetMutableTensor(CPU);
+    auto* bws = BlobGetMutableTensor(ws.CreateBlob("b"), CPU);
     bws->ResizeLike(bias);
     bws->ShareExternalPointer(bias.mutable_data<float>(), bias.size());
     ws.RunOperatorOnce(def);

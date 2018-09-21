@@ -1,7 +1,7 @@
 #pragma once
 
+#include <torch/arg.h>
 #include <torch/nn/module.h>
-#include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
 #include <torch/serialization.h>
 
