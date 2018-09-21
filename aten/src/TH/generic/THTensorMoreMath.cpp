@@ -1290,22 +1290,37 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   }
 }
 
-void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension, int pad, scalar_t pad_value)
-{
+void THTensor_(cat)(
+    THTensor* r_,
+    THTensor* ta,
+    THTensor* tb,
+    int dimension,
+    int pad,
+    scalar_t pad_value) {
   THTensor* inputs[2];
   inputs[0] = ta;
   inputs[1] = tb;
   THTensor_(catArray)(r_, inputs, 2, dimension, pad, pad_value);
 }
 
-void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension, bool pad);
-inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension, bool pad)
-{
+void THTensor_(check_shape_except_dim)(
+    THTensor* first,
+    THTensor* second,
+    int dimension,
+    bool pad);
+inline void THTensor_(check_shape_except_dim)(
+    THTensor* first,
+    THTensor* second,
+    int dimension,
+    bool pad) {
   int first_dims = first->dim();
   int second_dims = second->dim();
-  THArgCheck(first_dims == second_dims, 0,
+  THArgCheck(
+      first_dims == second_dims,
+      0,
       "Tensors must have same number of dimensions: got %d and %d",
-      first_dims, second_dims);
+      first_dims,
+      second_dims);
 
   // Without padding, sizes of tensors must match except in dimension
   if (!pad) {
@@ -1315,24 +1330,37 @@ inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second,
       }
       int64_t first_dim_size = first->size(dim);
       int64_t second_dim_size = second->size(dim);
-      THArgCheck(first_dim_size == second_dim_size, 0,
+      THArgCheck(
+          first_dim_size == second_dim_size,
+          0,
           "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d",
-          dimension, (long long)first_dim_size, (long long)second_dim_size, dim);
-      }
+          dimension,
+          (long long)first_dim_size,
+          (long long)second_dim_size,
+          dim);
     }
+  }
 }
 
-void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension, int pad, scalar_t pad_value)
-{
-  // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
-  // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
-  // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
-  // size (i.e. other empty sizes are not skipped).
+void THTensor_(catArray)(
+    THTensor* result,
+    THTensor** inputs,
+    int numInputs,
+    int dimension,
+    int pad,
+    scalar_t pad_value) {
+  // previously, size [0] tensors were the only possible empty tensors; thus, it
+  // wasn't possible to cat empty tensors unless all the other tensors were
+  // 1-dimensional, so we allowed these tensors to be "skipped".  We maintain
+  // this behavior for backwards compatibility, but only for this specific size
+  // (i.e. other empty sizes are not skipped).
   // FIXME: warn if this is the case
-  bool allSkipped= true;
+  bool allSkipped = true;
   int64_t nDims = 0;
-  THTensor *notSkippedTensor;  // non-owning reference
-  auto should_skip = [](THTensor *t, bool pad) { return t->is_empty() && t->dim() == 1 && !pad; };
+  THTensor* notSkippedTensor; // non-owning reference
+  auto should_skip = [](THTensor* t, bool pad) {
+    return t->is_empty() && t->dim() == 1 && !pad;
+  };
   for (int i = 0; i < numInputs; i++) {
     if (should_skip(inputs[i], pad)) {
       continue;
@@ -1351,10 +1379,10 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   THArgCheck(dimension < nDims, 4, "invalid dimension %d", dimension);
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
 
-    // Compute size of the result in the cat dimension
+  // Compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
   for (int i = 0; i < numInputs; i++) {
-    THTensor *tensor = inputs[i];
+    THTensor* tensor = inputs[i];
     if (should_skip(tensor, pad)) {
       continue;
     }
@@ -1387,7 +1415,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   // Check contiguity of all inputs and result
   bool allContiguous = true;
   for (int i = 0; i < numInputs; i++) {
-    if(!should_skip(inputs[i], pad)) {
+    if (!should_skip(inputs[i], pad)) {
       allContiguous = allContiguous && THTensor_(isContiguous)(inputs[i]);
     }
   }
@@ -1397,16 +1425,23 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   // Second path for non-contiguous
   int64_t offset;
   if (dimension == 0 && allContiguous && !pad) {
-    scalar_t* result_data = THStorage_(data)(THTensor_getStoragePtr(result)) + result->storage_offset();
+    scalar_t* result_data = THStorage_(data)(THTensor_getStoragePtr(result)) +
+        result->storage_offset();
     offset = 0;
     for (int j = 0; j < numInputs; j++) {
       if (!should_skip(inputs[j], pad)) {
         THTensor* input0 = inputs[j];
-        scalar_t* input0_data = THStorage_(data)(THTensor_getStoragePtr(input0)) + input0->storage_offset();
+        scalar_t* input0_data =
+            THStorage_(data)(THTensor_getStoragePtr(input0)) +
+            input0->storage_offset();
         int64_t input0_size = THTensor_(nElement)(input0);
-        // C standard says you can't pass nullptrs to memcpy, even if the size is 0; ubsan checks this.
+        // C standard says you can't pass nullptrs to memcpy, even if the size
+        // is 0; ubsan checks this.
         if (input0_size != 0) {
-          memcpy(result_data + offset, input0_data, input0_size*sizeof(scalar_t));
+          memcpy(
+              result_data + offset,
+              input0_data,
+              input0_size * sizeof(scalar_t));
         }
         offset += input0_size;
       }
@@ -1416,10 +1451,10 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
     for (int j = 0; j < numInputs; j++) {
       if (!should_skip(inputs[j], pad)) {
         int64_t dimSize = inputs[j]->size(dimension);
-        THTensor *nt = THTensor_(newWithTensor)(result);
+        THTensor* nt = THTensor_(newWithTensor)(result);
         if (pad) {
           for (int dim = 0; dim < nDims; dim++) {
-            if (dimension==dim) {
+            if (dimension == dim) {
               THTensor_(narrow)(nt, NULL, dimension, offset, dimSize);
             } else {
               THTensor_(narrow)(nt, NULL, dim, 0, inputs[j]->size(dim));

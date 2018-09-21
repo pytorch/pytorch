@@ -37,8 +37,12 @@ Tensor cat(TensorList tensors, int64_t dim) {
   return at::_cat(tensors, dim, false, 0);
 }
 
-Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim, Scalar pad_value) {
-  if (pad_value.isFloatingPoint() && std::isnan(pad_value.toFloat())){
+Tensor& cat_out(
+    Tensor& result,
+    TensorList tensors,
+    int64_t dim,
+    Scalar pad_value) {
+  if (pad_value.isFloatingPoint() && std::isnan(pad_value.toFloat())) {
     return at::cat_out(result, tensors, dim);
   }
   return at::_cat_out(result, tensors, dim, true, pad_value);

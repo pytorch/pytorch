@@ -212,14 +212,20 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands);
 bool PropagateCompleteShapeOnNode(
     Node * node, bool insert_expands, std::vector<CompleteTensorTypePtr> types);
 
-void PropagateCatShape(Node * cat_node, bool pad) {
-  static const auto propagate_complete = [](Node * node, bool pad, at::ArrayRef<Value*> tensors) -> bool {
-    auto input_types = fmap(tensors, [](Value *v) { return v->type()->cast<CompleteTensorType>(); });
-    if (!std::all_of(input_types.begin(), input_types.end(),
-        [](const CompleteTensorTypePtr& tp) { return tp != nullptr; })) {
+void PropagateCatShape(Node* cat_node, bool pad) {
+  static const auto propagate_complete =
+      [](Node* node, bool pad, at::ArrayRef<Value*> tensors) -> bool {
+    auto input_types = fmap(tensors, [](Value* v) {
+      return v->type()->cast<CompleteTensorType>();
+    });
+    if (!std::all_of(
+            input_types.begin(),
+            input_types.end(),
+            [](const CompleteTensorTypePtr& tp) { return tp != nullptr; })) {
       return false;
     }
-    if (!node->is_constant(attr::dim)) return false;
+    if (!node->is_constant(attr::dim))
+      return false;
     std::vector<int64_t> sizes = input_types[0]->sizes();
     const int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
     const int64_t ndim = sizes.size();
@@ -228,8 +234,8 @@ void PropagateCatShape(Node * cat_node, bool pad) {
       return false;
 
     sizes[dim] = 0;
-    for (auto & tp : input_types) {
-      auto & tp_sizes = tp->sizes();
+    for (auto& tp : input_types) {
+      auto& tp_sizes = tp->sizes();
       if (sizes.size() != tp_sizes.size())
         return false;
       for (int64_t i = 0; i < ndim; ++i) {
@@ -242,8 +248,9 @@ void PropagateCatShape(Node * cat_node, bool pad) {
     node->output()->setType(input_types[0]->withSizes(sizes));
     return true;
   };
-  static const auto propagate = [](Node * node, bool pad, at::ArrayRef<Value*> tensors) -> bool {
-    for (Value * v : tensors) {
+  static const auto propagate =
+      [](Node* node, bool pad, at::ArrayRef<Value*> tensors) -> bool {
+    for (Value* v : tensors) {
       if (auto type = v->type()->cast<TensorType>()) {
         node->output()->setType(type);
         return true;

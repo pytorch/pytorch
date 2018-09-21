@@ -351,7 +351,8 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       // NB: this is a specialization for the common case where all inputs are
       // of equal sizes. We can use a single split operation to handle that.
       if (std::all_of(
-              tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes) && !pad) {
+              tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes) &&
+          !pad) {
         auto tensor_grads = grads.at(0).chunk(tensor_inputs.size(), dim);
         tensor_grads.push_back(nullptr); // for attr::dim
         return tensor_grads;
@@ -386,7 +387,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->kind() == prim::Constant) {
       return {};
     }
-    throw std::runtime_error(std::string("failed to differentiate `") + node->kind().toDisplayString() + "`");
+    throw std::runtime_error(
+        std::string("failed to differentiate `") +
+        node->kind().toDisplayString() + "`");
   };
   if (!isDifferentiable(node)) {
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
