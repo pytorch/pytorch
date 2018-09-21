@@ -164,7 +164,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // Set up node as a PythonOp or as a weak script
     if (is_weak) {
       auto name = std::make_shared<Symbol>(
-          Symbol::aten(py::str(py::getattr(func, "__name__"))));
+          Symbol::weak(py::str(py::getattr(func, "__name__"))));
       new_node = m.graph()->insertNode(m.graph()->create(*name, 0));
     } else {
       // Create node that calls up to Python
