@@ -73,7 +73,7 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
         if (special_empty) {
           // We can't call select on an empty tensor so we just create an empty
           // tensor.
-          result.emplace_back(nonzero.type().tensor());
+          result.emplace_back(at::empty({0}, nonzero.options()));
         } else {
           result.emplace_back(nonzero.select(1, j));
         }

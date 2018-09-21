@@ -518,7 +518,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     }
     deviceGuard.set_index(-1);
 #endif
-    entry->src[i] = key.type->tensor(srcSizes[i]);
+    entry->src[i] = at::empty(srcSizes[i], key.type->options());
   }
 
 #ifdef USE_CUDA

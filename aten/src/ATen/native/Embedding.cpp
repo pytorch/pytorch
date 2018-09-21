@@ -66,12 +66,12 @@ Tensor embedding_sparse_backward(
 
   int64_t num_features = grad_.size(-1);
   auto weight_size = std::array<int64_t, 2>{{ num_weights, num_features }};
-  auto& dense_type = grad.type();
+  auto dense_options = grad.options();
 
   // check if all our grad come from padding_idx
   if (grad.numel() == 0) {
-    return at::_sparse_coo_tensor_unsafe(indices_.type().tensor({1, 0}),
-                                         dense_type.tensor({0, num_features}),
+    return at::_sparse_coo_tensor_unsafe(at::empty({1, 0}, indices_.options()),
+                                         at::empty({0, num_features}, dense_options),
                                          weight_size);
   }
 
