@@ -3303,5 +3303,6 @@
       output: True
     - TensorList tensors
     - arg: int64_t dim
-      default: 0
+    - arg: bool pad
+    - arg: real pad_value
 ]]
