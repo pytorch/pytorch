@@ -116,7 +116,7 @@ inline int CudaVersion() { return CUDA_VERSION; }
 /**
  * Returns the number of devices.
  */
-int NumCudaDevices();
+CAFFE2_CUDA_API int NumCudaDevices();
 
 /**
  * Check if the current running session has a cuda gpu present.
@@ -137,27 +137,27 @@ inline bool HasCudaGPU() { return NumCudaDevices() > 0; }
 /**
  * Gets the current GPU id. This is a simple wrapper around cudaGetDevice().
  */
-int CaffeCudaGetDevice();
+CAFFE2_CUDA_API int CaffeCudaGetDevice();
 
 /**
  * Gets the current GPU id. This is a simple wrapper around cudaGetDevice().
  */
-void CaffeCudaSetDevice(const int id);
+CAFFE2_CUDA_API void CaffeCudaSetDevice(const int id);
 
 /**
  * Gets the GPU id that the current pointer is located at.
  */
-int GetGPUIDForPointer(const void* ptr);
+CAFFE2_CUDA_API int GetGPUIDForPointer(const void* ptr);
 
 /**
  * Gets the device property for the given device. This function is thread safe.
  */
-const cudaDeviceProp& GetDeviceProperty(const int device);
+CAFFE2_CUDA_API const cudaDeviceProp& GetDeviceProperty(const int device);
 
 /**
  * Runs a device query function and prints out the results to LOG(INFO).
  */
-void DeviceQuery(const int deviceid);
+CAFFE2_CUDA_API void DeviceQuery(const int deviceid);
 
 /**
  * Return a peer access pattern by returning a matrix (in the format of a
@@ -166,22 +166,22 @@ void DeviceQuery(const int deviceid);
  * This function returns false if anything wrong happens during the query of
  * the GPU access pattern.
  */
-bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern);
+CAFFE2_CUDA_API bool GetCudaPeerAccessPattern(vector<vector<bool> >* pattern);
 
 /**
  * Return the availability of TensorCores for math
  */
-bool TensorCoreAvailable();
+CAFFE2_CUDA_API bool TensorCoreAvailable();
 
 /**
  * Return a human readable cublas error string.
  */
-const char* cublasGetErrorString(cublasStatus_t error);
+CAFFE2_CUDA_API const char* cublasGetErrorString(cublasStatus_t error);
 
 /**
  * Return a human readable curand error string.
  */
-const char* curandGetErrorString(curandStatus_t error);
+CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
 
 // CUDA: various checks for different function calls.
 #define CUDA_ENFORCE(condition, ...)     \

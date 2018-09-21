@@ -1,4 +1,4 @@
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 #include <torch/tensor.h>
 
@@ -14,28 +14,28 @@ using namespace at;
 
 // A macro so we don't lose location information when an assertion fails.
 #define REQUIRE_OPTIONS(device_, index_, type_, layout_)                    \
-  REQUIRE(options.device().type() == Device((device_), (index_)).type());   \
-  REQUIRE(options.device().index() == Device((device_), (index_)).index()); \
-  REQUIRE(options.dtype() == (type_));                                      \
-  REQUIRE(options.layout() == (layout_))
+  CATCH_REQUIRE(options.device().type() == Device((device_), (index_)).type());   \
+  CATCH_REQUIRE(options.device().index() == Device((device_), (index_)).index()); \
+  CATCH_REQUIRE(options.dtype() == (type_));                                      \
+  CATCH_REQUIRE(options.layout() == (layout_))
 
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
-  REQUIRE(tensor.device().type() == Device((device_), (index_)).type());   \
-  REQUIRE(tensor.device().index() == Device((device_), (index_)).index()); \
-  REQUIRE(tensor.type().scalarType() == (type_));                          \
-  REQUIRE(tensor.type().layout() == (layout_))
+  CATCH_REQUIRE(tensor.device().type() == Device((device_), (index_)).type());   \
+  CATCH_REQUIRE(tensor.device().index() == Device((device_), (index_)).index()); \
+  CATCH_REQUIRE(tensor.type().scalarType() == (type_));                          \
+  CATCH_REQUIRE(tensor.type().layout() == (layout_))
 
-TEST_CASE("TensorOptions/DefaultsToTheRightValues") {
+CATCH_TEST_CASE("TensorOptions/DefaultsToTheRightValues") {
   TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 }
 
-TEST_CASE("TensorOptions/ReturnsTheCorrectType") {
+CATCH_TEST_CASE("TensorOptions/ReturnsTheCorrectType") {
   auto options = TensorOptions().device(kCPU).dtype(kInt).layout(kSparse);
-  REQUIRE(at::getType(options) == getNonVariableType(Backend::SparseCPU, kInt));
+  CATCH_REQUIRE(at::getType(options) == getNonVariableType(Backend::SparseCPU, kInt));
 }
 
-TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
+CATCH_TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
   auto options = dtype(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
@@ -52,7 +52,7 @@ TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
   REQUIRE_OPTIONS(kCUDA, 3, kByte, kSparse);
 }
 
-TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
+CATCH_TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
   TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 
@@ -69,7 +69,7 @@ TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
-TEST_CASE("TensorOptions/ConstructsWellFromCPUTensors") {
+CATCH_TEST_CASE("TensorOptions/ConstructsWellFromCPUTensors") {
   auto options = empty(5, kDouble).options();
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
@@ -77,37 +77,37 @@ TEST_CASE("TensorOptions/ConstructsWellFromCPUTensors") {
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
-TEST_CASE("TensorOptions/ConstructsWellFromVariables") {
+CATCH_TEST_CASE("TensorOptions/ConstructsWellFromVariables") {
   auto options = torch::empty(5).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
-  REQUIRE(!options.requires_grad());
+  CATCH_REQUIRE(!options.requires_grad());
 
   options = torch::empty(5, at::requires_grad()).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
-  REQUIRE(!options.requires_grad());
+  CATCH_REQUIRE(!options.requires_grad());
 }
 
-TEST_CASE("Device/ParsesCorrectlyFromString") {
+CATCH_TEST_CASE("Device/ParsesCorrectlyFromString") {
   Device device("cpu:0");
-  REQUIRE(device == Device(kCPU, 0));
+  CATCH_REQUIRE(device == Device(kCPU, 0));
 
   device = Device("cpu");
-  REQUIRE(device == Device(kCPU));
+  CATCH_REQUIRE(device == Device(kCPU));
 
   device = Device("cuda:123");
-  REQUIRE(device == Device(kCUDA, 123));
+  CATCH_REQUIRE(device == Device(kCUDA, 123));
 
   device = Device("cuda");
-  REQUIRE(device == Device(kCUDA));
+  CATCH_REQUIRE(device == Device(kCUDA));
 
   std::vector<std::string> badnesses = {
       "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
   for (const auto& badness : badnesses) {
-    REQUIRE_THROWS(Device(badness));
+    _CATCH_REQUIRE_THROWS(Device(badness));
   }
 }
 
-TEST_CASE("OptionsGuard") {
+CATCH_TEST_CASE("OptionsGuard") {
   Tensor tensor;
   {
     OptionsGuard guard(TensorOptions{});
@@ -132,5 +132,5 @@ TEST_CASE("OptionsGuard") {
     tensor = torch::empty({10});
   }
   REQUIRE_TENSOR_OPTIONS(kCPU, -1, kFloat, kStrided);
-  REQUIRE(tensor.requires_grad());
+  CATCH_REQUIRE(tensor.requires_grad());
 }

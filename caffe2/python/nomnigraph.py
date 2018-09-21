@@ -68,7 +68,10 @@ def render(s):
 
 
 NeuralNetOperator = C.NeuralNetOperator
+Operator = C.NeuralNetOperator
 NeuralNetData = C.NeuralNetData
+Data = C.NeuralNetData
 NNSubgraph = C.NNSubgraph
 NNMatchGraph = C.NNMatchGraph
 Graph = C.Graph
+Annotation = C.Annotation

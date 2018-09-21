@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include "catch_utils.hpp"
 
 #include <torch/nn/module.h>
 #include <torch/nn/modules/functional.h>
@@ -118,24 +118,24 @@ void check_exact_values(
     optimizer.step();
 
     if (i % kSampleEvery == 0) {
-      REQUIRE(
+      CATCH_REQUIRE(
           expected_parameters.at(i / kSampleEvery).size() == parameters.size());
       for (size_t p = 0; p < parameters.size(); ++p) {
-        REQUIRE(parameters.at(p)->defined());
+        CATCH_REQUIRE(parameters.at(p)->defined());
         auto computed = parameters.at(p)->flatten();
         auto expected = expected_parameters.at(i / kSampleEvery).at(p);
         if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/5e-4)) {
           std::cout << "Iteration " << i << ": " << computed
                     << " != " << expected << " (parameter " << p << ")"
                     << std::endl;
-          REQUIRE(false);
+          CATCH_REQUIRE(false);
         }
       }
     }
   }
 }
 
-TEST_CASE("Optim/BasicInterface") {
+CATCH_TEST_CASE("Optim/BasicInterface") {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
     void step() override {}
@@ -144,139 +144,139 @@ TEST_CASE("Optim/BasicInterface") {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
   {
     MyOptimizer optimizer(parameters);
-    REQUIRE(optimizer.size() == parameters.size());
+    CATCH_REQUIRE(optimizer.size() == parameters.size());
   }
   {
     MyOptimizer optimizer;
-    REQUIRE(optimizer.size() == 0);
+    CATCH_REQUIRE(optimizer.size() == 0);
     optimizer.add_parameters(parameters);
-    REQUIRE(optimizer.size() == parameters.size());
+    CATCH_REQUIRE(optimizer.size() == parameters.size());
     for (size_t p = 0; p < parameters.size(); ++p) {
-      REQUIRE(optimizer.parameters()[p].allclose(parameters[p]));
+      CATCH_REQUIRE(optimizer.parameters()[p].allclose(parameters[p]));
     }
   }
   {
     Linear linear(3, 4);
     MyOptimizer optimizer(linear->parameters());
-    REQUIRE(optimizer.size() == linear->parameters().size());
+    CATCH_REQUIRE(optimizer.size() == linear->parameters().size());
   }
 }
 
-TEST_CASE("Optim/XORConvergence/SGD") {
-  REQUIRE(test_optimizer_xor<SGD>(
+CATCH_TEST_CASE("Optim/XORConvergence/SGD") {
+  CATCH_REQUIRE(test_optimizer_xor<SGD>(
       SGDOptions(0.1).momentum(0.9).nesterov(true).weight_decay(1e-6)));
 }
 
-TEST_CASE("Optim/XORConvergence/Adagrad") {
-  REQUIRE(test_optimizer_xor<Adagrad>(
+CATCH_TEST_CASE("Optim/XORConvergence/Adagrad") {
+  CATCH_REQUIRE(test_optimizer_xor<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)));
 }
 
-TEST_CASE("Optim/XORConvergence/RMSprop") {
-  REQUIRE(test_optimizer_xor<RMSprop>(RMSpropOptions(0.1).centered(true)));
+CATCH_TEST_CASE("Optim/XORConvergence/RMSprop") {
+  CATCH_REQUIRE(test_optimizer_xor<RMSprop>(RMSpropOptions(0.1).centered(true)));
 }
 
-TEST_CASE("Optim/XORConvergence/RMSpropWithMomentum") {
-  REQUIRE(test_optimizer_xor<RMSprop>(
+CATCH_TEST_CASE("Optim/XORConvergence/RMSpropWithMomentum") {
+  CATCH_REQUIRE(test_optimizer_xor<RMSprop>(
       RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6)));
 }
 
-TEST_CASE("Optim/XORConvergence/Adam") {
-  REQUIRE(test_optimizer_xor<Adam>(AdamOptions(0.1).weight_decay(1e-6)));
+CATCH_TEST_CASE("Optim/XORConvergence/Adam") {
+  CATCH_REQUIRE(test_optimizer_xor<Adam>(AdamOptions(0.1).weight_decay(1e-6)));
 }
 
-TEST_CASE("Optim/XORConvergence/AdamWithAmsgrad") {
-  REQUIRE(test_optimizer_xor<Adam>(
+CATCH_TEST_CASE("Optim/XORConvergence/AdamWithAmsgrad") {
+  CATCH_REQUIRE(test_optimizer_xor<Adam>(
       AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)));
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/Adam") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/Adam") {
   check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/AdamWithWeightDecay") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/AdamWithWeightDecay") {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-2),
       expected_parameters::Adam_with_weight_decay);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/AdamWithWeightDecayAndAMSGrad") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/AdamWithWeightDecayAndAMSGrad") {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
       expected_parameters::Adam_with_weight_decay_and_amsgrad);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/Adagrad") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/Adagrad") {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0), expected_parameters::Adagrad);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/AdagradWithWeightDecay") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/AdagradWithWeightDecay") {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-2),
       expected_parameters::Adagrad_with_weight_decay);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/AdagradWithWeightDecayAndLRDecay") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/AdagradWithWeightDecayAndLRDecay") {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
       expected_parameters::Adagrad_with_weight_decay_and_lr_decay);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/RMSprop") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/RMSprop") {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1), expected_parameters::RMSprop);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/RMSpropWithWeightDecay") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/RMSpropWithWeightDecay") {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-2),
       expected_parameters::RMSprop_with_weight_decay);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/RMSpropWithWeightDecayAndCentered") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/RMSpropWithWeightDecayAndCentered") {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-6).centered(true),
       expected_parameters::RMSprop_with_weight_decay_and_centered);
 }
 
-TEST_CASE(
+CATCH_TEST_CASE(
     "Optim/ProducesPyTorchValues/RMSpropWithWeightDecayAndCenteredAndMomentum") {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-6).centered(true).momentum(0.9),
       expected_parameters::RMSprop_with_weight_decay_and_centered_and_momentum);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/SGD") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/SGD") {
   check_exact_values<SGD>(SGDOptions(0.1), expected_parameters::SGD);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecay") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecay") {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-2),
       expected_parameters::SGD_with_weight_decay);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecayAndMomentum") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecayAndMomentum") {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-2).momentum(0.9),
       expected_parameters::SGD_with_weight_decay_and_momentum);
 }
 
-TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecayAndNesterovMomentum") {
+CATCH_TEST_CASE("Optim/ProducesPyTorchValues/SGDWithWeightDecayAndNesterovMomentum") {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-6).momentum(0.9).nesterov(true),
       expected_parameters::SGD_with_weight_decay_and_nesterov_momentum);
 }
 
-TEST_CASE("Optim/ZeroGrad") {
+CATCH_TEST_CASE("Optim/ZeroGrad") {
   torch::manual_seed(0);
 
   Linear model(2, 8);
   SGD optimizer(model->parameters(), 0.1);
 
   for (const auto& parameter : model->parameters()) {
-    REQUIRE(!parameter->grad().defined());
+    CATCH_REQUIRE(!parameter->grad().defined());
   }
 
   auto output = model->forward(torch::ones({5, 2}));
@@ -284,19 +284,19 @@ TEST_CASE("Optim/ZeroGrad") {
   loss.backward();
 
   for (const auto& parameter : model->parameters()) {
-    REQUIRE(parameter->grad().defined());
-    REQUIRE(parameter->grad().sum().toCFloat() > 0);
+    CATCH_REQUIRE(parameter->grad().defined());
+    CATCH_REQUIRE(parameter->grad().sum().toCFloat() > 0);
   }
 
   optimizer.zero_grad();
 
   for (const auto& parameter : model->parameters()) {
-    REQUIRE(parameter->grad().defined());
-    REQUIRE(parameter->grad().sum().toCFloat() == 0);
+    CATCH_REQUIRE(parameter->grad().defined());
+    CATCH_REQUIRE(parameter->grad().sum().toCFloat() == 0);
   }
 }
 
-TEST_CASE("Optim/ExternalVectorOfParameters") {
+CATCH_TEST_CASE("Optim/ExternalVectorOfParameters") {
   torch::manual_seed(0);
 
   std::vector<torch::Tensor> parameters = {
@@ -313,12 +313,12 @@ TEST_CASE("Optim/ExternalVectorOfParameters") {
 
   optimizer.step();
 
-  REQUIRE(parameters[0].allclose(original_parameters[0] - 1.0));
-  REQUIRE(parameters[1].allclose(original_parameters[1] - 1.0));
-  REQUIRE(parameters[2].allclose(original_parameters[2] - 1.0));
+  CATCH_REQUIRE(parameters[0].allclose(original_parameters[0] - 1.0));
+  CATCH_REQUIRE(parameters[1].allclose(original_parameters[1] - 1.0));
+  CATCH_REQUIRE(parameters[2].allclose(original_parameters[2] - 1.0));
 }
 
-TEST_CASE("Optim/AddParameter/LBFGS") {
+CATCH_TEST_CASE("Optim/AddParameter/LBFGS") {
   torch::manual_seed(0);
 
   std::vector<torch::Tensor> parameters = {torch::randn({5, 5})};

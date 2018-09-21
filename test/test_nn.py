@@ -1137,6 +1137,9 @@ class TestNN(NNTestCase):
         modules += [nn.Conv2d(3, 4, 3)]
         module_list += [modules[-1]]
         check()
+        modules.insert(1, nn.Linear(3, 2))
+        module_list.insert(1, modules[1])
+        check()
         modules.append(nn.Tanh())
         module_list.append(modules[-1])
         check()
@@ -1956,8 +1959,7 @@ class TestNN(NNTestCase):
         input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
 
         # Empty list is only handled in CPU for now
-        offsets = torch.tensor([0, 3], device=device, dtype=torch.long) if cuda \
-            else torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
+        offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
 
         grad_output = torch.tensor(
             [1, 2,
@@ -2008,33 +2010,31 @@ class TestNN(NNTestCase):
                  [3, 4]], device=device, dtype=dtype)
 
         output = es(input, offsets)
-        output.backward(grad_output if cuda else grad_output_with_empty)
+        output.backward(grad_output_with_empty)
 
         es_weight_grad = es.weight.grad.data
         if sparse:
-            es_weight_grad = es.weight.grad.data.to_dense()
-        self.assertEqual(
-            output.data,
-            expected_output if cuda else expected_output_with_empty)
+            es_weight_grad = es.weight.grad.to_dense()
+        self.assertEqual(output, expected_output_with_empty)
         self.assertEqual(es_weight_grad, expected_grad_weight, dtype2prec[dtype])
 
         # check same example except as 2D (2 x 3)
-        input = input.data.view(2, -1)
+        input = input.view(2, -1)
         es.zero_grad()
         output = es(input)
         output.backward(grad_output)
 
-        es_weight_grad = es.weight.grad.data
+        es_weight_grad = es.weight.grad
         if sparse:
-            es_weight_grad = es.weight.grad.data.to_dense()
-        self.assertEqual(output.data, expected_output)
+            es_weight_grad = es.weight.grad.to_dense()
+        self.assertEqual(output, expected_output)
         self.assertEqual(es_weight_grad, expected_grad_weight, dtype2prec[dtype])
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L, max_norm=None):
             es = nn.EmbeddingBag(N, D, mode=mode, sparse=sparse, max_norm=max_norm).to(device, dtype)
             e = nn.Embedding(N, D, max_norm=max_norm).to(device, dtype)
-            e.weight.data.copy_(es.weight.data)
+            e.weight.data.copy_(es.weight)
             input = torch.randint(N, (B, L), device=device, dtype=torch.long)
             offsets = torch.arange(0, B, device=device, dtype=torch.long).mul_(L)
             grad_output = torch.rand(B, D, device=device, dtype=dtype)
@@ -4201,6 +4201,43 @@ class TestNN(NNTestCase):
             input_shape = correct_input_shape
             hidden_shape = update_shape(correct_hidden_shape, 0, bad_size)
             test(input_shape, hidden_shape, mode)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_rnn_check_device(self):
+        input_size = 3
+        hidden_size = 5
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_shape = (num_layers * num_directions, batch_size, hidden_size)
+        rnn_modes = ['RNN', 'GRU', 'LSTM']
+
+        for mode in rnn_modes:
+            model = getattr(nn, mode)(input_size, hidden_size, num_layers)
+            input = torch.randn(correct_input_shape)
+            hidden = torch.randn(correct_hidden_shape)
+
+            # input and weights are not at the same device
+            with self.assertRaisesRegex(RuntimeError,
+                                        "Input and parameter tensors are not at the same device"):
+                model(input.to('cuda:0'))
+
+            # input and hiddens are not at the same device
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"Expected object of backend CPU but got backend CUDA for argument"):
+                if mode is 'LSTM':
+                    model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
+                else:
+                    model(input, (hidden.to('cuda:0')))
+
+            # hidden tensors are not at the same CUDA device
+            if mode is 'LSTM':
+                with self.assertRaisesRegex(RuntimeError,
+                                            "Input and hidden tensors are not at the same device"):
+                    model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
 
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']

@@ -10,6 +10,7 @@
 #include <ATen/core/Error.h>
 #include <ATen/core/UniqueVoidPtr.h>
 #include <ATen/core/typeid.h>
+#include <ATen/core/ATenGeneral.h>
 
 namespace caffe2 {
 class Event;
@@ -184,3 +185,27 @@ class AT_CORE_API BaseContext {
 };
 
 } // namespace at
+
+namespace caffe2 {
+
+using at::BaseContext;
+using at::BaseStaticContext;
+
+using StaticContextMap = std::unordered_map<at::DeviceType, BaseStaticContext*>;
+AT_API StaticContextMap& GetStaticContexts();
+AT_API void set_static_context(at::DeviceType t, BaseStaticContext* ptr);
+AT_API BaseStaticContext* get_static_context(at::DeviceType t);
+
+template <at::DeviceType t>
+struct StaticContextFunctionRegisterer {
+  explicit StaticContextFunctionRegisterer(BaseStaticContext* ptr) {
+    set_static_context(t, ptr);
+  }
+};
+
+#define REGISTER_STATIC_CONTEXT(t, f)                                \
+  namespace {                                                        \
+  static StaticContextFunctionRegisterer<t> g_static_context_##d(f); \
+  }
+
+} // namespace caffe2

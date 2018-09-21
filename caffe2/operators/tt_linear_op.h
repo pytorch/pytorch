@@ -52,7 +52,7 @@ class TTLinearOp final : public Operator<Context> {
     int cores_idx = 0;
 
     // Temporary buffer to facilitate multiplication of TT-cores with input
-    auto Y_buf = Y_temp_->GetMutableTensor(Context::GetDeviceType());
+    auto Y_buf = BlobGetMutableTensor(Y_temp_.get(), Context::GetDeviceType());
     Y_buf->ResizeLike(X);
     Y_buf->CopyFrom(X);
 

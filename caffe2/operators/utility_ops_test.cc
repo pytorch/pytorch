@@ -16,7 +16,7 @@ static void AddConstInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
       tensor->size(), value, tensor->template mutable_data<float>(), &context);

@@ -383,62 +383,6 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
 #endif
 
 #if defined(THC_REAL_IS_DOUBLE)
-GENERATE_KERNEL1(generate_bernoulli, double, double p, double, curand_uniform_double, x <= p)
-#else
-GENERATE_KERNEL1(generate_bernoulli, scalar_t, double p, float, curand_uniform, (ScalarConvert<bool, scalar_t>::to(x <= p)))
-#endif
-
-void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);
-  if (size == 0) return;
-  THCGenerator* gen = THCRandom_getGenerator(state);
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);
-  scalar_t *data = THCTensor_(data)(state, self);
-
-  generate_bernoulli<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, p);
-
-  THCTensor_(freeCopyTo)(state, self, self_);
-};
-
-void THCTensor_(bernoulli_Tensor)(THCState *state, THCTensor *self, THCTensor* p)
-{
-#if defined(THC_REAL_IS_FLOAT)
-  THCTensor_(bernoulli_FloatTensor)(state, self, p);
-#elif defined(THC_REAL_IS_DOUBLE)
-  THCTensor_(bernoulli_DoubleTensor)(state, self, p);
-#endif
-}
-
-#define DEFINE_BERNOULLI_TENSOR(NAME, PROB_TYPE, PROB_DATA_TYPE)               \
-void THCTensor_(NAME)(THCState* state,                                 \
-        THCTensor *self_, PROB_TYPE *probs_)                                   \
-{                                                                              \
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, probs_));             \
-  ptrdiff_t size = THCTensor_(nElement)(state, self_);                         \
-  if (size == 0) return;                                                       \
-  THCGenerator* gen = THCRandom_getGenerator(state);                           \
-  THCTensor *self = THCTensor_(newContiguous)(state, self_);                   \
-  PROB_TYPE *probs = PROB_TYPE##_newContiguous(state, probs_);                 \
-  ptrdiff_t prob_size = PROB_TYPE##_nElement(state, probs);                    \
-  scalar_t *result_data = THCTensor_(data)(state, self);                           \
-  PROB_DATA_TYPE *probs_data = PROB_TYPE##_data(state, probs);                 \
-                                                                               \
-  THArgCheck(size == prob_size, 3, "inconsistent tensor size");                \
-                                                                               \
-  generate_bernoulli_tensor<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>( \
-      gen->state.gen_states, size, result_data, probs_data);                         \
-                                                                               \
-  PROB_TYPE##_free(state, probs);                                              \
-  THCTensor_(freeCopyTo)(state, self, self_);                                  \
-}
-
-DEFINE_BERNOULLI_TENSOR(bernoulli_FloatTensor, THCudaTensor, float)
-DEFINE_BERNOULLI_TENSOR(bernoulli_DoubleTensor, THCudaDoubleTensor, double)
-
-#if defined(THC_REAL_IS_DOUBLE)
 GENERATE_KERNEL1(generate_geometric, double, double p, double, curand_uniform_double, ceil(log(x) / log(1-p)))
 #else
 GENERATE_KERNEL1(generate_geometric, scalar_t, double p, float, curand_uniform, (ScalarConvert<float, scalar_t>::to(ceilf(logf(x) / log(1-p)))))

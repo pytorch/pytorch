@@ -122,7 +122,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
-    return outputs_.at(idx)->GetMutableTensor(type);
+    return BlobGetMutableTensor(outputs_.at(idx), type);
   }
 
   template <typename T>
@@ -149,7 +149,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool InputIsTensorType(int idx, DeviceType device_type) {
-    return inputs_.at(idx)->IsTensorType(device_type);
+    return BlobIsTensorType(*inputs_.at(idx), device_type);
   }
 
   template <typename T>
@@ -162,7 +162,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool OutputIsTensorType(int idx, DeviceType type) {
-    return outputs_.at(idx)->IsTensorType(type);
+    return BlobIsTensorType(*outputs_.at(idx), type);
   }
 
   inline int InputSize() const {
@@ -987,6 +987,10 @@ CAFFE2_API std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTenso
 
 // Get a set of registered operator names
 CAFFE2_API std::set<std::string> GetRegisteredOperators();
+
+// Operator logging capabilities
+CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
+std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 }  // namespace caffe2
 
