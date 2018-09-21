@@ -65,7 +65,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   int updateParentCount(int child_id);
   int getParentCount(int child_id);
   bool testAndSetScheduled(int task_id);
-  int num_ops(int task_id) const;
+  int numOps(int task_id) const;
 
   void asyncWait(
       int task_id,
@@ -131,7 +131,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   void storeExceptionPtr();
 
   TaskThreadPool*
-  pool_getter(PoolsMap& pools, int device_type, int device_id, int pool_size);
+  poolGetter(PoolsMap& pools, int device_type, int device_id, int pool_size);
 
   std::unique_ptr<AsyncNetExecutorHelper> helper_;
 
