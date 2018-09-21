@@ -28,13 +28,27 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat_out(result, tensors, dim);
+  return at::_cat_out(result, tensors, dim, false, 0);
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat(tensors, dim);
+  return at::_cat(tensors, dim, false, 0);
+}
+
+Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim, Scalar pad_value) {
+  if (pad_value.isFloatingPoint() && std::isnan(pad_value.toFloat())){
+    return at::cat_out(result, tensors, dim);
+  }
+  return at::_cat_out(result, tensors, dim, true, pad_value);
+}
+
+Tensor cat(TensorList tensors, int64_t dim, Scalar pad_value) {
+  if (pad_value.isFloatingPoint() && std::isnan(pad_value.toFloat())){
+    return at::cat(tensors, dim);
+  }
+  return at::_cat(tensors, dim, true, pad_value);
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
