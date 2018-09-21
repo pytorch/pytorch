@@ -170,7 +170,7 @@ class cudnnTypeWrapper<double> {
 };
 
 template <>
-class cudnnTypeWrapper<float16> {
+class cudnnTypeWrapper<at::Half> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
   typedef const float ScalingParamType;

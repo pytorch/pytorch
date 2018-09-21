@@ -126,7 +126,7 @@ class ncclTypeWrapper<int> {
 
 #ifdef CAFFE_HAS_CUDA_FP16
 template <>
-class ncclTypeWrapper<float16> {
+class ncclTypeWrapper<at::Half> {
  public:
   static const ncclDataType_t type = ncclHalf;
 };
@@ -327,7 +327,7 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
 template class NCCL<float>;
 template class NCCL<int>;
 #ifdef CAFFE_HAS_CUDA_FP16
-template class NCCL<float16>;
+template class NCCL<at::Half>;
 #endif
 }
 }

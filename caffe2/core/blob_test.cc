@@ -203,10 +203,10 @@ TEST(TensorNonTypedTest, TensorChangeType) {
   EXPECT_TRUE(tensor.data<float>() == (const float*)ptr);
   EXPECT_TRUE(tensor.meta().Match<float>());
 
-  // float16 is smaller, so still should share buffer
-  EXPECT_TRUE(tensor.mutable_data<float16>() == (float16*)ptr);
-  EXPECT_TRUE(tensor.data<float16>() == (const float16*)ptr);
-  EXPECT_TRUE(tensor.meta().Match<float16>());
+  // at::Half is smaller, so still should share buffer
+  EXPECT_TRUE(tensor.mutable_data<at::Half>() == (at::Half*)ptr);
+  EXPECT_TRUE(tensor.data<at::Half>() == (const at::Half*)ptr);
+  EXPECT_TRUE(tensor.meta().Match<at::Half>());
 
   // share the data with other tensor so that the pointer won't be reused
   // when we reallocate
@@ -693,13 +693,13 @@ TEST(TensorTest, TensorSerialization_CustomType) {
   }
 }
 
-TEST(TensorTest, float16) {
+TEST(TensorTest, Half) {
   const TIndex kSize = 3000000;
   Blob blob;
   TensorCPU* tensor = blob.GetMutableTensor(CPU);
   tensor->Resize(kSize);
   for (int i = 0; i < tensor->size(); ++i) {
-    tensor->mutable_data<float16>()[i].x = i % 10000;
+    tensor->mutable_data<at::Half>()[i].x = i % 10000;
   }
   string serialized = blob.Serialize("test");
   BlobProto proto;
@@ -709,11 +709,11 @@ TEST(TensorTest, float16) {
   EXPECT_TRUE(proto.has_tensor());
   const TensorProto& tensor_proto = proto.tensor();
   EXPECT_EQ(
-      tensor_proto.data_type(), TypeMetaToDataType(TypeMeta::Make<float16>()));
+      tensor_proto.data_type(), TypeMetaToDataType(TypeMeta::Make<at::Half>()));
   if (FLAGS_caffe2_serialize_fp16_as_bytes) {
     EXPECT_EQ(tensor_proto.byte_data().size(), 2 * kSize);
     for (int i = 0; i < kSize; ++i) {
-      auto value = tensor->mutable_data<float16>()[i].x;
+      auto value = tensor->mutable_data<at::Half>()[i].x;
       auto low_bits = static_cast<char>(value & 0xff);
       auto high_bits = static_cast<char>(value >> 8);
       EXPECT_EQ(tensor_proto.byte_data()[2 * i], low_bits);
@@ -729,7 +729,7 @@ TEST(TensorTest, float16) {
   EXPECT_EQ(new_tensor.ndim(), 1);
   EXPECT_EQ(new_tensor.dim(0), kSize);
   for (int i = 0; i < kSize; ++i) {
-    EXPECT_EQ(new_tensor.data<float16>()[i].x, i % 10000);
+    EXPECT_EQ(new_tensor.data<at::Half>()[i].x, i % 10000);
   }
 }
 
