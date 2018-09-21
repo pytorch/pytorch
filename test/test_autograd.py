@@ -2466,6 +2466,19 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_lstmcell_backward_only_one_output_grad(self):
+        # checks that undefined gradients doen't hamper the backward
+        # see #11872
+        dev = torch.device('cuda')
+        l = torch.nn.LSTMCell(2, 3).to(dev).double()
+        s = torch.randn(1, 2, device=dev, dtype=torch.double, requires_grad=True)
+        for i in range(2):
+            out = l(s)[i]
+            out.sum().backward()
+            self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
     def test_anomaly_detect_nan(self):
         size = 10
 

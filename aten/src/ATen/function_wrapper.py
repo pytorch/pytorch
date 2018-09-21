@@ -719,11 +719,12 @@ def create_generic(top_env, declarations):
         # type: (List[AtFormal]) -> Optional[str]
         # dispatch to self if it's a parameter
         for formal in formals:
-            if formal['name'] == 'self' and formal['dynamic_type'] == 'Tensor':
+            if formal['name'] == 'self' and formal['dynamic_type'] == 'Tensor' and not formal.get('is_nullable', False):
                 return formal['name']
         # otherwise dispatch to the first Tensor or TensorList
         for formal in formals:
-            if 'TensorList' == formal['dynamic_type'] or formal['dynamic_type'] == 'Tensor':
+            if 'TensorList' == formal['dynamic_type'] or formal['dynamic_type'] == 'Tensor' and \
+               not formal.get('is_nullable', False):
                 return formal['name']
         return None
 
