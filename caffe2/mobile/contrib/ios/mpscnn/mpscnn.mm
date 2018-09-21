@@ -495,7 +495,7 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final
       caffe2::Timer rt;
       // Initialize random noise on first use.
       // Cache it to maintain temporal consistency.
-      auto* t = noiseBlob->GetMutableTensor(CPU);
+      auto* t = BlobGetMutableTensor(noiseBlob, CPU);
       t->Resize(noiseSize);
       math::RandGaussian<float, CPUContext>(
           t->size(),

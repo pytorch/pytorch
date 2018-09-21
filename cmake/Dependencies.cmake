@@ -349,7 +349,9 @@ if(BUILD_PYTHON)
     execute_process(
       COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
     if(${_exitcode} EQUAL 0)
-      string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      if (NOT MSVC)
+        string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      endif()
       message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
     endif()
   endif()
@@ -388,7 +390,11 @@ if(BUILD_PYTHON)
     pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       SET(PYTHON_LIBRARY "${_py_lib}")
-      message(STATUS "Setting Python's library to ${_py_lib}")
+      if (MSVC)
+        STRING(REPLACE "Lib" "libs" _py_static_lib ${_py_lib})
+        link_directories(${_py_static_lib})
+      endif()
+      message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
     endif()
   endif(NOT DEFINED PYTHON_LIBRARY)
 
@@ -456,37 +462,12 @@ endif()
 
 # ---[ OpenMP
 if(USE_OPENMP)
-  set(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
-  if(APPLE AND CMAKE_COMPILER_IS_GNUCC)
-    exec_program(uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
-    string(REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    message(STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
-    if(DARWIN_VERSION GREATER 9)
-      set(APPLE_OPENMP_SUCKS 1)
-    endif(DARWIN_VERSION GREATER 9)
-    execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpversion
-      OUTPUT_VARIABLE GCC_VERSION)
-    if(APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
-      message(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
-      message(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
-      add_compile_options(-Wno-unknown-pragmas)
-      set(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
-    endif()
-  endif()
-
-  if(WITH_OPENMP AND NOT CHECKED_OPENMP)
-    find_package(OpenMP)
-    set(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-
-    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
-    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
-    set(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
-  endif()
-
+  find_package(OpenMP)
   if(OPENMP_FOUND)
     message(STATUS "Adding " ${OpenMP_CXX_FLAGS})
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
   else()
     message(WARNING "Not compiling with OpenMP. Suppress this warning with -DUSE_OPENMP=OFF")
     caffe2_update_option(USE_OPENMP OFF)
@@ -818,6 +799,11 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   # We will build onnx as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF)
+  if (MSVC AND BUILD_SHARED_LIBS)
+    # That also means we want to export all symbols from the shared
+    # library we are building
+    set(ONNX_BUILD_MAIN_LIB ON)
+  endif()
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
   set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
   # If linking local protobuf, make sure ONNX has the same protobuf
@@ -981,6 +967,42 @@ if (NOT BUILD_ATEN_MOBILE)
     STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
     STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
   ENDIF()
+
+  # OpenMP support?
+  SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
+  IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
+    EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+    STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+    MESSAGE (STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
+    IF (DARWIN_VERSION GREATER 9)
+      SET(APPLE_OPENMP_SUCKS 1)
+    ENDIF (DARWIN_VERSION GREATER 9)
+    EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
+      OUTPUT_VARIABLE GCC_VERSION)
+    IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
+      MESSAGE(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
+      MESSAGE(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
+      add_compile_options(-Wno-unknown-pragmas)
+      SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
+    ENDIF()
+  ENDIF()
+
+  IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
+    FIND_PACKAGE(OpenMP)
+    SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
+
+    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
+    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
+    SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
+  ENDIF()
+
+  IF (OPENMP_FOUND)
+    MESSAGE(STATUS "Compiling with OpenMP support")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+  ENDIF()
+
+
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
   FIND_PACKAGE(MAGMA)

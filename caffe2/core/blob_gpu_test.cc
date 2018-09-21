@@ -1,6 +1,7 @@
 #include <iostream>  // NOLINT
 
 #include "caffe2/core/blob.h"
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/proto/caffe2_pb.h"
@@ -131,8 +132,8 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
     for (int i = 0; i < 6; ++i) {                                          \
       cpu_tensor.mutable_data<TypeParam>()[i] = static_cast<TypeParam>(i); \
     }                                                                      \
-    blob.GetMutableTensor(CUDA)->CopyFrom(cpu_tensor);                     \
-    string serialized = blob.Serialize("test");                            \
+    BlobGetMutableTensor(&blob, CUDA)->CopyFrom(cpu_tensor);                     \
+    string serialized = SerializeBlob(blob, "test");                       \
     BlobProto proto;                                                       \
     CAFFE_ENFORCE(proto.ParseFromString(serialized));                      \
     EXPECT_EQ(proto.name(), "test");                                       \
@@ -147,8 +148,8 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
       EXPECT_EQ(tensor_proto.field_name(i), static_cast<TypeParam>(i));    \
     }                                                                      \
     Blob new_blob;                                                         \
-    EXPECT_NO_THROW(new_blob.Deserialize(serialized));                     \
-    EXPECT_TRUE(new_blob.IsTensorType(CUDA));                            \
+    EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));               \
+    EXPECT_TRUE(BlobIsTensorType(new_blob, CUDA));                              \
     Tensor new_cpu_tensor(blob.Get<Tensor>(), CPU);                        \
     EXPECT_EQ(new_cpu_tensor.ndim(), 2);                                   \
     EXPECT_EQ(new_cpu_tensor.dim(0), 2);                                   \
@@ -181,7 +182,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     DeviceGuard guard(gpu_id);
     CUDAContext context(gpu_id);
     blob.Reset(new Tensor(tensor, &context, CUDA));
-    string serialized = blob.Serialize("test");
+    string serialized = SerializeBlob(blob, "test");
     BlobProto proto;
     CAFFE_ENFORCE(proto.ParseFromString(serialized));
     EXPECT_EQ(proto.name(), "test");
@@ -197,16 +198,16 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     EXPECT_EQ(tensor_proto.device_detail().cuda_gpu_id(), gpu_id);
     // Test if the restored blob is still of the same device.
     blob.Reset();
-    EXPECT_NO_THROW(blob.Deserialize(serialized));
-    EXPECT_TRUE(blob.IsTensorType(CUDA));
+    EXPECT_NO_THROW(DeserializeBlob(serialized, &blob));
+    EXPECT_TRUE(BlobIsTensorType(blob, CUDA));
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()),
               gpu_id);
     // Test if we force the restored blob on a different device, we
     // can still get so.
     blob.Reset();
     proto.mutable_tensor()->mutable_device_detail()->set_cuda_gpu_id(0);
-    EXPECT_NO_THROW(blob.Deserialize(proto.SerializeAsString()));
-    EXPECT_TRUE(blob.IsTensorType(CUDA));
+    EXPECT_NO_THROW(DeserializeBlob(proto.SerializeAsString(), &blob));
+    EXPECT_TRUE(BlobIsTensorType(blob, CUDA));
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()), 0);
   }
 }

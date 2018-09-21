@@ -21,7 +21,7 @@ void runWithSharedBuffer<CUDAContext>(
   auto* mutexPtr = mutexBlob->GetMutable<std::unique_ptr<std::mutex>>();
   std::lock_guard<std::mutex> g(**mutexPtr);
   auto* buffer =
-      ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CUDA__")->GetMutableTensor(CUDA);
+      BlobGetMutableTensor(ws->GetBlob("__CAFFE2_SHARED_CONV_BUFFER_CUDA__"), CUDA);
   f(buffer);
 }
 }

@@ -101,7 +101,7 @@ message AttributeProto {
 
   // The name field MUST be present for this version of the IR.
   optional string name = 1;           // namespace Attribute
- 
+
   // if ref_attr_name is not empty, ref_attr_name is the attribute name in parent function.
   // In this case, this AttributeProto does not contain data, and it's a reference of attribute
   // in parent scope.
@@ -170,6 +170,7 @@ message NodeProto {
   repeated AttributeProto attribute = 5;
 
   // A human-readable documentation for this node. Markdown is allowed.
+  // Equivalent to string debug_info
   optional string doc_string = 6;
 
   // Additional annotations, attributes are defined in Schema
@@ -177,7 +178,6 @@ message NodeProto {
   //    string engine
   //    string list control_input
   //    int64 is_gradient_op
-  //    string debug_info
   repeated AttributeProto annotations = 8;
 
   // Besides the node type, PyTorhc also serialize ATen function signature

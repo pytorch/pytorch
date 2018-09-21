@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include "catch_utils.hpp"
 
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/conv.h>
@@ -230,7 +230,7 @@ bool test_mnist(
   return correct.sum().toCFloat() > telabel.size(0) * 0.8;
 }
 
-TEST_CASE("integration/cartpole") {
+CATCH_TEST_CASE("integration/cartpole") {
   torch::manual_seed(0);
   std::cerr << "Training episodic policy gradient with a critic for up to 3000"
                " episodes, rest your eyes for a bit!\n";
@@ -326,11 +326,11 @@ TEST_CASE("integration/cartpole") {
     if (running_reward > 150) {
       break;
     }
-    REQUIRE(episode < 3000);
+    CATCH_REQUIRE(episode < 3000);
   }
 }
 
-TEST_CASE("integration/mnist", "[cuda]") {
+CATCH_TEST_CASE("integration/mnist", "[cuda]") {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
@@ -357,7 +357,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
   auto optimizer = torch::optim::SGD(
       model->parameters(), torch::optim::SGDOptions(1e-2).momentum(0.5));
 
-  REQUIRE(test_mnist(
+  CATCH_REQUIRE(test_mnist(
       32, // batch_size
       3, // num_epochs
       true, // useGPU
@@ -366,7 +366,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
       optimizer));
 }
 
-TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
+CATCH_TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
@@ -393,7 +393,7 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto optimizer = torch::optim::SGD(
       model->parameters(), torch::optim::SGDOptions(1e-2).momentum(0.5));
 
-  REQUIRE(test_mnist(
+  CATCH_REQUIRE(test_mnist(
       32, // batch_size
       3, // num_epochs
       true, // useGPU

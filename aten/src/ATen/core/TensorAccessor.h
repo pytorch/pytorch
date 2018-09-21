@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <stdint.h>
+#include <ATen/core/Macros.h>
 
 namespace at {
 
@@ -20,18 +21,6 @@ struct RestrictPtrTraits {
 };
 #endif
 
-#ifndef AT_HOSTDEVICE
-#ifdef __CUDACC__
-#define AT_HOSTDEVICE __host__ __device__
-#define AT_HOST __host__
-#define AT_DEVICE __device__
-#else
-#define AT_HOSTDEVICE
-#define AT_HOST
-#define AT_DEVICE
-#endif
-#endif
-
 // TensorAccessorBase and TensorAccessor are used for both CPU and CUDA tensors.
 // For CUDA tensors it is used in device code (only). This means that we restrict ourselves
 // to functions and types available there (e.g. IntList isn't).
@@ -42,7 +31,7 @@ class TensorAccessorBase {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  AT_HOSTDEVICE TensorAccessorBase(PtrType data_, const int64_t * sizes_, const int64_t * strides_)
+  AT_HOST_DEVICE TensorAccessorBase(PtrType data_, const int64_t * sizes_, const int64_t * strides_)
   : data_(data_), sizes_(sizes_), strides_(strides_) {}
   AT_HOST IntList sizes() const {
     return IntList(sizes_,N);
@@ -50,10 +39,10 @@ public:
   AT_HOST IntList strides() const {
     return IntList(strides_,N);
   }
-  AT_HOSTDEVICE int64_t stride(int64_t i) const { return strides_[i]; }
-  AT_HOSTDEVICE int64_t size(int64_t i) const { return sizes_[i]; }
-  AT_HOSTDEVICE T *data() { return data_; }
-  AT_HOSTDEVICE const T *data() const { return data_; }
+  AT_HOST_DEVICE int64_t stride(int64_t i) const { return strides_[i]; }
+  AT_HOST_DEVICE int64_t size(int64_t i) const { return sizes_[i]; }
+  AT_HOST_DEVICE T *data() { return data_; }
+  AT_HOST_DEVICE const T *data() const { return data_; }
 protected:
   PtrType data_;
   const int64_t* sizes_;
@@ -69,14 +58,14 @@ class TensorAccessor : public TensorAccessorBase<T,N,PtrTraits> {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  AT_HOSTDEVICE TensorAccessor(PtrType data_, const int64_t * sizes_, const int64_t * strides_)
+  AT_HOST_DEVICE TensorAccessor(PtrType data_, const int64_t * sizes_, const int64_t * strides_)
   : TensorAccessorBase<T,N>(data_,sizes_,strides_) {}
 
-  AT_HOSTDEVICE TensorAccessor<T,N-1> operator[](int64_t i) {
+  AT_HOST_DEVICE TensorAccessor<T,N-1> operator[](int64_t i) {
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 
-  AT_HOSTDEVICE const TensorAccessor<T,N-1> operator[](int64_t i) const {
+  AT_HOST_DEVICE const TensorAccessor<T,N-1> operator[](int64_t i) const {
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i,this->sizes_+1,this->strides_+1);
   }
 };
@@ -86,9 +75,9 @@ class TensorAccessor<T,1,PtrTraits> : public TensorAccessorBase<T,1,PtrTraits> {
 public:
   typedef typename PtrTraits<T>::PtrType PtrType;
 
-  AT_HOSTDEVICE TensorAccessor(PtrType data_, const int64_t * sizes_, const   int64_t * strides_)
+  AT_HOST_DEVICE TensorAccessor(PtrType data_, const int64_t * sizes_, const   int64_t * strides_)
   : TensorAccessorBase<T,1,PtrTraits>(data_,sizes_,strides_) {}
-  AT_HOSTDEVICE T & operator[](int64_t i) {
+  AT_HOST_DEVICE T & operator[](int64_t i) {
     return this->data_[this->strides_[0]*i];
   }
 };
@@ -112,8 +101,8 @@ public:
     std::copy(sizes_, sizes_ + N, std::begin(this->sizes_));
     std::copy(strides_, strides_ + N, std::begin(this->strides_));
   }
-  AT_HOSTDEVICE int64_t stride(int64_t i) const { return strides_[i]; }
-  AT_HOSTDEVICE int64_t size(int64_t i) const { return sizes_[i]; }
+  AT_HOST_DEVICE int64_t stride(int64_t i) const { return strides_[i]; }
+  AT_HOST_DEVICE int64_t size(int64_t i) const { return sizes_[i]; }
 protected:
   PtrType data_;
   int64_t sizes_[N];
@@ -157,7 +146,3 @@ public:
 };
 
 }
-
-#undef AT_HOSTDEVICE
-#undef AT_HOST
-#undef AT_DEVICE

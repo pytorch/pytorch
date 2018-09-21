@@ -283,7 +283,7 @@ for key, value in cfg_vars.items():
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '0.5.0a0'
+version = '1.0.0a0'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
@@ -426,6 +426,7 @@ class build_deps(PytorchCommand):
     def run(self):
         print('setup.py::build_deps::run()')
         # Check if you remembered to check out submodules
+
         def check_file(f):
             if not os.path.exists(f):
                 print("Could not find {}".format(f))
@@ -874,12 +875,6 @@ if IS_WINDOWS:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
     if USE_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_hip.lib'))
-    # Windows needs direct access to ONNX libraries as well
-    # as through Caffe2 library
-    CAFFE2_LIBS += [
-        os.path.join(lib_path, 'onnx.lib'),
-        os.path.join(lib_path, 'onnx_proto.lib'),
-    ]
     if DEBUG:
         PROTOBUF_STATIC_LIB = os.path.join(lib_path, 'libprotobufd.lib')
     else:
@@ -923,7 +918,6 @@ main_sources = [
     "torch/csrc/byte_order.cpp",
     "torch/csrc/jit/batched/BatchTensor.cpp",
     "torch/csrc/jit/init.cpp",
-    "torch/csrc/jit/ivalue.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
     "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.cpp",

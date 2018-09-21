@@ -1,13 +1,26 @@
 #include "ATen/native/cpu/UnaryOpsKernel.h"
 
 #include <cmath>
+#include <type_traits>
+#include "ATen/Config.h"
 #include "ATen/Dispatch.h"
+#include "ATen/CPUGenerator.h"
+#include "ATen/CheckGenerator.h"
+#include "ATen/Generator.h"
 #include "ATen/cpu/vml.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/native/DispatchStub.h"
+#include "ATen/native/Distributions.h"
 #ifdef __AVX2__
 #include "ATen/native/cpu/avx_mathfun.h"
 #endif
+
+#if AT_MKL_ENABLED()
+#include <mkl.h>
+#endif
+
+#include "TH/THGenerator.hpp"
+#include "TH/THRandom.h"
 
 namespace at { namespace native {
 namespace {
@@ -102,6 +115,65 @@ static void sigmoid_kernel(Tensor& result, const Tensor& self) {
   });
 }
 
+
+#if !AT_MKL_ENABLED()
+void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
+  // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
+  // users to report this as a bug.
+  AT_ASSERTM(false, "ATen not compiled with MKL");
+}
+#else
+void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
+  THGenerator* generator = get_generator(gen);
+  int64_t seed;
+  {
+    std::lock_guard<std::mutex> lock(generator->mutex);
+    seed = THRandom_random(generator);
+  }
+  int64_t n = self.numel();
+  bool contig = self.is_contiguous();
+
+  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cpu_", [&] {
+    at::Tensor tmp_int_tensor;
+    if (std::is_same<scalar_t, int>::value && contig) {
+      tmp_int_tensor = self;
+    } else {
+      tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
+    }
+
+    scalar_t *self_ptr = self.data<scalar_t>();
+    int *sample_int_ptr = tmp_int_tensor.data<int>();
+
+    auto sample = [&](int64_t begin, int64_t end) {
+      int64_t len = end - begin;
+      if (len > 0) {
+        VSLStreamStatePtr stream;
+        vslNewStream(&stream, VSL_BRNG_MCG31, seed);
+        vslSkipAheadStream(stream, begin);
+        viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, len,
+          sample_int_ptr + begin, p);
+        vslDeleteStream(&stream);
+
+        // vectorized copy if using buffer and contiguous, i.e., being non-int
+        // type and contiguous
+        if (!std::is_same<scalar_t, int>::value && contig) {
+          scalar_t *self_seg = self_ptr + begin;
+          int* tmp_seg = sample_int_ptr + begin;
+          at::vec256::convert<int, scalar_t>(tmp_seg, self_seg, len);
+        }
+      }
+    };
+
+    parallel_for(0, n, /* grain_size= */ 800, sample);
+
+    // copy_ if using buffer and non contiguous
+    if (!contig) {
+      self.copy_(tmp_int_tensor);
+    }
+  });
+}
+#endif
+
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
   static void op##_kernel(Tensor& result, const Tensor& self) {            \
     checkBackend(#op, {result}, Backend::CPU);                             \
@@ -143,6 +215,7 @@ static void sigmoid_kernel(Tensor& result, const Tensor& self) {
 } // anonymous namespace
 
 REGISTER_DISPATCH(sigmoidImpl, &sigmoid_kernel)
+REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)

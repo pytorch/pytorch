@@ -287,7 +287,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       for (int64_t c = 0; c < num_labels; c++) {
         scalar_t& res = grad_a[t][c];
         scalar_t lp = log_probs_a[t][c];
-        res = std::exp(lp)-std::exp(res + nll - lp) * gr;
+        res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
       }
     }
     // zero the remainder
