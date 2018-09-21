@@ -175,6 +175,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusers/interface.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/pretty_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
@@ -219,8 +220,8 @@ CONFIGURE_FILE(
 
 if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
@@ -231,13 +232,17 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/serialize.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
     )
 endif()
 
@@ -329,13 +334,6 @@ if (NOT NO_API AND NOT USE_ROCM)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
-
-  if (TORCH_USE_CEREAL)
-    target_compile_definitions(torch PUBLIC TORCH_USE_CEREAL)
-    # SYSTEM headers are included with -isystem and thus do not trigger warnings.
-    target_include_directories(torch SYSTEM PUBLIC
-      "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
-  endif()
 endif()
 
 if(USE_CUDA)
@@ -444,6 +442,7 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/any.cpp
     ${TORCH_API_TEST_DIR}/cursor.cpp
     ${TORCH_API_TEST_DIR}/integration.cpp
+    ${TORCH_API_TEST_DIR}/jit.cpp
     ${TORCH_API_TEST_DIR}/main.cpp
     ${TORCH_API_TEST_DIR}/misc.cpp
     ${TORCH_API_TEST_DIR}/module.cpp
@@ -452,16 +451,12 @@ if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_API_TEST_DIR}/parallel.cpp
     ${TORCH_API_TEST_DIR}/rnn.cpp
     ${TORCH_API_TEST_DIR}/sequential.cpp
+    ${TORCH_API_TEST_DIR}/serialize.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
-    ${TORCH_API_TEST_DIR}/tensor.cpp
-    ${TORCH_API_TEST_DIR}/jit.cpp
-    ${TORCH_API_TEST_DIR}/tensor_options.cpp
     ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
+    ${TORCH_API_TEST_DIR}/tensor_options.cpp
+    ${TORCH_API_TEST_DIR}/tensor.cpp
   )
-
-  if (TORCH_USE_CEREAL)
-    list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/serialization.cpp)
-  endif()
 
   add_executable(test_api ${TORCH_API_TEST_SOURCES})
 

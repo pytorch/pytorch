@@ -65,7 +65,7 @@ class MIOpenSoftmaxOp final : public Operator<HIPContext> {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:
@@ -126,7 +126,7 @@ class MIOpenSoftmaxGradientOp final : public Operator<HIPContext> {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:

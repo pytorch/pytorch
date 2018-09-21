@@ -1,14 +1,19 @@
 #pragma once
 
+#include <torch/arg.h>
 #include <torch/nn/module.h>
-#include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
-#include <torch/serialization.h>
-
-#include <ATen/ATen.h>
+#include <torch/optim/serialize.h>
 
 #include <utility>
 #include <vector>
+
+namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
 
 namespace torch {
 namespace optim {
@@ -32,35 +37,26 @@ class Adam : public Optimizer {
 
   void step() override;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-#if defined(TORCH_USE_CEREAL)
-    ar(CEREAL_NVP(step_buffers_),
-       CEREAL_NVP(exp_average_buffers_),
-       CEREAL_NVP(exp_average_sq_buffers_),
-       CEREAL_NVP(max_exp_average_sq_buffers_));
-#endif // defined(TORCH_USE_CEREAL)
-  }
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
 
   AdamOptions options;
 
+  std::vector<int64_t> step_buffers;
+  std::vector<Tensor> exp_average_buffers;
+  std::vector<Tensor> exp_average_sq_buffers;
+  std::vector<Tensor> max_exp_average_sq_buffers;
+
  private:
-#if defined(TORCH_USE_CEREAL)
-  friend class cereal::access;
-#endif // defined(TORCH_USE_CEREAL)
   Adam() : options(0) {}
 
-  std::vector<int64_t> step_buffers_;
-  std::vector<Tensor> exp_average_buffers_;
-  std::vector<Tensor> exp_average_sq_buffers_;
-  std::vector<Tensor> max_exp_average_sq_buffers_;
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    TORCH_OPTIM_SERIALIZE(step_buffers);
+    TORCH_OPTIM_SERIALIZE(exp_average_buffers);
+    TORCH_OPTIM_SERIALIZE(exp_average_sq_buffers);
+    TORCH_OPTIM_SERIALIZE(max_exp_average_sq_buffers);
+  }
 };
 } // namespace optim
 } // namespace torch
-
-#if defined(TORCH_USE_CEREAL)
-CEREAL_REGISTER_TYPE(torch::optim::Adam);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::Optimizer,
-    torch::optim::Adam);
-#endif // defined(TORCH_USE_CEREAL)

@@ -16,8 +16,8 @@ template <>
 bool WeightedSumOp<CUDAContext>::RunOnDevice() {
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float>();
-  } else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<float16>();
+  } else if (Input(0).IsType<at::Half>()) {
+    return DoRunWithType<at::Half>();
   } else {
     CAFFE_THROW("Unsupported inputs");
   }
@@ -28,8 +28,8 @@ template <>
 bool SumOp<CUDAContext>::RunOnDevice() {
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float, float>();
-  } else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<float16, float16>();
+  } else if (Input(0).IsType<at::Half>()) {
+    return DoRunWithType<at::Half, at::Half>();
   } else {
     CAFFE_THROW("Unsupported inputs");
   }

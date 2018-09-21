@@ -584,7 +584,7 @@ Example::
 
 add_docstr(torch.bernoulli,
            r"""
-bernoulli(input, out=None) -> Tensor
+bernoulli(input, *, generator=None, out=None) -> Tensor
 
 Draws binary random numbers (0 or 1) from a Bernoulli distribution.
 
@@ -594,14 +594,17 @@ Hence, all values in :attr:`input` have to be in the range:
 :math:`0 \leq \text{input}_i \leq 1`.
 
 The :math:`\text{i}^{th}` element of the output tensor will draw a
-value `1` according to the :math:`\text{i}^{th}` probability value given
+value :math:`1` according to the :math:`\text{i}^{th}` probability value given
 in :attr:`input`.
 
 .. math::
     \text{out}_{i} \sim \mathrm{Bernoulli}(p = \text{input}_{i})
 
 The returned :attr:`out` tensor only has values 0 or 1 and is of the same
-shape as :attr:`input`
+shape as :attr:`input`.
+
+:attr:`out` can have integral ``dtype``, but :attr`input` must have floating
+point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution
@@ -3057,60 +3060,6 @@ Example::
             [ 1,  1],
             [ 2,  2],
             [ 3,  3]])
-""")
-
-add_docstr(torch.norm,
-           r"""
-.. function:: norm(input, p=2) -> Tensor
-
-Returns the p-norm of the :attr:`input` tensor.
-
-.. math::
-    ||x||_{p} = \sqrt[p]{x_{1}^{p} + x_{2}^{p} + \ldots + x_{N}^{p}}
-
-Args:
-    input (Tensor): the input tensor
-    p (float, optional): the exponent value in the norm formulation
-Example::
-
-    >>> a = torch.randn(1, 3)
-    >>> a
-    tensor([[-0.5192, -1.0782, -1.0448]])
-    >>> torch.norm(a, 3)
-    tensor(1.3633)
-
-.. function:: norm(input, p, dim, keepdim=False, out=None) -> Tensor
-
-Returns the p-norm of each row of the :attr:`input` tensor in the given
-dimension :attr:`dim`.
-
-If :attr:`keepdim` is ``True``, the output tensor is of the same size as
-:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensor having 1 fewer dimension than :attr:`input`.
-
-Args:
-    input (Tensor): the input tensor
-    p (float):  the exponent value in the norm formulation
-    dim (int): the dimension to reduce
-    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
-
-Example::
-
-    >>> a = torch.randn(4, 2)
-    >>> a
-    tensor([[ 2.1983,  0.4141],
-            [ 0.8734,  1.9710],
-            [-0.7778,  0.7938],
-            [-0.1342,  0.7347]])
-    >>> torch.norm(a, 2, 1)
-    tensor([ 2.2369,  2.1558,  1.1113,  0.7469])
-    >>> torch.norm(a, 0, 1, True)
-    tensor([[ 2.],
-            [ 2.],
-            [ 2.],
-            [ 2.]])
 """)
 
 add_docstr(torch.normal,
