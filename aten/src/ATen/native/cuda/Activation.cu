@@ -225,8 +225,9 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
     // update weight_grad
     std::vector<int64_t> reduce_dims;
     reduce_dims.push_back(0);
-    for(int64_t i = 3; i < dims; i++) reduce_dims.push_back(i);
-    if (dims > 2) reduce_dims.push_back(2);
+    if (dims > 2) {
+      for(int64_t i = 2; i < dims; i++) reduce_dims.push_back(i);
+    }
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }
   return std::tuple<Tensor, Tensor>{input_grad, weight_grad};

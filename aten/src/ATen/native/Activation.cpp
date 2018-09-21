@@ -80,21 +80,23 @@ void inline prelu_cpu_kernel_multi_weights(
 
   int64_t i, j, k;
   int64_t input_numel = input.numel();
-  auto result_data = result.data<scalar_t>();
-  auto input_data = input.data<scalar_t>();
-  auto weight_data = weight.data<scalar_t>();
+  scalar_t* result_data = result.data<scalar_t>();
+  scalar_t* input_data = input.data<scalar_t>();
+  scalar_t* weight_data = weight.data<scalar_t>();
 
   #pragma omp parallel for private(i,j,k) if (input.numel() > 1000)
-  for (i = 0; i < input_dim0_size; i++) {
-    for (j = 0; j < channel_size; j++) {
-      for (k = 0; k < input_stride1; k++) {
-        int64_t pos = i * input_stride0 + j * input_stride1 + k;
-        scalar_t input_data_val = input_data[pos];
-        scalar_t weight_data_val = weight_data[j];
+  for (i = 0; i < input_dim0_size; ++i) {
+    int64_t offset = i * channel_size * input_stride1;
+    scalar_t* n_input_data = input_data + offset;
+    scalar_t* n_result_data = result_data + offset;
+    for (j = 0; j < channel_size; ++j) {
+      for (k = 0; k < input_stride1; ++k) {
         // to allow for compiler optimization, here splitting into two lines:
-        scalar_t w = (input_data_val > 0) ? scalar_t(1) : weight_data_val;
-        result_data[pos] = w * input_data_val;
+        scalar_t w = (n_input_data[k] > 0) ? scalar_t(1) : weight_data[j];
+        n_result_data[k] = w * n_input_data[k];
       }
+      n_input_data += input_stride1;
+      n_result_data += input_stride1;
     }
   }
 }
@@ -275,8 +277,9 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
     // update weight_grad
     std::vector<int64_t> reduce_dims;
     reduce_dims.push_back(0);
-    for(int64_t i = 3; i < dims; i++) reduce_dims.push_back(i);
-    if (dims > 2) reduce_dims.push_back(2);
+    if (dims > 2) {
+      for(int64_t i = 2; i < dims; i++) reduce_dims.push_back(i);
+    }
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }
   return std::tuple<Tensor, Tensor>{input_grad, weight_grad};
