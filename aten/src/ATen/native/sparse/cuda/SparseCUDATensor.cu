@@ -26,11 +26,15 @@ namespace at { namespace native {
 
 SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
-  if (nnz < 2) {
-    _get_sparse_impl(self)->set_coalesced(true);
-  }
   if (self.is_coalesced()) {
     return self;
+  }
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
+  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  if (nnz < 2) {
+    SparseTensor dst = self.clone();
+    _get_sparse_impl(dst)->set_coalesced(true);
+    return dst;
   }
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();

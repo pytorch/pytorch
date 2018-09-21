@@ -2,6 +2,7 @@
 
 #include <gloo/allreduce_halving_doubling.h>
 #include <gloo/allreduce_ring_chunked.h>
+#include <gloo/barrier_all_to_one.h>
 #include <gloo/broadcast_one_to_all.h>
 
 #ifdef USE_CUDA
@@ -186,23 +187,26 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
   {
     std::unique_lock<std::mutex> lock(m_);
     completed_ = true;
+    if (entry.key.type != nullptr) {
 #ifdef USE_CUDA
-    cuda_ = entry.key.type->is_cuda();
-    // Populate devices and events so that we can later synchronize
-    // with the operation associated with this work finishing.
-    if (cuda_) {
-      at::DeviceGuard deviceGuard;
-      devices_ = entry.key.devices;
-      events_.resize(devices_.size());
-      for (size_t i = 0; i < devices_.size(); i++) {
-        deviceGuard.set_index(devices_[i]);
-        events_[i] = CUDAEvent::create();
-        const auto& event = events_[i].getEvent();
-        const auto& stream = entry.streams[i].getStream();
-        C10D_CUDA_CHECK(cudaEventRecord(event, stream));
+      cuda_ = entry.key.type->is_cuda();
+
+      // Populate devices and events so that we can later synchronize
+      // with the operation associated with this work finishing.
+      if (cuda_) {
+        at::DeviceGuard deviceGuard;
+        devices_ = entry.key.devices;
+        events_.resize(devices_.size());
+        for (size_t i = 0; i < devices_.size(); i++) {
+          deviceGuard.set_index(devices_[i]);
+          events_[i] = CUDAEvent::create();
+          const auto& event = events_[i].getEvent();
+          const auto& stream = entry.streams[i].getStream();
+          C10D_CUDA_CHECK(cudaEventRecord(event, stream));
+        }
       }
-    }
 #endif
+    }
   }
   cv_.notify_all();
 }
@@ -306,10 +310,6 @@ ProcessGroupGloo::ProcessGroupGloo(
   for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this);
   }
-
-#ifdef USE_CUDA
-  thcState_ = ::at::globalContext().lazyInitCUDA();
-#endif
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -383,6 +383,10 @@ void ProcessGroupGloo::createAlgorithm(AlgorithmEntry& entry) {
       return;
     case CollectiveType::BROADCAST:
       GENERATE_ALL_TYPES(key.type->scalarType(), createBroadcast, entry);
+      return;
+    case CollectiveType::BARRIER:
+      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+          new ::gloo::BarrierAllToOne(contexts_[0]));
       return;
     case CollectiveType::UNUSED:
       break;
@@ -497,6 +501,11 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
 
+  // Without type there is nothing else to construct
+  if (key.type == nullptr) {
+    return entry;
+  }
+
   // Allocate source tensors for this entry
   auto& srcSizes = key.srcSizes;
   entry->src.resize(srcSizes.size());
@@ -592,14 +601,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   // In case of CUDA, ensure that operations that are queued after
   // this collective wait for the collective to complete.
   if (key.type->is_cuda()) {
-    synchronizeStreams(thcState_, entry);
+    auto thcState = ::at::globalContext().lazyInitCUDA();
+    synchronizeStreams(thcState, entry);
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (size_t i = 0; i < tensors.size(); i++) {
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
-        THCStreamGuard guard(thcState_, entry->streams[i]);
+        THCStreamGuard guard(thcState, entry->streams[i]);
         tensors[i].copy_(entry->src[i]);
       }
     };
@@ -642,14 +652,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   // In case of CUDA, ensure that operations that are queued after
   // this collective wait for the collective to complete.
   if (key.type->is_cuda()) {
-    synchronizeStreams(thcState_, entry);
+    auto thcState = ::at::globalContext().lazyInitCUDA();
+    synchronizeStreams(thcState, entry);
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (size_t i = 0; i < tensors.size(); i++) {
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
-        THCStreamGuard guard(thcState_, entry->streams[i]);
+        THCStreamGuard guard(thcState, entry->streams[i]);
         tensors[i].copy_(entry->src[i]);
       }
     };
@@ -782,7 +793,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
-  throw std::runtime_error("ProcessGroupGloo does not support barrier");
+  AlgorithmKey key;
+  key.collectiveType = CollectiveType::BARRIER;
+
+  auto entry = checkout(key);
+  entry->run = [=]() mutable {
+    entry->algorithm->run();
+  };
+  return enqueue(entry);
 }
 
 std::unordered_map<int, int> ProcessGroupGloo::getGroupRank() {

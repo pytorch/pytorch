@@ -366,7 +366,10 @@ class JitTestCase(TestCase):
         return ge
 
     def assertAllFused(self, graph):
-        self.assertTrue(all(node.kind() in {'prim::Constant', 'prim::FusionGroup'} for node in graph.nodes()))
+        if [n.kind() for n in graph.nodes()] == ['prim::DifferentiableGraph']:
+            graph = next(graph.nodes()).g('Subgraph')
+        self.assertTrue(all(node.kind() in {'prim::Constant', 'prim::FusionGroup'} for node in graph.nodes()),
+                        'got {}'.format(graph))
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
 
     def assertExportImport(self, trace, inputs):
@@ -1898,6 +1901,59 @@ class TestJit(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(random_bar(x), (x + 1)[0:1])
 
+    def test_pretty_printer(self):
+        @torch.jit.script
+        def if_test(a, b):
+            # FIXME: use 0 instead of a.
+            # c = 0
+            c = a
+            if bool(a < b):
+                c = b
+            else:
+                c = a
+            return c
+
+        @torch.jit.script
+        def if_one(a, b):
+            c = b
+            if bool(a < b):
+                c = a
+            return c
+
+        @torch.jit.script
+        def while_test(a, i):
+            while bool(i < 3):
+                a *= a
+                i += 1
+            return a
+
+        @torch.jit.script
+        def while_if_test(a, b):
+            c = 0
+            while bool(a < 10):
+                a = a + 1
+                b = b + 1
+                if bool(a > b):
+                    c = 2
+                else:
+                    c = 3
+            return a + 1
+
+        @torch.jit.script
+        def loop_use_test(y):
+            x = y + 1
+            z = x + 5
+            while bool(y < 8):
+                y += 1
+                z = x
+            return x, z
+
+        self.assertExpected(if_test.graph.pretty_print(), "if_test")
+        self.assertExpected(if_one.graph.pretty_print(), "if_one")
+        self.assertExpected(while_test.graph.pretty_print(), "while_test")
+        self.assertExpected(while_if_test.graph.pretty_print(), "while_if_test")
+        self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -2637,6 +2693,23 @@ a")
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_clamp_fusion(self):
+        def func(a, b):
+            return torch.clamp(a + b, min=0, max=2)
+
+        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
+        b = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        s = self.checkScript(func, (a, b))
+        self.assertAllFused(s.graph_for(a, b))
+
+        c = s(a, b)
+        c.sum().backward()
+        self.assertAllFused(backward_graph(s))
 
     def test_mul(self):
         def func(a, b):
@@ -3409,7 +3482,7 @@ a")
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skip("this test is flaky, see #11360")
+    @enable_cpu_fuser
     def test_scalar_fusion(self):
         def fn(x, y):
             return x + y.type_as(x)
@@ -7575,6 +7648,12 @@ EXCLUDE_SCRIPT = {
     'test_var_dim_1d',
     'test_var_dim_1d_neg0',
     'test_var_dim_neg0',
+    'test_norm_inf',
+    'test_norm_inf_2_dim',
+    'test_norm_fro',
+    'test_norm_fro_default',
+    'test_norm_nuc',
+    'test_renorm_norm_inf',
     'test_matrix_power_n=-1',  # involves inverse
     'test_matrix_power_n=-3',  # involves inverse
     # skipped nn functional tests

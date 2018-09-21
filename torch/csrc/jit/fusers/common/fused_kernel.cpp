@@ -296,6 +296,7 @@ static std::string encodeRHS(Node* n) {
     // TODO: some of these ops will not get generated because
     // we only work on float inputs/outputs, but they are here to record
     // that they are valid mappable ops once we handle more type
+
     {aten::__and__, "${0} && ${1}"},
     {aten::__lshift__, "${0} << ${1}"},
     {aten::__or__, "${0} || ${1}"},
@@ -318,6 +319,12 @@ static std::string encodeRHS(Node* n) {
     {aten::add, "${0} + ${2}*${1}"},
     {aten::sub, "(${0} - ${2}*${1})"},
     {aten::rand_like, "uniform(rnd())"},
+
+    // min, max
+    // It may seem unusual to have the bounds as the first case below,
+    // this is so that if min or max is NaN, they are "ignored"
+    // and when the input is NaN, the output is, too
+    {aten::clamp, "(${0}<${1}?${1}:(${0}>${2}?${2}:${0}))"},
 
     // simple derivatives
     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
