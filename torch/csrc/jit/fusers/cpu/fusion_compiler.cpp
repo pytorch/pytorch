@@ -14,8 +14,20 @@
 #include <sstream>
 #include <tuple>
 
+#if ((__GLIBC__ == 2) && (__GLIBC_MINOR__ >= 2)) || (__GLIBC__ > 2)
+#include <spawn.h>
+#ifdef POSIX_SPAWN_USEVFORK
+#define USE_POSIX_SPAWN
+#include <sys/wait.h>
+extern char **environ;
+#endif
+#endif
+
+#ifndef USE_POSIX_SPAWN
 #ifndef __APPLE__
-#include <malloc.h> // for malloc_trim
+#include <malloc.h>
+#define USE_MALLOC_TRIM
+#endif
 #endif
 
 namespace torch { namespace jit { namespace cpufuser {
@@ -25,14 +37,64 @@ CPUFusionCompiler& getFusionCompiler() {
   return compiler;
 }
 
+#ifdef USE_POSIX_SPAWN
+struct PosixSpawnAttrVfork {
+  explicit PosixSpawnAttrVfork() {
+    int err = posix_spawnattr_init(&attr);
+    if (err != 0) {
+      AT_ERROR("posix_spawnattr_init: ", strerror(err));
+    }
+
+    err = posix_spawnattr_setflags(&attr, POSIX_SPAWN_USEVFORK);
+    if (err != 0) {
+      AT_ERROR("posix_spawnattr_setflags: ", strerror(err));
+    }
+  }
+  ~PosixSpawnAttrVfork() {
+    int err = posix_spawnattr_destroy(&attr);
+    if (err != 0) {
+      AT_WARN("posix_spawnattr_destroy: ", strerror(err));
+    }
+  }
+  posix_spawnattr_t attr;
+};
+#endif // USE_POSIX_SPAWN
+
 int runCommand(const std::string& command) {
-  // XXX: system() uses fork(), which can fail if the malloc allocator uses
-  // too much memory. Ask the allocator nicely to free its memory for now, but
-  // we should rethink using system() in the future.
-#ifndef __APPLE__
+#ifdef USE_POSIX_SPAWN
+  // NB: Even with copy-on-write, fork can fail if the parent process's resident
+  // memory usage is more than half the total RAM. Because of this, we avoid
+  // system() (that calls fork) and try to use posix_spawn whenever possible.
+  PosixSpawnAttrVfork attr;
+  pid_t pid;
+
+  // Run sh to run the provided command
+  const char* cmd = command.c_str();
+  std::vector<char> cmd_copy(cmd, cmd + command.size() + 1);
+  char* argv[] = {"sh", "-c", cmd_copy.data(), NULL};
+
+  int status = posix_spawn(&pid, "/bin/sh", NULL, &attr.attr, argv, environ);
+  if (status != 0) {
+    AT_ERROR("posix_spawn: ", strerror(status));
+  }
+  if (waitpid(pid, &status, 0) == -1) {
+    AT_ERROR("waitpid: ", strerror(errno));
+  }
+  return WEXITSTATUS(status);
+#else
+
+  // No posix_spawn with vfork found on the system: try malloc_trim + system
+#ifdef USE_MALLOC_TRIM
   malloc_trim(/*pad=*/0);
-#endif
-  return system(command.c_str());
+#endif // USE_MALLOC_TRIM
+  int retval = system(command.c_str());
+  if (retval == -1) {
+    AT_ERROR("system(): ", strerror(errno));
+  } else if (retval == 127) {
+    AT_ERROR("system(): shell could not be executed in child process");
+  }
+  return retval;
+#endif // USE_POSIX_SPAWN
 }
 
 static const std::string check_exists_string = "which '${program}' > /dev/null";
@@ -97,3 +159,9 @@ std::vector<at::Tensor> CPUFusionCompiler::debugLaunchGraph(
 } // namespace cpufuser
 } // namespace jit
 } // namespace torch
+#ifdef USE_POSIX_SPAWN
+#undef USE_POSIX_SPAWN
+#endif
+#ifdef USE_MALLOC_TRIM
+#undef USE_MALLOC_TRIM
+#endif

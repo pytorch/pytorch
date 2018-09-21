@@ -37,15 +37,9 @@ static const std::string compile_string =
 #endif
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
-static void checkSystemFailure(const std::string& activity, int retval, int errnum) {
-  if (retval == 0) {
-    return;
-  } else if (retval == -1) {
-    AT_ERROR("Failed to ", activity, ": system() returned '", strerror(errnum), "'");
-  } else if (retval == 127) {
-    AT_ERROR("Failed to ", activity, ": shell could not be executed in child process");
-  } else {
-    AT_ERROR("Failed to ", activity, ": child process exited with return value ", retval);
+static void checkCommandFailure(const std::string& activity, int retval) {
+  if (retval != 0) {
+    AT_ERROR("Failed to ", activity, ": child exited with return value ", retval);
   }
 }
 
@@ -65,7 +59,7 @@ static void runCompiler(
     config.openmp = false; // disable for future compiles
     return runCompiler(config, cpp_file, so_file);
   }
-  checkSystemFailure("compile a fused CPU kernel", /*retval=*/r, errno);
+  checkCommandFailure("compile a fused CPU kernel", /*retval=*/r);
 }
 
 static const std::string disas_string =
@@ -75,7 +69,7 @@ static void disas(const std::string& so_file) {
   env.s("so_file", so_file);
   std::string cmd = format(disas_string, env);
   int r = runCommand(cmd.c_str());
-  checkSystemFailure("objdump", /*retval=*/r, errno);
+  checkCommandFailure("objdump", /*retval=*/r);
 }
 
 CPUFusedKernel::CPUFusedKernel(
