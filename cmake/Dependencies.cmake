@@ -860,10 +860,6 @@ if (NOT BUILD_ATEN_MOBILE)
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
   endif()
 
-  if (NOT MSVC)
-    set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
-  endif()
-
   INCLUDE(CheckCXXSourceCompiles)
 
   # disable some verbose warnings
@@ -917,14 +913,6 @@ if (NOT BUILD_ATEN_MOBILE)
     # we want to respect the standard, and we are bored of those **** .
     ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
     LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
-  ENDIF()
-
-  IF (NOT MSVC)
-    IF (CMAKE_VERSION VERSION_LESS "3.1")
-      SET(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
-    ELSE ()
-      SET(CMAKE_C_STANDARD 11)
-    ENDIF ()
   ENDIF()
 
   if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
