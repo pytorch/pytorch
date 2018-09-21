@@ -420,29 +420,29 @@ class DataLoader(object):
     Arguments:
         dataset (Dataset): dataset from which to load the data.
         batch_size (int, optional): how many samples per batch to load
-            (default: 1).
+            (default: ``1``).
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
-            at every epoch (default: False).
+            at every epoch (default: ``False``).
         sampler (Sampler, optional): defines the strategy to draw samples from
             the dataset. If specified, ``shuffle`` must be False.
         batch_sampler (Sampler, optional): like sampler, but returns a batch of
-            indices at a time. Mutually exclusive with batch_size, shuffle,
-            sampler, and drop_last.
+            indices at a time. Mutually exclusive with :attr:`batch_size`,
+            :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
         num_workers (int, optional): how many subprocesses to use for data
             loading. 0 means that the data will be loaded in the main process.
-            (default: 0)
+            (default: ``0``)
         collate_fn (callable, optional): merges a list of samples to form a mini-batch.
         pin_memory (bool, optional): If ``True``, the data loader will copy tensors
             into CUDA pinned memory before returning them.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
             if the dataset size is not divisible by the batch size. If ``False`` and
             the size of dataset is not divisible by the batch size, then the last batch
-            will be smaller. (default: False)
+            will be smaller. (default: ``False``)
         timeout (numeric, optional): if positive, the timeout value for collecting a batch
-            from workers. Should always be non-negative. (default: 0)
-        worker_init_fn (callable, optional): If not None, this will be called on each
+            from workers. Should always be non-negative. (default: ``0``)
+        worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
-            input, after seeding and before data loading. (default: None)
+            input, after seeding and before data loading. (default: ``None``)
 
     .. note:: By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
@@ -450,9 +450,9 @@ class DataLoader(object):
               may be duplicated upon initializing workers (w.g., NumPy), causing
               each worker to return identical random numbers. (See
               :ref:`dataloader-workers-random-seed` section in FAQ.) You may
-              use ``torch.initial_seed()`` to access the PyTorch seed for each
-              worker in :attr:`worker_init_fn`, and use it to set other seeds
-              before data loading.
+              use :func:`torch.initial_seed()` to access the PyTorch seed for
+              each worker in :attr:`worker_init_fn`, and use it to set other
+              seeds before data loading.
 
     .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.

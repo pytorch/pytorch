@@ -584,7 +584,7 @@ Example::
 
 add_docstr(torch.bernoulli,
            r"""
-bernoulli(input, out=None) -> Tensor
+bernoulli(input, *, generator=None, out=None) -> Tensor
 
 Draws binary random numbers (0 or 1) from a Bernoulli distribution.
 
@@ -594,14 +594,17 @@ Hence, all values in :attr:`input` have to be in the range:
 :math:`0 \leq \text{input}_i \leq 1`.
 
 The :math:`\text{i}^{th}` element of the output tensor will draw a
-value `1` according to the :math:`\text{i}^{th}` probability value given
+value :math:`1` according to the :math:`\text{i}^{th}` probability value given
 in :attr:`input`.
 
 .. math::
     \text{out}_{i} \sim \mathrm{Bernoulli}(p = \text{input}_{i})
 
 The returned :attr:`out` tensor only has values 0 or 1 and is of the same
-shape as :attr:`input`
+shape as :attr:`input`.
+
+:attr:`out` can have integral ``dtype``, but :attr`input` must have floating
+point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution

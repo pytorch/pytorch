@@ -91,11 +91,9 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
 
 static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
   if (index == 0 && dim == 0 && self.dim() == 0) {
-    // Deprecated support for indexing 0-dim tensors as if they were 1-dim.
-    PyErr_WarnEx(PyExc_UserWarning,
-        "invalid index of a 0-dim tensor. This will be an error in PyTorch 0.5. "
-        "Use tensor.item() to convert a 0-dim tensor to a Python number", 1);
-    return at::alias(self);
+    throw IndexError(
+        "invalid index of a 0-dim tensor. "
+        "Use tensor.item() to convert a 0-dim tensor to a Python number");
   }
   int64_t size = self.size(dim);
   if (index < -size || index >= size) {

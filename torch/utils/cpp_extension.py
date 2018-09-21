@@ -10,6 +10,8 @@ import sysconfig
 import tempfile
 import warnings
 
+from future.utils import raise_from
+
 import torch
 from .file_baton import FileBaton
 
@@ -696,7 +698,7 @@ def _jit_compile(name,
 
             if verbose:
                 print('Building extension module {}...'.format(name))
-            _build_extension_module(name, build_directory)
+            _build_extension_module(name, build_directory, verbose)
         finally:
             baton.release()
     else:
@@ -775,16 +777,28 @@ def _get_build_directory(name, verbose):
     return build_directory
 
 
-def _build_extension_module(name, build_directory):
+def _build_extension_module(name, build_directory, verbose):
     try:
-        subprocess.check_output(
-            ['ninja', '-v'], stderr=subprocess.STDOUT, cwd=build_directory)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        if sys.version_info >= (3, 5):
+            subprocess.run(
+                ['ninja', '-v'],
+                stdout=None if verbose else subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd=build_directory,
+                check=True)
+        else:
+            subprocess.check_output(
+                ['ninja', '-v'],
+                stderr=subprocess.STDOUT,
+                cwd=build_directory)
     except subprocess.CalledProcessError:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
-        raise RuntimeError("Error building extension '{}': {}".format(
-            name, error.output.decode()))
+        message = "Error building extension '{}': {}".format(name, error.output.decode())
+        raise_from(RuntimeError(message), None)
 
 
 def _import_module_from_library(module_name, path):
