@@ -125,6 +125,8 @@ struct ArgumentSpec {
   size_t hashCode() const {
     return hash_code;
   }
+  // For every input of a given graph, returns a most detailed type that can be
+  // inferred for it based on this ArgumentSpec.
   std::vector<TypePtr> getTypes(Graph& graph) const {
     size_t offset = 0;
     return fmap(graph.inputs(),

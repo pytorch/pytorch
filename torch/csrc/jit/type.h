@@ -167,7 +167,6 @@ private:
 
 struct UndefinedTensorType;
 using UndefinedTensorTypePtr = std::shared_ptr<UndefinedTensorType>;
-// This node represents a single Tensor value with a specific size
 struct TORCH_API UndefinedTensorType : public Type {
   static constexpr bool is_singleton = true;
   friend struct Type;
@@ -182,8 +181,6 @@ struct TORCH_API UndefinedTensorType : public Type {
     return rhs.kind() == kind();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    if (rhs->kind() == TypeKind::DynamicType)
-      return true;
     return rhs->kind() == TypeKind::DynamicType ||
            rhs->kind() == TypeKind::UndefinedTensorType;
   }
