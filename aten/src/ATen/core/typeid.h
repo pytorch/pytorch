@@ -209,7 +209,7 @@ const char* _TypeName() noexcept {
   static const std::string name = at::demangle(typeid(T).name());
   return name.c_str();
 #else
-  return __TypeName();
+  return __TypeName<T>();
 #endif
 }
 
