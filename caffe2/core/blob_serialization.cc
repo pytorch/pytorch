@@ -277,14 +277,14 @@ void TensorSerializer::Serialize(
         this->context_->template CopyToCPU<char>(
             2 * chunkSize,
             reinterpret_cast<const char*>(
-                input.template data<float16>() + chunkBegin),
+                input.template data<at::Half>() + chunkBegin),
             buffer.get());
         this->context_->FinishDeviceComputation();
         proto.set_byte_data(buffer.release(), 2 * chunkSize);
       } else {
         detail::CopyToProtoWithCast(
             chunkSize,
-            reinterpret_cast<const uint16_t*>(input.template data<float16>()) +
+            reinterpret_cast<const uint16_t*>(input.template data<at::Half>()) +
                 chunkBegin,
             proto.mutable_int32_data(),
             uniq_ptr.get());
@@ -482,17 +482,17 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
             2 * chunkSize,
             proto.byte_data().size(),
             "Incorrect proto field size.");
-        context->template CopyToCPU<float16>(
+        context->template CopyToCPU<at::Half>(
             chunkSize,
-            reinterpret_cast<const float16*>(proto.byte_data().data()),
-            tensor->template mutable_data<float16>() + chunkBegin);
+            reinterpret_cast<const at::Half*>(proto.byte_data().data()),
+            tensor->template mutable_data<at::Half>() + chunkBegin);
       } else {
         // Backward compatibility with models which used int32_data field
         detail::CopyFromProtoWithCast(
             chunkSize,
             proto.int32_data(),
             reinterpret_cast<uint16_t*>(
-                tensor->template mutable_data<float16>()) +
+                tensor->template mutable_data<at::Half>()) +
                 chunkBegin,
             context);
       }
