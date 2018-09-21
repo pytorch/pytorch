@@ -1,7 +1,8 @@
-graph(%x : Dynamic) {
-  %y : Dynamic = aten::softsign(%x)
-  %2 : Dynamic = aten::tanhshrink(%x)
-  %3 : int = prim::Constant[value=1]()
-  %4 : Dynamic = aten::add(%2, %y, %3)
-  return (%4);
+graph(%x.1 : Dynamic) {
+  %x : Dynamic = ^plain_python()(%x.1)
+  %y : Dynamic = weak::softsign(%x)
+  %3 : Dynamic = weak::tanhshrink(%x)
+  %4 : int = prim::Constant[value=1]()
+  %5 : Dynamic = aten::add(%3, %y, %4)
+  return (%5);
 }
