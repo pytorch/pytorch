@@ -209,13 +209,7 @@ inline AT_CORE_API TypeMetaData createTypeMetaData() {
   return TypeMetaData {sizeof(T), _PickCtor<T>(), _PickCopy<T>(), _Dtor<T>, TypeIdentifier::Get<T>(), _TypeName<T>()};
 }
 
-template<class T>
-struct AT_CORE_API TypeMetaDataRegistry final {
-  // This class is not meant for instantiation
-  TypeMetaDataRegistry() = delete;
-
-  static const TypeMetaData data;
-};
+template<class T> AT_CORE_API const TypeMetaData* _TypeMetaData() noexcept;
 }
 
 /**
@@ -322,8 +316,8 @@ public:
    * Returns a TypeMeta object that corresponds to the typename T.
    */
   template <typename T>
-  static constexpr TypeMeta Make() {
-    return TypeMeta(&detail::TypeMetaDataRegistry<T>::data);
+  static TypeMeta Make() {
+    return TypeMeta(detail::_TypeMetaData<T>());
   }
 
  private:
@@ -374,8 +368,10 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
       return #T;                                                          \
     }                                                                     \
     template<>                                                            \
-    AT_CORE_EXPORT const TypeMetaData TypeMetaDataRegistry<T>::data =     \
-      createTypeMetaData<T>();                                            \
+    AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {      \
+      static TypeMetaData singleton = createTypeMetaData<T>();            \
+      return &singleton;                                                  \
+    }                                                                     \
   }
 #else // _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
@@ -390,8 +386,10 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
       return #T;                                                          \
     }                                                                     \
     template<>                                                            \
-    AT_CORE_EXPORT const TypeMetaData TypeMetaDataRegistry<T>::data =     \
-      createTypeMetaData<T>();                                            \
+    AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {      \
+      static TypeMetaData singleton = createTypeMetaData<T>();            \
+      return &singleton;                                                  \
+    }                                                                     \
   }
 #endif
 
@@ -427,11 +425,13 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   }
 #endif
 
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                        \
-  namespace detail {                                                   \
-    template<>                                                         \
-    AT_CORE_EXPORT const TypeMetaData TypeMetaDataRegistry<T>::data =  \
-      createTypeMetaData<T>();                                         \
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                                   \
+  namespace detail {                                                              \
+    template<>                                                                    \
+    AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {              \
+      static TypeMetaData singleton = createTypeMetaData<T>();                    \
+      return &singleton;                                                          \
+    }                                                                             \
   }
 
 class Tensor;
