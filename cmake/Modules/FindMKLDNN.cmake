@@ -2,7 +2,7 @@
 #
 # The following variables are optionally searched for defaults
 #  MKL_FOUND             : set to true if a library implementing the CBLAS interface is found
-#  USE_IDEEP
+#  USE_MKLDNN
 #
 # The following are set after configuration is done:
 #  MKLDNN_FOUND          : set to true if mkl-dnn is found.
@@ -16,9 +16,9 @@ SET(MKLDNN_LIBRARIES)
 SET(MKLDNN_INCLUDE_DIR)
 SET(CAFFE2_USE_IDEEP OFF)
 
-IF (NOT USE_IDEEP)
+IF (NOT USE_MKLDNN)
   RETURN()
-ENDIF(NOT USE_IDEEP)
+ENDIF(NOT USE_MKLDNN)
 
 SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
 SET(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
