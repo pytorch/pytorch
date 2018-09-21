@@ -75,6 +75,25 @@ Resolver pythonResolver(ResolutionCallback rcb) {
   };
 }
 
+static void registerWeakOperator(const Node* node, py::function func) {
+  auto name = node->kind();
+  py::tuple tuple = py::cast<py::tuple>(compile_func_(func));
+  const Def& def = py::cast<const Def&>(tuple[0]);
+  ResolutionCallback rcb = py::cast<ResolutionCallback>(tuple[1]);
+  auto m = std::make_shared<Module>();
+  defineMethodsInModule(*m, {def}, {pythonResolver(rcb)}, nullptr);
+
+  RegisterOperators reg({Operator(name, [=](Node* node) {
+    Method& method = m->get_method(name.toUnqualString());
+    return [&](Stack& stack) {
+      auto res = method(stack);
+      drop(stack, method.num_inputs());
+      pack(stack, res);
+      return 0;
+    };
+  })});
+}
+
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
   : self(std::move(self)) {}
@@ -171,22 +190,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
     if (is_weak && op == nullptr) {
       // Weak script doesn't have operator, so compile and register
-      auto name = new_node->kind();
-      py::tuple tuple = py::cast<py::tuple>(compile_func_(func));
-      const Def& def = py::cast<const Def&>(tuple[0]);
-      ResolutionCallback rcb = py::cast<ResolutionCallback>(tuple[1]);
-      auto m = std::make_shared<Module>();
-      defineMethodsInModule(*m, {def}, {pythonResolver(rcb)}, nullptr);
-
-      RegisterOperators reg({Operator(name, [=](Node* node) {
-        Method& method = m->get_method(name.toUnqualString());
-        return [&](Stack& stack) {
-          auto res = method(stack);
-          drop(stack, method.num_inputs());
-          pack(stack, res);
-          return 0;
-        };
-      })});
+      registerWeakOperator(new_node, std::move(func));
     }
 
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
