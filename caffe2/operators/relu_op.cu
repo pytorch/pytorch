@@ -107,10 +107,10 @@ operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
 
 template <>
 template <>
-bool ReluFunctor<CUDAContext>::operator()<float16>(
+bool ReluFunctor<CUDAContext>::operator()<at::Half>(
     const int N,
-    const float16* X,
-    float16* Y,
+    const at::Half* X,
+    at::Half* Y,
     CUDAContext* context) const {
   if ((N & 1) == 0) {
     ReluHalf2CUDAKernel<<<
@@ -153,12 +153,12 @@ bool ReluGradientFunctor<CUDAContext>::Forward(
 
 template <>
 template <>
-bool ReluGradientFunctor<CUDAContext>::Forward<float16>(
+bool ReluGradientFunctor<CUDAContext>::Forward<at::Half>(
     const std::vector<int>& Y_dims,
     const std::vector<int>& /* dY_dims */,
-    const float16* Y,
-    const float16* dY,
-    float16* dX,
+    const at::Half* Y,
+    const at::Half* dY,
+    at::Half* dX,
     CUDAContext* context) const {
   const int size = std::accumulate(
       Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
@@ -189,13 +189,13 @@ bool ReluGradientFunctor<CUDAContext>::Forward<float16>(
 REGISTER_CUDA_OPERATOR(
     Relu,
     UnaryElementwiseOp<
-        TensorTypes<float, float16>,
+        TensorTypes<float, at::Half>,
         CUDAContext,
         ReluFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     ReluGradient,
     BinaryElementwiseOp<
-        TensorTypes<float, float16>,
+        TensorTypes<float, at::Half>,
         CUDAContext,
         ReluGradientFunctor<CUDAContext>>);
 

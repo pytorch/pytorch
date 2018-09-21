@@ -141,7 +141,7 @@ class CUDASparseAdagradOp final : public Operator<Context> {
     if (n == 0) {
       return true;
     }
-    return DispatchHelper<TensorTypes2<float, float16>, IndexType>::call(
+    return DispatchHelper<TensorTypes2<float, at::Half>, IndexType>::call(
         this, Input(PARAM));
   }
 

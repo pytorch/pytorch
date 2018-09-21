@@ -78,7 +78,7 @@ template bool TransformOnGPU<uint8_t, float, CUDAContext>(
     Tensor& std,
     CUDAContext* context);
 
-template bool TransformOnGPU<uint8_t, float16, CUDAContext>(
+template bool TransformOnGPU<uint8_t, at::Half, CUDAContext>(
     Tensor& X,
     Tensor* Y,
     Tensor& mean,
