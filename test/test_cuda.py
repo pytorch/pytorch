@@ -1552,6 +1552,17 @@ class TestCuda(TestCase):
         r = torch.multinomial(p, 1)
         self.assertNotEqual(r.min().item(), 0)
 
+        # multinomial without repeat but with less nonzero
+        # elements than draws
+        # the intention currently is to return 0 for those
+        # and match CPU behaviour, see issue #9062
+        p = torch.zeros(1, 5, device="cuda")
+        p[:, 1] = 1
+        r = torch.multinomial(p, 2, replacement=False)
+        expected = torch.zeros(1, 2, device="cuda", dtype=torch.long)
+        expected[:, 0] = 1
+        self.assertEqual(r, expected)
+
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
