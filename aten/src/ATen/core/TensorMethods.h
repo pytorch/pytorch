@@ -605,14 +605,8 @@ inline Tensor Tensor::baddbmm(const Tensor & batch1, const Tensor & batch2, Scal
 inline Tensor & Tensor::baddbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
     return type().baddbmm_(*this, batch1, batch2, beta, alpha);
 }
-inline Tensor Tensor::bernoulli(const Tensor & p, Generator * generator) const {
-    return type().bernoulli(*this, p, generator);
-}
-inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
-    return type().bernoulli(*this, p, generator);
-}
-inline Tensor Tensor::bernoulli() const {
-    return type().bernoulli(*this);
+inline Tensor Tensor::bernoulli(Generator * generator) const {
+    return type().bernoulli(*this, generator);
 }
 inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) {
     return type().bernoulli_(*this, p, generator);
@@ -620,8 +614,8 @@ inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) {
 inline Tensor & Tensor::bernoulli_(double p, Generator * generator) {
     return type().bernoulli_(*this, p, generator);
 }
-inline Tensor & Tensor::bernoulli_() {
-    return type().bernoulli_(*this);
+inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
+    return type().bernoulli(*this, p, generator);
 }
 inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const {
     return type().bincount(*this, weights, minlength);

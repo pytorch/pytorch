@@ -29,7 +29,7 @@ constexpr auto kChunkIdSeparator = "#%";
  * approaches for specific classes. Acceptor should take care of writing data
  * to the actual storage.
  */
-void SerializeBlob(
+CAFFE2_API void SerializeBlob(
     const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
@@ -45,15 +45,15 @@ void SerializeBlob(
  *
  * NOTE: this function doesn't do chunking and might break with big tensors.
  */
-string SerializeBlob(const Blob& blob, const string& name);
+CAFFE2_API string SerializeBlob(const Blob& blob, const string& name);
 
 /**
  * Deserializes from a string containing either BlobProto or TensorProto. If
  * the deserialization fails, the content in the blob should no longer be
  * trusted.
  */
-void DeserializeBlob(const string& content, Blob* result);
-void DeserializeBlob(const BlobProto& proto, Blob* result);
+CAFFE2_API void DeserializeBlob(const string& content, Blob* result);
+CAFFE2_API void DeserializeBlob(const BlobProto& proto, Blob* result);
 
 /**
  * @brief TensorSerializer is the serializer for Tensors.
