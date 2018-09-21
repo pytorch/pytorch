@@ -8152,13 +8152,12 @@ class TestCustomOperators(JitTestCase):
         ):
             torch.ops.aten.relu()
 
-    @unittest.skipIf(True, "temporarily disabled")
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::log_softmax\(\) is missing value for argument 'dim'."
+            "aten::transpose\(\) is missing value for argument 'dim0'."
         ):
-            torch.ops.aten.log_softmax(torch.ones(5))
+            torch.ops.aten.transpose(torch.ones(5, 5))
 
     def test_passing_an_argument_both_as_positional_and_kwarg(self):
         with self.assertRaisesRegex(
