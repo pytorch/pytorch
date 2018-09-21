@@ -37,6 +37,13 @@ response = object_acl.put(ACL='public-read')
 EOL
 
 cat >ci_scripts/build_pytorch.bat <<EOL
+  mkdir %CD%\\cpp-build
+  cd %CD%\\cpp-build
+  python ..\\tools/build_libtorch.py --windows
+
+EOL
+
+cat >ci_scripts/build_pytorch.bat <<EOL
 
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
@@ -143,7 +150,7 @@ if not "%USE_CUDA%"=="0" (
 
   if "%REBUILD%"=="" set NO_CUDA=0
 
-  python setup.py install && sccache --show-stats && (
+  python setup.py install && call %CD%\\ci_scripts\\build_libtorch.bat && sccache --show-stats && (
     if "%BUILD_ENVIRONMENT%"=="" (
       echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3\` in Command Prompt before running Git Bash.
     ) else (
