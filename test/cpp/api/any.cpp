@@ -21,7 +21,7 @@ TEST_F(AnyModuleTest, SimpleReturnType) {
     }
   };
   AnyModule any(M{});
-  ASSERT_TRUE(any.forward<int>() == 123);
+  ASSERT_EQ(any.forward<int>(), 123);
 }
 
 TEST_F(AnyModuleTest, SimpleReturnTypeAndSingleArgument) {
@@ -31,7 +31,7 @@ TEST_F(AnyModuleTest, SimpleReturnTypeAndSingleArgument) {
     }
   };
   AnyModule any(M{});
-  ASSERT_TRUE(any.forward<int>(5) == 5);
+  ASSERT_EQ(any.forward<int>(5), 5);
 }
 
 TEST_F(AnyModuleTest, StringLiteralReturnTypeAndArgument) {
@@ -41,7 +41,7 @@ TEST_F(AnyModuleTest, StringLiteralReturnTypeAndArgument) {
     }
   };
   AnyModule any(M{});
-  ASSERT_TRUE(any.forward<const char*>("hello") == std::string("hello"));
+  ASSERT_EQ(any.forward<const char*>("hello"), std::string("hello"));
 }
 
 TEST_F(AnyModuleTest, StringReturnTypeWithConstArgument) {
@@ -52,7 +52,7 @@ TEST_F(AnyModuleTest, StringReturnTypeWithConstArgument) {
   };
   AnyModule any(M{});
   int x = 4;
-  ASSERT_TRUE(any.forward<std::string>(x, 3.14) == std::string("7"));
+  ASSERT_EQ(any.forward<std::string>(x, 3.14), std::string("7"));
 }
 
 TEST_F(
@@ -115,7 +115,7 @@ struct M : torch::nn::Module {
 
 TEST_F(AnyModuleTest, GetWithCorrectTypeSucceeds) {
   AnyModule any(M{5});
-  ASSERT_TRUE(any.get<M>().value == 5);
+  ASSERT_EQ(any.get<M>().value, 5);
 }
 
 TEST_F(AnyModuleTest, GetWithIncorrectTypeThrows) {
@@ -127,15 +127,15 @@ TEST_F(AnyModuleTest, GetWithIncorrectTypeThrows) {
 TEST_F(AnyModuleTest, PtrWithBaseClassSucceeds) {
   AnyModule any(M{5});
   auto ptr = any.ptr();
-  ASSERT_TRUE(ptr != nullptr);
-  ASSERT_TRUE(ptr->name() == "M");
+  ASSERT_NE(ptr, nullptr);
+  ASSERT_EQ(ptr->name(), "M");
 }
 
 TEST_F(AnyModuleTest, PtrWithGoodDowncastSuccceeds) {
   AnyModule any(M{5});
   auto ptr = any.ptr<M>();
-  ASSERT_TRUE(ptr != nullptr);
-  ASSERT_TRUE(ptr->value == 5);
+  ASSERT_NE(ptr, nullptr);
+  ASSERT_EQ(ptr->value, 5);
 }
 
 TEST_F(AnyModuleTest, PtrWithBadDowncastThrows) {
@@ -155,8 +155,8 @@ TEST_F(AnyModuleTest, DefaultStateIsEmpty) {
   AnyModule any;
   ASSERT_TRUE(any.is_empty());
   any = std::make_shared<M>(5);
-  ASSERT_TRUE(!any.is_empty());
-  ASSERT_TRUE(any.get<M>().value == 5);
+  ASSERT_FALSE(any.is_empty());
+  ASSERT_EQ(any.get<M>().value, 5);
 }
 
 TEST_F(AnyModuleTest, AllMethodsThrowForEmptyAnyModule) {
@@ -190,11 +190,11 @@ TEST_F(AnyModuleTest, CanMoveAssignDifferentModules) {
   AnyModule any;
   ASSERT_TRUE(any.is_empty());
   any = std::make_shared<M>();
-  ASSERT_TRUE(!any.is_empty());
-  ASSERT_TRUE(any.forward<std::string>(5) == "5");
+  ASSERT_FALSE(any.is_empty());
+  ASSERT_EQ(any.forward<std::string>(5), "5");
   any = std::make_shared<N>();
-  ASSERT_TRUE(!any.is_empty());
-  ASSERT_TRUE(any.forward<int>(5.0f) == 8);
+  ASSERT_FALSE(any.is_empty());
+  ASSERT_EQ(any.forward<int>(5.0f), 8);
 }
 
 TEST_F(AnyModuleTest, ConstructsFromModuleHolder) {
@@ -212,8 +212,8 @@ TEST_F(AnyModuleTest, ConstructsFromModuleHolder) {
   };
 
   AnyModule any(M{5});
-  ASSERT_TRUE(any.get<MImpl>().value == 5);
-  ASSERT_TRUE(any.get<M>()->value == 5);
+  ASSERT_EQ(any.get<MImpl>().value, 5);
+  ASSERT_EQ(any.get<M>()->value, 5);
 
   AnyModule module(Linear(3, 4));
   std::shared_ptr<Module> ptr = module.ptr();
@@ -235,7 +235,7 @@ TEST_F(AnyModuleTest, ConvertsVariableToTensorCorrectly) {
       any.forward(torch::autograd::Variable(torch::ones(5))).sum().toCFloat() ==
       5);
   // at::Tensors that are not variables work too.
-  ASSERT_TRUE(any.forward(at::ones(5)).sum().toCFloat() == 5);
+  ASSERT_EQ(any.forward(at::ones(5)).sum().toCFloat(), 5);
 }
 
 namespace torch {
@@ -260,52 +260,52 @@ struct AnyValueTest : torch::test::SeedingFixture {};
 TEST_F(AnyValueTest, CorrectlyAccessesIntWhenCorrectType) {
   auto value = make_value(5);
   // const and non-const types have the same typeid()
-  ASSERT_TRUE(value.try_get<int>() != nullptr);
-  ASSERT_TRUE(value.try_get<const int>() != nullptr);
-  ASSERT_TRUE(value.get<int>() == 5);
+  ASSERT_NE(value.try_get<int>(), nullptr);
+  ASSERT_NE(value.try_get<const int>(), nullptr);
+  ASSERT_EQ(value.get<int>(), 5);
 }
 TEST_F(AnyValueTest, CorrectlyAccessesConstIntWhenCorrectType) {
   auto value = make_value(5);
-  ASSERT_TRUE(value.try_get<const int>() != nullptr);
-  ASSERT_TRUE(value.try_get<int>() != nullptr);
-  ASSERT_TRUE(value.get<const int>() == 5);
+  ASSERT_NE(value.try_get<const int>(), nullptr);
+  ASSERT_NE(value.try_get<int>(), nullptr);
+  ASSERT_EQ(value.get<const int>(), 5);
 }
 TEST_F(AnyValueTest, CorrectlyAccessesStringLiteralWhenCorrectType) {
   auto value = make_value("hello");
-  ASSERT_TRUE(value.try_get<const char*>() != nullptr);
-  ASSERT_TRUE(value.get<const char*>() == std::string("hello"));
+  ASSERT_NE(value.try_get<const char*>(), nullptr);
+  ASSERT_EQ(value.get<const char*>(), std::string("hello"));
 }
 TEST_F(AnyValueTest, CorrectlyAccessesStringWhenCorrectType) {
   auto value = make_value(std::string("hello"));
-  ASSERT_TRUE(value.try_get<std::string>() != nullptr);
-  ASSERT_TRUE(value.get<std::string>() == "hello");
+  ASSERT_NE(value.try_get<std::string>(), nullptr);
+  ASSERT_EQ(value.get<std::string>(), "hello");
 }
 TEST_F(AnyValueTest, CorrectlyAccessesPointersWhenCorrectType) {
   std::string s("hello");
   std::string* p = &s;
   auto value = make_value(p);
-  ASSERT_TRUE(value.try_get<std::string*>() != nullptr);
-  ASSERT_TRUE(*value.get<std::string*>() == "hello");
+  ASSERT_NE(value.try_get<std::string*>(), nullptr);
+  ASSERT_EQ(*value.get<std::string*>(), "hello");
 }
 TEST_F(AnyValueTest, CorrectlyAccessesReferencesWhenCorrectType) {
   std::string s("hello");
   const std::string& t = s;
   auto value = make_value(t);
-  ASSERT_TRUE(value.try_get<std::string>() != nullptr);
-  ASSERT_TRUE(value.get<std::string>() == "hello");
+  ASSERT_NE(value.try_get<std::string>(), nullptr);
+  ASSERT_EQ(value.get<std::string>(), "hello");
 }
 
 TEST_F(AnyValueTest, TryGetReturnsNullptrForTheWrongType) {
   auto value = make_value(5);
-  ASSERT_TRUE(value.try_get<int>() != nullptr);
-  ASSERT_TRUE(value.try_get<float>() == nullptr);
-  ASSERT_TRUE(value.try_get<long>() == nullptr);
-  ASSERT_TRUE(value.try_get<std::string>() == nullptr);
+  ASSERT_NE(value.try_get<int>(), nullptr);
+  ASSERT_EQ(value.try_get<float>(), nullptr);
+  ASSERT_EQ(value.try_get<long>(), nullptr);
+  ASSERT_EQ(value.try_get<std::string>(), nullptr);
 }
 
 TEST_F(AnyValueTest, GetThrowsForTheWrongType) {
   auto value = make_value(5);
-  ASSERT_TRUE(value.try_get<int>() != nullptr);
+  ASSERT_NE(value.try_get<int>(), nullptr);
   ASSERT_THROWS_WITH(
       value.get<float>(),
       "Attempted to cast Value to float, "
@@ -319,29 +319,29 @@ TEST_F(AnyValueTest, GetThrowsForTheWrongType) {
 TEST_F(AnyValueTest, MoveConstructionIsAllowed) {
   auto value = make_value(5);
   auto copy = make_value(std::move(value));
-  ASSERT_TRUE(copy.try_get<int>() != nullptr);
-  ASSERT_TRUE(copy.get<int>() == 5);
+  ASSERT_NE(copy.try_get<int>(), nullptr);
+  ASSERT_EQ(copy.get<int>(), 5);
 }
 
 TEST_F(AnyValueTest, MoveAssignmentIsAllowed) {
   auto value = make_value(5);
   auto copy = make_value(10);
   copy = std::move(value);
-  ASSERT_TRUE(copy.try_get<int>() != nullptr);
-  ASSERT_TRUE(copy.get<int>() == 5);
+  ASSERT_NE(copy.try_get<int>(), nullptr);
+  ASSERT_EQ(copy.get<int>(), 5);
 }
 
 TEST_F(AnyValueTest, TypeInfoIsCorrectForInt) {
   auto value = make_value(5);
-  ASSERT_TRUE(value.type_info().hash_code() == typeid(int).hash_code());
+  ASSERT_EQ(value.type_info().hash_code(), typeid(int).hash_code());
 }
 
 TEST_F(AnyValueTest, TypeInfoIsCorrectForStringLiteral) {
   auto value = make_value("hello");
-  ASSERT_TRUE(value.type_info().hash_code() == typeid(const char*).hash_code());
+  ASSERT_EQ(value.type_info().hash_code(), typeid(const char*).hash_code());
 }
 
 TEST_F(AnyValueTest, TypeInfoIsCorrectForString) {
   auto value = make_value(std::string("hello"));
-  ASSERT_TRUE(value.type_info().hash_code() == typeid(std::string).hash_code());
+  ASSERT_EQ(value.type_info().hash_code(), typeid(std::string).hash_code());
 }

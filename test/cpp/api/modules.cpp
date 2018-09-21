@@ -46,13 +46,13 @@ TEST_F(ModulesTest, Conv1d) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_TRUE(y.ndimension() == 3);
-  ASSERT_TRUE(s.ndimension() == 0);
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(s.ndimension(), 0);
   for (auto i = 0; i < 3; i++) {
-    ASSERT_TRUE(y.size(i) == 2);
+    ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_TRUE(model->parameters()["weight"].grad().numel() == 3 * 2 * 3);
+  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 3 * 2 * 3);
 }
 
 TEST_F(ModulesTest, Conv2dEven) {
@@ -62,13 +62,13 @@ TEST_F(ModulesTest, Conv2dEven) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_TRUE(y.ndimension() == 4);
-  ASSERT_TRUE(s.ndimension() == 0);
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(s.ndimension(), 0);
   for (auto i = 0; i < 4; i++) {
-    ASSERT_TRUE(y.size(i) == 2);
+    ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_TRUE(model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 3);
+  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 3 * 2 * 3 * 3);
 }
 
 TEST_F(ModulesTest, Conv2dUneven) {
@@ -78,13 +78,13 @@ TEST_F(ModulesTest, Conv2dUneven) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_TRUE(y.ndimension() == 4);
-  ASSERT_TRUE(s.ndimension() == 0);
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(s.ndimension(), 0);
   for (auto i = 0; i < 4; i++) {
-    ASSERT_TRUE(y.size(i) == 2);
+    ASSERT_EQ(y.size(i), 2);
   }
 
-  ASSERT_TRUE(model->parameters()["weight"].grad().numel() == 3 * 2 * 3 * 2);
+  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 3 * 2 * 3 * 2);
 }
 
 TEST_F(ModulesTest, Conv3d) {
@@ -94,10 +94,10 @@ TEST_F(ModulesTest, Conv3d) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_TRUE(y.ndimension() == 5);
-  ASSERT_TRUE(s.ndimension() == 0);
+  ASSERT_EQ(y.ndimension(), 5);
+  ASSERT_EQ(s.ndimension(), 0);
   for (auto i = 0; i < 5; i++) {
-    ASSERT_TRUE(y.size(i) == 2);
+    ASSERT_EQ(y.size(i), 2);
   }
 
   ASSERT_TRUE(
@@ -111,12 +111,12 @@ TEST_F(ModulesTest, Linear) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_TRUE(y.ndimension() == 2);
-  ASSERT_TRUE(s.ndimension() == 0);
-  ASSERT_TRUE(y.size(0) == 10);
-  ASSERT_TRUE(y.size(1) == 2);
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_TRUE(model->parameters()["weight"].grad().numel() == 2 * 5);
+  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * 5);
 }
 
 TEST_F(ModulesTest, SimpleContainer) {
@@ -131,19 +131,19 @@ TEST_F(ModulesTest, SimpleContainer) {
   x = l3->forward(x).clamp_min(0);
 
   x.backward();
-  ASSERT_TRUE(x.ndimension() == 2);
-  ASSERT_TRUE(x.size(0) == 1000);
-  ASSERT_TRUE(x.size(1) == 100);
-  ASSERT_TRUE(x.min().toCFloat() == 0);
+  ASSERT_EQ(x.ndimension(), 2);
+  ASSERT_EQ(x.size(0), 1000);
+  ASSERT_EQ(x.size(1), 100);
+  ASSERT_EQ(x.min().toCFloat(), 0);
 }
 
 TEST_F(ModulesTest, EmbeddingBasic) {
   const int64_t dict_size = 10;
   Embedding model(dict_size, 2);
   ASSERT_TRUE(model->parameters().contains("weight"));
-  ASSERT_TRUE(model->weight.ndimension() == 2);
-  ASSERT_TRUE(model->weight.size(0) == dict_size);
-  ASSERT_TRUE(model->weight.size(1) == 2);
+  ASSERT_EQ(model->weight.ndimension(), 2);
+  ASSERT_EQ(model->weight.size(0), dict_size);
+  ASSERT_EQ(model->weight.size(1), 2);
 
   // Cannot get gradients to change indices (input) - only for embedding
   // params
@@ -152,12 +152,12 @@ TEST_F(ModulesTest, EmbeddingBasic) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_TRUE(y.ndimension() == 2);
-  ASSERT_TRUE(s.ndimension() == 0);
-  ASSERT_TRUE(y.size(0) == 10);
-  ASSERT_TRUE(y.size(1) == 2);
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_TRUE(model->parameters()["weight"].grad().numel() == 2 * dict_size);
+  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * dict_size);
 }
 
 TEST_F(ModulesTest, EmbeddingList) {
@@ -167,10 +167,10 @@ TEST_F(ModulesTest, EmbeddingList) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_TRUE(y.ndimension() == 3);
-  ASSERT_TRUE(y.size(0) == 2);
-  ASSERT_TRUE(y.size(1) == 3);
-  ASSERT_TRUE(y.size(2) == 4);
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.size(0), 2);
+  ASSERT_EQ(y.size(1), 3);
+  ASSERT_EQ(y.size(2), 4);
 }
 
 TEST_F(ModulesTest, Dropout) {
@@ -179,34 +179,34 @@ TEST_F(ModulesTest, Dropout) {
   torch::Tensor y = dropout->forward(x);
 
   y.backward();
-  ASSERT_TRUE(y.ndimension() == 1);
-  ASSERT_TRUE(y.size(0) == 100);
-  ASSERT_TRUE(y.sum().toCFloat() < 130); // Probably
-  ASSERT_TRUE(y.sum().toCFloat() > 70); // Probably
+  ASSERT_EQ(y.ndimension(), 1);
+  ASSERT_EQ(y.size(0), 100);
+  ASSERT_LT(y.sum().toCFloat(), 130); // Probably
+  ASSERT_GT(y.sum().toCFloat(), 70); // Probably
 
   dropout->eval();
   y = dropout->forward(x);
-  ASSERT_TRUE(y.sum().toCFloat() == 100);
+  ASSERT_EQ(y.sum().toCFloat(), 100);
 }
 
 TEST_F(ModulesTest, Parameters) {
   auto model = std::make_shared<NestedModel>();
   auto parameters = model->parameters();
-  ASSERT_TRUE(parameters["param"].size(0) == 3);
-  ASSERT_TRUE(parameters["param"].size(1) == 2);
-  ASSERT_TRUE(parameters["param"].size(2) == 21);
-  ASSERT_TRUE(parameters["l1.bias"].size(0) == 20);
-  ASSERT_TRUE(parameters["l1.weight"].size(0) == 20);
-  ASSERT_TRUE(parameters["l1.weight"].size(1) == 5);
-  ASSERT_TRUE(parameters["test.l1.bias"].size(0) == 3);
-  ASSERT_TRUE(parameters["test.l1.weight"].size(0) == 3);
-  ASSERT_TRUE(parameters["test.l1.weight"].size(1) == 10);
-  ASSERT_TRUE(parameters["test.l2.bias"].size(0) == 5);
-  ASSERT_TRUE(parameters["test.l2.weight"].size(0) == 5);
-  ASSERT_TRUE(parameters["test.l2.weight"].size(1) == 3);
-  ASSERT_TRUE(parameters["test.l3.bias"].size(0) == 100);
-  ASSERT_TRUE(parameters["test.l3.weight"].size(0) == 100);
-  ASSERT_TRUE(parameters["test.l3.weight"].size(1) == 5);
+  ASSERT_EQ(parameters["param"].size(0), 3);
+  ASSERT_EQ(parameters["param"].size(1), 2);
+  ASSERT_EQ(parameters["param"].size(2), 21);
+  ASSERT_EQ(parameters["l1.bias"].size(0), 20);
+  ASSERT_EQ(parameters["l1.weight"].size(0), 20);
+  ASSERT_EQ(parameters["l1.weight"].size(1), 5);
+  ASSERT_EQ(parameters["test.l1.bias"].size(0), 3);
+  ASSERT_EQ(parameters["test.l1.weight"].size(0), 3);
+  ASSERT_EQ(parameters["test.l1.weight"].size(1), 10);
+  ASSERT_EQ(parameters["test.l2.bias"].size(0), 5);
+  ASSERT_EQ(parameters["test.l2.weight"].size(0), 5);
+  ASSERT_EQ(parameters["test.l2.weight"].size(1), 3);
+  ASSERT_EQ(parameters["test.l3.bias"].size(0), 100);
+  ASSERT_EQ(parameters["test.l3.weight"].size(0), 100);
+  ASSERT_EQ(parameters["test.l3.weight"].size(1), 5);
 }
 
 TEST_F(ModulesTest, FunctionalCallsSuppliedFunction) {
@@ -228,15 +228,15 @@ TEST_F(ModulesTest, FunctionalCallsSuppliedFunction) {
 
 TEST_F(ModulesTest, FunctionalWithTorchFunction) {
   auto functional = Functional(torch::relu);
-  ASSERT_TRUE(functional(torch::ones({})).toCFloat() == 1);
-  ASSERT_TRUE(functional(torch::ones({})).toCFloat() == 1);
-  ASSERT_TRUE(functional(torch::ones({}) * -1).toCFloat() == 0);
+  ASSERT_EQ(functional(torch::ones({})).toCFloat(), 1);
+  ASSERT_EQ(functional(torch::ones({})).toCFloat(), 1);
+  ASSERT_EQ(functional(torch::ones({}) * -1).toCFloat(), 0);
 }
 
 TEST_F(ModulesTest, FunctionalArgumentBinding) {
   auto functional =
       Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
-  ASSERT_TRUE(functional(torch::ones({})).toCFloat() == 0);
+  ASSERT_EQ(functional(torch::ones({})).toCFloat(), 0);
 }
 
 TEST_F(ModulesTest, BatchNormStateful) {
@@ -246,31 +246,31 @@ TEST_F(ModulesTest, BatchNormStateful) {
   ASSERT_TRUE(bn->options.stateful());
 
   ASSERT_TRUE(bn->running_mean.defined());
-  ASSERT_TRUE(bn->running_mean.dim() == 1);
-  ASSERT_TRUE(bn->running_mean.size(0) == 5);
+  ASSERT_EQ(bn->running_mean.dim(), 1);
+  ASSERT_EQ(bn->running_mean.size(0), 5);
 
   ASSERT_TRUE(bn->running_variance.defined());
-  ASSERT_TRUE(bn->running_variance.dim() == 1);
-  ASSERT_TRUE(bn->running_variance.size(0) == 5);
+  ASSERT_EQ(bn->running_variance.dim(), 1);
+  ASSERT_EQ(bn->running_variance.size(0), 5);
 
   // Is affine by default.
   ASSERT_TRUE(bn->options.affine());
 
   ASSERT_TRUE(bn->weight.defined());
-  ASSERT_TRUE(bn->weight.dim() == 1);
-  ASSERT_TRUE(bn->weight.size(0) == 5);
+  ASSERT_EQ(bn->weight.dim(), 1);
+  ASSERT_EQ(bn->weight.size(0), 5);
 
   ASSERT_TRUE(bn->bias.defined());
-  ASSERT_TRUE(bn->bias.dim() == 1);
-  ASSERT_TRUE(bn->bias.size(0) == 5);
+  ASSERT_EQ(bn->bias.dim(), 1);
+  ASSERT_EQ(bn->bias.size(0), 5);
 }
 TEST_F(ModulesTest, BatchNormStateless) {
   BatchNorm bn(BatchNormOptions(5).stateful(false).affine(false));
 
-  ASSERT_TRUE(!bn->running_mean.defined());
-  ASSERT_TRUE(!bn->running_variance.defined());
-  ASSERT_TRUE(!bn->weight.defined());
-  ASSERT_TRUE(!bn->bias.defined());
+  ASSERT_FALSE(bn->running_mean.defined());
+  ASSERT_FALSE(bn->running_variance.defined());
+  ASSERT_FALSE(bn->weight.defined());
+  ASSERT_FALSE(bn->bias.defined());
 
   ASSERT_THROWS_WITH(
       bn->forward(torch::ones({2, 5})),
@@ -302,12 +302,12 @@ TEST_F(ModulesTest, Linear_CUDA) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_TRUE(y.ndimension() == 2);
-  ASSERT_TRUE(s.ndimension() == 0);
-  ASSERT_TRUE(y.size(0) == 10);
-  ASSERT_TRUE(y.size(1) == 2);
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_TRUE(model->parameters()["weight"].grad().numel() == 2 * 5);
+  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * 5);
 }
 
 TEST_F(ModulesTest, Linear2_CUDA) {
@@ -319,10 +319,10 @@ TEST_F(ModulesTest, Linear2_CUDA) {
   torch::Tensor s = y.sum();
 
   s.backward();
-  ASSERT_TRUE(y.ndimension() == 2);
-  ASSERT_TRUE(s.ndimension() == 0);
-  ASSERT_TRUE(y.size(0) == 10);
-  ASSERT_TRUE(y.size(1) == 2);
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_TRUE(model->parameters()["weight"].grad().numel() == 2 * 5);
+  ASSERT_EQ(model->parameters()["weight"].grad().numel(), 2 * 5);
 }

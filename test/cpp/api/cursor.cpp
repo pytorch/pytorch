@@ -68,53 +68,53 @@ struct ModuleCursorFlatTest : torch::test::SeedingFixture {
 
 TEST_F(ModuleCursorFlatTest, IteratesInTheCorrectOrder) {
   auto iterator = cursor.begin();
-  ASSERT_TRUE(&iterator->value == &model[0]);
-  ASSERT_TRUE(&(++iterator)->value == &model[1]);
-  ASSERT_TRUE(&(++iterator)->value == &model[2]);
-  ASSERT_TRUE(++iterator == cursor.end());
+  ASSERT_EQ(&iterator->value, &model[0]);
+  ASSERT_EQ(&(++iterator)->value, &model[1]);
+  ASSERT_EQ(&(++iterator)->value, &model[2]);
+  ASSERT_EQ(++iterator, cursor.end());
 }
 
 TEST_F(ModuleCursorFlatTest, NamesAreFlat) {
   auto iterator = cursor.begin();
-  ASSERT_TRUE(iterator->key == "0");
-  ASSERT_TRUE((++iterator)->key == "1");
-  ASSERT_TRUE((++iterator)->key == "2");
+  ASSERT_EQ(iterator->key, "0");
+  ASSERT_EQ((++iterator)->key, "1");
+  ASSERT_EQ((++iterator)->key, "2");
 }
 
 TEST_F(ModuleCursorFlatTest, Apply) {
   size_t count = 0;
   cursor.apply([this, &count](Module& module) {
-    ASSERT_TRUE(&module == &model[count]);
+    ASSERT_EQ(&module, &model[count]);
     count += 1;
   });
-  ASSERT_TRUE(count == 3);
+  ASSERT_EQ(count, 3);
 }
 
 TEST_F(ModuleCursorFlatTest, ApplyItems) {
   size_t count = 0;
   cursor.apply_items([this, &count](const std::string& key, Module& module) {
-    ASSERT_TRUE(&module == &model[count]);
+    ASSERT_EQ(&module, &model[count]);
     count += 1;
   });
-  ASSERT_TRUE(count == 3);
+  ASSERT_EQ(count, 3);
 }
 
 TEST_F(ModuleCursorFlatTest, Map) {
   std::vector<Module*> vector(3);
   cursor.map(vector.begin(), [](Module& module) { return &module; });
-  ASSERT_TRUE(vector[0] == &model[0]);
-  ASSERT_TRUE(vector[1] == &model[1]);
-  ASSERT_TRUE(vector[2] == &model[2]);
+  ASSERT_EQ(vector[0], &model[0]);
+  ASSERT_EQ(vector[1], &model[1]);
+  ASSERT_EQ(vector[2], &model[2]);
 
   std::list<Module*> list;
   cursor.map(
       std::inserter(list, list.end()), [](Module& module) { return &module; });
-  ASSERT_TRUE(list.size() == 3);
+  ASSERT_EQ(list.size(), 3);
   auto iterator = list.begin();
-  ASSERT_TRUE(*iterator++ == &model[0]);
-  ASSERT_TRUE(*iterator++ == &model[1]);
-  ASSERT_TRUE(*iterator++ == &model[2]);
-  ASSERT_TRUE(iterator == list.end());
+  ASSERT_EQ(*iterator++, &model[0]);
+  ASSERT_EQ(*iterator++, &model[1]);
+  ASSERT_EQ(*iterator++, &model[2]);
+  ASSERT_EQ(iterator, list.end());
 }
 
 TEST_F(ModuleCursorFlatTest, MapItems) {
@@ -124,36 +124,36 @@ TEST_F(ModuleCursorFlatTest, MapItems) {
       [](const std::string& key, Module& module) {
         return std::make_pair(key, &module);
       });
-  ASSERT_TRUE(output.size() == 3);
+  ASSERT_EQ(output.size(), 3);
   ASSERT_TRUE(output.count("0"));
   ASSERT_TRUE(output.count("1"));
   ASSERT_TRUE(output.count("2"));
-  ASSERT_TRUE(output["0"] == &model[0]);
-  ASSERT_TRUE(output["1"] == &model[1]);
-  ASSERT_TRUE(output["2"] == &model[2]);
+  ASSERT_EQ(output["0"], &model[0]);
+  ASSERT_EQ(output["1"], &model[1]);
+  ASSERT_EQ(output["2"], &model[2]);
 }
 
 TEST_F(ModuleCursorFlatTest, Count) {
-  ASSERT_TRUE(cursor.size() == model.m.size());
+  ASSERT_EQ(cursor.size(), model.m.size());
 }
 
 TEST_F(ModuleCursorFlatTest, FindReturnsTheCorrectModulesWhenGivenAValidKey) {
-  ASSERT_TRUE(cursor.find("0") == &model[0]);
-  ASSERT_TRUE(cursor.find("1") == &model[1]);
-  ASSERT_TRUE(cursor.find("2") == &model[2]);
+  ASSERT_EQ(cursor.find("0"), &model[0]);
+  ASSERT_EQ(cursor.find("1"), &model[1]);
+  ASSERT_EQ(cursor.find("2"), &model[2]);
 }
 
 TEST_F(ModuleCursorFlatTest, FindReturnsNullptrWhenGivenAnInvalidKey) {
-  ASSERT_TRUE(cursor.find("foo") == nullptr);
-  ASSERT_TRUE(cursor.find("bar") == nullptr);
+  ASSERT_EQ(cursor.find("foo"), nullptr);
+  ASSERT_EQ(cursor.find("bar"), nullptr);
 }
 
 TEST_F(
     ModuleCursorFlatTest,
     AtWithKeyReturnsTheCorrectModulesWhenGivenAValidKey) {
-  ASSERT_TRUE(&cursor.at("0") == &model[0]);
-  ASSERT_TRUE(&cursor.at("1") == &model[1]);
-  ASSERT_TRUE(&cursor.at("2") == &model[2]);
+  ASSERT_EQ(&cursor.at("0"), &model[0]);
+  ASSERT_EQ(&cursor.at("1"), &model[1]);
+  ASSERT_EQ(&cursor.at("2"), &model[2]);
 }
 
 TEST_F(ModuleCursorFlatTest, AtWithKeyThrowsWhenGivenAnInvalidKey) {
@@ -164,9 +164,9 @@ TEST_F(ModuleCursorFlatTest, AtWithKeyThrowsWhenGivenAnInvalidKey) {
 TEST_F(
     ModuleCursorFlatTest,
     SubscriptOperatorWithKeyReturnsCorrectModulesWhenGivenAValidKey) {
-  ASSERT_TRUE(&cursor["0"] == &model[0]);
-  ASSERT_TRUE(&cursor["1"] == &model[1]);
-  ASSERT_TRUE(&cursor["2"] == &model[2]);
+  ASSERT_EQ(&cursor["0"], &model[0]);
+  ASSERT_EQ(&cursor["1"], &model[1]);
+  ASSERT_EQ(&cursor["2"], &model[2]);
 }
 
 TEST_F(ModuleCursorFlatTest, SubscriptOperatorWithKeyWhenGivenAnInvalidKey) {
@@ -177,9 +177,9 @@ TEST_F(ModuleCursorFlatTest, SubscriptOperatorWithKeyWhenGivenAnInvalidKey) {
 TEST_F(
     ModuleCursorFlatTest,
     AtWithIndexReturnsTheCorrectModulesWhenGivenAValidKey) {
-  ASSERT_TRUE(&cursor.at(0).value == &model[0]);
-  ASSERT_TRUE(&cursor.at(1).value == &model[1]);
-  ASSERT_TRUE(&cursor.at(2).value == &model[2]);
+  ASSERT_EQ(&cursor.at(0).value, &model[0]);
+  ASSERT_EQ(&cursor.at(1).value, &model[1]);
+  ASSERT_EQ(&cursor.at(2).value, &model[2]);
 }
 
 TEST_F(ModuleCursorFlatTest, AtWithIndexThrowsWhenGivenAnInvalidKey) {
@@ -192,9 +192,9 @@ TEST_F(ModuleCursorFlatTest, AtWithIndexThrowsWhenGivenAnInvalidKey) {
 TEST_F(
     ModuleCursorFlatTest,
     SubscriptOperatorWithIndexReturnsCorrectModulesWhenGivenAValidKey) {
-  ASSERT_TRUE(&cursor[0].value == &model[0]);
-  ASSERT_TRUE(&cursor[1].value == &model[1]);
-  ASSERT_TRUE(&cursor[2].value == &model[2]);
+  ASSERT_EQ(&cursor[0].value, &model[0]);
+  ASSERT_EQ(&cursor[1].value, &model[1]);
+  ASSERT_EQ(&cursor[2].value, &model[2]);
 }
 
 TEST_F(ModuleCursorFlatTest, SubscriptOperatorWithIndexWhenGivenAnInvalidKey) {
@@ -223,38 +223,38 @@ TEST_F(ModuleCursorDeepTest, IteratesInTheCorrectOrder) {
   auto cursor = model.modules();
   auto iterator = cursor.begin();
 
-  ASSERT_TRUE(&iterator->value == &model[0]);
+  ASSERT_EQ(&iterator->value, &model[0]);
 
   auto* seq = dynamic_cast<Container*>(&model[0]);
-  ASSERT_TRUE(seq != nullptr);
-  ASSERT_TRUE(&(++iterator)->value == &(*seq)[0]);
-  ASSERT_TRUE(&(++iterator)->value == &(*seq)[1]);
+  ASSERT_NE(seq, nullptr);
+  ASSERT_EQ(&(++iterator)->value, &(*seq)[0]);
+  ASSERT_EQ(&(++iterator)->value, &(*seq)[1]);
 
-  ASSERT_TRUE(&(++iterator)->value == &model[1]);
-  ASSERT_TRUE(&(++iterator)->value == &model[2]);
+  ASSERT_EQ(&(++iterator)->value, &model[1]);
+  ASSERT_EQ(&(++iterator)->value, &model[2]);
 
   seq = dynamic_cast<Container*>(&model[2]);
-  ASSERT_TRUE(seq != nullptr);
-  ASSERT_TRUE(&(++iterator)->value == &(*seq)[0]);
-  ASSERT_TRUE(&(++iterator)->value == &(*seq)[1]);
+  ASSERT_NE(seq, nullptr);
+  ASSERT_EQ(&(++iterator)->value, &(*seq)[0]);
+  ASSERT_EQ(&(++iterator)->value, &(*seq)[1]);
 
   seq = dynamic_cast<Container*>(&(*seq)[1]);
-  ASSERT_TRUE(seq != nullptr);
-  ASSERT_TRUE(&(++iterator)->value == &(*seq)[0]);
-  ASSERT_TRUE(&(++iterator)->value == &(*seq)[1]);
+  ASSERT_NE(seq, nullptr);
+  ASSERT_EQ(&(++iterator)->value, &(*seq)[0]);
+  ASSERT_EQ(&(++iterator)->value, &(*seq)[1]);
 }
 
 TEST_F(ModuleCursorDeepTest, ChildrenReturnsOnlyTheFirstLevelOfSubmodules) {
   auto children = model.children();
-  ASSERT_TRUE(children.size() == 3);
-  ASSERT_TRUE(&children.at("0") == &model[0]);
-  ASSERT_TRUE(&children.at("1") == &model[1]);
-  ASSERT_TRUE(&children.at("2") == &model[2]);
-  ASSERT_TRUE(!children.contains("0.0"));
+  ASSERT_EQ(children.size(), 3);
+  ASSERT_EQ(&children.at("0"), &model[0]);
+  ASSERT_EQ(&children.at("1"), &model[1]);
+  ASSERT_EQ(&children.at("2"), &model[2]);
+  ASSERT_FALSE(children.contains("0.0"));
   size_t count = 0;
   for (auto& child : children) {
-    ASSERT_TRUE(child.key == std::to_string(count));
-    ASSERT_TRUE(&child.value == &model[count]);
+    ASSERT_EQ(child.key, std::to_string(count));
+    ASSERT_EQ(&child.value, &model[count]);
     count += 1;
   }
 }
@@ -311,7 +311,7 @@ TEST_F(ParameterCursorFlatTest, ApplyItemsWorks) {
         }
         count += 1;
       });
-  ASSERT_TRUE(count == 4);
+  ASSERT_EQ(count, 4);
 }
 
 struct ParameterCursorDeepTest : torch::test::SeedingFixture {
@@ -348,19 +348,19 @@ TEST_F(ParameterCursorDeepTest, IteratesInTheCorrectOrderOverDeepModels) {
 TEST_F(ParameterCursorDeepTest, NamesAreHierarchical) {
   auto cursor = model.parameters();
   auto iterator = cursor.begin();
-  ASSERT_TRUE(iterator->key == "0.0.tensor1");
-  ASSERT_TRUE((++iterator)->key == "0.0.tensor2");
-  ASSERT_TRUE((++iterator)->key == "0.1.tensor1");
-  ASSERT_TRUE((++iterator)->key == "0.1.tensor2");
-  ASSERT_TRUE((++iterator)->key == "1.tensor1");
-  ASSERT_TRUE((++iterator)->key == "1.tensor2");
-  ASSERT_TRUE((++iterator)->key == "2.0.tensor1");
-  ASSERT_TRUE((++iterator)->key == "2.0.tensor2");
-  ASSERT_TRUE((++iterator)->key == "2.1.0.tensor1");
-  ASSERT_TRUE((++iterator)->key == "2.1.0.tensor2");
-  ASSERT_TRUE((++iterator)->key == "2.1.1.tensor1");
-  ASSERT_TRUE((++iterator)->key == "2.1.1.tensor2");
-  ASSERT_TRUE(++iterator == cursor.end());
+  ASSERT_EQ(iterator->key, "0.0.tensor1");
+  ASSERT_EQ((++iterator)->key, "0.0.tensor2");
+  ASSERT_EQ((++iterator)->key, "0.1.tensor1");
+  ASSERT_EQ((++iterator)->key, "0.1.tensor2");
+  ASSERT_EQ((++iterator)->key, "1.tensor1");
+  ASSERT_EQ((++iterator)->key, "1.tensor2");
+  ASSERT_EQ((++iterator)->key, "2.0.tensor1");
+  ASSERT_EQ((++iterator)->key, "2.0.tensor2");
+  ASSERT_EQ((++iterator)->key, "2.1.0.tensor1");
+  ASSERT_EQ((++iterator)->key, "2.1.0.tensor2");
+  ASSERT_EQ((++iterator)->key, "2.1.1.tensor1");
+  ASSERT_EQ((++iterator)->key, "2.1.1.tensor2");
+  ASSERT_EQ(++iterator, cursor.end());
 }
 
 struct CursorTest : torch::test::SeedingFixture {};

@@ -43,7 +43,7 @@ TEST(Serialize, Basic) {
   auto y = save_and_load(x);
 
   ASSERT_TRUE(y.defined());
-  ASSERT_TRUE(x.sizes().vec() == y.sizes().vec());
+  ASSERT_EQ(x.sizes().vec(), y.sizes().vec());
   ASSERT_TRUE(x.allclose(y));
 }
 
@@ -55,7 +55,7 @@ TEST(Serialize, Resized) {
   auto y = save_and_load(x);
 
   ASSERT_TRUE(y.defined());
-  ASSERT_TRUE(x.sizes().vec() == y.sizes().vec());
+  ASSERT_EQ(x.sizes().vec(), y.sizes().vec());
   ASSERT_TRUE(x.allclose(y));
 }
 
@@ -67,7 +67,7 @@ TEST(Serialize, Sliced) {
   auto y = save_and_load(x);
 
   ASSERT_TRUE(y.defined());
-  ASSERT_TRUE(x.sizes().vec() == y.sizes().vec());
+  ASSERT_EQ(x.sizes().vec(), y.sizes().vec());
   ASSERT_TRUE(x.allclose(y));
 }
 
@@ -79,7 +79,7 @@ TEST(Serialize, NonContiguous) {
   auto y = save_and_load(x);
 
   ASSERT_TRUE(y.defined());
-  ASSERT_TRUE(x.sizes().vec() == y.sizes().vec());
+  ASSERT_EQ(x.sizes().vec(), y.sizes().vec());
   ASSERT_TRUE(x.allclose(y));
 }
 
@@ -113,7 +113,7 @@ TEST(Serialize, XOR) {
     optimizer.step();
 
     running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
-    ASSERT_TRUE(epoch < 3000);
+    ASSERT_LT(epoch, 3000);
     epoch++;
   }
 
@@ -122,7 +122,7 @@ TEST(Serialize, XOR) {
   torch::load(model2, tempfile.str());
 
   auto loss = getLoss(model2, 100);
-  ASSERT_TRUE(loss.toCFloat() < 0.1);
+  ASSERT_LT(loss.toCFloat(), 0.1);
 }
 
 TEST(Serialize, Optim) {
@@ -225,7 +225,7 @@ TEST(Serialize, Optim) {
 //     optimizer.step();
 //
 //     running_loss = running_loss * 0.99 + loss.sum().toCFloat() * 0.01;
-//     ASSERT_TRUE(epoch < 3000);
+//     ASSERT_LT(epoch, 3000);
 //     epoch++;
 //   }
 //
@@ -234,7 +234,7 @@ TEST(Serialize, Optim) {
 //   torch::load(model2, tempfile.str());
 //
 //   auto loss = getLoss(model2, 100);
-//   ASSERT_TRUE(loss.toCFloat() < 0.1);
+//   ASSERT_LT(loss.toCFloat(), 0.1);
 //
 //   model2->to(torch::kCUDA);
 //   torch::test::TempFile tempfile2;
@@ -242,5 +242,5 @@ TEST(Serialize, Optim) {
 //   torch::load(model3, tempfile2.str());
 //
 //   loss = getLoss(model3, 100);
-//   ASSERT_TRUE(loss.toCFloat() < 0.1);
+//   ASSERT_LT(loss.toCFloat(), 0.1);
 // }

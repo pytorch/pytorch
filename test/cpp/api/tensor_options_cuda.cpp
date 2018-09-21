@@ -10,16 +10,16 @@ using namespace at;
 
 // A macro so we don't lose location information when an assertion fails.
 #define REQUIRE_OPTIONS(device_, index_, type_, layout_)                      \
-  ASSERT_TRUE(options.device().type() == Device((device_), (index_)).type()); \
+  ASSERT_EQ(options.device().type(), Device((device_), (index_)).type()); \
   ASSERT_TRUE(                                                                \
       options.device().index() == Device((device_), (index_)).index());       \
-  ASSERT_TRUE(options.dtype() == (type_));                                    \
+  ASSERT_EQ(options.dtype(), (type_));                                    \
   ASSERT_TRUE(options.layout() == (layout_))
 
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \
-  ASSERT_TRUE(tensor.device().type() == Device((device_), (index_)).type());   \
-  ASSERT_TRUE(tensor.device().index() == Device((device_), (index_)).index()); \
-  ASSERT_TRUE(tensor.type().scalarType() == (type_));                          \
+  ASSERT_EQ(tensor.device().type(), Device((device_), (index_)).type());   \
+  ASSERT_EQ(tensor.device().index(), Device((device_), (index_)).index()); \
+  ASSERT_EQ(tensor.type().scalarType(), (type_));                          \
   ASSERT_TRUE(tensor.type().layout() == (layout_))
 
 TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
@@ -116,15 +116,15 @@ TEST(OptionsGuardTest, DeviceGuardOptionsGuardInteraction_MultiCUDA) {
 
 TEST(DeviceGuardTest, IsMovable_CUDA) {
   DeviceGuard first(1);
-  ASSERT_TRUE(first.original_index() == 0);
-  ASSERT_TRUE(first.last_index() == 1);
+  ASSERT_EQ(first.original_index(), 0);
+  ASSERT_EQ(first.last_index(), 1);
   DeviceGuard second(std::move(first));
-  ASSERT_TRUE(second.original_index() == 0);
-  ASSERT_TRUE(second.last_index() == 1);
-  ASSERT_TRUE(first.original_index() == -1);
+  ASSERT_EQ(second.original_index(), 0);
+  ASSERT_EQ(second.last_index(), 1);
+  ASSERT_EQ(first.original_index(), -1);
   DeviceGuard third;
   third = std::move(second);
-  ASSERT_TRUE(third.original_index() == 0);
-  ASSERT_TRUE(third.last_index() == 1);
-  ASSERT_TRUE(second.original_index() == -1);
+  ASSERT_EQ(third.original_index(), 0);
+  ASSERT_EQ(third.last_index(), 1);
+  ASSERT_EQ(second.original_index(), -1);
 }

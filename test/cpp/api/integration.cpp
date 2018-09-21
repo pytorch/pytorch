@@ -321,7 +321,7 @@ TEST_F(IntegrationTest, CartPole) {
     if (running_reward > 150) {
       break;
     }
-    ASSERT_TRUE(episode < 3000);
+    ASSERT_LT(episode, 3000);
   }
 }
 

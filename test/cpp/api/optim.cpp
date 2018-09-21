@@ -144,13 +144,13 @@ TEST(OptimTest, BasicInterface) {
       torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
   {
     MyOptimizer optimizer(parameters);
-    ASSERT_TRUE(optimizer.size() == parameters.size());
+    ASSERT_EQ(optimizer.size(), parameters.size());
   }
   {
     MyOptimizer optimizer;
-    ASSERT_TRUE(optimizer.size() == 0);
+    ASSERT_EQ(optimizer.size(), 0);
     optimizer.add_parameters(parameters);
-    ASSERT_TRUE(optimizer.size() == parameters.size());
+    ASSERT_EQ(optimizer.size(), parameters.size());
     for (size_t p = 0; p < parameters.size(); ++p) {
       ASSERT_TRUE(optimizer.parameters()[p].allclose(parameters[p]));
     }
@@ -158,7 +158,7 @@ TEST(OptimTest, BasicInterface) {
   {
     Linear linear(3, 4);
     MyOptimizer optimizer(linear->parameters());
-    ASSERT_TRUE(optimizer.size() == linear->parameters().size());
+    ASSERT_EQ(optimizer.size(), linear->parameters().size());
   }
 }
 
@@ -277,7 +277,7 @@ TEST(OptimTest, ZeroGrad) {
   SGD optimizer(model->parameters(), 0.1);
 
   for (const auto& parameter : model->parameters()) {
-    ASSERT_TRUE(!parameter->grad().defined());
+    ASSERT_FALSE(parameter->grad().defined());
   }
 
   auto output = model->forward(torch::ones({5, 2}));
@@ -286,14 +286,14 @@ TEST(OptimTest, ZeroGrad) {
 
   for (const auto& parameter : model->parameters()) {
     ASSERT_TRUE(parameter->grad().defined());
-    ASSERT_TRUE(parameter->grad().sum().toCFloat() > 0);
+    ASSERT_GT(parameter->grad().sum().toCFloat(), 0);
   }
 
   optimizer.zero_grad();
 
   for (const auto& parameter : model->parameters()) {
     ASSERT_TRUE(parameter->grad().defined());
-    ASSERT_TRUE(parameter->grad().sum().toCFloat() == 0);
+    ASSERT_EQ(parameter->grad().sum().toCFloat(), 0);
   }
 }
 

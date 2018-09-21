@@ -69,19 +69,19 @@ void check_lstm_sizes(RNNOutput output) {
   // Expect the LSTM to have 64 outputs and 3 layers, with an input of batch
   // 10 and 16 time steps (10 x 16 x n)
 
-  ASSERT_TRUE(output.output.ndimension() == 3);
-  ASSERT_TRUE(output.output.size(0) == 10);
-  ASSERT_TRUE(output.output.size(1) == 16);
-  ASSERT_TRUE(output.output.size(2) == 64);
+  ASSERT_EQ(output.output.ndimension(), 3);
+  ASSERT_EQ(output.output.size(0), 10);
+  ASSERT_EQ(output.output.size(1), 16);
+  ASSERT_EQ(output.output.size(2), 64);
 
-  ASSERT_TRUE(output.state.ndimension() == 4);
-  ASSERT_TRUE(output.state.size(0) == 2); // (hx, cx)
-  ASSERT_TRUE(output.state.size(1) == 3); // layers
-  ASSERT_TRUE(output.state.size(2) == 16); // Batchsize
-  ASSERT_TRUE(output.state.size(3) == 64); // 64 hidden dims
+  ASSERT_EQ(output.state.ndimension(), 4);
+  ASSERT_EQ(output.state.size(0), 2); // (hx, cx)
+  ASSERT_EQ(output.state.size(1), 3); // layers
+  ASSERT_EQ(output.state.size(2), 16); // Batchsize
+  ASSERT_EQ(output.state.size(3), 64); // 64 hidden dims
 
   // Something is in the hiddens
-  ASSERT_TRUE(output.state.norm().toCFloat() > 0);
+  ASSERT_GT(output.state.norm().toCFloat(), 0);
 }
 
 struct RNNTest : torch::test::SeedingFixture {};
@@ -103,7 +103,7 @@ TEST_F(RNNTest, CheckOutputSizes) {
   torch::Tensor diff = next.state - output.state;
 
   // Hiddens changed
-  ASSERT_TRUE(diff.abs().sum().toCFloat() > 1e-3);
+  ASSERT_GT(diff.abs().sum().toCFloat(), 1e-3);
 }
 
 TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
@@ -126,10 +126,10 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   }
 
   auto out = model->forward(x);
-  ASSERT_TRUE(out.output.ndimension() == 3);
-  ASSERT_TRUE(out.output.size(0) == 3);
-  ASSERT_TRUE(out.output.size(1) == 4);
-  ASSERT_TRUE(out.output.size(2) == 2);
+  ASSERT_EQ(out.output.ndimension(), 3);
+  ASSERT_EQ(out.output.size(0), 3);
+  ASSERT_EQ(out.output.size(1), 4);
+  ASSERT_EQ(out.output.size(2), 2);
 
   auto flat = out.output.view(3 * 4 * 2);
   float c_out[] = {0.4391, 0.5402, 0.4330, 0.5324, 0.4261, 0.5239,
@@ -137,14 +137,14 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
                    0.6620, 0.7860, 0.6501, 0.7741, 0.7889, 0.9003,
                    0.7769, 0.8905, 0.7635, 0.8794, 0.7484, 0.8666};
   for (size_t i = 0; i < 3 * 4 * 2; i++) {
-    ASSERT_TRUE(std::abs(flat[i].toCFloat() - c_out[i]) < 1e-3);
+    ASSERT_LT(std::abs(flat[i].toCFloat() - c_out[i]), 1e-3);
   }
 
-  ASSERT_TRUE(out.state.ndimension() == 4); // (hx, cx) x layers x B x 2
-  ASSERT_TRUE(out.state.size(0) == 2);
-  ASSERT_TRUE(out.state.size(1) == 1);
-  ASSERT_TRUE(out.state.size(2) == 4);
-  ASSERT_TRUE(out.state.size(3) == 2);
+  ASSERT_EQ(out.state.ndimension(), 4); // (hx, cx) x layers x B x 2
+  ASSERT_EQ(out.state.size(0), 2);
+  ASSERT_EQ(out.state.size(1), 1);
+  ASSERT_EQ(out.state.size(2), 4);
+  ASSERT_EQ(out.state.size(3), 2);
   flat = out.state.view(16);
   float h_out[] = {0.7889,
                    0.9003,
@@ -163,7 +163,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
                    1.0931,
                    1.4911};
   for (size_t i = 0; i < 16; i++) {
-    ASSERT_TRUE(std::abs(flat[i].toCFloat() - h_out[i]) < 1e-3);
+    ASSERT_LT(std::abs(flat[i].toCFloat() - h_out[i]), 1e-3);
   }
 }
 
@@ -206,7 +206,7 @@ TEST_F(RNNTest, Sizes_CUDA) {
   torch::Tensor diff = next.state - output.state;
 
   // Hiddens changed
-  ASSERT_TRUE(diff.abs().sum().toCFloat() > 1e-3);
+  ASSERT_GT(diff.abs().sum().toCFloat(), 1e-3);
 }
 
 TEST_F(RNNTest, EndToEndLSTM_CUDA) {

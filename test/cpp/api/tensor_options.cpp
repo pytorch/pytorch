@@ -14,16 +14,16 @@ using namespace at;
 
 // A macro so we don't lose location information when an assertion fails.
 #define REQUIRE_OPTIONS(device_, index_, type_, layout_)                      \
-  ASSERT_TRUE(options.device().type() == Device((device_), (index_)).type()); \
+  ASSERT_EQ(options.device().type(), Device((device_), (index_)).type()); \
   ASSERT_TRUE(                                                                \
       options.device().index() == Device((device_), (index_)).index());       \
-  ASSERT_TRUE(options.dtype() == (type_));                                    \
+  ASSERT_EQ(options.dtype(), (type_));                                    \
   ASSERT_TRUE(options.layout() == (layout_))
 
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \
-  ASSERT_TRUE(tensor.device().type() == Device((device_), (index_)).type());   \
-  ASSERT_TRUE(tensor.device().index() == Device((device_), (index_)).index()); \
-  ASSERT_TRUE(tensor.type().scalarType() == (type_));                          \
+  ASSERT_EQ(tensor.device().type(), Device((device_), (index_)).type());   \
+  ASSERT_EQ(tensor.device().index(), Device((device_), (index_)).index()); \
+  ASSERT_EQ(tensor.type().scalarType(), (type_));                          \
   ASSERT_TRUE(tensor.type().layout() == (layout_))
 
 TEST(TensorOptionsTest, DefaultsToTheRightValues) {
@@ -82,11 +82,11 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
 TEST(TensorOptionsTest, ConstructsWellFromVariables) {
   auto options = torch::empty(5).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
-  ASSERT_TRUE(!options.requires_grad());
+  ASSERT_FALSE(options.requires_grad());
 
   options = torch::empty(5, at::requires_grad()).options();
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
-  ASSERT_TRUE(!options.requires_grad());
+  ASSERT_FALSE(options.requires_grad());
 }
 
 TEST(TensorOptionsTest, OptionsGuard) {
@@ -119,16 +119,16 @@ TEST(TensorOptionsTest, OptionsGuard) {
 
 TEST(DeviceTest, ParsesCorrectlyFromString) {
   Device device("cpu:0");
-  ASSERT_TRUE(device == Device(kCPU, 0));
+  ASSERT_EQ(device, Device(kCPU, 0));
 
   device = Device("cpu");
-  ASSERT_TRUE(device == Device(kCPU));
+  ASSERT_EQ(device, Device(kCPU));
 
   device = Device("cuda:123");
-  ASSERT_TRUE(device == Device(kCUDA, 123));
+  ASSERT_EQ(device, Device(kCUDA, 123));
 
   device = Device("cuda");
-  ASSERT_TRUE(device == Device(kCUDA));
+  ASSERT_EQ(device, Device(kCUDA));
 
   std::vector<std::string> badnesses = {
       "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
