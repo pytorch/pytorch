@@ -321,6 +321,10 @@
 
 - func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
 
+- func: cat(TensorList tensors, int64_t dim, Scalar pad_value) -> Tensor
+
+- func: cat_out(Tensor result, TensorList tensors, int64_t dim, Scalar pad_value) -> Tensor
+
 - func: ceil(Tensor self) -> Tensor
   variants: function, method
 
