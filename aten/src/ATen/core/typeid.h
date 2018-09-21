@@ -17,19 +17,19 @@
 
 #include <exception>
 
-#include "ATen/core/Error.h"
 #include "ATen/core/Backtrace.h"
-#include "ATen/core/Macros.h"
+#include "ATen/core/C++17.h"
+#include "ATen/core/Error.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/IdWrapper.h"
-#include "ATen/core/C++17.h"
+#include "ATen/core/Macros.h"
 
 // TODO: This file is still in the caffe2 namespace, despite living
-// in the ATen directory.  This is because the macro CAFFE_PREALLOCATED_KNOWN_TYPE
-// defines a template specialization, which relies on the namespace of TypeMeta
-// matching the namespace where the macro is called.  This requires us to
-// fix all of the call-sites, which I want to do later.  So the namespace
-// is not fixed at the moment.
+// in the ATen directory.  This is because the macro
+// CAFFE_PREALLOCATED_KNOWN_TYPE defines a template specialization, which relies
+// on the namespace of TypeMeta matching the namespace where the macro is
+// called.  This requires us to fix all of the call-sites, which I want to do
+// later.  So the namespace is not fixed at the moment.
 
 // Make at::Half a fundamental type.
 namespace std {
@@ -96,7 +96,6 @@ using DataType = caffe2::TypeIdentifier;
 AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 
 namespace caffe2 {
-
 
 namespace detail {
 
@@ -169,10 +168,7 @@ inline void _Copy(const void* src, void* dst, size_t n) {
  * A placeholder function for types that do not allow assignment.
  */
 template <typename T>
-inline void _CopyNotAllowed(
-    const void* /*src*/,
-    void* /*dst*/,
-    size_t /*n*/) {
+inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
       "Type " + std::string(at::demangle_type<T>()) +
       " does not allow assignment.");
@@ -180,8 +176,7 @@ inline void _CopyNotAllowed(
 
 template <
     typename T,
-    typename std::enable_if<std::is_copy_assignable<T>::value>::type* =
-        nullptr>
+    typename std::enable_if<std::is_copy_assignable<T>::value>::type* = nullptr>
 inline TypeMetaData::TypedCopy* _PickCopy() {
   return &_Copy<T>;
 }
@@ -205,19 +200,37 @@ inline void _Dtor(void* ptr, size_t n) {
   }
 }
 
-template<class T> const char* _TypeName() noexcept;
+template <class T>
+const char* _TypeName() noexcept;
 
-template<class T, c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
+template <
+    class T,
+    c10::guts::enable_if_t<
+        std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
 inline AT_CORE_API TypeMetaData createTypeMetaData() {
-  return TypeMetaData {sizeof(T), nullptr, nullptr, nullptr, TypeIdentifier::Get<T>(), _TypeName<T>()};
+  return TypeMetaData{sizeof(T),
+                      nullptr,
+                      nullptr,
+                      nullptr,
+                      TypeIdentifier::Get<T>(),
+                      _TypeName<T>()};
 }
-template<class T, c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr>
+template <
+    class T,
+    c10::guts::enable_if_t<!(
+        std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr>
 inline AT_CORE_API TypeMetaData createTypeMetaData() {
-  return TypeMetaData {sizeof(T), _PickCtor<T>(), _PickCopy<T>(), _Dtor<T>, TypeIdentifier::Get<T>(), _TypeName<T>()};
+  return TypeMetaData{sizeof(T),
+                      _PickCtor<T>(),
+                      _PickCopy<T>(),
+                      _Dtor<T>,
+                      TypeIdentifier::Get<T>(),
+                      _TypeName<T>()};
 }
 
-template<class T> AT_CORE_API const TypeMetaData* _TypeMetaData() noexcept;
-}
+template <class T>
+AT_CORE_API const TypeMetaData* _TypeMetaData() noexcept;
+} // namespace detail
 
 /**
  * TypeMeta is a thin class that allows us to store the type of a container such
@@ -226,9 +239,16 @@ template<class T> AT_CORE_API const TypeMetaData* _TypeMetaData() noexcept;
  * for run-time inspection.
  */
 class AT_CORE_API TypeMeta {
-private:
-    static constexpr detail::TypeMetaData uninitialized_ = {0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)"};
-public:
+ private:
+  static constexpr detail::TypeMetaData uninitialized_ = {
+      0,
+      nullptr,
+      nullptr,
+      nullptr,
+      TypeIdentifier::uninitialized(),
+      "nullptr (uninitialized)"};
+
+ public:
   using PlacementNew = detail::TypeMetaData::PlacementNew;
   using TypedCopy = detail::TypeMetaData::TypedCopy;
   using TypedDestructor = detail::TypeMetaData::TypedDestructor;
@@ -236,8 +256,7 @@ public:
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
    */
-  constexpr TypeMeta() noexcept
-      : data_(&uninitialized_) {}
+  constexpr TypeMeta() noexcept : data_(&uninitialized_) {}
 
   /**
    * Copy constructor.
@@ -247,15 +266,15 @@ public:
   /**
    * Assignment operator.
    */
-  AT_CPP14_CONSTEXPR TypeMeta& operator=(const TypeMeta& src) noexcept = default;
+  AT_CPP14_CONSTEXPR TypeMeta& operator=(const TypeMeta& src) noexcept =
+      default;
 
   constexpr TypeMeta(TypeMeta&& rhs) noexcept = default;
 
  private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
-  constexpr TypeMeta(const detail::TypeMetaData* data) noexcept
-      : data_(data) {}
+  constexpr TypeMeta(const detail::TypeMetaData* data) noexcept : data_(data) {}
 
  public:
   /**
@@ -304,17 +323,17 @@ public:
 
   // Below are static functions that can be called by passing a specific type.
 
-  template<class T>
+  template <class T>
   static TypeIdentifier Id() noexcept {
     return TypeIdentifier::Get<T>();
   }
 
-  template<class T>
+  template <class T>
   static const char* TypeName() noexcept {
     return Make<T>().name();
   }
 
-  template<class T>
+  template <class T>
   static constexpr size_t ItemSize() noexcept {
     return sizeof(T);
   }
@@ -328,7 +347,6 @@ public:
   }
 
  private:
-
   const detail::TypeMetaData* data_;
 };
 
@@ -343,10 +361,10 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * Register unique id for a type so it can be used in TypeMeta context, e.g. be
  * used as a type for Blob or for Tensor elements.
  *
- * CAFFE_KNOWN_TYPE does explicit instantiation of TypeIdentifier::Get<T> template
- * function and thus needs to be put in a single translation unit (.cpp file)
- * for a given type T. Other translation units that use type T as a type of the
- * caffe2::Blob or element type of caffe2::Tensor need to depend on the
+ * CAFFE_KNOWN_TYPE does explicit instantiation of TypeIdentifier::Get<T>
+ * template function and thus needs to be put in a single translation unit (.cpp
+ * file) for a given type T. Other translation units that use type T as a type
+ * of the caffe2::Blob or element type of caffe2::Tensor need to depend on the
  * translation unit that contains CAFFE_KNOWN_TYPE declaration via regular
  * linkage dependencies.
  *
@@ -370,33 +388,33 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     return type_id;                                                       \
   }                                                                       \
   namespace detail {                                                      \
-    template<>                                                            \
-    AT_CORE_EXPORT const char* _TypeName<T>() noexcept {                  \
-      return #T;                                                          \
-    }                                                                     \
-    template<>                                                            \
-    AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {      \
-      static TypeMetaData singleton = createTypeMetaData<T>();            \
-      return &singleton;                                                  \
-    }                                                                     \
+  template <>                                                             \
+  AT_CORE_EXPORT const char* _TypeName<T>() noexcept {                    \
+    return #T;                                                            \
+  }                                                                       \
+  template <>                                                             \
+  AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {        \
+    static TypeMetaData singleton = createTypeMetaData<T>();              \
+    return &singleton;                                                    \
+  }                                                                       \
   }
 #else // _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                \
+  TypeIdentifier TypeIdentifier::Get<T>() {                               \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     return type_id;                                                       \
   }                                                                       \
   namespace detail {                                                      \
-    template<>                                                            \
-    AT_CORE_EXPORT const char* _TypeName<T>() noexcept {                  \
-      return #T;                                                          \
-    }                                                                     \
-    template<>                                                            \
-    AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {      \
-      static TypeMetaData singleton = createTypeMetaData<T>();            \
-      return &singleton;                                                  \
-    }                                                                     \
+  template <>                                                             \
+  const char* _TypeName<T>() noexcept {                                   \
+    return #T;                                                            \
+  }                                                                       \
+  template <>                                                             \
+  const TypeMetaData* _TypeMetaData<T>() noexcept {                       \
+    static TypeMetaData singleton = createTypeMetaData<T>();              \
+    return &singleton;                                                    \
+  }                                                                       \
   }
 #endif
 
@@ -407,38 +425,38 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * for your own types to allocate dynamic ids for them.
  */
 #ifdef _MSC_VER
-#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T) \
-  template <>                                                    \
-  inline AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {\
-    return TypeIdentifier(PreallocatedId);                       \
-  }                                                              \
-  namespace detail {                                             \
-    template<>                                                   \
-    inline AT_CORE_EXPORT const char* _TypeName<T>() noexcept {  \
-      return #T;                                                 \
-    }                                                            \
+#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)  \
+  template <>                                                     \
+  inline AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() { \
+    return TypeIdentifier(PreallocatedId);                        \
+  }                                                               \
+  namespace detail {                                              \
+  template <>                                                     \
+  inline AT_CORE_EXPORT const char* _TypeName<T>() noexcept {     \
+    return #T;                                                    \
+  }                                                               \
   }
 #else // _MSC_VER
-#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T) \
-  template <>                                                    \
-  inline AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {\
-    return TypeIdentifier(PreallocatedId);                       \
-  }                                                              \
-  namespace detail {                                             \
-    template<>                                                   \
-    inline AT_CORE_EXPORT const char* _TypeName<T>() noexcept {  \
-      return #T;                                                 \
-    }                                                            \
+#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)  \
+  template <>                                                     \
+  inline AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() { \
+    return TypeIdentifier(PreallocatedId);                        \
+  }                                                               \
+  namespace detail {                                              \
+  template <>                                                     \
+  inline AT_CORE_EXPORT const char* _TypeName<T>() noexcept {     \
+    return #T;                                                    \
+  }                                                               \
   }
 #endif
 
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                                   \
-  namespace detail {                                                              \
-    template<>                                                                    \
-    AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {              \
-      static TypeMetaData singleton = createTypeMetaData<T>();                    \
-      return &singleton;                                                          \
-    }                                                                             \
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                    \
+  namespace detail {                                               \
+  template <>                                                      \
+  AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept { \
+    static TypeMetaData singleton = createTypeMetaData<T>();       \
+    return &singleton;                                             \
+  }                                                                \
   }
 
 class Tensor;
