@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/serialize/archive.h>
 
 #include <ATen/ATen.h>
 
@@ -23,12 +24,14 @@ Tensor LBFGS::gather_flat_grad() {
   return at::cat(views);
 }
 
-void LBFGS::add_grad(const torch::Scalar& step_size, const Tensor& update) {
+void LBFGS::add_grad(const torch::Tensor& step_size, const Tensor& update) {
   int64_t offset = 0;
   for (auto& parameter : parameters_) {
     int64_t numel = parameter.numel();
     Tensor& pd = autograd::Variable(parameter).data();
-    pd.add_(update.slice(0, offset, offset + numel, 1).view_as(pd), step_size);
+    pd.add_(
+        update.slice(0, offset, offset + numel, 1).view_as(pd),
+        step_size.toCFloat());
     offset += numel;
   }
 }
@@ -109,9 +112,9 @@ torch::Tensor LBFGS::step(LossClosure closure) {
 
     // reset initial guess for step size
     if (n_iter == 1) {
-      t = at::_local_scalar(at::min(ONE, ONE / abs_grad_sum) * options.learning_rate_);
+      t = torch::min(ONE, ONE / abs_grad_sum) * options.learning_rate_;
     } else {
-      t = options.learning_rate_;
+      t = at::tensor(options.learning_rate_, torch::kFloat32);
     }
 
     Tensor gtd = flat_grad.dot(d);
@@ -141,17 +144,23 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       break;
     } else if (gtd.toCFloat() > -options.tolerance_grad_) {
       break;
-    } else if (
-        d.mul(t).abs_().sum().toCFloat() <=
-        options.tolerance_change_) {
+    } else if (d.mul(t).abs_().sum().toCFloat() <= options.tolerance_change_) {
       break;
     } else if (
-        std::abs(loss.toCFloat() - prev_loss.toFloat()) <
+        std::abs(loss.toCFloat() - prev_loss.toCFloat()) <
         options.tolerance_change_) {
       break;
     }
   }
   return orig_loss;
+}
+
+void LBFGS::save(serialize::OutputArchive& archive) const {
+  serialize(*this, archive);
+}
+
+void LBFGS::load(serialize::InputArchive& archive) {
+  serialize(*this, archive);
 }
 } // namespace optim
 } // namespace torch
