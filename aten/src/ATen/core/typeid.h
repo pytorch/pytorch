@@ -201,7 +201,17 @@ inline void _Dtor(void* ptr, size_t n) {
 }
 
 template <class T>
-const char* _TypeName() noexcept;
+const char* __TypeName() noexcept;
+
+template <class T>
+const char* _TypeName() noexcept {
+#ifdef __GXX_RTTI
+  static const std::string name = at::demangle(typeid(T).name());
+  return name.c_str();
+#else
+  return __TypeName();
+#endif
+}
 
 template <
     class T,
@@ -389,7 +399,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   }                                                                       \
   namespace detail {                                                      \
   template <>                                                             \
-  AT_CORE_EXPORT const char* _TypeName<T>() noexcept {                    \
+  AT_CORE_EXPORT const char* __TypeName<T>() noexcept {                   \
     return #T;                                                            \
   }                                                                       \
   template <>                                                             \
@@ -407,7 +417,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   }                                                                       \
   namespace detail {                                                      \
   template <>                                                             \
-  const char* _TypeName<T>() noexcept {                                   \
+  const char* __TypeName<T>() noexcept {                                  \
     return #T;                                                            \
   }                                                                       \
   template <>                                                             \
@@ -432,7 +442,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   }                                                               \
   namespace detail {                                              \
   template <>                                                     \
-  inline AT_CORE_EXPORT const char* _TypeName<T>() noexcept {     \
+  inline AT_CORE_EXPORT const char* __TypeName<T>() noexcept {    \
     return #T;                                                    \
   }                                                               \
   }
@@ -444,7 +454,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   }                                                               \
   namespace detail {                                              \
   template <>                                                     \
-  inline AT_CORE_EXPORT const char* _TypeName<T>() noexcept {     \
+  inline AT_CORE_EXPORT const char* __TypeName<T>() noexcept {    \
     return #T;                                                    \
   }                                                               \
   }
