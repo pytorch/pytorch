@@ -1154,7 +1154,7 @@ class _ConstSequential(_ConstModuleList):
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch.nn.functional)
+_modules_containing_builtins = [torch]
 
 
 # lazily built to ensure the correct initialization order

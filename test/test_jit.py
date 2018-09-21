@@ -7047,6 +7047,20 @@ a")
 
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
 
+    def test_weak_script_function(self):
+        @torch.jit.script
+        def fn(x):
+            y = torch.nn.functional.softsign(x)
+            return torch.nn.functional.tanhshrink(x) + y
+
+        def no_script(x):
+            y = torch.nn.functional.softsign(x)
+            return torch.nn.functional.tanhshrink(x) + y
+
+        input = torch.randn(3, 4, 5)
+        self.assertExpectedGraph(fn.graph)
+        self.assertEqual(fn(input), no_script(input))
+
 
 class MnistNet(nn.Module):
     def __init__(self):

@@ -1,0 +1,7 @@
+graph(%x : Dynamic) {
+  %y : Dynamic = aten::softsign(%x)
+  %2 : Dynamic = aten::tanhshrink(%x)
+  %3 : int = prim::Constant[value=1]()
+  %4 : Dynamic = aten::add(%2, %y, %3)
+  return (%4);
+}
