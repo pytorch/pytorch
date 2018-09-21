@@ -1325,23 +1325,7 @@ void PropagateShapeOnBlock(Block * block, bool insert_expands) {
 
 } // anonymous namespace
 
-void PropagateInputShapes(Graph & graph, const CompleteArgumentSpec & spec) {
-  JIT_ASSERT(graph.inputs().size() == spec.size());
-  for(size_t i = 0; i < spec.size(); ++i) {
-    auto argspec = spec.at(i);
-    if (!argspec.isTensor()) continue;
-    graph.inputs()[i]->setType(argspec);
-  }
-  PropagateShapeOnBlock(graph.block());
-}
-
-void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
-  JIT_ASSERT(graph.inputs().size() == spec.size());
-  for(size_t i = 0; i < spec.size(); ++i) {
-    const auto & argspec = spec.at(i);
-    if (!argspec.isTensor()) continue;
-    graph.inputs()[i]->setType(argspec);
-  }
+void PropagateInputShapes(Graph & graph) {
   PropagateShapeOnBlock(graph.block());
 }
 
