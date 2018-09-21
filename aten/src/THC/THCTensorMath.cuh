@@ -40,47 +40,29 @@ inline bool getCatGrid(THCState* state, ptrdiff_t nTensors, dim3& grid) {
   //X dim of grid for cat array cooperates on a single tensor in the cat.
   //Given half of the GPU, full utilization will always occur.
   grid = dim3( 2LL * numSM, (long long) nTensors );
-	     
+
   return true;
 }
-
-// Similar to any other IndexToOffset calculation for copying along a given dimension.
-template <typename IndexType, int Dims>
-struct CatArrIndexToOffset {
-  static inline __device__ IndexType compute(
-      const IndexType outputSize[Dims],
-      const IndexType outputStride[Dims],
-      const IndexType dimSize,
-      const unsigned int concatDim,
-      IndexType linearIndex) {
-    IndexType offset = 0;
-
-#pragma unroll
-    for (int i = Dims - 1; i >= 1; --i) {
-      IndexType curDimSize = i == concatDim ? dimSize : outputSize[i];
-      IndexType nextDimIndex = linearIndex / curDimSize;
-      IndexType curDimIndex = linearIndex - curDimSize * nextDimIndex;
-      IndexType curDimOffset = curDimIndex * outputStride[i];
-      offset += curDimOffset;
-      linearIndex = nextDimIndex;
-    }
-
-    return offset + linearIndex * outputStride[0];
-  }
-};
-
-template <typename T, typename IndexType>
-struct CatArrInputTensor {
-  T* input;
-  IndexType offset;
-  IndexType dimSize;
-  IndexType nElements;
-};
 
 template<typename IndexType, unsigned int MaxDims>
 struct OutputTensorSizeStride {
   IndexType outputSize[MaxDims];
   IndexType outputStride[MaxDims];
+};
+
+template<typename IndexType, unsigned int MaxDims>
+struct InputTensorSize {
+  IndexType inputSize[MaxDims];
+  IndexType inputStride[MaxDims];
+};
+
+template <typename T, typename IndexType, unsigned int MaxDims>
+struct CatArrInputTensor {
+  T* input;
+  IndexType offset;
+  InputTensorSize<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> inputParam;
+  IndexType nElements;
+  IndexType nElementsOutput;
 };
 
 /**
@@ -95,35 +77,44 @@ struct OutputTensorSizeStride {
   *
   * The most important assumption made is that the input tensors are contiguous.
   */
-
-
-
 template <typename T, typename IndexType, int Dims>
 __global__ void CatArrayBatchedCopy(
     T* output,
-    CatArrInputTensor<T, IndexType>* inputs,
+    CatArrInputTensor<T, IndexType, CAT_ARRAY_MAX_INPUT_DIMS>* inputs,
     OutputTensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
     const int concatDim,
-    IndexType dimStride) {
+    T pad_value) {
 
-    IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
-    IndexType nElements = inputs[blockIdx.y].nElements;
-
-    if(tid >= nElements) return;
-    
+    IndexType nElementsOutput = inputs[blockIdx.y].nElementsOutput;
     T* data = inputs[blockIdx.y].input;
-    IndexType offset = inputs[blockIdx.y].offset;
-    IndexType dimSize = inputs[blockIdx.y].dimSize;
-    IndexType dataOffset = offset * dimStride;
+    IndexType dimOffset = inputs[blockIdx.y].offset;
+    IndexType dataOffset = dimOffset * os.outputStride[concatDim];
 
-    IndexType stride = gridDim.x * blockDim.x;
-
-    while( tid < nElements){
-    IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
-    	      os.outputSize, os.outputStride, dimSize, concatDim, tid);
-    output[dataOffset + elementOffset] = data[tid];
-
-    tid += stride;
+    for (IndexType linearIndex = (IndexType) blockIdx.x * blockDim.x + threadIdx.x;
+      linearIndex < nElementsOutput;
+      linearIndex += (IndexType) gridDim.x * blockDim.x) {
+      IndexType inputOffset = 0;
+      IndexType outputOffset = 0;
+      bool inbound = true;
+      for (int i = Dims - 1; i >= 1; --i) {
+        IndexType inputDimSize = inputs[blockIdx.y].inputParam.inputSize[i];
+        IndexType curDimSize = i == concatDim ? inputDimSize : os.outputSize[i];
+        IndexType nextDimIndex = linearIndex / curDimSize;
+        IndexType curDimIndex = linearIndex - curDimSize * nextDimIndex;
+        if (curDimIndex >= inputDimSize && inbound) {
+          inbound = false;
+        }
+        inputOffset += curDimIndex * inputs[blockIdx.y].inputParam.inputStride[i];
+        outputOffset += curDimIndex * os.outputStride[i];
+        linearIndex = nextDimIndex;
+      }
+      inputOffset += linearIndex * inputs[blockIdx.y].inputParam.inputStride[0];
+      outputOffset += linearIndex * os.outputStride[0];
+      if (inbound) {
+        output[dataOffset + outputOffset] = data[inputOffset];
+      } else {
+        output[dataOffset + outputOffset] = pad_value;
+      }
     }
 }
 
