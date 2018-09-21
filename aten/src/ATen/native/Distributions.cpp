@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/Config.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
@@ -9,8 +10,13 @@
 #include "ATen/CheckGenerator.h"
 #include "ATen/core/Generator.h"
 #include "ATen/native/Distributions.h"
+#include "ATen/native/DispatchStub.h"
+#include "ATen/native/cpu/UnaryOpsKernel.h"
 
+#include <type_traits>
 #include <functional>
+#include <assert.h>
+#include <cpuinfo.h>
 
 #include "TH/THRandom.h"
 #include "TH/THGenerator.hpp"
@@ -48,11 +54,6 @@ namespace {
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-THGenerator* get_generator(at::Generator* gen) {
-  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
-  auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
-  return gen_->generator;
-}
 
 int64_t sample_poisson(double lambda, THGenerator* generator) {
   if (lambda >= 10) {
@@ -109,49 +110,67 @@ int64_t sample_poisson(double lambda, THGenerator* generator) {
 namespace at {
 namespace native {
 
-Tensor bernoulli(const Tensor& self, const Tensor& p, Generator* gen) {
-  Tensor result = self.type().tensor();
-  result.resize_(self.sizes());
-  return native::bernoulli_(result, p, gen);
+Tensor bernoulli(const Tensor& self, Generator* gen) {
+  return at::empty_like(self).bernoulli_(self, gen);
 }
 
 Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
-  Tensor result = self.type().tensor();
-  result.resize_(self.sizes());
-  return native::bernoulli_(result, p, gen);
+  return at::empty_like(self).bernoulli_(p, gen);
 }
 
-Tensor bernoulli(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  result.resize_(self.sizes());
-  return native::bernoulli(result, self, nullptr);
+Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
+  // result.resize_as_(self) requires self to have same dtype as result, so we
+  // use resize_ instead.
+  // TODO: Fix resize_as_. See pytorch/pytorch#11665.
+  return result.resize_(self.sizes()).bernoulli_(self, gen);
 }
 
-Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
-  if (!self.is_cuda() && !p_.is_cuda()) {
-    Tensor p = p_.toType(kDouble);
-    AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_", [&] {
-      THGenerator* generator = get_generator(gen);
-      std::lock_guard<std::mutex> lock(generator->mutex);
-      CPU_tensor_apply2<scalar_t, double>(
-          self, p, [generator](scalar_t& ret_val, double& p_val) {
-            ret_val = (scalar_t)THRandom_bernoulli(generator, p_val);
+Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_tensor_cpu_self_", [&] {
+    THGenerator* generator = get_generator(gen);
+    std::lock_guard<std::mutex> lock(generator->mutex);
+    using self_t = scalar_t;
+    if (p_.type().scalarType() == kDouble) {
+      auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+      CPU_tensor_apply2<self_t, double>(
+        self, p, [generator](self_t& ret_val, double& p_val) {
+          ret_val = static_cast<self_t>(THRandom_bernoulli(generator, p_val));
+        });
+    } else {
+      AT_DISPATCH_FLOATING_TYPES(p_.type(), "bernoulli_tensor_cpu_p_", [&] {
+        auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
+        using p_t = scalar_t;
+        CPU_tensor_apply2<self_t, p_t>(
+          self, p, [generator](self_t& ret_val, p_t& p_val) {
+            ret_val = static_cast<self_t>(THRandom_bernoulliFloat(generator, static_cast<p_t>(p_val)));
           });
-    });
-    return self;
-  }
-  self.copy_(at::_th_bernoulli(std::get<0>(expand_inplace(self, p_)), gen));
+      });
+    }
+  });
   return self;
 }
 
-Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
-    at::_bernoulli_(self, p, gen);
+DEFINE_DISPATCH(bernoulli_mkl_stub);
+
+Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
+  AT_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
+#if AT_MKL_ENABLED()
+  if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
+    bernoulli_mkl_stub(kCPU, self, p, gen);
     return self;
+  }
+#endif
+  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cpu_", [&] {
+    THGenerator* generator = get_generator(gen);
+    std::lock_guard<std::mutex> lock(generator->mutex);
+    CPU_tensor_apply1<scalar_t>(
+        self, [generator, p](scalar_t& ret_val) {
+          ret_val = static_cast<scalar_t>(THRandom_bernoulli(generator, p));
+        });
+  });
+  return self;
 }
 
-Tensor& bernoulli_(Tensor& self) {
-  return native::bernoulli_(self, 0.5, nullptr);
-}
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = self.type().tensor(self.sizes());
