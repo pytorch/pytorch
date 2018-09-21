@@ -212,8 +212,8 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands);
 bool PropagateCompleteShapeOnNode(
     Node * node, bool insert_expands, std::vector<CompleteTensorTypePtr> types);
 
-void PropagateCatShape(Node * cat_node) {
-  static const auto propagate_complete = [](Node * node, at::ArrayRef<Value*> tensors) -> bool {
+void PropagateCatShape(Node * cat_node, bool pad) {
+  static const auto propagate_complete = [](Node * node, bool pad, at::ArrayRef<Value*> tensors) -> bool {
     auto input_types = fmap(tensors, [](Value *v) { return v->type()->cast<CompleteTensorType>(); });
     if (!std::all_of(input_types.begin(), input_types.end(),
         [](const CompleteTensorTypePtr& tp) { return tp != nullptr; })) {
@@ -233,7 +233,7 @@ void PropagateCatShape(Node * cat_node) {
       if (sizes.size() != tp_sizes.size())
         return false;
       for (int64_t i = 0; i < ndim; ++i) {
-        if (sizes[i] != tp_sizes[i] && i != dim) {
+        if (sizes[i] != tp_sizes[i] && i != dim && !pad) {
           return false;
         }
       }
@@ -242,7 +242,7 @@ void PropagateCatShape(Node * cat_node) {
     node->output()->setType(input_types[0]->withSizes(sizes));
     return true;
   };
-  static const auto propagate = [](Node * node, at::ArrayRef<Value*> tensors) -> bool {
+  static const auto propagate = [](Node * node, bool pad, at::ArrayRef<Value*> tensors) -> bool {
     for (Value * v : tensors) {
       if (auto type = v->type()->cast<TensorType>()) {
         node->output()->setType(type);
@@ -255,9 +255,9 @@ void PropagateCatShape(Node * cat_node) {
   if (list_node->kind() == prim::ListConstruct) {
     auto tensors = list_node->inputs();
     if (!tensors.empty()) {
-      if (propagate_complete(cat_node, tensors)) {
+      if (propagate_complete(cat_node, pad, tensors)) {
         return;
-      } else if (propagate(cat_node, tensors)) {
+      } else if (propagate(cat_node, pad, tensors)) {
         return;
       }
     }
@@ -355,8 +355,14 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     default:
       break; // fall-through
   }
-  if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")) {
-    return PropagateCatShape(node);
+
+  if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")){
+      return PropagateCatShape(node, false);
+  }
+  if (node->matches("aten::cat(Tensor[] tensors, int dim, Scalar pad_value) -> Tensor")) {
+    at::Scalar pad_value = *node->get<at::Scalar>(attr::pad_value);
+    const bool pad = std::isnan(pad_value.toFloat());
+    return PropagateCatShape(node, pad);
   }
 
   if (auto maybe_complete_types = gatherTensorTypes<CompleteTensorType>(node)) {
