@@ -165,12 +165,6 @@
 
 - func: arange_out(Tensor result, Scalar end) -> Tensor
 
-- func: arange(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
-  deprecated: true
-
-- func: arange(Type dtype, Scalar end) -> Tensor
-  deprecated: true
-
 # This function is a temporary hack to allow tracing of arange like constructs with dynamic
 # bounds on arange.  Normal arange is not traceable because it does not take any tensor inputs;
 # if the range you need is based on another tensor, calling this function directly will
@@ -272,22 +266,29 @@
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
 
-- func: bernoulli(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
+# Sample bernoulli with values in `self` as probability.
+- func: bernoulli(Tensor self, *, Generator* generator=nullptr) -> Tensor
   variants: function, method
 
-- func: bernoulli(Tensor self, double p, Generator* generator=nullptr) -> Tensor
-  variants: function, method
+- func: bernoulli_out(Tensor result, Tensor self, *, Generator* generator=nullptr) -> Tensor
+  variants: function
 
-- func: bernoulli(Tensor self) -> Tensor
-  variants: function, method
+- func: bernoulli_(Tensor self, Tensor p, *, Generator* generator=nullptr) -> Tensor
+  variants: method
+  dispatch:
+    CPU: bernoulli_tensor_cpu_
+    CUDA: bernoulli_tensor_cuda_
 
-- func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
-  variants: function, method
+- func: bernoulli_(Tensor self, double p=0.5, *, Generator* generator=nullptr) -> Tensor
+  variants: method
+  dispatch:
+    CPU: bernoulli_scalar_cpu_
+    CUDA: bernoulli_scalar_cuda_
 
-- func: bernoulli_(Tensor self, double p, Generator* generator=nullptr) -> Tensor
-  variants: function, method
-
-- func: bernoulli_(Tensor self) -> Tensor
+# This out-of-place version isn't used explicitly, but needed by jit.
+# There is no default valid on `p` here because it would introduce ambiguity
+# with `bernoulli(Tensor self, *, Generator* generator=nullptr)` declaration.
+- func: bernoulli(Tensor self, double p, *, Generator* generator=nullptr) -> Tensor
   variants: function, method
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
@@ -397,8 +398,6 @@
 
 - func: _convolution_nogroup(Tensor input, Tensor weight, Tensor? bias, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding) -> Tensor
 
-# NB: We MUST call the input self, otherwise codegen will attempt to
-# dispatch on ggI... which might be undefined.
 - func: _convolution_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor weight, Tensor self, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups, bool benchmark, bool deterministic, bool cudnn_enabled, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
 
 - func: conv1d(Tensor input, Tensor weight, Tensor bias={}, IntList[1] stride=1, IntList[1] padding=0, IntList[1] dilation=1, int64_t groups=1) -> Tensor
@@ -648,9 +647,6 @@
 
 - func: empty_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: empty(Type dtype, IntList size) -> Tensor
-  deprecated: true
-
 - func: erf(Tensor self) -> Tensor
   variants: function, method
 
@@ -727,9 +723,6 @@
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
-- func: eye(Type dtype, int64_t n, int64_t m=-1) -> Tensor
-  deprecated: true
-
 - func: flatten(Tensor self, int64_t start_dim=0, int64_t end_dim=-1) -> Tensor
   variants: function, method
 
@@ -760,9 +753,6 @@
 - func: full_like(Tensor self, Scalar fill_value) -> Tensor
 
 - func: full_like(Tensor self, Scalar fill_value, *, TensorOptions options) -> Tensor
-
-- func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
-  deprecated: true
 
 # NOTE [ grid_sampler Native Functions ]
 # `grid_sampler` does all the shape checking and then dispatches to one of
@@ -940,9 +930,6 @@
 
 - func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
 
-- func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
-  deprecated: true
-
 - func: log(Tensor self) -> Tensor
   variants: function, method
 
@@ -1013,9 +1000,6 @@
 - func: logspace_out(Tensor result, Scalar start, Scalar end) -> Tensor
 
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
-
-- func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
-  deprecated: true
 
 - func: log_softmax(Tensor self, int64_t dim) -> Tensor
   variants: function, method
@@ -1199,9 +1183,6 @@
 
 - func: ones_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: ones(Type dtype, IntList size) -> Tensor
-  deprecated: true
-
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
 
 - func: pdist(Tensor self, double p=2) -> Tensor
@@ -1233,9 +1214,6 @@
 
 - func: rand_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: rand(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
-
 - func: randint(int64_t high, IntList size, *, TensorOptions options={}) -> Tensor
 
 - func: randint(int64_t high, IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
@@ -1243,12 +1221,6 @@
 - func: randint(int64_t low, int64_t high, IntList size, *, TensorOptions options={}) -> Tensor
 
 - func: randint(int64_t low, int64_t high, IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
-
-- func: randint(Type dtype, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
-
-- func: randint(Type dtype, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
 
 - func: randint_out(Tensor result, int64_t high, IntList size, *) -> Tensor
 
@@ -1278,9 +1250,6 @@
 
 - func: randn_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
-
 - func: randperm(int64_t n, *, TensorOptions options={}) -> Tensor
 
 - func: randperm(int64_t n, *, Generator* generator, TensorOptions options={}) -> Tensor
@@ -1292,9 +1261,6 @@
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
-- func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
-  deprecated: true
-
 - func: range(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
 
 - func: range(Scalar start, Scalar end, Scalar step, TensorOptions options={}) -> Tensor
@@ -1302,9 +1268,6 @@
 - func: range_out(Tensor result, Scalar start, Scalar end) -> Tensor
 
 - func: range_out(Tensor result, Scalar start, Scalar end, Scalar step) -> Tensor
-
-- func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
-  deprecated: true
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -1780,9 +1743,6 @@
 
 - func: zeros_like(Tensor self, *, TensorOptions options) -> Tensor
 
-- func: zeros(Type dtype, IntList size) -> Tensor
-  deprecated: true
-
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   variants: function
   dispatch:
@@ -1819,6 +1779,21 @@
 - func: norm_out(Tensor result, Tensor self, Scalar p, int64_t dim, bool keepdim=false) -> Tensor
   python_default_init:
     p: 2
+
+- func: frobenius_norm(Tensor self) -> Tensor
+  variants: function
+
+- func: frobenius_norm(Tensor self, IntList[1] dim, bool keepdim=false) -> Tensor
+  variants: function
+
+- func: frobenius_norm_out(Tensor result, Tensor self, IntList[1] dim, bool keepdim=false) -> Tensor
+  variants: function
+
+- func: nuclear_norm(Tensor self, bool keepdim=false) -> Tensor
+  variants: function
+
+- func: nuclear_norm_out(Tensor result, Tensor self, bool keepdim=false) -> Tensor
+  variants: function
 
 - func: native_clone(Tensor self) -> Tensor
   dispatch:

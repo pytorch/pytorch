@@ -10,10 +10,16 @@ import sysconfig
 import tempfile
 import warnings
 
+from future.utils import raise_from
+
 import torch
 from .file_baton import FileBaton
+from ._cpp_extension_versioner import ExtensionVersioner
 
 from setuptools.command.build_ext import build_ext
+
+
+IS_WINDOWS = sys.platform == 'win32'
 
 
 def _find_cuda_home():
@@ -22,7 +28,7 @@ def _find_cuda_home():
     cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
     if cuda_home is None:
         # Guess #2
-        if sys.platform == 'win32':
+        if IS_WINDOWS:
             cuda_homes = glob.glob(
                 'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
             if len(cuda_homes) == 0:
@@ -34,7 +40,7 @@ def _find_cuda_home():
         if not os.path.exists(cuda_home):
             # Guess #3
             try:
-                which = 'where' if sys.platform == 'win32' else 'which'
+                which = 'where' if IS_WINDOWS else 'which'
                 nvcc = subprocess.check_output(
                     [which, 'nvcc']).decode().rstrip('\r\n')
                 cuda_home = os.path.dirname(os.path.dirname(nvcc))
@@ -76,8 +82,24 @@ COMMON_NVCC_FLAGS = [
 ]
 
 
-def is_binary_build():
+JIT_EXTENSION_VERSIONER = ExtensionVersioner()
+
+
+def _is_binary_build():
     return not BUILT_FROM_SOURCE_VERSION_PATTERN.match(torch.version.__version__)
+
+
+def get_default_build_root():
+    '''
+    Returns the path to the root folder under which extensions will built.
+
+    For each extension module built, there will be one folder underneath the
+    folder returned by this function. For example, if ``p`` is the path
+    returned by this function and ``ext`` the name of an extension, the build
+    folder for the extension will be ``p/ext``.
+    '''
+    # tempfile.gettempdir() will be /tmp on UNIX and \TEMP on Windows.
+    return os.path.realpath(os.path.join(tempfile.gettempdir(), 'torch_extensions'))
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -92,10 +114,10 @@ def check_compiler_abi_compatibility(compiler):
         False if the compiler is (likely) ABI-incompatible with PyTorch,
         else True.
     '''
-    if not is_binary_build():
+    if not _is_binary_build():
         return True
     try:
-        check_cmd = '{}' if sys.platform == 'win32' else '{} --version'
+        check_cmd = '{}' if IS_WINDOWS else '{} --version'
         info = subprocess.check_output(
             check_cmd.format(compiler).split(), stderr=subprocess.STDOUT)
     except Exception:
@@ -262,7 +284,7 @@ class BuildExtension(build_ext):
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
-        elif sys.platform == 'win32':
+        elif IS_WINDOWS:
             compiler = os.environ.get('CXX', 'cl')
         else:
             compiler = os.environ.get('CXX', 'c++')
@@ -290,7 +312,7 @@ class BuildExtension(build_ext):
         # so that the std::string in the API is resolved to
         # non-C++11 symbols.
         define = '-D_GLIBCXX_USE_CXX11_ABI=0'
-        if is_binary_build():
+        if _is_binary_build():
             if isinstance(extension.extra_compile_args, dict):
                 for args in extension.extra_compile_args.values():
                     args.append(define)
@@ -327,7 +349,7 @@ def CppExtension(name, sources, *args, **kwargs):
     include_dirs += include_paths()
     kwargs['include_dirs'] = include_dirs
 
-    if sys.platform == 'win32':
+    if IS_WINDOWS:
         library_dirs = kwargs.get('library_dirs', [])
         library_dirs += library_paths()
         kwargs['library_dirs'] = library_dirs
@@ -376,7 +398,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     libraries = kwargs.get('libraries', [])
     libraries.append('cudart')
-    if sys.platform == 'win32':
+    if IS_WINDOWS:
         libraries.append('caffe2')
         libraries.append('torch')
         libraries.append('caffe2_gpu')
@@ -431,7 +453,7 @@ def library_paths(cuda=False):
     '''
     paths = []
 
-    if sys.platform == 'win32':
+    if IS_WINDOWS:
         here = os.path.abspath(__file__)
         torch_path = os.path.dirname(os.path.dirname(here))
         lib_path = os.path.join(torch_path, 'lib')
@@ -439,7 +461,7 @@ def library_paths(cuda=False):
         paths.append(lib_path)
 
     if cuda:
-        lib_dir = 'lib/x64' if sys.platform == 'win32' else 'lib64'
+        lib_dir = 'lib/x64' if IS_WINDOWS else 'lib64'
         paths.append(_join_cuda_home(lib_dir))
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, lib_dir))
@@ -528,7 +550,7 @@ def load(name,
         extra_include_paths,
         build_directory or _get_build_directory(name, verbose),
         verbose,
-        with_cuda=with_cuda)
+        with_cuda)
 
 
 def load_inline(name,
@@ -655,7 +677,7 @@ def load_inline(name,
         extra_include_paths,
         build_directory,
         verbose,
-        with_cuda=with_cuda)
+        with_cuda)
 
 
 def _jit_compile(name,
@@ -667,44 +689,83 @@ def _jit_compile(name,
                  build_directory,
                  verbose,
                  with_cuda=None):
-    baton = FileBaton(os.path.join(build_directory, 'lock'))
-    if baton.try_acquire():
-        try:
-            verify_ninja_availability()
-            check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
-            if with_cuda is None:
-                with_cuda = any(map(_is_cuda_file, sources))
-            extra_ldflags = _prepare_ldflags(
-                extra_ldflags or [],
-                with_cuda,
-                verbose)
-            build_file_path = os.path.join(build_directory, 'build.ninja')
-            if verbose:
-                print(
-                    'Emitting ninja build file {}...'.format(build_file_path))
-            # NOTE: Emitting a new ninja build file does not cause re-compilation if
-            # the sources did not change, so it's ok to re-emit (and it's fast).
-            _write_ninja_file(
-                path=build_file_path,
-                name=name,
-                sources=sources,
-                extra_cflags=extra_cflags or [],
-                extra_cuda_cflags=extra_cuda_cflags or [],
-                extra_ldflags=extra_ldflags or [],
-                extra_include_paths=extra_include_paths or [],
-                with_cuda=with_cuda)
+    old_version = JIT_EXTENSION_VERSIONER.get_version(name)
+    version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
+        name,
+        sources,
+        build_arguments=[extra_cflags, extra_cuda_cflags, extra_ldflags, extra_include_paths],
+        build_directory=build_directory,
+        with_cuda=with_cuda
+    )
+    if version > 0:
+        if version != old_version and verbose:
+            print('The input conditions for extension module {} have changed. '.format(name) +
+                  'Bumping to version {0} and re-building as {1}_v{0}...'.format(version, name))
+        name = '{}_v{}'.format(name, version)
 
-            if verbose:
-                print('Building extension module {}...'.format(name))
-            _build_extension_module(name, build_directory)
-        finally:
-            baton.release()
-    else:
-        baton.wait()
+    if version != old_version:
+        baton = FileBaton(os.path.join(build_directory, 'lock'))
+        if baton.try_acquire():
+            try:
+                _write_ninja_file_and_build(
+                    name=name,
+                    sources=sources,
+                    extra_cflags=extra_cflags or [],
+                    extra_cuda_cflags=extra_cuda_cflags or [],
+                    extra_ldflags=extra_ldflags or [],
+                    extra_include_paths=extra_include_paths or [],
+                    build_directory=build_directory,
+                    verbose=verbose,
+                    with_cuda=with_cuda)
+            finally:
+                baton.release()
+        else:
+            baton.wait()
+    elif verbose:
+        print('No modifications detected for re-loaded extension '
+              'module {}, skipping build step...'.format(name))
 
     if verbose:
         print('Loading extension module {}...'.format(name))
     return _import_module_from_library(name, build_directory)
+
+
+def _write_ninja_file_and_build(name,
+                                sources,
+                                extra_cflags,
+                                extra_cuda_cflags,
+                                extra_ldflags,
+                                extra_include_paths,
+                                build_directory,
+                                verbose,
+                                with_cuda):
+    verify_ninja_availability()
+    check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
+    if with_cuda is None:
+        with_cuda = any(map(_is_cuda_file, sources))
+    extra_ldflags = _prepare_ldflags(
+        extra_ldflags or [],
+        with_cuda,
+        verbose)
+    build_file_path = os.path.join(build_directory, 'build.ninja')
+    if verbose:
+        print(
+            'Emitting ninja build file {}...'.format(build_file_path))
+    # NOTE: Emitting a new ninja build file does not cause re-compilation if
+    # the sources did not change, so it's ok to re-emit (and it's fast).
+    _write_ninja_file(
+        path=build_file_path,
+        name=name,
+        sources=sources,
+        extra_cflags=extra_cflags or [],
+        extra_cuda_cflags=extra_cuda_cflags or [],
+        extra_ldflags=extra_ldflags or [],
+        extra_include_paths=extra_include_paths or [],
+        with_cuda=with_cuda)
+
+    if verbose:
+        print('Building extension module {}...'.format(name))
+    _build_extension_module(name, build_directory, verbose)
 
 
 def verify_ninja_availability():
@@ -720,7 +781,7 @@ def verify_ninja_availability():
 
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
-    if sys.platform == 'win32':
+    if IS_WINDOWS:
         python_path = os.path.dirname(sys.executable)
         python_lib_path = os.path.join(python_path, 'libs')
 
@@ -739,7 +800,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
     if with_cuda:
         if verbose:
             print('Detected CUDA files, patching ldflags')
-        if sys.platform == 'win32':
+        if IS_WINDOWS:
             extra_ldflags.append('/LIBPATH:{}'.format(
                 _join_cuda_home('lib/x64')))
             extra_ldflags.append('cudart.lib')
@@ -757,9 +818,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
 def _get_build_directory(name, verbose):
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
-        # tempfile.gettempdir() will be /tmp on UNIX and \TEMP on Windows.
-        root_extensions_directory = os.path.join(tempfile.gettempdir(),
-                                                 'torch_extensions')
+        root_extensions_directory = get_default_build_root()
 
     if verbose:
         print('Using {} as PyTorch extensions root...'.format(
@@ -775,16 +834,28 @@ def _get_build_directory(name, verbose):
     return build_directory
 
 
-def _build_extension_module(name, build_directory):
+def _build_extension_module(name, build_directory, verbose):
     try:
-        subprocess.check_output(
-            ['ninja', '-v'], stderr=subprocess.STDOUT, cwd=build_directory)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        if sys.version_info >= (3, 5):
+            subprocess.run(
+                ['ninja', '-v'],
+                stdout=None if verbose else subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd=build_directory,
+                check=True)
+        else:
+            subprocess.check_output(
+                ['ninja', '-v'],
+                stderr=subprocess.STDOUT,
+                cwd=build_directory)
     except subprocess.CalledProcessError:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
-        raise RuntimeError("Error building extension '{}': {}".format(
-            name, error.output.decode()))
+        message = "Error building extension '{}': {}".format(name, error.output.decode())
+        raise_from(RuntimeError(message), None)
 
 
 def _import_module_from_library(module_name, path):
@@ -802,7 +873,7 @@ def _write_ninja_file(path,
                       extra_cuda_cflags,
                       extra_ldflags,
                       extra_include_paths,
-                      with_cuda=False):
+                      with_cuda):
     extra_cflags = [flag.strip() for flag in extra_cflags]
     extra_cuda_cflags = [flag.strip() for flag in extra_cuda_cflags]
     extra_ldflags = [flag.strip() for flag in extra_ldflags]
@@ -825,7 +896,7 @@ def _write_ninja_file(path,
     system_includes.append(sysconfig.get_paths()['include'])
 
     # Windoze does not understand `-isystem`.
-    if sys.platform == 'win32':
+    if IS_WINDOWS:
         user_includes += system_includes
         system_includes.clear()
 
@@ -833,18 +904,18 @@ def _write_ninja_file(path,
     common_cflags += ['-I{}'.format(include) for include in user_includes]
     common_cflags += ['-isystem {}'.format(include) for include in system_includes]
 
-    if is_binary_build():
+    if _is_binary_build():
         common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=0']
 
     cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
-    if sys.platform == 'win32':
+    if IS_WINDOWS:
         from distutils.spawn import _nt_quote_args
         cflags = _nt_quote_args(cflags)
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
         cuda_flags = common_cflags + COMMON_NVCC_FLAGS
-        if sys.platform == 'win32':
+        if IS_WINDOWS:
             cuda_flags = _nt_quote_args(cuda_flags)
         else:
             cuda_flags += ['--compiler-options', "'-fPIC'"]
@@ -854,20 +925,20 @@ def _write_ninja_file(path,
 
         flags.append('cuda_flags = {}'.format(' '.join(cuda_flags)))
 
-    if sys.platform == 'win32':
+    if IS_WINDOWS:
         ldflags = ['/DLL'] + extra_ldflags
     else:
         ldflags = ['-shared'] + extra_ldflags
     # The darwin linker needs explicit consent to ignore unresolved symbols.
     if sys.platform == 'darwin':
         ldflags.append('-undefined dynamic_lookup')
-    elif sys.platform == 'win32':
+    elif IS_WINDOWS:
         ldflags = _nt_quote_args(ldflags)
     flags.append('ldflags = {}'.format(' '.join(ldflags)))
 
     # See https://ninja-build.org/build.ninja.html for reference.
     compile_rule = ['rule compile']
-    if sys.platform == 'win32':
+    if IS_WINDOWS:
         compile_rule.append(
             '  command = cl /showIncludes $cflags -c $in /Fo$out')
         compile_rule.append('  deps = msvc')
@@ -883,7 +954,7 @@ def _write_ninja_file(path,
             '  command = $nvcc $cuda_flags -c $in -o $out')
 
     link_rule = ['rule link']
-    if sys.platform == 'win32':
+    if IS_WINDOWS:
         cl_paths = subprocess.check_output(['where',
                                             'cl']).decode().split('\r\n')
         if len(cl_paths) >= 1:
@@ -911,13 +982,14 @@ def _write_ninja_file(path,
             rule = 'compile'
             target = '{}.o'.format(file_name)
         object_files.append(target)
-        if sys.platform == 'win32':
+        if IS_WINDOWS:
             source_file = source_file.replace(':', '$:')
         source_file = source_file.replace(" ", "$ ")
         build.append('build {}: {} {}'.format(target, rule, source_file))
 
-    ext = '.pyd' if sys.platform == 'win32' else '.so'
-    library_target = '{}{}'.format(name, ext)
+    ext = 'pyd' if IS_WINDOWS else 'so'
+    library_target = '{}.{}'.format(name, ext)
+
     link = ['build {}: link {}'.format(library_target, ' '.join(object_files))]
 
     default = ['default {}'.format(library_target)]

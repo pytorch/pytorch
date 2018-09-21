@@ -1,6 +1,4 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
-# TODO(jiayq): once we have unified CMake entry, remove this module path.
-SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules ${CMAKE_MODULE_PATH})
 SET(Gloo_USE_CUDA TRUE)
 
 ################################################################################
