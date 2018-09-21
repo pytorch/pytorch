@@ -58,7 +58,7 @@ void cast_op_cpu_impl(
       do_cast_<int64_t, SrcType>(input, output);
       break;
     case caffe2::TensorProto_DataType_FLOAT16:
-      CAFFE_THROW("Casting to and from float16 on CPU is not supported yet");
+      CAFFE_THROW("Casting to and from Half on CPU is not supported yet");
       // break;
     case caffe2::TensorProto_DataType_DOUBLE:
       do_cast_<double, SrcType>(input, output);
