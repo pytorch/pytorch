@@ -19,16 +19,12 @@ std::unordered_set<Symbol> skip_list = {
   prim::PythonOp, //may have side effects
   //all the rand functions from native_functions.yaml
   aten::rand,
-  aten::rand_out,
   aten::rand_like,
   aten::randint,
-  aten::randint_out,
   aten::randint_like,
   aten::randn,
-  aten::randn_out,
   aten::randn_like,
   aten::randperm,
-  aten::randperm_out,
   prim::Constant,
   prim::Undefined,
   prim::NoneGenerator,
