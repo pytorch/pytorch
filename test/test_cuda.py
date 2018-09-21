@@ -161,6 +161,10 @@ def constant_tensor_add(a, b):
         return a + b
 
 
+def small_0d(t):
+    return make_tensor(t, (1,)).squeeze()
+
+
 def small_2d(t):
     return make_tensor(t, S, S)
 
@@ -258,6 +262,7 @@ tests = [
     ('mul', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
         "skipIfRocm:ByteTensor,CharTensor,HalfTensor,ShortTensor"),
     ('mul', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
+    ('mul', small_0d, lambda t: [small_0d(torch.IntTensor)], 'scalar', types, True),
     ('div', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
         "skipIfRocm:ByteTensor,CharTensor,FloatTensor,HalfTensor,ShortTensor"),
     ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
@@ -902,6 +907,25 @@ class TestCuda(TestCase):
         self.assertIsInstance(y.cuda().float(), torch.cuda.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
+
+    def test_mul_intertype_scalar(self):
+        x = torch.tensor(1.5, device='cuda')
+        y = torch.tensor(3, dtype=torch.int32, device='cuda')
+
+        self.assertEqual(x * y, 4.5)
+        self.assertEqual(y * x, 4.5)
+        with self.assertRaisesRegex(RuntimeError, 'expected type'):
+            y *= x
+        x *= y
+        self.assertEqual(x, 4.5)
+
+        x = torch.tensor(1.5, device='cuda', dtype=torch.float16)
+        self.assertEqual(x * y, 4.5)
+        # half * int currently promotes to double
+        with self.assertRaisesRegex(RuntimeError, 'expected type'):
+            x *= y
+        with self.assertRaisesRegex(RuntimeError, 'expected type'):
+            y *= x
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
