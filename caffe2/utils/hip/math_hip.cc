@@ -823,8 +823,8 @@ void Gemm<float16, HIPContext>(
 
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // convert alpha, beta from float -> __half
-    /*auto alpha_fp16 = convert::floatToHalf(alpha);
-    auto beta_fp16 = convert::floatToHalf(beta);
+    /*__half alpha_fp16 = at::Half(alpha);
+    __half beta_fp16 = at::Half(beta);
 
     // call cublasHgemm
     ROCBLAS_CHECK(cublasHgemm(
@@ -1001,8 +1001,8 @@ void GemmStridedBatched<float16, HIPContext>(
         : rocblas_operation_transpose;
 
     // convert alpha, beta from float -> __half
-    auto alpha_fp16 = convert::floatToHalf(alpha);
-    auto beta_fp16 = convert::floatToHalf(beta);
+    __half alpha_fp16 = at::Half(alpha);
+    __half beta_fp16 = at::Half(beta);
     ROCBLAS_ENFORCE(cublasHgemmStridedBatched(
         context->rocblas_handle(),
         cuTransB,
@@ -1188,8 +1188,8 @@ void Gemv<float16, HIPContext>(
         CUDA_R_16F,
         LDC));
   } else if (math_type == TensorProto_DataType_FLOAT16) {
-    auto alpha_fp16 = convert::floatToHalf(alpha);
-    auto beta_fp16 = convert::floatToHalf(beta);
+    __half alpha_fp16 = at::Half(alpha);
+    __half beta_fp16 = at::Half(beta);
 
     ROCBLAS_CHECK(cublasHgemm(
         context->rocblas_handle(),
