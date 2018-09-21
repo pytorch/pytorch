@@ -434,6 +434,11 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
+  if (torch::jit::tracer::isTracing()) {
+    jit::tracer::ArgumentStash::popIntList("size");
+    jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
+    jit::tracer::delValueTrace(self);
+  }
   baseType->resize_(self_, size);
   return self;
 }
@@ -443,6 +448,10 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
+  }
+  if (torch::jit::tracer::isTracing()) {
+    jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
+    jit::tracer::delValueTrace(self);
   }
   baseType->resize_as_(self_, the_template_);
   return self;
