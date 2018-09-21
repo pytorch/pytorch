@@ -66,8 +66,12 @@ private:
   int DeviceType = caffe2::DeviceTypeProto::PROTO_CPU;
 };
 
-CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict = false);
+CAFFE2_API void injectDataEdgeIndicators(caffe2::NetDef* net);
+CAFFE2_API void removeDataEdgeIndicators(caffe2::NetDef* net);
 
+CAFFE2_API nom::repr::NNModule convertToNNModule(
+    caffe2::NetDef& net,
+    bool strict = false);
 CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 
 // Pass in an oldNet to copy all the attributes of that network.
