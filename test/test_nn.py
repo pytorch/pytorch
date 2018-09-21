@@ -5820,6 +5820,21 @@ class TestNN(NNTestCase):
         expected = m(inp.view(6, 5)).view(2, 3, 8)
         self.assertEqual(expected, m(inp))
 
+    def test_bilinear(self):
+        module = nn.Bilinear(10, 10, 8)
+        input1 = torch.randn(4, 10, requires_grad=True)
+        input2 = torch.randn(4, 10, requires_grad=True)
+        grad_output = torch.randn(4, 8)
+
+        res = module(input1, input2)
+        expected = (torch.einsum("bi,kij,bj->bk", input1, module.weight, input2) +
+                    module.bias)
+        self.assertEqual(res, expected)
+        grads = torch.autograd.grad(res, [module.weight, module.bias, input1, input2], grad_output)
+        grads_expected = torch.autograd.grad(expected, [module.weight, module.bias, input1, input2], grad_output)
+        for g, ge in zip(grads, grads_expected):
+            self.assertEqual(g, ge)
+
     def test_bilinear_no_bias(self):
         module = nn.Bilinear(10, 10, 8)
         module_no_bias = nn.Bilinear(10, 10, 8, False)
