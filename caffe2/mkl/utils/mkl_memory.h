@@ -18,14 +18,6 @@ CAFFE2_DECLARE_bool(caffe2_mkl_implicit_layout_change);
 namespace caffe2 {
 namespace mkl {
 
-#ifdef _WIN32
-#define CAFFE2_MKLML_EXPORT __declspec(dllexport)
-#elif defined(__GNUC__)
-#define CAFFE2_MKLML_EXPORT __attribute__((__visibility__("default")))
-#else
-#define CAFFE2_MKLML_EXPORT
-#endif
-
 template <typename T>
 class PrimitiveWrapper {
  public:
@@ -156,7 +148,7 @@ class LayoutWrapper {
  * Most of the MKLMemory functions are not thread safe.
  */
 template <typename T>
-class CAFFE2_MKLML_EXPORT MKLMemory {
+class CAFFE2_EXPORT MKLMemory {
  public:
   // Initializes an empty MKLMemory.
   MKLMemory() {}
