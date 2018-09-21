@@ -350,12 +350,10 @@ void addObjectMethods(py::module& m) {
             }
 #ifdef USE_NUMPY
             if (PyArray_Check(arg.ptr())) { // numpy array
-              PyArrayObject* array
-                = reinterpret_cast<PyArrayObject*>(arg.ptr());
               auto feeder = CreateFeeder(option.device_type());
               CAFFE_ENFORCE(
                   feeder, "Unknown device type encountered in FeedBlob.");
-              feeder->Feed(option, array, blob);
+              feeder->Feed(option, arg.ptr(), blob);
               return true;
             }
 #else
@@ -429,7 +427,7 @@ void addObjectMethods(py::module& m) {
                   "Unexpected type of argument -- expected numpy array");
             }
             TensorFeeder<CPUContext>().FeedTensor(
-                DeviceOption{}, reinterpret_cast<PyArrayObject*>(obj.ptr()), t);
+                DeviceOption{}, obj.ptr(), t);
 #else
             CAFFE_THROW("Caffe2 compiled without NumPy support.");
 #endif // USE_NUMPY
@@ -751,10 +749,8 @@ void addObjectMethods(py::module& m) {
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
                   "Input must be of type numpy array.");
-              PyArrayObject* array =
-                  reinterpret_cast<PyArrayObject*>(input.ptr());
               TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &tensors_data.at(name));
+                  DeviceOption(), input.ptr(), &tensors_data.at(name));
 #else
               CAFFE_THROW("Caffe2 was compiled without NumPy support.");
 #endif // USE_NUMPY
@@ -781,10 +777,8 @@ void addObjectMethods(py::module& m) {
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
                   "Input must be of type numpy array.");
-              PyArrayObject* array =
-                  reinterpret_cast<PyArrayObject*>(input.ptr());
               TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &(tensors_data[i]));
+                  DeviceOption(), input.ptr(), &(tensors_data[i]));
             }
 #else
             CAFFE_THROW("Caffe2 was compiled without NumPy support.");
@@ -894,10 +888,8 @@ void addObjectMethods(py::module& m) {
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
                   "Input must be of type numpy array.");
-              PyArrayObject* array =
-                  reinterpret_cast<PyArrayObject*>(input.ptr());
               TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &(tensors_data[i]));
+                  DeviceOption(), input.ptr(), &(tensors_data[i]));
             }
 #else
             CAFFE_THROW("Caffe2 was compiled without NumPy support.");
@@ -923,10 +915,8 @@ void addObjectMethods(py::module& m) {
               CAFFE_ENFORCE(
                   PyArray_Check(input.ptr()),
                   "Input must be of type numpy array.");
-              PyArrayObject* array =
-                  reinterpret_cast<PyArrayObject*>(input.ptr());
               TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &tensors_data.at(name));
+                  DeviceOption(), input.ptr(), &tensors_data.at(name));
             }
 #else
             CAFFE_THROW("Caffe2 was compiled without NumPy support.");
@@ -1449,13 +1439,12 @@ void addGlobalMethods(py::module& m) {
         auto* blob = gWorkspace->CreateBlob(name);
 #ifdef USE_NUMPY
         if (PyArray_Check(arg.ptr())) { // numpy array
-          PyArrayObject* array = reinterpret_cast<PyArrayObject*>(arg.ptr());
           auto feeder = CreateFeeder(option.device_type());
           CAFFE_ENFORCE(
               feeder,
               "Unknown device type encountered in FeedBlob: ",
               option.device_type());
-          feeder->Feed(option, array, blob);
+          feeder->Feed(option, arg.ptr(), blob);
           return true;
         }
 #else
