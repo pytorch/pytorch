@@ -41,7 +41,7 @@ void AllgatherOp<Context>::initializeAlgorithm() {
         init_.template getInputs<int>(),
         init_.template getOutput<int>(),
         init_.size));
-  } else if (init_.template IsType<float16>()) {
+  } else if (init_.template IsType<at::Half>()) {
     algorithm_.reset(new ::gloo::AllgatherRing<::gloo::float16>(
         init_.context,
         init_.template getInputs<::gloo::float16>(),

@@ -133,7 +133,7 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
 }
 
 TEST(TypeMetaTest, Float16IsNotUint16) {
-  EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<float16>());
+  EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<at::Half>());
 }
 
 }  // namespace
