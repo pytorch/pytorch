@@ -27,15 +27,17 @@ class AtomicFetchAddOp final : public Operator<CPUContext> {
     auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(0);
     auto& a = Input(1);
     auto& b = Input(2);
+    auto* aPtr = a.data<int32_t>();
+    auto* bPtr = b.data<int32_t>();
+    std::lock_guard<std::mutex> lg(*mutex);
+    // The Output(n) includes some memory buffer operations. It should
+    // be in the mutex protection scope.
     auto* c = Output(0);
     auto* d = Output(1);
     c->Resize(std::vector<TIndex>());
     d->Resize(std::vector<TIndex>());
-    auto* aPtr = a.data<int32_t>();
-    auto* bPtr = b.data<int32_t>();
     auto* cPtr = c->template mutable_data<int32_t>();
     auto* dPtr = d->template mutable_data<int32_t>();
-    std::lock_guard<std::mutex> lg(*mutex);
     *dPtr = *aPtr;
     *cPtr = *aPtr + *bPtr;
     return true;
