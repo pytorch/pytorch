@@ -8,8 +8,6 @@
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(caffe2::float16);
-
 TensorProto::DataType TypeMetaToDataType(const TypeMeta& meta) {
   static_assert(sizeof(int) == 4,
                 "int in this compiler does not equal to 4 bytes.");

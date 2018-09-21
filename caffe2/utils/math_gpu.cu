@@ -754,8 +754,8 @@ CAFFE2_CUDA_EXPORT void Gemm<float16, CUDAContext>(
         N));
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // convert alpha, beta from float -> __half
-    const __half alpha_fp16 = convert::floatToHalf(alpha);
-    const __half beta_fp16 = convert::floatToHalf(beta);
+    const __half alpha_fp16 = at::Half(alpha);
+    const __half beta_fp16 = at::Half(beta);
     // call cublasHgemm
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
@@ -1019,8 +1019,8 @@ CAFFE2_CUDA_EXPORT void GemmBatched<float16, CUDAContext>(
 #endif
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
-    const __half alpha_fp16 = convert::floatToHalf(alpha);
-    const __half beta_fp16 = convert::floatToHalf(beta);
+    const __half alpha_fp16 = at::Half(alpha);
+    const __half beta_fp16 = at::Half(beta);
     std::vector<const __half*> A_array(batch_size);
     std::vector<const __half*> B_array(batch_size);
     std::vector<__half*> C_array(batch_size);
@@ -1135,8 +1135,8 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<float16, CUDAContext>(
 #endif
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // Convert alpha, beta from float -> __half
-    const __half alpha_fp16 = convert::floatToHalf(alpha);
-    const __half beta_fp16 = convert::floatToHalf(beta);
+    const __half alpha_fp16 = at::Half(alpha);
+    const __half beta_fp16 = at::Half(beta);
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
     CUBLAS_ENFORCE(cublasHgemmStridedBatched(
@@ -1476,8 +1476,8 @@ CAFFE2_CUDA_EXPORT void Gemv<float16, CUDAContext>(
         CUDA_R_16F,
         ldc));
   } else if (math_type == TensorProto_DataType_FLOAT16) {
-    const __half alpha_fp16 = convert::floatToHalf(alpha);
-    const __half beta_fp16 = convert::floatToHalf(beta);
+    const __half alpha_fp16 = at::Half(alpha);
+    const __half beta_fp16 = at::Half(beta);
     CUBLAS_ENFORCE(cublasSetPointerMode(
         context->cublas_handle(), CUBLAS_POINTER_MODE_HOST));
     CUBLAS_ENFORCE(cublasHgemm(
