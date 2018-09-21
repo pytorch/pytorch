@@ -375,6 +375,18 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   return setUnshapedType(node);
 }
 
+static at::optional<size_t> determineListSize(Value * list) {
+  JIT_ASSERT(list->type()->cast<ListType>());
+  if (auto shape = constant_as<std::vector<int64_t>>(list)) {
+    return shape->size();
+  }
+  auto input_node = list->node();
+  if (input_node->kind() == prim::ListConstruct) {
+    return input_node->inputs().size();
+  }
+  return at::nullopt;
+}
+
 bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   static const auto broadcast = [](std::vector<TensorTypePtr>& tensor_types) -> TensorTypePtr {
     if (tensor_types.size() == 1) {
@@ -1023,8 +1035,8 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   std::vector<TensorTypePtr> tensor_types;
   static const auto reshape_prop =
     [](Node * node, Symbol shape_input, const std::vector<TensorTypePtr>& tensor_types) -> TensorTypePtr {
-      if (auto shape = node->get<std::vector<int64_t>>(shape_input)) {
-        return tensor_types.at(0)->withDim(shape->size());
+      if (auto list_size = determineListSize(node->namedInput(shape_input))) {
+        return tensor_types.at(0)->withDim(*list_size);
       }
       return nullptr;
     };

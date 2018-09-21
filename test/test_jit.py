@@ -3457,6 +3457,18 @@ a")
         real_outs = cu.test_view_shape_prop(*inputs)
         self.assertEqual(real_outs, outputs)
 
+    def test_view_listconstruct_shape_prop(self):
+        def fn(x):
+            B = x.size(0)
+            C = x.size(1)
+            T = x.size(2)
+            return x.view(T, B, C)
+
+        x = torch.randn(3, 1, 5, requires_grad=True)
+        graph = torch.jit.script(fn).graph
+        torch._C._jit_pass_shape_analysis(graph, (x,), False)
+        self.assertTrue(next(graph.outputs()).type().kind() != 'DynamicType')
+
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
         def test_integral_shape_inference(a):
