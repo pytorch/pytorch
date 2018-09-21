@@ -100,13 +100,13 @@ __global__ void renormRowsL1(T* dist, long rows, long cols) {
     T sum = ScalarConvert<int, T>::to(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      assert(THCNumerics<T>::ge(val, zero));
+      assert(! THCNumerics<T>::lt(val, zero)); // ! < 0 for NaN handling
       sum = THCNumerics<T>::add(sum, val);
     }
 
     sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T>(), zero);
     if (threadIdx.x == 0) {
-      assert(THCNumerics<T>::gt(sum, zero));
+      assert(! THCNumerics<T>::lt(sum, zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
