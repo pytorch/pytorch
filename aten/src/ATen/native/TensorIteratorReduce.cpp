@@ -14,7 +14,7 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop);
 void TensorIterator::parallel_reduce(const loop2d_t& loop) {
   AT_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
   int64_t numel = this->numel();
-  if (numel < at::internal::GRAIN_SIZE) {
+  if (numel < at::internal::GRAIN_SIZE || at::get_max_threads() == 1) {
     serial_for_each(loop, {0, numel});
   } else if (use_two_pass_reduction(*this)) {
     two_pass_reduction(*this, loop);
@@ -69,12 +69,11 @@ static int find_split_dim(TensorIterator& iter) {
 }
 
 static std::tuple<int64_t, int64_t>
-round_columns(TensorIterator& iter, int dim, int64_t begin, int64_t end) {
-  int64_t elems_per_128_bytes = 128 / iter.element_size(dim);
-  begin = begin - (begin % elems_per_128_bytes);
+round_columns(TensorIterator& iter, int dim, int multiple, int64_t begin, int64_t end) {
+  begin = begin - (begin % multiple);
   if (end != iter.shape()[dim]) {
     // only round the 'end' column down if it's not the final column
-    end = end - (end % elems_per_128_bytes);
+    end = end - (end % multiple);
   }
   return std::make_tuple(begin, end);
 }
@@ -83,11 +82,18 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
   AT_ASSERT(iter.ndim() >= 1);
   int dim = find_split_dim(iter);
   int64_t cols = iter.shape()[dim];
+  int element_size = iter.element_size(/*arg=*/1);
 
-  bool should_round_columns = iter.strides(1)[dim] == iter.element_size(1);
+  bool should_round_columns = iter.strides(1)[dim] == element_size;
   at::parallel_for(0, cols, 1, [&](int64_t begin, int64_t end) {
     if (should_round_columns) {
-      std::tie(begin, end) = round_columns(iter, dim, begin, end);
+      // round columns to multiples of 128 bytes if adjacent columns are
+      // contiguous in memory.
+      int64_t cols_per_128_bytes = 128 / element_size;
+      std::tie(begin, end) = round_columns(iter, dim, cols_per_128_bytes, begin, end);
+    }
+    if (begin == end) {
+      return;
     }
     auto sub_iter = TensorIterator(iter);
     sub_iter.narrow(dim, begin, end - begin);
