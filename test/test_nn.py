@@ -5827,8 +5827,8 @@ class TestNN(NNTestCase):
         grad_output = torch.randn(4, 8)
 
         res = module(input1, input2)
-        expected = (torch.einsum("bi,kij,bj->bk", input1, module.weight, input2)
-                    + module.bias)
+        expected = (torch.einsum("bi,kij,bj->bk", input1, module.weight, input2) +
+                    module.bias)
         self.assertEqual(res, expected)
         grads = torch.autograd.grad(res, [module.weight, module.bias, input1, input2], grad_output)
         grads_expected = torch.autograd.grad(expected, [module.weight, module.bias, input1, input2], grad_output)
