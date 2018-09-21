@@ -6,6 +6,12 @@ FILE(GLOB ATen_CORE_SRCS "*.cpp")
 FILE(GLOB ATen_CORE_TEST_SRCS "*_test.cpp")
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
+# see the source file for explanation
+set_source_files_properties(
+  register_symbols.cpp
+  PROPERTIES COMPILE_FLAGS -O0
+  )
+
 # Pass to parent
 set(ATen_CORE_HEADERS ${ATen_CORE_HEADERS} PARENT_SCOPE)
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)

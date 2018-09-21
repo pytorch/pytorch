@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/interned_strings.h"
+#include <ATen/core/interned_strings.h>
 #include <cstdint>
 #include <iostream>
 #include <mutex>
@@ -9,7 +9,7 @@
 #include "ATen/core/Error.h"
 #include "ATen/core/optional.h"
 #include "string.h"
-#include "torch/csrc/jit/interned_strings_class.h"
+#include <ATen/core/interned_strings_class.h>
 
 namespace torch { namespace jit {
 

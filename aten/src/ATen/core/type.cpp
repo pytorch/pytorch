@@ -1,6 +1,4 @@
-#include "torch/csrc/jit/type.h"
-
-#include "torch/csrc/jit/assertions.h"
+#include <ATen/core/jit_type.h>
 
 #include <iostream>
 
@@ -11,7 +9,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << at::toString(value->scalarType()) << "(";
     auto& sizes = value->sizes();
     auto& strides = value->strides();
-    JIT_ASSERT(sizes.size() == strides.size());
+    AT_ASSERT(sizes.size() == strides.size());
     for (size_t i = 0; i < sizes.size(); i++) {
       if (i > 0) {
         out << ", ";
