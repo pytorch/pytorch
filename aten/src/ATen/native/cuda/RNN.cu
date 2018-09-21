@@ -395,7 +395,7 @@ void lstm_backward_impl(const Tensor& grad_hy, const Tensor& grad_cy,
   using accscalar_t = acc_type<scalar_t, /*is_cuda=*/true>;
 
   dim3 block, grid;
-  int64_t numel = grad_hy.numel();
+  int64_t numel = cx.numel();
   getLaunchConfig(&block, &grid, numel);
 
   auto grad_hyI = tryGetTensorInfo<scalar_t, index_type>(grad_hy);
@@ -405,7 +405,7 @@ void lstm_backward_impl(const Tensor& grad_hy, const Tensor& grad_cy,
   auto workspaceI = getTensorInfo<scalar_t, index_type>(workspace);
   auto grad_gatesI = getTensorInfo<scalar_t, index_type>(grad_gates);
   auto grad_cxI = getTensorInfo<scalar_t, index_type>(grad_cx);
-  index_type hidden_size = grad_hyI.sizes[grad_hyI.dims-1];
+  index_type hidden_size = cxI.sizes[cxI.dims-1];
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (allContiguous({grad_hy, grad_cy, cx, cy, workspace, grad_gates, grad_cx})) {
@@ -540,7 +540,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
 
   auto grad_gates = at::empty_like(workspace);
   auto grad_cx = at::empty_like(cx);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_hy.type(), "_thnn_fused_lstm_cell_cuda_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(workspace.type(), "_thnn_fused_lstm_cell_cuda_backward", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       lstm_backward_impl<scalar_t, int32_t>(grad_hy, grad_cy, cx, cy, workspace, grad_gates, grad_cx);
     } else {
@@ -589,7 +589,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_gru_cell_backward
   auto grad_input_gates = at::empty({workspace.size(0), hidden_size * 3}, workspace.options());
   auto grad_hidden_gates = at::empty({workspace.size(0), hidden_size * 3}, workspace.options());
   auto grad_hx = at::empty_like(grad_hy);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_hy.type(), "_thnn_fused_lstm_cell_cuda_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_hy.type(), "_thnn_fused_gru_cell_cuda_backward", [&] {
     if (canUse32BitIndexMath(workspace)) { // See Note [64-bit index math check elision]
       gru_backward_impl<scalar_t, int32_t>(grad_hy, workspace, grad_input_gates, grad_hidden_gates, grad_hx);
     } else {
