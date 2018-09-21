@@ -424,13 +424,13 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::ceil(Tensor self) -> Tensor",
     "aten::clone(Tensor self) -> Tensor",
     "aten::contiguous(Tensor self) -> Tensor",
-    "aten::bernoulli(Tensor self) -> Tensor",
+    "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
     "aten::celu(Tensor self, Scalar alpha) -> Tensor",
     "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
     "aten::clamp_max(Tensor self, Scalar max) -> Tensor",
     "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
     "aten::alpha_dropout(Tensor input, float p, int train) -> Tensor",
-    "aten::bernoulli(Tensor self, float p, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, *, Generator generator) -> Tensor",
     "aten::cos(Tensor self) -> Tensor",
     "aten::cosh(Tensor self) -> Tensor",
     "aten::digamma(Tensor self) -> Tensor",
@@ -592,7 +592,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   //   tensor outputs : 1
   static const register_formula_for binary_ops_strict_match {{
     "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
-    "aten::bernoulli(Tensor self, Tensor p, Generator generator) -> Tensor",
     "aten::mm(Tensor self, Tensor mat2) -> Tensor",
     "aten::bmm(Tensor self, Tensor mat2) -> Tensor",
   }, [](Node * node) -> type_vec_t {

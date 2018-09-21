@@ -4,6 +4,8 @@
 
 namespace caffe2 {
 
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(Tensor);
+
 UndefinedTensorImpl UndefinedTensorImpl::singleton_;
 
 TensorPrinter::TensorPrinter(

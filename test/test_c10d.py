@@ -1,6 +1,7 @@
 import copy
 import math
 import multiprocessing
+import os
 import sys
 import tempfile
 import time
@@ -144,6 +145,77 @@ class RendezvousTest(TestCase):
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
             c10d.rendezvous('invalid://')
+
+
+class RendezvousEnvTest(TestCase):
+    def test_common_errors(self):
+        vars = {
+            "WORLD_SIZE": "2",
+            "RANK": "0",
+            "MASTER_ADDR": "127.0.0.1",
+            "MASTER_PORT": common.find_free_port(),
+        }
+
+        class Env(object):
+            def __init__(self, vars):
+                self.vars = vars
+
+            def __enter__(self):
+                for key, value in self.vars.items():
+                    os.environ[key] = str(value)
+
+            def __exit__(self, type, value, traceback):
+                for key in self.vars.keys():
+                    del os.environ[key]
+
+        def without(d, key):
+            d = d.copy()
+            d.pop(key)
+            return d
+
+        with Env(without(vars, 'WORLD_SIZE')):
+            with self.assertRaisesRegex(ValueError, 'WORLD_SIZE expected'):
+                gen = c10d.rendezvous('env://')
+                next(gen)
+        with Env(without(vars, 'RANK')):
+            with self.assertRaisesRegex(ValueError, 'RANK expected'):
+                gen = c10d.rendezvous('env://')
+                next(gen)
+        with Env(without(vars, 'MASTER_ADDR')):
+            with self.assertRaisesRegex(ValueError, 'MASTER_ADDR expected'):
+                gen = c10d.rendezvous('env://')
+                next(gen)
+        with Env(without(vars, 'MASTER_PORT')):
+            with self.assertRaisesRegex(ValueError, 'MASTER_PORT expected'):
+                gen = c10d.rendezvous('env://')
+                next(gen)
+
+    def test_nominal(self):
+        os.environ['WORLD_SIZE'] = '2'
+        os.environ['MASTER_ADDR'] = '127.0.0.1'
+        os.environ['MASTER_PORT'] = str(common.find_free_port())
+
+        # First rank
+        os.environ['RANK'] = '0'
+        gen0 = c10d.rendezvous('env://')
+        store0, rank0, size0 = next(gen0)
+        self.assertEqual(0, rank0)
+        self.assertEqual(2, size0)
+
+        # Second rank
+        os.environ['RANK'] = '1'
+        gen1 = c10d.rendezvous('env://')
+        store1, rank1, size1 = next(gen1)
+        self.assertEqual(1, rank1)
+        self.assertEqual(2, size1)
+
+        # Set value on both stores
+        store0.set("key0", "value0")
+        store1.set("key1", "value1")
+
+        # Cross check with get
+        self.assertEqual(b"value0", store1.get("key0"))
+        self.assertEqual(b"value1", store0.get("key1"))
 
 
 class RendezvousFileTest(TestCase):

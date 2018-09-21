@@ -1898,6 +1898,59 @@ class TestJit(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(random_bar(x), (x + 1)[0:1])
 
+    def test_pretty_printer(self):
+        @torch.jit.script
+        def if_test(a, b):
+            # FIXME: use 0 instead of a.
+            # c = 0
+            c = a
+            if bool(a < b):
+                c = b
+            else:
+                c = a
+            return c
+
+        @torch.jit.script
+        def if_one(a, b):
+            c = b
+            if bool(a < b):
+                c = a
+            return c
+
+        @torch.jit.script
+        def while_test(a, i):
+            while bool(i < 3):
+                a *= a
+                i += 1
+            return a
+
+        @torch.jit.script
+        def while_if_test(a, b):
+            c = 0
+            while bool(a < 10):
+                a = a + 1
+                b = b + 1
+                if bool(a > b):
+                    c = 2
+                else:
+                    c = 3
+            return a + 1
+
+        @torch.jit.script
+        def loop_use_test(y):
+            x = y + 1
+            z = x + 5
+            while bool(y < 8):
+                y += 1
+                z = x
+            return x, z
+
+        self.assertExpected(if_test.graph.pretty_print(), "if_test")
+        self.assertExpected(if_one.graph.pretty_print(), "if_one")
+        self.assertExpected(while_test.graph.pretty_print(), "while_test")
+        self.assertExpected(while_if_test.graph.pretty_print(), "while_if_test")
+        self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -3409,7 +3462,7 @@ a")
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skip("this test is flaky, see #11360")
+    @enable_cpu_fuser
     def test_scalar_fusion(self):
         def fn(x, y):
             return x + y.type_as(x)
@@ -5330,6 +5383,22 @@ a")
         self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs, export_raw_ir=True))
+
+    def test_onnx_export_script_non_alpha_add_sub(self):
+        class ModuleToExport(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ModuleToExport, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                bs = x.size(0) + 1
+                return bs - 1
+
+        mte = ModuleToExport()
+        outputs = torch.LongTensor([mte(torch.rand(3, 4))])
+        self.assertExpected(torch.onnx.export_to_pretty_string(
+            mte, (torch.rand(3, 4),), None, verbose=False,
+            example_outputs=outputs))
 
     def test_onnx_export_script_module_if(self):
         class ModuleToExport(torch.jit.ScriptModule):

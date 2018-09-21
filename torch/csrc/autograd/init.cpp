@@ -45,8 +45,8 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   m.def("_enable_profiler", torch::autograd::profiler::enableProfiler);
   m.def("_disable_profiler", torch::autograd::profiler::disableProfiler);
 
-  m.def("_push_range", [](const char* name) {
-    torch::autograd::profiler::pushRange(name);
+  m.def("_push_range", [](std::string name) {
+    torch::autograd::profiler::pushRange(std::move(name));
   });
   m.def("_pop_range", []() { torch::autograd::profiler::popRange(); });
 

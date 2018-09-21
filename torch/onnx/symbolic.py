@@ -192,25 +192,22 @@ def unused(g):
     return g.op("prim::Undefined")
 
 
-@parse_args('v', 'v', 't')
-def add(g, self, other, alpha):
-    if _scalar(alpha) != 1:
+def add(g, self, other, alpha=None):
+    # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
+    if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:
         return _unimplemented("add", "alpha != 1")
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)
     return g.op("Add", self, _if_scalar_type_as(g, other, self))
 
 
-@parse_args('v', 'v', 't')
-def sub(g, self, other, alpha):
-    if _scalar(alpha) != 1:
+def sub(g, self, other, alpha=None):
+    # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
+    if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:
         return _unimplemented("sub", "alpha != 1")
     # See Note [Pointwise by scalar]. Note that self or other may be scalars.
     other = _maybe_get_scalar(other)
-    self = _maybe_get_scalar(self)
-    self = _if_scalar_type_as(g, self, other)
-    other = _if_scalar_type_as(g, other, self)
-    return g.op("Sub", self, other)
+    return g.op("Sub", self, _if_scalar_type_as(g, other, self))
 
 
 def mul(g, self, other):
@@ -349,7 +346,7 @@ def embedding_bag(g,
                 indices,
                 offsets,
                 operator_s="embedding_bag",
-                outputs=3,
+                outputs=4,
                 scale_grad_by_freq_i=scale_grad_by_freq,
                 mode_i=mode,
                 sparse_i=sparse)

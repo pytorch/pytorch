@@ -110,7 +110,7 @@ struct TypeMetaData final {
 // due to type erasure. E.g. somebody calling TypeMeta::copy() for
 // non-copyable type. Right now just throws exception but is implemented
 // in .cpp to manage dependencies
-void _ThrowRuntimeTypeLogicError(const std::string& msg);
+AT_CORE_API void _ThrowRuntimeTypeLogicError(const std::string& msg);
 
 /**
  * Placement new function for the type.
@@ -200,34 +200,23 @@ inline void _Dtor(void* ptr, size_t n) {
 
 template<class T> const char* _TypeName() noexcept;
 
-template<class T, class Enable = void>
-struct TypeMetaDataRegistry final {
-  static_assert(!std::is_same<T, T>::value, "This should never be picked since TypeMetaDataRegistry has specialisations for all cases");
-};
-
-template <typename T>
-struct TypeMetaDataRegistry<T, c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>> final {
-  // This class is not meant for instantiation
-  TypeMetaDataRegistry() = delete;
-
-  static const TypeMetaData data;
-};
-template<class T>
-const TypeMetaData TypeMetaDataRegistry<T, c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>>::data =
-  TypeMetaData {sizeof(T), nullptr, nullptr, nullptr, TypeIdentifier::Get<T>(), _TypeName<T>()};
-
-template <typename T>
-struct TypeMetaDataRegistry<T, c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>> final {
-  // This class is not meant for instantiation
-  TypeMetaDataRegistry() = delete;
-
-  static const TypeMetaData data;
-};
-template<class T>
-const TypeMetaData TypeMetaDataRegistry<T, c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>>::data =
-  TypeMetaData {sizeof(T), _PickCtor<T>(), _PickCopy<T>(), _Dtor<T>, TypeIdentifier::Get<T>(), _TypeName<T>()};
+template<class T, c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
+inline AT_CORE_API TypeMetaData createTypeMetaData() {
+  return TypeMetaData {sizeof(T), nullptr, nullptr, nullptr, TypeIdentifier::Get<T>(), _TypeName<T>()};
+}
+template<class T, c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr>
+inline AT_CORE_API TypeMetaData createTypeMetaData() {
+  return TypeMetaData {sizeof(T), _PickCtor<T>(), _PickCopy<T>(), _Dtor<T>, TypeIdentifier::Get<T>(), _TypeName<T>()};
 }
 
+template<class T>
+struct AT_CORE_API TypeMetaDataRegistry final {
+  // This class is not meant for instantiation
+  TypeMetaDataRegistry() = delete;
+
+  static const TypeMetaData data;
+};
+}
 
 /**
  * TypeMeta is a thin class that allows us to store the type of a container such
@@ -236,7 +225,9 @@ const TypeMetaData TypeMetaDataRegistry<T, c10::guts::enable_if_t<!(std::is_fund
  * for run-time inspection.
  */
 class AT_CORE_API TypeMeta {
- public:
+private:
+    static constexpr detail::TypeMetaData uninitialized_ = {0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)"};
+public:
   using PlacementNew = detail::TypeMetaData::PlacementNew;
   using TypedCopy = detail::TypeMetaData::TypedCopy;
   using TypedDestructor = detail::TypeMetaData::TypedDestructor;
@@ -303,11 +294,11 @@ class AT_CORE_API TypeMeta {
     return data_->name_;
   }
 
-  friend constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
+  friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
 
   template <typename T>
   constexpr bool Match() const noexcept {
-    return (data_ == Make<T>().data_);
+    return (*this == Make<T>());
   }
 
   // Below are static functions that can be called by passing a specific type.
@@ -318,8 +309,8 @@ class AT_CORE_API TypeMeta {
   }
 
   template<class T>
-  static constexpr const char* TypeName() noexcept {
-    return detail::TypeMetaDataRegistry<T>::data.name_;
+  static const char* TypeName() noexcept {
+    return Make<T>().name();
   }
 
   template<class T>
@@ -338,14 +329,12 @@ class AT_CORE_API TypeMeta {
  private:
 
   const detail::TypeMetaData* data_;
-
-  static constexpr detail::TypeMetaData uninitialized_ = detail::TypeMetaData {0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)"};
 };
 
-inline constexpr bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return (lhs.data_ == rhs.data_);
 }
-inline constexpr bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
+inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return !operator==(lhs, rhs);
 }
 
@@ -384,19 +373,25 @@ inline constexpr bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexc
     AT_CORE_EXPORT const char* _TypeName<T>() noexcept {                  \
       return #T;                                                          \
     }                                                                     \
+    template<>                                                            \
+    AT_CORE_EXPORT const TypeMetaData TypeMetaDataRegistry<T>::data =     \
+      createTypeMetaData<T>();                                            \
   }
 #else // _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  TypeIdentifier TypeIdentifier::Get<T>() {                               \
+  AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     return type_id;                                                       \
   }                                                                       \
   namespace detail {                                                      \
     template<>                                                            \
-    const char* _TypeName<T>() noexcept {                                 \
+    AT_CORE_EXPORT const char* _TypeName<T>() noexcept {                  \
       return #T;                                                          \
     }                                                                     \
+    template<>                                                            \
+    AT_CORE_EXPORT const TypeMetaData TypeMetaDataRegistry<T>::data =     \
+      createTypeMetaData<T>();                                            \
   }
 #endif
 
@@ -407,30 +402,37 @@ inline constexpr bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexc
  * for your own types to allocate dynamic ids for them.
  */
 #ifdef _MSC_VER
-#define CAFFE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)         \
+#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T) \
   template <>                                                    \
-  inline AT_CORE_API TypeIdentifier TypeIdentifier::Get<T>() {   \
+  inline AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {\
     return TypeIdentifier(PreallocatedId);                       \
   }                                                              \
   namespace detail {                                             \
     template<>                                                   \
-    inline AT_CORE_API const char* _TypeName<T>() noexcept {     \
+    inline AT_CORE_EXPORT const char* _TypeName<T>() noexcept {  \
       return #T;                                                 \
     }                                                            \
   }
 #else // _MSC_VER
-#define CAFFE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T) \
-  template <>                                            \
-  inline TypeIdentifier TypeIdentifier::Get<T>() {       \
-    return TypeIdentifier(PreallocatedId);               \
-  }                                                      \
-  namespace detail {                                     \
-    template<>                                           \
-    inline const char* _TypeName<T>() noexcept {         \
-      return #T;                                         \
-    }                                                    \
+#define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T) \
+  template <>                                                    \
+  inline AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {\
+    return TypeIdentifier(PreallocatedId);                       \
+  }                                                              \
+  namespace detail {                                             \
+    template<>                                                   \
+    inline AT_CORE_EXPORT const char* _TypeName<T>() noexcept {  \
+      return #T;                                                 \
+    }                                                            \
   }
 #endif
+
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                        \
+  namespace detail {                                                   \
+    template<>                                                         \
+    AT_CORE_EXPORT const TypeMetaData TypeMetaDataRegistry<T>::data =  \
+      createTypeMetaData<T>();                                         \
+  }
 
 class Tensor;
 
@@ -439,37 +441,37 @@ class Tensor;
 
 struct _CaffeHighestPreallocatedTypeId final {};
 
-CAFFE_PREALLOCATED_KNOWN_TYPE(0, uint8_t)
-CAFFE_PREALLOCATED_KNOWN_TYPE(1, int8_t)
-CAFFE_PREALLOCATED_KNOWN_TYPE(2, int16_t)
-CAFFE_PREALLOCATED_KNOWN_TYPE(3, int)
-CAFFE_PREALLOCATED_KNOWN_TYPE(4, int64_t)
-CAFFE_PREALLOCATED_KNOWN_TYPE(5, at::Half)
-CAFFE_PREALLOCATED_KNOWN_TYPE(6, float)
-CAFFE_PREALLOCATED_KNOWN_TYPE(7, double)
-CAFFE_PREALLOCATED_KNOWN_TYPE(8, at::ComplexHalf)
-CAFFE_PREALLOCATED_KNOWN_TYPE(9, std::complex<float>)
-CAFFE_PREALLOCATED_KNOWN_TYPE(10, std::complex<double>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(0, uint8_t)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(1, int8_t)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(2, int16_t)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(3, int)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(4, int64_t)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(5, at::Half)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(6, float)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(7, double)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(8, at::ComplexHalf)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(9, std::complex<float>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(10, std::complex<double>)
 // 11 = undefined type id
 
-CAFFE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
-CAFFE_PREALLOCATED_KNOWN_TYPE(13, std::string)
-CAFFE_PREALLOCATED_KNOWN_TYPE(14, bool)
-CAFFE_PREALLOCATED_KNOWN_TYPE(15, uint16_t)
-CAFFE_PREALLOCATED_KNOWN_TYPE(16, char)
-CAFFE_PREALLOCATED_KNOWN_TYPE(17, std::unique_ptr<std::mutex>)
-CAFFE_PREALLOCATED_KNOWN_TYPE(18, std::unique_ptr<std::atomic<bool>>)
-CAFFE_PREALLOCATED_KNOWN_TYPE(19, std::vector<int32_t>)
-CAFFE_PREALLOCATED_KNOWN_TYPE(20, std::vector<int64_t>)
-CAFFE_PREALLOCATED_KNOWN_TYPE(21, std::vector<unsigned long>)
-CAFFE_PREALLOCATED_KNOWN_TYPE(22, bool*)
-CAFFE_PREALLOCATED_KNOWN_TYPE(23, char*)
-CAFFE_PREALLOCATED_KNOWN_TYPE(24, int*)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(13, std::string)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(14, bool)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(15, uint16_t)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(16, char)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(17, std::unique_ptr<std::mutex>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(18, std::unique_ptr<std::atomic<bool>>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(19, std::vector<int32_t>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(20, std::vector<int64_t>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(21, std::vector<unsigned long>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(22, bool*)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(23, char*)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(24, int*)
 
 #ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-CAFFE_PREALLOCATED_KNOWN_TYPE(25, long)
-CAFFE_PREALLOCATED_KNOWN_TYPE(26, std::vector<long>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, long)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(26, std::vector<long>)
 #endif // CAFFE2_UNIQUE_LONG_TYPEMETA
 
-CAFFE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

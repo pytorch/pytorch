@@ -3,13 +3,13 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import hypothesis.strategies as st
-
-from caffe2.python import core, workspace
 from caffe2.proto import caffe2_pb2
-from hypothesis import given
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
+from hypothesis import given
+import hypothesis.strategies as st
 import numpy as np
 
 
@@ -19,7 +19,7 @@ def _fill_diagonal(shape, value):
     return (result,)
 
 
-class TestFillerOperator(hu.HypothesisTestCase):
+class TestFillerOperator(serial.SerializedTestCase):
 
     @given(**hu.gcs)
     def test_shape_error(self, gc, dc):
@@ -127,7 +127,7 @@ class TestFillerOperator(hu.HypothesisTestCase):
 
         self.assertNotEqual(min_data, max_data)
 
-    @given(
+    @serial.given(
         shape=st.sampled_from(
             [
                 [3, 3],
@@ -168,9 +168,9 @@ class TestFillerOperator(hu.HypothesisTestCase):
         # Check against numpy reference
         self.assertReferenceChecks(gc, op, [shape, value], _fill_diagonal)
 
-    @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
-                            min_size=0,
-                            max_size=10),
+    @serial.given(lengths=st.lists(st.integers(min_value=0, max_value=10),
+                                   min_size=0,
+                                   max_size=10),
            **hu.gcs)
     def test_lengths_range_fill(self, lengths, gc, dc):
         op = core.CreateOperator(

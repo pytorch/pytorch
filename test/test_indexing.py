@@ -274,12 +274,14 @@ class TestIndexing(TestCase):
         self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
 
     def test_zero_dim_index(self):
-        # We temporarily support indexing a zero-dim tensor as if it were
-        # a one-dim tensor to better maintain backwards compatibility.
         x = torch.tensor(10)
-        with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(x, x[0])
-            self.assertEqual(len(w), 1)
+        self.assertEqual(x, x.item())
+
+        def runner():
+            print(x[0])
+            return x[0]
+
+        self.assertRaisesRegex(IndexError, 'invalid index', runner)
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to

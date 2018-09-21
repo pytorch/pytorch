@@ -15,11 +15,13 @@ import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.operator_test.adagrad_test_helper import (
     ref_adagrad, adagrad_sparse_test_helper
 )
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 import unittest
 import os
 
-class TestAdagrad(hu.HypothesisTestCase):
+
+class TestAdagrad(serial.SerializedTestCase):
     @staticmethod
     def ref_row_wise_adagrad(param_in, mom_in, grad, lr, epsilon):
         mom_out = mom_in + np.mean(np.square(grad))
@@ -27,7 +29,7 @@ class TestAdagrad(hu.HypothesisTestCase):
         param_out = param_in + grad_adj
         return (param_out, mom_out)
 
-    @given(inputs=hu.tensors(n=3),
+    @serial.given(inputs=hu.tensors(n=3),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
@@ -112,7 +114,7 @@ class TestAdagrad(hu.HypothesisTestCase):
         return adagrad_sparse_test_helper(self, inputs, lr, epsilon,
             None, ref_adagrad, gc, dc)
 
-    @given(inputs=hu.tensors(n=2),
+    @serial.given(inputs=hu.tensors(n=2),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
@@ -223,7 +225,7 @@ class TestAdagrad(hu.HypothesisTestCase):
             [param, momentum, indices, grad, lr],
             ref_row_wise_sparse)
 
-    @given(inputs=hu.tensors(n=1),
+    @serial.given(inputs=hu.tensors(n=1),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
