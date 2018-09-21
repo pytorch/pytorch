@@ -580,6 +580,18 @@ class CompilationUnit(object):
     def __getattr__(self, attr):
         return self.module._get_method(attr)
 
+def weak_script(fn):
+    # register op for jit
+    # no op if called from python
+    fn.is_weak = True
+    return fn
+
+# to be called from C++
+def graph_from_fn(fn, _frames_up=0):
+    rcb = createResolutionCallback(_frames_up + 1)
+    ast = get_jit_ast(fn, is_method=False)
+    return (ast, rcb)
+torch._C._jit_register_preprocessor(graph_from_fn)
 
 def script(fn, optimize=True, _frames_up=0):
     if not _enabled:
