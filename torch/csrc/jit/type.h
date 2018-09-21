@@ -356,6 +356,9 @@ struct TORCH_API ListType : public Type {
     }
     return false;
   }
+  bool requires_grad() const override {
+    return elem->requires_grad();
+  }
   std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";
@@ -403,6 +406,10 @@ struct TORCH_API TupleType : public Type {
     return compare(*rhs, [](const TypePtr a, const TypePtr b) {
       return a->isSubtypeOf(b);
     });
+  }
+  bool requires_grad() const override {
+    return std::any_of(elements_.begin(), elements_.end(),
+                       [](const TypePtr& ptr) { return ptr->requires_grad(); });
   }
   std::string str() const override {
     std::stringstream ss;
