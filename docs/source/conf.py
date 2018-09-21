@@ -29,10 +29,10 @@ try:
 except ImportError:
     import warnings
     warnings.warn('unable to load "torchvision" package')
-import sphinx_rtd_theme
 
 RELEASE = os.environ.get('RELEASE', False)
 
+import pytorch_sphinx_theme
 
 # -- General configuration ------------------------------------------------
 
@@ -134,19 +134,13 @@ autodoc_inherit_docstrings = False
 #
 #
 #
-html_theme = 'sphinx_rtd_theme'
 
+html_theme = 'pytorch_sphinx_theme'
+html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-#
-html_theme_options = {
-    'canonical_url': 'https://pytorch.org/docs/stable/',
-    'collapse_navigation': False,
-    'display_version': True,
-    'logo_only': True,
-}
 
 html_logo = '_static/img/pytorch-logo-dark-unstable.png'
 if RELEASE:
