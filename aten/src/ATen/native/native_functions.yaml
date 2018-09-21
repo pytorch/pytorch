@@ -1007,7 +1007,6 @@
 - func: log_softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
   variants: function, method
 
->>>>>>> add mixed precision softmax
 - func: log_softmax(Tensor self, int64_t dim) -> Tensor
   variants: function, method
 
