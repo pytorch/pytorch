@@ -12,7 +12,7 @@
 
 namespace at {
 
-struct Tensor;
+class Tensor;
 
 class AT_API Scalar {
 public:

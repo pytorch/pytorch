@@ -33,7 +33,7 @@ class Context;
 struct Allocator;
 struct Generator;
 struct Storage;
-struct Tensor;
+class Tensor;
 
 static inline void noop_deleter(void*) {}
 
