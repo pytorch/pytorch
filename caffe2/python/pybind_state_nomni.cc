@@ -199,9 +199,19 @@ void addNomnigraphMethods(pybind11::module& m) {
             return nn::get<nom::repr::Tensor>(n);
           },
           py::return_value_policy::reference_internal)
+      .def_property(
+          "annotation",
+          [](NNGraph::NodeRef n) { return getOrAddCaffe2Annotation(n); },
+          [](NNGraph::NodeRef n, Caffe2Annotation annot) {
+            auto* nnOp = nn::get<NeuralNetOperator>(n);
+            nnOp->setAnnotation(
+                nom::util::make_unique<Caffe2Annotation>(annot));
+          },
+          py::return_value_policy::copy)
       .def(
           "getAnnotation",
-          [](NNGraph::NodeRef n) { return getOrAddCaffe2Annotation(n); })
+          [](NNGraph::NodeRef n) { return getOrAddCaffe2Annotation(n); },
+          py::return_value_policy::copy)
       .def(
           "setAnnotation",
           [](NNGraph::NodeRef n, Caffe2Annotation annot) {
@@ -327,7 +337,19 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def("setDevice", &Caffe2Annotation::setDevice)
       .def("getDevice", &Caffe2Annotation::getDevice)
       .def("setDeviceType", &Caffe2Annotation::setDeviceType)
-      .def("getDeviceType", &Caffe2Annotation::getDeviceType);
+      .def("getDeviceType", &Caffe2Annotation::getDeviceType)
+      .def("setKeyNode", &Caffe2Annotation::setKeyNode)
+      .def(
+          "getKeyNode",
+          &Caffe2Annotation::getKeyNode,
+          py::return_value_policy::reference)
+      .def("setLengthNode", &Caffe2Annotation::setLengthNode)
+      .def(
+          "getLengthNode",
+          &Caffe2Annotation::getLengthNode,
+          py::return_value_policy::reference)
+      .def("setComponentLevels", &Caffe2Annotation::setComponentLevels)
+      .def("getComponentLevels", &Caffe2Annotation::getComponentLevels);
 }
 
 REGISTER_PYBIND_ADDITION(addNomnigraphMethods);

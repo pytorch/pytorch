@@ -223,3 +223,23 @@ class TestBindings(test_util.TestCase):
         node.setAnnotation(annot)
         new_annot = node.getAnnotation()
         assert new_annot.getDeviceType() == 7
+
+    def test_distribute_annotations(self):
+        nn = ng.NNModule()
+        key = nn.dataFlow.createNode(ng.NeuralNetData("key"))
+        length = nn.dataFlow.createNode(ng.NeuralNetData("length"))
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+
+        annot = ng.Annotation()
+        annot.setKeyNode(key)
+        annot.setLengthNode(length)
+        annot.setComponentLevels(["", "test", "woot"])
+
+        node.setAnnotation(annot)
+
+        new_annot = node.getAnnotation()
+        #assert new_annot.getLengthNode() == length
+        assert new_annot.getKeyNode() == key
+        assert len(new_annot.getComponentLevels()) == 3
+        assert new_annot.getComponentLevels()[0] == ""
+        assert new_annot.getComponentLevels()[2] == "woot"
