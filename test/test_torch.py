@@ -8490,7 +8490,6 @@ class TestTorch(TestCase):
                 self.assertRaises(
                     AttributeError, lambda: sparse_cuda_t.__cuda_array_interface__)
 
-
             # CUDA tensors have the attribute and v0 interface
             cudat = tp(10).cuda()
 
@@ -8509,7 +8508,6 @@ class TestTorch(TestCase):
             self.assertEqual(ar_dict["typestr"], typestr)
             self.assertEqual(ar_dict["data"], (cudat.data_ptr(), False))
             self.assertEqual(ar_dict["version"], 0)
-
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_array_interface(self):

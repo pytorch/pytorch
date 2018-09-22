@@ -444,7 +444,7 @@ class Tensor(torch._C._TensorBase):
     @property
     def __cuda_array_interface__(self):
         """Array view description for cuda tensors.
-        
+
         See:
         https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
         """
