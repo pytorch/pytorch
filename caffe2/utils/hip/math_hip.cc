@@ -38,11 +38,11 @@ namespace {
     }                                                                 \
   };                                                                  \
   template <>                                                         \
-  struct Func##Functor<float16> {                                     \
-    inline __host__ __device__ float16                                \
-    operator()(const float16& lhs, const float16& rhs) const {        \
-      return convert::To<float, float16>(convert::To<float16, float>( \
-          lhs) expr convert::To<float16, float>(rhs));                \
+  struct Func##Functor<at::Half> {                                     \
+    inline __host__ __device__ at::Half                                \
+    operator()(const at::Half& lhs, const at::Half& rhs) const {        \
+      return convert::To<float, at::Half>(convert::To<at::Half, float>( \
+          lhs) expr convert::To<at::Half, float>(rhs));                \
     }                                                                 \
   };
 DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Add, +)
@@ -459,7 +459,7 @@ DEFINE_SIMPLE_HIP_COMPARE_FUNCTION(GE, thrust::greater_equal)
   DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op) \
   DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, Func, Op)               \
   DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(double, double, Func, Op)             \
-  DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float16, float16, Func, Op)
+  DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(at::Half, at::Half, Func, Op)
 
 DEFINE_SIMPLE_HIP_BINARY_FUNCTION(Add, AddFunctor)
 DEFINE_SIMPLE_HIP_BINARY_FUNCTION(Sub, SubFunctor)
@@ -612,7 +612,7 @@ DEFINE_2D_BROADCAST_HIP_COMPARE_FUNCTION(GE, thrust::greater_equal)
       std::int64_t, std::int64_t, Func, Op)                           \
   DELEGATE_2D_BROADCAST_HIP_BINARY_FUNCTION(float, float, Func, Op)   \
   DELEGATE_2D_BROADCAST_HIP_BINARY_FUNCTION(double, double, Func, Op) \
-  DELEGATE_2D_BROADCAST_HIP_BINARY_FUNCTION(float16, float16, Func, Op)
+  DELEGATE_2D_BROADCAST_HIP_BINARY_FUNCTION(at::Half, at::Half, Func, Op)
 
 DEFINE_2D_BROADCAST_HIP_BINARY_FUNCTION(Add, AddFunctor)
 DEFINE_2D_BROADCAST_HIP_BINARY_FUNCTION(Sub, SubFunctor)
@@ -676,7 +676,7 @@ DEFINE_BROADCAST_HIP_COMPARE_FUNCTION(GE, thrust::greater_equal)
   DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op) \
   DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(float, float, Func, Op)               \
   DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(double, double, Func, Op)             \
-  DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(float16, float16, Func, Op)
+  DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(at::Half, at::Half, Func, Op)
 
 DEFINE_BROADCAST_HIP_BINARY_FUNCTION(Add, AddFunctor)
 DEFINE_BROADCAST_HIP_BINARY_FUNCTION(Sub, SubFunctor)
@@ -776,17 +776,17 @@ void Gemm<float, HIPContext>(
 }
 
 template <>
-void Gemm<float16, HIPContext>(
+void Gemm<at::Half, HIPContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
     const int M,
     const int N,
     const int K,
     const float alpha,
-    const float16* A,
-    const float16* B,
+    const at::Half* A,
+    const at::Half* B,
     const float beta,
-    float16* C,
+    at::Half* C,
     HIPContext* context,
     TensorProto::DataType math_type) {
   CAFFE_THROW("Unsupported math type");
@@ -823,8 +823,8 @@ void Gemm<float16, HIPContext>(
 
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // convert alpha, beta from float -> __half
-    /*auto alpha_fp16 = convert::floatToHalf(alpha);
-    auto beta_fp16 = convert::floatToHalf(beta);
+    /*__half alpha_fp16 = at::Half(alpha);
+    __half beta_fp16 = at::Half(beta);
 
     // call cublasHgemm
     ROCBLAS_CHECK(cublasHgemm(
@@ -954,7 +954,7 @@ void GemmStridedBatched<float, HIPContext>(
 }
 
 template <>
-void GemmStridedBatched<float16, HIPContext>(
+void GemmStridedBatched<at::Half, HIPContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
     const int batch_size,
@@ -962,12 +962,12 @@ void GemmStridedBatched<float16, HIPContext>(
     const int N,
     const int K,
     const float alpha,
-    const float16* A,
+    const at::Half* A,
     const int A_stride,
-    const float16* B,
+    const at::Half* B,
     const int B_stride,
     const float beta,
-    float16* C,
+    at::Half* C,
     const int C_stride,
     HIPContext* context,
     TensorProto::DataType math_type) {
@@ -975,7 +975,7 @@ void GemmStridedBatched<float16, HIPContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     // loop over matrices in the batch
     for (int i = 0; i < batch_size; ++i) {
-      math::Gemm<float16, HIPContext>(
+      math::Gemm<at::Half, HIPContext>(
           TransA,
           TransB,
           M,
@@ -1001,8 +1001,8 @@ void GemmStridedBatched<float16, HIPContext>(
         : rocblas_operation_transpose;
 
     // convert alpha, beta from float -> __half
-    auto alpha_fp16 = convert::floatToHalf(alpha);
-    auto beta_fp16 = convert::floatToHalf(beta);
+    __half alpha_fp16 = at::Half(alpha);
+    __half beta_fp16 = at::Half(beta);
     ROCBLAS_ENFORCE(cublasHgemmStridedBatched(
         context->rocblas_handle(),
         cuTransB,
@@ -1141,19 +1141,19 @@ __global__ void AddStripedBatchKernel(
   }
 
 CAFFE2_SPECIALIZED_HIP_ADD_STRIPED_BATCH(float);
-CAFFE2_SPECIALIZED_HIP_ADD_STRIPED_BATCH(float16);
+CAFFE2_SPECIALIZED_HIP_ADD_STRIPED_BATCH(at::Half);
 #undef CAFFE2_SPECIALIZED_HIP_ADD_STRIPED_BATCH
 
 template <>
-void Gemv<float16, HIPContext>(
+void Gemv<at::Half, HIPContext>(
     const CBLAS_TRANSPOSE TransA,
     const int M,
     const int N,
     const float alpha,
-    const float16* A,
-    const float16* x,
+    const at::Half* A,
+    const at::Half* x,
     const float beta,
-    float16* y,
+    at::Half* y,
     HIPContext* context,
     TensorProto::DataType math_type) {
   CAFFE_THROW("Unsupported math type");
@@ -1188,8 +1188,8 @@ void Gemv<float16, HIPContext>(
         CUDA_R_16F,
         LDC));
   } else if (math_type == TensorProto_DataType_FLOAT16) {
-    auto alpha_fp16 = convert::floatToHalf(alpha);
-    auto beta_fp16 = convert::floatToHalf(beta);
+    __half alpha_fp16 = at::Half(alpha);
+    __half beta_fp16 = at::Half(beta);
 
     ROCBLAS_CHECK(cublasHgemm(
         context->rocblas_handle(),
@@ -1245,7 +1245,7 @@ CAFFE2_SPECIALIZED_HIP_SET(double);
 CAFFE2_SPECIALIZED_HIP_SET(bool);
 CAFFE2_SPECIALIZED_HIP_SET(int8_t);
 CAFFE2_SPECIALIZED_HIP_SET(int16_t);
-CAFFE2_SPECIALIZED_HIP_SET(float16);
+CAFFE2_SPECIALIZED_HIP_SET(at::Half);
 CAFFE2_SPECIALIZED_HIP_SET(int);
 CAFFE2_SPECIALIZED_HIP_SET(int64_t);
 CAFFE2_SPECIALIZED_HIP_SET(char);
@@ -1395,15 +1395,15 @@ void Dot<float, HIPContext>(
 }
 
 template <>
-void Dot<float16, HIPContext>(
+void Dot<at::Half, HIPContext>(
     const int n,
-    const float16* a,
-    const float16* b,
-    float16* y,
+    const at::Half* a,
+    const at::Half* b,
+    at::Half* y,
     HIPContext* context) {
   CAFFE_THROW("Unsupported math type");
 #if ROCBLAS_FP16 // rocblas does not support fp16 yet
-  float16 result;
+  at::Half result;
   // execute with 32-bit math
   ROCBLAS_CHECK(cublasDotEx(
       context->rocblas_handle(),
@@ -1417,7 +1417,7 @@ void Dot<float16, HIPContext>(
       &result,
       CUDA_R_16F,
       CUDA_R_32F));
-  context->Copy<float16, CPUContext, HIPContext>(1, &result, y);
+  context->Copy<at::Half, CPUContext, HIPContext>(1, &result, y);
 #endif
 }
 
@@ -1594,7 +1594,7 @@ struct FloatTransform {
     }                                                                     \
   }
 
-CAFFE2_MATH_SUM_FUNC(float16)
+CAFFE2_MATH_SUM_FUNC(at::Half)
 #undef CAFFE2_MATH_SUM_FUNC
 
 namespace {
@@ -1674,7 +1674,7 @@ void SumSqr<float, HIPContext>(
     }                                                                 \
   }
 
-CAFFE2_MATH_SUMSQR_FUNC(float16)
+CAFFE2_MATH_SUMSQR_FUNC(at::Half)
 #undef CAFFE2_MATH_SUMSQR_FUNC
 #undef DEVICE_REDUCE_SIZE_THRESHOLD
 
@@ -1710,15 +1710,15 @@ void Select<float, HIPContext>(
 }
 
 template <>
-void Select<float16, HIPContext>(
+void Select<at::Half, HIPContext>(
     const int N,
     const int D,
-    const float16* x,
+    const at::Half* x,
     const int* idx,
-    float16* y,
+    at::Half* y,
     HIPContext* context) {
   hipLaunchKernelGGL(
-      (SelectKernel<float16>),
+      (SelectKernel<at::Half>),
       dim3(CAFFE_GET_BLOCKS(N)),
       dim3(CAFFE_HIP_NUM_THREADS),
       0,
@@ -1749,52 +1749,52 @@ ScaleKernel(const int n, const TAlpha* alpha, const TData* x, TData* y) {
 }
 
 template <>
-__global__ void ScaleKernel<float16, float16>(
+__global__ void ScaleKernel<at::Half, at::Half>(
     const int n,
-    const float16 alpha,
-    const float16* x,
-    float16* y) {
+    const at::Half alpha,
+    const at::Half* x,
+    at::Half* y) {
   HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, float16>(
-        convert::To<float16, float>(x[i]) * convert::To<float16, float>(alpha));
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * convert::To<at::Half, float>(alpha));
   }
 }
 
 template <>
-__global__ void ScaleKernel<float16, float16>(
+__global__ void ScaleKernel<at::Half, at::Half>(
     const int n,
-    const float16* alpha,
-    const float16* x,
-    float16* y) {
+    const at::Half* alpha,
+    const at::Half* x,
+    at::Half* y) {
   HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, float16>(
-        convert::To<float16, float>(x[i]) *
-        convert::To<float16, float>(*alpha));
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) *
+        convert::To<at::Half, float>(*alpha));
   }
 }
 
 // fp16 specialization
 template <>
-__global__ void ScaleKernel<float, float16>(
+__global__ void ScaleKernel<float, at::Half>(
     const int n,
     const float alpha,
-    const float16* x,
-    float16* y) {
+    const at::Half* x,
+    at::Half* y) {
   HIP_1D_KERNEL_LOOP(i, n) {
     y[i] =
-        convert::To<float, float16>(convert::To<float16, float>(x[i]) * alpha);
+        convert::To<float, at::Half>(convert::To<at::Half, float>(x[i]) * alpha);
   }
 }
 
 template <>
-__global__ void ScaleKernel<float, float16>(
+__global__ void ScaleKernel<float, at::Half>(
     const int n,
     const float* alpha,
-    const float16* x,
-    float16* y) {
+    const at::Half* x,
+    at::Half* y) {
   HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, float16>(
-        convert::To<float16, float>(x[i]) * (*alpha));
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * (*alpha));
   }
 }
 
@@ -1864,8 +1864,8 @@ void Powx<float, HIPContext>(
         y);                                         \
   }
 CAFFE2_SPECIALIZED_HIP_SCALE(float, float)
-CAFFE2_SPECIALIZED_HIP_SCALE(float16, float16)
-CAFFE2_SPECIALIZED_HIP_SCALE(float, float16)
+CAFFE2_SPECIALIZED_HIP_SCALE(at::Half, at::Half)
+CAFFE2_SPECIALIZED_HIP_SCALE(float, at::Half)
 CAFFE2_SPECIALIZED_HIP_SCALE(double, double)
 CAFFE2_SPECIALIZED_HIP_SCALE(std::int32_t, std::int32_t)
 CAFFE2_SPECIALIZED_HIP_SCALE(std::int64_t, std::int64_t)
@@ -1895,11 +1895,11 @@ void Axpy<double, HIPContext>(
 }
 
 template <>
-void Axpy<float16, HIPContext>(
+void Axpy<at::Half, HIPContext>(
     const int N,
     const float alpha,
-    const float16* X,
-    float16* Y,
+    const at::Half* X,
+    at::Half* Y,
     HIPContext* context) {
   CAFFE_THROW("Unsupported math type");
 #if ROCBLAS_FP16
@@ -1948,14 +1948,14 @@ void Axpy<float, HIPContext>(
 }
 
 template <>
-void Axpy<float16, HIPContext>(
+void Axpy<at::Half, HIPContext>(
     const int n,
     const float* alpha,
-    const float16* X,
-    float16* Y,
+    const at::Half* X,
+    at::Half* Y,
     HIPContext* context) {
   hipLaunchKernelGGL(
-      (AxpyKernel<float16>),
+      (AxpyKernel<at::Half>),
       dim3(CAFFE_GET_BLOCKS(n)),
       dim3(CAFFE_HIP_NUM_THREADS),
       0,
@@ -1981,16 +1981,16 @@ __global__ void AxpbyKernel(
 }
 
 template <>
-__global__ void AxpbyKernel<float, float16>(
+__global__ void AxpbyKernel<float, at::Half>(
     const int n,
     const float a,
-    const float16* x,
+    const at::Half* x,
     const float b,
-    float16* y) {
+    at::Half* y) {
   HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, float16>(
-        convert::To<float16, float>(x[i]) * a +
-        convert::To<float16, float>(y[i]) * b);
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * a +
+        convert::To<at::Half, float>(y[i]) * b);
   }
 }
 
@@ -2007,16 +2007,16 @@ __global__ void AxpbyKernel(
 }
 
 template <>
-__global__ void AxpbyKernel<float, float16>(
+__global__ void AxpbyKernel<float, at::Half>(
     const int n,
     const float* a,
-    const float16* x,
+    const at::Half* x,
     const float* b,
-    float16* y) {
+    at::Half* y) {
   HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, float16>(
-        convert::To<float16, float>(x[i]) * *a +
-        convert::To<float16, float>(y[i]) * *b);
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * *a +
+        convert::To<at::Half, float>(y[i]) * *b);
   }
 }
 
@@ -2064,7 +2064,7 @@ __global__ void AxpbyKernel<float, float16>(
         y);                                         \
   }
 CAFFE2_SPECIALIZED_HIP_AXPBY(float, float)
-CAFFE2_SPECIALIZED_HIP_AXPBY(float, float16)
+CAFFE2_SPECIALIZED_HIP_AXPBY(float, at::Half)
 #undef CAFFE2_SPECIALIZED_HIP_AXPBY
 
 namespace {

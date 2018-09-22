@@ -1264,7 +1264,7 @@ bool ImageInputOp<Context>::CopyPrefetched() {
                                               image_output, mean_gpu_,
                                               std_gpu_, &context_);
       } else if (output_type_ == TensorProto_DataType_FLOAT16) {
-        TransformOnGPU<uint8_t,float16,Context>(prefetched_image_on_device_,
+        TransformOnGPU<uint8_t,at::Half,Context>(prefetched_image_on_device_,
                                                 image_output, mean_gpu_,
                                                 std_gpu_, &context_);
       }  else {

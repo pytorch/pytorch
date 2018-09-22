@@ -375,6 +375,18 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   return setUnshapedType(node);
 }
 
+static at::optional<size_t> determineListSize(Value * list) {
+  JIT_ASSERT(list->type()->cast<ListType>());
+  if (auto shape = constant_as<std::vector<int64_t>>(list)) {
+    return shape->size();
+  }
+  auto input_node = list->node();
+  if (input_node->kind() == prim::ListConstruct) {
+    return input_node->inputs().size();
+  }
+  return at::nullopt;
+}
+
 bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   static const auto broadcast = [](std::vector<TensorTypePtr>& tensor_types) -> TensorTypePtr {
     if (tensor_types.size() == 1) {
@@ -424,13 +436,13 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::ceil(Tensor self) -> Tensor",
     "aten::clone(Tensor self) -> Tensor",
     "aten::contiguous(Tensor self) -> Tensor",
-    "aten::bernoulli(Tensor self) -> Tensor",
+    "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
     "aten::celu(Tensor self, Scalar alpha) -> Tensor",
     "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
     "aten::clamp_max(Tensor self, Scalar max) -> Tensor",
     "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
     "aten::alpha_dropout(Tensor input, float p, int train) -> Tensor",
-    "aten::bernoulli(Tensor self, float p, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, *, Generator generator) -> Tensor",
     "aten::cos(Tensor self) -> Tensor",
     "aten::cosh(Tensor self) -> Tensor",
     "aten::digamma(Tensor self) -> Tensor",
@@ -592,7 +604,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   //   tensor outputs : 1
   static const register_formula_for binary_ops_strict_match {{
     "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
-    "aten::bernoulli(Tensor self, Tensor p, Generator generator) -> Tensor",
     "aten::mm(Tensor self, Tensor mat2) -> Tensor",
     "aten::bmm(Tensor self, Tensor mat2) -> Tensor",
   }, [](Node * node) -> type_vec_t {
@@ -1024,8 +1035,8 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
   std::vector<TensorTypePtr> tensor_types;
   static const auto reshape_prop =
     [](Node * node, Symbol shape_input, const std::vector<TensorTypePtr>& tensor_types) -> TensorTypePtr {
-      if (auto shape = node->get<std::vector<int64_t>>(shape_input)) {
-        return tensor_types.at(0)->withDim(shape->size());
+      if (auto list_size = determineListSize(node->namedInput(shape_input))) {
+        return tensor_types.at(0)->withDim(*list_size);
       }
       return nullptr;
     };
@@ -1326,23 +1337,7 @@ void PropagateShapeOnBlock(Block * block, bool insert_expands) {
 
 } // anonymous namespace
 
-void PropagateInputShapes(Graph & graph, const CompleteArgumentSpec & spec) {
-  JIT_ASSERT(graph.inputs().size() == spec.size());
-  for(size_t i = 0; i < spec.size(); ++i) {
-    auto argspec = spec.at(i);
-    if (!argspec.isTensor()) continue;
-    graph.inputs()[i]->setType(argspec);
-  }
-  PropagateShapeOnBlock(graph.block());
-}
-
-void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
-  JIT_ASSERT(graph.inputs().size() == spec.size());
-  for(size_t i = 0; i < spec.size(); ++i) {
-    const auto & argspec = spec.at(i);
-    if (!argspec.isTensor()) continue;
-    graph.inputs()[i]->setType(argspec);
-  }
+void PropagateInputShapes(Graph & graph) {
   PropagateShapeOnBlock(graph.block());
 }
 

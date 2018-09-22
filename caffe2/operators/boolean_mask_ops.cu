@@ -290,7 +290,7 @@ lowerDiagMaskKernel(int N, int M, int B, const T* in, T fill_val, T* out) {
 
 template <>
 bool SequenceMaskOp<CUDAContext>::RunOnDevice() {
-    return DispatchHelper<TensorTypes<float16, float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<at::Half, float>>::call(this, Input(0));
 }
 
 template <>

@@ -63,6 +63,7 @@ CAFFE_DEFINE_KNOWN_TYPE(int16_t);
 CAFFE_DEFINE_KNOWN_TYPE(int64_t);
 CAFFE_DEFINE_KNOWN_TYPE(double);
 CAFFE_DEFINE_KNOWN_TYPE(char);
+CAFFE_DEFINE_KNOWN_TYPE(at::Half);
 CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::mutex>);
 CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>);
 CAFFE_DEFINE_KNOWN_TYPE(std::vector<int32_t>);

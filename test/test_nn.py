@@ -22,7 +22,6 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
-import torch.legacy.nn as legacy
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import Variable, gradcheck
@@ -4202,6 +4201,43 @@ class TestNN(NNTestCase):
             hidden_shape = update_shape(correct_hidden_shape, 0, bad_size)
             test(input_shape, hidden_shape, mode)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_rnn_check_device(self):
+        input_size = 3
+        hidden_size = 5
+        num_layers = 2
+        batch_size = 4
+        seq_len = 6
+        num_directions = 1
+
+        correct_input_shape = (seq_len, batch_size, input_size)
+        correct_hidden_shape = (num_layers * num_directions, batch_size, hidden_size)
+        rnn_modes = ['RNN', 'GRU', 'LSTM']
+
+        for mode in rnn_modes:
+            model = getattr(nn, mode)(input_size, hidden_size, num_layers)
+            input = torch.randn(correct_input_shape)
+            hidden = torch.randn(correct_hidden_shape)
+
+            # input and weights are not at the same device
+            with self.assertRaisesRegex(RuntimeError,
+                                        "Input and parameter tensors are not at the same device"):
+                model(input.to('cuda:0'))
+
+            # input and hiddens are not at the same device
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"Expected object of backend CPU but got backend CUDA for argument"):
+                if mode is 'LSTM':
+                    model(input, (hidden.to('cuda:0'), hidden.to('cuda:0')))
+                else:
+                    model(input, (hidden.to('cuda:0')))
+
+            # hidden tensors are not at the same CUDA device
+            if mode is 'LSTM':
+                with self.assertRaisesRegex(RuntimeError,
+                                            "Input and hidden tensors are not at the same device"):
+                    model(input.to('cuda:0'), (hidden.to('cuda:0'), hidden.to('cuda:1')))
+
     def test_rnn_initial_hidden_state(self):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
         for mode in rnn_modes:
@@ -4596,6 +4632,14 @@ class TestNN(NNTestCase):
 
         gradcheck(func, [v])
         gradgradcheck(func, [v])
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_PReLU_backward_requires_grad_false(self):
+        m = nn.PReLU().to('cuda')
+        x = torch.randn(2, 3, 4, 5, requires_grad=False, device='cuda')
+        y = m(x)
+        y.mean().backward()
+        self.assertEqual(x.grad, None)
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
@@ -5786,39 +5830,18 @@ class TestNN(NNTestCase):
 
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
-        module_legacy = legacy.Bilinear(10, 10, 8)
+        input1 = torch.randn(4, 10, requires_grad=True)
+        input2 = torch.randn(4, 10, requires_grad=True)
+        grad_output = torch.randn(4, 8)
 
-        module_legacy.weight.copy_(module.weight.data)
-        module_legacy.bias.copy_(module.bias.data)
-
-        input1 = torch.randn(4, 10)
-        input2 = torch.randn(4, 10)
-
-        output = module(Variable(input1), Variable(input2))
-        output_legacy = module_legacy.forward([input1, input2])
-
-        self.assertEqual(output.data, output_legacy)
-
-        input1_1 = torch.tensor(input1, requires_grad=True)
-        input2_1 = torch.tensor(input2, requires_grad=True)
-
-        module.zero_grad()
-        module_legacy.zeroGradParameters()
-
-        output = module(input1_1, input2_1)
-        grad_output = torch.randn(*output.size())
-        gi1_legacy, gi2_legacy = module_legacy.backward([input1, input2], grad_output)
-        output.backward(grad_output)
-        gi1 = input1_1.grad.data.clone()
-        gi2 = input2_1.grad.data.clone()
-
-        self.assertEqual(gi1, gi1_legacy)
-        self.assertEqual(gi2, gi2_legacy)
-        self.assertEqual(module.weight.grad.data, module_legacy.gradWeight)
-        self.assertEqual(module.bias.grad.data, module_legacy.gradBias)
-
-        _assertGradAndGradgradChecks(self, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
-                                     (input1_1, input2_1))
+        res = module(input1, input2)
+        expected = (torch.einsum("bi,kij,bj->bk", input1, module.weight, input2) +
+                    module.bias)
+        self.assertEqual(res, expected)
+        grads = torch.autograd.grad(res, [module.weight, module.bias, input1, input2], grad_output)
+        grads_expected = torch.autograd.grad(expected, [module.weight, module.bias, input1, input2], grad_output)
+        for g, ge in zip(grads, grads_expected):
+            self.assertEqual(g, ge)
 
     def test_bilinear_no_bias(self):
         module = nn.Bilinear(10, 10, 8)
