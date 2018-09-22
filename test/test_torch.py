@@ -8427,6 +8427,91 @@ class TestTorch(TestCase):
             self.assertEqual(x[idx], x[int(idx)])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_cuda_array_interface(self):
+        """torch.Tensor exposes __cuda_array_interface__ for cuda tensors.
+
+        An object t is considered a cuda-tensor if:
+            hasattr(t, '__cuda_array_interface__')
+
+        A cuda-tensor provides a tensor description dict:
+            shape: (integer, ...) Tensor shape.
+            strides: (integer, ...) Tensor strides, in bytes.
+            typestr: (str) A numpy-style typestr.
+            data: (int, boolean) A (data_ptr, read-only) tuple.
+            version: (int) Version 0
+
+        See:
+        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        """
+
+        types = [
+            torch.DoubleTensor,
+            torch.FloatTensor,
+            torch.HalfTensor,
+            torch.LongTensor,
+            torch.IntTensor,
+            torch.ShortTensor,
+            torch.CharTensor,
+            torch.ByteTensor,
+        ]
+        dtypes = [
+            np.float64,
+            np.float32,
+            np.float16,
+            np.int64,
+            np.int32,
+            np.int16,
+            np.int8,
+            np.uint8,
+        ]
+        for tp, npt in zip(types, dtypes):
+
+            # Get typestr from numpy descr, ignoring endian marker
+            typestr = np.dtype(npt).descr[0][1][1:]
+
+            # CPU tensors do not implement the interface.
+            cput = tp(10)
+
+            self.assertFalse(hasattr(cput, '__cuda_array_interface__'))
+            self.assertRaises(AttributeError, lambda: cput.__cuda_array_interface__)
+
+            # Sparse CPU/CUDA tensors do not implement the interface
+            if tp not in (torch.HalfTensor,):
+                sparse_t = torch.sparse_coo_tensor(cput[None, :], cput)
+
+                self.assertFalse(hasattr(sparse_t, '__cuda_array_interface__'))
+                self.assertRaises(
+                    AttributeError, lambda: sparse_t.__cuda_array_interface__)
+
+                sparse_cuda_t = torch.sparse_coo_tensor(cput[None, :], cput).cuda()
+
+                self.assertFalse(hasattr(sparse_cuda_t, '__cuda_array_interface__'))
+                self.assertRaises(
+                    AttributeError, lambda: sparse_cuda_t.__cuda_array_interface__)
+
+
+            # CUDA tensors have the attribute and v0 interface
+            cudat = tp(10).cuda()
+
+            self.assertTrue(hasattr(cudat, '__cuda_array_interface__'))
+
+            ar_dict = cudat.__cuda_array_interface__
+
+            self.assertEqual(
+                set(ar_dict.keys()),
+                {"shape", "strides", "typestr", "data", "version"}
+            )
+
+            self.assertEqual(ar_dict["shape"], (10,))
+            self.assertEqual(
+                ar_dict["strides"], (cudat.storage().element_size(),))
+            self.assertEqual(ar_dict["typestr"], typestr)
+            self.assertEqual(ar_dict["data"], (cudat.data_ptr(), False))
+            self.assertEqual(ar_dict["version"], 0)
+
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_array_interface(self):
         types = [
             torch.DoubleTensor,
