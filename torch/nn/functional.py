@@ -17,11 +17,13 @@ from . import grad
 
 _VF = torch._C._VariableFunctions
 
+
 def weak_script(fn):
     # register op for jit
     # no op if called from python
     fn.is_weak = True
     return fn
+
 
 class _Reduction:
     # NB: Keep this class in sync with enums in THNN/Reduction.h
