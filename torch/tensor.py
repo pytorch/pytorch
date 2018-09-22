@@ -441,4 +441,52 @@ class Tensor(torch._C._TensorBase):
             array = array.astype('uint8')
         return torch.from_numpy(array)
 
+    @property
+    def __cuda_array_interface__(self):
+        """Array view description for cuda tensors.
+        
+        See:
+        https://numba.pydata.org/numba-doc/latest/cuda/cuda_array_interface.html
+        """
+
+        # raise AttributeError for unsupported tensors, so that
+        # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
+        if not self.device.type == "cuda":
+            raise AttributeError(
+                "Not on cuda device, use Tensor.cuda() first: %r" %
+                self.device
+            )
+
+        if self.is_sparse:
+            raise AttributeError(
+                "Can't convert sparse tensor, use Tensor.to_dense() "
+                "to convert to a dense tensor first."
+            )
+
+        # RuntimeError, matching tensor.__array__() behavior.
+        if self.requires_grad:
+            raise RuntimeError(
+                "Can't get __cuda_array_interface__ on Variable that requires grad. "
+                "Use var.detach().__cuda_array_interface__ instead."
+            )
+
+        typestr = {
+            torch.float16: "f2",
+            torch.float32: "f4",
+            torch.float64: "f8",
+            torch.uint8: "u1",
+            torch.int8: "i1",
+            torch.int16: "i2",
+            torch.int32: "i4",
+            torch.int64: "i8",
+        }[self.dtype]
+
+        itemsize = self.storage().element_size()
+
+        shape = self.shape
+        strides = tuple(s * itemsize for s in self.stride())
+        data = (self.data_ptr(), False)  # read-only is false
+
+        return dict(typestr=typestr, shape=shape, strides=strides, data=data, version=0)
+
     __module__ = 'torch'
