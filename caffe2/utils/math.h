@@ -17,9 +17,13 @@ extern "C" {
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math_utils.h"
 
+namespace at {
+  class Tensor;
+}
+
 namespace caffe2 {
 
-class Tensor;
+using at::Tensor;
 
 // An empty class as a placeholder for a math function that has no specific
 // engine specified.

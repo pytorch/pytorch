@@ -37,6 +37,10 @@ struct is_fundamental<at::Half> : std::true_type {
 };
 }  // namespace std
 
+namespace at {
+  class Tensor;
+}
+
 namespace caffe2 {
 
 class TypeMeta;
@@ -454,8 +458,6 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
       #T);                                                     \
   }
 
-class Tensor;
-
 // Note: we have preallocated the numbers so they line up exactly
 // with at::ScalarType's numbering.  All other numbers do not matter.
 
@@ -474,7 +476,7 @@ CAFFE_DECLARE_KNOWN_TYPE(9, std::complex<float>)
 CAFFE_DECLARE_KNOWN_TYPE(10, std::complex<double>)
 // 11 = undefined type id
 
-CAFFE_DECLARE_KNOWN_TYPE(12, Tensor)
+CAFFE_DECLARE_KNOWN_TYPE(12, at::Tensor)
 CAFFE_DECLARE_KNOWN_TYPE(13, std::string)
 CAFFE_DECLARE_KNOWN_TYPE(14, bool)
 CAFFE_DECLARE_KNOWN_TYPE(15, uint16_t)
