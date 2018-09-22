@@ -171,6 +171,7 @@ using NodeKind = Symbol;
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
   Value(Node * node_, size_t offset_);
+  virtual ~Value() {}
 private:
   friend struct Node;
   friend struct Graph;
@@ -254,6 +255,18 @@ public:
     return this;
   }
 
+};
+
+struct ParamValue : Value {
+  TH_DISALLOW_COPY_AND_ASSIGN(ParamValue);
+  ParamValue(Node * node_, size_t offset_, at::optional<IValue> default_value);
+
+  const at::optional<IValue>& default_value() const {
+    return default_value_;
+  }
+
+private:
+  at::optional<IValue> default_value_;
 };
 
 struct Node : public Attributes<Node> {
@@ -508,6 +521,13 @@ public:
     outputs_.push_back(new Value(this, outputs_.size()));
     schema_ = nullptr;
     return outputs_.back();
+  }
+
+  ParamValue* addParamOutput(at::optional<IValue> default_value) {
+    ParamValue* val = new ParamValue(this, outputs_.size(), default_value);
+    outputs_.push_back(val);
+    schema_ = nullptr;
+    return val;
   }
 
   Value* insertOutput(size_t i) {
@@ -796,6 +816,13 @@ struct Block {
     v->setUniqueName(name);
     return v;
   }
+  ParamValue* addParamInput(
+      at::optional<IValue> default_value,
+      std::string name = "") {
+    ParamValue* v = input_->addParamOutput(default_value);
+    v->setUniqueName(name);
+    return v;
+  }
   Value* insertInput(size_t i, std::string name = "") {
     Value* v = input_->insertOutput(i);
     v->setUniqueName(name);
@@ -948,6 +975,11 @@ public:
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
+  }
+  ParamValue* addParamInput(
+      at::optional<IValue> default_value,
+      std::string name = "") {
+    return block_->addParamInput(default_value, std::move(name));
   }
   Value* insertInput(size_t i, std::string name = "") {
     return block_->insertInput(i, std::move(name));
@@ -1267,6 +1299,12 @@ inline void Value::replaceAllUsesWith(Value * newValue) {
     replaceFirstUseWith(newValue);
   }
 }
+
+inline ParamValue::ParamValue(
+    Node* node_,
+    size_t offset_,
+    at::optional<IValue> default_value_)
+    : Value(node_, offset_), default_value_(default_value_) {}
 
 inline Node::Node(Graph * graph_, NodeKind kind_) :
   kind_(kind_),

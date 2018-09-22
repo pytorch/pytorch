@@ -43,6 +43,19 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
   return out;
 }
 
+
+void printIValue(std::ostream& out, IValue& value) {
+  if (value.isTensor()) {
+    out << value.toTensor();
+  } else if (value.isInt()) {
+    out << value.toInt();
+  } else if (value.isDouble()) {
+    out << value.toDouble();
+  } else {
+    AT_ERROR("Unknown IValue type");
+  }
+}
+
 struct const_value_list_with_types {
   const ArrayRef<const Value*> values;
   bool use_newlines;
@@ -68,6 +81,17 @@ std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
     printValueRef(out, n);
     out << " : ";
     out << *n->type();
+
+    // Print default value if one exists
+    const ParamValue* pv = dynamic_cast<const ParamValue*>(n);
+    if (pv != nullptr) {
+      auto value = pv->default_value();
+      if (value) {
+        out << " = ";
+        printIValue(out, *value);
+      }
+    }
+
   }
   return out;
 }

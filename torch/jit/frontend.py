@@ -182,19 +182,24 @@ def build_def(ctx, py_def, type_line, is_method):
                build_stmts(ctx, body))
 
 
-_vararg_kwarg_err = ("Compiled functions can't take variable number of arguments, "
-                     "have default values for arguments, nor keyword-only arguments")
+_vararg_kwarg_err = ("Compiled functions can't take variable number of"
+                     " arguments or have keyword-only arguments")
 
 
 def build_param_list(ctx, py_args):
-    if py_args.vararg is not None or py_args.kwarg is not None or py_args.defaults:
+    num_no_default = len(py_args.args) - len(py_args.defaults)
+
+    def get_default_at(i):
+        return py_args.defaults[i - num_no_default] if i >= num_no_default else None
+
+    if py_args.vararg is not None or py_args.kwarg is not None:
         raise ValueError(_vararg_kwarg_err)
-    if not PY2 and (py_args.kw_defaults or py_args.kwonlyargs):
+    if not PY2 and py_args.kwonlyargs:
         raise ValueError(_vararg_kwarg_err)
-    return [build_param(ctx, arg) for arg in py_args.args]
+    return [build_param(ctx, arg, get_default_at(i)) for i, arg in enumerate(py_args.args)]
 
 
-def build_param(ctx, py_arg):
+def build_param(ctx, py_arg, default):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     #     In Python2 py_arg is a Name (Expr subclass)
     name = py_arg.id if PY2 else py_arg.arg
@@ -203,7 +208,13 @@ def build_param(ctx, py_arg):
         annotation_expr = build_expr(ctx, py_arg.annotation)
     else:
         annotation_expr = Var(Ident(r, 'Tensor'))
-    return Param(annotation_expr, Ident(r, name))
+
+    if default:
+        value = str(default.n)
+        r_default = ctx.make_range(default.lineno, default.col_offset, default.col_offset + len(value))
+        return Param(annotation_expr, Ident(r, name), Const(r_default, value))
+    else:
+        return Param(annotation_expr, Ident(r, name))
 
 
 class StmtBuilder(Builder):

@@ -157,7 +157,6 @@ TORCH_API std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolv
 TORCH_API Value* packOutputs(Graph& g, at::ArrayRef<Value*> values);
 TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 TORCH_API void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
-TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
 
 // try to match a list if inputs and keyword 'attributes' to this schema,
 // if it works return the flat list of positional inputs to the call

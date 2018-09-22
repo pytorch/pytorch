@@ -9,7 +9,13 @@ std::shared_ptr<Graph> Canonicalize(const std::shared_ptr<Graph>& graph) {
   std::unordered_map<Value*, Value*> rn_env;
   auto rn_fn = [&](Value* v) { return rn_env.at(v); };
   for (auto* input : graph->inputs()) {
-    auto* r_input = r->addInput();
+    auto as_param_value = dynamic_cast<const ParamValue*>(input);
+    Value* r_input = nullptr;
+    if (as_param_value != nullptr) {
+      r_input = r->addParamInput(as_param_value->default_value());
+    } else {
+      r_input = r->addInput();
+    }
     r_input->copyMetadata(input);
     r_input->setStage(input->stage());
     rn_env[input] = r_input;

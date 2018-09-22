@@ -785,7 +785,17 @@ struct to_ir {
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
       // Add the input to the graph
-      Value *new_input = graph->addInput(name);
+      Value *new_input = nullptr;
+      if ((*it).has_default()) {
+        auto default_const = (*it).default_value();
+        if (default_const.isFloatingPoint()) {
+          new_input = graph->addParamInput(IValue(default_const.asFloatingPoint()), name);
+        } else {
+          new_input = graph->addParamInput(IValue(default_const.asIntegral()), name);
+        }
+      } else {
+        new_input = graph->addInput(name);
+      }
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
@@ -1931,8 +1941,17 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
+    at::optional<IValue> default_value = at::nullopt;
+    if (decl_arg.has_default()) {
+      Const default_const = decl_arg.default_value();
+      if (default_const.isFloatingPoint()) {
+        default_value = IValue(autograd::make_variable(at::scalar_to_tensor(default_const.asFloatingPoint())));
+      } else {
+        default_value = IValue(autograd::make_variable(at::scalar_to_tensor(default_const.asIntegral())));
+      }
+    }
     auto arg = Argument(decl_arg.ident().name(), parseTypeFromExpr(decl_arg.type()),
-                        /*N =*/at::nullopt, /*default_value =*/at::nullopt,
+                        /*N =*/at::nullopt, /*default_value =*/default_value,
                         /*kwarg_only =*/false);
     retval.push_back(arg);
   }

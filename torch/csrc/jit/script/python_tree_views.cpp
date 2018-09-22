@@ -86,6 +86,9 @@ void initTreeViewBindings(PyObject *module) {
   py::class_<Param, TreeView>(m, "Param")
     .def(py::init([](const Expr& type, const Ident& name) {
       return Param::create(name.range(), name, type);
+    }))
+    .def(py::init([](const Expr& type, const Ident& name, const Const& default_value) {
+      return Param::create(name.range(), name, type, default_value);
     }));
   py::class_<Attribute, TreeView>(m, "Attribute")
     .def(py::init([](const Ident& name, const Expr& value) {

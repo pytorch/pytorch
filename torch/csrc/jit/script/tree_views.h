@@ -257,87 +257,6 @@ struct Expr : public TreeView {
   }
 };
 
-////////////////////////////////////////////////////////////////////////////////
-// Helper nodes (mostly for function arguments)
-////////////////////////////////////////////////////////////////////////////////
-
-struct Attribute : public TreeView {
-  explicit Attribute(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_ATTRIBUTE);
-  }
-  Ident name() const {
-    return Ident(subtree(0));
-  }
-  Expr value() const {
-    return Expr(subtree(1));
-  }
-  static Attribute create(const SourceRange& range, const Ident& name, const TreeRef& value) {
-    return Attribute(Compound::create(TK_ATTRIBUTE, range, {name, value}));
-  }
-};
-
-
-struct Param : public TreeView {
-  explicit Param(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_PARAM);
-  }
-  static Param create(const SourceRange& range, const Ident& ident, const Expr& type) {
-    return Param(Compound::create(TK_PARAM, range, {ident, type}));
-  }
-  Ident ident() const {
-    return Ident(subtree(0));
-  }
-  Expr type() const {
-    return Expr(subtree(1));
-  }
-  template<typename T>
-  T typeExpect() const {
-    return T(type());
-  }
-};
-
-////////////////////////////////////////////////////////////////////////////////
-// Top level definitions
-////////////////////////////////////////////////////////////////////////////////
-
-struct Decl : public TreeView {
-  explicit Decl(const TreeRef& tree) : TreeView(tree) {
-    tree->match(TK_DECL);
-  }
-  List<Param> params() const {
-    return List<Param>(subtree(0));
-  }
-  Maybe<Expr> return_type() const {
-    return Maybe<Expr>(subtree(1));
-  }
-  static Decl create(const SourceRange& range, const List<Param>& params, Maybe<Expr> return_type) {
-    return Decl(Compound::create(TK_DECL, range, {params, return_type}));
-  }
-};
-
-struct Def : public TreeView {
-  explicit Def(const TreeRef& tree) : TreeView(tree) {
-    tree->match(TK_DEF);
-  }
-  Ident name() const {
-    return Ident(subtree(0));
-  }
-  Decl decl() const {
-    return Decl(subtree(1));
-  }
-  List<Stmt> statements() const {
-    return List<Stmt>(subtree(2));
-  }
-  static Def create(
-      const SourceRange& range,
-      const Ident& name,
-      const Decl& decl,
-      const List<Stmt>& stmts) {
-    return Def(Compound::create(
-        TK_DEF, range, {name, decl, stmts}));
-  }
-};
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Statements
@@ -555,6 +474,105 @@ struct Const : public Expr {
   }
   static Const create(const SourceRange& range, const std::string& value) {
     return Const(Compound::create(TK_CONST, range, {String::create(value)}));
+  }
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Helper nodes (mostly for function arguments)
+////////////////////////////////////////////////////////////////////////////////
+
+struct Attribute : public TreeView {
+  explicit Attribute(const TreeRef& tree) : TreeView(tree) {
+    tree_->match(TK_ATTRIBUTE);
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  Expr value() const {
+    return Expr(subtree(1));
+  }
+  static Attribute create(const SourceRange& range, const Ident& name, const TreeRef& value) {
+    return Attribute(Compound::create(TK_ATTRIBUTE, range, {name, value}));
+  }
+};
+
+
+struct Param : public TreeView {
+  explicit Param(const TreeRef& tree) : TreeView(tree) {
+    tree_->match(TK_PARAM);
+  }
+  static Param create(
+      const SourceRange& range,
+      const Ident& ident,
+      const Expr& type) {
+    return Param(
+        Compound::create(TK_PARAM, range, {ident, type}));
+  }
+  static Param create(
+      const SourceRange& range,
+      const Ident& ident,
+      const Expr& type,
+      const Const& default_value) {
+    return Param(
+        Compound::create(TK_PARAM, range, {ident, type, default_value}));
+  }
+  Ident ident() const {
+    return Ident(subtree(0));
+  }
+  Expr type() const {
+    return Expr(subtree(1));
+  }
+  Const default_value() const {
+    return Const(subtree(2));
+  }
+  bool has_default() const {
+    return tree()->trees().size() == 3;
+  }
+  template<typename T>
+  T typeExpect() const {
+    return T(type());
+  }
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Top level definitions
+////////////////////////////////////////////////////////////////////////////////
+
+struct Decl : public TreeView {
+  explicit Decl(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_DECL);
+  }
+  List<Param> params() const {
+    return List<Param>(subtree(0));
+  }
+  Maybe<Expr> return_type() const {
+    return Maybe<Expr>(subtree(1));
+  }
+  static Decl create(const SourceRange& range, const List<Param>& params, Maybe<Expr> return_type) {
+    return Decl(Compound::create(TK_DECL, range, {params, return_type}));
+  }
+};
+
+struct Def : public TreeView {
+  explicit Def(const TreeRef& tree) : TreeView(tree) {
+    tree->match(TK_DEF);
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  Decl decl() const {
+    return Decl(subtree(1));
+  }
+  List<Stmt> statements() const {
+    return List<Stmt>(subtree(2));
+  }
+  static Def create(
+      const SourceRange& range,
+      const Ident& name,
+      const Decl& decl,
+      const List<Stmt>& stmts) {
+    return Def(Compound::create(
+        TK_DEF, range, {name, decl, stmts}));
   }
 };
 
