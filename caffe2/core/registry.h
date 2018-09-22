@@ -144,7 +144,7 @@ class Registerer {
  */
 #define CAFFE_DECLARE_TYPED_REGISTRY(                                    \
     RegistryName, SrcType, ObjectType, PtrType, ...)                     \
-  CAFFE2_EXPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*   \
+  CAFFE2_IMPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*   \
   RegistryName();                                                        \
   typedef Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>        \
       Registerer##RegistryName;
