@@ -27,7 +27,7 @@ const int INFO    = 0;
 const char CAFFE2_SEVERITY_PREFIX[] = "FEWIV";
 
 namespace caffe2 {
-class MessageLogger {
+class CAFFE2_API MessageLogger {
  public:
   MessageLogger(const char *file, int line, int severity);
   ~MessageLogger();
@@ -46,7 +46,7 @@ class MessageLogger {
 // This class is used to explicitly ignore values in the conditional
 // logging macros.  This avoids compiler warnings like "value computed
 // is not used" and "statement has no effect".
-class LoggerVoidify {
+class CAFFE2_API LoggerVoidify {
  public:
   LoggerVoidify() { }
   // This has to be an operator with a precedence lower than << but
@@ -166,21 +166,26 @@ static_assert(CAFFE2_LOG_THRESHOLD <= FATAL,
 // These are adapted from glog to support a limited set of logging capability
 // for STL objects.
 
-namespace caffe2 {
+namespace std {
 // Forward declare these two, and define them after all the container streams
 // operators so that we can recurse from pair -> container -> container -> pair
 // properly.
 template<class First, class Second>
 std::ostream& operator<<(
     std::ostream& out, const std::pair<First, Second>& p);
+} // namespace std
+
+namespace caffe2 {
 template <class Iter>
 void PrintSequence(std::ostream& ss, Iter begin, Iter end);
+} // namespace caffe2
 
+namespace std {
 #define INSTANTIATE_FOR_CONTAINER(container) \
 template <class... Types> \
 std::ostream& operator<<( \
     std::ostream& out, const container<Types...>& seq) { \
-  PrintSequence(out, seq.begin(), seq.end()); \
+  caffe2::PrintSequence(out, seq.begin(), seq.end()); \
   return out; \
 }
 
@@ -195,7 +200,9 @@ inline std::ostream& operator<<(
   out << '(' << p.first << ", " << p.second << ')';
   return out;
 }
+} // namespace std
 
+namespace caffe2 {
 template <class Iter>
 inline void PrintSequence(std::ostream& out, Iter begin, Iter end) {
   // Output at most 100 elements -- appropriate if used for logging.

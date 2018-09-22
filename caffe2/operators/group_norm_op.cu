@@ -6,7 +6,7 @@
 // This is a stand-alone op: Y = gamma * (X - mu) / sig + beta
 // ------------------------------------------------------------------
 
-#include "group_norm_op.h"
+#include "caffe2/operators/group_norm_op.h"
 
 #include <array>
 
@@ -14,6 +14,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/math_utils.h"
 
 namespace caffe2 {
 
@@ -21,25 +22,6 @@ namespace {
 
 template <typename T>
 using BlockReduce = cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS>;
-
-template <typename T>
-inline __host__ __device__ T CubeCUDA(const T x) {
-  return x * x * x;
-}
-
-__global__ void InvStdCUDAKernel(
-    const int size,
-    const float epsilon,
-    const float* var,
-    float* rsig) {
-  CUDA_1D_KERNEL_LOOP(i, size) {
-#if __CUDA_ARCH__ >= 350
-    rsig[i] = rsqrtf(__ldg(var + i) + epsilon);
-#else
-    rsig[i] = rsqrtf(var[i] + epsilon);
-#endif
-  }
-}
 
 template <typename T, StorageOrder kOrder>
 __global__ void GroupNormForwardCUDAKernel(
@@ -144,13 +126,14 @@ __global__ void GroupNormBackwardCUDAKernel(
     const int i_gamma = kOrder == StorageOrder::NCHW ? (i / HxW) % C : i % C;
 #if __CUDA_ARCH__ >= 350
     const T u = (__ldg(db + i_mu) * __ldg(mu + i_mu) - __ldg(ds + i_mu)) *
-        (__ldg(X + i) - __ldg(mu + i_mu)) * CubeCUDA(__ldg(rsig + i_mu));
+        (__ldg(X + i) - __ldg(mu + i_mu)) *
+        math::utils::Cube<T>(__ldg(rsig + i_mu));
     const T v = __ldg(db + i_mu) * __ldg(rsig + i_mu);
     dX[i] = __ldg(gamma + i_gamma) * __ldg(dY + i) * __ldg(rsig + i_mu) +
         (u - v) * denom;
 #else
     const T u = (db[i_mu] * mu[i_mu] - ds[i_mu]) * (X[i] - mu[i_mu]) *
-        CubeCUDA(rsig[i_mu]);
+        math::utils::Cube<T>(rsig[i_mu]);
     const T v = db[i_mu] * rsig[i_mu];
     dX[i] = gamma[i_gamma] * dY[i] * rsig[i_mu] + (u - v) * denom;
 #endif
@@ -215,27 +198,14 @@ bool GroupNormOp<float, CUDAContext>::RunOnDeviceImpl(
     float* Y_data,
     float* mu_data,
     float* rsig_data) {
-  const std::array<int, 4> dims = order_ == StorageOrder::NCHW
-      ? std::array<int, 4>{N, G, D, HxW}
-      : std::array<int, 4>{N, HxW, G, D};
-  const std::array<int, 2> axes = order_ == StorageOrder::NCHW
-      ? std::array<int, 2>{2, 3}
-      : std::array<int, 2>{1, 3};
-
-  // Computes mean and variance.
-  math::Moments<float, CUDAContext>(
-      4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
-
-  // Uses rsqrt to computes 1 / std which is much faster than computes std.
-  InvStdCUDAKernel<<<
-      CAFFE_GET_BLOCKS(N * G),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(N * G, epsilon_, rsig_data, rsig_data);
-
-  // Computes Y = gamma * (X - mu) * rsig + beta.
   const int size = N * G * D * HxW;
   if (order_ == StorageOrder::NCHW) {
+    const std::array<int, 2> dims = {N * G, D * HxW};
+    const int axis = 1;
+    math::Moments<float, CUDAContext>(
+        2, dims.data(), 1, &axis, X_data, mu_data, rsig_data, &context_);
+    math::InvStd<float, CUDAContext>(
+        N * G, epsilon_, rsig_data, rsig_data, &context_);
     GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>
         <<<CAFFE_GET_BLOCKS(size),
            CAFFE_CUDA_NUM_THREADS,
@@ -252,6 +222,12 @@ bool GroupNormOp<float, CUDAContext>::RunOnDeviceImpl(
             beta_data,
             Y_data);
   } else {
+    const std::array<int, 4> dims = {N, HxW, G, D};
+    const std::array<int, 2> axes = {1, 3};
+    math::Moments<float, CUDAContext>(
+        4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
+    math::InvStd<float, CUDAContext>(
+        N * G, epsilon_, rsig_data, rsig_data, &context_);
     GroupNormForwardCUDAKernel<float, StorageOrder::NHWC>
         <<<CAFFE_GET_BLOCKS(size),
            CAFFE_CUDA_NUM_THREADS,

@@ -11,9 +11,14 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/ir.h"
+
 #include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/autograd/functions/utils.h"
+
+#include <ATen/core/VariableHooksInterface.h>
 
 #include <array>
 #include <cstddef>
@@ -36,68 +41,9 @@ using namespace at;
 using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
-// Helper methods for working with Attributes (torch/csrc/jit/attributes.h)
 
-// The overloaded accessors are convenient for the generated code (since we
-// don't want to make the codegen do the dispatch manually)
-static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
-static void setattr(jit::Node* n, jit::Symbol name, SparseTensorRef s)     { n->t_(name, s.tref); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, std::string v)         { n->s_(name, v); }
-template<std::size_t N>
-static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
-
-template<typename T>
-static jit::Value* createConstant(jit::Node* n, T value) {
-  return n->owningGraph()->createConstant(jit::as_tensor(value))->insertBefore(n)->output();
-}
-
-template<typename T>
-static void genericInsertInput(jit::Node* n, size_t idx, T value) {
-  n->insertInput(idx, createConstant(n, value));
-}
-
-void failPositionalAttr() {
-  throw std::runtime_error("unsupported type in setposattr. File a bug report!");
-}
-
-static void setposattr(jit::Node* n, size_t idx, const char *name, int64_t v)             { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Scalar& v)   { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensorRef s)     { failPositionalAttr(); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, const at::IntList& v)  {
-  using ArgumentStash = jit::tracer::ArgumentStash;
-  if (ArgumentStash::hasIntList(name)) {
-    auto info = ArgumentStash::popIntList(name);
-    for (size_t i = 0; i < info.size(); ++i) {
-      if (info[i] != nullptr) continue;
-      info[i] = createConstant(n, v[i]);
-    }
-    jit::TensorType expected_type {at::kLong, -1, {}};
-    for (jit::Value* v : info) {
-      if (*v->type() != expected_type) {
-        throw std::runtime_error(
-          "Type mismatch in setposattr for IntList. Check that your program "
-          "is valid without tracing, and please file a bug report if it is.");
-      }
-    }
-    jit::WithInsertPoint insert_point{n};
-    auto symbolic_info = fmap<jit::SymbolicVariable>(info);
-    auto size = jit::SymbolicVariable::stack(symbolic_info, 0);
-    n->insertInput(idx, size);
-  } else {
-    return genericInsertInput(n, idx, v);
-  }
-}
-static void setposattr(jit::Node* n, size_t idx, const char *name, bool v)                { genericInsertInput(n, idx, v); }
-static void setposattr(jit::Node* n, size_t idx, const char *name, double v)              { genericInsertInput(n, idx, v); }
-template<std::size_t N>
-static void setposattr(jit::Node* n, size_t idx, const char *name, std::array<bool, N> v) { failPositionalAttr(); }
-
-VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context, /*is_variable=*/true, /*is_undefined=*/false)
+VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
+  : TypeDefault(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
   , baseType(baseType)
   , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
@@ -106,26 +52,31 @@ VariableType::VariableType(Context* context, Type* baseType)
 ScalarType VariableType::scalarType() const {
   return baseType->scalarType();
 }
+caffe2::TypeMeta VariableType::typeMeta() const {
+  return baseType->typeMeta();
+}
 Backend VariableType::backend() const {
   return baseType->backend();
 }
-bool VariableType::is_cuda() const { return baseType->is_cuda(); }
-bool VariableType::is_sparse() const { return baseType->is_sparse(); }
-bool VariableType::is_distributed() const { return baseType->is_distributed(); }
-
-std::unique_ptr<Storage> VariableType::storage() const {
+Allocator* VariableType::allocator() const {
+  return baseType->allocator();
+}
+Device VariableType::getDeviceFromPtr(void * data) const {
+  return baseType->getDeviceFromPtr(data);
+}
+Storage VariableType::storage(bool resizable) const {
   return baseType->storage();
 }
-std::unique_ptr<Storage> VariableType::storage(size_t size) const {
+Storage VariableType::storage(size_t size, bool resizable) const {
   return baseType->storage(size);
 }
-std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
+Storage VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   return baseType->storageFromBlob(data, size, deleter);
 }
-std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
 }
-std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
+Storage VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
   return baseType->storageWithAllocator(size, allocator);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
@@ -142,24 +93,20 @@ size_t VariableType::elementSizeInBytes() const {
   return baseType->elementSizeInBytes();
 }
 Type & VariableType::toBackend(Backend b) const {
-  return *getType(baseType->toBackend(b));
+  return *getVariableTypeFromBaseType(baseType->toBackend(b));
 }
 Type & VariableType::toScalarType(ScalarType s) const {
-  return *getType(baseType->toScalarType(s));
+  return *getVariableTypeFromBaseType(baseType->toScalarType(s));
 }
 TypeID VariableType::ID() const {
   return static_cast<TypeID>(id_);
 }
 
-const char * VariableType::typeString() {
-  return "VariableType";
-}
-
 std::vector<std::unique_ptr<Type>> type_to_variable_type;
 
 // XXX - this is not threadsafe with uses of Variables
-void register_variable_type_for(Type* baseType) {
-  TORCH_ASSERT(baseType);
+void register_variable_type_for(TypeExtendedInterface* baseType) {
+  AT_ASSERT(baseType);
   size_t base_id = static_cast<size_t>(baseType->ID());
   if(type_to_variable_type.size() <= base_id) {
     type_to_variable_type.resize(base_id + 1);
@@ -172,7 +119,7 @@ struct VariableTypeRegistry {
     auto& context = at::globalContext();
     for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
       for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
-        auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+        auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
         if (baseType && baseType->backend() != Backend::Undefined) {
           register_variable_type_for(baseType);
         }
@@ -181,24 +128,60 @@ struct VariableTypeRegistry {
   }
 };
 
+struct VariableHooks : public at::VariableHooksInterface {
+  VariableHooks(at::VariableHooksArgs) {}
+  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend, at::ScalarType) const override;
+  at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
+};
+
+// Sigh, the registry doesn't support namespaces :(
+using at::RegistererVariableHooksRegistry;
+using at::VariableHooksRegistry;
+
+// WARNING: YOU MUST DO THE NEXT TWO STATIC INITIALIZERS IN THIS ORDER.
+//
+// If you do it in the other order, this is what can happen if
+// these static initializers are called before Context is
+// initialized:
+//
+//    - VariableHooks::registerVariableTypeFor will be activated
+//      to register a variable type
+//
+//    - We run the constructor of VariableTypeRegistry, which
+//      calls at::globalContext()
+//
+//    - Context is not initialized yet, so we call the constructor
+//      of Context
+//
+//    - We register CPU types, calling VariableHooks::registerVariableTypeFor
+//
+//    - We register the CPU type as a variable type
+//
+//    - In VariableTypeRegistry, we try to register the Variable type AGAIN!!
+//      Disaster.
+//
 static VariableTypeRegistry registry;
+REGISTER_VARIABLE_HOOKS(VariableHooks)
+
+// Pre-condition: backend/scalar_type is a valid type in the type_registry
+void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend, at::ScalarType scalar_type) const {
+  auto* baseType = context->getNonVariableTypeRaw(backend, scalar_type);
+  register_variable_type_for(static_cast<at::TypeExtendedInterface*>(baseType));
+}
+
+at::Type& VariableHooks::getVariableTypeFromBaseType(const at::Type& baseType) const {
+  return *VariableType::getVariableTypeFromBaseType(baseType);
+}
 
 bool VariableType::isVariableType(const at::Type& type) {
   return type.is_variable();
 }
 
-at::Type* VariableType::getType(const at::Type& baseType) {
+at::Type* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
   auto id = static_cast<size_t>(baseType.ID());
   if(id >= type_to_variable_type.size())
     return nullptr;
   return type_to_variable_type[id].get();
-}
-
-at::Type* VariableType::getType(const at::Tensor& tensor) {
-  if (!tensor.defined()) {
-    throw std::runtime_error("tensor is undefined");
-  }
-  return getType(tensor.type());
 }
 
 namespace {
@@ -208,9 +191,9 @@ std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
   for (auto p : backends) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
       if (baseType) {
-        res.emplace_back(VariableType::getType(*baseType));
+        res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
       }
     }
   }
@@ -316,24 +299,15 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   return make_variable_view(std::move(base_var), std::move(tensor));
 }
 
-struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
-  bool out = false;
-  using IterArgs<ComputeRequiresGrad>::operator();
-  void operator()(const at::Tensor& tensor) {
-    const auto& var = static_cast<const Variable&>(tensor);
-    if (var.defined() && var.requires_grad()) {
-      out = true;
-    }
+static std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors) {
+  auto base_var = Variable(base);
+  if (base_var.is_view()) {
+    base_var = base_var.base();
   }
-  bool short_circuit() { return out; }
-};
-
-template<typename... Args>
-static bool compute_requires_grad(Args&&... args) {
-  if (!GradMode::is_enabled()) {
-    return false;
+  for(Tensor &tensor : tensors) {
+    tensor = make_variable_view(base_var, std::move(tensor));
   }
-  return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
+  return tensors;
 }
 
 static void check_no_requires_grad(const Tensor& tensor, const char* name) {
@@ -364,7 +338,7 @@ static void throw_error_out_requires_grad(const char* name) {
 
 static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && var.defined()) {
-    grad_fn->add_input_metadata(var.type(), var.sizes());
+    grad_fn->add_input_metadata(var);
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
@@ -374,22 +348,8 @@ static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> gr
     for (auto& var : vars) {
       if (var.defined()) {
         // TODO: eliminate const_cast
-        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
+        auto output_nr = grad_fn->add_input_metadata(var);
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
-      } else {
-        grad_fn->add_input_metadata(Function::undefined_input());
-      }
-    }
-  }
-}
-
-static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
-  if (grad_fn) {
-    for (auto& var : vars) {
-      if (var.defined()) {
-        // TODO: eliminate const_cast
-        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
-        const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());
       }
@@ -421,7 +381,25 @@ static bool isFloatingPoint(ScalarType s) {
   return s == kFloat || s == kDouble || s == kHalf;
 }
 
+void VariableType::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+  as_variable_ref(self).backward(gradient, keep_graph, create_graph);
+}
+
+void VariableType::set_data(Tensor & self, Tensor new_data) const {
+  as_variable_ref(self).set_data(new_data);
+}
 Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
+  jit::Node* node = nullptr;
+  if(torch::jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    // if you have no views of self, then an in place copy is equivalent to
+    // making sure we expand src to the same size as self
+    node = graph->create(jit::aten::expand_as, /*outputs=*/0);
+    jit::tracer::addInputs(node, "src", src);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+    jit::tracer::ensureUnique("copy_ (possibly due to an assignment)", self);
+  }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -441,6 +419,9 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   baseType->s_copy_(self_, src_, non_blocking);
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
+  if(torch::jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
   return self;
 }
 
@@ -453,6 +434,11 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
+  if (torch::jit::tracer::isTracing()) {
+    jit::tracer::ArgumentStash::popIntList("size");
+    jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
+    jit::tracer::delValueTrace(self);
+  }
   baseType->resize_(self_, size);
   return self;
 }
@@ -462,6 +448,10 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
+  }
+  if (torch::jit::tracer::isTracing()) {
+    jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
+    jit::tracer::delValueTrace(self);
   }
   baseType->resize_as_(self_, the_template_);
   return self;
@@ -475,10 +465,50 @@ Tensor VariableType::contiguous(const Tensor & self) const {
   return self.clone();
 }
 
+Tensor VariableType::detach(const Tensor & self) const {
+  profiler::RecordFunction profiler("detach");
+  torch::jit::Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    node = graph->create(jit::aten::detach, /*outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+
+  }
+  // <NON_GENERATED_CODE>
+  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach();
+  // </NON_GENERATED_CODE>
+  if (jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, result);
+  }
+  return result;
+}
+
+Tensor & VariableType::detach_(Tensor & self) const {
+  profiler::RecordFunction profiler("detach_");
+  torch::jit::Node* node = nullptr;
+  if (jit::tracer::isTracing()) {
+    auto& graph = jit::tracer::getTracingState()->graph;
+    node = graph->create(jit::aten::detach, /*outputs=*/0);
+    jit::tracer::recordSourceLocation(node);
+    jit::tracer::addInputs(node, "self", self);
+    graph->appendNode(node);
+    jit::tracer::ensureUnique("detach_", self);
+  }
+  // <NON_GENERATED_CODE>
+  as_variable_ref(self).detach_();
+  // </NON_GENERATED_CODE>
+  if (jit::tracer::isTracing()) {
+    jit::tracer::addOutput(node, self);
+  }
+  return self;
+}
+
 static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
   std::vector<std::vector<int64_t>> args_sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    args_sizes[i] = tensors[i].sizes();
+    args_sizes[i] = tensors[i].sizes().vec();
   }
   return args_sizes;
 }

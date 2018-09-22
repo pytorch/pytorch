@@ -1,36 +1,16 @@
 #pragma once
 
 #include <ATen/Allocator.h>
-#include <ATen/Error.h>
-#include <ATen/Generator.h>
-#include <ATen/Registry.h>
+#include <ATen/core/Generator.h>
+#include <ATen/core/Registry.h>
+#include <ATen/core/Error.h>
 
 #include <cstddef>
 #include <functional>
 #include <memory>
 
-// Forward declare these CUDA types here to avoid including CUDA headers in
-// ATen headers, which would make ATen always require CUDA to build.
+// Forward-declares THCState
 struct THCState;
-struct CUstream_st;
-typedef struct CUstream_st* cudaStream_t;
-struct cudaDeviceProp;
-
-#ifndef __HIP_PLATFORM_HCC__
-// pyHIPIFY rewrites this as:
-//
-//    struct cusparseContext;
-//    typedef struct cusparseContext *hipsparseHandle_t;
-//
-// however, this forward declaration is wrong
-// the way that the HIP headers define hipsparseHandle_t is
-//
-//    typedef cusparseHandle_t hipsparseHandle_t
-//
-// so the rewrite is wrong.
-struct cusparseContext;
-typedef struct cusparseContext *cusparseHandle_t;
-#endif
 
 namespace at {
 class Context;
@@ -39,7 +19,7 @@ class Context;
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
-const std::string CUDA_HELP =
+constexpr const char* CUDA_HELP =
   "PyTorch splits its backend into two shared libraries: a CPU library "
   "and a CUDA library; this error has occurred because you are trying "
   "to use some CUDA functionality, but the CUDA library has not been "
@@ -85,32 +65,12 @@ struct AT_API CUDAHooksInterface {
     return false;
   }
 
-  virtual bool hasCuDNN() const {
+  virtual bool hasMAGMA() const {
     return false;
   }
 
-  virtual cudaStream_t getCurrentCUDAStream(THCState*) const {
-    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-#ifndef __HIP_PLATFORM_HCC__
-  virtual cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const {
-    AT_ERROR("Cannot getCurrentCUDASparseHandle() without ATen_cuda library. ", CUDA_HELP);
-  }
-#endif
-
-  virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device)
-      const {
-    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const {
-    AT_ERROR("Cannot getCurrentDeviceProperties() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual struct cudaDeviceProp* getDeviceProperties(THCState*, int device)
-      const {
-    AT_ERROR("Cannot getDeviceProperties() without ATen_cuda library. ", CUDA_HELP);
+  virtual bool hasCuDNN() const {
+    return false;
   }
 
   virtual int64_t current_device() const {
@@ -126,6 +86,10 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual bool compiledWithCuDNN() const {
+    return false;
+  }
+
+  virtual bool compiledWithMIOpen() const {
     return false;
   }
 

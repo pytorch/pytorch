@@ -1,8 +1,9 @@
 #include "caffe2/utils/eigen_utils.h"
-#include "roi_align_op.h"
+#include "caffe2/operators/roi_align_op.h"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/flags.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 #include "gtest/gtest.h"
 
@@ -17,7 +18,7 @@ void AddConstInput(
     Context* context,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<Tensor<Context>>();
+  auto* tensor = blob->GetMutableTensor(Context::GetDeviceType());
   tensor->Resize(shape);
   math::Set<float, Context>(
       tensor->size(), value, tensor->template mutable_data<float>(), context);
@@ -38,10 +39,10 @@ void AddInput<CPUContext>(
     const string& name,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->mutable_data<float>(), tensor->size());
+      tensor->template mutable_data<float>(), tensor->size());
   tensor_vec.array() = utils::AsEArrXt(values);
 }
 
@@ -51,12 +52,12 @@ void AddInput<CUDAContext>(
     const vector<float>& values,
     const string& name,
     Workspace* ws) {
-  TensorCPU tmp(shape);
+  Tensor tmp(shape, CPU);
   EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.size());
   tmp_vec.array() = utils::AsEArrXt(values);
 
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->template GetMutable<Tensor<CUDAContext>>();
+  auto* tensor = blob->GetMutableTensor(CUDA);
   tensor->CopyFrom(tmp);
 }
 
@@ -135,7 +136,8 @@ void CreateAndRun(
     def.add_input("X");
     def.add_input("R");
     def.add_output("Y");
-    def.mutable_device_option()->set_device_type(GetDeviceType<Context>());
+    def.mutable_device_option()->set_device_type(
+        TypeToProto(GetDeviceType<Context>()));
     def.add_arg()->CopyFrom(MakeArgument("spatial_scale", 1.0f / 16.0f));
     def.add_arg()->CopyFrom(MakeArgument("pooled_h", 6));
     def.add_arg()->CopyFrom(MakeArgument("pooled_w", 8));
@@ -150,7 +152,7 @@ void CreateAndRun(
     def_roialign.add_input("R");
     def_roialign.add_output("Y_NHWC");
     def_roialign.mutable_device_option()->set_device_type(
-        GetDeviceType<Context>());
+        TypeToProto(GetDeviceType<Context>()));
     def_roialign.add_arg()->CopyFrom(
         MakeArgument("spatial_scale", 1.0f / 16.0f));
     def_roialign.add_arg()->CopyFrom(MakeArgument("pooled_h", 6));
@@ -163,14 +165,16 @@ void CreateAndRun(
     def_x.set_type("NCHW2NHWC");
     def_x.add_input("X");
     def_x.add_output("X_NHWC");
-    def_x.mutable_device_option()->set_device_type(GetDeviceType<Context>());
+    def_x.mutable_device_option()->set_device_type(
+        TypeToProto(GetDeviceType<Context>()));
 
     OperatorDef def_y;
     def_y.set_name("test_y");
     def_y.set_type("NHWC2NCHW");
     def_y.add_input("Y_NHWC");
     def_y.add_output("Y");
-    def_y.mutable_device_option()->set_device_type(GetDeviceType<Context>());
+    def_y.mutable_device_option()->set_device_type(
+        TypeToProto(GetDeviceType<Context>()));
 
     ops.push_back(CreateOperator(def_x, &ws));
     ops.push_back(CreateOperator(def_roialign, &ws));
@@ -185,7 +189,7 @@ void CreateAndRun(
   Blob* Y_blob = ws.GetBlob("Y");
   EXPECT_NE(nullptr, Y_blob);
 
-  auto& Y = Y_blob->Get<Tensor<Context>>();
+  auto& Y = Y_blob->Get<Tensor>();
   outResult->CopyFrom(Y, &context);
 }
 
@@ -195,9 +199,9 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
   if (!caffe2::HasCudaGPU())
     return;
 
-  TensorCPU y_cpu;
-  TensorCPU y_gpu;
-  TensorCPU y_cpu_nhwc;
+  Tensor y_cpu(CPU);
+  Tensor y_gpu(CPU);
+  Tensor y_cpu_nhwc(CPU);
 
   // tests using FAIR example
   {

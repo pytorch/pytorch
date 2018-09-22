@@ -19,12 +19,14 @@ class GetGPUMemoryUsageOp final : public Operator<CUDAContext> {
 
     auto* stats = Output(0);
     stats->Resize(2, total_by_gpu.size());
-    context_.Copy<long, CPUContext, CUDAContext>(
-        total_by_gpu.size(), total_by_gpu.data(), stats->mutable_data<long>());
-    context_.Copy<long, CPUContext, CUDAContext>(
+    context_.CopyFromCPU<long>(
+        total_by_gpu.size(),
+        total_by_gpu.data(),
+        stats->template mutable_data<long>());
+    context_.CopyFromCPU<long>(
         max_by_gpu.size(),
         max_by_gpu.data(),
-        stats->mutable_data<long>() + total_by_gpu.size());
+        stats->template mutable_data<long>() + total_by_gpu.size());
     return true;
   }
 };

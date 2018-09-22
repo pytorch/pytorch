@@ -404,3 +404,10 @@ class TestDB(unittest.TestCase):
 
         s2 = schema.Scalar((np.int32, (2, 3)))
         self.assertEqual(s2.field_type().shape, (2, 3))
+
+    def testDtypeForCoreType(self):
+        dtype = schema.dtype_for_core_type(core.DataType.FLOAT16)
+        self.assertEqual(dtype, np.float16)
+
+        with self.assertRaises(TypeError):
+            schema.dtype_for_core_type(100)

@@ -12,7 +12,7 @@ __global__ void spin_kernel(int64_t cycles)
   }
 }
 
-THC_API void THC_sleep(THCState* state, int64_t cycles)
+void THC_sleep(THCState* state, int64_t cycles)
 {
   dim3 grid(1);
   dim3 block(1);

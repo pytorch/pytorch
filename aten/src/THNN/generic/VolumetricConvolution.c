@@ -33,13 +33,13 @@ void THNN_(VolumetricConvolution_updateOutput)(
     dimw++;
   }
 
-  int64_t nOutputPlane = weight->size[0];
-  int64_t kT           = weight->size[2];
-  int64_t kH           = weight->size[3];
-  int64_t kW           = weight->size[4];
-  int64_t inputDepth   = input->size[dimt];
-  int64_t inputHeight  = input->size[dimh];
-  int64_t inputWidth   = input->size[dimw];
+  int64_t nOutputPlane = weight->size(0);
+  int64_t kT           = weight->size(2);
+  int64_t kH           = weight->size(3);
+  int64_t kW           = weight->size(4);
+  int64_t inputDepth   = input->size(dimt);
+  int64_t inputHeight  = input->size(dimh);
+  int64_t inputWidth   = input->size(dimw);
   int64_t outputDepth  = (inputDepth - kT) / dT + 1;
   int64_t outputWidth  = (inputWidth - kW) / dW + 1;
   int64_t outputHeight = (inputHeight - kH) / dH + 1;
@@ -51,7 +51,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
 
     /* add bias */
     if (bias) {
-      for (i = 0; i < bias->size[0]; i++)
+      for (i = 0; i < THTensor_sizeLegacyNoScalars(bias, 0); i++)
       {
         THTensor_(select)(outn, output, 0, i);
         THTensor_(fill)(outn, THTensor_(get1d)(bias, i));
@@ -65,7 +65,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
   }
   else /* batch mode */
   {
-    int64_t nBatch = input->size[0];
+    int64_t nBatch = input->size(0);
     THTensor_(resize5d)(output, nBatch, nOutputPlane, outputDepth, outputHeight, outputWidth);
     THTensor *inb = THTensor_(new)();
     THTensor *outb = THTensor_(new)();
@@ -78,7 +78,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
 
       /* add bias */
       if (bias) {
-        for (i = 0; i < bias->size[0]; i++)
+        for (i = 0; i < THTensor_sizeLegacyNoScalars(bias, 0); i++)
         {
           THTensor_(select)(outn, outb, 0, i);
           THTensor_(fill)(outn, THTensor_(get1d)(bias, i));
@@ -91,10 +91,10 @@ void THNN_(VolumetricConvolution_updateOutput)(
       THTensor_(conv3Dmv)(outb, 1.0, 1.0, inb, weight, dT, dH, dW, "V", "X");
     }
 
-    THTensor_(free)(inb);
-    THTensor_(free)(outb);
+    c10::raw::intrusive_ptr::decref(inb);
+    c10::raw::intrusive_ptr::decref(outb);
   }
-  THTensor_(free)(outn);
+  c10::raw::intrusive_ptr::decref(outn);
 }
 
 void THNN_(VolumetricConvolution_updateGradInput)(
@@ -117,7 +117,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
 		"non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
 		"expected for weight, but got: %s");
 
-  int nOutputPlane = (int)weight->size[0];
+  int nOutputPlane = (int)THTensor_sizeLegacyNoScalars(weight, 0);
 
   THNN_ARGCHECK(!gradOutput->is_empty() && (gradOutput->dim() == 4 || gradOutput->dim() == 5), 3,
 		gradOutput,
@@ -129,7 +129,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
     dimPlane++;
   }
 
-  THArgCheck(nOutputPlane == gradOutput->size[dimPlane], 1,
+  THArgCheck(nOutputPlane == gradOutput->size(dimPlane), 1,
     "Number of output features is not equal to nOutputPlane"
   );
 
@@ -141,13 +141,13 @@ void THNN_(VolumetricConvolution_updateGradInput)(
   }
   else /* batch mode */
   {
-    int64_t nBatch = gradOutput->size[0];
+    int64_t nBatch = gradOutput->size(0);
     THTensor *ginpb = THTensor_(new)();
     THTensor *goutb = THTensor_(new)();
     int64_t j;
 
     THTensor_(resize5d)(gradInput,
-      input->size[0], input->size[1], input->size[2], input->size[3], input->size[4]
+      input->size(0), input->size(1), input->size(2), input->size(3), input->size(4)
     );
 
     /* loop over batches */
@@ -157,11 +157,11 @@ void THNN_(VolumetricConvolution_updateGradInput)(
       THTensor_(select)(goutb, gradOutput, 0, j);
       THTensor_(conv3Dmv)(ginpb, 0.0, 1.0, goutb, tweight, dT, dH, dW, "F", "C");
     }
-    THTensor_(free)(ginpb);
-    THTensor_(free)(goutb);
+    c10::raw::intrusive_ptr::decref(ginpb);
+    c10::raw::intrusive_ptr::decref(goutb);
   }
 
-  THTensor_(free)(tweight);
+  c10::raw::intrusive_ptr::decref(tweight);
 }
 
 void THNN_(VolumetricConvolution_accGradParameters)(
@@ -180,22 +180,22 @@ void THNN_(VolumetricConvolution_accGradParameters)(
           int pH,
           accreal scale_)
 {
-  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
+  scalar_t scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THArgCheck(pT != 0 || pW != 0 || pH != 0, 9, "padding not supported by CPU backend");   // sharing signature with CUDA version
 
   THNN_ARGCHECK(!gradWeight->is_empty() && gradWeight->dim() == 5, 4, gradWeight,
 		"non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
 		"expected for gradWeight, but got: %s");
 
-  int nOutputPlane = (int)gradWeight->size[0];
+  int nOutputPlane = (int)THTensor_sizeLegacyNoScalars(gradWeight, 0);
   if (gradBias) {
-    THArgCheck(!gradBias->is_empty() && gradBias->dim() == 1 && gradBias->size[0] == nOutputPlane, 5,
+    THArgCheck(!gradBias->is_empty() && THTensor_nDimensionLegacyNoScalars(gradBias) == 1 && THTensor_sizeLegacyNoScalars(gradBias, 0) == nOutputPlane, 5,
       "gradBias tensor has wrong size"
     );
   }
 
   int64_t k;
-  real *gradBias_data;
+  scalar_t *gradBias_data;
   THTensor *gradOutSlice;
   int dimPlane = 0;
   if (gradOutput->dim() == 5)
@@ -203,7 +203,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
     dimPlane++;
   }
 
-  THArgCheck(nOutputPlane == gradOutput->size[dimPlane], 1,
+  THArgCheck(nOutputPlane == gradOutput->size(dimPlane), 1,
     "Number of output features is not equal to nOutputPlane"
   );
 
@@ -211,14 +211,14 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   {
     /* gradient to bias */
     if (gradBias) {
-      gradBias_data = THTensor_(data)(gradBias);
+      gradBias_data = gradBias->data<scalar_t>();
       gradOutSlice = THTensor_(new)();
       for (k = 0; k < nOutputPlane; k++)
       {
         THTensor_(select)(gradOutSlice, gradOutput, 0, k);
         gradBias_data[k] += scale * THTensor_(sumall)(gradOutSlice);
       }
-      THTensor_(free)(gradOutSlice);
+      c10::raw::intrusive_ptr::decref(gradOutSlice);
     }
 
     /* gradient to kernels */
@@ -226,7 +226,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   }
   else /* batch mode */
   {
-    int64_t nBatch = gradOutput->size[0];
+    int64_t nBatch = gradOutput->size(0);
     THTensor *inpb = THTensor_(new)();
     THTensor *goutb = THTensor_(new)();
     int64_t j;
@@ -239,21 +239,21 @@ void THNN_(VolumetricConvolution_accGradParameters)(
 
       /* gradient to bias */
       if (gradBias) {
-        gradBias_data = THTensor_(data)(gradBias);
+        gradBias_data = gradBias->data<scalar_t>();
         gradOutSlice = THTensor_(new)();
         for (k = 0; k < nOutputPlane; k++)
         {
           THTensor_(select)(gradOutSlice, goutb, 0, k);
           gradBias_data[k] += scale * THTensor_(sumall)(gradOutSlice);
         }
-        THTensor_(free)(gradOutSlice);
+        c10::raw::intrusive_ptr::decref(gradOutSlice);
       }
 
       /* gradient to kernels */
       THTensor_(conv3DRevger)(gradWeight, 1.0, scale, inpb, goutb, dT, dH, dW);
     }
-    THTensor_(free)(inpb);
-    THTensor_(free)(goutb);
+    c10::raw::intrusive_ptr::decref(inpb);
+    c10::raw::intrusive_ptr::decref(goutb);
   }
 }
 

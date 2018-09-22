@@ -6,7 +6,7 @@ import torch
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
-from torch.nn.functional import pad, sigmoid
+from torch.nn.functional import pad
 
 __all__ = [
     'AbsTransform',
@@ -157,6 +157,9 @@ class Transform(object):
         """
         raise NotImplementedError
 
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
+
 
 class _InverseTransform(Transform):
     """
@@ -274,6 +277,12 @@ class ComposeTransform(Transform):
             x = y
         return result
 
+    def __repr__(self):
+        fmt_string = self.__class__.__name__ + '(\n    '
+        fmt_string += ',\n    '.join([p.__repr__() for p in self.parts])
+        fmt_string += '\n)'
+        return fmt_string
+
 
 identity_transform = ComposeTransform([])
 
@@ -341,7 +350,7 @@ class SigmoidTransform(Transform):
         return isinstance(other, SigmoidTransform)
 
     def _call(self, x):
-        return sigmoid(x)
+        return torch.sigmoid(x)
 
     def _inverse(self, y):
         return y.log() - (-y).log1p()
@@ -483,7 +492,7 @@ class StickBreakingTransform(Transform):
 
     def _call(self, x):
         offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
-        z = sigmoid(x - offset.log())
+        z = torch.sigmoid(x - offset.log())
         z_cumprod = (1 - z).cumprod(-1)
         y = pad(z, (0, 1), value=1) * pad(z_cumprod, (1, 0), value=1)
         return y
@@ -497,7 +506,7 @@ class StickBreakingTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
-        z = sigmoid(x - offset.log())
+        z = torch.sigmoid(x - offset.log())
         detJ = ((1 - z).log() + y[..., :-1].log()).sum(-1)
         return detJ
 

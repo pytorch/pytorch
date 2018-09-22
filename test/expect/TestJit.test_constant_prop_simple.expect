@@ -1,0 +1,5 @@
+graph(%input_tensor : Dynamic) {
+  %1 : int = prim::Constant[value=8]()
+  %2 : Dynamic = aten::add(%1, %input_tensor)
+  return (%2);
+}

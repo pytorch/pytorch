@@ -13,7 +13,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input, const Tensor& weight,
     const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
     bool training, double exponential_average_factor, double epsilon) {
-  throw std::runtime_error("cudnn_batch_norm: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_batch_norm: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
@@ -21,7 +21,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& running_mean, const Tensor& running_var,
     const Tensor& save_mean, const Tensor& save_var,
     double epsilon) {
-  throw std::runtime_error("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
 }}  // namespace at::native
@@ -31,6 +31,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
+#include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
 

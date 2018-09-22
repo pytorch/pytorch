@@ -10,13 +10,13 @@ void THNN_(MarginCriterion_updateOutput)(
           bool sizeAverage,
           accreal margin_)
 {
-  real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
+  scalar_t margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   THNN_CHECK_NELEMENT(input, target);
   THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
-  real sum = 0;
+  scalar_t sum = 0;
 
-  TH_TENSOR_APPLY2(real, input, real, target,
-    real z = (margin - *input_data * *target_data);
+  TH_TENSOR_APPLY2(scalar_t, input, scalar_t, target,
+    scalar_t z = (margin - *input_data * *target_data);
     sum += z>0 ? z : 0;
   );
 
@@ -34,12 +34,12 @@ void THNN_(MarginCriterion_updateGradInput)(
           bool sizeAverage,
           accreal margin_)
 {
-  real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
+  scalar_t margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   THNN_CHECK_NELEMENT(input, target);
-  real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.);
+  scalar_t norm = (sizeAverage ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.);
 
   THTensor_(resizeAs)(gradInput, input);
-  TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
+  TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
     *gradInput_data = (*input_data * *target_data) < margin ? -norm * *target_data : 0;
   );
 }

@@ -9,6 +9,9 @@ from torch._six import imap
 from torch._C import _add_docstr
 
 
+# NB: If you subclass Tensor, and want to share the subclassed class
+# across processes, you must also update torch/multiprocessing/reductions.py
+# to define a ForkingPickler serialization mode for the class.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
         if not self.is_leaf:
@@ -100,13 +103,15 @@ class Tensor(torch._C._TensorBase):
 
             hook(grad) -> Tensor or None
 
+
         The hook should not modify its argument, but it can optionally return
         a new gradient which will be used in place of :attr:`grad`.
 
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
 
-        Example:
+        Example::
+
             >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
             >>> h = v.register_hook(lambda grad: grad * 2)  # double the gradient
             >>> v.backward(torch.tensor([1., 2., 3.]))
@@ -217,17 +222,12 @@ class Tensor(torch._C._TensorBase):
         self.storage().share_memory_()
         return self
 
-    def view_as(self, tensor):
-        r"""view_as(other) -> Tensor
-
-        View this tensor as the same size as :attr:`other`.
-        ``self.view_as(other)`` is equivalent to ``self.view(other.size())``.
-
-        Args:
-            other (:class:`torch.Tensor`): The result tensor has the same size
-                as :attr:`other.size()`.
-        """
-        return self.view(tensor.size())
+    def __reversed__(self):
+        r"""Reverses the tensor along dimension 0."""
+        if self.dim() == 0:
+            return self
+        else:
+            return self.flip(0)
 
     def argmax(self, dim=None, keepdim=False):
         r"""See :func:`torch.argmax`"""
@@ -237,6 +237,14 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.argmin`"""
         return torch.argmin(self, dim, keepdim)
 
+    def argsort(self, dim=None, descending=False):
+        r"""See :func: `torch.argsort`"""
+        return torch.argsort(self, dim, descending)
+
+    def norm(self, p="fro", dim=None, keepdim=False):
+        r"""See :func: `torch.norm`"""
+        return torch.norm(self, p, dim, keepdim)
+
     def btrifact(self, info=None, pivot=True):
         r"""See :func:`torch.btrifact`
         """
@@ -245,11 +253,22 @@ class Tensor(torch._C._TensorBase):
                           "consider using btrifact_with_info instead", stacklevel=2)
             factorization, pivots, _info = super(Tensor, self).btrifact_with_info(pivot=pivot)
             if info.type() != _info.type():
-                raise ValueError('btrifact expects info to be an IntTenor')
+                raise ValueError('btrifact expects info to be an IntTensor')
             info.resize_as_(_info).copy_(_info)
             return factorization, pivots
         else:
             return super(Tensor, self).btrifact(pivot=pivot)
+
+    def stft(self, n_fft, hop_length=None, win_length=None, window=None,
+             center=True, pad_mode='reflect', normalized=False, onesided=True):
+        r"""See :func:`torch.stft`
+
+        .. warning::
+          This function changed signature at version 0.4.1. Calling with
+          the previous signature may cause error or return incorrect result.
+        """
+        return torch.stft(self, n_fft, hop_length, win_length, window, center,
+                          pad_mode, normalized, onesided)
 
     def resize(self, *sizes):
         warnings.warn("non-inplace resize is deprecated")
@@ -270,48 +289,65 @@ class Tensor(torch._C._TensorBase):
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
     def index_add(self, dim, index, tensor):
+        r"""Out-of-place version of :meth:`torch.Tensor.index_add_`
+        """
         return self.clone().index_add_(dim, index, tensor)
 
     def index_copy(self, dim, index, tensor):
+        r"""Out-of-place version of :meth:`torch.Tensor.index_copy_`
+        """
         return self.clone().index_copy_(dim, index, tensor)
 
     def index_fill(self, dim, index, value):
+        r"""Out-of-place version of :meth:`torch.Tensor.index_fill_`
+        """
         return self.clone().index_fill_(dim, index, value)
 
     def scatter(self, dim, index, source):
+        r"""Out-of-place version of :meth:`torch.Tensor.scatter_`
+        """
         return self.clone().scatter_(dim, index, source)
 
     def scatter_add(self, dim, index, source):
+        r"""Out-of-place version of :meth:`torch.Tensor.scatter_add_`
+        """
         return self.clone().scatter_add_(dim, index, source)
 
-    def masked_copy(self, mask, tensor):
-        warnings.warn("masked_copy is deprecated and renamed to masked_scatter, and will be removed in v0.3")
-        return self.masked_scatter(mask, tensor)
-
-    def masked_copy_(self, mask, tensor):
-        warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
-        return self.masked_scatter_(mask, tensor)
-
     def masked_scatter(self, mask, tensor):
+        r"""Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+        """
         return self.clone().masked_scatter_(mask, tensor)
 
     def masked_fill(self, mask, value):
+        r"""Out-of-place version of :meth:`torch.Tensor.masked_fill_`
+        """
         return self.clone().masked_fill_(mask, value)
 
-    def unique(self, sorted=False, return_inverse=False):
+    def unique(self, sorted=False, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`
         """
-        output, inverse_indices = self._unique(
-            sorted=sorted, return_inverse=return_inverse)
+        if dim is not None:
+            output, inverse_indices = torch._unique_dim(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse,
+                dim=dim
+            )
+        else:
+            output, inverse_indices = torch._unique(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse
+            )
         if return_inverse:
             return output, inverse_indices
         else:
             return output
 
     def __rsub__(self, other):
-        return -self + other
+        return torch.sub(other, self)
 
     def __rdiv__(self, other):
         if self.dtype.is_floating_point:
@@ -371,6 +407,11 @@ class Tensor(torch._C._TensorBase):
         # map will interleave them.)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
+        if torch._C._get_tracing_state():
+            warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '
+                          'Passing a tensor of different shape won\'t change the number of '
+                          'iterations executed (and might lead to errors or silently give '
+                          'incorrect results).', category=RuntimeWarning)
         return iter(imap(lambda i: self[i], range(self.size(0))))
 
     def __hash__(self):
@@ -384,11 +425,13 @@ class Tensor(torch._C._TensorBase):
         return sorted(keys)
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    __array_priority__ = 1000    # prefer Tensor ops over numpy ones
+
     def __array__(self, dtype=None):
         if dtype is None:
-            return self.cpu().numpy()
+            return self.numpy()
         else:
-            return self.cpu().numpy().astype(dtype, copy=False)
+            return self.numpy().astype(dtype, copy=False)
 
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`

@@ -1,6 +1,7 @@
 // TODO(ataei): reduce the apparent redundancy of all the code below.
 #include "caffe2/operators/pool_op.h"
 #include "caffe2/utils/cpu_neon.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -763,7 +764,7 @@ op = core.CreateOperator(
     stride=2,
 )
 
-workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) # NCHW
+workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) // NCHW
 print("X:\n", workspace.FetchBlob("X"), "\n")
 workspace.RunOperatorOnce(op)
 print("Y:\n", workspace.FetchBlob("Y"))
@@ -831,7 +832,7 @@ op = core.CreateOperator(
     stride=2,
 )
 
-workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) # NCHW
+workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) // NCHW
 print("X:\n", workspace.FetchBlob("X"), "\n")
 workspace.RunOperatorOnce(op)
 print("Y:\n", workspace.FetchBlob("Y"))

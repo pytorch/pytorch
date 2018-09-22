@@ -251,7 +251,12 @@ def tensors1d(n, min_len=1, max_len=64, dtype=np.float32, elements=None):
 
 cpu_do = caffe2_pb2.DeviceOption()
 gpu_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA)
-device_options = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else [])
+hip_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
+# (bddppq) Do not rely on this no_hip option! It's just used to
+# temporarily skip some flaky tests on ROCM before it's getting more mature.
+_device_options_no_hip = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else [])
+device_options = _device_options_no_hip + ([hip_do] if workspace.has_hip_support else [])
+
 # Include device option for each GPU
 expanded_device_options = [cpu_do] + (
     [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, cuda_gpu_id=i)
@@ -274,6 +279,7 @@ gcs = dict(
 
 gcs_cpu_only = dict(gc=st.sampled_from([cpu_do]), dc=st.just([cpu_do]))
 gcs_gpu_only = dict(gc=st.sampled_from([gpu_do]), dc=st.just([gpu_do]))
+gcs_no_hip = dict(gc=st.sampled_from(_device_options_no_hip), dc=st.just(_device_options_no_hip))
 
 
 @contextlib.contextmanager
@@ -310,6 +316,38 @@ def runOpBenchmark(
         workspace.CreateNet(net)
         ret = workspace.BenchmarkNet(net.name, 1, iterations, True)
     return ret
+
+
+def runOpOnInput(
+    device_option,
+    op,
+    inputs,
+    input_device_options=None,
+):
+    op = copy.deepcopy(op)
+    op.device_option.CopyFrom(device_option)
+
+    with temp_workspace():
+        if (len(op.input) > len(inputs)):
+            raise ValueError(
+                'must supply an input for each input on the op: %s vs %s' %
+                (op.input, inputs))
+        _input_device_options = input_device_options or \
+            core.InferOpBlobDevicesAsDict(op)[0]
+        for (n, b) in zip(op.input, inputs):
+            workspace.FeedBlob(
+                n,
+                b,
+                device_option=_input_device_options.get(n, device_option)
+            )
+        workspace.RunOperatorOnce(op)
+        outputs_to_check = list(range(len(op.output)))
+        outs = []
+        for output_index in outputs_to_check:
+            output_blob_name = op.output[output_index]
+            output = workspace.FetchBlob(output_blob_name)
+            outs.append(output)
+        return outs
 
 
 class HypothesisTestCase(test_util.TestCase):
@@ -588,6 +626,7 @@ class HypothesisTestCase(test_util.TestCase):
                         op, inputs, reference_outputs,
                         output_to_grad, grad_reference,
                         threshold=threshold)
+
             return outs
 
     def assertValidationChecks(

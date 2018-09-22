@@ -12,13 +12,15 @@ class FeedBlobOp : public Operator<Context> {
   FeedBlobOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws) {
     CAFFE_ENFORCE(
-        OperatorBase::HasSingleArgumentOfType<string>("value"),
+        this->template HasSingleArgumentOfType<string>("value"),
         "value argument must exist and be passed as a string");
-    value_ = OperatorBase::GetSingleArgument<string>("value", "");
+    value_ = this->template GetSingleArgument<string>("value", "");
   }
 
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
   bool RunOnDevice() override {
-    *OperatorBase::Output<std::string>(0) = value_;
+    *this->template Output<std::string>(0) = value_;
     return true;
   }
 

@@ -12,7 +12,7 @@ namespace caffe2 {
 namespace gloo {
 
 void signalFailure(Blob* status_blob, std::exception& /* unused */) {
-  auto* res = status_blob->GetMutable<TensorCPU>();
+  auto* res = status_blob->GetMutableTensor(CPU);
   res->Resize(1);
   res->template mutable_data<int32_t>()[0] = 1;
 }

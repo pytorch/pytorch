@@ -143,8 +143,7 @@ struct GlooCache {
                                           std::default_delete<char[]>());
 #ifdef USE_CUDA
     } else if (device == DeviceType::CUDA) {
-      buffer_type *buf;
-      THCudaCheck(THCudaMalloc(THDGetCudaState(), (void**)&buf, bytes));
+      buffer_type *buf = static_cast<buffer_type*>(THCudaMalloc(THDGetCudaState(), bytes));
       return std::shared_ptr<buffer_type>(buf, [](char* ptr) { THCudaFree(THDGetCudaState(), ptr); });
 #endif
     } else {

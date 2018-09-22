@@ -5,7 +5,7 @@
 
 namespace caffe2 {
 
-class AsyncSchedulingNet : public AsyncNetBase {
+class CAFFE2_API AsyncSchedulingNet : public AsyncNetBase {
  public:
   AsyncSchedulingNet(
       const std::shared_ptr<const NetDef>& net_def,
@@ -30,7 +30,7 @@ class AsyncSchedulingNet : public AsyncNetBase {
 
   std::atomic<int> processed_tasks_num_;
 
-  DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
+  AT_DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
 };
 
 } // namespace caffe2

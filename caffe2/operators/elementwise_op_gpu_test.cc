@@ -13,7 +13,7 @@ void CopyVector<caffe2::CUDAContext>(const int N, const bool* x, bool* y) {
 template <>
 caffe2::OperatorDef CreateOperatorDef<caffe2::CUDAContext>() {
   caffe2::OperatorDef def;
-  def.mutable_device_option()->set_device_type(caffe2::CUDA);
+  def.mutable_device_option()->set_device_type(caffe2::PROTO_CUDA);
   return def;
 }
 

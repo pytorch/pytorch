@@ -1,6 +1,5 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/tensor.h"
 #include "caffe2/core/typeid.h"
 
 CAFFE2_DEFINE_bool(
@@ -26,7 +25,7 @@ void SetCPUAllocator(CPUAllocator* alloc) {
   g_cpu_allocator.reset(alloc);
 }
 
-MemoryAllocationReporter CPUContext::reporter_;
+MemoryAllocationReporter CPUStaticContext::reporter_;
 
 void MemoryAllocationReporter::New(void* ptr, size_t nbytes) {
   std::lock_guard<std::mutex> guard(mutex_);

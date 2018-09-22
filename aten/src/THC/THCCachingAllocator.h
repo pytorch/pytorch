@@ -9,6 +9,8 @@
 #include "THCStream.h"
 
 THC_API THCDeviceAllocator* THCCachingAllocator_get(void);
+THC_API void THCCachingAllocator_emptyCache(void);
+THC_API void THCCachingAllocator_cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
 THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size);
 THC_API void THCCachingAllocator_recordStream(void *ptr, THCStream* stream);
 THC_API uint64_t THCCachingAllocator_currentMemoryAllocated(int device);

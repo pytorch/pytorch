@@ -15,14 +15,23 @@ class BBoxTransformOp final : public Operator<Context> {
  public:
   BBoxTransformOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        weights_(OperatorBase::GetRepeatedArgument<T>(
+        weights_(this->template GetRepeatedArgument<T>(
             "weights",
             vector<T>{1.0f, 1.0f, 1.0f, 1.0f})),
         apply_scale_(
-            OperatorBase::GetSingleArgument<bool>("apply_scale", true)),
-        correct_transform_coords_(OperatorBase::GetSingleArgument<bool>(
+            this->template GetSingleArgument<bool>("apply_scale", true)),
+        correct_transform_coords_(this->template GetSingleArgument<bool>(
             "correct_transform_coords",
-            false)) {
+            false)),
+        rotated_(this->template GetSingleArgument<bool>("rotated", false)),
+        angle_bound_on_(
+            this->template GetSingleArgument<bool>("angle_bound_on", true)),
+        angle_bound_lo_(
+            this->template GetSingleArgument<int>("angle_bound_lo", -90)),
+        angle_bound_hi_(
+            this->template GetSingleArgument<int>("angle_bound_hi", 90)),
+        clip_angle_thresh_(
+            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)) {
     CAFFE_ENFORCE_EQ(
         weights_.size(),
         4,
@@ -44,6 +53,18 @@ class BBoxTransformOp final : public Operator<Context> {
   // Set to true to match the detectron code, set to false for backward
   //   compatibility
   bool correct_transform_coords_{false};
+  // Set for RRPN case to handle rotated boxes. Inputs should be in format
+  // [ctr_x, ctr_y, width, height, angle (in degrees)].
+  bool rotated_{false};
+  // If set, for rotated boxes in RRPN, output angles are normalized to be
+  // within [angle_bound_lo, angle_bound_hi].
+  bool angle_bound_on_{true};
+  int angle_bound_lo_{-90};
+  int angle_bound_hi_{90};
+  // For RRPN, clip almost horizontal boxes within this threshold of
+  // tolerance for backward compatibility. Set to negative value for
+  // no clipping.
+  float clip_angle_thresh_{1.0};
 };
 
 } // namespace caffe2

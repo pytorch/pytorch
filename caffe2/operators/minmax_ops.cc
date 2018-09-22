@@ -1,4 +1,5 @@
 #include "caffe2/operators/minmax_ops.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 

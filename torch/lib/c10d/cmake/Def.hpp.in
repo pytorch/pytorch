@@ -1,3 +1,4 @@
 #pragma once
 
 #cmakedefine USE_C10D_NCCL
+#cmakedefine USE_C10D_MPI

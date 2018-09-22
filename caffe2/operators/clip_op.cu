@@ -46,9 +46,12 @@ bool ClipOp<float, CUDAContext>::RunOnDevice() {
   auto* Y = Output(0);
   CAFFE_ENFORCE_GT(X.size(), 0);
   Y->ResizeLike(X);
-  ClipKernel<<<CAFFE_GET_BLOCKS(X.size()), CAFFE_CUDA_NUM_THREADS,
-               0, context_.cuda_stream()>>>(
-      X.size(), min_, max_, X.data<float>(), Y->mutable_data<float>());
+  ClipKernel<<<
+      CAFFE_GET_BLOCKS(X.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      X.size(), min_, max_, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
@@ -60,10 +63,17 @@ bool ClipGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_GT(Y.size(), 0);
   CAFFE_ENFORCE_EQ(dY.size(), Y.size());
   dX->ResizeLike(Y);
-  ClipGradientKernel<<<CAFFE_GET_BLOCKS(Y.size()), CAFFE_CUDA_NUM_THREADS,
-                       0, context_.cuda_stream()>>>(
-      Y.size(), min_, max_, Y.data<float>(), dY.data<float>(),
-      dX->mutable_data<float>());
+  ClipGradientKernel<<<
+      CAFFE_GET_BLOCKS(Y.size()),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      Y.size(),
+      min_,
+      max_,
+      Y.data<float>(),
+      dY.data<float>(),
+      dX->template mutable_data<float>());
   return true;
 }
 

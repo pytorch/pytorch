@@ -1,7 +1,7 @@
 #ifndef TH_FILE_INC
 #define TH_FILE_INC
 
-#include "THStorage.h"
+#include "THStorageFunctions.h"
 
 typedef struct THFile__ THFile;
 

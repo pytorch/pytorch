@@ -139,17 +139,17 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X, simulating a batch of 2, 4x4 matricies
+// Create X, simulating a batch of 2, 4x4 matricies
 X = np.random.randint(0,high=20,size=(2,4,4))
 print("X:\n",X)
 
-# Feed X into workspace
+// Feed X into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```
@@ -226,17 +226,17 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X, simulating a batch of 2, 4x4 matricies
+// Create X, simulating a batch of 2, 4x4 matricies
 X = np.random.randint(0,high=20,size=(2,4,4))
 print("X:\n",X)
 
-# Feed X into workspace
+// Feed X into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```
@@ -296,7 +296,7 @@ bool SumElementsGradientOp<T, Context>::RunOnDevice()
 #endif
 {
   auto& X = Input(0);
-  const auto& sum_grad = Input(1);
+  Tensor sum_grad(Input(1), CPU);
   auto* dX = Output(0);
   dX->ResizeLike(X);
   DCHECK_EQ(sum_grad.size(), 1);

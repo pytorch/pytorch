@@ -9,6 +9,9 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   AT_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
   AT_CHECK(mask.sizes().equals(t.sizes()), "sparse_mask: operands have incompatible sizes; self has size ",
       t.sizes(), " but mask has size ", mask.sizes());
+  AT_ASSERT(t.is_cuda()); // dispatch argument
+  AT_CHECK(mask.is_cuda(), "sparse_mask: expected 'mask' to be CUDA, but got CPU");
+  AT_CHECK(r.is_cuda(), "sparse_mask: expected 'out' to be CUDA, but got CPU");
   AT_CHECK(_check_device({r, t, mask}),
       "sparse_mask: arguments are located on different devices; self is on device ", t.get_device(),
       ", mask is on device ", mask.get_device(), ", out is on device ", r.get_device());
@@ -21,7 +24,10 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   Tensor r_values = r._values().type().tensor(mask_values.sizes());
   _alias_into_sparse(r, mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
-  _get_sparse_impl(r)->set_nnz(mask._nnz());
+  _get_sparse_impl(r)->set_nnz_and_narrow(mask._nnz());
+  if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements
+    return r;
+  }
 
   LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
 

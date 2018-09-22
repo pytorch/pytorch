@@ -7,9 +7,9 @@
 #include <cuda_runtime.h>
 
 #include <ATen/ATen.h>
-#include <THCStream.h>
+#include <THC/THCStream.h>
 
-#include "../CUDAUtils.hpp"
+#include <c10d/CUDAUtils.hpp>
 
 #define C10D_CUDA_CHECK(condition)        \
   do {                                    \
@@ -37,7 +37,7 @@ class THCStreamGuard {
  public:
   explicit THCStreamGuard(THCState* state, CUDAStream& stream)
       : device_(THCStream_device(stream.getTHCStream())), state_(state) {
-    CUDADevice device(device_);
+    at::DeviceGuard deviceGuard(device_);
     original_ = THCState_getStream(state_);
     THCStream_retain(original_);
     THCState_setStream(state_, stream.getTHCStream());
@@ -51,7 +51,7 @@ class THCStreamGuard {
 
   ~THCStreamGuard() {
     if (original_ != nullptr) {
-      CUDADevice device(device_);
+      at::DeviceGuard deviceGuard(device_);
       THCState_setStream(state_, original_);
       THCStream_free(original_);
     }

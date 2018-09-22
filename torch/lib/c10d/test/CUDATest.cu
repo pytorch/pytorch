@@ -1,6 +1,6 @@
 #include "CUDATest.hpp"
 
-#include "../private/CUDAUtils.hpp"
+#include <c10d/private/CUDAUtils.hpp>
 
 namespace c10d {
 namespace test {

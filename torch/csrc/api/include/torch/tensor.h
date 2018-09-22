@@ -8,7 +8,6 @@
 namespace torch {
 using namespace at;
 
-using Tensor = autograd::Variable;
 using Dtype = at::ScalarType;
 
 /// Fixed width dtypes.

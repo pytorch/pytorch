@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
 #include "test_seed.h"
@@ -19,31 +18,26 @@ void trace() {
     trace += foo_a[i][i];
   }
 
-  REQUIRE(Scalar(foo.trace()).toFloat() == Approx(trace));
+  EXPECT_FLOAT_EQ(foo.trace().toCFloat(), trace);
 }
 
-TEST_CASE( "atest", "[]" ) {
-
-  manual_seed(123, at::Backend::CPU);
-  manual_seed(123, at::Backend::CUDA);
+// TEST_CASE( "atest", "[]" ) {
+TEST(atest, atest) {
+  manual_seed(123, at::kCPU);
+  manual_seed(123, at::kCUDA);
 
   auto foo = rand({12,6});
-  REQUIRE(foo.data<float>() == foo.toFloatData());
+  EXPECT_EQ(foo.data<float>(), foo.toFloatData());
 
-  REQUIRE(foo.size(0) == 12);
-  REQUIRE(foo.size(1) == 6);
+  EXPECT_EQ(foo.size(0), 12);
+  EXPECT_EQ(foo.size(1), 6);
 
   foo = foo+foo*3;
   foo -= 4;
 
-  {
-    Tensor no;
-    REQUIRE_THROWS(add_out(no,foo,foo));
-  }
   Scalar a = 4;
-
   float b = a.to<float>();
-  REQUIRE(b == 4);
+  EXPECT_EQ(b, 4);
 
   foo = (foo*foo) == (foo.pow(3));
   foo =  2 + (foo+1);
@@ -56,7 +50,7 @@ TEST_CASE( "atest", "[]" ) {
     }
   }
 
-  REQUIRE(foo.equal(4 * ones({12, 6}, kByte)));
+  EXPECT_TRUE(foo.equal(4 * ones({12, 6}, kByte)));
 
   trace();
 
@@ -66,17 +60,18 @@ TEST_CASE( "atest", "[]" ) {
   auto f = CPU(kFloat).tensorFromBlob(data, {1,2,3});
   auto f_a = f.accessor<float,3>();
 
-  REQUIRE(f_a[0][0][0] == 1.0);
-  REQUIRE(f_a[0][1][1] == 5.0);
+  EXPECT_EQ(f_a[0][0][0], 1.0);
+  EXPECT_EQ(f_a[0][1][1], 5.0);
 
-  REQUIRE(f.strides()[0] == 6);
-  REQUIRE(f.strides()[1] == 3);
-  REQUIRE(f.strides()[2] == 1);
-  REQUIRE(f.sizes()[0] == 1);
-  REQUIRE(f.sizes()[1] == 2);
-  REQUIRE(f.sizes()[2] == 3);
+  EXPECT_EQ(f.strides()[0], 6);
+  EXPECT_EQ(f.strides()[1], 3);
+  EXPECT_EQ(f.strides()[2], 1);
+  EXPECT_EQ(f.sizes()[0], 1);
+  EXPECT_EQ(f.sizes()[1], 2);
+  EXPECT_EQ(f.sizes()[2], 3);
 
-  REQUIRE_THROWS(f.resize_({3,4,5}));
+  // TODO(ezyang): maybe do a more precise exception type.
+  ASSERT_THROW(f.resize_({3,4,5}), std::exception);
   {
     int isgone = 0;
     {
@@ -84,7 +79,7 @@ TEST_CASE( "atest", "[]" ) {
         isgone++;
       });
     }
-    REQUIRE(isgone == 1);
+    EXPECT_EQ(isgone, 1);
   }
   {
     int isgone = 0;
@@ -95,18 +90,19 @@ TEST_CASE( "atest", "[]" ) {
       });
       a_view = f2.view({3,2,1});
     }
-    REQUIRE(isgone == 0);
+    EXPECT_EQ(isgone, 0);
     a_view.reset();
-    REQUIRE(isgone == 1);
+    EXPECT_EQ(isgone, 1);
   }
 
   if(at::hasCUDA()) {
     int isgone = 0;
     {
-      auto f2 = CUDA(kFloat).tensorFromBlob(nullptr, {1,2,3}, [&](void*) {
+      auto base = CUDA(kFloat).tensor({1,2,3});
+      auto f2 = CUDA(kFloat).tensorFromBlob(base.data_ptr(), {1,2,3}, [&](void*) {
         isgone++;
       });
     }
-    REQUIRE(isgone==1);
+    EXPECT_EQ(isgone, 1);
   }
 }

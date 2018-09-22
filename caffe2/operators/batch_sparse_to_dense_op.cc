@@ -108,6 +108,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(BatchSparseToDense)
     .NumInputs(3, 4)
     .NumOutputs(1)
+    .DisallowInputFillers() // TODO: enable the filler
     .SetDoc(R"DOC(
 Convert sparse matrix representation into dense matrix.
 

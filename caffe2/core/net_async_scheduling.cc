@@ -125,6 +125,23 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
       }
     }
 
+    // In case of net's failure, make sure all pending tasks are finished
+    if (!success_) {
+      // Simple logic to capture all pending tasks - check all tasks
+      // at the end of each task in case of net's failure
+      for (auto tid = 0; tid < tasksNum(); ++tid) {
+        if (event(tid).Query() == EventStatus::EVENT_SCHEDULED) {
+          // SetFinished may throw, e.g. when we call it on already finished
+          // event, and in some other cases (CUDA)
+          try {
+            event(tid).SetFinished("Cancelled");
+          } catch (const EnforceNotMet&) {
+            // ignore
+          }
+        }
+      }
+    }
+
     // finishRun may cause waiters to wake up and destroy the net,
     // before we call finishRun we need to make sure all other (finishing)
     // tasks are done;

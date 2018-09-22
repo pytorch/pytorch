@@ -72,7 +72,7 @@ class NCCLContext {
   cudaEvent_t master_event_;
   std::vector<cudaEvent_t> events_;
 
-  DISABLE_COPY_AND_ASSIGN(NCCLContext);
+  AT_DISABLE_COPY_AND_ASSIGN(NCCLContext);
 };
 
 // We share the contexts across multiple operators, hence the
@@ -126,7 +126,7 @@ class ncclTypeWrapper<int> {
 
 #ifdef CAFFE_HAS_CUDA_FP16
 template <>
-class ncclTypeWrapper<float16> {
+class ncclTypeWrapper<at::Half> {
  public:
   static const ncclDataType_t type = ncclHalf;
 };
@@ -327,7 +327,7 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
 template class NCCL<float>;
 template class NCCL<int>;
 #ifdef CAFFE_HAS_CUDA_FP16
-template class NCCL<float16>;
+template class NCCL<at::Half>;
 #endif
 }
 }

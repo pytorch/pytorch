@@ -2,10 +2,11 @@
 
 // ${generated_comment}
 
+#include <ATen/Context.h>
 #include <ATen/ScalarType.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/TensorMethods.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorMethods.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <array>
 #include <functional>
@@ -28,19 +29,28 @@ inline Tensor from_blob(
     IntList sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return options.type().tensorFromBlob(data, sizes, deleter);
+  return at::getType(options).tensorFromBlob(data, sizes, deleter);
+}
+
+inline Tensor from_blob(
+    void* data,
+    IntList sizes,
+    IntList strides,
+    const std::function<void(void*)>& deleter,
+    const TensorOptions& options = {}) {
+  return at::getType(options).tensorFromBlob(data, sizes, strides, deleter);
 }
 
 inline Tensor from_blob(
     void* data,
     IntList sizes,
     const TensorOptions& options = {}) {
-  return native::from_blob(data, sizes, [](void*) {}, options);
+  return native::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
 }
 
 // These functions are defined in native/TensorFactories.cpp.
 #define TENSOR(T, S, _1)                                               \
-  Tensor tensor(ArrayRef<T> values, const TensorOptions& options);     \
+  AT_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options);     \
   inline Tensor tensor(                                                \
       std::initializer_list<T> values, const TensorOptions& options) { \
     return native::tensor(ArrayRef<T>(values), options);               \

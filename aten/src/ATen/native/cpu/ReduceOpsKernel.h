@@ -1,16 +1,17 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/optional.h>
-#include "CapabilityDispatch.h"
+#include <ATen/core/optional.h>
+#include <ATen/native/DispatchStub.h>
 
-namespace at {
-namespace native {
+namespace at { namespace native {
 
 using reduce_fn = void(*)(Tensor &, const Tensor &, at::optional<int64_t>);
 
-extern DispatchStub<reduce_fn> sum_kernel;
-extern DispatchStub<reduce_fn> prod_kernel;
+DECLARE_DISPATCH(reduce_fn, sum_kernel);
+DECLARE_DISPATCH(reduce_fn, prod_kernel);
 
-}
-}
+using reduce_norm_fn = void(*)(Tensor &, const Tensor &, Scalar, at::optional<int64_t>);
+DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
+
+}} // namespace at::native

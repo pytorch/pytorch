@@ -1,13 +1,16 @@
-#include "TCPStore.hpp"
 #include "StoreTestCommon.hpp"
 
 #include <cstdlib>
 #include <iostream>
 #include <thread>
 
-int main(int argc, char** argv) {
+#include <c10d/PrefixStore.hpp>
+#include <c10d/TCPStore.hpp>
+
+void testHelper(const std::string& prefix = "") {
   // server store
-  c10d::TCPStore serverStore("127.0.0.1", 29500, true);
+  c10d::TCPStore serverTCPStore("127.0.0.1", 29500, true);
+  c10d::PrefixStore serverStore(prefix, serverTCPStore);
 
   // Basic set/get on the server store
   c10d::test::set(serverStore, "key0", "value0");
@@ -24,10 +27,13 @@ int main(int argc, char** argv) {
   c10d::test::Semaphore sem1, sem2;
 
   // Each thread will have a client store to send/recv data
-  std::vector<std::unique_ptr<c10d::TCPStore>> clientStores;
+  std::vector<std::unique_ptr<c10d::TCPStore>> clientTCPStores;
+  std::vector<std::unique_ptr<c10d::PrefixStore>> clientStores;
   for (auto i = 0; i < numThreads; i++) {
-    clientStores.push_back(std::unique_ptr<c10d::TCPStore>(
+    clientTCPStores.push_back(std::unique_ptr<c10d::TCPStore>(
         new c10d::TCPStore("127.0.0.1", 29500, false)));
+    clientStores.push_back(std::unique_ptr<c10d::PrefixStore>(
+        new c10d::PrefixStore(prefix, *clientTCPStores[i])));
   }
 
   std::string expectedCounterRes = std::to_string(numThreads * numIterations);
@@ -59,7 +65,6 @@ int main(int argc, char** argv) {
             std::string val = "thread_val_" + std::to_string(numIterations - 1);
             c10d::test::check(*clientStores[i], key, val);
           }
-
         })));
   }
 
@@ -72,6 +77,7 @@ int main(int argc, char** argv) {
 
   // Clear the store to test that client disconnect won't shutdown the store
   clientStores.clear();
+  clientTCPStores.clear();
 
   // Check that the counter has the expected value
   c10d::test::check(serverStore, "counter", expectedCounterRes);
@@ -82,7 +88,10 @@ int main(int argc, char** argv) {
     std::string val = "thread_val_" + std::to_string(numIterations - 1);
     c10d::test::check(serverStore, key, val);
   }
-
+}
+int main(int argc, char** argv) {
+  testHelper();
+  testHelper("testPrefix");
   std::cout << "Test succeeded" << std::endl;
   return EXIT_SUCCESS;
 }

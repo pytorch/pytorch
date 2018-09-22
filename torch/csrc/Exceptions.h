@@ -4,10 +4,10 @@
 #include <stdexcept>
 #include <string>
 
-#include "ATen/Error.h"
+#include "ATen/core/Error.h"
 #include "THP_export.h"
-#include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/object_ptr.h"
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
@@ -29,7 +29,7 @@
     return retval;                                                             \
   }
 
-#define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(NULL)
+#define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError;
 

@@ -14,7 +14,7 @@ class ThresholdedReluOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ThresholdedReluOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    alpha_ = OperatorBase::GetSingleArgument<T>("alpha", 1.0);
+    alpha_ = this->template GetSingleArgument<T>("alpha", 1.0);
   }
 
   bool RunOnDevice() override;
@@ -29,7 +29,7 @@ class ThresholdedReluGradientOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ThresholdedReluGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    alpha_ = OperatorBase::GetSingleArgument<T>("alpha", 1.0);
+    alpha_ = this->template GetSingleArgument<T>("alpha", 1.0);
   }
 
   bool RunOnDevice() override;

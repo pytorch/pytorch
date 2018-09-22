@@ -3,6 +3,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 from caffe2.python import core, utils
+import numpy as np
 
 
 class RegularizationBy(object):
@@ -231,3 +232,98 @@ class BoundedGradientProjection(Regularizer):
             left_open=self.left_open,
             right_open=self.right_open,
         )
+
+
+class GroupL1Norm(Regularizer):
+    """
+    Scardapane, Simone, et al. "Group sparse regularization for deep neural networks."
+    Neurocomputing 241 (2017): 81-89.
+
+    This regularizer computes l1 norm of a weight matrix based on groups.
+    There are essentially three stages in the computation:
+    1. Compute the l2 norm on all the members of each group
+    2. Scale each l2 norm by the size of each group
+    3. Compute the l1 norm of the scaled l2 norms
+    """
+    def __init__(self, reg_lambda, groups, stabilizing_val=0):
+        """
+        Args:
+            reg_lambda: The weight of the regularization term.
+            groups: A list of integers describing the size of each group.
+                The length of the list is the number of groups.
+
+        Optional Args:
+            stabilizing_val: The computation of GroupL1Norm involves the Sqrt
+                operator. When values are small, its gradient can be numerically
+                unstable and causing gradient explosion. Adding this term to
+                stabilize gradient calculation. Recommended value of this term is
+                1e-8, but it depends on the specific scenarios. If the implementation
+                of the gradient operator of Sqrt has taken into stability into
+                consideration, this term won't be necessary.
+        """
+        super(GroupL1Norm, self).__init__()
+        assert (
+            (reg_lambda) >= 0
+        ), "regularization weight should be 0 or positive"
+        assert isinstance(groups, list), "groups needs to be a list"
+
+        self.reg_lambda = (reg_lambda)
+        self.groups = groups
+        self.stabilizing_val = stabilizing_val
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        """
+        Args:
+            param: The input blob to regularize. It should be a weight matrix
+                blob with shape (output_dim, input_dim). input_dim should be
+                equal to the sum of self.groups.
+
+        Returns:
+            group_l1_norm: The output blob after applying regularization.
+
+        These are the steps of computation:
+            1. square all elements
+            2. sum by row
+            3. lengthssum by group
+            4. square_root all elements
+            5. normalize each group based on group size
+            6. compute l1 norm of each group
+            7. scale the result with the regularization lambda
+        """
+        squared = net.Sqr(param)
+        reduced_sum = net.ReduceSum(squared, axes=[0], keepdims=0)
+        lengths_sum = net.LengthsSum(
+            [
+                reduced_sum,
+                net.GivenTensorIntFill(
+                    [], 1, shape=[len(self.groups)], values=self.groups
+                ),
+            ]
+        )
+
+        if self.stabilizing_val:
+            net.Add(
+                [lengths_sum, net.ConstantFill([], 1, value=self.stabilizing_val)],
+                [lengths_sum],
+                broadcast=1,
+            )
+
+        sqrt = net.Sqrt(lengths_sum)
+
+        # Here we combine step 5 and step 7 into one operator call to
+        # improve efficiency: values = np.sqrt(self.groups) * self.reg_lambda
+        l2_scaled = net.Mul(
+            [
+                sqrt,
+                net.GivenTensorFill(
+                    [],
+                    shape=[len(self.groups)],
+                    values=np.sqrt(self.groups) * self.reg_lambda
+                )
+            ],
+            ['normalized_l2_norm_scaled']
+        )
+
+        group_l1_norm = net.LpNorm(l2_scaled, ['group_l1_nrom'], p=1)
+
+        return group_l1_norm

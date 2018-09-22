@@ -5,9 +5,9 @@ ARG EC2
 ADD ./install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
-# Compile/install ccache for faster builds
-ADD ./install_ccache.sh install_ccache.sh
-RUN bash ./install_ccache.sh && rm install_ccache.sh
+# Include BUILD_ENVIRONMENT environment variable in image
+ARG BUILD_ENVIRONMENT
+ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # Install Python
 ARG PYTHON_VERSION
@@ -63,6 +63,10 @@ ENV THRUST_ROOT /data/Thrust
 ENV MIOPEN_DISABLE_CACHE 1
 ENV HIP_PLATFORM hcc
 
+# Compile/install ccache for faster builds
+ADD ./install_ccache.sh install_ccache.sh
+RUN bash ./install_ccache.sh && rm install_ccache.sh
+
 # (optional) Add Jenkins user
 ARG JENKINS
 ARG JENKINS_UID
@@ -70,7 +74,3 @@ ARG JENKINS_GID
 ADD ./add_jenkins_user.sh add_jenkins_user.sh
 RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh ${JENKINS_UID} ${JENKINS_GID}; fi
 RUN rm add_jenkins_user.sh
-
-# Include BUILD_ENVIRONMENT environment variable in image
-ARG BUILD_ENVIRONMENT
-ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}

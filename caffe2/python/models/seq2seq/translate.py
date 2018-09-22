@@ -5,10 +5,12 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from abc import ABCMeta, abstractmethod
 import argparse
 from future.utils import viewitems
 import logging
 import numpy as np
+from six import with_metaclass
 import sys
 
 from caffe2.python import core, rnn_cell, workspace
@@ -31,7 +33,60 @@ def _weighted_sum(model, values, weight, output_name):
     )
 
 
-class Seq2SeqModelCaffe2EnsembleDecoder(object):
+class Seq2SeqModelCaffe2EnsembleDecoderBase(with_metaclass(ABCMeta, object)):
+
+    @abstractmethod
+    def get_model_file(self, model):
+        pass
+
+    @abstractmethod
+    def get_db_type(self):
+        pass
+
+    def build_word_rewards(self, vocab_size, word_reward, unk_reward):
+        word_rewards = np.full([vocab_size], word_reward, dtype=np.float32)
+        word_rewards[seq2seq_util.PAD_ID] = 0
+        word_rewards[seq2seq_util.GO_ID] = 0
+        word_rewards[seq2seq_util.EOS_ID] = 0
+        word_rewards[seq2seq_util.UNK_ID] = word_reward + unk_reward
+        return word_rewards
+
+    def load_models(self):
+        db_reader = 'reader'
+        for model, scope_name in zip(
+            self.models,
+            self.decoder_scope_names,
+        ):
+            params_for_current_model = [
+                param
+                for param in self.model.GetAllParams()
+                if str(param).startswith(scope_name)
+            ]
+            assert workspace.RunOperatorOnce(core.CreateOperator(
+                'CreateDB',
+                [], [db_reader],
+                db=self.get_model_file(model),
+                db_type=self.get_db_type())
+            ), 'Failed to create db {}'.format(self.get_model_file(model))
+            assert workspace.RunOperatorOnce(core.CreateOperator(
+                'Load',
+                [db_reader],
+                params_for_current_model,
+                load_all=1,
+                add_prefix=scope_name + '/',
+                strip_prefix='gpu_0/',
+            ))
+            logger.info('Model {} is loaded from a checkpoint {}'.format(
+                scope_name, self.get_model_file(model)))
+
+
+class Seq2SeqModelCaffe2EnsembleDecoder(Seq2SeqModelCaffe2EnsembleDecoderBase):
+
+    def get_model_file(self, model):
+        return model['model_file']
+
+    def get_db_type(self):
+        return 'minidb'
 
     def scope(self, scope_name, blob_name):
         return (
@@ -258,14 +313,6 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
             attention_weights,
         )
 
-    def build_word_rewards(self, vocab_size, word_reward, unk_reward):
-        word_rewards = np.full([vocab_size], word_reward, dtype=np.float32)
-        word_rewards[seq2seq_util.PAD_ID] = 0
-        word_rewards[seq2seq_util.GO_ID] = 0
-        word_rewards[seq2seq_util.EOS_ID] = 0
-        word_rewards[seq2seq_util.UNK_ID] = word_reward + unk_reward
-        return word_rewards
-
     def __init__(
         self,
         translate_params,
@@ -413,36 +460,6 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
         logger.info('Params created: ')
         for param in self.model.params:
             logger.info(param)
-
-    def load_models(self):
-        db_reader = 'reader'
-        for model, scope_name in zip(
-            self.models,
-            self.decoder_scope_names,
-        ):
-            params_for_current_model = [
-                param
-                for param in self.model.GetAllParams()
-                if str(param).startswith(scope_name)
-            ]
-            assert workspace.RunOperatorOnce(core.CreateOperator(
-                'CreateDB',
-                [], [db_reader],
-                db=model['model_file'],
-                db_type='minidb')
-            ), 'Failed to create db {}'.format(model['model_file'])
-            assert workspace.RunOperatorOnce(core.CreateOperator(
-                'Load',
-                [db_reader],
-                params_for_current_model,
-                load_all=1,
-                add_prefix=scope_name + '/',
-                strip_prefix='gpu_0/',
-            ))
-            logger.info('Model {} is loaded from a checkpoint {}'.format(
-                scope_name,
-                model['model_file'],
-            ))
 
     def decode(self, numberized_input, max_output_seq_len):
         workspace.FeedBlob(

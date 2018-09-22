@@ -11,9 +11,9 @@ void THNN_(LogSigmoid_updateOutput)(
   THTensor_(resizeAs)(output, input);
   THTensor_(resizeAs)(buffer, input);
   //Use the LogSumExp trick to make this stable against overflow
-  TH_TENSOR_APPLY3(real, output, real, input, real, buffer,
-    real max_elem = fmax(0, -*input_data);
-    real z = exp(-max_elem) + exp(-*input_data - max_elem);
+  TH_TENSOR_APPLY3(scalar_t, output, scalar_t, input, scalar_t, buffer,
+    scalar_t max_elem = fmax(0, -*input_data);
+    scalar_t z = exp(-max_elem) + exp(-*input_data - max_elem);
     *buffer_data = z;
     *output_data = -(max_elem + log(z));
   );
@@ -35,10 +35,10 @@ void THNN_(LogSigmoid_updateGradInput)(
  *  -max_deriv - (z-1)/z if x is >= 0 or
  *  -max_deriv + (z-1)/z if x is < 0
  */
-  TH_TENSOR_APPLY3(real, input, real, gradInput, real, buffer,
-    real z = *buffer_data;
-    real max_deriv = 0.0;
-    real sign = -1.0;
+  TH_TENSOR_APPLY3(scalar_t, input, scalar_t, gradInput, scalar_t, buffer,
+    scalar_t z = *buffer_data;
+    scalar_t max_deriv = 0.0;
+    scalar_t sign = -1.0;
     if (*input_data < 0){
         max_deriv = -1.0;
         sign = 1.0;

@@ -73,9 +73,7 @@ void THC_logicalValue(THCState *state,
                       TensorTypeOut *self_,
                       TensorType *src,
                       Op op) {
-  THLongStorage* st = THCTensor_newSizeOf(state, src);
-  THCTensor_resize(state, self_, st, NULL);
-  THLongStorage_free(st);
+  THCTensor_resize(state, self_, src->sizes(), {});
 
   if (!THC_pointwiseApply2<ScalarTypeOut, ScalarType>(state, self_, src, op)) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);

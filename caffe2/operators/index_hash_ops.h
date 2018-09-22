@@ -13,8 +13,8 @@ class IndexHashOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   IndexHashOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        seed_(OperatorBase::GetSingleArgument<int64_t>("seed", 0)),
-        modulo_(OperatorBase::GetSingleArgument<int64_t>("modulo", 0)) {
+        seed_(this->template GetSingleArgument<int64_t>("seed", 0)),
+        modulo_(this->template GetSingleArgument<int64_t>("modulo", 0)) {
     CAFFE_ENFORCE_GT(modulo_, 0, "MODULO should be > 0");
   }
 

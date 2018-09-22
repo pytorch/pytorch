@@ -77,7 +77,7 @@ static void compute_2d(const struct compute_2d_context* context, size_t linear_i
 
   int q;
   int r;
-  context->range_j.divMod((int) linear_index, q, r);
+  context->range_j.DivMod((int)linear_index, &q, &r);
   context->function(context->argument, q, r);
 }
 
@@ -121,7 +121,7 @@ static void compute_2d_tiled(const struct compute_2d_tiled_context* context, siz
   int q;
   int r;
 
-  context->tile_range_j.divMod(linear_index, q, r);
+  context->tile_range_j.DivMod(linear_index, &q, &r);
   const size_t max_tile_i = context->tile_i;
   const size_t max_tile_j = context->tile_j;
   const size_t index_i = q * max_tile_i;

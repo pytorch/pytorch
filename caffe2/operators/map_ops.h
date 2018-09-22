@@ -54,7 +54,7 @@ class CreateMapOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     TensorProto::DataType key_dtype =
-        static_cast<TensorProto::DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto::DataType>(this->template GetSingleArgument<int>(
             "key_dtype", TensorProto_DataType_INT32));
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -64,7 +64,7 @@ class CreateMapOp final : public Operator<Context> {
   template <typename KEY_T>
   bool DoRunWithType() {
     TensorProto::DataType value_dtype =
-        static_cast<TensorProto::DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto::DataType>(this->template GetSingleArgument<int>(
             "value_dtype", TensorProto_DataType_INT32));
 
     return DispatchHelper<
@@ -75,7 +75,7 @@ class CreateMapOp final : public Operator<Context> {
   template <typename KEY_T, typename VALUE_T>
   bool DoRunWithType2() {
     // clear to make sure the map is empty
-    OperatorBase::Output<typename MapTypeTraits<KEY_T, VALUE_T>::MapType>(MAP)
+    this->template Output<typename MapTypeTraits<KEY_T, VALUE_T>::MapType>(MAP)
         ->clear();
     return true;
   }
@@ -83,7 +83,7 @@ class CreateMapOp final : public Operator<Context> {
   template <typename KEY_T>
   bool DoRunWithOtherType2() {
     TensorProto::DataType value_dtype =
-        static_cast<TensorProto::DataType>(OperatorBase::GetSingleArgument<int>(
+        static_cast<TensorProto::DataType>(this->template GetSingleArgument<int>(
             "value_dtype", TensorProto_DataType_INT32));
 
     CAFFE_THROW(
@@ -126,7 +126,7 @@ class KeyValueToMapOp final : public Operator<Context> {
     auto* key_data = key_input.template data<KEY_T>();
     auto* value_data = value_input.template data<VALUE_T>();
 
-    auto* map_data = OperatorBase::Output<MapType>(MAP);
+    auto* map_data = this->template Output<MapType>(MAP);
 
     for (int i = 0; i < key_input.size(); ++i) {
       map_data->emplace(key_data[i], value_data[i]);
@@ -167,7 +167,7 @@ class MapToKeyValueOp final : public Operator<Context> {
   bool DoRunWithType() {
     using key_type = typename MAP_T::key_type;
     using mapped_type = typename MAP_T::mapped_type;
-    auto& map_data = OperatorBase::Input<MAP_T>(MAP);
+    auto& map_data = this->template Input<MAP_T>(MAP);
     auto* key_output = Output(KEYS);
     auto* value_output = Output(VALUES);
     key_output->Resize(map_data.size());
@@ -201,9 +201,9 @@ class MapSerializer : public BlobSerializerBase {
     CAFFE_ENFORCE(blob.IsType<MapType>());
     const MapType& map_data = blob.template Get<MapType>();
     TIndex sz = map_data.size();
-    Tensor<CPUContext> key_tensor;
+    Tensor key_tensor(CPU);
     key_tensor.Resize(sz);
-    Tensor<CPUContext> value_tensor;
+    Tensor value_tensor(CPU);
     value_tensor.Resize(sz);
     auto* key_data = key_tensor.mutable_data<KEY_T>();
     auto* value_data = value_tensor.mutable_data<VALUE_T>();
@@ -215,7 +215,7 @@ class MapSerializer : public BlobSerializerBase {
     }
 
     TensorProtos tensor_protos;
-    TensorSerializer<CPUContext> ser;
+    TensorSerializer ser;
     ser.Serialize(
         key_tensor, name, tensor_protos.add_protos(), 0, key_tensor.size());
     ser.Serialize(
@@ -239,8 +239,8 @@ class MapDeserializer : public BlobDeserializerBase {
     CAFFE_ENFORCE(
         tensor_protos.ParseFromString(proto.content()),
         "Fail to parse TensorProtos");
-    TensorDeserializer<CPUContext> deser;
-    Tensor<CPUContext> key_tensor, value_tensor;
+    TensorDeserializer deser;
+    Tensor key_tensor(CPU), value_tensor(CPU);
     deser.Deserialize(tensor_protos.protos(0), &key_tensor);
     deser.Deserialize(tensor_protos.protos(1), &value_tensor);
     auto* key_data = key_tensor.data<KEY_T>();

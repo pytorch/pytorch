@@ -181,15 +181,18 @@ namespace caffe2 {
             T* comp_data = Comp_rate->template mutable_data<T>();
             math::Sum<T, Context>(
                 Mask.size(), Mask.template data<T>(), comp_data, &context_);
-            math::Scale<T, Context>(
-                1, static_cast<T>(1.) / Mask.size(), comp_data, comp_data,
+            math::Scale<float, T, Context>(
+                1,
+                static_cast<T>(1.) / Mask.size(),
+                comp_data,
+                comp_data,
                 &context_);
           }
           return true;
         }
 
       protected:
-        Tensor<Context> bias_multiplier_;
+       Tensor bias_multiplier_{Context::GetDeviceType()};
     };
 
   template <typename T, class Context, class Engine=DefaultEngine>
@@ -263,8 +266,11 @@ namespace caffe2 {
           T* comp_data = comp_r_buf_.template mutable_data<T>();
           math::Sum<T, Context>(
               Mask.size(), Mask.template data<T>(), comp_data, &context_);
-          math::Scale<T, Context>(
-              1, static_cast<T>(1.) / Mask.size(), comp_data, comp_data,
+          math::Scale<float, T, Context>(
+              1,
+              static_cast<T>(1.) / Mask.size(),
+              comp_data,
+              comp_data,
               &context_);
           // update W size window
           // Notice here we need to maintain state in OP.
@@ -343,9 +349,9 @@ namespace caffe2 {
         }
 
       protected:
-        Tensor<Context> bias_multiplier_;
-        Tensor<Context> sum_buffer_;
-        Tensor<Context> comp_r_buf_;
+       Tensor bias_multiplier_{Context::GetDeviceType()};
+       Tensor sum_buffer_{Context::GetDeviceType()};
+       Tensor comp_r_buf_{Context::GetDeviceType()};
     };
 
 }  // namespace caffe2

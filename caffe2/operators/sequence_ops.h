@@ -14,9 +14,9 @@ class GatherPaddingOp final : public Operator<Context> {
   GatherPaddingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         startPaddingWidth_(
-            OperatorBase::GetSingleArgument<int>("padding_width", 1)),
+            this->template GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
-            OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
+            this->template GetSingleArgument<int>("end_padding_width", -1)) {
     CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
@@ -93,8 +93,8 @@ class GatherPaddingOp final : public Operator<Context> {
   int startPaddingWidth_;
   int endPaddingWidth_;
   // Scratch space required by the CUDA version
-  Tensor<Context> lengths_prefix_sum_buffer_;
-  Tensor<Context> lengths_prefix_sum_;
+  Tensor lengths_prefix_sum_buffer_{Context::GetDeviceType()};
+  Tensor lengths_prefix_sum_{Context::GetDeviceType()};
 };
 
 template <class Context>
@@ -104,9 +104,9 @@ class RemovePaddingOp final : public Operator<Context> {
   RemovePaddingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         startPaddingWidth_(
-            OperatorBase::GetSingleArgument<int>("padding_width", 1)),
+            this->template GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
-            OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
+            this->template GetSingleArgument<int>("end_padding_width", -1)) {
     CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
@@ -133,8 +133,8 @@ class RemovePaddingOp final : public Operator<Context> {
   int endPaddingWidth_;
 
   // Scratch space required by the CUDA version
-  Tensor<Context> lengths_prefix_sum_buffer_;
-  Tensor<Context> lengths_prefix_sum_;
+  Tensor lengths_prefix_sum_buffer_{Context::GetDeviceType()};
+  Tensor lengths_prefix_sum_{Context::GetDeviceType()};
 };
 
 template <class Context>
@@ -144,9 +144,9 @@ class AddPaddingOp final : public Operator<Context> {
   AddPaddingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         startPaddingWidth_(
-            OperatorBase::GetSingleArgument<int>("padding_width", 1)),
+            this->template GetSingleArgument<int>("padding_width", 1)),
         endPaddingWidth_(
-            OperatorBase::GetSingleArgument<int>("end_padding_width", -1)) {
+            this->template GetSingleArgument<int>("end_padding_width", -1)) {
     CAFFE_ENFORCE_GE(startPaddingWidth_, 0);
     if (endPaddingWidth_ < 0) {
       endPaddingWidth_ = startPaddingWidth_;
@@ -236,8 +236,8 @@ class AddPaddingOp final : public Operator<Context> {
   int endPaddingWidth_;
 
   // Scratch space required by the CUDA version
-  Tensor<Context> lengths_prefix_sum_buffer_;
-  Tensor<Context> lengths_prefix_sum_;
+  Tensor lengths_prefix_sum_buffer_{Context::GetDeviceType()};
+  Tensor lengths_prefix_sum_{Context::GetDeviceType()};
 };
 
 template <class Context>

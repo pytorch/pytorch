@@ -6,9 +6,11 @@
 #include <string>
 #include <vector>
 
+#include "caffe2/core/common.h"
+
 namespace caffe2 {
 
-class StoreHandler {
+class CAFFE2_API StoreHandler {
  public:
   static constexpr std::chrono::milliseconds kDefaultTimeout =
       std::chrono::seconds(30);
@@ -53,7 +55,8 @@ class StoreHandler {
 /*
  * The backing store is no longer available. It may have been deleted.
  */
-struct StoreHandlerNotAvailableException : public std::runtime_error {
+struct CAFFE2_API StoreHandlerNotAvailableException
+    : public std::runtime_error {
   StoreHandlerNotAvailableException() = default;
   explicit StoreHandlerNotAvailableException(const std::string& msg)
       : std::runtime_error(msg) {}
@@ -66,7 +69,7 @@ struct StoreHandlerNotAvailableException : public std::runtime_error {
 /*
  * Timeout accessing the store.
  */
-struct StoreHandlerTimeoutException : public std::runtime_error {
+struct CAFFE2_API StoreHandlerTimeoutException : public std::runtime_error {
   StoreHandlerTimeoutException() = default;
   explicit StoreHandlerTimeoutException(const std::string& msg)
       : std::runtime_error(msg) {}

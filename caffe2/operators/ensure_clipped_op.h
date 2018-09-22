@@ -1,6 +1,7 @@
 #pragma once
 
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -15,10 +16,10 @@ class EnsureClippedOp final : public Operator<Context> {
         min_(std::numeric_limits<T>::lowest()),
         max_(std::numeric_limits<T>::max()) {
     if (HasArgument("min")) {
-      min_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("min", 0));
+      min_ = static_cast<T>(this->template GetSingleArgument<float>("min", 0));
     }
     if (HasArgument("max")) {
-      max_ = static_cast<T>(OperatorBase::GetSingleArgument<float>("max", 0));
+      max_ = static_cast<T>(this->template GetSingleArgument<float>("max", 0));
     }
   }
 
