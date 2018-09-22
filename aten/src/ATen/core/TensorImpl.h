@@ -9,12 +9,12 @@
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/LegacyTypeDispatch.h"
 #include "ATen/core/Backend.h"
+#include "ATen/core/context_base.h"
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/context_base.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -550,7 +550,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
         reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize() ||
             !caffe2::FLAGS_caffe2_keep_on_shrink ||
             storage_.capacity() - (storage_offset_ + numel_) * storage_.itemsize() >
-                caffe2::FLAGS_caffe2_max_keep_on_shrink_memory;
+                static_cast<size_t>(caffe2::FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
       if (reset_tensor && !is_init) {
