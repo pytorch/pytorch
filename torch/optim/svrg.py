@@ -15,13 +15,12 @@ class SVRG(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
-        update_frequency (int, optional): determines after how many epochs the snapshot should be updated (default: 1)
 
     .. _Accelerating stochastic gradient descent using predictive variance reduction:
     https://papers.nips.cc/paper/4937-accelerating-stochastic-gradient-descent-using-predictive-variance-reduction.pdf
     """
     def __init__(self, params, snapshot_params=None, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False, update_frequency=1):
+                 weight_decay=0, nesterov=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -30,17 +29,10 @@ class SVRG(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
-        if update_frequency < 0.0 and not isinstance(update_frequency, int):
-            raise ValueError("Invalid update_frequency: {}".format(update_frequency))
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov)
         super(SVRG, self).__init__(params, defaults)
-
-        # Store the update_frequency parameter
-        self.update_frequency = update_frequency
-        # Define a variable that will count the epochs that will be used with update frequency
-        self.update_count = 0
 
         # Making param groups out of the snapshot parameters
         snapshot_param_groups = list(snapshot_params)
@@ -116,11 +108,6 @@ class SVRG(Optimizer):
             raise RuntimeError("A closure has to be given")
         if dataloader is None:
             raise RuntimeError("Dataloader has to be given")
-        if self.update_count % self.update_frequency != 0:
-            self.update_count = self.update_count + 1
-            return
-        else:
-            self.update_count = 1
         # Zero the gradient of the parameters
         self.zero_grad()
         # Take a snapshot of the latest parameters
