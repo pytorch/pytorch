@@ -9,7 +9,7 @@
 namespace caffe2 {
 
 class CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
-  UndefinedTensorImpl() : TensorImpl(at::Storage()){};
+  UndefinedTensorImpl() : TensorImpl(CPU){};
 
  public:
  // Without this, we get:
@@ -290,7 +290,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->stride(dim);
   }
 
-  inline at::DimVector strides() {
+  inline at::IntList strides() {
     return impl_.get()->strides();
   }
 
