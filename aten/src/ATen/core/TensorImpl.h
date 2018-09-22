@@ -9,12 +9,12 @@
 #include "ATen/core/TensorTypeIdRegistration.h"
 #include "ATen/core/LegacyTypeDispatch.h"
 #include "ATen/core/Backend.h"
+#include "ATen/core/context_base.h"
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/context_base.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
