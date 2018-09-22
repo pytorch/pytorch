@@ -24,6 +24,15 @@
 #include "ATen/core/IdWrapper.h"
 #include "ATen/core/Macros.h"
 
+/*
+ * TypeIdentifier is a small type containing an id.
+ * Types must be registered using CAFFE_KNOWN_TYPE() for them to have a type id.
+ * If a type is registered, you can also create an object containing meta data
+ * like constructor, destructor, stringified name, ... about the type by calling
+ * TypeMeta::Make<T>. This returns a TypeMeta() object, which is basically just
+ * a pointer to the type information, so it's cheap to pass around.
+ */
+
 // TODO: This file is still in the caffe2 namespace, despite living
 // in the ATen directory.  This is because the macro
 // CAFFE_PREALLOCATED_KNOWN_TYPE defines a template specialization, which relies
@@ -99,6 +108,9 @@ namespace caffe2 {
 
 namespace detail {
 
+// This struct holds the actual type information. There will be
+// one allocated per type. TypeMeta objects will then point to the struct
+// instance for the type they're configured for.
 struct TypeMetaData final {
   using PlacementNew = void(void*, size_t);
   using TypedCopy = void(const void*, void*, size_t);
