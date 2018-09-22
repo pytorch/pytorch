@@ -1208,6 +1208,7 @@ if __name__ == '__main__':
                 'lib/include/ATen/cudnn/*.h',
                 'lib/include/ATen/detail/*.h',
                 'lib/include/caffe2/utils/*.h',
+                'lib/include/caffe2/core/*.h',
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/detail/ordered_dict.h',
