@@ -7,7 +7,7 @@
 
 namespace caffe2 {
 
-class Caffe2Annotation : public nom::repr::Annotation {
+class CAFFE2_API Caffe2Annotation : public nom::repr::Annotation {
  public:
   Caffe2Annotation() : Annotation(AnnotationKind::Caffe2) {}
   Caffe2Annotation(std::string device)
@@ -44,7 +44,7 @@ class Caffe2Annotation : public nom::repr::Annotation {
   void setComponentLevels(std::vector<std::string> components);
   std::vector<std::string> getComponentLevels() const;
 
-  static bool classof(const Annotation* A);
+  CAFFE2_API static bool classof(const Annotation* A);
 
  private:
   std::string Device = "";
