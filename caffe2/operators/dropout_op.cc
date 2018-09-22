@@ -9,8 +9,8 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
   Y->Resize(X.dims());
   if (is_test_) {
     if (Y != &X) {
-      context_.Copy<float, CPUContext, CPUContext>(
-          X.size(), X.data<float>(), Y->mutable_data<float>());
+      context_.CopyFromCPU<float>(
+          X.size(), X.data<float>(), Y->template mutable_data<float>());
     }
     return true;
   } else {
@@ -19,10 +19,10 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     // generate probability depending on 1-ratio.
     std::bernoulli_distribution dist(1. - ratio_);
     const float* Xdata = X.data<float>();
-    float* Ydata = Y->mutable_data<float>();
+    float* Ydata = Y->template mutable_data<float>();
     auto mask = Output(1);
     mask->Resize(X.dims());
-    bool* mask_data = mask->mutable_data<bool>();
+    bool* mask_data = mask->template mutable_data<bool>();
     auto& gen = context_.RandGenerator();
     for (int i = 0; i < X.size(); ++i) {
       mask_data[i] = dist(gen);
@@ -39,8 +39,8 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
   dX->Resize(dY.dims());
   if (is_test_) {
     if (dX != &dY) {
-      context_.Copy<float, CPUContext, CPUContext>(
-          dY.size(), dY.data<float>(), dX->mutable_data<float>());
+      context_.CopyFromCPU<float>(
+          dY.size(), dY.data<float>(), dX->template mutable_data<float>());
     }
     return true;
   } else {
@@ -48,7 +48,7 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(dY.size(), mask.size());
     const float* dYdata = dY.data<float>();
     const bool* mask_data = mask.data<bool>();
-    float* dXdata = dX->mutable_data<float>();
+    float* dXdata = dX->template mutable_data<float>();
     float scale = 1. / (1. - ratio_);
     for (int i = 0; i < dY.size(); ++i) {
       dXdata[i] = dYdata[i] * mask_data[i] * scale;
@@ -144,7 +144,9 @@ mask: [[False False False  True  True]
 </details>
 
 )DOC")
-    .Arg("ratio", "*(type: float; default: 0.5)* Probability of an element to be zeroed.")
+    .Arg(
+        "ratio",
+        "*(type: float; default: 0.5)* Probability of an element to be zeroed.")
     .ArgIsTest(
         "*(type: int; default: 0)* If zero (train mode), perform dropout. If non-zero"
         "(test mode), Y = X.")
@@ -154,7 +156,7 @@ mask: [[False False False  True  True]
         1,
         "mask",
         "*(type: Tensor`<bool>`)* The output mask containing boolean values for"
-        "each element, signifying which elements are dropped out. If `is_test` is" 
+        "each element, signifying which elements are dropped out. If `is_test` is"
         "nonzero, this output is not filled.")
     .InheritOnnxSchema("Dropout");
 

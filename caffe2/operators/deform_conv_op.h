@@ -17,7 +17,7 @@ class DeformConvOpBase : public ConvPoolOpBase<Context> {
   DeformConvOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws),
         deformable_group_(
-            OperatorBase::GetSingleArgument<int>("deformable_group", 1)) {}
+            this->template GetSingleArgument<int>("deformable_group", 1)) {}
   ~DeformConvOpBase() {}
 
  protected:
@@ -70,10 +70,10 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
   bool RunOnDeviceWithOrderNCHW() override;
 
  private:
-  Tensor<Context> col_buffer_;
-  Tensor<Context> bias_multiplier_;
-  Tensor<Context> img_shape_device_;
-  Tensor<Context> col_buffer_shape_device_;
+  Tensor col_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor img_shape_device_{Context::GetDeviceType()};
+  Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   // Input: X, o, W, b
   // Output: Y
   INPUT_TAGS(INPUT, OFFSET, FILTER, BIAS);
@@ -86,7 +86,7 @@ class DeformConvGradientOp final : public DeformConvOpBase<T, Context> {
 
   DeformConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : DeformConvOpBase<T, Context>(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
+        no_bias_(this->template GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 4),
         "If bias is not present, you should not have 4 grad output.");
@@ -96,10 +96,10 @@ class DeformConvGradientOp final : public DeformConvOpBase<T, Context> {
   bool RunOnDeviceWithOrderNCHW() override;
 
  private:
-  Tensor<Context> col_buffer_;
-  Tensor<Context> bias_multiplier_;
-  Tensor<Context> img_shape_device_;
-  Tensor<Context> col_buffer_shape_device_;
+  Tensor col_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor img_shape_device_{Context::GetDeviceType()};
+  Tensor col_buffer_shape_device_{Context::GetDeviceType()};
   bool no_bias_;
   // input: X, W, dY
   // output: dO, dW, db, and optionally dX

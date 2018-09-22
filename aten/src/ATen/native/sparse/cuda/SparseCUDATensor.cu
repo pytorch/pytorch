@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/sparse/SparseUtils.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
@@ -26,14 +27,18 @@ namespace at { namespace native {
 SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 #ifndef __HIP_PLATFORM_HCC__
   int64_t nnz = self._nnz();
-  if (nnz < 2) {
-    _get_sparse_impl(self)->set_coalesced(true);
-  }
   if (self.is_coalesced()) {
     return self;
   }
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
+  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  if (nnz < 2) {
+    SparseTensor dst = self.clone();
+    _get_sparse_impl(dst)->set_coalesced(true);
+    return dst;
+  }
 
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
   // Replace instances with
@@ -80,7 +85,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t newNnz = newEnd.first - indicesIter;
 
   indices1D.resize_({1, newNnz});
-  std::vector<int64_t> newValues_size(values.sizes());
+  auto newValues_size = values.sizes().vec();
   newValues_size[0] = newNnz;
   Tensor newValues = at::empty(newValues_size, values.options());
 
@@ -88,8 +93,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   dim3 block(32, 4);
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       values.type(), "coalesce_sparse_cuda", [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
-        apply::coalesceValuesKernel<scalar_t, accscalar_t><<<grid, block, 0, stream>>>(
+        using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
+        apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
           uniqueOffsets.data<int64_t>(),
           origIndices.data<int64_t>(),
           values.data<scalar_t>(),

@@ -3,7 +3,7 @@
 
 #include "GLImage.h"
 #include "caffe2/core/net.h"
-#include "caffe2/core/predictor.h"
+#include "caffe2/predictor/predictor.h"
 
 namespace caffe2 {
 class GLPredictor : public Predictor {

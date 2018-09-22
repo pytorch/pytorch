@@ -16,7 +16,7 @@ USE_MKLDNN = False
 MKLDNN_LIB_DIR = None
 MKLDNN_INCLUDE_DIR = None
 MKLDNN_LIBRARY = None
-if (IS_LINUX or IS_WINDOWS) and not check_env_flag('NO_MKLDNN'):
+if not check_env_flag('NO_MKLDNN'):
     lib_paths = list(filter(bool, [
         os.getenv('MKLDNN_LIB_DIR'),
         os.path.join(MKLDNN_HOME, 'lib'),

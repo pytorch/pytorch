@@ -9,16 +9,16 @@
 namespace caffe2 {
 
 template <class Context>
-struct RSqrtFunctor {
+struct RsqrtFunctor {
   template <typename T>
   bool operator()(const int N, const T* X, T* Y, Context* context) const {
-    math::InvSqrt<T, Context>(N, X, Y, context);
+    math::Rsqrt<T, Context>(N, X, Y, context);
     return true;
   }
 };
 
 template <class Context>
-struct RSqrtGradientFunctor {
+struct RsqrtGradientFunctor {
   template <typename T>
   bool Forward(
       const std::vector<int>& dY_dims,

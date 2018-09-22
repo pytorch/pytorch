@@ -181,6 +181,51 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   }
 }
 
+std::ostream& operator<<(
+    std::ostream& oss,
+    const NNNodeMatchCriteria& criteria) {
+  return oss << criteria.debugString;
+}
+
+NNNodeMatchCriteria criteriaSingleOutputAndConsumer() {
+  return NNNodeMatchCriteria(
+      [](NNGraph::NodeRef nodeRef) {
+        auto nodeOutputs = nn::getOutputs(nodeRef);
+        NOM_REQUIRE_OR_RET_FALSE(nodeOutputs.size() == 1);
+        auto nodeConsumers = nn::getConsumers(nodeOutputs.front());
+        return nodeConsumers.size() == 1;
+      },
+      "Single output and consumer");
+}
+
+NNNodeMatchCriteria criteriaSingleConsumer() {
+  return NNNodeMatchCriteria(
+      [](NNGraph::NodeRef nodeRef) {
+        auto nodeOutputs = nn::getOutputs(nodeRef);
+        NNGraph::NodeRef nodeConsumer = nullptr;
+        for (auto nodeOutput : nodeOutputs) {
+          for (auto consumer : nn::getConsumers(nodeOutput)) {
+            if (nodeConsumer && consumer && consumer != nodeConsumer) {
+              return false;
+            }
+            nodeConsumer = consumer;
+          }
+        }
+        return true;
+      },
+      "Single consumer");
+}
+
+NNNodeMatchCriteria matchTensor(const std::string& debugString) {
+  return matchOp<nom::repr::Tensor>(debugString);
+}
+
+NNMatchNode matchExternalTensorNode(const std::string& debugString) {
+  return NNMatchNode(matchTensor(debugString))
+      .nonTerminal()
+      .excludeFromSubgraph();
+}
+
 } // namespace nn
 
 } // namespace repr

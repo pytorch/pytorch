@@ -17,17 +17,17 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
 
   if (input->dim() == 3) {
-    nInputCols = input->size[2];
-    nInputRows = input->size[1];
-    nInputPlane = input->size[0];
+    nInputCols = input->size(2);
+    nInputRows = input->size(1);
+    nInputPlane = input->size(0);
     batchSize = 1;
   }
   else
   {
-    nInputCols = input->size[3];
-    nInputRows = input->size[2];
-    nInputPlane = input->size[1];
-    batchSize = input->size[0];
+    nInputCols = input->size(3);
+    nInputRows = input->size(2);
+    nInputPlane = input->size(1);
+    batchSize = input->size(0);
   }
 
   input = THCTensor_(newContiguous)(state, input);
@@ -65,22 +65,22 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   int dimh = 1;
 
   if (input->dim() == 3) {
-    nInputPlane = input->size[0];
+    nInputPlane = input->size(0);
     batchSize = 1;
   }
   else
   {
     ++dimw;
     ++dimh;
-    nInputPlane = input->size[1];
-    batchSize = input->size[0];
+    nInputPlane = input->size(1);
+    batchSize = input->size(0);
   }
-  nInputCols = input->size[dimw];
-  nInputRows = input->size[dimh];
+  nInputCols = input->size(dimw);
+  nInputRows = input->size(dimh);
 
-  if(owidth!=gradOutput->size[dimw] || oheight!=gradOutput->size[dimh]){
+  if(owidth!=gradOutput->size(dimw) || oheight!=gradOutput->size(dimh)){
      THError("Inconsistent gradOutput size. oheight= %d, owidth= %d, gradOutput: %dx%d",
-             oheight, owidth,gradOutput->size[dimh],gradOutput->size[dimw]);
+             oheight, owidth,gradOutput->size(dimh),gradOutput->size(dimw));
   }
 
   input = THCTensor_(newContiguous)(state, input);

@@ -6,7 +6,7 @@ from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
 from . import SequentialSampler, RandomSampler, BatchSampler
 import signal
 import functools
-import collections
+from torch._six import container_abcs
 import re
 import sys
 import threading
@@ -72,46 +72,57 @@ else:
             return os.getppid() == self.manager_pid
 
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
-    global _use_shared_memory
-    _use_shared_memory = True
+def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
+    try:
+        global _use_shared_memory
+        _use_shared_memory = True
 
-    # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
-    # module's handlers are executed after Python returns from C low-level
-    # handlers, likely when the same fatal signal happened again already.
-    # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
-    _set_worker_signal_handlers()
+        # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
+        # module's handlers are executed after Python returns from C low-level
+        # handlers, likely when the same fatal signal happened again already.
+        # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
+        _set_worker_signal_handlers()
 
-    torch.set_num_threads(1)
-    random.seed(seed)
-    torch.manual_seed(seed)
+        torch.set_num_threads(1)
+        random.seed(seed)
+        torch.manual_seed(seed)
 
-    if init_fn is not None:
-        init_fn(worker_id)
+        # Do not wait for putting thread to join when this worker exits.
+        # Otherwise, this worker may always be waiting to put and doesn't check
+        # index_queue and done_event for termination signal.
+        data_queue.cancel_join_thread()
 
-    watchdog = ManagerWatchdog()
+        if init_fn is not None:
+            init_fn(worker_id)
 
-    while True:
-        try:
-            r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
-        except queue.Empty:
-            if watchdog.is_alive():
-                continue
-            else:
+        watchdog = ManagerWatchdog()
+
+        while True:
+            try:
+                r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
+            except queue.Empty:
+                if watchdog.is_alive() and not done_event.is_set():
+                    continue
+                else:
+                    break
+            # use done_event so that we can get faster exiting signal even if there
+            # are still indices in index_queue
+            if r is None or done_event.is_set():
                 break
-        if r is None:
-            break
-        idx, batch_indices = r
-        try:
-            samples = collate_fn([dataset[i] for i in batch_indices])
-        except Exception:
-            data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
-        else:
-            data_queue.put((idx, samples))
-            del samples
+            idx, batch_indices = r
+            try:
+                samples = collate_fn([dataset[i] for i in batch_indices])
+            except Exception:
+                data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+            else:
+                data_queue.put((idx, samples))
+                del samples
+    except KeyboardInterrupt:
+        # Main process will raise KeyboardInterrupt anyways.
+        pass
 
 
-def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
+def _pin_memory_loop(in_queue, out_queue, done_event, pin_memory, device_id):
     if pin_memory:
         torch.cuda.set_device(device_id)
 
@@ -122,7 +133,7 @@ def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id)
             if done_event.is_set():
                 return
             raise
-        if r is None:
+        if r is None or done_event.is_set():
             break
         if isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
@@ -180,9 +191,9 @@ def default_collate(batch):
         return torch.DoubleTensor(batch)
     elif isinstance(batch[0], string_classes):
         return batch
-    elif isinstance(batch[0], collections.Mapping):
+    elif isinstance(batch[0], container_abcs.Mapping):
         return {key: default_collate([d[key] for d in batch]) for key in batch[0]}
-    elif isinstance(batch[0], collections.Sequence):
+    elif isinstance(batch[0], container_abcs.Sequence):
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
@@ -194,9 +205,9 @@ def pin_memory_batch(batch):
         return batch.pin_memory()
     elif isinstance(batch, string_classes):
         return batch
-    elif isinstance(batch, collections.Mapping):
+    elif isinstance(batch, container_abcs.Mapping):
         return {k: pin_memory_batch(sample) for k, sample in batch.items()}
-    elif isinstance(batch, collections.Sequence):
+    elif isinstance(batch, container_abcs.Sequence):
         return [pin_memory_batch(sample) for sample in batch]
     else:
         return batch
@@ -242,7 +253,6 @@ class _DataLoaderIter(object):
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
-        self.done_event = threading.Event()
 
         self.sample_iter = iter(self.batch_sampler)
 
@@ -250,43 +260,50 @@ class _DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
             self.worker_queue_idx = 0
-            self.worker_result_queue = multiprocessing.SimpleQueue()
+            self.worker_result_queue = multiprocessing.Queue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False
             self.send_idx = 0
             self.rcvd_idx = 0
             self.reorder_dict = {}
+            self.done_event = multiprocessing.Event()
 
-            self.workers = [
-                multiprocessing.Process(
+            self.index_queues = []
+            self.workers = []
+            for i in range(self.num_workers):
+                index_queue = multiprocessing.Queue()
+                w = multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queues[i],
-                          self.worker_result_queue, self.collate_fn, base_seed + i,
+                    args=(self.dataset, index_queue,
+                          self.worker_result_queue, self.done_event,
+                          self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
-                for i in range(self.num_workers)]
+                w.daemon = True  # ensure that the worker exits on process exit
+                # Process.start() actually take some time as it needs to start a
+                # process and pass the arguments over via a pipe. Therefore, we
+                # only add a worker to self.workers list after it started, so
+                # that we do not call .join() if program dies before it starts,
+                # and __del__ tries to join it but will get:
+                #     AssertionError: can only join a started process.
+                w.start()
+                self.index_queues.append(index_queue)
+                self.workers.append(w)
 
-            if self.pin_memory or self.timeout > 0:
+            if self.pin_memory:
                 self.data_queue = queue.Queue()
-                if self.pin_memory:
-                    maybe_device_id = torch.cuda.current_device()
-                else:
-                    # do not initialize cuda context if not necessary
-                    maybe_device_id = None
-                self.worker_manager_thread = threading.Thread(
-                    target=_worker_manager_loop,
+                pin_memory_thread = threading.Thread(
+                    target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
-                          maybe_device_id))
-                self.worker_manager_thread.daemon = True
-                self.worker_manager_thread.start()
+                          torch.cuda.current_device()))
+                pin_memory_thread.daemon = True
+                pin_memory_thread.start()
+                # Similar to workers (see comment above), we only register
+                # pin_memory_thread once it is started.
+                self.pin_memory_thread = pin_memory_thread
             else:
                 self.data_queue = self.worker_result_queue
-
-            for w in self.workers:
-                w.daemon = True  # ensure that the worker exits on process exit
-                w.start()
 
             _update_worker_pids(id(self), tuple(w.pid for w in self.workers))
             _set_SIGCHLD_handler()
@@ -366,33 +383,29 @@ class _DataLoaderIter(object):
         raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
-        try:
-            if not self.shutdown:
-                self.shutdown = True
-                self.done_event.set()
-                for q in self.index_queues:
-                    q.put(None)
-                # if some workers are waiting to put, make place for them
-                try:
-                    while not self.worker_result_queue.empty():
-                        self.worker_result_queue.get()
-                except (FileNotFoundError, ImportError):
-                    # Many weird errors can happen here due to Python
-                    # shutting down. These are more like obscure Python bugs.
-                    # FileNotFoundError can happen when we rebuild the fd
-                    # fetched from the queue but the socket is already closed
-                    # from the worker side.
-                    # ImportError can happen when the unpickler loads the
-                    # resource from `get`.
-                    pass
-                # done_event should be sufficient to exit worker_manager_thread,
-                # but be safe here and put another None
-                self.worker_result_queue.put(None)
-        finally:
-            # removes pids no matter what
+        if not self.shutdown:
+            self.shutdown = True
+            # removes pids from the C side data structure first so worker
+            # termination afterwards won't trigger false positive error report.
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
+            self.done_event.set()
+            if self.pin_memory:
+                # Sending `None` to `pin_memory_thread` must be before
+                # stopping worker processes because the workers may leave
+                # corrupted data in `worker_result_queue`, causing
+                # `pin_memory_thread` unable to read and terminate properly.
+                self.worker_result_queue.put(None)
+            # Workers can't be waiting to put be cause their output queue
+            # is a multiprocessing.Queue and its .put is non-blocking.
+            # They can only be waiting to get, so we put `None` here.
+            for q in self.index_queues:
+                q.put(None)
+            for w in self.workers:
+                w.join()
+            if hasattr(self, 'pin_memory_thread'):
+                self.pin_memory_thread.join()
 
     def __del__(self):
         if self.num_workers > 0:
@@ -407,29 +420,29 @@ class DataLoader(object):
     Arguments:
         dataset (Dataset): dataset from which to load the data.
         batch_size (int, optional): how many samples per batch to load
-            (default: 1).
+            (default: ``1``).
         shuffle (bool, optional): set to ``True`` to have the data reshuffled
-            at every epoch (default: False).
+            at every epoch (default: ``False``).
         sampler (Sampler, optional): defines the strategy to draw samples from
             the dataset. If specified, ``shuffle`` must be False.
         batch_sampler (Sampler, optional): like sampler, but returns a batch of
-            indices at a time. Mutually exclusive with batch_size, shuffle,
-            sampler, and drop_last.
+            indices at a time. Mutually exclusive with :attr:`batch_size`,
+            :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
         num_workers (int, optional): how many subprocesses to use for data
             loading. 0 means that the data will be loaded in the main process.
-            (default: 0)
+            (default: ``0``)
         collate_fn (callable, optional): merges a list of samples to form a mini-batch.
         pin_memory (bool, optional): If ``True``, the data loader will copy tensors
             into CUDA pinned memory before returning them.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
             if the dataset size is not divisible by the batch size. If ``False`` and
             the size of dataset is not divisible by the batch size, then the last batch
-            will be smaller. (default: False)
+            will be smaller. (default: ``False``)
         timeout (numeric, optional): if positive, the timeout value for collecting a batch
-            from workers. Should always be non-negative. (default: 0)
-        worker_init_fn (callable, optional): If not None, this will be called on each
+            from workers. Should always be non-negative. (default: ``0``)
+        worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
-            input, after seeding and before data loading. (default: None)
+            input, after seeding and before data loading. (default: ``None``)
 
     .. note:: By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
@@ -437,9 +450,9 @@ class DataLoader(object):
               may be duplicated upon initializing workers (w.g., NumPy), causing
               each worker to return identical random numbers. (See
               :ref:`dataloader-workers-random-seed` section in FAQ.) You may
-              use ``torch.initial_seed()`` to access the PyTorch seed for each
-              worker in :attr:`worker_init_fn`, and use it to set other seeds
-              before data loading.
+              use :func:`torch.initial_seed()` to access the PyTorch seed for
+              each worker in :attr:`worker_init_fn`, and use it to set other
+              seeds before data loading.
 
     .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.

@@ -1,9 +1,12 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/ir.h"
 
 #include <ATen/ATen.h>
+
 #include <vector>
+#include <memory>
 
 namespace torch { namespace jit {
 
@@ -29,8 +32,11 @@ using value_list = std::vector<Value*>;
 //   df_input_captures = {I0, O2, O0} // Order matches the prefix of inputs to df
 //                        x   t   y
 //   df_output_vjps = {0}     // i.e. connect next_edge[0] of grad_fn to x's (grad_fn, output_nr).
+//
+// Terminology: vjp = vector-jacobian product
+
 struct Gradient {
-  operator bool() const {
+  explicit operator bool() const {
     return df != nullptr;
   }
   std::shared_ptr<Graph> f;
@@ -79,13 +85,11 @@ struct Gradient {
   //   - Interpret df
   //   - Wrap outputs of df into Variables (that don't require grad)
 };
-// XXX: When calling this function, graph should have complete type information.
-// Use the shape analysis pass to fill in the gaps if it doesn't.
-Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& requires_grad);
+TORCH_API Gradient differentiate(std::shared_ptr<Graph>& graph);
 
 // can we take a derivative of this node symbolically?
-bool isDifferentiable(Node * n);
-bool isDifferentiable(Graph & g);
-bool isZero(Value * v);
+TORCH_API bool isDifferentiable(Node * n);
+TORCH_API bool isDifferentiable(Graph & g);
+TORCH_API bool isZero(Value * v);
 
 }}

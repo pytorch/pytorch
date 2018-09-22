@@ -19,10 +19,10 @@ namespace {
 static void AddConstInput(const std::vector<int>& shape, const float value,
                           const string& name, Workspace* ws) {
   DeviceOption option;
-  option.set_device_type(CUDA);
+  option.set_device_type(PROTO_CUDA);
   CUDAContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<Tensor<CUDAContext>>();
+  auto* tensor = blob->GetMutableTensor(CUDA);
   tensor->Resize(shape);
   math::Set<float, CUDAContext>(tensor->size(), value,
                                 tensor->mutable_data<float>(),
@@ -43,7 +43,7 @@ TEST(NervanaFullyConnectedTest, Test) {
   def.add_input("W");
   def.add_input("B");
   def.add_output("Y");
-  def.mutable_device_option()->set_device_type(CUDA);
+  def.mutable_device_option()->set_device_type(PROTO_CUDA);
   def.set_engine("NERVANA");
   AddConstInput(std::vector<int>{5, 10}, 1., "X", &ws);
   AddConstInput(std::vector<int>{6, 10}, 1., "W", &ws);
@@ -54,8 +54,8 @@ TEST(NervanaFullyConnectedTest, Test) {
   EXPECT_TRUE(op->Run());
   Blob* Yblob = ws.GetBlob("Y");
   EXPECT_NE(nullptr, Yblob);
-  auto& Y = Yblob->Get<Tensor<CUDAContext>>();
-  TensorCPU Y_cpu(Y);
+  auto& Y = Yblob->Get<Tensor>();
+  Tensor Y_cpu(Y, CPU);
   EXPECT_EQ(Y.size(), 5 * 6);
   for (int i = 0; i < Y.size(); ++i) {
     CHECK_LT(Y_cpu.data<float>()[i], 10.11);

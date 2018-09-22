@@ -43,7 +43,7 @@ bool CopyFromGLOp<T>::RunOnDevice() {
   if (first_run_) {
     first_run_ = false;
     for (int i = 0; i < Inputs().size(); ++i) {
-      auto* Y = OperatorBase::Outputs()[i]->template GetMutable<TensorCPU>();
+      auto* Y = OperatorBase::Outputs()[i]->GetMutableTensor(CPU);
       Y->Resize(inputs_[i]->dims());
       Y->template mutable_data<float>();
     }
@@ -54,7 +54,7 @@ bool CopyFromGLOp<T>::RunOnDevice() {
       // GLTensor
       auto* X = inputs_[i].get();
       X->lazy_allocate(Xblob, second_run_, true);
-      auto* Y = OperatorBase::Outputs()[i]->template GetMutable<TensorCPU>();
+      auto* Y = OperatorBase::Outputs()[i]->GetMutableTensor(CPU);
       Timer timer;
       timer.Start();
       getTensorCPU(*X, *Y);

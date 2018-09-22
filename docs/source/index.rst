@@ -31,16 +31,19 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    nn
    optim
    torch.autograd <autograd>
-   torch.distributions <distributions>
-   torch.multiprocessing <multiprocessing>
    torch.distributed <distributed>
+   torch.distributions <distributions>
+   torch.jit <jit>
+   torch.multiprocessing <multiprocessing>
    bottleneck
    checkpoint
    cpp_extension
    data
+   dlpack
    ffi
    model_zoo
    onnx
+   torch.distributed.deprecated <distributed_deprecated>
    torch.legacy <legacy>
 
 .. toctree::

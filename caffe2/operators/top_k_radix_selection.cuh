@@ -360,7 +360,7 @@ __global__ void gatherTopK(const T* inputPtr,
   // Find the start offset for our slice
   const T* inputSliceStart = &inputPtr[slice * inputSliceSize];
   T* topKSliceStart = &topKPtr[slice * outputSliceSize];
-  caffe2::TIndex* indicesSliceStart = &indicesPtr[slice * outputSliceSize];
+  IndicesType* indicesSliceStart = &indicesPtr[slice * outputSliceSize];
 
   // Find the k-th highest element in our input
   T topKValue = (T)0;

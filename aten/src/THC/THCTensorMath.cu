@@ -6,7 +6,7 @@
 #include "THCTensorMath.cuh"
 #include "THCThrustAllocator.cuh"
 #include "THCTensor.hpp"
-#include "THCStream.hpp"
+#include "THCStream.h"
 
 #include <thrust/copy.h>
 #include <thrust/count.h>

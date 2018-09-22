@@ -13,22 +13,34 @@ namespace {
 #if defined(__AVX__) && !defined(_MSC_VER)
 
 template <> class Vec256<double> {
+private:
+  __m256d values;
 public:
   static constexpr int size = 4;
-  __m256d values;
   Vec256() {}
   Vec256(__m256d v) : values(v) {}
   Vec256(double val) {
     values = _mm256_set1_pd(val);
   }
+  Vec256(double val1, double val2, double val3, double val4) {
+    values = _mm256_setr_pd(val1, val2, val3, val4);
+  }
   operator __m256d() const {
     return values;
   }
   template <int64_t mask>
-  static Vec256<double> blend(Vec256<double> a, Vec256<double> b) {
+  static Vec256<double> blend(const Vec256<double>& a, const Vec256<double>& b) {
     return _mm256_blend_pd(a.values, b.values, mask);
   }
-  static Vec256<double> set(Vec256<double> a, Vec256<double> b, int64_t count = size) {
+  static Vec256<double> blendv(const Vec256<double>& a, const Vec256<double>& b,
+                               const Vec256<double>& mask) {
+    return _mm256_blendv_pd(a.values, b.values, mask.values);
+  }
+  static Vec256<double> arange(double base = 0., double step = 1.) {
+    return Vec256<double>(base, base + step, base + 2 * step, base + 3 * step);
+  }
+  static Vec256<double> set(const Vec256<double>& a, const Vec256<double>& b,
+                            int64_t count = size) {
     switch (count) {
       case 0:
         return a;
@@ -55,12 +67,14 @@ public:
   void store(void* ptr, int count = size) const {
     if (count == size) {
       _mm256_storeu_pd(reinterpret_cast<double*>(ptr), values);
-    } else {
+    } else if (count > 0) {
       double tmp_values[size];
       _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(double));
     }
   }
+  const double& operator[](int idx) const  = delete;
+  double& operator[](int idx) = delete;
   Vec256<double> map(double (*f)(double)) const {
     __at_align32__ double tmp[4];
     store(tmp);
@@ -84,6 +98,9 @@ public:
   }
   Vec256<double> erf() const {
     return Vec256<double>(Sleef_erfd4_u10(values));
+  }
+  Vec256<double> erfc() const {
+    return Vec256<double>(Sleef_erfcd4_u15(values));
   }
   Vec256<double> exp() const {
     return Vec256<double>(Sleef_expd4_u10(values));
@@ -121,6 +138,9 @@ public:
   Vec256<double> floor() const {
     return _mm256_floor_pd(values);
   }
+  Vec256<double> neg() const {
+    return _mm256_xor_pd(_mm256_set1_pd(-0.), values);
+  }
   Vec256<double> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
@@ -136,8 +156,40 @@ public:
   Vec256<double> sqrt() const {
     return _mm256_sqrt_pd(values);
   }
+  Vec256<double> reciprocal() const {
+    return _mm256_div_pd(_mm256_set1_pd(1), values);
+  }
   Vec256<double> rsqrt() const {
     return _mm256_div_pd(_mm256_set1_pd(1), _mm256_sqrt_pd(values));
+  }
+  Vec256<double> pow(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_powd4_u10(values, b));
+  }
+  // Comparison using the _CMP_**_OQ predicate.
+  //   `O`: get false if an operand is NaN
+  //   `Q`: do not raise if an operand is NaN
+  Vec256<double> operator==(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_EQ_OQ);
+  }
+
+  Vec256<double> operator!=(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
+  }
+
+  Vec256<double> operator<(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_LT_OQ);
+  }
+
+  Vec256<double> operator<=(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_LE_OQ);
+  }
+
+  Vec256<double> operator>(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_GT_OQ);
+  }
+
+  Vec256<double> operator>=(const Vec256<double>& other) const {
+    return _mm256_cmp_pd(values, other.values, _CMP_GE_OQ);
   }
 };
 
@@ -165,6 +217,33 @@ template <>
 Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_max_pd(a, b);
 }
+
+template <>
+Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_min_pd(a, b);
+}
+
+template <>
+Vec256<double> inline operator&(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_and_pd(a, b);
+}
+
+template <>
+Vec256<double> inline operator|(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_or_pd(a, b);
+}
+
+template <>
+Vec256<double> inline operator^(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_xor_pd(a, b);
+}
+
+#ifdef __AVX2__
+template <>
+Vec256<double> inline fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
+  return _mm256_fmadd_pd(a, b, c);
+}
+#endif
 
 #endif
 

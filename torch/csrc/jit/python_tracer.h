@@ -10,14 +10,12 @@ void initPythonTracerBindings(PyObject *module);
 
 
 std::string getPythonInterpreterStackTrace();
-tracer::PreTraceInfo preRecordPythonTrace(
+Node* preRecordPythonTrace(
     THPObjectPtr pyobj, std::string arg_types, at::ArrayRef<autograd::Variable> inputs,
     pyobj_list scalar_args);
 
 std::shared_ptr<Graph> createGraphByTracing(
-        py::function func,
-        autograd::variable_list inputs,
-        size_t num_inputs);
+        py::function func, Stack inputs, at::optional<size_t> num_real_inputs={});
 } // namespace tracer
 
 }} // namespace torch::jit

@@ -58,7 +58,7 @@ class PrimitiveWrapper {
 
  private:
   dnnPrimitive_t primitive_ = 0;
-  DISABLE_COPY_AND_ASSIGN(PrimitiveWrapper);
+  AT_DISABLE_COPY_AND_ASSIGN(PrimitiveWrapper);
 };
 
 template <typename T>
@@ -138,7 +138,7 @@ class LayoutWrapper {
 
  private:
   dnnLayout_t layout_ = 0;
-  DISABLE_COPY_AND_ASSIGN(LayoutWrapper);
+  AT_DISABLE_COPY_AND_ASSIGN(LayoutWrapper);
 };
 
 /**
@@ -557,7 +557,7 @@ class MKLMemory {
   // The primitive to use to convert from internal layout to user layout
   PrimitiveWrapper<T> convert_out_;
 
-  DISABLE_COPY_AND_ASSIGN(MKLMemory);
+  AT_DISABLE_COPY_AND_ASSIGN(MKLMemory);
 };
 
 template <typename T>
@@ -575,7 +575,7 @@ class MKLWorkspace {
 
  private:
   void* buffer_;
-  DISABLE_COPY_AND_ASSIGN(MKLWorkspace);
+  AT_DISABLE_COPY_AND_ASSIGN(MKLWorkspace);
 };
 
 } // namespace mkl

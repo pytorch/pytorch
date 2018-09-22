@@ -18,7 +18,7 @@ bool CosineEmbeddingCriterionOp<CPUContext>::RunOnDevice() {
 
   const float* Sdata = S.data<float>();
   const int* Ydata = Y.data<int>();
-  float* output_data = output->mutable_data<float>();
+  float* output_data = output->template mutable_data<float>();
   for (int i = 0; i < S.size(); ++i) {
     output_data[i] =
         Ydata[i] == 1 ? (1.f - Sdata[i]) : std::max(0.f, Sdata[i] - margin_);
@@ -38,7 +38,7 @@ bool CosineEmbeddingCriterionGradientOp<CPUContext>::RunOnDevice() {
   const float* Sdata = S.data<float>();
   const int* Ydata = Y.data<int>();
   const float* dOutput_data = dOutput.data<float>();
-  float* dSdata = dS->mutable_data<float>();
+  float* dSdata = dS->template mutable_data<float>();
   for (int i = 0; i < S.size(); ++i) {
     dSdata[i] = dOutput_data[i] *
         (Ydata[i] == 1 ? -1.f : static_cast<float>(Sdata[i] >= margin_));

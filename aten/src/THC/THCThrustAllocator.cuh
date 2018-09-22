@@ -17,13 +17,11 @@ class THCThrustAllocator {
   }
 
   char* allocate(std::ptrdiff_t size) {
-    char* out = NULL;
-    THCudaCheck(THCudaMalloc(state_, (void**) &out, size));
-    return out;
+    return static_cast<char*>(THCudaMalloc(state_, size));
   }
 
   void deallocate(char* p, size_t size) {
-    THCudaCheck(THCudaFree(state_, p));
+    THCudaFree(state_, p);
   }
 
  private:

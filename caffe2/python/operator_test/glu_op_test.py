@@ -4,20 +4,21 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import assume, given, settings, HealthCheck
 import hypothesis.strategies as st
-import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 
 import unittest
 
 
-class TestGlu(hu.HypothesisTestCase):
+class TestGlu(serial.SerializedTestCase):
     # Suppress filter_too_much health check.
     # Reproduce by commenting @settings and uncommenting @seed.
     # @seed(302934307671667531413257853548643485645)
     @settings(suppress_health_check=[HealthCheck.filter_too_much])
-    @given(
+    @serial.given(
         X=hu.tensor(),
         axis=st.integers(min_value=0, max_value=3),
         **hu.gcs

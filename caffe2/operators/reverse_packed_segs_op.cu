@@ -1,5 +1,5 @@
 #include "caffe2/core/context_gpu.h"
-#include "reverse_packed_segs_op.h"
+#include "caffe2/operators/reverse_packed_segs_op.h"
 
 namespace caffe2 {
 

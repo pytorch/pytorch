@@ -13,7 +13,7 @@ class BaseInputAccessor {
  public:
   BaseInputAccessor() {}
 
-  bool observeInput(const Tensor<CPUContext>& dataInput) {
+  bool observeInput(const Tensor& dataInput) {
     data_ = dataInput.raw_data();
     return dataInput.template IsType<TData>();
   }
@@ -373,7 +373,7 @@ class AbstractReduceFrontOrBackGradientOp : public Operator<Context> {
   template <int FixedSize>
   bool DoRunWithValue() {
     auto& reduction_grad = Input(REDUCTION_GRAD);
-    auto& source_shape = OperatorBase::Input<TensorCPU>(SOURCE_SHAPE);
+    auto& source_shape = this->template Input<Tensor>(SOURCE_SHAPE, CPU);
 
     auto* data_grads = Output(0);
 
@@ -1964,6 +1964,11 @@ segments, i.e. len(*LENGTHS*).
       GradientNeedIndices>;
 };
 
+OpSchema::Cost CostInferenceForSparseLengths(
+    const OperatorDef& def,
+    const vector<TensorShape>& inputs,
+    bool use_weight);
+
 template <
     typename T,
     typename SIndex,
@@ -2007,7 +2012,21 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
         "OUTPUT",
         "Aggregated output tensor. Has the first dimension of K "
         "(the number of segments).");
+    schema.TensorInferenceFunction(
+        [](const OperatorDef&, const std::vector<TensorShape>& input_types) {
+          std::vector<TensorShape> out(1);
+          out[0] = input_types[0];
+          out[0].set_dims(0, input_types[Reducer::kInputCount + 1].dims(0));
+          return out;
+        });
     ReducerDef::PopulateSchema(schema);
+
+    schema.CostInferenceFunction(
+        [](const OperatorDef& def,
+           const vector<TensorShape>& inputs) -> OpSchema::Cost {
+          return CostInferenceForSparseLengths(
+              def, inputs, strcmp(OpDef::name, "WeightedSum") == 0);
+        });
   }
   using Reducer = typename ReducerDef::template Reducer<T, Context>;
   using ReducerGradient =

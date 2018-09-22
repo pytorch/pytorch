@@ -118,3 +118,51 @@ class TestRegularizer(LayersTestCase):
 
         assert output is None
         npt.assert_allclose(workspace.blobs[param], ref(X), atol=1e-7)
+
+    @given(
+        output_dim=st.integers(1, 10),
+        input_num=st.integers(3, 30),
+        reg_weight=st.integers(0, 10)
+    )
+    def test_group_l1_norm(self, output_dim, input_num, reg_weight):
+        """
+        1. create a weight blob
+        2. create random group splits
+        3. run group_l1_nrom with the weight blob
+        4. run equivalent np operations to calculate group l1 norm
+        5. compare if the results from 3 and 4 are equal
+        """
+        def compare_reference(weight, group_boundaries, reg_lambda, output):
+            group_splits = np.hsplit(weight, group_boundaries[1:-1])
+            l2_reg = np.sqrt([np.sum(np.square(g)) for g in group_splits])
+            l2_normalized = np.multiply(l2_reg,
+                np.array([np.sqrt(g.shape[1]) for g in group_splits]))
+            result = np.multiply(np.sum(l2_normalized), reg_lambda)
+            npt.assert_almost_equal(result, workspace.blobs[output], decimal=2)
+
+        weight = np.random.rand(output_dim, input_num).astype(np.float32)
+
+        feature_num = np.random.randint(low=1, high=input_num - 1)
+        group_boundaries = [0]
+        group_boundaries = np.append(
+            group_boundaries,
+            np.sort(
+                np.random.choice(range(1, input_num - 1), feature_num, replace=False)
+            ),
+        )
+        group_boundaries = np.append(group_boundaries, [input_num])
+        split_info = np.diff(group_boundaries)
+
+        weight_blob = core.BlobReference("weight_blob")
+        workspace.FeedBlob(weight_blob, weight)
+
+        train_init_net, train_net = self.get_training_nets()
+        reg = regularizer.GroupL1Norm(reg_weight * 0.1, split_info.tolist())
+        output = reg(
+            train_net, train_init_net, weight_blob, by=RegularizationBy.ON_LOSS
+        )
+
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+
+        compare_reference(weight, group_boundaries, reg_weight * 0.1, output)

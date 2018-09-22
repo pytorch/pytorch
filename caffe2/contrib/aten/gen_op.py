@@ -278,7 +278,7 @@ if __name__ == '__main__':
                     # first tensor input is used to define the output type.
                     defined_inferred_type = True
                     env['statements'].append(
-                        'auto inferred_type = &({}.type());'.format(
+                        'auto inferred_type = &at::getType({});'.format(
                             arg['name']))
             else:
                 init = CT(ARGUMENT_MAP[arg['type']]).substitute(env, arg=arg['name'])

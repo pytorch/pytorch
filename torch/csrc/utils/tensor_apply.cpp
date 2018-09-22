@@ -54,7 +54,7 @@ static void recursive_apply(IntList sizes, ScalarType scalarType, int64_t dim,
 }
 
 Tensor & apply_(Tensor & self, PyObject* fn) {
-  if (self.type().backend() != kCPU) {
+  if (self.type().backend() != Backend::CPU) {
     throw TypeError("apply_ is only implemented on CPU tensors");
   }
   auto scalarType = self.type().scalarType();
@@ -63,7 +63,7 @@ Tensor & apply_(Tensor & self, PyObject* fn) {
 }
 
 Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
-  if (self.type().backend() != kCPU) {
+  if (self.type().backend() != Backend::CPU) {
     throw TypeError("map_ is only implemented on CPU tensors");
   }
   if (other_.type() != self.type()) {
@@ -78,7 +78,7 @@ Tensor & map_(Tensor & self, const Tensor & other_, PyObject* fn) {
 }
 
 Tensor & map2_(Tensor & self, const Tensor & x_, const Tensor & y_, PyObject* fn) {
-  if (self.type().backend() != kCPU || x_.type().backend() != kCPU || y_.type().backend() != kCPU) {
+  if (self.type().backend() != Backend::CPU || x_.type().backend() != Backend::CPU || y_.type().backend() != Backend::CPU) {
     throw TypeError("map2_ is only implemented on CPU tensors");
   }
   if (x_.type() != self.type()) {

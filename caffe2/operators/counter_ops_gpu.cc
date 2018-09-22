@@ -1,5 +1,5 @@
 #include "caffe2/core/context_gpu.h"
-#include "counter_ops.h"
+#include "caffe2/operators/counter_ops.h"
 
 namespace caffe2 {
 REGISTER_CUDA_OPERATOR(CreateCounter, CreateCounterOp<int64_t, CUDAContext>);

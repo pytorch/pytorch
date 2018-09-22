@@ -45,7 +45,7 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   virtual ~PerfOperatorObserver();
 
   double getMilliseconds() const;
-  OpSchema::Cost getAnalyticalCost() const;
+  std::vector<TensorShape> getTensorShapes() const;
 
  private:
   void Start() override;
@@ -60,5 +60,6 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   // costly here and a raw pointer is a cheapest sholution
   PerfNetObserver* netObserver_;
   double milliseconds_;
+  std::vector<TensorShape> tensor_shapes_;
 };
 } // namespace caffe2

@@ -21,7 +21,7 @@
 
 namespace caffe2 {
 
-uint32_t wipe_cache();
+CAFFE2_API uint32_t wipe_cache();
 
 } // namespace caffe2
 

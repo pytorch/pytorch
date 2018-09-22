@@ -20,23 +20,23 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
                   "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
 
-  real *output_data;
-  real *input_data;
+  scalar_t *output_data;
+  scalar_t *input_data;
 
   int64_t sizeD, isizeT, isizeH, isizeW;
   int64_t istrideD, istrideT, istrideH, istrideW;
   int64_t totalZ;
 
   if (input->dim() == 4) {
-    sizeD = input->size[0];
-    isizeT = input->size[1];
-    isizeH = input->size[2];
-    isizeW = input->size[3];
+    sizeD = input->size(0);
+    isizeT = input->size(1);
+    isizeH = input->size(2);
+    isizeW = input->size(3);
 
-    istrideD = input->stride[0];
-    istrideT = input->stride[1];
-    istrideH = input->stride[2];
-    istrideW = input->stride[3];
+    istrideD = input->stride(0);
+    istrideT = input->stride(1);
+    istrideH = input->stride(2);
+    istrideW = input->stride(3);
 
     THCTensor_(resize4d)(state, output, sizeD, osizeT, osizeH, osizeW);
 
@@ -44,16 +44,16 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
   } else {
     input = THCTensor_(newContiguous)(state, input);
 
-    int64_t sizeB = input->size[0];
-    sizeD = input->size[1];
-    isizeT = input->size[2];
-    isizeH = input->size[3];
-    isizeW = input->size[4];
+    int64_t sizeB = input->size(0);
+    sizeD = input->size(1);
+    isizeT = input->size(2);
+    isizeH = input->size(3);
+    isizeW = input->size(4);
 
-    istrideD = input->stride[1];
-    istrideT = input->stride[2];
-    istrideH = input->stride[3];
-    istrideW = input->stride[4];
+    istrideD = input->stride(1);
+    istrideT = input->stride(2);
+    istrideH = input->stride(3);
+    istrideW = input->stride(4);
 
     THCTensor_(resize5d)(state, output, sizeB, sizeD, osizeT, osizeH, osizeW);
 
@@ -99,31 +99,31 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
 
   int64_t sizeD, isizeT, isizeH, isizeW;
   int64_t osizeT, osizeH, osizeW;
   int64_t totalZ;
 
   if (input->dim() == 4) {
-    sizeD = input->size[0];
-    isizeT = input->size[1];
-    isizeH = input->size[2];
-    isizeW = input->size[3];
+    sizeD = input->size(0);
+    isizeT = input->size(1);
+    isizeH = input->size(2);
+    isizeW = input->size(3);
 
-    osizeT = gradOutput->size[1];
-    osizeH = gradOutput->size[2];
-    osizeW = gradOutput->size[3];
+    osizeT = gradOutput->size(1);
+    osizeH = gradOutput->size(2);
+    osizeW = gradOutput->size(3);
   } else {
-    sizeD = input->size[1];
-    isizeT = input->size[2];
-    isizeH = input->size[3];
-    isizeW = input->size[4];
+    sizeD = input->size(1);
+    isizeT = input->size(2);
+    isizeH = input->size(3);
+    isizeW = input->size(4);
 
-    osizeT = gradOutput->size[2];
-    osizeH = gradOutput->size[3];
-    osizeW = gradOutput->size[4];
+    osizeT = gradOutput->size(2);
+    osizeH = gradOutput->size(3);
+    osizeW = gradOutput->size(4);
   }
 
   // somehow nonatomic is passing all test for volumetric case.
@@ -132,7 +132,7 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   if (input->dim() == 4) {
     totalZ = atomic ? sizeD * osizeT : sizeD * isizeT;
   } else {
-    int sizeB = input->size[0];
+    int sizeB = input->size(0);
     totalZ = atomic ? sizeB * sizeD * osizeT : sizeB * sizeD * isizeT;
   }
 

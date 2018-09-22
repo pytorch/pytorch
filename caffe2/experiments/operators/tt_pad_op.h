@@ -52,7 +52,7 @@ class TTPadOp final : public Operator<Context> {
       TIndex padded_dim0 = (X_dim0 / scale_ + 1) * scale_;
       auto dim0_diff = padded_dim0 - X_dim0;
       // set growthPct to the upper bound percentage: (100 * scale_ / X_dim0)
-      X_pad->template Extend(dim0_diff, 100 * scale_ / X_dim0, &context_);
+      X_pad->Extend(dim0_diff, 100 * scale_ / X_dim0, &context_);
 
       auto* X_pad_data = X_pad->template mutable_data<T>();
       TIndex X_size = X_dim0 * X_dim1;
@@ -83,7 +83,7 @@ class TTPadGradientOp final : public Operator<Context> {
     auto dim1 = G.dim(1);
 
     if (old_dim0 < new_dim0) {
-      output->Shrink(old_dim0);
+      output->ShrinkTo(old_dim0);
     }
 
     return true;

@@ -4,11 +4,13 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
-from hypothesis import given
+from hypothesis import given, assume
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 
+import unittest
+import os
 
 class TestElementwiseOps(hu.HypothesisTestCase):
 
@@ -131,6 +133,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
+    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(
         X=hu.tensor(
             elements=st.floats(0.1, 10),
@@ -186,7 +189,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
            inplace=st.booleans(), **hu.gcs)
     def test_rsqrt(self, X, inplace, gc, dc):
         op = core.CreateOperator(
-            "RSqrt",
+            "Rsqrt",
             ["X"],
             ["X"] if inplace else ["Y"],
         )
@@ -202,6 +205,62 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=5e-3)
+
+    @given(X=hu.tensor(dtype=np.float32), **hu.gcs)
+    def test_cube(self, X, gc, dc):
+        op = core.CreateOperator(
+            "Cube",
+            ["X"],
+            ["Y"],
+        )
+
+        def cube_ref(X):
+            return [np.power(X, 3)]
+
+        def cube_grad_ref(g_out, outputs, fwd_inputs):
+            dY = g_out
+            [X] = fwd_inputs
+            return [dY * np.square(X) * 3]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=cube_ref,
+            output_to_grad="Y",
+            grad_reference=cube_grad_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+
+    @given(X=hu.tensor(dtype=np.float32), in_place=st.booleans(), **hu.gcs)
+    def test_cbrt(self, X, in_place, gc, dc):
+        op = core.CreateOperator(
+            "Cbrt",
+            ["X"],
+            ["X"] if in_place else ["Y"],
+        )
+
+        def cbrt_ref(X):
+            return [np.cbrt(X)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=cbrt_ref,
+        )
+
+    @given(X=hu.tensor(elements=st.floats(1.0, 10.0), dtype=np.float32),
+           in_place=st.booleans(), **hu.gcs)
+    def test_cbrt_grad(self, X, in_place, gc, dc):
+        op = core.CreateOperator(
+            "Cbrt",
+            ["X"],
+            ["X"] if in_place else ["Y"],
+        )
+
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+        self.assertGradientChecks(gc, op, [-X], 0, [0])
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
@@ -255,12 +314,14 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=swish_gradient,
         )
 
-    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
-    def test_sigmoid(self, X, inplace, gc, dc):
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
+    def test_sigmoid(self, X, inplace, engine, gc, dc):
         op = core.CreateOperator(
             "Sigmoid",
             ["X"],
             ["X"] if inplace else ["Y"],
+            engine=engine,
         )
 
         def sigmoid_ref(X):
@@ -274,6 +335,47 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
+    @given(X=hu.tensor(dtype=np.float32),
+           inplace=st.booleans(),
+           alpha=st.floats(min_value=-100.0, max_value=100.0),
+           beta=st.floats(min_value=-100.0, max_value=100.0),
+           engine=st.sampled_from([""]),
+           **hu.gcs)
+    def test_hard_sigmoid(self, X, inplace, alpha, beta, engine, gc, dc):
+        # Prevent alpha and beta from mutually being 0 to avoid a division
+        # error when adjusting our inputs
+        assume(alpha != 0.0 or beta != 0.0)
+        op = core.CreateOperator(
+            "HardSigmoid",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+            alpha=alpha,
+            beta=beta,
+            engine=engine,
+        )
+
+        def hard_sigmoid_ref(X):
+            return [np.minimum(1.0, np.maximum(0.0, X * alpha + beta))]
+
+        # Adjust inputs to avoid differentitating at inflection points
+        if abs(alpha) > 0.001:
+            Y = X * alpha + beta
+            Y += 0.04 * np.sign(Y)
+            Y[Y == 0.0] += 0.1
+            Y[Y == 1.0] -= 0.1
+            X = (Y - beta) / alpha
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=hard_sigmoid_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6), **hu.gcs)
     def test_eq(self, n, m, gc, dc):
@@ -338,7 +440,8 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         (shapes, types) = workspace.InferShapesAndTypes([net])
         self.assertTrue(str(result_2) not in shapes)
 
-    def _run_single_test(self, op, ref, A, B, test_grad, gc, dc):
+    def _run_single_test(
+            self, op, ref, A, B, reverse_inputs, test_grad, gc, dc):
         inputs = [A, B]
         self.assertReferenceChecks(
             device_option=gc,
@@ -351,17 +454,18 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             for i in range(len(inputs)):
                 self.assertGradientChecks(gc, op, inputs, i, [0])
 
-        inputs = [B, A]
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=inputs,
-            reference=ref,
-        )
-        self.assertDeviceChecks(dc, op, inputs, [0])
-        if test_grad:
-            for i in range(len(inputs)):
-                self.assertGradientChecks(gc, op, inputs, i, [0])
+        if reverse_inputs:
+            inputs = [B, A]
+            self.assertReferenceChecks(
+                device_option=gc,
+                op=op,
+                inputs=inputs,
+                reference=ref,
+            )
+            self.assertDeviceChecks(dc, op, inputs, [0])
+            if test_grad:
+                for i in range(len(inputs)):
+                    self.assertGradientChecks(gc, op, inputs, i, [0])
 
     def _test_binary_op(
             self, op_name, np_ref, n, m, k, t, bias, test_grad, gc, dc):
@@ -376,38 +480,77 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
         A = np.random.rand(n, m, k, t).astype(np.float32) + bias
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
-        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
         A = np.random.rand(1).astype(np.float32) + bias
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
-        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
         A = np.random.rand(k, t).astype(np.float32) + bias
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
-        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
         A = np.random.rand(n, m, 1, 1).astype(np.float32) + bias
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
-        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
+
+        A = np.random.rand(1, m, k, 1).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
         A = np.random.rand(m, 1, t).astype(np.float32) + bias
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
-        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
         A = np.random.rand(1, m, 1, t).astype(np.float32) + bias
         B = np.random.rand(n, 1, k, 1).astype(np.float32) + bias
-        self._run_single_test(op, ref, A, B, test_grad, gc, dc)
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
+
+    def _test_binary_op_in_place(
+            self, op_name, np_ref, n, m, bias, test_grad, in_place_2nd, gc, dc):
+        def ref(A, B):
+            return [np_ref(A, B)]
+
+        op = core.CreateOperator(
+            op_name,
+            ["A", "B"],
+            ["A"],
+        )
+        A = np.random.rand(n, m).astype(np.float32) + bias
+        B = np.random.rand(m).astype(np.float32) + bias
+
+        self._run_single_test(op, ref, A, B, False, test_grad, gc, dc)
+        A = np.random.rand(n, m).astype(np.float32) + bias
+        B = np.random.rand(n, 1).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, False, test_grad, gc, dc)
+
+        if in_place_2nd:
+            op = core.CreateOperator(
+                op_name,
+                ["A", "B"],
+                ["B"],
+            )
+            A = np.random.rand(m).astype(np.float32) + bias
+            B = np.random.rand(n, m).astype(np.float32) + bias
+            self._run_single_test(op, ref, A, B, False, test_grad, gc, dc)
+            A = np.random.rand(n, 1).astype(np.float32) + bias
+            B = np.random.rand(n, m).astype(np.float32) + bias
+            self._run_single_test(op, ref, A, B, False, test_grad, gc, dc)
 
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), **hu.gcs)
     def test_add(self, n, m, k, t, gc, dc):
         self._test_binary_op("Add", np.add, n, m, k, t, -0.5, True, gc, dc)
+        self._test_binary_op_in_place(
+            "Add", np.add, n, m, -0.5, True, True, gc, dc)
 
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), **hu.gcs)
     def test_sub(self, n, m, k, t, gc, dc):
         self._test_binary_op("Sub", np.subtract, n, m,
                              k, t, -0.5, True, gc, dc)
+        self._test_binary_op_in_place(
+            "Sub", np.subtract, n, m, -0.5, True, True, gc, dc)
 
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), **hu.gcs)
@@ -419,6 +562,8 @@ class TestElementwiseOps(hu.HypothesisTestCase):
            t=st.integers(0, 5), **hu.gcs)
     def test_div(self, n, m, k, t, gc, dc):
         self._test_binary_op("Div", np.divide, n, m, k, t, 1.0, True, gc, dc)
+        self._test_binary_op_in_place(
+            "Div", np.divide, n, m, 1.0, True, False, gc, dc)
 
     @given(n=st.integers(1, 5), m=st.integers(1, 5), broadcast=st.booleans(),
            **hu.gcs)
@@ -463,27 +608,31 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
         A = np.random.randint(128, size=(n, m, k, t))
         B = np.random.randint(128, size=(n, m, k, t))
-        self._run_single_test(op, ref, A, B, False, gc, dc)
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
         A = np.random.randint(128, size=1)
         B = np.random.randint(128, size=(n, m, k, t))
-        self._run_single_test(op, ref, A, B, False, gc, dc)
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
         A = np.random.randint(128, size=(k, t))
         B = np.random.randint(128, size=(n, m, k, t))
-        self._run_single_test(op, ref, A, B, False, gc, dc)
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
         A = np.random.randint(128, size=(n, m, 1, 1))
         B = np.random.randint(128, size=(n, m, k, t))
-        self._run_single_test(op, ref, A, B, False, gc, dc)
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
+
+        A = np.random.randint(128, size=(1, m, k, 1))
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
         A = np.random.randint(128, size=(m, 1, t))
         B = np.random.randint(128, size=(n, m, k, t))
-        self._run_single_test(op, ref, A, B, False, gc, dc)
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
         A = np.random.randint(128, size=(1, m, 1, t))
         B = np.random.randint(128, size=(n, 1, k, 1))
-        self._run_single_test(op, ref, A, B, False, gc, dc)
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
     @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
            t=st.integers(1, 5), **hu.gcs)
@@ -502,3 +651,30 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     def test_bitwise_xor(self, n, m, k, t, gc, dc):
         self._test_bitwise_binary_op(
             "BitwiseXor", np.bitwise_xor, n, m, k, t, gc, dc)
+
+    @given(X=hu.tensor(elements=st.floats(0.5, 2), dtype=np.float32),
+           inplace=st.booleans(), **hu.gcs)
+    def test_reciprocal(self, X, inplace, gc, dc):
+        def reciprocal_op(X):
+            return [np.reciprocal(X)]
+
+        op = core.CreateOperator(
+            "Reciprocal",
+            ["X"],
+            ["X"] if inplace else ["Y"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=reciprocal_op,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], stepsize=1e-3, threshold=0.05)
+
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

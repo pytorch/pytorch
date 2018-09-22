@@ -45,8 +45,7 @@ class Int8TensorFetcher : public BlobFetcherBase {
     void* ptr = static_cast<void*>(
         PyArray_DATA(reinterpret_cast<PyArrayObject*>(data_array.ptr())));
     CPUContext context;
-    context.template CopyBytes<CPUContext, CPUContext>(
-        src.t.nbytes(), src.t.raw_data(), ptr);
+    context.CopyBytesSameDevice(src.t.nbytes(), src.t.raw_data(), ptr);
     context.FinishDeviceComputation();
 
     auto result = pybind11::cast<pybind11::object>(

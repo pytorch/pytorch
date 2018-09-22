@@ -1,6 +1,6 @@
 #include "ATen/ATen.h"
-#include "ATen/Error.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/core/Error.h"
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
@@ -20,8 +20,9 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n) {
 }
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
-  AT_CHECK(n > 0, "n must be greater than zero, got", n);
-  if(m <= 0) {
+  AT_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+
+  if(m < 0) {
     m = n;
   }
 
@@ -48,7 +49,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     result.copy_(randperm_out_cuda(result_float, n, generator));
   } else {
     if (n < 30000) {  // For small inputs, we offload it to CPU instead.
-      auto result_cpu = result.type().toBackend(kCPU).tensor({n});
+      auto result_cpu = result.type().cpu().tensor({n});
       randperm_out(result_cpu, n, generator);
       result.copy_(result_cpu);
     } else {

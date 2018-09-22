@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "caffe2/core/types.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -57,8 +58,8 @@ OPERATOR_SCHEMA(Swish)
     .NumOutputs(1)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Swish takes one input data (Tensor<T>) and produces one output data
-(Tensor<T>) where the swish function, y = x / (1 + exp(-x)), is applied to the
+Swish takes one input data (Tensor) and produces one output data
+(Tensor) where the swish function, y = x / (1 + exp(-x)), is applied to the
 tensor elementwise.
 )DOC")
     .Input(0, "X", "1D input tensor")

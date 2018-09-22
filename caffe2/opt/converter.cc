@@ -1,3 +1,5 @@
+#include <limits>
+
 #include "caffe2/opt/converter.h"
 #include "caffe2/core/logging.h"
 
@@ -9,49 +11,6 @@
 using namespace nom;
 
 namespace {
-
-std::map<std::string, caffe2::Argument>
-getArgumentsFromOperator(caffe2::OperatorDef op) {
-  std::map<std::string, caffe2::Argument> argMap;
-  for (auto arg : op.arg()) {
-    argMap[arg.name()] = arg;
-  }
-  return argMap;
-}
-
-repr::NeuralNetOperator::NNLayout getLayout(std::map<std::string, caffe2::Argument> argMap) {
-  auto arg = argMap.find("order");
-  if (arg != argMap.end()) {
-    auto order = argMap["order"].s();
-    if (order == "NCHW" || order == "nchw") {
-      return repr::NeuralNetOperator::NNLayout::NCHW;
-    } else if (order == "NHWC" || order == "nhwc") {
-      return repr::NeuralNetOperator::NNLayout::NHWC;
-    }
-  }
-  return repr::NeuralNetOperator::NNLayout::Undefined;
-}
-
-std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) {
-  // There are literally three ways to define shapes in Conv in Caffe2
-  std::vector<int> kernelShape;
-  if (argMap.count("kernel")) {
-    CAFFE_ENFORCE(argMap["kernel"].has_i(), "Invalid kernel argument");
-    int kernel = static_cast<int>(argMap["kernel"].i());
-    kernelShape = {kernel, kernel};
-  } else if (argMap.count("kernels")) {
-    for (auto i : argMap["kernels"].ints()) {
-      kernelShape.push_back(static_cast<int>(i));
-    }
-  } else if (argMap.count("kernel_h") && argMap.count("kernel_w")) {
-    CAFFE_ENFORCE(argMap["kernel_h"].has_i(), "Invalid kernel argument");
-    CAFFE_ENFORCE(argMap["kernel_w"].has_i(), "Invalid kernel argument");
-    int kernelH = static_cast<int>(argMap["kernel_h"].i());
-    int kernelW = static_cast<int>(argMap["kernel_w"].i());
-    kernelShape = {kernelH, kernelW};
-  }
-  return kernelShape;
-}
 
 std::vector<int> getStrides(std::map<std::string, caffe2::Argument> argMap) {
   std::vector<int> strides;
@@ -85,17 +44,80 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
   return dilations;
 }
 
+int getGroup(std::map<std::string, caffe2::Argument>& argMap) {
+  if (argMap.count("group")) {
+    CAFFE_ENFORCE(argMap["group"].has_i() && "Invalid group argument");
+    return static_cast<int>(argMap["group"].i());
+  }
+  return 1;
+}
+
 } // namespace
 
 namespace caffe2 {
 
-std::unique_ptr<repr::NeuralNetOperator>
-convertToNeuralNetOperator(caffe2::OperatorDef* op) {
-  auto argMap = getArgumentsFromOperator(*op);
+CAFFE_DEFINE_REGISTRY(ConverterRegistry, Converter);
 
-  std::unique_ptr<repr::NeuralNetOperator> nnOp;
+std::map<std::string, caffe2::Argument> Converter::getArgumentsFromOperator(
+    caffe2::OperatorDef op) {
+  std::map<std::string, caffe2::Argument> argMap;
+  for (auto arg : op.arg()) {
+    argMap[arg.name()] = arg;
+  }
+  return argMap;
+}
 
-  if (op->type() == "Conv") {
+repr::NeuralNetOperator::NNLayout getLayout(std::map<std::string, caffe2::Argument> argMap) {
+  auto arg = argMap.find("order");
+  if (arg != argMap.end()) {
+    auto order = argMap["order"].s();
+    if (order == "NCHW" || order == "nchw") {
+      return repr::NeuralNetOperator::NNLayout::NCHW;
+    } else if (order == "NHWC" || order == "nhwc") {
+      return repr::NeuralNetOperator::NNLayout::NHWC;
+    }
+  }
+  return repr::NeuralNetOperator::NNLayout::Undefined;
+}
+
+OperatorDef Converter::convertToOperatorDef(
+    const nom::repr::NeuralNetOperator* nnOp) {
+  auto* annotation = nnOp->getAnnotation();
+  // Default to using the stored operator.
+  if (isa<Caffe2Annotation>(annotation)) {
+    return dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
+  }
+  CAFFE_THROW("TODO: Cannot yet instantiate OperatorDef from nomnigraph");
+}
+
+std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) {
+  // There are literally three ways to define shapes in Conv in Caffe2
+  std::vector<int> kernelShape;
+  if (argMap.count("kernel")) {
+    CAFFE_ENFORCE(argMap["kernel"].has_i(), "Invalid kernel argument");
+    int kernel = static_cast<int>(argMap["kernel"].i());
+    kernelShape = {kernel, kernel};
+  } else if (argMap.count("kernels")) {
+    for (auto i : argMap["kernels"].ints()) {
+      kernelShape.push_back(static_cast<int>(i));
+    }
+  } else if (argMap.count("kernel_h") && argMap.count("kernel_w")) {
+    CAFFE_ENFORCE(argMap["kernel_h"].has_i(), "Invalid kernel argument");
+    CAFFE_ENFORCE(argMap["kernel_w"].has_i(), "Invalid kernel argument");
+    int kernelH = static_cast<int>(argMap["kernel_h"].i());
+    int kernelW = static_cast<int>(argMap["kernel_w"].i());
+    kernelShape = {kernelH, kernelW};
+  }
+  return kernelShape;
+}
+
+namespace {
+
+class ConvConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp;
+    auto argMap = getArgumentsFromOperator(op);
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::Conv>(kernelShape);
     auto c = dyn_cast<repr::Conv>(nnOp.get());
@@ -103,33 +125,89 @@ convertToNeuralNetOperator(caffe2::OperatorDef* op) {
     c->setStrides(getStrides(argMap));
     c->setPads(getPads(argMap));
     c->setDilations(getDilations(argMap));
+    c->setGroup(getGroup(argMap));
 
+    return nnOp;
   }
+  // Does not override default converter to OperatorDef
 
-  if (op->type() == "Relu") {
-    nnOp = util::make_unique<repr::Relu>();
+  virtual ~ConvConverter() {}
+};
+
+REGISTER_CONVERTER(Conv, ConvConverter);
+
+TRIVIAL_CONVERTER(Relu);
+REGISTER_CONVERTER(Relu, ReluConverter);
+
+TRIVIAL_CONVERTER(Sum);
+REGISTER_CONVERTER(Sum, SumConverter);
+
+TRIVIAL_CONVERTER(BatchNormalization);
+REGISTER_CONVERTER(SpatialBN, BatchNormalizationConverter);
+
+TRIVIAL_CONVERTER(Flatten);
+REGISTER_CONVERTER(Flatten, FlattenConverter);
+
+class ClipConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    auto argMap = getArgumentsFromOperator(op);
+    float min = std::numeric_limits<float>::lowest();
+    float max = std::numeric_limits<float>::max();
+
+    if (argMap.count("min")) {
+      min = static_cast<float>(argMap["min"].i());
+    }
+
+    if (argMap.count("max")) {
+      max = static_cast<float>(argMap["max"].i());
+    }
+
+    return util::make_unique<repr::Clip>(min, max);
   }
+  // Does not override default converter to OperatorDef
 
-  if (op->type() == "AveragePool") {
+  virtual ~ClipConverter() {}
+};
+REGISTER_CONVERTER(Clip, ClipConverter);
+
+class AveragePoolConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp;
+    auto argMap = getArgumentsFromOperator(op);
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::AveragePool>(kernelShape);
+    return nnOp;
   }
+  // Does not override default converter to OperatorDef
 
-  if (op->type() == "MaxPool") {
+  virtual ~AveragePoolConverter() {}
+};
+REGISTER_CONVERTER(AveragePool, AveragePoolConverter);
+
+class MaxPoolConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp;
+    auto argMap = getArgumentsFromOperator(op);
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::MaxPool>(kernelShape);
+    return nnOp;
   }
+  // Does not override default converter to OperatorDef
 
-  if (op->type() == "Sum") {
-    nnOp = util::make_unique<repr::Sum>();
-  }
+  virtual ~MaxPoolConverter() {}
+};
+REGISTER_CONVERTER(MaxPool, MaxPoolConverter);
 
-  if (op->type() == "SpatialBN") {
-    nnOp = util::make_unique<repr::BatchNormalization>();
-  }
+class ConcatConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp =
+        util::make_unique<repr::Concat>();
+    auto argMap = getArgumentsFromOperator(op);
 
-  if (op->type() == "Concat") {
-    nnOp = util::make_unique<repr::Concat>();
     auto c = dyn_cast<repr::Concat>(nnOp.get());
     if (argMap.count("axis")) {
       CAFFE_ENFORCE(argMap["axis"].has_i(), "Invalid axis argument");
@@ -141,38 +219,29 @@ convertToNeuralNetOperator(caffe2::OperatorDef* op) {
       int add_axis = static_cast<int>(argMap["add_axis"].i());
       c->setAddAxis(!!add_axis);
     }
+    return nnOp;
   }
+  // Does not override default converter to OperatorDef
 
-  if (op->type() == "Flatten") {
-    nnOp = util::make_unique<repr::Flatten>();
-  }
+  virtual ~ConcatConverter() {}
+};
+REGISTER_CONVERTER(Concat, ConcatConverter);
 
-  if (op->type() == "BatchGather") {
-    nnOp = util::make_unique<repr::BatchGather>();
-  }
+} // namespace
 
-  if (op->type() == "BatchMatMul") {
-    nnOp = util::make_unique<repr::BatchMatMul>();
-    auto c = dyn_cast<repr::BatchMatMul>(nnOp.get());
-    if (argMap.count("trans_a")) {
-      CAFFE_ENFORCE(argMap["trans_a"].has_i(), "Invalid axis argument");
-      int trans_a = static_cast<int>(argMap["trans_a"].i());
-      c->setTransA(!!trans_a);
-    }
-    if (argMap.count("trans_b")) {
-      CAFFE_ENFORCE(argMap["trans_b"].has_i(), "Invalid add_axis argument");
-      int trans_b = static_cast<int>(argMap["trans_b"].i());
-      c->setTransB(!!trans_b);
-    }
-    if (argMap.count("broadcast")) {
-      CAFFE_ENFORCE(argMap["broadcast"].has_i(), "Invalid add_axis argument");
-      int broadcast = static_cast<int>(argMap["broadcast"].i());
-      c->setBroadcast(!!broadcast);
-    }
+std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
+    const caffe2::OperatorDef& op) {
+  auto argMap = Converter::getArgumentsFromOperator(op);
+
+  std::unique_ptr<repr::NeuralNetOperator> nnOp;
+
+  if (ConverterRegistry()->Has(op.type())) {
+    nnOp =
+        ConverterRegistry()->Create(op.type())->convertToNeuralNetOperator(op);
   }
 
   if (!nnOp) {
-    nnOp = util::make_unique<repr::GenericOperator>(op->type());
+    nnOp = util::make_unique<repr::GenericOperator>(op.type());
   }
 
   // Generic attributes associated with Ops here
@@ -181,162 +250,24 @@ convertToNeuralNetOperator(caffe2::OperatorDef* op) {
   auto annotation = util::make_unique<Caffe2Annotation>();
   annotation->setOperatorDef(op);
 
-  auto device_name = op->device_option().node_name();
+  auto device_name = op.device_option().node_name();
   if (device_name != "") {
     annotation->setDevice(device_name);
   }
+  annotation->setDeviceType(op.device_option().device_type());
 
   nnOp->setAnnotation(std::move(annotation));
 
   return nnOp;
 }
 
-void handleWhileOp(
-    repr::NNGraph& dfg,
-    repr::NNCFGraph& cfg,
-    repr::NNGraph::NodeRef& opNode,
-    repr::NNCFGraph::NodeRef& bbNode,
-    OperatorDef& op,
-    std::unordered_map<std::string, repr::NNGraph::NodeRef>& blobMap
-) {
-  opNode->resetData(util::make_unique<repr::While>());
-  auto argMap = getArgumentsFromOperator(op);
-  std::string bodyNetSerialized = argMap["body"].s();
-  auto bodyNet = caffe2::NetDef();
-  bodyNet.ParseFromString(bodyNetSerialized);
-
-  std::unordered_map<std::string, repr::NNGraph::NodeRef> bodyBlobMap;
-  auto bodyNN = convertToNNModule(bodyNet, &bodyBlobMap);
-  repr::NNGraph bodyGraph = std::move(bodyNN.dataFlow);
-  repr::NNCFGraph bodyCFGraph = std::move(bodyNN.controlFlow);
-
-  auto rev_sorted = algorithm::tarjans(&bodyGraph);
-
-  for (auto& k : bodyBlobMap) {
-    auto name = k.first;
-    if (blobMap.count(name)) {
-      auto oldNode = blobMap[name];
-      printf("Exit tensor %s is in the parent scope, inserting Phi node...\n", k.first.c_str());
-      auto phiNode = dfg.createNode(util::make_unique<repr::NNPhi>()); // NN variant of a Phi node
-      // Clone the operator.
-      auto tensor = dyn_cast<repr::NeuralNetData>(blobMap[name]->data().get());
-      auto* clonedTensor = tensor->clone();
-      auto phiOut = dfg.createNode(std::unique_ptr<repr::NeuralNetData>(clonedTensor));
-      dfg.createEdge(phiNode, phiOut);
-      dfg.createEdge(oldNode, phiNode);
-      dfg.createEdge(bodyBlobMap[name], phiNode);
-      blobMap[name] = phiOut;
-      for (auto& inEdge : opNode->getInEdges()) {
-        if (inEdge->tail() == oldNode) {
-          dfg.deleteEdge(inEdge);
-          dfg.createEdge(phiOut, opNode);
-        }
-      }
-    }
-  }
-
-  // Dependencies simply have no producers
-  std::unordered_map<repr::NNGraph::NodeRef, repr::NNGraph::NodeRef> inNodeMap;
-  for (auto& n : bodyGraph.getMutableNodes()) {
-    if (!isa<repr::NeuralNetData>(n->data())) { continue; }
-    if (n->getInEdges().size() == 0) {
-      auto name = dyn_cast<repr::NeuralNetData>(n->data().get())->getName();
-      // TODO(bwasti): this may be needed, depending on constraints
-      //assert(blobMap.count(name) != 0 && "Loop body takes undefined dependency.");
-      if (blobMap.count(name)) {
-        inNodeMap[n] = blobMap[name];
-      }
-    }
-  }
-
-  CAFFE_ENFORCE(rev_sorted.front().getNodes().size() == 1,
-      "More than one exit node.");
-  CAFFE_ENFORCE(rev_sorted.back().getNodes().size() == 1,
-      "More than one entry node.");
-
-  auto exit_tensor = *(rev_sorted.front().getNodes().begin());
-  CAFFE_ENFORCE(isa<repr::NeuralNetData>(exit_tensor->data()),
-      "Exit node is not a tensor.");
-
-  auto bodyNodes = bodyGraph.getMutableNodes();
-  auto bodyEdges = bodyGraph.getMutableEdges();
-
-  for (auto node : bodyNodes) {
-    bodyGraph.importNode(node, dfg);
-  }
-
-  for (auto edge : bodyEdges) {
-    bodyGraph.importEdge(edge, dfg);
-  }
-
-  // Merge all dependencies
-  for (auto node : dfg.getMutableNodes()) {
-    if (inNodeMap.count(node)) {
-      dfg.replaceNode(node, inNodeMap[node]);
-      dfg.deleteNode(node);
-    }
-  }
-
-  for (const auto& inEdge : opNode->getInEdges()) {
-    auto* inputData = dyn_cast<repr::NeuralNetData>(inEdge->tail()->data().get());
-    auto* exitData = dyn_cast<repr::NeuralNetData>(exit_tensor->data().get());
-    if (inputData->getName() == exitData->getName()) {
-      dfg.replaceNode(exit_tensor, inEdge->tail());
-      dfg.deleteNode(exit_tensor);
-    }
-  }
-
-  // CFG Handling
-  auto bodyCFNodes = bodyCFGraph.getMutableNodes();
-  auto bodyCFEdges = bodyCFGraph.getMutableEdges();
-
-  // Create a while loop CFG node.
-  auto whileBasicBlock = util::make_unique<repr::BasicBlockType<repr::NNGraph>>();
-  for (auto& inEdge : opNode->getInEdges()) {
-    auto node = inEdge->tail();
-    for (auto& parentInEdge : node->getInEdges()) {
-      auto parentNode = parentInEdge->tail();
-      if (isa<repr::Phi>(parentNode->data().get())) {
-        whileBasicBlock->pushInstructionNode(parentNode);
-      }
-    }
-  }
-  whileBasicBlock->pushInstructionNode(opNode);
-
-  auto whileCFNode = cfg.createNode(std::move(whileBasicBlock));
-  cfg.createEdge(bbNode, whileCFNode, 0);
-
-  // The true path executes the body of the loop, so we
-  // take that BB and point to it.
-  for (auto cfNode : bodyCFNodes) {
-    bodyCFGraph.importNode(cfNode, cfg);
-    // If the CFG node has no children, we loop back to the top of the
-    // while loop.
-    if (cfNode->getOutEdges().size() == 0) {
-      cfg.createEdge(cfNode, whileCFNode, 0);
-    }
-    // TODO check for a single entry point
-    if (cfNode->getInEdges().size() == 0) {
-      cfg.createEdge(whileCFNode, cfNode, 1);
-    }
-  }
-  for (auto cfEdge : bodyCFEdges) {
-    bodyCFGraph.importEdge(cfEdge, cfg);
-  }
-
-  // Now create the false case.
-  bbNode =
-    cfg.createNode(util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
-  cfg.createEdge(whileCFNode, bbNode, -1);
-}
-
 
 /// \brief Ingest a caffe2 protobuf model and output an NNModule.
 /// \param net The caffe2 protobuf NetDef
-/// \param blobMap [optional][output] A pointer to a blobMap to be populated with all the output blobs of the NetDef by name->NodeRef
-repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, repr::NNGraph::NodeRef>* blobMapOut) {
-  repr::NNGraph dfg;
-  repr::NNCFGraph cfg;
+repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict) {
+  repr::NNModule module;
+  repr::NNGraph& dfg = module.dataFlow;
+  repr::NNCFGraph& cfg = module.controlFlow;
   /// \brief We keep track of the producer of the blob.
   /// Because Caffe2 Nets are really just ordered operations
   /// we can just keep track of the most recent producer of
@@ -345,10 +276,14 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
   /// replace it in this map.
   std::unordered_map<std::string, repr::NNGraph::NodeRef> blobMap;
 
+  std::unordered_set<std::string> externalInputNames;
+  for (const auto& inputName : net.external_input()) {
+    externalInputNames.insert(inputName);
+  }
+
   /// \brief For the construction of the control flow graph we keep track
   /// of a current basic block, which we split up as we come accross control
   /// flow operations such as if and while.
-  // std::unique_ptr<repr::BasicBlockType<repr::NNGraph>> currentBasicBlock =
   auto bbNode =
       cfg.createNode(util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
 
@@ -361,6 +296,10 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
         auto tensor = util::make_unique<repr::Tensor>(input);
         blobMap[input] =
             dfg.createNode(unique_dyn_cast<repr::NeuralNetData>(tensor));
+        if (externalInputNames.count(input)) {
+          module.inputs.insert(blobMap[input]);
+          externalInputNames.erase(input);
+        }
       }
 
       auto tensorNode = blobMap[input];
@@ -376,91 +315,120 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
       blobMap[output] = tensorNode;
     }
 
-    if (op.type() == "While") {
-      handleWhileOp(dfg, cfg, opNode, bbNode, op, blobMap);
+    opNode->resetData(convertToNeuralNetOperator(op));
+    auto currentBasicBlock = bbNode->mutableData()->get();
+    currentBasicBlock->pushInstructionNode(opNode);
+  }
+
+  if (externalInputNames.size()) {
+    // In strict mode we ensure the input names are valid
+    if (strict) {
+      std::ostringstream os;
+      for (const auto& inputName : externalInputNames) {
+        os << "\"" << inputName << "\" ";
+      }
+
+      CAFFE_ENFORCE(
+          externalInputNames.size() == 0,
+          "Attempting to convert an ill-formed network: ",
+          "external_input contains ",
+          externalInputNames.size(),
+          " unused blobs: ",
+          os.str());
+    // Otherwise, we add the blobs to the graph as no-ops
     } else {
-      opNode->resetData(convertToNeuralNetOperator(&op));
-      auto currentBasicBlock = bbNode->mutableData()->get();
-      currentBasicBlock->pushInstructionNode(opNode);
+      for (const auto& input : externalInputNames) {
+        blobMap[input] = dfg.createNode(util::make_unique<repr::Tensor>(input));
+      }
     }
   }
 
-  repr::NNModule module;
-  module.dataFlow = std::move(dfg);
-  module.controlFlow = std::move(cfg);
-  if (blobMapOut) {
-    *blobMapOut = blobMap;
+  for (const auto& outputName : net.external_output()) {
+    CAFFE_ENFORCE(
+        blobMap.count(outputName),
+        "NetDef has ill-formed external_output: \"",
+        outputName,
+        "\"");
+    module.outputs.insert(blobMap[outputName]);
   }
+
   return module;
 }
 
-caffe2::OperatorDef convertToOperatorDef(repr::NNGraph::NodeRef instrNode) {
+caffe2::OperatorDef convertToOperatorDef(
+    const repr::NNGraph::NodeRef& instrNode) {
   auto *nnOp = repr::nn::get<repr::NeuralNetOperator>(instrNode);
   auto *annotation = nnOp->getAnnotation();
   caffe2::OperatorDef op;
 
-  if (!annotation) {
-    using NNKind = repr::NeuralNetOperator::NNKind;
-    switch (nnOp->getKind()) {
-      case NNKind::Send:
-      {
-        auto sendOp = dyn_cast<repr::Send>(nnOp);
-        op.set_type("Placeholder:Send");
-        {
-          auto arg = op.add_arg();
-          arg->set_name("dst_node");
-          arg->set_s(sendOp->getDestination());
-        }
-        {
-          auto out = repr::nn::getOutputs(instrNode).front();
-          auto t = repr::nn::get<repr::Data>(out);
-          auto arg = op.add_arg();
-          arg->set_name("callsite_id");
-          arg->set_i(t->getVersion());
-        }
-        break;
-      }
-      case NNKind::Receive:
-      {
-        auto recvOp = dyn_cast<repr::Receive>(nnOp);
-        op.set_type("Placeholder:Receive");
-        {
-          auto arg = op.add_arg();
-          arg->set_name("src_node");
-          arg->set_s(recvOp->getSource());
-        }
-        {
-          auto out = repr::nn::getOutputs(instrNode).front();
-          auto t = repr::nn::get<repr::Data>(out);
-          auto arg = op.add_arg();
-          arg->set_name("callsite_id");
-          arg->set_i(t->getVersion());
-        }
-        break;
-      }
-      default:
-        op.set_type(nnOp->getName());
-    }
+  if (ConverterRegistry()->Has(op.type())) {
+    op = ConverterRegistry()->Create(op.type())->convertToOperatorDef(nnOp);
+  } else if (!annotation) {
+    op.set_type(nnOp->getName());
   } else {
-    switch (annotation->getKind()) {
-      case repr::Annotation::AnnotationKind::Caffe2:
-        op = *dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
-        break;
-      default:
-        op.set_type("__NOMNIGRAPH_CONVERSION_ERROR__");
-        CAFFE_THROW("Couldn't convert operator annotation to Caffe2 operator def");
-        break;
+    if (isa<Caffe2Annotation>(annotation)) {
+      auto c2_annotation = dyn_cast<Caffe2Annotation>(annotation);
+      op = c2_annotation->getOperatorDef();
+      op.mutable_device_option()->set_device_type(
+          c2_annotation->getDeviceType());
+    } else {
+      CAFFE_THROW(
+          "Couldn't convert operator annotation to Caffe2 operator def");
     }
   }
+
   // We may have swapped out some of the edges.
   op.clear_input();
   op.clear_output();
   return op;
 }
 
+Caffe2Annotation getOrAddCaffe2Annotation(
+    nom::repr::NNGraph::NodeRef& instrNode) {
+  auto* nnOp = repr::nn::get<repr::NeuralNetOperator>(instrNode);
+  auto* annotation = nnOp->getAnnotation();
+  if (!annotation) {
+    auto new_annot = util::make_unique<Caffe2Annotation>();
+    new_annot->setOperatorDef(convertToOperatorDef(instrNode));
+    nnOp->setAnnotation(std::move(new_annot));
+    annotation = nnOp->getAnnotation();
+  }
+  CAFFE_ENFORCE(isa<Caffe2Annotation>(annotation));
+  auto c2_annotation = dyn_cast<Caffe2Annotation>(annotation);
+  return *c2_annotation;
+}
+
 caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m) {
   auto predictNet = caffe2::NetDef();
   return convertToCaffe2Proto(m, predictNet);
+}
+
+std::vector<std::string> mergeExternalTensors(
+    const std::unordered_set<repr::NNGraph::NodeRef>& currExternal,
+    const std::vector<std::string>& oldExternal) {
+  std::vector<std::string> out;
+
+  // Maximally preserve the order of external inputs and outputs.
+  std::unordered_set<std::string> newExternal;
+  for (const auto& tensorNode : currExternal) {
+    CAFFE_ENFORCE(
+        repr::nn::is<repr::NeuralNetData>(tensorNode),
+        "A non-tensor node was added to external inputs/outputs of the NNModule");
+    auto name = repr::nn::get<repr::NeuralNetData>(tensorNode)->getName();
+    newExternal.insert(name);
+  }
+
+  for (const auto& tensorName : oldExternal) {
+    if (newExternal.count(tensorName)) {
+      out.emplace_back(tensorName);
+      newExternal.erase(tensorName);
+    }
+  }
+  for (const auto& tensorName : newExternal) {
+    out.emplace_back(tensorName);
+  }
+
+  return out;
 }
 
 caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& oldNet) {
@@ -521,6 +489,31 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
       // Save the operator to the net.
       *predictNet.add_op() = op;
     }
+  }
+
+  // Maximally preserve the order of external inputs and outputs.
+  std::vector<std::string> oldExternalInputs;
+  std::vector<std::string> oldExternalOutputs;
+
+  for (const auto& inputName : predictNet.external_input()) {
+    oldExternalInputs.emplace_back(inputName);
+  }
+  for (const auto& outputName : predictNet.external_output()) {
+    oldExternalOutputs.emplace_back(outputName);
+  }
+
+  auto newExternalInputs = mergeExternalTensors(m.inputs, oldExternalInputs);
+  auto newExternalOutputs = mergeExternalTensors(m.outputs, oldExternalOutputs);
+
+  predictNet.clear_external_input();
+  predictNet.clear_external_output();
+
+  for (const auto& inputName : newExternalInputs) {
+    predictNet.add_external_input(inputName);
+  }
+
+  for (const auto& outputName : newExternalOutputs) {
+    predictNet.add_external_output(outputName);
   }
 
   return predictNet;

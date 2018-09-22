@@ -2,34 +2,26 @@ r"""
 Weight Normalization from https://arxiv.org/abs/1602.07868
 """
 from torch.nn.parameter import Parameter
-
-
-def _norm(p, dim):
-    """Computes the norm over all dimensions except dim"""
-    if dim is None:
-        return p.norm()
-    elif dim == 0:
-        output_size = (p.size(0),) + (1,) * (p.dim() - 1)
-        return p.contiguous().view(p.size(0), -1).norm(dim=1).view(*output_size)
-    elif dim == p.dim() - 1:
-        output_size = (1,) * (p.dim() - 1) + (p.size(-1),)
-        return p.contiguous().view(-1, p.size(-1)).norm(dim=0).view(*output_size)
-    else:
-        return _norm(p.transpose(0, dim), 0).transpose(0, dim)
+from torch import _weight_norm, norm_except_dim
 
 
 class WeightNorm(object):
     def __init__(self, name, dim):
+        if dim is None:
+            dim = -1
         self.name = name
         self.dim = dim
 
     def compute_weight(self, module):
         g = getattr(module, self.name + '_g')
         v = getattr(module, self.name + '_v')
-        return v * (g / _norm(v, self.dim))
+        return _weight_norm(v, g, self.dim)
 
     @staticmethod
     def apply(module, name, dim):
+        if dim is None:
+            dim = -1
+
         fn = WeightNorm(name, dim)
 
         weight = getattr(module, name)
@@ -38,7 +30,7 @@ class WeightNorm(object):
         del module._parameters[name]
 
         # add g and v as new parameters and express w as g/||v|| * v
-        module.register_parameter(name + '_g', Parameter(_norm(weight, dim).data))
+        module.register_parameter(name + '_g', Parameter(norm_except_dim(weight, 2, dim).data))
         module.register_parameter(name + '_v', Parameter(weight.data))
         setattr(module, name, fn.compute_weight(module))
 

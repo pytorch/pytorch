@@ -8,7 +8,8 @@
 namespace caffe2 {
 
 class RunCountNetObserver;
-class RunCountOperatorObserver final : public ObserverBase<OperatorBase> {
+
+class CAFFE2_API RunCountOperatorObserver final : public ObserverBase<OperatorBase> {
  public:
   explicit RunCountOperatorObserver(OperatorBase* op) = delete;
   RunCountOperatorObserver(OperatorBase* op, RunCountNetObserver* netObserver);
@@ -25,7 +26,7 @@ class RunCountOperatorObserver final : public ObserverBase<OperatorBase> {
   RunCountNetObserver* netObserver_;
 };
 
-class RunCountNetObserver final : public OperatorAttachingNetObserver<
+class CAFFE2_API RunCountNetObserver final : public OperatorAttachingNetObserver<
                                       RunCountOperatorObserver,
                                       RunCountNetObserver> {
  public:

@@ -1,4 +1,4 @@
-<p align="center"><img width="40%" src="docs/source/_static/img/pytorch-logo-dark.png" /></p>
+![PyTorch Logo](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/pytorch-logo-dark.png)
 
 --------------------------------------------------------------------------------
 
@@ -15,6 +15,7 @@ We are in an early-release beta. Expect some adventures and rough edges.
   - [Binaries](#binaries)
   - [From Source](#from-source)
   - [Docker Image](#docker-image)
+  - [Building the Documentation](#building-the-documentation)
   - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
@@ -34,32 +35,14 @@ See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/
 
 At a granular level, PyTorch is a library that consists of the following components:
 
-<table>
-<tr>
-    <td><b> torch </b></td>
-    <td> a Tensor library like NumPy, with strong GPU support </td>
-</tr>
-<tr>
-    <td><b> torch.autograd </b></td>
-    <td> a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch </td>
-</tr>
-<tr>
-    <td><b> torch.nn </b></td>
-    <td> a neural networks library deeply integrated with autograd designed for maximum flexibility </td>
-</tr>
-<tr>
-    <td><b> torch.multiprocessing  </b></td>
-    <td> Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training. </td>
-</tr>
-<tr>
-    <td><b> torch.utils </b></td>
-    <td> DataLoader, Trainer and other utility functions for convenience </td>
-</tr>
-<tr>
-    <td><b> torch.legacy(.nn/.optim) </b></td>
-    <td> legacy code that has been ported over from torch for backward compatibility reasons </td>
-</tr>
-</table>
+| Component | Description |
+| ---- | --- |
+| **torch** | a Tensor library like NumPy, with strong GPU support |
+| **torch.autograd** | a tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
+| **torch.nn** | a neural networks library deeply integrated with autograd designed for maximum flexibility |
+| **torch.multiprocessing** | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
+| **torch.utils** | DataLoader, Trainer and other utility functions for convenience |
+| **torch.legacy(.nn/.optim)** | legacy code that has been ported over from torch for backward compatibility reasons |
 
 Usually one uses PyTorch either as:
 
@@ -72,10 +55,10 @@ Elaborating further:
 
 If you use NumPy, then you have used Tensors (a.k.a ndarray).
 
-<p align=center><img width="30%" src="docs/source/_static/img/tensor_illustration.png" /></p>
+![Tensor illustration](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/tensor_illustration.png)
 
-PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerate
-compute by a huge amount.
+PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerates the
+computation by a huge amount.
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
 such as slicing, indexing, math operations, linear algebra, reductions.
@@ -99,7 +82,7 @@ from several research papers on this topic, as well as current and past work suc
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
 
-<p align=center><img width="80%" src="docs/source/_static/img/dynamic_graph.gif" /></p>
+![Dynamic graph](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/dynamic_graph.gif)
 
 ### Python First
 
@@ -123,8 +106,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 PyTorch has minimal framework overhead. We integrate acceleration libraries
 such as Intel MKL and NVIDIA (cuDNN, NCCL) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
-(TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.
-They are mature and have been tested for years.
+(TH, THC, THNN, THCUNN) are mature and have been tested for years.
 
 Hence, PyTorch is quite fast – whether you run small or large neural networks.
 
@@ -166,7 +148,9 @@ If you want to compile with CUDA support, install
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 Other potentially useful environment variables may be found in `setup.py`.
 
-If you want to build on Windows, Visual Studio 2017 and NVTX are also needed.
+If you want to build on Windows, Visual Studio 2017 14.11 toolset and NVTX are also needed.
+Especially, for CUDA 8 build on Windows, there will be an additional requirement for VS 2015 Update 3 and a patch for it.
+The details of the patch can be found out [here](https://support.microsoft.com/en-gb/help/4020481/fix-link-exe-crashes-with-a-fatal-lnk1000-error-when-you-use-wholearch).
 
 #### Install optional dependencies
 
@@ -214,8 +198,11 @@ On Windows
 set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 set DISTUTILS_USE_SDK=1
-REM The following line is needed for Python 2.7, but the support for it is very experimental.
+REM The following two lines are needed for Python 2.7, but the support for it is very experimental.
 set MSSdk=1
+set FORCE_PY27_BUILD=1
+REM As for CUDA 8, VS2015 Update 3 is also required to build PyTorch. Use the following line.
+set "CUDAHOSTCXX=%VS140COMNTOOLS%\..\..\VC\bin\amd64\cl.exe"
 
 call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
@@ -223,7 +210,7 @@ python setup.py install
 
 ### Docker image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass -e PYTHON_VERSION=x.y flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
 ```
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```
@@ -237,16 +224,28 @@ Please note that PyTorch uses shared memory to share data between processes, so 
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
 
+### Building the Documentation
+
+To build documentation in various formats, you will need Sphinx and the
+readthedocs theme.
+
+```
+cd docs/
+pip install -r requirements.txt
+```
+You can then build the documentation by running ``make <format>`` from the
+``docs/`` folder. Run ``make`` to get a list of all available output formats.
+
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](http://pytorch.org/previous-versions/).
+on [our website](http://pytorch.org/previous-versions).
 
 
 ## Getting Started
 
 Three pointers to get you started:
-- [Tutorials: get you started with understanding and using PyTorch](http://pytorch.org/tutorials/)
+- [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](http://pytorch.org/docs/)
 

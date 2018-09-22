@@ -287,8 +287,11 @@ class TensorRTTransformTest(TestCase):
         start = time.time()
         pred_net_cut = transform_caffe2_net(pred_net,
                                             {input_name: input_blob_dims},
-                                            build_serializable_op=True)
+                                            build_serializable_op=False)
         del init_net, pred_net
+        pred_net_cut.device_option.CopyFrom(device_option)
+        for op in pred_net_cut.op:
+            op.device_option.CopyFrom(device_option)
         #_print_net(pred_net_cut)
 
         Y_trt = None

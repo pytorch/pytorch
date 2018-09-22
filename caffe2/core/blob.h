@@ -9,9 +9,10 @@
 
 #include "caffe2/core/blob_serializer_base.h"
 #include "caffe2/core/common.h"
-#include "caffe2/core/typeid.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/core/tensor.h"
+#include "caffe2/core/typeid.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -22,35 +23,22 @@ namespace caffe2 {
  * properly when the blob is deallocated or re-allocated with a new type. A blob
  * could contain anything, although the most common case is to contain a Tensor.
  */
-class Blob {
+class CAFFE2_API Blob final {
  public:
-  typedef void (*DestroyCall)(void*);
+  using DestroyCall = void(void*);
 
   /**
    * Initializes an empty Blob.
    */
-  Blob() : meta_(), pointer_(nullptr) {}
+  Blob() noexcept : meta_(), pointer_(nullptr), destroy_(nullptr) {}
   ~Blob() { Reset(); }
 
-  Blob(Blob&& other) noexcept
-      : meta_(std::move(other.meta_)),
-        pointer_(std::move(other.pointer_)),
-        destroy_(std::move(other.destroy_)) {
-    other.meta_ = {};
-    other.pointer_ = nullptr;
-    other.destroy_ = nullptr;
+  Blob(Blob&& other) noexcept : Blob() {
+    swap(other);
   }
 
   Blob& operator=(Blob&& other) noexcept {
-    if (pointer_ && destroy_) {
-      destroy_(pointer_);
-    }
-    meta_ = std::move(other.meta_);
-    pointer_ = std::move(other.pointer_);
-    destroy_ = std::move(other.destroy_);
-    other.meta_ = {};
-    other.pointer_ = nullptr;
-    other.destroy_ = nullptr;
+    Blob(std::move(other)).swap(*this);
     return *this;
   }
 
@@ -58,22 +46,34 @@ class Blob {
    * Checks if the content stored in the blob is of type T.
    */
   template <class T>
-  bool IsType() const { return meta_.Match<T>(); }
+  bool IsType() const noexcept {
+    return meta_.Match<T>();
+  }
+
+  bool IsTensorType(DeviceType device_type) const {
+    bool is_match = meta_.Match<Tensor>();
+    auto* tensor = static_cast<Tensor*>(pointer_);
+    if (is_match && tensor && tensor->GetDeviceType() == device_type) {
+      return true;
+    }
+    return false;
+  }
 
   /**
    * Returns the meta info of the blob.
    */
-  inline const TypeMeta& meta() const { return meta_; }
+  inline const TypeMeta& meta() const noexcept { return meta_; }
 
   /**
    * Returns a printable typename of the blob.
    */
-  inline const char* TypeName() const { return meta_.name(); }
+  inline const char* TypeName() const noexcept { return meta_.name(); }
 
   /**
    * @brief Gets the const reference of the stored object. The code checks if
    * the stored object is of the desired type.
    */
+  // TODO(jerryzh): add a Get(DeviceType) function?
   template <class T>
   const T& Get() const {
     CAFFE_ENFORCE(
@@ -82,13 +82,16 @@ class Blob {
         meta_.name(),
         " while caller expects ",
         TypeMeta::TypeName<T>());
+    // TODO: after we add Get<Tensor>(DeviceType)
+    // and changed all the callsites, we can add
+    // a static assert here to enforce T != Tensor
     return *static_cast<const T*>(pointer_);
   }
 
-  const void* GetRaw() const {
+  const void* GetRaw() const noexcept {
     return pointer_;
   }
-  void* GetRaw() {
+  void* GetRaw() noexcept {
     return pointer_;
   }
 
@@ -106,6 +109,9 @@ class Blob {
         std::is_default_constructible<T>::value,
         "GetMutable can't be called with non-default-constructible types. "
         "Try using specialized methods");
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "Use GetMutableTensor(DeviceType) instead");
     if (IsType<T>()) {
       return static_cast<T*>(pointer_);
     } else {
@@ -120,6 +126,16 @@ class Blob {
       return static_cast<T*>(pointer_);
     } else {
       return nullptr;
+    }
+  }
+
+  inline Tensor* GetMutableTensor(DeviceType device_type) {
+    if (IsTensorType(device_type)) {
+      return static_cast<Tensor*>(pointer_);
+    } else {
+      VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
+              << " DeviceType:" << device_type;
+      return Reset<Tensor>(new Tensor(device_type));
     }
   }
 
@@ -143,7 +159,7 @@ class Blob {
   }
 
   inline void*
-  Reset(void* allocated, const TypeMeta& meta, const DestroyCall& destroy) {
+  Reset(void* allocated, const TypeMeta& meta, DestroyCall* destroy) {
     if (pointer_ && destroy_) {
       destroy_(pointer_);
     }
@@ -157,8 +173,8 @@ class Blob {
    * Releases the ownership, if any, this Blob has on the underlying pointer.
    * The user is then responsible for freeing the data if needed
    */
-  inline DestroyCall Release() {
-    DestroyCall d = destroy_;
+  inline DestroyCall* Release() {
+    DestroyCall* d = destroy_;
     destroy_ = nullptr;
     return d;
   }
@@ -204,29 +220,6 @@ class Blob {
   }
 
   /**
-   * Serializes the current blob, if possible. Note that this serialization uses
-   * the registration mechanism and one has to implement specific serialization
-   * approaches for specific classes. Acceptor should take care of writing data
-   * to the actual storage.
-   */
-  void Serialize(
-      const string& name,
-      BlobSerializerBase::SerializationAcceptor acceptor,
-      int chunk_size = kDefaultChunkSize) const;
-
-  /**
-   * @brief Convenience function to serialize a blob to a string.
-   *
-   * This is a conveinence function to serialize small Blobs that produce
-   * manageable serialized strings. To serialize big blobs such as
-   * large sparse tensors, use the fully-functional interface in
-   * blob_serializer_base.h.
-   *
-   * NOTE: this function doesn't do chunking and might break with big tensors.
-   */
-  string Serialize(const string& name) const;
-
-  /**
    * @brief Swaps the underlying storage of two blobs.
    */
   void swap(Blob& rhs) {
@@ -235,14 +228,6 @@ class Blob {
     swap(pointer_, rhs.pointer_);
     swap(destroy_, rhs.destroy_);
   }
-
-  /**
-   * Deserializes from a string containing either BlobProto or TensorProto. If
-   * the deserialization fails, the content in the blob should no longer be
-   * trusted.
-   */
-  void Deserialize(const string& content);
-  void Deserialize(const BlobProto& proto);
 
  private:
   /**
@@ -254,9 +239,9 @@ class Blob {
   }
   TypeMeta meta_;
   void* pointer_ = nullptr;
-  DestroyCall destroy_ = nullptr;
+  DestroyCall* destroy_ = nullptr;
 
-  DISABLE_COPY_AND_ASSIGN(Blob);
+  AT_DISABLE_COPY_AND_ASSIGN(Blob);
 };
 
 inline void swap(Blob& lhs, Blob& rhs) {

@@ -6,7 +6,7 @@
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include <gtest/gtest.h>
 
 namespace caffe2 {
@@ -111,7 +111,7 @@ TEST(DBReaderTest, Reader) {
   EXPECT_EQ(reader->cursor()->key(), "05");
   Blob reader_blob;
   reader_blob.Reset(reader.release());
-  std::string str = reader_blob.Serialize("saved_reader");
+  std::string str = SerializeBlob(reader_blob, "saved_reader");
   // Release to close the old reader.
   reader_blob.Reset();
   BlobProto blob_proto;
@@ -124,7 +124,7 @@ TEST(DBReaderTest, Reader) {
   EXPECT_EQ(proto.db_type(), "leveldb");
   EXPECT_EQ(proto.key(), "05");
   // Test restoring the reader from the serialized proto.
-  EXPECT_NO_THROW(reader_blob.Deserialize(str));
+  EXPECT_NO_THROW(DeserializeBlob(str, &reader_blob));
   EXPECT_TRUE(reader_blob.IsType<DBReader>());
   const DBReader& new_reader = reader_blob.Get<DBReader>();
   EXPECT_TRUE(new_reader.cursor() != nullptr);

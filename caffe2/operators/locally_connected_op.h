@@ -37,9 +37,9 @@ class LocallyConnectedOp final : public ConvPoolOpBase<Context> {
       const T* filter_data,
       const T* bias_data,
       T* Y_data,
-      Tensor<Context>* column_buffer,
-      Tensor<Context>* column_transposed_buffer,
-      Tensor<Context>* output_buffer);
+      Tensor* column_buffer,
+      Tensor* column_transposed_buffer,
+      Tensor* output_buffer);
 
   void RunOnDeviceWithOrderNHWCImpl(
       const lc_op_util::ShapeParams& shape,
@@ -47,16 +47,16 @@ class LocallyConnectedOp final : public ConvPoolOpBase<Context> {
       const T* filter_data,
       const T* bias_data,
       T* Y_data,
-      Tensor<Context>* column_buffer,
-      Tensor<Context>* column_transposed_buffer,
-      Tensor<Context>* Y_transposed_buffer);
+      Tensor* column_buffer,
+      Tensor* column_transposed_buffer,
+      Tensor* Y_transposed_buffer);
 
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
 
   // Buffer.
-  Tensor<Context> column_buffer_;
-  Tensor<Context> column_transposed_buffer_;
-  Tensor<Context> Y_transposed_buffer_;
+  Tensor column_buffer_{Context::GetDeviceType()};
+  Tensor column_transposed_buffer_{Context::GetDeviceType()};
+  Tensor Y_transposed_buffer_{Context::GetDeviceType()};
 
   // Input: X, W, b
   // Output: Y
@@ -93,9 +93,9 @@ class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context> {
       T* dfilter_data,
       T* dX_data,
       T* dbias_data,
-      Tensor<Context>* column_buffer,
-      Tensor<Context>* column_transposed_buffer,
-      Tensor<Context>* dY_transposed_buffer);
+      Tensor* column_buffer,
+      Tensor* column_transposed_buffer,
+      Tensor* dY_transposed_buffer);
 
   void RunOnDeviceWithOrderNHWCImpl(
       const lc_op_util::ShapeParams& shape,
@@ -105,18 +105,18 @@ class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context> {
       T* dfilter_data,
       T* dX_data,
       T* dbias_data,
-      Tensor<Context>* column_buffer,
-      Tensor<Context>* column_transposed_buffer,
-      Tensor<Context>* dY_transposed_buffer);
+      Tensor* column_buffer,
+      Tensor* column_transposed_buffer,
+      Tensor* dY_transposed_buffer);
 
   const bool no_bias_;
 
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
 
   // Buffer.
-  Tensor<Context> column_buffer_;
-  Tensor<Context> column_transposed_buffer_;
-  Tensor<Context> dY_transposed_buffer_;
+  Tensor column_buffer_{Context::GetDeviceType()};
+  Tensor column_transposed_buffer_{Context::GetDeviceType()};
+  Tensor dY_transposed_buffer_{Context::GetDeviceType()};
 
   // input: X, W, dY
   // output: dW, db, and optionally dX

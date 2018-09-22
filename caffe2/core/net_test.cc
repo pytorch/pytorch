@@ -36,11 +36,11 @@ class NetTestDummyOp final : public OperatorBase {
 
   // Simulate CUDA operator behavior
   bool HasAsyncPart() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
   bool SupportsAsyncScheduling() const override {
-    return debug_def().device_option().device_type() == CUDA;
+    return debug_def().device_option().device_type() == PROTO_CUDA;
   }
 
  protected:
@@ -767,6 +767,52 @@ TEST(NetTest, NoTypeNet) {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     ASSERT_TRUE(net);
   }
+}
+
+class NotFinishingOp final : public Operator<CPUContext> {
+ public:
+  NotFinishingOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    // never calls SetFinished
+    return true;
+  }
+
+  bool HasAsyncPart() const override {
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(NotFinishingOp, NotFinishingOp);
+
+OPERATOR_SCHEMA(NotFinishingOp);
+
+TEST(NetTest, PendingOpsAndNetFailure) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "async_scheduling"
+        op {
+          type: "NotFinishingOp"
+        }
+        op {
+          type: "NetTestDummy"
+          arg {
+            name: "fail"
+            i: 1
+          }
+        }
+)DOC";
+
+  NetDef net_def;
+  CAFFE_ENFORCE(
+      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+
+  Workspace ws;
+  std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+
+  // net is not stuck and returns false
+  ASSERT_FALSE(net->Run());
 }
 
 } // namespace caffe2

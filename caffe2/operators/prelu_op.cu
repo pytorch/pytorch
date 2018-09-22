@@ -154,7 +154,7 @@ bool PReluOp<float, CUDAContext>::RunOnDevice() {
   Y->ResizeLike(X);
   const auto* Xdata = X.data<float>();
   const auto* Wdata = W.data<float>();
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
 
   const auto C = order_ == StorageOrder::NCHW ? X.dim(1) : X.dim(X.ndim() - 1);
   const auto C_shared = (W.size() == 1);
@@ -221,8 +221,8 @@ bool PReluGradientOp<float, CUDAContext>::RunOnDevice() {
   const float* dYdata = dY.data<float>();
   const float* Xdata = X.data<float>();
   const float* Wdata = W.data<float>();
-  float* dXdata = dX->mutable_data<float>();
-  float* dWdata = dW->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
+  float* dWdata = dW->template mutable_data<float>();
   int N = Y.dim(0);
 
   if (C_shared) {
