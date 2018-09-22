@@ -505,6 +505,8 @@ struct AT_API Type {
   virtual Tensor & round_(Tensor & self) const = 0;
   virtual Tensor relu(const Tensor & self) const = 0;
   virtual Tensor & relu_(Tensor & self) const = 0;
+  virtual Tensor prelu(const Tensor & self, const Tensor & weight) const = 0;
+  virtual std::tuple<Tensor,Tensor> prelu_backward(const Tensor & grad_output, const Tensor & self, const Tensor & weight) const = 0;
   virtual Tensor hardshrink(const Tensor & self, Scalar lambd) const = 0;
   virtual Tensor hardshrink_backward(const Tensor & grad_out, const Tensor & self, Scalar lambd) const = 0;
   virtual Tensor rsqrt(const Tensor & self) const = 0;

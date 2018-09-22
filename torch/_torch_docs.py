@@ -445,9 +445,10 @@ add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
-Convert the data into a `torch.Tensor`.  If the data is already a `Tensor` of the same `dtype` and `device`, no copy
-will be performed.  Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and the `device` is the cpu,
-no copy will be performed.
+Convert the data into a `torch.Tensor`. If the data is already a `Tensor` with the same `dtype` and `device`,
+no copy will be performed, otherwise a new `Tensor` will be returned with computational graph retained if data
+`Tensor` has ``requires_grad=True``. Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and
+the `device` is the cpu, no copy will be performed.
 
 Args:
     {data}
@@ -3772,7 +3773,7 @@ Constructs a tensor with :attr:`data`.
     When data is a tensor `x`, :func:`torch.tensor` reads out 'the data' from whatever it is passed,
     and constructs a leaf variable. Therefore ``torch.tensor(x)`` is equivalent to ``x.clone().detach()``
     and ``torch.tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
-    The equivalents use ``clone()`` and ``detach()`` are recommended.
+    The equivalents using ``clone()`` and ``detach()`` are recommended.
 
 Args:
     {data}
