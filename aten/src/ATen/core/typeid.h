@@ -91,9 +91,6 @@ namespace caffe2 {
 AT_CORE_API std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
 AT_CORE_API std::unordered_set<std::string>& gRegisteredTypeNames();
 
-// A utility function to return an exception std::string by prepending its
-// exception type before its what() content
-AT_CORE_API std::string GetExceptionString(const std::exception& e);
 
 AT_CORE_API std::mutex& gTypeRegistrationMutex();
 
