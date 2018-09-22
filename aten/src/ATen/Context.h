@@ -22,7 +22,7 @@
 
 namespace at {
 
-struct Tensor;
+class Tensor;
 
 class AT_API Context {
 public:

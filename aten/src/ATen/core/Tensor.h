@@ -15,7 +15,7 @@
 namespace at {
 struct Generator;
 struct Type;
-struct Tensor;
+class Tensor;
 struct TensorOptions;
 } // namespace at
 
@@ -37,11 +37,12 @@ namespace at {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-struct AT_API Tensor {
+class AT_API Tensor {
+public:
   Tensor(){};
   Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
-      : tensor_impl_(std::move(tensor_impl)) {
-    if (tensor_impl_.get() == nullptr) {
+      : impl_(std::move(tensor_impl)) {
+    if (impl_.get() == nullptr) {
       throw std::runtime_error("TensorBaseImpl with nullptr not supported");
     }
   }
@@ -50,25 +51,25 @@ struct AT_API Tensor {
   Tensor(Tensor&&) = default;
 
   int64_t dim() const {
-    return tensor_impl_->dim();
+    return impl_->dim();
   }
 
   TensorImpl * unsafeGetTensorImpl() const {
-    return tensor_impl_.get();
+    return impl_.get();
   }
   TensorImpl * unsafeReleaseTensorImpl() {
-    return tensor_impl_.release();
+    return impl_.release();
   }
   const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr() const {
-    return tensor_impl_;
+    return impl_;
   }
 
   bool defined() const {
-    return tensor_impl_;
+    return impl_;
   }
 
   void reset() {
-    tensor_impl_.reset();
+    impl_.reset();
   }
 
   // The following overloads are very intruiging.  Consider the following
@@ -102,11 +103,11 @@ struct AT_API Tensor {
   // Tensor& operator=(const Tensor&) & = default;
   // Tensor& operator=(Tensor&&) & = default;
   Tensor& operator=(const Tensor& x) & {
-    tensor_impl_ = x.tensor_impl_;
+    impl_ = x.impl_;
     return *this;
   }
   Tensor& operator=(Tensor&& x) & {
-    tensor_impl_ = std::move(x.tensor_impl_);
+    impl_ = std::move(x.impl_);
     return *this;
   }
 
@@ -115,37 +116,37 @@ struct AT_API Tensor {
   Tensor& operator=(Tensor&&) &&;
 
   bool is_same(const Tensor& other) const noexcept {
-    return tensor_impl_ == other.tensor_impl_;
+    return impl_ == other.impl_;
   }
   size_t use_count() const noexcept {
-    return tensor_impl_.use_count();
+    return impl_.use_count();
   }
   size_t weak_use_count() const noexcept {
-    return tensor_impl_.weak_use_count();
+    return impl_.weak_use_count();
   }
 
   const char * toString() const;
 
   IntList sizes() const {
-    return tensor_impl_->sizes();
+    return impl_->sizes();
   }
   IntList strides() const {
-    return tensor_impl_->strides();
+    return impl_->strides();
   }
   int64_t ndimension() const {
     return dim();
   }
   Type & type() const {
-    return tensor_impl_->type();
+    return impl_->type();
   }
   TensorTypeId type_id() const {
-    return tensor_impl_->type_id();
+    return impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return dataTypeToScalarType(tensor_impl_->dtype().id());
+    return dataTypeToScalarType(impl_->dtype().id());
   }
   const Storage& storage() const {
-    return tensor_impl_->storage();
+    return impl_->storage();
   }
   Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
@@ -170,7 +171,9 @@ struct AT_API Tensor {
   TensorOptions options() const;
 
   template<typename T>
-  T * data() const;
+  T * data() const {
+    return impl_->data<T>();
+  }
 
   // Purposely not defined here to avoid inlining
   void print() const;
@@ -230,18 +233,18 @@ struct AT_API Tensor {
   // ~~~~~ Autograd API ~~~~~
 
   Tensor& set_requires_grad(bool requires_grad) {
-    tensor_impl_->set_requires_grad(requires_grad);
+    impl_->set_requires_grad(requires_grad);
     return *this;
   }
   bool requires_grad() const {
-    return tensor_impl_->requires_grad();
+    return impl_->requires_grad();
   }
 
   Tensor& grad() {
-    return tensor_impl_->grad();
+    return impl_->grad();
   }
   const Tensor& grad() const {
-    return tensor_impl_->grad();
+    return impl_->grad();
   }
 
   void set_data(Tensor new_data);
@@ -653,35 +656,288 @@ struct AT_API Tensor {
   friend struct WeakTensor;
 
 protected:
-  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl_;
+  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
+
+public:
+  explicit Tensor(Storage storage)
+      : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(std::move(storage))) {}
+
+  /**
+   * @brief Creates a tensor of the given dimension.
+   *
+   * Note that the actual data allocation is not going to be carried out until
+   * the first time mutable_data() is called.
+   */
+  explicit Tensor(const std::vector<int64_t>& dims, DeviceType type)
+      : Tensor(Storage(type)) {
+    // TODO: here, we create a Storage
+    // and immediately discard it in Resize() since
+    // reset_tensor will be true and FreeMemory will be called,
+    // we might want to avoid creating Storage twice?
+    Resize(dims);
+  }
+
+  explicit Tensor(const std::vector<int>& dims, DeviceType type)
+      : Tensor(Storage(type)) {
+    Resize(dims);
+  }
+
+  /**
+   * context_for_copy is required to have the same DeviceType as src
+   */
+  Tensor(const Tensor& src, BaseContext* context_for_copy, DeviceType type)
+      : Tensor(Storage(type)) {
+    CopyFrom(src, context_for_copy);
+  }
+
+  /**
+   * @brief: Create a Tensor of at::DeviceType `type` and initialize it with
+   * src Tensor
+   */
+  Tensor(const Tensor& src, DeviceType type)
+      : Tensor(Storage(type)) {
+    CopyFrom(src);
+  }
+
+  /**
+   * @brief Creates a tensor, and fills its contents with the given values.
+   * The type of tensor will be decided by the context parameter
+   */
+  template <typename T>
+  Tensor(
+      const std::vector<int64_t>& dims,
+      const std::vector<T>& values,
+      BaseContext* context)
+      : Tensor(Storage(context->device_type(), caffe2::TypeMeta::Make<T>())) {
+    Resize(dims);
+    CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size());
+    context->CopyItemsFromCPU(
+        storage().dtype(), size(), values.data(), mutable_data<T>());
+  }
+
+  /**
+   * @brief Creates a scalar tensor, and fills its content with the given value.
+   * The type of tensor will be decided by the context parameter
+   */
+  template <
+      typename T,
+      typename = typename std::enable_if<std::is_scalar<T>::value>::type>
+  Tensor(const T& value, BaseContext* context)
+      : Tensor(Storage(context->device_type(), caffe2::TypeMeta::Make<T>())) {
+    Resize(std::vector<int64_t>{});
+    context->CopyItemsFromCPU(
+        storage().dtype(), size(), &value, mutable_data<T>());
+  }
+
+  Tensor Clone() const {
+    Tensor x(GetDeviceType());
+    x.CopyFrom(*this);
+    return x;
+  }
+
+  BaseStaticContext* GetStaticContext() const {
+    return impl_.get()->GetStaticContext();
+  }
+
+  std::unique_ptr<BaseContext> CreateContext() const {
+    return impl_.get()->CreateContext();
+  }
+
+  DeviceType GetDeviceType() const {
+    return impl_.get()->GetDeviceType();
+  }
+
+  void CopyFrom(const Tensor& src, BaseContext* context = nullptr) const {
+    impl_.get()->CopyFrom(*src.impl_.get(), context);
+  }
+
+  void ExtendTo(int64_t num, float growthPct, BaseContext* context) const {
+    impl_.get()->ExtendTo(num, growthPct, context);
+  }
+
+  void Extend(int64_t num, float growthPct, BaseContext* context) const {
+    impl_.get()->Extend(num, growthPct, context);
+  }
+
+  void ShrinkTo(int64_t outer_dim) const {
+    impl_.get()->ShrinkTo(outer_dim);
+  }
+
+  template <class T>
+  void ReserveSpace(const T& outer_dim) const {
+    impl_.get()->ReserveSpace(outer_dim);
+  }
+
+  template <typename... Ts>
+  void Resize(Ts... dim_source) const {
+    impl_.get()->Resize(dim_source...);
+  }
+
+  inline void ResizeLike(const Tensor& src_tensor) const {
+    impl_.get()->ResizeLike(*src_tensor.impl_.get());
+  }
+
+  inline void Reshape(const std::vector<int64_t>& dims) const {
+    impl_.get()->Reshape(dims);
+  }
+
+  inline void Reshape(const std::vector<int>& dims) const {
+    impl_.get()->Reshape(dims);
+  }
+
+  inline void FreeMemory() const {
+    impl_.get()->FreeMemory();
+  }
+
+  std::string DebugString() const {
+    return impl_.get()->DebugString();
+  }
+
+  // NB: a.swap(b) is not equivalent to std::swap(a, b);
+  // swap method swaps the CONTENTS of the tensors, while std::swap
+  // swaps the POINTERS.
+  void swap(const Tensor& other) const noexcept {
+    // NB: use get() to get a non-const pointer!
+    std::swap(*impl_.get(), *other.impl_.get());
+  }
+
+  void ShareData(const Tensor& src) const {
+    impl_.get()->ShareData(*src.impl_.get());
+  }
+
+  template <typename T>
+  void ShareExternalPointer(
+      T* src,
+      size_t capacity = 0,
+      caffe2::MemoryDeleter d = nullptr) const {
+    impl_.get()->ShareExternalPointer<T>(src, capacity, d);
+  }
+
+  template <typename T>
+  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t capacity = 0) const {
+    impl_.get()->ShareExternalPointer<T>(std::move(data_ptr), capacity);
+  }
+
+  void ShareExternalPointer(
+      void* src,
+      const caffe2::TypeMeta& meta,
+      size_t capacity = 0,
+      caffe2::MemoryDeleter d = nullptr) const {
+    impl_.get()->ShareExternalPointer(src, meta, capacity, d);
+  }
+
+  void ShareExternalPointer(
+      at::DataPtr&& data_ptr,
+      const caffe2::TypeMeta& data_type,
+      size_t capacity) {
+    impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, capacity);
+  }
+
+  inline const void* raw_data() const {
+    return impl_.get()->raw_data();
+  }
+
+  inline void* raw_mutable_data(const caffe2::TypeMeta& meta) const {
+    return impl_.get()->raw_mutable_data(meta);
+  }
+
+  inline void* raw_mutable_data() const {
+    return impl_.get()->raw_mutable_data();
+  }
+
+  template <typename T>
+  inline T* mutable_data() const {
+    return impl_.get()->mutable_data<T>();
+  }
+
+  inline int ndim() const {
+    return impl_.get()->ndim();
+  }
+
+  inline int64_t size() const {
+    return impl_.get()->size();
+  }
+
+  inline size_t itemsize() const {
+    return impl_.get()->itemsize();
+  }
+
+  inline size_t nbytes() const {
+    return impl_.get()->nbytes();
+  }
+
+  inline size_t capacity_nbytes() const {
+    return impl_.get()->capacity_nbytes();
+  }
+
+  inline const std::vector<int64_t>& dims() const {
+    return impl_.get()->dims();
+  }
+
+  inline int64_t size_from_dim(int k) const {
+    return impl_.get()->size_from_dim(k);
+  }
+
+  inline int64_t size_to_dim(int k) const {
+    return impl_.get()->size_to_dim(k);
+  }
+
+  inline int64_t size_between_dim(int k, int l) const {
+    return impl_.get()->size_between_dim(k, l);
+  }
+
+  inline int canonical_axis_index(int axis_index) const {
+    return impl_.get()->canonical_axis_index(axis_index);
+  }
+
+  template <typename T>
+  inline bool IsType() const {
+    return impl_.get()->IsType<T>();
+  }
+
+  inline const caffe2::TypeMeta& meta() const {
+    return impl_.get()->meta();
+  }
+
+  inline int dim32(const int i) const {
+    return impl_.get()->dim32(i);
+  }
+
+  inline int64_t dim(const int i) const {
+    return impl_.get()->dim(i);
+  }
+
+  inline void ExtractDeviceOption(caffe2::DeviceOption* device) const {
+    return impl_.get()->ExtractDeviceOption(device);
+  }
 };
 
 struct AT_API WeakTensor {
-  WeakTensor(const Tensor& t) : weak_tensor_impl_(t.tensor_impl_) {}
+  WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
 
   // XXX: this can return undefined tensors
   // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
   Tensor lock() const {
-    return Tensor(weak_tensor_impl_.lock());
+    return Tensor(weak_impl_.lock());
   }
 
   bool is_same(const WeakTensor& other) const noexcept {
-    return weak_tensor_impl_ == other.weak_tensor_impl_;
+    return weak_impl_ == other.weak_impl_;
   }
 
   size_t use_count() const noexcept {
-    return weak_tensor_impl_.use_count();
+    return weak_impl_.use_count();
   }
   size_t weak_use_count() const noexcept {
-    return weak_tensor_impl_.weak_use_count();
+    return weak_impl_.weak_use_count();
   }
 
   TensorImpl* unsafeGetTensorImpl() const {
-    return weak_tensor_impl_._unsafe_get_target();
+    return weak_impl_._unsafe_get_target();
   }
 
 private:
-  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_tensor_impl_;
+  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
 };
 } // namespace at
 
