@@ -16,7 +16,7 @@ AT_CORE_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
   // for a library
   AT_ERROR(msg);
 }
-}
+} // namespace detail
 
 constexpr detail::TypeMetaData TypeMeta::uninitialized_;
 

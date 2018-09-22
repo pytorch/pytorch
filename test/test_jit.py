@@ -1590,18 +1590,6 @@ class TestJit(JitTestCase):
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
 
-    def test_addmm_fusion_scalar_type(self):
-        @torch.jit.script
-        def addmm(a, b, c):
-            return a + b.mm(c)
-
-        a, b, c = [torch.tensor(e) for e in (1, [[2.]], [[3.]])]
-        addmm(a, b, c)
-        graph = addmm.graph_for(a, b, c)
-        # graph fusion skipped in windows, which runs cse
-        self.run_pass('cse', graph)
-        self.assertExpectedGraph(graph)
-
     def test_index_put(self):
         ten = torch.zeros(3, 3)
         mask = torch.Tensor([[True, True, True],
@@ -1629,13 +1617,22 @@ class TestJit(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
             sparse(get_sparse())
 
-        # has a different entry point than calling sparse directly
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            torch._C._jit_pass_shape_analysis(
-                sparse.graph, (get_sparse(),), False)
-
         with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
             sparse(torch.tensor([1]))
+
+    def test_tuple_specialization(self):
+        @torch.jit.script
+        def f(t):
+            # type: (Tuple[Tensor, Tensor]) -> Tensor
+            x, y = t
+            return x + y
+
+        t = torch.randn(2, 2), torch.randn(2, 2)
+        f(t)
+        graph = f.graph_for(t)
+        input_types = list(next(graph.inputs()).type().elements())
+        for t in input_types:
+            self.assertEqual(t.kind(), 'TensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -3459,6 +3456,18 @@ a")
 
         real_outs = cu.test_view_shape_prop(*inputs)
         self.assertEqual(real_outs, outputs)
+
+    def test_view_listconstruct_shape_prop(self):
+        def fn(x):
+            B = x.size(0)
+            C = x.size(1)
+            T = x.size(2)
+            return x.view(T, B, C)
+
+        x = torch.randn(3, 1, 5, requires_grad=True)
+        graph = torch.jit.script(fn).graph
+        torch._C._jit_pass_shape_analysis(graph, (x,), False)
+        self.assertTrue(next(graph.outputs()).type().kind() != 'DynamicType')
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
@@ -7652,14 +7661,9 @@ EXCLUDE_SCRIPT = {
     'test_var_dim_1d',
     'test_var_dim_1d_neg0',
     'test_var_dim_neg0',
-    'test_norm_inf',
-    'test_norm_inf_2_dim',
     'test_norm_fro',
     'test_norm_fro_default',
     'test_norm_nuc',
-    'test_renorm_norm_inf',
-    'test_matrix_power_n=-1',  # involves inverse
-    'test_matrix_power_n=-3',  # involves inverse
     # skipped nn functional tests
     # ops involves sampling which could not test
     'test_nn_dropout',

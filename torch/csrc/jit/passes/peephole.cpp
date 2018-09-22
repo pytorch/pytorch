@@ -51,7 +51,17 @@ void PeepholeOptimize(Block * block) {
     } else if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
                /*with_const=*/attr::alpha)) {
       // z + x.mm(y) == z.addmm(x, y) == x.mm(y) + z
-      if (node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
+      // This optimization has been disabled at the moment, because it's not helpful at all
+      // until we will be able to represent torch.addmm(a, b, c, out=a). That's because addmm
+      // dispatches internally to gemm, which computes:
+      //   C = beta * C + alpha * A @ B
+      // but aten::addmm(a, b, c, 1, 1) is really:
+      //   D = beta * C + alpha * A @ B
+      // and because it works out of place on C, we're only trading off an explicit add for
+      // a copy inside the addmm function. Note that it doesn't even result in fewer reads,
+      // because mm won't even load C (because beta == 0 for it).
+      static constexpr bool addmm_fusion_enabled = false;
+      if (addmm_fusion_enabled && node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
         // Look for mm from both sides of the add
         for (size_t mm_side = 0; mm_side < 2; mm_side++) {
 
