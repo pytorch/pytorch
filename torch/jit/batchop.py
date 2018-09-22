@@ -87,7 +87,10 @@ def batch_mm(data1, mask1, dims1, data2, mask2, dims2):
     data1 = data1 * mask1.type_as(data1)
     data2 = data2 * mask2.type_as(data2)
     data = torch.bmm(data1, data2)
-    mask = torch.bmm(mask1.narrow(2, 0, 1), mask2.narrow(1, 0, 1))
+    if mask1.is_cuda():
+        mask = torch.bmm(mask1.narrow(2, 0, 1).type_as(data1), mask2.narrow(1, 0, 1).type_as(data2)).byte()
+    else
+        mask = torch.bmm(mask1.narrow(2, 0, 1), mask2.narrow(1, 0, 1))
     dims = torch.cat((dims1[:1], dims2[1:dims2.size(0)]))
     return data, mask, dims
 
