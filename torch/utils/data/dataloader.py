@@ -108,6 +108,9 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
             # use done_event so that we can get faster exiting signal even if there
             # are still indices in index_queue
             if r is None or done_event.is_set():
+                # None means the last element. Indicate that no more data will
+                # be put on this queue by the current process.
+                index_queue.close()
                 break
             idx, batch_indices = r
             try:
@@ -396,6 +399,8 @@ class _DataLoaderIter(object):
                 # stopping worker processes because the workers may leave
                 # corrupted data in `worker_result_queue`, causing
                 # `pin_memory_thread` unable to read and terminate properly.
+                # Also need to join the putting thread to ensure that `None` is
+                # already put into the queue.
                 self.worker_result_queue.put(None)
                 # Indicate that no more data will be put on this queue by the
                 # current process.
