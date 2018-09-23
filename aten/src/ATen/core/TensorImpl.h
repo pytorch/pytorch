@@ -420,7 +420,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
    * complexity.
    */
   void Extend(int64_t num, float growthPct, at::BaseContext* context) {
-    CAFFE_ENFORCE_GE_WITH_CALLER(sizes_.size(), 1);
+    CAFFE_ENFORCE_GE_WITH_CALLER(sizes_.size(), 1u);
     CAFFE_ENFORCE_GE_WITH_CALLER(
         num, 0, "`num` must be non-negative for Extend");
     CAFFE_ENFORCE_WITH_CALLER(
@@ -944,7 +944,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline int dim32(const int i) const {
 #ifndef NDEBUG
-    CAFFE_ENFORCE_LT_WITH_CALLER(i, sizes_.size(), "Exceeding ndim limit");
+    CAFFE_ENFORCE_LT_WITH_CALLER(i, static_cast<int>(sizes_.size()), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
 #endif
     CAFFE_ENFORCE_LT_WITH_CALLER(sizes_[i], std::numeric_limits<int>::max());
@@ -958,7 +958,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline int64_t dim(const int i) const {
 #ifndef NDEBUG
-    CAFFE_ENFORCE_LT_WITH_CALLER(i, sizes_.size(), "Exceeding ndim limit");
+    CAFFE_ENFORCE_LT_WITH_CALLER(i, static_cast<int>(sizes_.size()), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
 #endif
     return sizes_[i];
