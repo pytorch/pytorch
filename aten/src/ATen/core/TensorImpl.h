@@ -10,6 +10,8 @@
 #include "ATen/core/LegacyTypeDispatch.h"
 #include "ATen/core/Backend.h"
 
+#include "caffe2/core/logging.h"
+
 struct THTensor;
 
 namespace at {
@@ -97,6 +99,18 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <typename T>
   inline T * data() const {
+    CAFFE_ENFORCE_WITH_CALLER(
+        storage_.data() || numel_ == 0,
+        "The tensor is of non-zero shape, but its data is not allocated yet. "
+        "Caffe2 uses a lazy allocation, so you will need to call "
+        "mutable_data() or raw_mutable_data() to actually allocate memory.");
+    CAFFE_ENFORCE_WITH_CALLER(
+        storage_.IsType<T>(),
+        "Tensor type mismatch, caller expects elements to be ",
+        caffe2::TypeMeta::TypeName<T>(),
+        ", while tensor contains ",
+        data_type_.name(),
+        ". ");
     return storage_.data<T>() + storage_offset_;
   }
 
