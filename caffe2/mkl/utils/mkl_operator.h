@@ -97,7 +97,7 @@ class MKLOperator : public OperatorBase {
   // The primitive used in the operator.
   PrimitiveWrapper<T> primitive_;
   // Size cache for all the input sizes.
-  vector<vector<TIndex>> input_size_cache_;
+  vector<vector<int64_t>> input_size_cache_;
   // An internal MKLMemory buffer. This is usually handy when we have a
   // single output from the operator. If your operator has multiple outputs
   // then you should allocate your own buffer.

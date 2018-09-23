@@ -139,7 +139,7 @@ void TensorSerializer::SerializeWithChunkSize(
   // Serialize whole vector. If vector is empty, it's shape still needs to be
   // serialized in empty proto
   for (size_t chunkBegin = 0;
-       chunkBegin < std::max(tensor.size(), static_cast<TIndex>(1));
+       chunkBegin < std::max(tensor.size(), static_cast<int64_t>(1));
        chunkBegin += chunk_size) {
     VLOG(2) << "Starting a chunk at " << chunkBegin;
 #ifndef __ANDROID__
@@ -374,8 +374,8 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       tensor->GetStaticContext()->CreateContext(proto.device_detail());
   auto context = uniq_ptr.get();
   context->SwitchToDevice(0);
-  vector<TIndex> dims;
-  for (const TIndex d : proto.dims()) {
+  vector<int64_t> dims;
+  for (const int64_t d : proto.dims()) {
     dims.push_back(d);
   }
   tensor->Resize(dims);

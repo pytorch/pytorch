@@ -17,7 +17,7 @@ void concat(
   const auto numRows = inputs.size();
 
   // Precompute the output sizes to avoid resizing
-  std::vector<std::vector<TIndex>> outputDims(numTensors);
+  std::vector<std::vector<int64_t>> outputDims(numTensors);
 
   for (int i = 0; i < numTensors; ++i) {
     SmartTensorPrinter::PrintTensor(inputZero.at(i));

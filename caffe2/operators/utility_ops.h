@@ -496,7 +496,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
  private:
   template <typename Index>
   bool DoRunWithType() {
-    TIndex block_size = Input(0).size_from_dim(1);
+    int64_t block_size = Input(0).size_from_dim(1);
     return DispatchHelper<FixedValues<1>, Index>::call(this, block_size);
   }
 
@@ -512,10 +512,10 @@ class ScatterWeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_GT(X0.size(), 0);
     CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
     CAFFE_ENFORCE_EQ(weight0.size(), 1);
-    TIndex M = X0.size();
-    TIndex N = X0.dim(0);
-    TIndex K = indices.size();
-    TIndex block_size = M / N;
+    int64_t M = X0.size();
+    int64_t N = X0.dim(0);
+    int64_t K = indices.size();
+    int64_t block_size = M / N;
     T* data = output->template mutable_data<T>();
     const Index* idxs = indices.template data<Index>();
     T w0 = *weight0.template data<T>();
@@ -664,10 +664,10 @@ class ScatterAssignOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(&input, output, "In place operation is required");
 
     CAFFE_ENFORCE_GT(input.ndim(), 0, "X0 has to be at least the vector");
-    TIndex M = input.size();
-    TIndex N = input.dim(0);
-    TIndex K = indices.size();
-    TIndex block_size = M / N;
+    int64_t M = input.size();
+    int64_t N = input.dim(0);
+    int64_t K = indices.size();
+    int64_t block_size = M / N;
     CAFFE_ENFORCE_EQ(slices.size(), block_size * K);
     // TODO(dzhulgakov): it can be made to work with arbitrary data type by
     // using raw_mutable_data
@@ -682,9 +682,9 @@ class ScatterAssignOp : public Operator<Context> {
       T* data,
       const Index* idxs,
       const T* slicesData,
-      TIndex N,
-      TIndex K,
-      TIndex block_size) {
+      int64_t N,
+      int64_t K,
+      int64_t block_size) {
     for (int i = 0; i < K; ++i) {
       Index idx = idxs[i];
       // double-checking the indices, but it's fine as it's DCHECK only
@@ -936,7 +936,7 @@ class HasElementsOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    output->Resize(std::vector<TIndex>{});
+    output->Resize(std::vector<int64_t>{});
     *output->template mutable_data<bool>() = input.size() > 0;
     return true;
   }
@@ -953,7 +953,7 @@ class SizeOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
 
-    output->Resize(vector<TIndex>());
+    output->Resize(vector<int64_t>());
     auto* output_data = output->template mutable_data<int64_t>();
 
     auto size = input.size();
@@ -1099,7 +1099,7 @@ class LengthsGatherOp : public Operator<Context> {
     const auto* lengths_data = lengths.template data<int32_t>();
     const auto* indices_data = indices.template data<Index>();
 
-    TIndex total_length = 0;
+    int64_t total_length = 0;
     for (size_t i = 0; i < indices.size(); ++i) {
       auto idx = indices_data[i];
       CAFFE_ENFORCE_LT(idx, lengths.size());
@@ -1110,7 +1110,7 @@ class LengthsGatherOp : public Operator<Context> {
     output->Resize(shape);
 
     offsets_.clear();
-    TIndex running_offset = 0;
+    int64_t running_offset = 0;
     offsets_.reserve(lengths.size());
     for (size_t i = 0; i < lengths.size(); ++i) {
       offsets_.push_back(running_offset);
@@ -1139,7 +1139,7 @@ class LengthsGatherOp : public Operator<Context> {
     return true;
   }
 
-  std::vector<TIndex> offsets_;
+  std::vector<int64_t> offsets_;
 
   INPUT_TAGS(ITEMS, LENGTHS, INDICES);
 };

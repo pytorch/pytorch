@@ -59,7 +59,7 @@ class CAFFE2_API Tensor final {
    * Note that the actual data allocation is not going to be carried out until
    * the first time mutable_data() is called.
    */
-  explicit Tensor(const vector<TIndex>& dims, DeviceType type)
+  explicit Tensor(const vector<int64_t>& dims, DeviceType type)
       : Tensor(Storage(type)) {
     // TODO: here, we create a Storage
     // and immediately discard it in Resize() since
@@ -96,7 +96,7 @@ class CAFFE2_API Tensor final {
    */
   template <typename T>
   Tensor(
-      const vector<TIndex>& dims,
+      const vector<int64_t>& dims,
       const vector<T>& values,
       BaseContext* context)
       : Tensor(Storage(context->device_type(), TypeMeta::Make<T>())) {
@@ -115,7 +115,7 @@ class CAFFE2_API Tensor final {
       typename = typename std::enable_if<std::is_scalar<T>::value>::type>
   Tensor(const T& value, BaseContext* context)
       : Tensor(Storage(context->device_type(), TypeMeta::Make<T>())) {
-    Resize(std::vector<TIndex>{});
+    Resize(std::vector<int64_t>{});
     context->CopyItemsFromCPU(
         storage().dtype(), size(), &value, mutable_data<T>());
   }
@@ -142,15 +142,15 @@ class CAFFE2_API Tensor final {
     impl_.get()->CopyFrom(*src.impl_.get(), context);
   }
 
-  void ExtendTo(TIndex num, float growthPct, BaseContext* context) const {
+  void ExtendTo(int64_t num, float growthPct, BaseContext* context) const {
     impl_.get()->ExtendTo(num, growthPct, context);
   }
 
-  void Extend(TIndex num, float growthPct, BaseContext* context) const {
+  void Extend(int64_t num, float growthPct, BaseContext* context) const {
     impl_.get()->Extend(num, growthPct, context);
   }
 
-  void ShrinkTo(TIndex outer_dim) const {
+  void ShrinkTo(int64_t outer_dim) const {
     impl_.get()->ShrinkTo(outer_dim);
   }
 
@@ -168,7 +168,7 @@ class CAFFE2_API Tensor final {
     impl_.get()->ResizeLike(*src_tensor.impl_.get());
   }
 
-  inline void Reshape(const vector<TIndex>& dims) const {
+  inline void Reshape(const vector<int64_t>& dims) const {
     impl_.get()->Reshape(dims);
   }
 
@@ -250,7 +250,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->ndim();
   }
 
-  inline TIndex size() const {
+  inline int64_t size() const {
     return impl_.get()->size();
   }
 
@@ -266,19 +266,19 @@ class CAFFE2_API Tensor final {
     return impl_.get()->capacity_nbytes();
   }
 
-  inline const vector<TIndex>& dims() const {
+  inline const vector<int64_t>& dims() const {
     return impl_.get()->dims();
   }
 
-  inline TIndex size_from_dim(int k) const {
+  inline int64_t size_from_dim(int k) const {
     return impl_.get()->size_from_dim(k);
   }
 
-  inline TIndex size_to_dim(int k) const {
+  inline int64_t size_to_dim(int k) const {
     return impl_.get()->size_to_dim(k);
   }
 
-  inline TIndex size_between_dim(int k, int l) const {
+  inline int64_t size_between_dim(int k, int l) const {
     return impl_.get()->size_between_dim(k, l);
   }
 
@@ -311,7 +311,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->dim32(i);
   }
 
-  inline TIndex dim(const int i) const {
+  inline int64_t dim(const int i) const {
     return impl_.get()->dim(i);
   }
 
@@ -337,7 +337,7 @@ TypeCall GetTypeCallFunction(TypeIdentifier id);
 void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c);
 
 // Shape call registry
-typedef vector<TIndex> (*TensorInfoCall)(
+typedef vector<int64_t> (*TensorInfoCall)(
     const void*,
     size_t* capacity,
     DeviceOption* device);
@@ -377,7 +377,7 @@ void TensorPrinter::Print(const Tensor& tensor) {
   std::stringstream values_stream;
   // One most likely doesn't want to print int64-number of items for visual
   // inspection, so we cast down to int here.
-  int total_count = static_cast<int>(std::min(tensor.size(), TIndex(limit_)));
+  int total_count = static_cast<int>(std::min(tensor.size(), int64_t(limit_)));
   const T* tensor_data = tensor.template data<T>();
   for (int i = 0; i < total_count - 1; ++i) {
     values_stream << tensor_data[i] << ",";

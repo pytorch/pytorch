@@ -124,7 +124,7 @@ bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
 
   // Input is (N, C, H, W)
   // Output is (N, C, H + 1, W + 1)
-  vector<TIndex> out_shape(X.dims());
+  vector<int64_t> out_shape(X.dims());
   out_shape[2] += 1; // H + 1 output size
   out_shape[3] += 1; // W + 1 output size
   Y->Resize(out_shape);
@@ -172,7 +172,7 @@ bool IntegralImageGradientOp<float, CUDAContext>::RunOnDevice() {
   // Row pass reduces shape of dY from (N, C, H + 1, W + 1)
   // to (N, C, H + 1, W)
   // Col pass reduces shape to (N, C, H, W)
-  vector<TIndex> row_pass_shape(dY.dims());
+  vector<int64_t> row_pass_shape(dY.dims());
   row_pass_shape[3] -= 1;
   row_pass_buffer_.Resize(row_pass_shape);
   const int chans = row_pass_buffer_.dim32(1);
