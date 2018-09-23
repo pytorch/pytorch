@@ -16,9 +16,8 @@ if TEST_NUMBA_CUDA:
 
 
 class TestNumbaIntegration(TestCase):
-
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @unittest.skipIf(not TEST_CUDA, "no CUDA")
+    @unittest.skipIf(not TEST_NUMPY, "No numpy")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_cuda_array_interface(self):
         """torch.Tensor exposes __cuda_array_interface__ for cuda tensors.
 
@@ -98,7 +97,7 @@ class TestNumbaIntegration(TestCase):
             self.assertEqual(ar_dict["data"], (cudat.data_ptr(), False))
             self.assertEqual(ar_dict["version"], 0)
 
-    @unittest.skipIf(not TEST_CUDA, "No CUDA")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
     def test_array_adaptor(self):
         """Torch __cuda_array_adaptor__ exposes tensor data to numba.cuda."""
@@ -166,7 +165,41 @@ class TestNumbaIntegration(TestCase):
             # Cannot verify correctness of strided view operations.
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
-    @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba")
+    @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
+    def test_conversion_errors(self):
+        """Numba property reports array interface for tensor types:
+            cpu is not a cuda array
+            sparse is not a cuda array
+            needs_grad raises an error on check or conversion
+        """
+
+        cput = torch.arange(100)
+
+        self.assertFalse(numba.cuda.is_cuda_array(cput))
+        with self.assertRaises(TypeError):
+            numba.cuda.as_cuda_array(cput)
+
+        sparset = torch.sparse_coo_tensor(cput[None, :], cput)
+
+        self.assertFalse(numba.cuda.is_cuda_array(sparset))
+        with self.assertRaises(TypeError):
+            numba.cuda.as_cuda_array(sparset)
+
+        cpu_gradt = torch.zeros(100).requires_grad_(True)
+
+        self.assertFalse(numba.cuda.is_cuda_array(cpu_gradt))
+        with self.assertRaises(TypeError):
+            numba.cuda.as_cuda_array(cpu_gradt)
+
+        cuda_gradt = torch.zeros(100).requires_grad_(True).cuda()
+
+        with self.assertRaises(RuntimeError):
+            numba.cuda.is_cuda_array(cuda_gradt)
+        with self.assertRaises(RuntimeError):
+            numba.cuda.as_cuda_array(cuda_gradt)
+
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
     @unittest.skipIf(not TEST_MULTIGPU, "No multigpu")
     def test_active_device(self):
         """'as_cuda_array' tensor device must match active numba context."""
