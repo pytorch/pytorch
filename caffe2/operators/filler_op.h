@@ -23,7 +23,7 @@ class FillerOp : public Operator<Context> {
   FillerOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         shape_(this->template GetRepeatedArgument<int64_t>("shape")),
-        extra_shape_(ToVectorTIndex(
+        extra_shape_(ToVectorint64_t(
             this->template GetRepeatedArgument<int>("extra_shape"))),
         input_as_shape_(
             this->template GetSingleArgument<bool>("input_as_shape", false)) {
@@ -53,7 +53,7 @@ class FillerOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto* output = Operator<Context>::Output(0);
     if (InputSize()) {
-      auto shape = vector<TIndex>{};
+      auto shape = vector<int64_t>{};
       if (input_as_shape_) {
         // Shape input must be in CPU context
         auto& input = this->template Input<Tensor>(0, CPU);
@@ -61,8 +61,8 @@ class FillerOp : public Operator<Context> {
             input.ndim(),
             1,
             "When input_as_shape is true, the input must be a 1D tensor of "
-            "data type TIndex");
-        auto* shape_data = input.template data<TIndex>();
+            "data type int64_t");
+        auto* shape_data = input.template data<int64_t>();
         shape.insert(shape.end(), shape_data, shape_data + input.dim32(0));
       } else {
         auto& input = Input(0);
@@ -79,8 +79,8 @@ class FillerOp : public Operator<Context> {
   virtual bool Fill(Tensor* output) = 0;
 
  protected:
-  vector<TIndex> shape_;
-  vector<TIndex> extra_shape_;
+  vector<int64_t> shape_;
+  vector<int64_t> extra_shape_;
   bool input_as_shape_;
 };
 
@@ -367,27 +367,27 @@ class DiagonalFillOp final : public FillerOp<Context> {
     CAFFE_ENFORCE(output->ndim() >= 2, "Input shape must be >= 2D");
   }
 
-  TIndex GetStepSize(Tensor* output) {
-    TIndex step;
+  int64_t GetStepSize(Tensor* output) {
+    int64_t step;
     if (output->ndim() == 2) {
       step = output->dim(1) + 1;
     } else {
-      TIndex prev_i = output->dim(0);
+      int64_t prev_i = output->dim(0);
       for (auto i : output->dims()) {
         if (i != prev_i) {
           CAFFE_THROW("All dimensions of input must be of equal length");
         }
       }
-      vector<TIndex> cumprod(output->ndim());
+      vector<int64_t> cumprod(output->ndim());
       auto dims = output->dims();
       std::partial_sum(
           dims.begin(),
           dims.end() - 1,
           cumprod.begin(),
-          std::multiplies<TIndex>());
+          std::multiplies<int64_t>());
       step = 1 +
           std::accumulate(
-                 cumprod.begin(), cumprod.end(), static_cast<TIndex>(0));
+                 cumprod.begin(), cumprod.end(), static_cast<int64_t>(0));
       VLOG(0) << step;
     }
     return step;

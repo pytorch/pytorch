@@ -329,7 +329,7 @@ class CopyToMPSCNNOp final : public Operator<CPUContext> {
     for (auto i = 0; i < Inputs().size(); ++i) {
       const auto& X = Input(i);
       CAFFE_ENFORCE(X.ndim() > 0 && X.ndim() <= 4);
-      std::vector<TIndex> XDims = {1, 1, 1, 1};
+      std::vector<int64_t> XDims = {1, 1, 1, 1};
       XDims.assign(X.dims().begin(), X.dims().end());
 
       caffe2::Timer t;
@@ -2259,15 +2259,15 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
 
     // bbox_deltas: (num_images, A * 4, H, W)
     CAFFE_ENFORCE_EQ(
-        bbox_deltas.dims(), (vector<TIndex>{num_images, 4 * A, height, width}));
+        bbox_deltas.dims(), (vector<int64_t>{num_images, 4 * A, height, width}));
 
     // im_info_tensor: (num_images, 3), format [height, width, scale; ...]
-    CAFFE_ENFORCE_EQ(im_info_tensor.dims(), (vector<TIndex>{num_images, 3}));
+    CAFFE_ENFORCE_EQ(im_info_tensor.dims(), (vector<int64_t>{num_images, 3}));
     CAFFE_ENFORCE(
         im_info_tensor.template IsType<float>(), im_info_tensor.meta().name());
 
     // anchors: (A, 4)
-    CAFFE_ENFORCE_EQ(anchors.dims(), (vector<TIndex>{A, 4}));
+    CAFFE_ENFORCE_EQ(anchors.dims(), (vector<int64_t>{A, 4}));
     CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.meta().name());
     // Broadcast the anchors to all pixels
     auto all_anchors_vec =
