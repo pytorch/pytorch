@@ -166,7 +166,7 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     code.append(OutType + " *op = &out[rangeIndex * block_size];")
 
     # initialize to 0
-    code.append("TIndex j = 0;")
+    code.append("int64_t j = 0;")
     code.append("for(; j + 8 <= block_size; j += 8) {")
     code.append("_mm256_storeu_ps(op + j, _mm256_setzero_ps());")
     code.append("}")
@@ -312,10 +312,10 @@ for o in options:
     code.append(fn + "(")
 
     args = []
-    args.append("const TIndex block_size,")
-    args.append("const TIndex output_size,")
-    args.append("const TIndex index_size,")
-    args.append("const TIndex data_size,")
+    args.append("const int64_t block_size,")
+    args.append("const int64_t output_size,")
+    args.append("const int64_t index_size,")
+    args.append("const int64_t data_size,")
     args.append("const " + InType + "* input,")
     args.append("const " + IndexType + "* indices,")
     args.append("const int* lengths,")

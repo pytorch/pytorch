@@ -38,7 +38,7 @@ class CuDNNLRNOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnLRNDescriptor_t norm_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   const int size_;
   const float alpha_;
@@ -80,7 +80,7 @@ class CuDNNLRNGradientOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnLRNDescriptor_t norm_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   const int size_;
   const float alpha_;
