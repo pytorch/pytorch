@@ -110,6 +110,23 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
 
   explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0) {
     data_type_ = storage_ ? storage_.dtype() : caffe2::TypeMeta{};
+    if (storage_) {
+      switch (storage_.device_type()) {
+      case DeviceType::CPU:
+        type_id_ = CPUTensorId();
+        break;
+      case DeviceType::CUDA:
+        type_id_ = CUDATensorId();
+        break;
+      default:
+        // The other types are not supported by PyTorch Type at the moment
+        // TODO: Allocate type_ids for all of this
+        type_id_ = UndefinedTensorId();
+        break;
+      }
+    } else {
+      type_id_ = UndefinedTensorId();
+    }
   }
 
   TensorImpl(const TensorImpl&) = default;
