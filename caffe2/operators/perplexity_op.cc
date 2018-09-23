@@ -10,7 +10,7 @@ bool PerplexityOp<float, CPUContext>::RunOnDevice() {
   DCHECK_EQ(X.ndim(), 1);
   int N = X.dim32(0);
 
-  Y->Resize(vector<TIndex>());
+  Y->Resize(vector<int64_t>());
   const auto* Xdata = X.data<float>();
 
   float perplexity = 1.0;

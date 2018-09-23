@@ -156,7 +156,7 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
   }
 
  private:
-  TIndex batchSize_;
+  int64_t batchSize_;
 };
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<TextFileReaderInstance>);

@@ -90,19 +90,19 @@ class TensorFiller {
     return Min(0).Max(max_segment).Dist(FD_SYNTHETIC);
   }
 
-  TensorFiller& Shape(const std::vector<TIndex>& shape) {
+  TensorFiller& Shape(const std::vector<int64_t>& shape) {
     shape_ = shape;
     return *this;
   }
 
   template <class Type>
-  TensorFiller(const std::vector<TIndex>& shape, Type fixed_sum)
+  TensorFiller(const std::vector<int64_t>& shape, Type fixed_sum)
       : shape_(shape), dist_(FD_FIXEDSUM), fixed_sum_((double)fixed_sum) {}
 
-  TensorFiller(const std::vector<TIndex>& shape)
+  TensorFiller(const std::vector<int64_t>& shape)
       : shape_(shape), dist_(FD_UNIFORM), fixed_sum_(0) {}
 
-  TensorFiller() : TensorFiller(std::vector<TIndex>()) {}
+  TensorFiller() : TensorFiller(std::vector<int64_t>()) {}
 
   std::string DebugString() const {
     std::stringstream stream;
@@ -123,7 +123,7 @@ class TensorFiller {
   }
 
  private:
-  std::vector<TIndex> shape_;
+  std::vector<int64_t> shape_;
   // TODO: type is unknown until a user starts to fill data;
   // cast everything to double for now.
   double min_ = 0.0;

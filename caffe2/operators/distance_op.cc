@@ -237,7 +237,7 @@ vector<TensorShape> TensorInferenceForDotProduct(
     const vector<TensorShape>& in) {
   CAFFE_ENFORCE_GT(in.size(), 0);
 
-  vector<TIndex> dims(1);
+  vector<int64_t> dims(1);
   dims[0] = in[0].dims().size() > 0 ? in[0].dims(0) : 1;
   return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
 }

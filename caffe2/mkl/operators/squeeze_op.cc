@@ -57,7 +57,7 @@ class MKLSqueezeOp final : public MKLOperator<T> {
 
  private:
   vector<int> dims_;
-  vector<TIndex> cached_input_dims_;
+  vector<int64_t> cached_input_dims_;
 };
 
 } // namespace mkl
