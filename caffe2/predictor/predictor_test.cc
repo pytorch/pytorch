@@ -132,7 +132,7 @@ const char* metaSpec = R"DOC(
 )DOC";
 
 std::unique_ptr<Blob> randomTensor(
-    const std::vector<TIndex>& dims,
+    const std::vector<int64_t>& dims,
     CPUContext* ctx) {
   auto blob = make_unique<Blob>();
   auto* t = blob->GetMutableTensor(CPU);
