@@ -397,11 +397,18 @@ class _DataLoaderIter(object):
                 # corrupted data in `worker_result_queue`, causing
                 # `pin_memory_thread` unable to read and terminate properly.
                 self.worker_result_queue.put(None)
+                # Indicate that no more data will be put on this queue by the
+                # current process.
+                self.worker_result_queue.close()
+                # Join the background thread. Can only be called after close().
+                self.worker_result_queue.join_thread()
             # Workers can't be waiting to put be cause their output queue
             # is a multiprocessing.Queue and its .put is non-blocking.
             # They can only be waiting to get, so we put `None` here.
             for q in self.index_queues:
                 q.put(None)
+                q.close()
+                q.join_thread()
             for w in self.workers:
                 w.join()
             if hasattr(self, 'pin_memory_thread'):
