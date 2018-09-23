@@ -168,7 +168,7 @@ Tensor & embedding_renorm_cpu_(
       continue;
     }
     auto row = self[sorted_indices[i]];
-    auto norm = row.norm(norm_type).toCDouble();
+    auto norm = row.norm(norm_type).item<double>();
     if (norm > max_norm) {
       auto scale = max_norm / (norm + 1e-7);
       row *= scale;

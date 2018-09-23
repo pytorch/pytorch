@@ -143,8 +143,8 @@ static Tensor unsqueezeN(const Tensor & src, int64_t before, int64_t after) {
 
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size) {
   if (index.numel() != 0) {
-    auto max_idx = index.max().toCLong();
-    auto min_idx = index.min().toCLong();
+    auto max_idx = index.max().item<int64_t>();
+    auto min_idx = index.min().item<int64_t>();
     AT_CHECK(max_idx < dim_size,
              "index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
     AT_CHECK(min_idx >= -dim_size,
