@@ -16,10 +16,10 @@ template <
     typename OutType,
     bool IS_WEIGHT_POSITIONAL = false>
 static void EmbeddingLookupGenericSlow(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const InType* input,
     const IndexType* indices,
     const int* lengths,
@@ -27,13 +27,13 @@ static void EmbeddingLookupGenericSlow(
     const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,
     OutType* out) {
-  TIndex current = 0;
+  int64_t current = 0;
   for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     EigenVectorArrayMap<OutType> out_vector(out, block_size);
     for (int i = 0; i < lengths[m]; ++i) {
       CAFFE_ENFORCE_LT(current, index_size);
-      TIndex idx = indices[current];
+      int64_t idx = indices[current];
       CAFFE_ENFORCE(
           0 <= idx && idx < data_size,
           "Index ",
@@ -86,10 +86,10 @@ static void EmbeddingLookupGenericSlow(
     IndexTypeName, IndexType, InTypeName, InType, OutTypeName, OutType, IS_WEIGHT_POSITIONAL)          \
   void                                                                                                 \
       EmbeddingLookup_##IndexTypeName##_##InTypeName##_##OutTypeName##_##IS_WEIGHT_POSITIONAL##__base( \
-          const TIndex block_size,                                                                     \
-          const TIndex output_size,                                                                    \
-          const TIndex index_size,                                                                     \
-          const TIndex data_size,                                                                      \
+          const int64_t block_size,                                                                     \
+          const int64_t output_size,                                                                    \
+          const int64_t index_size,                                                                     \
+          const int64_t data_size,                                                                      \
           const InType* input,                                                                         \
           const IndexType* indices,                                                                    \
           const int* lengths,                                                                          \
@@ -116,10 +116,10 @@ static void EmbeddingLookupGenericSlow(
   }                                                                                                    \
   template <>                                                                                          \
   void EmbeddingLookup<IndexType, InType, OutType, IS_WEIGHT_POSITIONAL>(                              \
-      const TIndex block_size,                                                                         \
-      const TIndex output_size,                                                                        \
-      const TIndex index_size,                                                                         \
-      const TIndex data_size,                                                                          \
+      const int64_t block_size,                                                                         \
+      const int64_t output_size,                                                                        \
+      const int64_t index_size,                                                                         \
+      const int64_t data_size,                                                                          \
       const InType* input,                                                                             \
       const IndexType* indices,                                                                        \
       const int* lengths,                                                                              \

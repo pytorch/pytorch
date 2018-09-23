@@ -538,7 +538,7 @@ void run2b1bConvIm2ColGEMM(QConvState* state,
     CAFFE_ENFORCE_EQ(Y->dim32(0), divRoundUp(X.dim32(0) * OH * OW, kGEMMTileSize) * kGEMMTileSize);
     CAFFE_ENFORCE_EQ(Y->dim32(1), OC);
     Y->ShrinkTo(X.dim32(0) * OH * OW);
-    Y->Reshape(std::vector<TIndex>{{TIndex(X.dim(0)), TIndex(OH), TIndex(OW), TIndex(OC)}});
+    Y->Reshape(std::vector<int64_t>{{int64_t(X.dim(0)), int64_t(OH), int64_t(OW), int64_t(OC)}});
   }
 }
 

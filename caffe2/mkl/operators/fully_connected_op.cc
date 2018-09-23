@@ -90,8 +90,8 @@ class MKLFullyConnectedOp final : public MKLOperator<T> {
   // Input: X, W, b
   // Output: Y
   size_t axis_{1};
-  vector<TIndex> cached_input_dims_;
-  vector<TIndex> cached_filter_dims_;
+  vector<int64_t> cached_input_dims_;
+  vector<int64_t> cached_filter_dims_;
   PrimitiveWrapper<T> primitive_;
   LayoutWrapper<T> input_layout_;
   LayoutWrapper<T> filter_layout_;

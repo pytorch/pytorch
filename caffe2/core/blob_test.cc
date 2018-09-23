@@ -557,9 +557,9 @@ TEST(TensorTest, TensorNonFundamentalTypeClone) {
 
 TEST(TensorTest, Tensor64BitDimension) {
   // Initialize a large tensor.
-  TIndex large_number =
+  int64_t large_number =
       static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
-  Tensor tensor(vector<TIndex>{large_number}, CPU);
+  Tensor tensor(vector<int64_t>{large_number}, CPU);
   EXPECT_EQ(tensor.ndim(), 1);
   EXPECT_EQ(tensor.dim(0), large_number);
   EXPECT_EQ(tensor.size(), large_number);
@@ -589,9 +589,9 @@ TEST(TensorTest, Tensor64BitDimension) {
 }
 
 TEST(TensorDeathTest, CannotCastDownLargeDims) {
-  TIndex large_number =
+  int64_t large_number =
       static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
-  Tensor tensor(vector<TIndex>{large_number}, CPU);
+  Tensor tensor(vector<int64_t>{large_number}, CPU);
   EXPECT_EQ(tensor.ndim(), 1);
   EXPECT_EQ(tensor.dim(0), large_number);
   ASSERT_THROW(tensor.dim32(0), EnforceNotMet);
@@ -694,7 +694,7 @@ TEST(TensorTest, TensorSerialization_CustomType) {
 }
 
 TEST(TensorTest, Half) {
-  const TIndex kSize = 3000000;
+  const int64_t kSize = 3000000;
   Blob blob;
   TensorCPU* tensor = blob.GetMutableTensor(CPU);
   tensor->Resize(kSize);
