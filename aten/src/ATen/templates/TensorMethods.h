@@ -72,16 +72,6 @@ inline Device Tensor::device() const {
 }
 
 #define DEFINE_CAST(T, name, _)                  \
-  template <>                                    \
-  inline T* Tensor::data() const {               \
-    AT_CHECK(                                    \
-        type().scalarType() == ScalarType::name, \
-        "expected scalar type ",                 \
-        #name,                                   \
-        " but found ",                           \
-        at::toString(type().scalarType()));      \
-    return static_cast<T*>(this->data_ptr());    \
-  }                                              \
   inline T* Tensor::to##name##Data() const {     \
     return data<T>();                            \
   }
