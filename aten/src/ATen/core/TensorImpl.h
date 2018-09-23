@@ -404,7 +404,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
    *        to dimension of `num`.
    */
   void ExtendTo(int64_t num, float growthPct, at::BaseContext* context) {
-    CAFFE_ENFORCE_GE_WITH_CALLER(sizes_.size(), 1);
+    CAFFE_ENFORCE_GE_WITH_CALLER(sizes_.size(), 1u);
     CAFFE_ENFORCE_GE_WITH_CALLER(growthPct, 0);
     CAFFE_ENFORCE(context != nullptr, "Context must be provided.");
     Extend(num - sizes_[0], growthPct, context);
