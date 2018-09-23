@@ -12,20 +12,18 @@ namespace nn {
 
 /// Options for `Dropout` and `FeatureDropout`.
 struct DropoutOptions {
-  DropoutOptions(double rate);
+  /* implicit */ DropoutOptions(double rate = 0.5);
   /// The probability with which a particular component of the input is set to
   /// zero.
   /// Changes to this parameter at runtime are effective.
-  TORCH_ARG(double, rate) = 0.5;
+  TORCH_ARG(double, rate);
 };
 
 namespace detail {
 template <typename Derived>
 class DropoutImplBase : public torch::nn::Cloneable<Derived> {
  public:
-  explicit DropoutImplBase(double rate)
-      : DropoutImplBase(DropoutOptions(rate)) {}
-  explicit DropoutImplBase(DropoutOptions options_);
+  explicit DropoutImplBase(DropoutOptions options_ = DropoutOptions());
 
   void reset() override;
 
