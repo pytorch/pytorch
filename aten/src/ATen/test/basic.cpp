@@ -31,15 +31,15 @@ static void test(Type & type) {
 
   CATCH_SECTION( "ones and dot" ) {
     Tensor b0 = ones({1, 1}, type);
-    CATCH_REQUIRE(2 == (b0+b0).sum().toCDouble());
+    CATCH_REQUIRE(2 == (b0+b0).sum().item<double>());
 
     Tensor b1 = ones({1, 2}, type);
-    CATCH_REQUIRE(4 == (b1+b1).sum().toCDouble());
+    CATCH_REQUIRE(4 == (b1+b1).sum().item<double>());
 
     Tensor b = ones({3, 4}, type);
-    CATCH_REQUIRE(24 == (b+b).sum().toCDouble());
+    CATCH_REQUIRE(24 == (b+b).sum().item<double>());
     CATCH_REQUIRE(12 == b.numel());
-    CATCH_REQUIRE(b.view(-1).dot(b.view(-1)).toCDouble() == 12);
+    CATCH_REQUIRE(b.view(-1).dot(b.view(-1)).item<double>() == 12);
   }
 
   CATCH_SECTION( "rand" ) {
@@ -54,7 +54,7 @@ static void test(Type & type) {
     auto z = b.sort(1);
     auto z_sorted = std::get<0>(z);
 
-    CATCH_REQUIRE(z_sorted[0][0].toCFloat() < z_sorted[0][1].toCFloat());
+    CATCH_REQUIRE(z_sorted[0][0].item<float>() < z_sorted[0][1].item<float>());
   }
 
   if(type.backend() != Backend::CUDA)
@@ -62,7 +62,7 @@ static void test(Type & type) {
     Tensor b = randperm(15, type);
     Tensor rv, ri;
     std::tie(rv, ri) = sort(b, 0);
-    CATCH_REQUIRE(rv[0].toCFloat() <= rv[1].toCFloat());
+    CATCH_REQUIRE(rv[0].item<float>() <= rv[1].item<float>());
   }
 
   CATCH_SECTION( "context" ) {
@@ -89,7 +89,7 @@ static void test(Type & type) {
     auto end = std::chrono::high_resolution_clock::now();
     //TODO TEST PERF?
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;
-    CATCH_REQUIRE(norm(100000*d).toCDouble() == norm(r).toCDouble());
+    CATCH_REQUIRE(norm(100000*d).item<double>() == norm(r).item<double>());
   }
 
   CATCH_SECTION( "loads of adds (with copy)" ) {
@@ -102,7 +102,7 @@ static void test(Type & type) {
     auto end = std::chrono::high_resolution_clock::now();
     //TODO TEST PERF?
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;
-    CATCH_REQUIRE(norm(100000*d).toCDouble() == norm(r).toCDouble());
+    CATCH_REQUIRE(norm(100000*d).item<double>() == norm(r).item<double>());
   }
 
   CATCH_SECTION( "isContiguous" ) {
@@ -154,7 +154,7 @@ static void test(Type & type) {
 
   CATCH_SECTION( "abs(value)" ) {
     Tensor r = at::abs(type.scalarTensor(-3));
-    CATCH_REQUIRE(r.toCInt() == 3);
+    CATCH_REQUIRE(r.item<int32_t>() == 3);
   }
 
 //TODO(zach): operator overloads
@@ -195,7 +195,7 @@ static void test(Type & type) {
     auto f = rand({3,4}, type);
     f[2] = zeros({4}, type);
     f[1][0] = -1;
-    CATCH_REQUIRE(f[2][0].toCDouble() == 0);
+    CATCH_REQUIRE(f[2][0].item<double>() == 0);
   }
 
   CATCH_SECTION( "tensor from TH" ) {
@@ -206,14 +206,14 @@ static void test(Type & type) {
     CATCH_REQUIRE_NOTHROW(tt);
   }
 
-  CATCH_SECTION( "toCFloat" ) {
+  CATCH_SECTION( "item<float>" ) {
     Tensor a = zeros({3,4});
     Tensor b = ones({3,7});
     Tensor c = cat({a,b},1);
     CATCH_REQUIRE(c.size(1) == 11);
 
     Tensor e = rand({});
-    CATCH_REQUIRE(*e.data<float>() == e.sum().toCFloat());
+    CATCH_REQUIRE(*e.data<float>() == e.sum().item<float>());
   }
 
   CATCH_SECTION( "to string" ) {

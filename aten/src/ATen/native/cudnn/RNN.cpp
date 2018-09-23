@@ -1125,7 +1125,7 @@ DropoutState& get_dropout_state(const Type& tp, double dropout_p, bool train) {
                                  : ten_dropout_state_cache.at(device);
   if (train && dropout_p > 0 && !state.buffer.defined()) {
     std::unique_lock<std::mutex> lock {state.mutex};
-    int64_t seed = at::empty({}, at::kLong).random_().toCLong();
+    int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();
     state.buffer = at::_cudnn_init_dropout_state(
       tp.toScalarType(at::kByte), dropout_p, train, seed);
     // NB: CUDA binds the event to a device at creation time, so we can initialize it

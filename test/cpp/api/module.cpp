@@ -41,13 +41,13 @@ TEST_F(ModuleTest, ZeroGrad) {
   for (auto& parameter : module->parameters()) {
     auto grad = parameter->grad();
     ASSERT_TRUE(grad.defined());
-    ASSERT_NE(grad.sum().toCFloat(), 0);
+    ASSERT_NE(grad.sum().item<float>(), 0);
   }
   module->zero_grad();
   for (auto& parameter : module->parameters()) {
     auto grad = parameter->grad();
     ASSERT_TRUE(grad.defined());
-    ASSERT_EQ(grad.sum().toCFloat(), 0);
+    ASSERT_EQ(grad.sum().item<float>(), 0);
   }
 }
 
@@ -72,7 +72,7 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
   ASSERT_TRUE(module.x.grad().defined());
   ASSERT_FALSE(module.y.grad().defined());
 
-  ASSERT_EQ(module.x.grad().sum().toCFloat(), 0);
+  ASSERT_EQ(module.x.grad().sum().item<float>(), 0);
 }
 
 TEST_F(ModuleTest, CanGetName) {
