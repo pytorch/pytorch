@@ -6,7 +6,7 @@
 #include <ATen/core/context_base.h>
 
 namespace caffe2 {
-  using at::ToVectorTIndex;
+  using at::ToVectorint64_t;
   using at::size_from_dim_;
   using at::size_to_dim_;
   using at::size_between_dim_;
