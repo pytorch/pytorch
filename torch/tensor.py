@@ -453,21 +453,23 @@ class Tensor(torch._C._TensorBase):
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
         if not self.device.type == "cuda":
             raise AttributeError(
-                "Not on cuda device, use Tensor.cuda() first: %r" %
-                self.device
+                "Can't get __cuda_array_interface__ on non-CUDA tensor type: %s "
+                "If CUDA data is required use tensor.cuda() to copy tensor to device memory." %
+                self.type()
             )
 
         if self.is_sparse:
             raise AttributeError(
-                "Can't convert sparse tensor, use Tensor.to_dense() "
-                "to convert to a dense tensor first."
+                "Can't get __cuda_array_interface__ on sparse type: %s "
+                "Use Tensor.to_dense() to convert to a dense tensor first." %
+                self.type()
             )
 
         # RuntimeError, matching tensor.__array__() behavior.
         if self.requires_grad:
             raise RuntimeError(
                 "Can't get __cuda_array_interface__ on Variable that requires grad. "
-                "Use var.detach().__cuda_array_interface__ instead."
+                "If gradients aren't required, use var.detach() to get Variable that doesn't require grad."
             )
 
         typestr = {
