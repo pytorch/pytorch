@@ -87,11 +87,6 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
         random.seed(seed)
         torch.manual_seed(seed)
 
-        # Do not wait for putting thread to join when this worker exits.
-        # Otherwise, this worker may always be waiting to put and doesn't check
-        # index_queue and done_event for termination signal.
-        data_queue.cancel_join_thread()
-
         if init_fn is not None:
             init_fn(worker_id)
 
@@ -105,13 +100,16 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
                     continue
                 else:
                     break
-            # use done_event so that we can get faster exiting signal even if there
-            # are still indices in index_queue
-            if r is None or done_event.is_set():
-                # None means the last element. Indicate that no more data will
-                # be put on this queue by the current process.
-                index_queue.close()
-                break
+            # If `done_event` is set, keep getting until we reach `None` (i.e.,
+            # meaning last element).
+            # See NOTE [ Shutdown Data Loader Workers ] below for details.
+            if done_event.is_set():
+                if r is None:
+                    break
+                continue
+            else:
+                # Can only get `None` if `done_event` is set.
+                assert r is not None
             idx, batch_indices = r
             try:
                 samples = collate_fn([dataset[i] for i in batch_indices])
@@ -123,21 +121,27 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass
+    # Pass over a `None` when this worker exits.
+    data_queue.put(None)
 
 
-def _pin_memory_loop(in_queue, out_queue, done_event, pin_memory, device_id):
+def _pin_memory_loop(in_queue, out_queue, pin_memory, device_id, num_workers):
     if pin_memory:
         torch.cuda.set_device(device_id)
 
-    while True:
+    active_workers = num_workers
+
+    while active_workers > 0:
         try:
             r = in_queue.get()
         except Exception:
-            if done_event.is_set():
-                return
             raise
-        if r is None or done_event.is_set():
-            break
+        # When `in_queue` gives a `None`, we know that 1 worker has ended. When
+        # we see all `num_workers` `None`s, exit this thread.
+        # See NOTE [ Shutdown Data Loader Workers ] below for details.
+        if r is None:
+            active_workers -= 1
+            continue
         if isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
             continue
@@ -298,8 +302,8 @@ class _DataLoaderIter(object):
                 self.data_queue = queue.Queue()
                 pin_memory_thread = threading.Thread(
                     target=_pin_memory_loop,
-                    args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
-                          torch.cuda.current_device()))
+                    args=(self.worker_result_queue, self.data_queue, self.pin_memory,
+                          torch.cuda.current_device(), self.num_workers))
                 pin_memory_thread.daemon = True
                 pin_memory_thread.start()
                 # Similar to workers (see comment above), we only register
@@ -386,6 +390,67 @@ class _DataLoaderIter(object):
         raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
+        # NOTE [ Shutdown Data Loader Workers ]
+        # Terminating multiprocessing logic requires very careful design. In
+        # particular, we need to make sure that
+        #   1. A process won't be hanging when putting into a queue.
+        #   2. A process won't be hanging when getting from a queue.
+        #
+        # Our data model looks like, data flowing from top to bottom (queues are
+        # indicated with curly brackets):
+        #
+        #              main process
+        #                   |
+        #             {index_queue}
+        #                   |
+        #            worker processes
+        #                   |
+        #          {worker_result_queue}
+        #                   |
+        #    pin_memory_thread of main process
+        #                   |
+        #             {data_queue}
+        #                   |
+        #              data output
+        #
+        # P.S. `worker_result_queue` and `pin_memory_thread` part may be omitted
+        #      if `pin_memory=False`.
+        #
+        # It is important to terminate threads/processes in the order of data
+        # flow. If we terminate a consumer of a queue before the sender, the
+        # sender may be stuck in `.put`. You may say that we can use the
+        # `cancel_join_thread` method on `multiprocessing.Queue` in sender so
+        # it won't try to join the putting thread when it exits. However, this
+        #  1. requires a separate mechanism to signal the termination to the
+        #     sender.
+        #  2. may leave corrupted data in the sender, so the consumer may get
+        #     stuck in `get` that data without noticing our termination signal.
+        #
+        # Therefore, we
+        #  1. [main process]
+        #       i.   Set `done_event`
+        #       ii.  Put `None` in each `index_queue`. Join the putting threads
+        #            of these queues.
+        #       iii. Join the `pin_memory_thread`. (i.e., block until after step
+        #            3 below)
+        #       iv.  Join the workers. (i.e., block until after step 2 below)
+        #
+        #  2. [each worker process]
+        #     If `done_event` is set, keep getting from `index_queue` until
+        #     reach `None`, then put `None` into `worker_result_queue`
+        #
+        #  3. [pin_memory_thread]
+        #     Upon seeing the 1st `None` from `worker_result_queue`, keep
+        #     getting from it until seeing all `num_workers` number of  `None`s.
+        #
+        # NB: If we don't have `pin_memory_thread`, then the the step 3 above
+        #     is instead done in [main process], and must be done before step
+        #     1/iv so that workers won't be waiting for `.put(None)`.
+        #
+        # NB: `done_event` isn't strictly needed. E.g., in step 2 above we can
+        #     just check for `None` from `index_queue`, but it allows us to skip
+        #     wasting resources processing indices already in `index_queue` if
+        #     we are already shutting down.
         if not self.shutdown:
             self.shutdown = True
             # removes pids from the C side data structure first so worker
@@ -394,30 +459,22 @@ class _DataLoaderIter(object):
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
             self.done_event.set()
-            if self.pin_memory:
-                # Sending `None` to `pin_memory_thread` must be before
-                # stopping worker processes because the workers may leave
-                # corrupted data in `worker_result_queue`, causing
-                # `pin_memory_thread` unable to read and terminate properly.
-                # Also need to join the putting thread to ensure that `None` is
-                # already put into the queue.
-                self.worker_result_queue.put(None)
-                # Indicate that no more data will be put on this queue by the
-                # current process.
-                self.worker_result_queue.close()
-                # Join the background thread. Can only be called after close().
-                self.worker_result_queue.join_thread()
-            # Workers can't be waiting to put be cause their output queue
-            # is a multiprocessing.Queue and its .put is non-blocking.
-            # They can only be waiting to get, so we put `None` here.
             for q in self.index_queues:
                 q.put(None)
+                # Indicate that no more data will be put on this queue by the
+                # current process.
                 q.close()
+                # Join the background thread. Can only be called after close().
                 q.join_thread()
-            for w in self.workers:
-                w.join()
             if hasattr(self, 'pin_memory_thread'):
                 self.pin_memory_thread.join()
+            else:
+                active_workers = self.num_workers
+                while active_workers > 0:
+                    if self.worker_result_queue.get() is None:
+                        active_workers -= 1
+            for w in self.workers:
+                w.join()
 
     def __del__(self):
         if self.num_workers > 0:
