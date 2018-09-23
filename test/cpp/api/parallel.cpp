@@ -55,7 +55,7 @@ TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
   ASSERT_EQ(output.device(), torch::Device(torch::kCUDA, 1));
 
   auto chunks = output.chunk(2);
-  ASSERT_TRUE(chunks[0].to({torch::kCUDA, 0}).allclose(a));
+  ASSERT_TRUE(chunks[0].to(torch::Device{torch::kCUDA, 0}).allclose(a));
   ASSERT_TRUE(chunks[1].allclose(b));
 
   output.backward();
