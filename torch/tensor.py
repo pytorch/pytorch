@@ -472,15 +472,17 @@ class Tensor(torch._C._TensorBase):
                 "If gradients aren't required, use var.detach() to get Variable that doesn't require grad."
             )
 
+        # CUDA devices are little-endian and tensors are stored in native byte
+        # order. 1-byte entries are endian-agnostic.
         typestr = {
-            torch.float16: "f2",
-            torch.float32: "f4",
-            torch.float64: "f8",
-            torch.uint8: "u1",
-            torch.int8: "i1",
-            torch.int16: "i2",
-            torch.int32: "i4",
-            torch.int64: "i8",
+            torch.float16: "<f2",
+            torch.float32: "<f4",
+            torch.float64: "<f8",
+            torch.uint8: "|u1",
+            torch.int8: "|i1",
+            torch.int16: "<i2",
+            torch.int32: "<i4",
+            torch.int64: "<i8",
         }[self.dtype]
 
         itemsize = self.storage().element_size()

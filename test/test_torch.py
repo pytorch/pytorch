@@ -8467,9 +8467,6 @@ class TestTorch(TestCase):
         ]
         for tp, npt in zip(types, dtypes):
 
-            # Get typestr from numpy descr, ignoring endian marker
-            typestr = np.dtype(npt).descr[0][1][1:]
-
             # CPU tensors do not implement the interface.
             cput = tp(10)
 
@@ -8505,7 +8502,8 @@ class TestTorch(TestCase):
             self.assertEqual(ar_dict["shape"], (10,))
             self.assertEqual(
                 ar_dict["strides"], (cudat.storage().element_size(),))
-            self.assertEqual(ar_dict["typestr"], typestr)
+            # typestr from numpy, cuda-native little-endian
+            self.assertEqual(ar_dict["typestr"], np.dtype(npt).newbyteorder("<").str)
             self.assertEqual(ar_dict["data"], (cudat.data_ptr(), False))
             self.assertEqual(ar_dict["version"], 0)
 
