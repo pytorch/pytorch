@@ -5,7 +5,6 @@
 using caffe2::CPUContext;
 using caffe2::Tensor;
 using caffe2::TensorCPU;
-using caffe2::TIndex;
 using std::vector;
 
 namespace caffe2 {
@@ -17,7 +16,7 @@ void filler_init(
     const std::vector<int>& extra_shape,
     bool input_as_shape) {
   if (inputs.size()) {
-    auto real_shape = vector<TIndex>{};
+    auto real_shape = vector<int64_t>{};
     if (input_as_shape) {
       // Shape input must be in CPU context
       auto& input = *inputs[0];
@@ -25,8 +24,8 @@ void filler_init(
           input.ndim(),
           1,
           "When input_as_shape is true, the input must be a 1D tensor of "
-          "data type TIndex");
-      auto* shape_data = input.template data<TIndex>();
+          "data type int64_t");
+      auto* shape_data = input.template data<int64_t>();
       real_shape.insert(
           real_shape.end(), shape_data, shape_data + input.dim32(0));
     } else {

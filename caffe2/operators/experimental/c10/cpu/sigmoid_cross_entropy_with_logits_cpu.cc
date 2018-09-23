@@ -3,7 +3,6 @@
 #include "caffe2/utils/math.h"
 
 using caffe2::Tensor;
-using caffe2::TIndex;
 
 namespace caffe2 {
 namespace {
@@ -36,9 +35,9 @@ void sigmoid_cross_entropy_with_logits_op_cpu_impl(
   const auto outer_size = logits.size() / inner_size;
 
   if (logits.ndim() == 0) {
-    out->Resize(std::vector<TIndex>{});
+    out->Resize(std::vector<int64_t>{});
   } else {
-    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
+    std::vector<int64_t> dims(logits.dims().begin(), logits.dims().end() - 1);
     out->Resize(dims);
   }
   auto* out_ptr = out->mutable_data<float>();
