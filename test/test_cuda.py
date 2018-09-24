@@ -257,8 +257,7 @@ tests = [
     ('add', small_3d, lambda t: [number(0.2, 2, t), small_3d_positive(t)], 'scalar_tensor'),
     ('sub', small_3d, lambda t: [number(3.14, 3, t)]),
     ('sub', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('mul', small_3d, lambda t: [number(3.14, 3, t)], '', types, False,
-        "skipIfRocm:CharTensor,ShortTensor"),
+    ('mul', small_3d, lambda t: [number(3.14, 3, t)]),
     ('mul', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('mul', small_0d, lambda t: [small_0d(torch.IntTensor)], 'scalar', types, True),
     ('div', small_3d, lambda t: [number(3.14, 3, t)]),
@@ -342,13 +341,13 @@ tests = [
     ('max', small_3d_unique, lambda t: [1], 'dim', types, False, skipIfRocm),
     ('max', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
     ('max', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
-    ('min', small_3d_unique, lambda t: [], '', types, False, "skipIfRocm:HalfTensor"),
+    ('min', small_3d_unique, lambda t: []),
     ('min', small_3d_unique, lambda t: [1], 'dim', types, False, skipIfRocm),
     ('min', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
     ('min', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
     ('mean', small_3d, lambda t: []),
-    ('mean', small_3d, lambda t: [-1], 'neg_dim', types, False, "skipIfRocm:DoubleTensor,FloatTensor"),
-    ('mean', small_3d, lambda t: [1], 'dim', types, False, "skipIfRocm:DoubleTensor,FloatTensor"),
+    ('mean', small_3d, lambda t: [-1], 'neg_dim'),
+    ('mean', small_3d, lambda t: [1], 'dim'),
     ('mode', small_3d, lambda t: [], '', types, False, skipIfRocm),
     ('mode', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
     ('mode', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
@@ -380,16 +379,14 @@ tests = [
     ('put_', new_t(2, 3), lambda t: [long_type(t)([]), t([])], 'empty'),
     ('put_', new_t(2, 2), lambda t: [long_type(t)([[1], [-3]]), t([[1], [2]]), True], 'accumulate'),
     ('prod', small_2d_oneish, lambda t: []),
-    ('prod', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
-    ('prod', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
+    ('prod', small_3d, lambda t: [1], 'dim'),
+    ('prod', small_3d, lambda t: [-1], 'neg_dim'),
     ('sum', small_2d, lambda t: []),
-    ('sum', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
-    ('sum', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
-    ('renorm', small_3d, lambda t: [2, 1, 1], '2_norm', types, False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
-    ('renorm', small_3d, lambda t: [2, -1, 1], '2_norm_neg_dim', types,
-        False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
-    ('renorm', small_3d, lambda t: [1.5, 1, 1], '1_5_norm', types,
-        False, "skipIfRocm:HalfTensor,DoubleTensor,FloatTensor"),
+    ('sum', small_3d, lambda t: [1], 'dim'),
+    ('sum', small_3d, lambda t: [-1], 'neg_dim'),
+    ('renorm', small_3d, lambda t: [2, 1, 1], '2_norm'),
+    ('renorm', small_3d, lambda t: [2, -1, 1], '2_norm_neg_dim'),
+    ('renorm', small_3d, lambda t: [1.5, 1, 1], '1_5_norm'),
     ('repeat', small_2d, lambda t: [2, 2, 2],),
     ('size', new_t(1, 2, 3, 4), lambda t: [],),
     ('size', new_t(1, 2, 3, 4), lambda t: [1], 'dim'),
@@ -1134,7 +1131,6 @@ class TestCuda(TestCase):
     def test_gather_dim(self):
         self._test_gather(1)
 
-    @skipIfRocm
     def test_from_sequence(self):
         seq = [list(range(i * 4, i * 4 + 4)) for i in range(5)]
         reference = torch.arange(0, 20).resize_(5, 4)
@@ -1881,7 +1877,6 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
-    @skipIfRocm
     def test_randperm_cuda(self):
         cuda = torch.device('cuda:0')
 
