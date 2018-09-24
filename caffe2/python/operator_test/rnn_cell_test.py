@@ -1182,7 +1182,7 @@ class RNNCellTest(hu.HypothesisTestCase):
             net_proto=model.net.Proto(),
             input_blobs=["input"],
             output_blobs=[output],
-            device=core.DeviceOption(caffe2_pb2.CPU, 1),
+            device=device,
         )
 
         # Create the net and run once to see it is valid
