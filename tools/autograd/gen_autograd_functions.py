@@ -137,6 +137,7 @@ def process_function(func):
         if arg['type'] == 'Tensor' or (arg['type'] == 'Scalar' and is_output):
             saved_variables.append('SavedVariable {}_;'.format(name))
             release_variables.append('{}_.reset_data();'.format(name))
+            release_variables.append('{}_.reset_grad_function();'.format(name))
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append('auto {} = {}_.unpack({});'.format(name, name, ptr))
         elif arg['type'] == 'TensorList':

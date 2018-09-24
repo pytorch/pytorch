@@ -145,7 +145,7 @@ using EnforceNotMet = at::Error;
  * functions to caffe2::enforce_detail namespace. For example:
  *
  *   namespace caffe2 { namespace enforce_detail {
- *   inline EnforceFailMessage IsVector(const vector<TIndex>& shape) {
+ *   inline EnforceFailMessage IsVector(const vector<int64_t>& shape) {
  *     if (shape.size() == 1) { return EnforceOK(); }
  *     return MakeString("Shape ", shape, " is not a vector");
  *   }

@@ -15,12 +15,12 @@ class BatchSparseToDenseOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   BatchSparseToDenseOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        OP_SINGLE_ARG(TIndex, "dense_last_dim", dense_last_dim_, -1),
+        OP_SINGLE_ARG(int64_t, "dense_last_dim", dense_last_dim_, -1),
         OP_SINGLE_ARG(T, "default_value", default_value_, static_cast<T>(0)) {}
   bool RunOnDevice() override;
 
  private:
-  TIndex dense_last_dim_;
+  int64_t dense_last_dim_;
   T default_value_;
   INPUT_TAGS(LENGTHS, INDICES, VALUES);
 };
@@ -34,7 +34,7 @@ class BatchDenseToSparseOp : public Operator<Context> {
   bool RunOnDevice() override;
 
  private:
-  TIndex dense_last_dim_;
+  int64_t dense_last_dim_;
   INPUT_TAGS(LENGTHS, INDICES, DENSE);
 };
 

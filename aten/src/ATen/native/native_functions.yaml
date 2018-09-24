@@ -1312,6 +1312,18 @@
 - func: relu_(Tensor self) -> Tensor
   variants: function, method
 
+- func: prelu(Tensor self, Tensor weight) -> Tensor
+  variants: function, method
+  dispatch:
+    CPU: prelu_cpu
+    CUDA: prelu_cuda
+
+- func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
+  variants: function, method
+  dispatch:
+    CPU: prelu_backward_cpu
+    CUDA: prelu_backward_cuda
+
 - func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   variants: function, method
   dispatch:

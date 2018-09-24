@@ -64,7 +64,7 @@ class MKLSumOp final : public MKLOperator<T> {
 
  private:
   std::vector<float> coefficients_;
-  vector<TIndex> cached_input_dims_;
+  vector<int64_t> cached_input_dims_;
   vector<std::shared_ptr<void>> input_views_;
 };
 
