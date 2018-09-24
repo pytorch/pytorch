@@ -6,11 +6,12 @@
 #include <memory>
 #include <unordered_map>
 
-#include <ATen/core/DeviceType.h>
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/core/Device.h>
 #include <ATen/core/Error.h>
+#include <ATen/core/Registry.h>
 #include <ATen/core/UniqueVoidPtr.h>
 #include <ATen/core/typeid.h>
-#include <ATen/core/ATenGeneral.h>
 
 namespace caffe2 {
 class Event;
@@ -30,11 +31,6 @@ class AT_CORE_API BaseStaticContext {
   virtual ~BaseStaticContext() noexcept {}
 
   virtual std::pair<void*, DeleterFnPtr> New(size_t nbytes) const = 0;
-
-  virtual std::unique_ptr<BaseContext> CreateContext() = 0;
-
-  virtual std::unique_ptr<BaseContext> CreateContext(
-      const caffe2::DeviceOption&) = 0;
 
   virtual DeviceType GetDeviceType() = 0;
 
@@ -183,6 +179,22 @@ class AT_CORE_API BaseContext {
     }
   }
 };
+
+// Context constructor registry
+AT_DECLARE_TYPED_REGISTRY(
+    ContextRegistry,
+    at::DeviceType,
+    BaseContext,
+    std::unique_ptr,
+    at::Device);
+
+#define REGISTER_CONTEXT(type, ...) \
+  AT_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
+
+inline std::unique_ptr<at::BaseContext> CreateContext(
+    const at::Device& device) {
+  return ContextRegistry()->Create(device.type(), device);
+}
 
 } // namespace at
 
