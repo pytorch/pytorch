@@ -938,6 +938,28 @@ class TestCuda(TestCase):
     def test_neg(self):
         TestTorch._test_neg(self, lambda t: t.cuda())
 
+    @unittest.skipIf(torch.cuda.get_device_properties(0).total_memory < 6e9, "not enough memory")
+    def test_arithmetic_large_tensor(self):
+        x = torch.empty(2**30, device='cuda')
+
+        x.fill_(1)
+        self.assertEqual(x.sum(), 2**30)
+
+        x += 1
+        self.assertEqual(x.sum(), 2**31)
+
+        x.fill_(1)
+        x -= 0.5
+        self.assertEqual(x.sum(), 2**29)
+
+        x.fill_(1)
+        x *= 2
+        self.assertEqual(x.sum(), 2**31)
+
+        x.fill_(1)
+        x /= 2
+        self.assertEqual(x.sum(), 2**29)
+
     def _test_broadcast(self, input):
         if not TEST_MULTIGPU:
             raise unittest.SkipTest("only one GPU detected")
