@@ -38,7 +38,7 @@ TEST_F(ParallelTest, DifferentiableScatter_MultiCUDA) {
 
   ASSERT_TRUE(input.grad().defined());
   ASSERT_TRUE(input.grad().device().is_cpu());
-  ASSERT_EQ(input.grad().sum().toCInt(), 10);
+  ASSERT_EQ(input.grad().sum().item<int32_t>(), 10);
 }
 
 TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
@@ -62,11 +62,11 @@ TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
 
   ASSERT_TRUE(a.grad().defined());
   ASSERT_EQ(a.grad().device(), torch::Device(torch::kCUDA, 0));
-  ASSERT_EQ(a.grad().sum().toCInt(), 5);
+  ASSERT_EQ(a.grad().sum().item<int32_t>(), 5);
 
   ASSERT_TRUE(b.grad().defined());
   ASSERT_EQ(b.grad().device(), torch::Device(torch::kCUDA, 1));
-  ASSERT_EQ(b.grad().sum().toCInt(), 5);
+  ASSERT_EQ(b.grad().sum().item<int32_t>(), 5);
 }
 
 TEST_F(ParallelTest, Replicate_MultiCUDA) {
@@ -226,6 +226,6 @@ TEST_F(ParallelTest, DataParallelUsesAllAvailableCUDADevices_CUDA) {
   const auto device_count = torch::cuda::device_count();
   ASSERT_EQ(output.numel(), device_count);
   for (size_t i = 0; i < device_count; ++i) {
-    ASSERT_EQ(output[i].toCInt(), i);
+    ASSERT_EQ(output[i].item<int32_t>(), i);
   }
 }

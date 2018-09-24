@@ -647,6 +647,8 @@
 
 - func: empty_like(Tensor self, *, TensorOptions options) -> Tensor
 
+- func: empty_strided(IntList size, IntList stride, *, TensorOptions options={}) -> Tensor
+
 - func: erf(Tensor self) -> Tensor
   variants: function, method
 
@@ -1887,11 +1889,13 @@
 
 
 - func: native_tensor(Type self_ty) -> Tensor
+  variants: []
   dispatch:
     SparseCPU: new_sparse
     SparseCUDA: new_sparse
 
 - func: native_tensor(Type self_ty, IntList size) -> Tensor
+  variants: []
   dispatch:
     SparseCPU: new_with_size_sparse
     SparseCUDA: new_with_size_sparse
@@ -1940,7 +1944,6 @@
 
 - func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
   variants: []
-
 
 - func: _native_sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
   variants: []

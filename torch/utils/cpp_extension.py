@@ -170,6 +170,7 @@ class BuildExtension(build_ext):
     def build_extensions(self):
         self._check_abi()
         for extension in self.extensions:
+            self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
             self._define_torch_extension_name(extension)
             self._add_gnu_abi_flag_if_binary(extension)
 
@@ -290,6 +291,13 @@ class BuildExtension(build_ext):
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
 
+    def _add_compile_flag(self, extension, flag):
+        if isinstance(extension.extra_compile_args, dict):
+            for args in extension.extra_compile_args.values():
+                args.append(flag)
+        else:
+            extension.extra_compile_args.append(flag)
+
     def _define_torch_extension_name(self, extension):
         # pybind11 doesn't support dots in the names
         # so in order to support extensions in the packages
@@ -298,11 +306,7 @@ class BuildExtension(build_ext):
         names = extension.name.split('.')
         name = names[-1]
         define = '-DTORCH_EXTENSION_NAME={}'.format(name)
-        if isinstance(extension.extra_compile_args, dict):
-            for args in extension.extra_compile_args.values():
-                args.append(define)
-        else:
-            extension.extra_compile_args.append(define)
+        self._add_compile_flag(extension, define)
 
     def _add_gnu_abi_flag_if_binary(self, extension):
         # If the version string looks like a binary build,
@@ -310,14 +314,9 @@ class BuildExtension(build_ext):
         # if the extension is compiled with gcc >= 5.1,
         # then we have to define _GLIBCXX_USE_CXX11_ABI=0
         # so that the std::string in the API is resolved to
-        # non-C++11 symbols.
-        define = '-D_GLIBCXX_USE_CXX11_ABI=0'
+        # non-C++11 symbols
         if _is_binary_build():
-            if isinstance(extension.extra_compile_args, dict):
-                for args in extension.extra_compile_args.values():
-                    args.append(define)
-            else:
-                extension.extra_compile_args.append(define)
+            self._add_compile_flag(extension, '-D_GLIBCXX_USE_CXX11_ABI=0')
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -427,10 +426,12 @@ def include_paths(cuda=False):
     here = os.path.abspath(__file__)
     torch_path = os.path.dirname(os.path.dirname(here))
     lib_include = os.path.join(torch_path, 'lib', 'include')
-    # Some internal (old) Torch headers don't properly prefix their includes,
-    # so we need to pass -Itorch/lib/include/TH as well.
     paths = [
         lib_include,
+        # Remove this once torch/torch.h is officially no longer supported for C++ extensions.
+        os.path.join(lib_include, 'torch', 'csrc', 'api', 'include'),
+        # Some internal (old) Torch headers don't properly prefix their includes,
+        # so we need to pass -Itorch/lib/include/TH as well.
         os.path.join(lib_include, 'TH'),
         os.path.join(lib_include, 'THC')
     ]
@@ -580,7 +581,7 @@ def load_inline(name,
     the necessary header includes, as well as the (pybind11) binding code. More
     precisely, strings passed to ``cpp_sources`` are first concatenated into a
     single ``.cpp`` file. This file is then prepended with ``#include
-    <torch/torch.h>``.
+    <torch/extension.h>``.
 
     Furthermore, if the ``functions`` argument is supplied, bindings will be
     automatically generated for each function specified. ``functions`` can
@@ -630,7 +631,7 @@ def load_inline(name,
     if isinstance(cuda_sources, str):
         cuda_sources = [cuda_sources]
 
-    cpp_sources.insert(0, '#include <torch/torch.h>')
+    cpp_sources.insert(0, '#include <torch/extension.h>')
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -854,7 +855,9 @@ def _build_extension_module(name, build_directory, verbose):
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
-        message = "Error building extension '{}': {}".format(name, error.output.decode())
+        message = "Error building extension '{}'".format(name)
+        if hasattr(error, 'output') and error.output:
+            message += ": {}".format(error.output.decode())
         raise_from(RuntimeError(message), None)
 
 
@@ -890,7 +893,7 @@ def _write_ninja_file(path,
     sources = [os.path.abspath(file) for file in sources]
     user_includes = [os.path.abspath(file) for file in extra_include_paths]
 
-    # include_paths() gives us the location of torch/torch.h
+    # include_paths() gives us the location of torch/extension.h
     system_includes = include_paths(with_cuda)
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     system_includes.append(sysconfig.get_paths()['include'])
@@ -901,6 +904,7 @@ def _write_ninja_file(path,
         system_includes.clear()
 
     common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
+    common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
     common_cflags += ['-I{}'.format(include) for include in user_includes]
     common_cflags += ['-isystem {}'.format(include) for include in system_includes]
 

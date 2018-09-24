@@ -14,7 +14,7 @@ template <typename T>
 using Shared = c10::intrusive_ptr<T>;
 
 // string
-struct AT_API ConstantString final : c10::intrusive_ptr_target {
+struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
  private:
   const std::string str_;
  public:
@@ -27,7 +27,7 @@ struct AT_API ConstantString final : c10::intrusive_ptr_target {
   operator const std::string & () const {
     return string();
   }
-  AT_API friend std::ostream& operator<<(
+  CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const ConstantString& v);
 };
@@ -67,7 +67,7 @@ using DoubleList = ConstantList<double>;
 #define TORCH_FORALL_TAGS(_) \
   _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
 
-struct AT_API IValue final {
+struct CAFFE2_API IValue final {
   IValue()
   : payload{0}
   , tag(Tag::None)
@@ -277,7 +277,9 @@ struct AT_API IValue final {
   template<typename T>
   T to() const &;
 
-  AT_API friend std::ostream& operator<<(std::ostream& out, const IValue& v);
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const IValue& v);
 
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
