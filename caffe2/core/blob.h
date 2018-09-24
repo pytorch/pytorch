@@ -7,9 +7,10 @@
 #include <type_traits>
 #include <vector>
 
+#include <ATen/core/blob.h>
+#include <ATen/core/typeid.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
-#include <ATen/core/blob.h>
 
 namespace caffe2 {
 
@@ -23,13 +24,18 @@ inline bool BlobIsTensorType(const Blob& blob, DeviceType device_type) {
 }
 
 inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {
-  if (BlobIsTensorType(*blob, device_type)) {
-    return blob->GetMutable<Tensor>();
-  } else {
-    VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
-            << " DeviceType:" << device_type;
-    return blob->Reset<Tensor>(new Tensor(device_type));
+  if (blob->IsType<Tensor>()) {
+    Tensor* tensor = blob->GetMutable<Tensor>();
+    if (tensor->GetDeviceType() == device_type) {
+      return tensor;
+    }
   }
+
+  // if we're here, then either Blob didn't hold a Tensor
+  // or that Tensor had the wrong DeviceType.
+  VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
+          << " DeviceType:" << device_type;
+  return blob->Reset<Tensor>(new Tensor(device_type));
 }
 
 }  // namespace caffe2

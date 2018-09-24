@@ -32,7 +32,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
       (InputSize() == 2) ? Input(SEQ_LEN).data<int>() : nullptr;
 
   vector<int32_t> values_cache;
-  output_len->Resize(vector<TIndex>{batch_size});
+  output_len->Resize(vector<int64_t>{batch_size});
   int* output_len_data = output_len->mutable_data<int>();
 
   for (int32_t i = 0; i < batch_size; ++i) {
@@ -121,7 +121,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
   }
 
   int32_t cache_size = values_cache.size();
-  values->Resize(vector<TIndex>{cache_size});
+  values->Resize(vector<int64_t>{cache_size});
   int* values_data = values->mutable_data<int>();
   for (int i = 0; i < values_cache.size(); ++i) {
     values_data[i] = values_cache.at(i);

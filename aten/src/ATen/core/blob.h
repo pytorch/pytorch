@@ -2,8 +2,8 @@
 
 #include <cstddef>
 #include <sstream>
-#include <typeinfo>
 #include <type_traits>
+#include <typeinfo>
 #include <vector>
 
 #include <ATen/core/typeid.h>
@@ -27,7 +27,9 @@ class AT_CORE_API Blob final {
    * Initializes an empty Blob.
    */
   Blob() noexcept : meta_(), pointer_(nullptr), destroy_(nullptr) {}
-  ~Blob() { Reset(); }
+  ~Blob() {
+    Reset();
+  }
 
   Blob(Blob&& other) noexcept : Blob() {
     swap(other);
@@ -49,12 +51,16 @@ class AT_CORE_API Blob final {
   /**
    * Returns the meta info of the blob.
    */
-  inline const TypeMeta& meta() const noexcept { return meta_; }
+  inline const TypeMeta& meta() const noexcept {
+    return meta_;
+  }
 
   /**
    * Returns a printable typename of the blob.
    */
-  inline const char* TypeName() const noexcept { return meta_.name(); }
+  inline const char* TypeName() const noexcept {
+    return meta_.name();
+  }
 
   /**
    * @brief Gets the const reference of the stored object. The code checks if
@@ -133,8 +139,10 @@ class AT_CORE_API Blob final {
     return allocated;
   }
 
-  inline void*
-  Reset(void* allocated, const TypeMeta& meta, DestroyCall* destroy) {
+  inline void* Reset(
+      void* allocated,
+      const TypeMeta& meta,
+      DestroyCall* destroy) {
     if (pointer_ && destroy_) {
       destroy_(pointer_);
     }
@@ -223,4 +231,4 @@ inline void swap(Blob& lhs, Blob& rhs) {
   lhs.swap(rhs);
 }
 
-}  // namespace caffe2
+} // namespace caffe2

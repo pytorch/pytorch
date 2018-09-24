@@ -58,7 +58,7 @@ bool SampleAsOp<float, CUDAContext>::RunOnDevice() {
   assert(count > 0);
 
   // resize Y
-  vector<TIndex> out_shape(X.dims());
+  vector<int64_t> out_shape(X.dims());
   out_shape[0] = count;
   Y->Resize(out_shape);
 

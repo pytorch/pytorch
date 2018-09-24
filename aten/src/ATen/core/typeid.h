@@ -30,6 +30,13 @@
 // fix all of the call-sites, which I want to do later.  So the namespace
 // is not fixed at the moment.
 
+// Make at::Half a fundamental type.
+namespace std {
+template<>
+struct is_fundamental<at::Half> : std::true_type {
+};
+}  // namespace std
+
 namespace caffe2 {
 
 class TypeMeta;
@@ -84,9 +91,6 @@ namespace caffe2 {
 AT_CORE_API std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
 AT_CORE_API std::unordered_set<std::string>& gRegisteredTypeNames();
 
-// A utility function to return an exception std::string by prepending its
-// exception type before its what() content
-AT_CORE_API std::string GetExceptionString(const std::exception& e);
 
 AT_CORE_API std::mutex& gTypeRegistrationMutex();
 

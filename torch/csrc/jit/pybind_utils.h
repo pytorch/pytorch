@@ -93,6 +93,7 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
     switch (type->kind()) {
       case TypeKind::DynamicType:
       case TypeKind::TensorType:
+      case TypeKind::UndefinedTensorType:
       case TypeKind::CompleteTensorType: {
         auto var = py::cast<autograd::Variable>(obj);
         if (var.is_sparse()) {

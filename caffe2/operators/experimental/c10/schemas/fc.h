@@ -10,7 +10,7 @@ struct FullyConnected final {
   static constexpr const char* name = "FC";
 
   struct Cache final {
-    vector<TIndex> Y_shape_cache_;
+    vector<int64_t> Y_shape_cache_;
     Tensor bias_multiplier_ = Tensor{CPU};
   };
 
