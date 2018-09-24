@@ -130,6 +130,15 @@ def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
 
+def _try_get_scalar_type(*args):
+    for arg in args:
+        try:
+            return arg.type().scalarType()
+        except RuntimeError:
+            pass
+    return None
+
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
@@ -241,7 +250,7 @@ def stack(g, tensor_list, dim):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = self.type().scalarType().lower()
+    ty = _try_get_scalar_type(self, other).lower()
     C = g.constant(0, [1], ty)
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 

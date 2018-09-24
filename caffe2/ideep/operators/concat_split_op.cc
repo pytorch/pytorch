@@ -43,7 +43,7 @@ class IDEEPConcatOp final : public IDEEPOperator {
     }
 
     auto axis_vdata = ideep::concat::compute(inputs, axis_, add_axis_, *output);
-    axis_info->Resize(vector<TIndex>(1, InputSize()));
+    axis_info->Resize(vector<int64_t>(1, InputSize()));
     int* axis_data = axis_info->template mutable_data<int>();
     for (int i = 0; i < axis_vdata.size(); i++) {
       axis_data[i] = axis_vdata[i];

@@ -426,7 +426,7 @@ class TestOperators(TestCase):
 
     def test_norm(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
-        self.assertONNX(lambda x: x.norm(dim=2), (x))
+        self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
     def test_upsample(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
