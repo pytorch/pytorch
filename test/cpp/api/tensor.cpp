@@ -104,7 +104,7 @@ TEST(TensorTest, ContainsCorrectValueForSingleValue) {
   auto tensor = at::tensor(123);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kInt);
-  ASSERT_EQ(tensor[0].toCInt(), 123);
+  ASSERT_EQ(tensor[0].item<int32_t>(), 123);
 
   tensor = at::tensor(123.456f);
   ASSERT_EQ(tensor.numel(), 1);
@@ -189,7 +189,7 @@ TEST(TensorTest, FromBlob) {
   auto tensor = torch::from_blob(v.data(), v.size(), torch::kInt32);
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor[0].toCInt(), 1);
-  ASSERT_EQ(tensor[1].toCInt(), 2);
-  ASSERT_EQ(tensor[2].toCInt(), 3);
+  ASSERT_EQ(tensor[0].item<int32_t>(), 1);
+  ASSERT_EQ(tensor[1].item<int32_t>(), 2);
+  ASSERT_EQ(tensor[2].item<int32_t>(), 3);
 }

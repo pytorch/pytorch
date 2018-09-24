@@ -148,7 +148,7 @@ static void fusionTests() {
     auto outputs = debugLaunchGraph(graph, 0, {a,b});
     CATCH_REQUIRE(outputs.size() == 1);
     auto o2 = a*b;
-    float max_diff = (o2 - outputs[0]).abs().max().toCDouble();
+    float max_diff = (o2 - outputs[0]).abs().max().item<double>();
     //std::cout << "max diff: " << max_diff << "\n";
     CATCH_REQUIRE(max_diff == 0);
   };
@@ -202,7 +202,7 @@ static void fusionTests() {
     auto outputs = debugLaunchGraph(graph, 0, inputs);
     CATCH_REQUIRE(outputs.size() == graph.outputs().size());
     CATCH_REQUIRE(out0.is_same_size(outputs.front()));
-    float max_diff = (outputs.front() - out0).abs().max().toCDouble();
+    float max_diff = (outputs.front() - out0).abs().max().item<double>();
     CATCH_REQUIRE(max_diff < 1e-6);
 
   };
@@ -236,9 +236,9 @@ static void fusionTests() {
     auto outputs = debugLaunchGraph(graph, 0, {a,b});
     CATCH_REQUIRE(outputs.size() == 2);
 
-    float max_diff = (o_r - outputs[0]).abs().max().toCDouble();
+    float max_diff = (o_r - outputs[0]).abs().max().item<double>();
     CATCH_REQUIRE(max_diff == 0);
-    float max_diff2 = (o2_r - outputs[1]).abs().max().toCDouble();
+    float max_diff2 = (o2_r - outputs[1]).abs().max().item<double>();
     CATCH_REQUIRE(max_diff2 == 0);
   };
   testConcat(0);
@@ -325,16 +325,16 @@ at::Tensor t_def(at::Tensor x) {
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
   double maxValue = 0.0;
   for (auto& tensor : inputs) {
-    maxValue = fmax(tensor.abs().max().toCFloat(), maxValue);
+    maxValue = fmax(tensor.abs().max().item<float>(), maxValue);
   }
-  return diff.abs().max().toCFloat() < 2e-6 * maxValue;
+  return diff.abs().max().item<float>() < 2e-6 * maxValue;
 }
 bool almostEqual(const at::Tensor & a, const at::Tensor & b) {
   return checkRtol(a - b,{a, b});
 }
 
 bool exactlyEqual(const at::Tensor & a, const at::Tensor & b) {
-  return (a - b).abs().max().toCFloat() == 0.f;
+  return (a - b).abs().max().item<float>() == 0.f;
 }
 
 std::pair<at::Tensor, at::Tensor>
@@ -873,7 +873,7 @@ void testControlFlow() {
   };
 
   auto L = [](int64_t l) { return IValue(autograd::make_variable(scalar_to_tensor(at::Scalar(l)))); };
-  auto V = [](IValue t) { return std::move(t).toTensor().toCLong(); };
+  auto V = [](IValue t) { return std::move(t).toTensor().item<int64_t>(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);
   };

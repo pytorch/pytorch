@@ -71,7 +71,7 @@ TEST_F(
   ASSERT_TRUE(
       any.forward(std::string("a"), std::string("ab"), std::string("abc"))
           .sum()
-          .toCInt() == 6);
+          .item<int32_t>() == 6);
 }
 
 TEST_F(AnyModuleTest, WrongArgumentType) {
@@ -232,10 +232,10 @@ TEST_F(AnyModuleTest, ConvertsVariableToTensorCorrectly) {
   // mismatch).
   AnyModule any(M{});
   ASSERT_TRUE(
-      any.forward(torch::autograd::Variable(torch::ones(5))).sum().toCFloat() ==
+      any.forward(torch::autograd::Variable(torch::ones(5))).sum().item<float>() ==
       5);
   // at::Tensors that are not variables work too.
-  ASSERT_EQ(any.forward(at::ones(5)).sum().toCFloat(), 5);
+  ASSERT_EQ(any.forward(at::ones(5)).sum().item<float>(), 5);
 }
 
 namespace torch {

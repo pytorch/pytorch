@@ -34,7 +34,7 @@ DEFINE_DISPATCH(max_kernel);
 DEFINE_DISPATCH(min_kernel);
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
-  return at::isclose(self, other, rtol, atol, equal_nan).all().toCByte();
+  return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
 }
 
 Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {

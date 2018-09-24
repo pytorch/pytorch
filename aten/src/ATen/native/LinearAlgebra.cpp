@@ -22,7 +22,7 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
   std::tie(lu, p, info) = self.unsqueeze(0).btrifact_with_info();
   p.squeeze_(0);
   lu.squeeze_(0);
-  int int_info = info.squeeze_().toCInt();
+  int int_info = info.squeeze_().item<int32_t>();
   AT_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
   auto n = self.size(0);
   auto num_exchanges = (at::arange(1, n + 1, p.type()) != p).nonzero().size(0);
@@ -63,7 +63,7 @@ Tensor logdet(const Tensor& self) {
   } else {
     det = diag_U.prod().mul_(det_P);
   }
-  if (det.sign().toCDouble() <= 0) {
+  if (det.sign().item<double>() <= 0) {
     return det.log_();  // in order to get proper -inf (det=0) or nan (det<0)
   } else {
     return diag_U.abs().log().sum();
