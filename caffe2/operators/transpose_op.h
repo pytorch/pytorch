@@ -33,7 +33,7 @@ class TransposeOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     // Do the actual transpose, which is implemented in DoRunWithType().
-    return DispatchHelper<TensorTypes<float, double, int, TIndex>>::call(
+    return DispatchHelper<TensorTypes<float, double, int, int64_t>>::call(
         this, Input(0));
   }
 

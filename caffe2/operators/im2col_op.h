@@ -77,7 +77,7 @@ class Im2ColOp final : public Operator<Context> {
     switch (order_) {
       case StorageOrder::NCHW: {
         Y->Resize(
-            std::vector<TIndex>{N, C * kernel_h_ * kernel_w_, out_h, out_w});
+            std::vector<int64_t>{N, C * kernel_h_ * kernel_w_, out_h, out_w});
 
         const size_t dx = X.size() / N;
         const size_t dy = Y->size() / N;
@@ -105,7 +105,7 @@ class Im2ColOp final : public Operator<Context> {
       }; break;
       case StorageOrder::NHWC: {
         Y->Resize(
-            std::vector<TIndex>{N, out_h, out_w, kernel_h_ * kernel_w_ * C});
+            std::vector<int64_t>{N, out_h, out_w, kernel_h_ * kernel_w_ * C});
 
         const size_t dx = X.size() / N;
         const size_t dy = Y->size() / N;

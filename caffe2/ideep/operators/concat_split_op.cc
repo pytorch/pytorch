@@ -33,8 +33,9 @@ class IDEEPConcatOp final : public IDEEPOperator {
       if (OperatorBase::InputBlob(i).template IsType<itensor>()) {
         inputs.emplace_back(Input(i));
       } else {
-        CAFFE_ENFORCE(BlobIsTensorType(OperatorBase::InputBlob(i), CPU),
-                      "Expect cpu tensor if not itensor");
+        CAFFE_ENFORCE(
+            BlobIsTensorType(OperatorBase::InputBlob(i), CPU),
+            "Expect cpu tensor if not itensor");
         auto& tensor_cpu = OperatorBase::Input<Tensor>(i, CPU);
         CAFFE_ENFORCE(tensor_cpu.dims().size() == 0 ||
                       tensor_cpu.size_from_dim(0) == 0,
@@ -43,7 +44,7 @@ class IDEEPConcatOp final : public IDEEPOperator {
     }
 
     auto axis_vdata = ideep::concat::compute(inputs, axis_, add_axis_, *output);
-    axis_info->Resize(vector<TIndex>(1, InputSize()));
+    axis_info->Resize(vector<int64_t>(1, InputSize()));
     int* axis_data = axis_info->template mutable_data<int>();
     for (int i = 0; i < axis_vdata.size(); i++) {
       axis_data[i] = axis_vdata[i];

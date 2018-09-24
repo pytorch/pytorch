@@ -1,11 +1,11 @@
 #include <iostream>  // NOLINT
 
+#include <gtest/gtest.h>
 #include "caffe2/core/blob.h"
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/proto/caffe2_pb.h"
-#include <gtest/gtest.h>
 
 namespace caffe2 {
 namespace {
@@ -132,7 +132,7 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
     for (int i = 0; i < 6; ++i) {                                          \
       cpu_tensor.mutable_data<TypeParam>()[i] = static_cast<TypeParam>(i); \
     }                                                                      \
-    BlobGetMutableTensor(&blob, CUDA)->CopyFrom(cpu_tensor);                     \
+    BlobGetMutableTensor(&blob, CUDA)->CopyFrom(cpu_tensor);               \
     string serialized = SerializeBlob(blob, "test");                       \
     BlobProto proto;                                                       \
     CAFFE_ENFORCE(proto.ParseFromString(serialized));                      \
@@ -149,7 +149,7 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
     }                                                                      \
     Blob new_blob;                                                         \
     EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));               \
-    EXPECT_TRUE(BlobIsTensorType(new_blob, CUDA));                              \
+    EXPECT_TRUE(BlobIsTensorType(new_blob, CUDA));                         \
     Tensor new_cpu_tensor(blob.Get<Tensor>(), CPU);                        \
     EXPECT_EQ(new_cpu_tensor.ndim(), 2);                                   \
     EXPECT_EQ(new_cpu_tensor.dim(0), 2);                                   \

@@ -36,10 +36,10 @@ class SparseMatrixReshapeOp : public Operator<Context> {
         OperatorBase::HasArgument("new_shape"),
         "Argument `new_shape` is missing.");
 
-    vector<TIndex> old_shape =
-        OperatorBase::GetRepeatedArgument<TIndex>("old_shape");
-    vector<TIndex> new_shape =
-        OperatorBase::GetRepeatedArgument<TIndex>("new_shape");
+    vector<int64_t> old_shape =
+        OperatorBase::GetRepeatedArgument<int64_t>("old_shape");
+    vector<int64_t> new_shape =
+        OperatorBase::GetRepeatedArgument<int64_t>("new_shape");
 
     CAFFE_ENFORCE(
         old_shape.size() == 2,
@@ -63,7 +63,7 @@ class SparseMatrixReshapeOp : public Operator<Context> {
           old_shape[0] > 0,
           "The first dimension in `old_shape` must be positive.");
 
-      TIndex matrix_size = old_shape[0] * old_shape[1];
+      int64_t matrix_size = old_shape[0] * old_shape[1];
 
       if (new_shape[0] == -1) {
         CAFFE_ENFORCE(
@@ -106,14 +106,14 @@ class SparseMatrixReshapeOp : public Operator<Context> {
     new_col->Resize(nnz);
     new_row->Resize(nnz);
 
-    const auto* old_col_data = old_col.template data<TIndex>();
+    const auto* old_col_data = old_col.template data<int64_t>();
     const auto* old_row_data = old_row.template data<int>();
 
-    auto* new_col_data = new_col->template mutable_data<TIndex>();
+    auto* new_col_data = new_col->template mutable_data<int64_t>();
     auto* new_row_data = new_row->template mutable_data<int>();
 
     for (int i = 0; i < nnz; ++i) {
-      TIndex offset = old_row_data[i] * old_stride_ + old_col_data[i];
+      int64_t offset = old_row_data[i] * old_stride_ + old_col_data[i];
       new_row_data[i] = offset / new_stride_;
       new_col_data[i] = offset % new_stride_;
     }
@@ -122,8 +122,8 @@ class SparseMatrixReshapeOp : public Operator<Context> {
   }
 
  private:
-  TIndex old_stride_;
-  TIndex new_stride_;
+  int64_t old_stride_;
+  int64_t new_stride_;
 };
 
 } // namespace caffe2

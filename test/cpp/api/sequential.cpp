@@ -1,4 +1,4 @@
-#include "catch_utils.hpp"
+#include <gtest/gtest.h>
 
 #include <torch/nn/modules.h>
 #include <torch/nn/modules/batchnorm.h>
@@ -14,14 +14,14 @@
 #include <memory>
 #include <vector>
 
-#include <test/cpp/api/util.h>
+#include <test/cpp/api/support.h>
 
 using namespace torch::nn;
 using namespace torch::test;
 
-using Catch::StartsWith;
+struct SequentialTest : torch::test::SeedingFixture {};
 
-CATCH_TEST_CASE("Sequential/ConstructsFromSharedPointer") {
+TEST_F(SequentialTest, ConstructsFromSharedPointer) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
     int value;
@@ -31,10 +31,10 @@ CATCH_TEST_CASE("Sequential/ConstructsFromSharedPointer") {
   };
   Sequential sequential(
       std::make_shared<M>(1), std::make_shared<M>(2), std::make_shared<M>(3));
-  CATCH_REQUIRE(sequential->size() == 3);
+  ASSERT_EQ(sequential->size(), 3);
 }
 
-CATCH_TEST_CASE("Sequential/ConstructsFromConcreteType") {
+TEST_F(SequentialTest, ConstructsFromConcreteType) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
     int value;
@@ -44,9 +44,9 @@ CATCH_TEST_CASE("Sequential/ConstructsFromConcreteType") {
   };
 
   Sequential sequential(M(1), M(2), M(3));
-  CATCH_REQUIRE(sequential->size() == 3);
+  ASSERT_EQ(sequential->size(), 3);
 }
-CATCH_TEST_CASE("Sequential/ConstructsFromModuleHolder") {
+TEST_F(SequentialTest, ConstructsFromModuleHolder) {
   struct MImpl : torch::nn::Module {
     explicit MImpl(int value_) : value(value_) {}
     int forward() {
@@ -61,10 +61,10 @@ CATCH_TEST_CASE("Sequential/ConstructsFromModuleHolder") {
   };
 
   Sequential sequential(M(1), M(2), M(3));
-  CATCH_REQUIRE(sequential->size() == 3);
+  ASSERT_EQ(sequential->size(), 3);
 }
 
-CATCH_TEST_CASE("Sequential/PushBackAddsAnElement") {
+TEST_F(SequentialTest, PushBackAddsAnElement) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
     int forward() {
@@ -73,17 +73,17 @@ CATCH_TEST_CASE("Sequential/PushBackAddsAnElement") {
     int value;
   };
   Sequential sequential;
-  CATCH_REQUIRE(sequential->size() == 0);
-  CATCH_REQUIRE(sequential->is_empty());
+  ASSERT_EQ(sequential->size(), 0);
+  ASSERT_TRUE(sequential->is_empty());
   sequential->push_back(Linear(3, 4));
-  CATCH_REQUIRE(sequential->size() == 1);
+  ASSERT_EQ(sequential->size(), 1);
   sequential->push_back(std::make_shared<M>(1));
-  CATCH_REQUIRE(sequential->size() == 2);
+  ASSERT_EQ(sequential->size(), 2);
   sequential->push_back(M(2));
-  CATCH_REQUIRE(sequential->size() == 3);
+  ASSERT_EQ(sequential->size(), 3);
 }
 
-CATCH_TEST_CASE("Sequential/AccessWithAt") {
+TEST_F(SequentialTest, AccessWithAt) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
     int forward() {
@@ -98,22 +98,21 @@ CATCH_TEST_CASE("Sequential/AccessWithAt") {
   for (auto& module : modules) {
     sequential->push_back(module);
   }
-  CATCH_REQUIRE(sequential->size() == 3);
+  ASSERT_EQ(sequential->size(), 3);
 
   // returns the correct module for a given index
   for (size_t i = 0; i < modules.size(); ++i) {
-    CATCH_REQUIRE(&sequential->at<M>(i) == modules[i].get());
+    ASSERT_EQ(&sequential->at<M>(i), modules[i].get());
   }
 
   // throws for a bad index
-  CATCH_REQUIRE_THROWS_WITH(
-      sequential->at<M>(modules.size() + 1), StartsWith("Index out of range"));
-  CATCH_REQUIRE_THROWS_WITH(
-      sequential->at<M>(modules.size() + 1000000),
-      StartsWith("Index out of range"));
+  ASSERT_THROWS_WITH(
+      sequential->at<M>(modules.size() + 1), "Index out of range");
+  ASSERT_THROWS_WITH(
+      sequential->at<M>(modules.size() + 1000000), "Index out of range");
 }
 
-CATCH_TEST_CASE("Sequential/AccessWithPtr") {
+TEST_F(SequentialTest, AccessWithPtr) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
     int forward() {
@@ -128,46 +127,43 @@ CATCH_TEST_CASE("Sequential/AccessWithPtr") {
   for (auto& module : modules) {
     sequential->push_back(module);
   }
-  CATCH_REQUIRE(sequential->size() == 3);
+  ASSERT_EQ(sequential->size(), 3);
 
   // returns the correct module for a given index
   for (size_t i = 0; i < modules.size(); ++i) {
-    CATCH_REQUIRE(sequential->ptr(i).get() == modules[i].get());
-    CATCH_REQUIRE(sequential[i].get() == modules[i].get());
-    CATCH_REQUIRE(sequential->ptr<M>(i).get() == modules[i].get());
+    ASSERT_EQ(sequential->ptr(i).get(), modules[i].get());
+    ASSERT_EQ(sequential[i].get(), modules[i].get());
+    ASSERT_EQ(sequential->ptr<M>(i).get(), modules[i].get());
   }
 
   // throws for a bad index
-  CATCH_REQUIRE_THROWS_WITH(
-      sequential->ptr(modules.size() + 1), StartsWith("Index out of range"));
-  CATCH_REQUIRE_THROWS_WITH(
-      sequential->ptr(modules.size() + 1000000),
-      StartsWith("Index out of range"));
+  ASSERT_THROWS_WITH(sequential->ptr(modules.size() + 1), "Index out of range");
+  ASSERT_THROWS_WITH(
+      sequential->ptr(modules.size() + 1000000), "Index out of range");
 }
 
-CATCH_TEST_CASE("Sequential/CallingForwardOnEmptySequentialIsDisallowed") {
+TEST_F(SequentialTest, CallingForwardOnEmptySequentialIsDisallowed) {
   Sequential empty;
-  CATCH_REQUIRE_THROWS_WITH(
-      empty->forward<int>(),
-      StartsWith("Cannot call forward() on an empty Sequential"));
+  ASSERT_THROWS_WITH(
+      empty->forward<int>(), "Cannot call forward() on an empty Sequential");
 }
 
-CATCH_TEST_CASE("Sequential/CallingForwardChainsCorrectly") {
+TEST_F(SequentialTest, CallingForwardChainsCorrectly) {
   struct MockModule : torch::nn::Module {
     explicit MockModule(int value) : expected(value) {}
     int expected;
     int forward(int value) {
-      CATCH_REQUIRE(value == expected);
+      assert(value == expected);
       return value + 1;
     }
   };
 
   Sequential sequential(MockModule{1}, MockModule{2}, MockModule{3});
 
-  CATCH_REQUIRE(sequential->forward<int>(1) == 4);
+  ASSERT_EQ(sequential->forward<int>(1), 4);
 }
 
-CATCH_TEST_CASE("Sequential/CallingForwardWithTheWrongReturnTypeThrows") {
+TEST_F(SequentialTest, CallingForwardWithTheWrongReturnTypeThrows) {
   struct M : public torch::nn::Module {
     int forward() {
       return 5;
@@ -175,14 +171,13 @@ CATCH_TEST_CASE("Sequential/CallingForwardWithTheWrongReturnTypeThrows") {
   };
 
   Sequential sequential(M{});
-  CATCH_REQUIRE(sequential->forward<int>() == 5);
-  CATCH_REQUIRE_THROWS_WITH(
+  ASSERT_EQ(sequential->forward<int>(), 5);
+  ASSERT_THROWS_WITH(
       sequential->forward<float>(),
-      StartsWith("The type of the return value "
-                 "is int, but you asked for type float"));
+      "The type of the return value is int, but you asked for type float");
 }
 
-CATCH_TEST_CASE("Sequential/TheReturnTypeOfForwardDefaultsToTensor") {
+TEST_F(SequentialTest, TheReturnTypeOfForwardDefaultsToTensor) {
   struct M : public torch::nn::Module {
     torch::Tensor forward(torch::Tensor v) {
       return v;
@@ -191,21 +186,21 @@ CATCH_TEST_CASE("Sequential/TheReturnTypeOfForwardDefaultsToTensor") {
 
   Sequential sequential(M{});
   auto variable = torch::ones({3, 3}, torch::requires_grad());
-  CATCH_REQUIRE(sequential->forward(variable).equal(variable));
+  ASSERT_TRUE(sequential->forward(variable).equal(variable));
 }
 
-CATCH_TEST_CASE("Sequential/ForwardReturnsTheLastValue") {
+TEST_F(SequentialTest, ForwardReturnsTheLastValue) {
   torch::manual_seed(0);
   Sequential sequential(Linear(10, 3), Linear(3, 5), Linear(5, 100));
 
   auto x = torch::randn({1000, 10}, torch::requires_grad());
   auto y = sequential->forward(x);
-  CATCH_REQUIRE(y.ndimension() == 2);
-  CATCH_REQUIRE(y.size(0) == 1000);
-  CATCH_REQUIRE(y.size(1) == 100);
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(y.size(0), 1000);
+  ASSERT_EQ(y.size(1), 100);
 }
 
-CATCH_TEST_CASE("Sequential/SanityCheckForHoldingStandardModules") {
+TEST_F(SequentialTest, SanityCheckForHoldingStandardModules) {
   Sequential sequential(
       Linear(10, 3),
       Conv2d(1, 2, 3),
@@ -215,7 +210,7 @@ CATCH_TEST_CASE("Sequential/SanityCheckForHoldingStandardModules") {
       LSTM(4, 5));
 }
 
-CATCH_TEST_CASE("Sequential/ExtendPushesModulesFromOtherSequential") {
+TEST_F(SequentialTest, ExtendPushesModulesFromOtherSequential) {
   struct A : torch::nn::Module {
     int forward(int x) {
       return x;
@@ -240,34 +235,34 @@ CATCH_TEST_CASE("Sequential/ExtendPushesModulesFromOtherSequential") {
   Sequential b(C{}, D{});
   a->extend(*b);
 
-  CATCH_REQUIRE(a->size() == 4);
-  CATCH_REQUIRE(a[0]->as<A>());
-  CATCH_REQUIRE(a[1]->as<B>());
-  CATCH_REQUIRE(a[2]->as<C>());
-  CATCH_REQUIRE(a[3]->as<D>());
+  ASSERT_EQ(a->size(), 4);
+  ASSERT_TRUE(a[0]->as<A>());
+  ASSERT_TRUE(a[1]->as<B>());
+  ASSERT_TRUE(a[2]->as<C>());
+  ASSERT_TRUE(a[3]->as<D>());
 
-  CATCH_REQUIRE(b->size() == 2);
-  CATCH_REQUIRE(b[0]->as<C>());
-  CATCH_REQUIRE(b[1]->as<D>());
+  ASSERT_EQ(b->size(), 2);
+  ASSERT_TRUE(b[0]->as<C>());
+  ASSERT_TRUE(b[1]->as<D>());
 
   std::vector<std::shared_ptr<A>> c = {std::make_shared<A>(),
                                        std::make_shared<A>()};
   b->extend(c);
 
-  CATCH_REQUIRE(b->size() == 4);
-  CATCH_REQUIRE(b[0]->as<C>());
-  CATCH_REQUIRE(b[1]->as<D>());
-  CATCH_REQUIRE(b[2]->as<A>());
-  CATCH_REQUIRE(b[3]->as<A>());
+  ASSERT_EQ(b->size(), 4);
+  ASSERT_TRUE(b[0]->as<C>());
+  ASSERT_TRUE(b[1]->as<D>());
+  ASSERT_TRUE(b[2]->as<A>());
+  ASSERT_TRUE(b[3]->as<A>());
 }
 
-CATCH_TEST_CASE("Sequential/HasReferenceSemantics") {
+TEST_F(SequentialTest, HasReferenceSemantics) {
   Sequential first(Linear(2, 3), Linear(4, 4), Linear(4, 5));
   Sequential second(first);
 
-  CATCH_REQUIRE(first.get() == second.get());
-  CATCH_REQUIRE(first->size() == second->size());
-  CATCH_REQUIRE(std::equal(
+  ASSERT_EQ(first.get(), second.get());
+  ASSERT_EQ(first->size(), second->size());
+  ASSERT_TRUE(std::equal(
       first->begin(),
       first->end(),
       second->begin(),
@@ -276,17 +271,17 @@ CATCH_TEST_CASE("Sequential/HasReferenceSemantics") {
       }));
 }
 
-CATCH_TEST_CASE("Sequential/IsCloneable") {
+TEST_F(SequentialTest, IsCloneable) {
   Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
   Sequential clone =
       std::dynamic_pointer_cast<SequentialImpl>(sequential->clone());
-  CATCH_REQUIRE(sequential->size() == clone->size());
+  ASSERT_EQ(sequential->size(), clone->size());
 
   for (size_t i = 0; i < sequential->size(); ++i) {
     // The modules should be the same kind (type).
-    CATCH_REQUIRE(sequential[i]->name() == clone[i]->name());
+    ASSERT_EQ(sequential[i]->name(), clone[i]->name());
     // But not pointer-equal (distinct objects).
-    CATCH_REQUIRE(sequential[i] != clone[i]);
+    ASSERT_NE(sequential[i], clone[i]);
   }
 
   // Verify that the clone is deep, i.e. parameters of modules are cloned too.
@@ -295,38 +290,38 @@ CATCH_TEST_CASE("Sequential/IsCloneable") {
 
   auto params1 = sequential->parameters();
   auto params2 = clone->parameters();
-  CATCH_REQUIRE(params1.size() == params2.size());
+  ASSERT_EQ(params1.size(), params2.size());
   for (auto& param : params1) {
-    CATCH_REQUIRE(!pointer_equal(param.value, params2[param.key]));
-    CATCH_REQUIRE(param->device() == params2[param.key].device());
-    CATCH_REQUIRE(param->allclose(params2[param.key]));
+    ASSERT_FALSE(pointer_equal(param.value, params2[param.key]));
+    ASSERT_EQ(param->device(), params2[param.key].device());
+    ASSERT_TRUE(param->allclose(params2[param.key]));
     param->add_(2);
   }
   for (auto& param : params1) {
-    CATCH_REQUIRE(!param->allclose(params2[param.key]));
+    ASSERT_FALSE(param->allclose(params2[param.key]));
   }
 }
 
-CATCH_TEST_CASE("Sequential/RegistersElementsAsSubmodules") {
+TEST_F(SequentialTest, RegistersElementsAsSubmodules) {
   Sequential sequential(Linear(10, 3), Conv2d(1, 2, 3), FeatureDropout(0.5));
 
   auto modules = sequential->modules();
-  CATCH_REQUIRE(modules.size() == sequential->children().size());
+  ASSERT_EQ(modules.size(), sequential->children().size());
 
-  CATCH_REQUIRE(modules[0]->as<Linear>());
-  CATCH_REQUIRE(modules[1]->as<Conv2d>());
-  CATCH_REQUIRE(modules[2]->as<FeatureDropout>());
+  ASSERT_TRUE(modules[0]->as<Linear>());
+  ASSERT_TRUE(modules[1]->as<Conv2d>());
+  ASSERT_TRUE(modules[2]->as<FeatureDropout>());
 }
 
-CATCH_TEST_CASE("Sequential/CloneToDevice", "[cuda]") {
+TEST_F(SequentialTest, CloneToDevice_CUDA) {
   Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
   torch::Device device(torch::kCUDA, 0);
   Sequential clone =
       std::dynamic_pointer_cast<SequentialImpl>(sequential->clone(device));
   for (const auto& p : clone->parameters()) {
-    CATCH_REQUIRE(p->device() == device);
+    ASSERT_EQ(p->device(), device);
   }
   for (const auto& b : clone->buffers()) {
-    CATCH_REQUIRE(b->device() == device);
+    ASSERT_EQ(b->device(), device);
   }
 }

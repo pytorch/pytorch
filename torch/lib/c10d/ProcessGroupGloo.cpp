@@ -310,10 +310,6 @@ ProcessGroupGloo::ProcessGroupGloo(
   for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this);
   }
-
-#ifdef USE_CUDA
-  thcState_ = ::at::globalContext().lazyInitCUDA();
-#endif
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -605,14 +601,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   // In case of CUDA, ensure that operations that are queued after
   // this collective wait for the collective to complete.
   if (key.type->is_cuda()) {
-    synchronizeStreams(thcState_, entry);
+    auto thcState = ::at::globalContext().lazyInitCUDA();
+    synchronizeStreams(thcState, entry);
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (size_t i = 0; i < tensors.size(); i++) {
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
-        THCStreamGuard guard(thcState_, entry->streams[i]);
+        THCStreamGuard guard(thcState, entry->streams[i]);
         tensors[i].copy_(entry->src[i]);
       }
     };
@@ -655,14 +652,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   // In case of CUDA, ensure that operations that are queued after
   // this collective wait for the collective to complete.
   if (key.type->is_cuda()) {
-    synchronizeStreams(thcState_, entry);
+    auto thcState = ::at::globalContext().lazyInitCUDA();
+    synchronizeStreams(thcState, entry);
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (size_t i = 0; i < tensors.size(); i++) {
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
-        THCStreamGuard guard(thcState_, entry->streams[i]);
+        THCStreamGuard guard(thcState, entry->streams[i]);
         tensors[i].copy_(entry->src[i]);
       }
     };

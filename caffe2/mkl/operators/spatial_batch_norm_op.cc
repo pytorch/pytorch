@@ -146,7 +146,7 @@ class MKLBNOp final : public Operator<MKLContext> {
   const StorageOrder order_;
   const int num_batches_;
 
-  vector<TIndex> cached_input_dims_;
+  vector<int64_t> cached_input_dims_;
   LayoutWrapper<T> scale_bias_layout_;
   LayoutWrapper<T> saved_mean_layout_;
   LayoutWrapper<T> saved_var_layout_;

@@ -131,7 +131,8 @@ struct WorkspaceIdInjector {
           "Integer overflow while calculating GLOBAL_WORKSPACE_ID blob");
       int32_t global_ws_id = (seq_++) + (static_cast<int32_t>(node_id) << 16);
       Blob* global_ws_id_blob = workspace->CreateLocalBlob(GLOBAL_WORKSPACE_ID);
-      TensorCPU* global_ws_id_tensor = BlobGetMutableTensor(global_ws_id_blob, CPU);
+      TensorCPU* global_ws_id_tensor =
+          BlobGetMutableTensor(global_ws_id_blob, CPU);
       global_ws_id_tensor->Resize();
       global_ws_id_tensor->template mutable_data<int32_t>()[0] = global_ws_id;
       VLOG(1) << "Adding " << GLOBAL_WORKSPACE_ID << " = " << global_ws_id;
@@ -417,7 +418,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           } catch (const std::exception& ex) {
             std::lock_guard<std::mutex> guard(exception_mutex);
             if (!first_exception.size()) {
-              first_exception = GetExceptionString(ex);
+              first_exception = at::GetExceptionString(ex);
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
             }
             compiledStep->gotFailure = true;

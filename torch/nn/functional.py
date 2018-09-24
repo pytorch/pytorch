@@ -856,15 +856,16 @@ In-place version of :func:`~leaky_relu`.
 """)
 
 
-prelu = _add_docstr(torch._C._nn.prelu, r"""
-prelu(input, weight) -> Tensor
+def prelu(input, weight):
+    r"""prelu(input, weight) -> Tensor
 
-Applies element-wise the function
-:math:`\text{PReLU}(x) = \max(0,x) + \text{weight} * \min(0,x)` where weight is a
-learnable parameter.
+    Applies element-wise the function
+    :math:`\text{PReLU}(x) = \max(0,x) + \text{weight} * \min(0,x)` where weight is a
+    learnable parameter.
 
-See :class:`~torch.nn.PReLU` for more details.
-""")
+    See :class:`~torch.nn.PReLU` for more details.
+    """
+    return torch.prelu(input, weight)
 
 
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):

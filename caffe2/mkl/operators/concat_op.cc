@@ -96,7 +96,7 @@ class MKLConcatOp final : public MKLOperator<T> {
 
  private:
   int axis_;
-  vector<TIndex> cached_output_dims_;
+  vector<int64_t> cached_output_dims_;
 };
 
 } // namespace mkl
