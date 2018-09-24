@@ -20,10 +20,10 @@ TEST(TorchScriptTest, CanCompileMultipleFunctions) {
   auto a = torch::ones(1);
   auto b = torch::ones(1);
 
-  ASSERT_EQ(1, module->run_method("test_mul", a, b).toTensor().toCLong());
+  ASSERT_EQ(1, module->run_method("test_mul", a, b).toTensor().item<int64_t>());
 
-  ASSERT_EQ(2, module->run_method("test_relu", a, b).toTensor().toCLong());
+  ASSERT_EQ(2, module->run_method("test_relu", a, b).toTensor().item<int64_t>());
 
   ASSERT_TRUE(
-      0x200 == module->run_method("test_while", a, b).toTensor().toCLong());
+      0x200 == module->run_method("test_while", a, b).toTensor().item<int64_t>());
 }

@@ -118,6 +118,12 @@ Tensor& empty_out(Tensor& result, IntList size) {
   return result;
 }
 
+Tensor empty_strided(IntList size, IntList stride, const TensorOptions& options) {
+  // Note [Native bindings for legacy TH factory functions]
+  return getFactoryType(options).tensor(size, stride);
+}
+
+
 // Temporary type cast operators. These are needed to trace type-casts now since
 // Type's are not supported in the IR. Instead, we call down to these
 // specialized operators for each datatype.

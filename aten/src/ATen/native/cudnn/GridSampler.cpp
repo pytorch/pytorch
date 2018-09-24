@@ -75,7 +75,7 @@ Tensor cudnn_grid_sampler_forward(
   checkGridSize(c, grid, input);
   checkDim(c, input, 4);
 
-  auto output_t = input->type().tensor();
+  auto output_t = at::empty({0}, input->options());
   output_t.resize_({input->size(0), input->size(1), grid->size(1), grid->size(2)});
 
   TensorDescriptor idesc{ *input };  // input descriptor
@@ -114,9 +114,9 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
   checkDim(c, input, 4);
   checkDim(c, grad_output, 4);
 
-  auto grad_input_t = input->type().tensor();
+  auto grad_input_t = at::empty({0}, input->options());
   grad_input_t.resize_(input->sizes());
-  auto grad_grid_t = grid->type().tensor();
+  auto grad_grid_t = at::empty({0}, grid->options());
   grad_grid_t.resize_(grid->sizes());
 
   TensorDescriptor idesc{ *input };  // input descriptor

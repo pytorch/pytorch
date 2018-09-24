@@ -158,7 +158,7 @@ void test(Type & T, Type & AccT) {
     // check mixing types
     auto t1 = randn({3, 4}, T);
     auto t2 = randn({3, 4}, T).toType(kDouble);
-    CATCH_REQUIRE_THROWS_WITH(at::_standard_gamma_grad(t1, t2), Catch::StartsWith("expected scalar type"));
+    CATCH_REQUIRE_THROWS_WITH(at::_standard_gamma_grad(t1, t2), Catch::Contains("expects elements to be float"));
   }
 
   CATCH_SECTION( "where" ) {

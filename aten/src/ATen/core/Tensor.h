@@ -37,7 +37,7 @@ namespace at {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-class AT_API Tensor {
+class CAFFE2_API Tensor {
 public:
   Tensor(){};
   Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
@@ -175,19 +175,11 @@ public:
     return impl_->data<T>();
   }
 
+  template <typename T>
+  T item() const;
+
   // Purposely not defined here to avoid inlining
   void print() const;
-
-  //toLongData(), toFloatData() etc.
-  #define TO_TYPE_DATA(T,name,_) \
-  T * to##name##Data() const;
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_TYPE_DATA)
-  #undef TO_TYPE_DATA
-
-  #define TO_C_TYPE(T,name,_) \
-  T toC##name () const;
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_C_TYPE)
-  #undef TO_C_TYPE
 
   // Return a `TensorAccessor` for CPU `Tensor`s. You have to specify scalar type and
   // dimension.
@@ -912,7 +904,7 @@ public:
   }
 };
 
-struct AT_API WeakTensor {
+struct CAFFE2_API WeakTensor {
   WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
 
   // XXX: this can return undefined tensors

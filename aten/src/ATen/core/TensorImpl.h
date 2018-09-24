@@ -104,7 +104,7 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
  * the allocation and de-allocation of such memory. We make a simplified
  * assumption that the memory is always contiguous.
  */
-struct AT_API TensorImpl : public c10::intrusive_ptr_target {
+struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
   TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable);
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);

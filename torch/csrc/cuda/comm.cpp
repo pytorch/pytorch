@@ -47,7 +47,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
       _device_guard.set_index(device);
-      tensors.push_back(type.tensor(tensor.sizes()));
+      tensors.push_back(at::empty(tensor.sizes(), type.options()));
     }
     nccl::broadcast(tensors);
   } else {

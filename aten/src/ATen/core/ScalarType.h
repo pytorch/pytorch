@@ -178,10 +178,10 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
             /* u1  i1  i2  i4  i8  f2  f4  f8 */
     /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8 },
     /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8 },
-    /* i2 */ { i2, i2, i2, i4, i8, f4, f4, f8 },
-    /* i4 */ { i4, i4, i4, i4, i8, f8, f4, f8 },
-    /* i8 */ { i8, i8, i8, i8, i8, f8, f4, f8 },
-    /* f2 */ { f2, f2, f4, f8, f8, f2, f4, f8 },
+    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8 },
+    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8 },
+    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8 },
+    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8 },
     /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8 },
     /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8 },
   };

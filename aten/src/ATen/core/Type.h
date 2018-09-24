@@ -76,7 +76,7 @@ enum class TypeID {
   NumOptions
 };
 
-struct AT_API Type {
+struct CAFFE2_API Type {
   explicit Type(TensorTypeId type_id, bool is_variable, bool is_undefined)
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
@@ -579,6 +579,8 @@ struct AT_API Type {
   virtual Tensor & sub_(Tensor & self, Scalar other, Scalar alpha) const = 0;
   virtual Tensor addmm(const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
+  virtual Tensor native_tensor() const = 0;
+  virtual Tensor native_tensor(IntList size) const = 0;
   virtual Tensor tensor() const = 0;
   virtual Tensor tensor(IntList size) const = 0;
   virtual Tensor native_sparse_coo_tensor(IntList size) const = 0;
@@ -611,7 +613,6 @@ protected:
   TensorTypeId type_id_;
   bool is_variable_;
   bool is_undefined_;
-
 };
 
 } // namespace at
