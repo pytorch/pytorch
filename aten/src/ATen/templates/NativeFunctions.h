@@ -48,23 +48,23 @@ inline Tensor from_blob(
 }
 
 // These functions are defined in native/TensorFactories.cpp.
-#define TENSOR(T, S, _1)                                               \
-  AT_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options);     \
-  inline Tensor tensor(                                                \
-      std::initializer_list<T> values, const TensorOptions& options) { \
-    return native::tensor(ArrayRef<T>(values), options);               \
-  }                                                                    \
-  inline Tensor tensor(T value, const TensorOptions& options) {        \
-    return native::tensor(ArrayRef<T>(value), options);                \
-  }                                                                    \
-  inline Tensor tensor(ArrayRef<T> values) {                           \
-    return native::tensor(std::move(values), at::dtype(k##S));         \
-  }                                                                    \
-  inline Tensor tensor(std::initializer_list<T> values) {              \
-    return native::tensor(ArrayRef<T>(values));                        \
-  }                                                                    \
-  inline Tensor tensor(T value) {                                      \
-    return native::tensor(ArrayRef<T>(value));                         \
+#define TENSOR(T, S, _1)                                                      \
+  CAFFE2_API Tensor tensor(ArrayRef<T> values, const TensorOptions& options); \
+  inline Tensor tensor(                                                       \
+      std::initializer_list<T> values, const TensorOptions& options) {        \
+    return native::tensor(ArrayRef<T>(values), options);                      \
+  }                                                                           \
+  inline Tensor tensor(T value, const TensorOptions& options) {               \
+    return native::tensor(ArrayRef<T>(value), options);                       \
+  }                                                                           \
+  inline Tensor tensor(ArrayRef<T> values) {                                  \
+    return native::tensor(std::move(values), at::dtype(k##S));                \
+  }                                                                           \
+  inline Tensor tensor(std::initializer_list<T> values) {                     \
+    return native::tensor(ArrayRef<T>(values));                               \
+  }                                                                           \
+  inline Tensor tensor(T value) {                                             \
+    return native::tensor(ArrayRef<T>(value));                                \
   }
 AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
 #undef TENSOR

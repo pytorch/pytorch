@@ -37,7 +37,7 @@ namespace at {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-struct AT_API Tensor {
+struct CAFFE2_API Tensor {
   Tensor(){};
   Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : tensor_impl_(std::move(tensor_impl)) {
@@ -262,7 +262,7 @@ protected:
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl_;
 };
 
-struct AT_API WeakTensor {
+struct CAFFE2_API WeakTensor {
   WeakTensor(const Tensor& t) : weak_tensor_impl_(t.tensor_impl_) {}
 
   // XXX: this can return undefined tensors
