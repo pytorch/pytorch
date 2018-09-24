@@ -97,7 +97,7 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor
 std::tuple<Tensor,Tensor>
 fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
   Tensor ret = at::empty_like(self);
-  Tensor mask = self.type().toScalarType(kByte).tensor(self.sizes());
+  Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte));
   const int64_t nelem = self.numel();
   const int64_t block_size = 256;
   unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
