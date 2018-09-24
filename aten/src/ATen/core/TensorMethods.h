@@ -935,6 +935,12 @@ inline Tensor Tensor::relu() const {
 inline Tensor & Tensor::relu_() {
     return type().relu_(*this);
 }
+inline Tensor Tensor::prelu(const Tensor & weight) const {
+    return type().prelu(*this, weight);
+}
+inline std::tuple<Tensor,Tensor> Tensor::prelu_backward(const Tensor & grad_output, const Tensor & weight) const {
+    return type().prelu_backward(grad_output, *this, weight);
+}
 inline Tensor Tensor::hardshrink(Scalar lambd) const {
     return type().hardshrink(*this, lambd);
 }

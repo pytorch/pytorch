@@ -814,8 +814,8 @@ void testOpenGLConcat(int N, std::vector<int> Cs, int H, int W, bool tiling = fa
             << "H: " << H << ", W: " << W;
   Workspace ws;
   for (int i = 0; i < Cs.size(); i++) {
-    auto* t =
-        BlobGetMutableTensor(ws.CreateBlob("X_cpu" + caffe2::to_string(i)),CPU);
+    auto* t = BlobGetMutableTensor(
+        ws.CreateBlob("X_cpu" + caffe2::to_string(i)), CPU);
     t->Resize(N, Cs[i], H, W);
     CPUContext ctx0;
     // Too noisy.
@@ -1990,7 +1990,8 @@ void compareModelsForOpenGL(std::string name,
     Workspace cws;
     cws.RunNetOnce(initNet);
 
-    auto* t_cpu = BlobGetMutableTensor(cws.CreateBlob(truncatedPredictNet.external_input(0)), CPU);
+    auto* t_cpu = BlobGetMutableTensor(
+        cws.CreateBlob(truncatedPredictNet.external_input(0)), CPU);
     if (name == "styleTransfer") {
       CAFFE_ENFORCE_EQ(input_order, "NHWC");
       CAFFE_ENFORCE_EQ(input_type, "uint8_t");
@@ -2031,7 +2032,8 @@ void compareModelsForOpenGL(std::string name,
     Workspace mws;
     mws.RunNetOnce(initNet);
 
-    auto* t_gl = BlobGetMutableTensor(mws.CreateBlob(truncatedOpenGLPredictNet.external_input(0)), CPU);
+    auto* t_gl = BlobGetMutableTensor(
+        mws.CreateBlob(truncatedOpenGLPredictNet.external_input(0)), CPU);
     if (name == "styleTransfer") {
       CAFFE_ENFORCE_EQ(input_order, "NHWC");
       CAFFE_ENFORCE_EQ(input_type, "uint8_t");

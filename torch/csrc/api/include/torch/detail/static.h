@@ -1,5 +1,8 @@
 #pragma once
 
+#include <torch/csrc/utils/variadic.h>
+#include <torch/tensor.h>
+
 #include <cstdint>
 #include <type_traits>
 
@@ -52,7 +55,8 @@ inline constexpr bool check_not_lvalue_references<void>() {
 
 /// A type trait whose `value` member is true if `M` derives from `Module`.
 template <typename M>
-using is_module = std::is_base_of<torch::nn::Module, typename std::decay<M>::type>;
+using is_module =
+    std::is_base_of<torch::nn::Module, typename std::decay<M>::type>;
 
 template <typename M, typename T = void>
 using enable_if_module_t =

@@ -1,6 +1,7 @@
 import os
-import unittest
+import shutil
 import sys
+import unittest
 
 import torch
 import torch.utils.cpp_extension
@@ -23,6 +24,12 @@ if TEST_CUDA:
 
 
 class TestCppExtension(common.TestCase):
+    def setUp(self):
+        if sys.platform != 'win32':
+            default_build_root = torch.utils.cpp_extension.get_default_build_root()
+            if os.path.exists(default_build_root):
+                shutil.rmtree(default_build_root)
+
     def test_extension_function(self):
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
@@ -314,6 +321,25 @@ class TestCppExtension(common.TestCase):
         x = torch.randn(3, device='cuda', dtype=torch.half)
         result = module.half_test(x)
         self.assertEqual(result[0], 123)
+
+    def test_reload_jit_extension(self):
+        def compile(code):
+            return torch.utils.cpp_extension.load_inline(
+                name='reloaded_jit_extension',
+                cpp_sources=code,
+                functions='f',
+                verbose=True)
+
+        module = compile('int f() { return 123; }')
+        self.assertEqual(module.f(), 123)
+
+        module = compile('int f() { return 456; }')
+        self.assertEqual(module.f(), 456)
+        module = compile('int f() { return 456; }')
+        self.assertEqual(module.f(), 456)
+
+        module = compile('int f() { return 789; }')
+        self.assertEqual(module.f(), 789)
 
 
 if __name__ == '__main__':

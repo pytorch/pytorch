@@ -770,9 +770,9 @@
   other: where(condition, zeros_like(grad), grad)
 
 # weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
-# to be running backward with create_graph=True, fall back to a backward function that uses 
+# to be running backward with create_graph=True, fall back to a backward function that uses
 # differentiable ops.
-- name: _weight_norm_cuda_interface(Tensor v, Tensor g, int64_t dim) 
+- name: _weight_norm_cuda_interface(Tensor v, Tensor g, int64_t dim)
   v, g: "GradMode::is_enabled() ? _weight_norm_differentiable_backward(grad.contiguous(), v, g, result1, dim) : _weight_norm_cuda_interface_backward(grad.contiguous(), v, g, result1, dim)"
 
 - name: zero_(Tensor self)
@@ -866,8 +866,11 @@
 - name: log_softmax(Tensor self, int64_t dim)
   self: log_softmax_backward_data(grad, result, dim, self)
 
-- name: prelu_forward(Tensor self, Tensor weight)
-  self, weight: prelu_backward(grad, self, weight, grad_input_mask)
+- name: prelu(Tensor self, Tensor weight)
+  self, weight: prelu_backward(grad, self, weight)
+
+- name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight)
+  grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
 
 - name: rrelu_with_noise_forward(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training)
@@ -1093,9 +1096,6 @@
 - name: nll_loss2d_backward(Tensor grad_output, Tensor self, Tensor target, Tensor weight, int64_t reduction, int64_t ignore_index, Tensor total_weight)
   grad_output: nll_loss2d(grad, target, weight, reduction, ignore_index)
   self: zeros_like(grad)
-
-- name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight, std::array<bool,2> output_mask)
-  grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight, grad_input_mask)
 
 - name: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training)
   grad_output: rrelu_with_noise_backward(grad, self, noise, lower, upper, training)

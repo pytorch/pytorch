@@ -106,8 +106,8 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
  private:
   // Input: X, W, b
   // Output: Y
-  vector<TIndex> cached_input_dims_;
-  vector<TIndex> cached_filter_dims_;
+  vector<int64_t> cached_input_dims_;
+  vector<int64_t> cached_filter_dims_;
   PrimitiveWrapper<T> primitive_;
   unique_ptr<MKLMemory<T>> X_wrapper_ = nullptr;
   unique_ptr<MKLMemory<T>> filter_wrapper_ = nullptr;
