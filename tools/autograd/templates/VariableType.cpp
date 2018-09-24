@@ -177,11 +177,11 @@ bool VariableType::isVariableType(const at::Type& type) {
   return type.is_variable();
 }
 
-at::Type* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
+at::TypeExtendedInterface* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
   auto id = static_cast<size_t>(baseType.ID());
   if(id >= type_to_variable_type.size())
     return nullptr;
-  return type_to_variable_type[id].get();
+  return static_cast<at::TypeExtendedInterface*>(type_to_variable_type[id].get());
 }
 
 namespace {
