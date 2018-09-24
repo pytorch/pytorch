@@ -3,7 +3,7 @@
 
 namespace caffe2 {
 
-CAFFE2_EXPORT void ArgumentToAttributeProto(
+C10_EXPORT void ArgumentToAttributeProto(
     const Argument& arg,
     ::torch::AttributeProto* attr) {
   CAFFE_ENFORCE(arg.has_name());
@@ -29,7 +29,7 @@ CAFFE2_EXPORT void ArgumentToAttributeProto(
   }
 }
 
-CAFFE2_EXPORT void AttributeProtoToArgument(
+C10_EXPORT void AttributeProtoToArgument(
     const ::torch::AttributeProto& attr,
     Argument* arg) {
   CAFFE_ENFORCE(attr.has_name());
@@ -94,7 +94,7 @@ CAFFE2_EXPORT void AttributeProtoToArgument(
   }
 }
 
-CAFFE2_EXPORT void OperatorDefToNodeProto(
+C10_EXPORT void OperatorDefToNodeProto(
     const OperatorDef& def,
     ::torch::NodeProto* node) {
   node->mutable_input()->CopyFrom(def.input());
@@ -141,7 +141,7 @@ CAFFE2_EXPORT void OperatorDefToNodeProto(
   }
 }
 
-CAFFE2_EXPORT void NodeProtoToOperatorDef(
+C10_EXPORT void NodeProtoToOperatorDef(
     const ::torch::NodeProto& node,
     OperatorDef* def) {
   def->mutable_input()->CopyFrom(node.input());

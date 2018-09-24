@@ -43,7 +43,7 @@ void addObjectMethods(pybind11::module& m);
 // Get current workspace
 Workspace* GetCurrentWorkspace();
 
-class CAFFE2_EXPORT BlobFetcherBase {
+class C10_EXPORT BlobFetcherBase {
  public:
   struct FetchedBlob {
     pybind11::object obj;
@@ -60,7 +60,7 @@ class BlobFeederBase {
   Feed(const DeviceOption& option, PyArrayObject* array, Blob* blob) = 0;
 };
 
-CAFFE2_EXPORT CAFFE_DECLARE_TYPED_REGISTRY(
+C10_EXPORT CAFFE_DECLARE_TYPED_REGISTRY(
     BlobFetcherRegistry,
     TypeIdentifier,
     BlobFetcherBase,

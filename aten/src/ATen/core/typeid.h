@@ -404,7 +404,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 // and as a result, we define these two macros slightly differently.
 // TODO(jiayq): AT_CORE_API below is not correct, because we may use the
 // definition in third party dependent libraries. The proper way is to use
-// CAFFE2_EXPORT (which explicitly requires dllexport). Marking this as a
+// C10_EXPORT (which explicitly requires dllexport). Marking this as a
 // todo item when the unified build is finished.
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \

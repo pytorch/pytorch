@@ -6,10 +6,6 @@
 
 #pragma once
 
-// Note: this is for caffe2/*. Will need to codemod to use direct C10.
-#define CAFFE2_EXPORT C10_EXPORT
-#define CAFFE2_IMPORT C10_IMPORT
-
 // Note: this is for aten/src/*. Will need to codemod.
 #define AT_CORE_API CAFFE2_API
 #define AT_CORE_EXPORT C10_EXPORT

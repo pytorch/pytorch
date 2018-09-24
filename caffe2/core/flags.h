@@ -79,14 +79,14 @@ namespace gflags = google;
 // (3) Gflags has a design issue that does not properly expose the global flags,
 // if one builds the library with -fvisibility=hidden. The current gflags (as of
 // Aug 2018) only deals with the Windows case using dllexport, and not the Linux
-// counterparts. As a result, we will explciitly use CAFFE2_EXPORT to export the
+// counterparts. As a result, we will explciitly use C10_EXPORT to export the
 // flags defined in Caffe2. This is done via a global reference, so the flag
 // itself is not duplicated - under the hood it is the same global gflags flag.
 #define CAFFE2_GFLAGS_DEF_WRAPPER(                                             \
     type, real_type, name, default_value, help_str)                            \
   DEFINE_##type(name, default_value, help_str);                                \
   namespace caffe2 {                                                           \
-    CAFFE2_EXPORT real_type& FLAGS_##name = ::FLAGS_##name;                    \
+    C10_EXPORT real_type& FLAGS_##name = ::FLAGS_##name;                    \
   }
 
 #define CAFFE2_DEFINE_int(name, default_value, help_str)                       \
@@ -105,7 +105,7 @@ namespace gflags = google;
 #define CAFFE2_GFLAGS_DECLARE_WRAPPER(type, real_type, name)                   \
   DECLARE_##type(name);                                                        \
   namespace caffe2 {                                                           \
-    CAFFE2_IMPORT extern real_type& FLAGS_##name;                              \
+    C10_IMPORT extern real_type& FLAGS_##name;                              \
   }  // namespace caffe2
 
 #define CAFFE2_DECLARE_int(name)                                               \
@@ -152,7 +152,7 @@ CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 
 #define CAFFE2_DEFINE_typed_var(type, name, default_value, help_str)           \
   namespace caffe2 {                                                           \
-  CAFFE2_EXPORT type FLAGS_##name = default_value;                             \
+  C10_EXPORT type FLAGS_##name = default_value;                             \
   namespace {                                                                  \
   class Caffe2FlagParser_##name : public Caffe2FlagParser {                    \
    public:                                                                     \
@@ -182,7 +182,7 @@ CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 // DECLARE_typed_var should be used in header files and in the global namespace.
 #define CAFFE2_DECLARE_typed_var(type, name)                                   \
   namespace caffe2 {                                                           \
-    CAFFE2_IMPORT extern type FLAGS_##name;                                    \
+    C10_IMPORT extern type FLAGS_##name;                                    \
   } // namespace caffe2
 
 #define CAFFE2_DECLARE_int(name) CAFFE2_DECLARE_typed_var(int, name)
