@@ -34,7 +34,7 @@ BatchTensor::BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims
     for(auto x : datalist){
       sizes[i] = std::max(sizes[i], x.size(i));
     }
-    mask_sizes[i] = *dims[i - 1].toByteData() ? sizes[i] : 1;
+    mask_sizes[i] = *dims[i - 1].data<uint8_t>() ? sizes[i] : 1;
   }
   data = at::empty(sizes, datalist[0].options());
   data.fill_(0);
@@ -44,7 +44,7 @@ BatchTensor::BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims
     auto data_item = data.narrow(0, i, 1);
     auto mask_item = mask.narrow(0, i, 1);
     for(int64_t j = 0; j < dims.size(0); j++){
-      if(*dims[j].toByteData()){
+      if(*dims[j].data<uint8_t>()){
         data_item = data_item.narrow(j + 1, 0, datalist[i].size(j + 1));
         mask_item = mask_item.narrow(j + 1, 0, datalist[i].size(j + 1));
       }
@@ -62,12 +62,12 @@ std::vector<at::Tensor> BatchTensor::examples() {
     data = data.sum(d, /*keepdim=*/true);
     while(data.dim() >= 1)
       data = data[0];
-    return *data.toLongData();
+    return *data.data<int64_t>();
   };
   for(int64_t i = 0; i < data.size(0); i++){
     auto data_tmp = data.narrow(0, i, 1);
     for(int64_t d = 0; d < dims.size(0); d++){
-      if(*dims[d].toByteData()){
+      if(*dims[d].data<uint8_t>()){
         data_tmp = data_tmp.narrow(d + 1, 0, mask_sum(mask[i], d));
       }
     }
