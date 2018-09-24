@@ -397,7 +397,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // An event used by asynchronous execution.
   std::unique_ptr<Event> event_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(OperatorBase);
+  C10_DISABLE_COPY_AND_ASSIGN(OperatorBase);
 };
 
 // If your operator does not need any specialized contructor or destructor,

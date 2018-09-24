@@ -52,7 +52,7 @@ class CAFFE2_API Cursor {
    */
   virtual bool Valid() = 0;
 
-  AT_DISABLE_COPY_AND_ASSIGN(Cursor);
+  C10_DISABLE_COPY_AND_ASSIGN(Cursor);
 };
 
 /**
@@ -71,7 +71,7 @@ class CAFFE2_API Transaction {
    */
   virtual void Commit() = 0;
 
-  AT_DISABLE_COPY_AND_ASSIGN(Transaction);
+  C10_DISABLE_COPY_AND_ASSIGN(Transaction);
 };
 
 /**
@@ -99,7 +99,7 @@ class CAFFE2_API DB {
  protected:
   Mode mode_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(DB);
+  C10_DISABLE_COPY_AND_ASSIGN(DB);
 };
 
 // Database classes are registered by their names so we can do optional
@@ -285,7 +285,7 @@ class CAFFE2_API DBReader {
   uint32_t num_shards_;
   uint32_t shard_id_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(DBReader);
+  C10_DISABLE_COPY_AND_ASSIGN(DBReader);
 };
 
 class CAFFE2_API DBReaderSerializer : public BlobSerializerBase {

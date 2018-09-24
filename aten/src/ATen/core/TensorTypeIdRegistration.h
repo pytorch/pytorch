@@ -29,7 +29,7 @@ class CAFFE2_API TensorTypeIdCreator final {
  private:
   std::atomic<details::_tensorTypeId_underlyingType> last_id_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
 };
 
 class CAFFE2_API TensorTypeIdRegistry final {
@@ -43,7 +43,7 @@ class CAFFE2_API TensorTypeIdRegistry final {
   std::unordered_set<at::TensorTypeId> registeredTypeIds_;
   std::mutex mutex_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
 };
 
 class CAFFE2_API TensorTypeIds final {
@@ -61,7 +61,7 @@ class CAFFE2_API TensorTypeIds final {
   TensorTypeIdCreator creator_;
   TensorTypeIdRegistry registry_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIds);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIds);
 };
 
 inline constexpr at::TensorTypeId TensorTypeIds::undefined() noexcept {
@@ -78,7 +78,7 @@ class CAFFE2_API TensorTypeIdRegistrar final {
  private:
   at::TensorTypeId id_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistrar);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistrar);
 };
 
 inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {

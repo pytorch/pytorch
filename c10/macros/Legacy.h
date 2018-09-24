@@ -5,7 +5,3 @@
  */
 
 #pragma once
-
-// Note: this is for both aten and c2, due to cross reference between c2 and
-// aten that we try to unentangle. Will need to codemod.
-#define AT_DISABLE_COPY_AND_ASSIGN C10_DISABLE_COPY_AND_ASSIGN

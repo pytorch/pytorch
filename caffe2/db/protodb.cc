@@ -60,7 +60,7 @@ class ProtoDBTransaction : public Transaction {
   TensorProtos* proto_;
   std::unordered_set<string> existing_names_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(ProtoDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(ProtoDBTransaction);
 };
 
 class ProtoDB : public DB {
