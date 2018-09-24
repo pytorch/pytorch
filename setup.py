@@ -471,18 +471,9 @@ class build_deps(PytorchCommand):
             if not same:
                 shutil.copyfile(orig_file, sym_file)
 
-        # Copy headers necessary to compile C++ extensions.
-        #
-        # This is not perfect solution as build does not depend on any of
-        # the auto-generated code and auto-generated files will not be
-        # included in this copy. If we want to use auto-generated files,
-        # we need to find a better way to do this.
-        # More information can be found in conversation thread of PR #5772
-
         self.copy_tree('torch/lib/tmp_install/share', 'torch/share')
         self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
-        self.copy_file('torch/csrc/torch.h', 'torch/lib/include/torch/torch.h')
 
 
 build_dep_cmds = {}
@@ -1212,7 +1203,13 @@ if __name__ == '__main__':
                 'lib/include/c10/macros/*.h',
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
-                'lib/include/torch/csrc/api/include/torch/detail/ordered_dict.h',
+                'lib/include/torch/csrc/api/include/torch/*.h',
+                'lib/include/torch/csrc/api/include/torch/detail/*.h',
+                'lib/include/torch/csrc/api/include/torch/nn/*.h',
+                'lib/include/torch/csrc/api/include/torch/nn/modules/*.h',
+                'lib/include/torch/csrc/api/include/torch/nn/parallel/*.h',
+                'lib/include/torch/csrc/api/include/torch/optim/*.h',
+                'lib/include/torch/csrc/api/include/torch/serialize/*.h',
                 'lib/include/torch/csrc/autograd/*.h',
                 'lib/include/torch/csrc/autograd/generated/*.h',
                 'lib/include/torch/csrc/cuda/*.h',
