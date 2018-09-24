@@ -16,7 +16,7 @@
 
 namespace at {
 
-class AT_CORE_API TensorTypeIdCreator final {
+class CAFFE2_API TensorTypeIdCreator final {
  public:
   TensorTypeIdCreator();
 
@@ -32,7 +32,7 @@ class AT_CORE_API TensorTypeIdCreator final {
   AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
 };
 
-class AT_CORE_API TensorTypeIdRegistry final {
+class CAFFE2_API TensorTypeIdRegistry final {
  public:
   TensorTypeIdRegistry();
 
@@ -46,7 +46,7 @@ class AT_CORE_API TensorTypeIdRegistry final {
   AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
 };
 
-class AT_CORE_API TensorTypeIds final {
+class CAFFE2_API TensorTypeIds final {
  public:
   static TensorTypeIds& singleton();
 
@@ -68,7 +68,7 @@ inline constexpr at::TensorTypeId TensorTypeIds::undefined() noexcept {
   return TensorTypeIdCreator::undefined();
 }
 
-class AT_CORE_API TensorTypeIdRegistrar final {
+class CAFFE2_API TensorTypeIdRegistrar final {
  public:
   TensorTypeIdRegistrar();
   ~TensorTypeIdRegistrar();
@@ -85,7 +85,7 @@ inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
   return id_;
 }
 
-#define AT_DECLARE_TENSOR_TYPE(TensorName) AT_CORE_API at::TensorTypeId TensorName();
+#define AT_DECLARE_TENSOR_TYPE(TensorName) CAFFE2_API at::TensorTypeId TensorName();
 
 #define AT_DEFINE_TENSOR_TYPE(TensorName)           \
   at::TensorTypeId TensorName() {                   \
