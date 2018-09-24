@@ -156,6 +156,10 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
+            # If a dataloader iterator is destructed before all samples are drained, a worker process could terminate
+            # before the main process gets destructed, so we need a timeout check when receiving result from worker
+            if done_event.is_set():
+                return
             continue
         except Exception:
             if done_event.is_set():
