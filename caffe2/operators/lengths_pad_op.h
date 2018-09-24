@@ -56,7 +56,7 @@ class LengthsPadOp : public Operator<Context> {
 
     math::Set(
         output->size(), static_cast<T>(padding_value_), out_data, &context_);
-    for (TIndex i = 0; i < lengths_size; ++i) {
+    for (int64_t i = 0; i < lengths_size; ++i) {
       auto length = lengths_data[i];
       CAFFE_ENFORCE_GE(length, 0);
       CAFFE_ENFORCE_GE(

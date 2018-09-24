@@ -2,12 +2,12 @@
 
 #include <cstddef>
 #include <sstream>
-#include <typeinfo>
 #include <type_traits>
+#include <typeinfo>
 #include <vector>
 
-#include <ATen/core/typeid.h>
 #include <ATen/core/intrusive_ptr.h>
+#include <ATen/core/typeid.h>
 
 namespace caffe2 {
 
@@ -26,7 +26,9 @@ class AT_CORE_API Blob final : public c10::intrusive_ptr_target {
    * Initializes an empty Blob.
    */
   Blob() noexcept : meta_(), pointer_(nullptr), has_ownership_(false) {}
-  ~Blob() { Reset(); }
+  ~Blob() {
+    Reset();
+  }
 
   Blob(Blob&& other) noexcept : Blob() {
     swap(other);
@@ -48,12 +50,16 @@ class AT_CORE_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Returns the meta info of the blob.
    */
-  inline const TypeMeta& meta() const noexcept { return meta_; }
+  inline const TypeMeta& meta() const noexcept {
+    return meta_;
+  }
 
   /**
    * Returns a printable typename of the blob.
    */
-  inline const char* TypeName() const noexcept { return meta_.name(); }
+  inline const char* TypeName() const noexcept {
+    return meta_.name();
+  }
 
   /**
    * @brief Gets the const reference of the stored object. The code checks if
@@ -176,7 +182,7 @@ class AT_CORE_API Blob final : public c10::intrusive_ptr_target {
     swap(has_ownership_, rhs.has_ownership_);
   }
 
-private:
+ private:
   void free_() {
     if (has_ownership_) {
       AT_ASSERTM(pointer_ != nullptr, "Can't have ownership of nullptr");
@@ -203,4 +209,4 @@ inline std::ostream& operator<<(std::ostream& out, const Blob& v) {
   return out << "Blob";
 }
 
-}  // namespace caffe2
+} // namespace caffe2

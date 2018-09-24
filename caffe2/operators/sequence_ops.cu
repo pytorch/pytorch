@@ -237,7 +237,7 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   CAFFE_ENFORCE_GE(in.ndim(), 1);
   const int32_t outer_size = in.dims()[0];
   const auto block_size = std::accumulate(
-      in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
+      in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<int64_t>());
 
   // if no lengths is provided, assume it is a single full-span entry
   const int32_t* lengths_ptr = nullptr;

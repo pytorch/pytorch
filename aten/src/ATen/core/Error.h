@@ -150,6 +150,10 @@ class AT_CORE_API Warning {
   static handler_t warning_handler_;
 };
 
+// A utility function to return an exception std::string by prepending its
+// exception type before its what() content
+AT_CORE_API std::string GetExceptionString(const std::exception& e);
+
 } // namespace at
 
 // TODO: variants that print the expression tested and thus don't require

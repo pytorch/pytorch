@@ -201,7 +201,7 @@ class MapSerializer : public BlobSerializerBase {
       BlobSerializerBase::SerializationAcceptor acceptor) override {
     CAFFE_ENFORCE(typeMeta.Match<MapType>());
     const MapType& map_data = *static_cast<const MapType*>(pointer);
-    TIndex sz = map_data.size();
+    int64_t sz = map_data.size();
     Tensor key_tensor(CPU);
     key_tensor.Resize(sz);
     Tensor value_tensor(CPU);

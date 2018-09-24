@@ -178,7 +178,7 @@ class TensorFeeder : public BlobFeederBase {
     // numpy requires long int as its dims.
     int ndim = PyArray_NDIM(array);
     npy_intp* npy_dims = PyArray_DIMS(array);
-    std::vector<TIndex> dims;
+    std::vector<int64_t> dims;
     for (int i = 0; i < ndim; ++i) {
       dims.push_back(npy_dims[i]);
     }
@@ -375,7 +375,8 @@ class PythonOpBase : public Operator<Context> {
         if (blob->template IsType<Tensor>()) {
           if (use_dlpack) {
             DLPackWrapper<CPUContext> wrapper(
-                BlobGetMutableTensor(blob, Context::GetDeviceType()), cpu_option);
+                BlobGetMutableTensor(blob, Context::GetDeviceType()),
+                cpu_option);
             py_obj = py::cast(wrapper, py::return_value_policy::copy);
           } else {
             py_obj = py::cast(

@@ -261,9 +261,9 @@ class GemmBatchedGPUTest
     X_ = BlobGetMutableTensor(X_blob, CUDA);
     W_ = BlobGetMutableTensor(W_blob, CUDA);
     Y_ = BlobGetMutableTensor(Y_blob, CUDA);
-    X_->Resize(std::vector<TIndex>{3, 5, 10});
-    W_->Resize(std::vector<TIndex>{3, 6, 10});
-    Y_->Resize(std::vector<TIndex>{3, 5, 6});
+    X_->Resize(std::vector<int64_t>{3, 5, 10});
+    W_->Resize(std::vector<int64_t>{3, 6, 10});
+    Y_->Resize(std::vector<int64_t>{3, 5, 6});
     math::Set<float, CUDAContext>(
         X_->size(), 1.0f, X_->mutable_data<float>(), cuda_context_.get());
     math::Set<float, CUDAContext>(

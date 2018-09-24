@@ -55,7 +55,8 @@ inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
   BlobGetMutableTensor(ws->CreateBlob(blob_name), CPU)->Resize(1);
   auto timestepBlob = ws->GetBlob(blob_name);
   CAFFE_ENFORCE(timestepBlob);
-  BlobGetMutableTensor(timestepBlob, CPU)->template mutable_data<int32_t>()[0] = t;
+  BlobGetMutableTensor(timestepBlob, CPU)->template mutable_data<int32_t>()[0] =
+      t;
 }
 
 CAFFE2_API std::map<string, string> GetRecurrentMapping(
@@ -72,7 +73,8 @@ void applyOffsetAlias(
   auto srcBlob = ws->GetBlob(oc.src);
   CAFFE_ENFORCE(srcBlob);
   auto* src = BlobGetMutableTensor(srcBlob, Context::GetDeviceType());
-  auto* dst = BlobGetMutableTensor(ws->GetBlob(oc.dst), Context::GetDeviceType());
+  auto* dst =
+      BlobGetMutableTensor(ws->GetBlob(oc.dst), Context::GetDeviceType());
   auto timestep = src->size() / src->dim(0);
   auto dims = src->dims();
   const int32_t startDstTimestep =
@@ -900,7 +902,7 @@ class RNNApplyLinkOp : public Operator<Context> {
     auto* external_out = Output(1);
 
     CAFFE_ENFORCE_GT(external.size(), 0);
-    const TIndex externalTimestepSize = external.size() / external.dim(0);
+    const int64_t externalTimestepSize = external.size() / external.dim(0);
     auto* externalData = external_out->template mutable_data<T>() +
         (t + offset_) * externalTimestepSize;
     auto internalDims = external_out->dims();
