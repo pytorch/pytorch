@@ -314,7 +314,8 @@ void TrackMemoryAlloc(size_t nbytes) {
 }
 }
 
-std::pair<void*, MemoryDeleter> CUDAStaticContext::New(size_t nbytes) const {
+// TODO: wrap this function in DefaultCUDAAllocator
+at::DataPtr CUDAStaticContext::New(size_t nbytes) const {
   // Lock the mutex
   std::lock_guard<std::mutex> lock(CUDAContext::mutex());
   // A one-time caffe2 cuda initializer.
@@ -331,7 +332,7 @@ std::pair<void*, MemoryDeleter> CUDAStaticContext::New(size_t nbytes) const {
       g_size_map[ptr] = nbytes;
       g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
     }
-    return {ptr, Delete};
+    return {ptr, ptr, Delete, at::Device(CUDA)};
   case CudaMemoryPoolType::CUB:
     CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
     g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
@@ -340,16 +341,16 @@ std::pair<void*, MemoryDeleter> CUDAStaticContext::New(size_t nbytes) const {
     if (FLAGS_caffe2_gpu_memory_tracking) {
       g_size_map[ptr] = nbytes;
     }
-    return {ptr, Delete};
+    return {ptr, ptr, Delete, at::Device(CUDA)};
   case CudaMemoryPoolType::THC:
     CUDA_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
     if (FLAGS_caffe2_gpu_memory_tracking) {
       g_size_map[ptr] = nbytes;
       g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
     }
-    return {ptr, Delete};
+    return {ptr, ptr, Delete, at::Device(CUDA)};
   }
-  return {nullptr, Delete};
+  return {nullptr, nullptr, Delete, at::Device(CUDA)};
 }
 
 void CUDAStaticContext::Delete(void* ptr) {

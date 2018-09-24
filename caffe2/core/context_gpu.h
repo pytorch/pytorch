@@ -223,7 +223,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return curand_generator_;
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
+  inline static at::DataPtr New(size_t nbytes) {
     return StaticContext()->New(nbytes);
   }
 
@@ -334,26 +334,27 @@ inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  */
-struct CAFFE2_CUDA_API PinnedCPUAllocator final : CPUAllocator {
+struct CAFFE2_CUDA_API PinnedCPUAllocator final : at::Allocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
+  at::DataPtr allocate(size_t nbytes) const override {
     void* data;
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
     if (IsNUMAEnabled()) {
-      auto ptr_and_deleter = baseAllocator_.New(nbytes);
-      data = ptr_and_deleter.first;
+      auto data_ptr = baseAllocator_.allocate(nbytes);
+      // maybe need to change the name of first release...
+      data = data_ptr.release().release();
       CAFFE_ENFORCE(data);
       CUDA_ENFORCE(cudaHostRegister(data, nbytes, cudaHostRegisterDefault));
     } else {
       CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
     }
     memset(data, 0, nbytes);
-    return {data, Delete};
+    return {data, data, &Delete, at::Device(CPU)};
   }
 
-  MemoryDeleter GetDeleter() override {
-    return Delete;
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
   }
 
  private:
@@ -385,13 +386,14 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : CPUAllocator {
 
 class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
  public:
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
+  at::DataPtr New(size_t nbytes) const override;
 
   DeviceType GetDeviceType() override {
     return CUDA;
   }
 
   void ExtractDeviceOption(DeviceOption* device, const void* data) override {
+    CAFFE_ENFORCE(data, "data cannot be nullptr");
     device->set_device_type(TypeToProto(GetDeviceType()));
     device->set_cuda_gpu_id(GetGPUIDForPointer(data));
   }

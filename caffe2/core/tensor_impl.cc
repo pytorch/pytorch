@@ -12,3 +12,20 @@ CAFFE2_DEFINE_int64(
     LLONG_MAX,
     "The maximum memory in bytes to keep on shrink, if the difference between "
     "tensor sizes is bigger than this then tensor will be reset.");
+
+namespace caffe2 {
+static void deletePlacementDeleteContext(void* ptr) {
+  delete static_cast<PlacementDeleteContext*>(ptr);
+}
+
+at::DataPtr PlacementDeleteContext::makeDataPtr(
+    Ctx&& prev_ctx,
+    const PlacementDtor& placement_dtor,
+    size_t size,
+    at::Device device) {
+  return {prev_ctx.get(),
+          new PlacementDeleteContext(std::move(prev_ctx), placement_dtor, size),
+          &deletePlacementDeleteContext,
+          device};
+}
+} // namespace caffe2

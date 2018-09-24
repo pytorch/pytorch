@@ -60,6 +60,9 @@ class UniqueVoidPtr {
   void* get_context() const {
     return ctx_.get();
   }
+  std::unique_ptr<void, DeleterFnPtr>&& release() {
+    return std::move(ctx_);
+  }
   void* release_context() {
     return ctx_.release();
   }

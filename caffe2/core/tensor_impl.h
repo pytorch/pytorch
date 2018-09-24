@@ -78,6 +78,32 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
   return axis_index;
 }
 
+using PlacementDtor = void (*)(void*, size_t);
+
+struct PlacementDeleteContext {
+  using Ctx = std::unique_ptr<void, at::DeleterFnPtr>;
+  Ctx ctx_;
+  PlacementDtor placement_dtor_;
+  size_t size_;
+  void* data_;
+  PlacementDeleteContext(
+      Ctx&& ctx,
+      const PlacementDtor& placement_dtor,
+      size_t size)
+      : ctx_(std::move(ctx)),
+        placement_dtor_(placement_dtor),
+        size_(size),
+        data_(ctx_.get()) {}
+  static at::DataPtr makeDataPtr(
+      Ctx&& prev_ctx,
+      const PlacementDtor& placement_dtor,
+      size_t size,
+      at::Device device);
+  ~PlacementDeleteContext() {
+    placement_dtor_(data_, size_);
+  }
+};
+
 /**
  * @brief TensorImpl is the implementation of a tensor and the basic class
  * in Caffe2 that stores a contiguous memory with its shape information.
@@ -595,29 +621,19 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.dtor();
-        void* ptr;
-        at::DeleterFnPtr deleter;
-        auto ptr_and_deleter = GetStaticContext()->New(
+        auto data_ptr = GetStaticContext()->New(
             numel_ * storage_.itemsize()); // Removing this can get rid of
                                            // InefficientStdFunctionContext
-        ptr = ptr_and_deleter.first;
-        deleter = ptr_and_deleter.second;
-        storage_.set_data_ptr(at::InefficientStdFunctionContext::makeDataPtr(
-            ptr,
-            [size, dtor, deleter](void* local_ptr) -> void {
-              dtor(local_ptr, size);
-              deleter(local_ptr);
-            },
+        storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
+            std::move(data_ptr.release()),
+            dtor,
+            size,
             at::Device(storage_.device_type())));
         data_type_.ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
-        auto ptr_and_deleter =
-            GetStaticContext()->New(numel_ * storage_.itemsize());
-        storage_.set_data_ptr(at::InefficientStdFunctionContext::makeDataPtr(
-            ptr_and_deleter.first,
-            ptr_and_deleter.second,
-            at::Device(storage_.device_type())));
+        auto data_ptr = GetStaticContext()->New(numel_ * storage_.itemsize());
+        storage_.set_data_ptr(std::move(data_ptr));
       }
       storage_.set_numel(numel_);
       AT_ASSERT(storage_offset_ == 0); // because we just reallocated

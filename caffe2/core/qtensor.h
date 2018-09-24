@@ -122,10 +122,10 @@ class CAFFE2_EXPORT QTensor {
 
   unsigned char* mutable_data() {
     if (!data_) {
-      auto ptr_and_deleter = Context::New(nbytes());
+      auto data_ptr = Context::New(nbytes());
       data_.reset(
-          static_cast<unsigned char*>(ptr_and_deleter.first),
-          ptr_and_deleter.second);
+          static_cast<unsigned char*>(data_ptr.release_context()),
+          data_ptr.get_deleter());
       capacity_ = nbytes() * CHAR_BIT;
     }
     CAFFE_ENFORCE(capacity_ == nbytes() * CHAR_BIT);

@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include <ATen/core/ATenGeneral.h>
+#include <ATen/core/Allocator.h>
 #include <ATen/core/Device.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/Registry.h>
@@ -30,7 +31,7 @@ class AT_CORE_API BaseStaticContext {
  public:
   virtual ~BaseStaticContext() noexcept {}
 
-  virtual std::pair<void*, DeleterFnPtr> New(size_t nbytes) const = 0;
+  virtual at::DataPtr New(size_t nbytes) const = 0;
 
   virtual DeviceType GetDeviceType() = 0;
 

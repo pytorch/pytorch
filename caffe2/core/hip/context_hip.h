@@ -206,7 +206,7 @@ class HIPContext final : public BaseContext {
     return hiprand_generator_;
   }
 
-  static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
+  static at::DataPtr New(size_t nbytes) {
     return StaticContext()->New(nbytes);
   }
 
@@ -326,23 +326,23 @@ inline void CPUContext::CopyBytes<CPUContext, HIPContext>(
 struct PinnedCPUAllocator final : CPUAllocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
+  at::DataPtr allocate(size_t nbytes) const override {
     void* data;
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
     if (IsNUMAEnabled()) {
-      auto ptr_and_deleter = baseAllocator_.New(nbytes);
-      data = ptr_and_deleter.first;
+      auto ptr_and_deleter = baseAllocator_.allocate(nbytes);
+      data = baseAllocator_.release().release();
       CAFFE_ENFORCE(data);
       HIP_ENFORCE(hipHostRegister(data, nbytes, hipHostRegisterDefault));
     } else {
       HIP_ENFORCE(hipHostMalloc(&data, nbytes));
     }
     memset(data, 0, nbytes);
-    return {data, Delete};
+    return {data, data, &Delete, at::Device(CPU)};
   }
 
-  MemoryDeleter GetDeleter() override {
-    return Delete;
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
   }
 
  private:
@@ -374,7 +374,7 @@ struct PinnedCPUAllocator final : CPUAllocator {
 
 class HIPStaticContext final : public BaseStaticContext {
  public:
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
+  at::DataPtr New(size_t nbytes) const override;
 
   DeviceType GetDeviceType() override {
     return HIP;

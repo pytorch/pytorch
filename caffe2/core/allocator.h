@@ -3,6 +3,7 @@
 
 #include <unordered_map>
 
+#include <ATen/core/Allocator.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/numa.h"
 
@@ -41,10 +42,10 @@ class CAFFE2_API MemoryAllocationReporter {
   size_t allocated_;
 };
 
-struct CAFFE2_API DefaultCPUAllocator final : CPUAllocator {
+struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
   DefaultCPUAllocator() {}
   ~DefaultCPUAllocator() override {}
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
+  at::DataPtr allocate(size_t nbytes) const override {
     void* data = nullptr;
 #ifdef __ANDROID__
     data = memalign(gCaffe2Alignment, nbytes);
@@ -59,7 +60,12 @@ struct CAFFE2_API DefaultCPUAllocator final : CPUAllocator {
     if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
       memset(data, 0, nbytes);
     }
-    return {data, Delete};
+    LOG(INFO) << "allocated data: " << data;
+    if (FLAGS_caffe2_report_cpu_memory_usage) {
+      reporter_.New(data, nbytes);
+      return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
+    }
+    return {data, data, &Delete, at::Device(at::DeviceType::CPU)};
   }
 
 #ifdef _MSC_VER
@@ -68,20 +74,32 @@ struct CAFFE2_API DefaultCPUAllocator final : CPUAllocator {
   }
 #else
   static void Delete(void* data) {
+    LOG(INFO) << "destructed " << data;
     free(data);
   }
 #endif
 
-  MemoryDeleter GetDeleter() override {
-    return Delete;
+  static void ReportAndDelete(void* ptr) {
+    reporter_.Delete(ptr);
+    Delete(ptr);
   }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    if (FLAGS_caffe2_report_cpu_memory_usage) {
+      return &ReportAndDelete;
+    }
+    return &Delete;
+  }
+
+ protected:
+  static MemoryAllocationReporter reporter_;
 };
 
 // Get the CPU Alloctor.
-CAFFE2_API CPUAllocator* GetCPUAllocator();
+CAFFE2_API at::Allocator* GetCPUAllocator();
 // Sets the CPU allocator to the given allocator: the caller gives away the
 // ownership of the pointer.
-CAFFE2_API void SetCPUAllocator(CPUAllocator* alloc);
+CAFFE2_API void SetCPUAllocator(at::Allocator* alloc);
 
 } // namespace caffe2
 
