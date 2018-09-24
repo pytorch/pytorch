@@ -16,10 +16,10 @@
 
 #include <string>
 
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/blob_serialization.h"
 #ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
 #endif

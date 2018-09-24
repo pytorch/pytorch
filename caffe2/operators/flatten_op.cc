@@ -12,8 +12,8 @@ OPERATOR_SCHEMA(Flatten)
       ArgumentHelper helper(def);
       const int axis = helper.GetSingleArgument<int>("axis", 1);
       vector<TensorShape> out(1);
-      TIndex outer = 1;
-      TIndex inner = 1;
+      int64_t outer = 1;
+      int64_t inner = 1;
       std::size_t index = 0;
       for (auto d : in[0].dims()) {
         if (index < axis) {

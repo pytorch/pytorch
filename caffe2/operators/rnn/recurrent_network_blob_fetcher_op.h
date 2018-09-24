@@ -31,7 +31,7 @@ class RecurrentNetworkBlobFetcherOp final : public Operator<Context> {
 
     std::vector<std::string> blob_names_vector = {};
 
-    for (TIndex i = 0; i < stepWorkspaces.size(); i++) {
+    for (int64_t i = 0; i < stepWorkspaces.size(); i++) {
       Workspace* currentStepWorkspace = stepWorkspaces[i].get();
       std::vector<std::string> blob_names = currentStepWorkspace->LocalBlobs();
 
