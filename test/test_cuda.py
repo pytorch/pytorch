@@ -30,9 +30,11 @@ if not TEST_CUDA:
     TestCase = object  # noqa: F811
 
 TEST_MAGMA = TEST_CUDA
+TEST_LARGE_TENSOR = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
+    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
@@ -938,7 +940,7 @@ class TestCuda(TestCase):
     def test_neg(self):
         TestTorch._test_neg(self, lambda t: t.cuda())
 
-    @unittest.skipIf(torch.cuda.get_device_properties(0).total_memory < 6e9, "not enough memory")
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_arithmetic_large_tensor(self):
         x = torch.empty(2**30, device='cuda')
 
