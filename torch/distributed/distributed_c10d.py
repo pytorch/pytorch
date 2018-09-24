@@ -1149,3 +1149,72 @@ def new_group(ranks=None):
             if rank in ranks:
                 _pg_group_ranks[pg][rank] = ranks.index(rank)
     return pg
+
+
+def ring_all_reduce(tensor,
+         group=group.WORLD):
+    """
+    Reduces the tensor data across all machines in such a way that all get
+    the final result.
+
+    Arguments:
+        tensor (Tensor): Tensor to send.
+        group (ProcessGroup, optional): The process group to work on
+
+    """
+    if _rank_not_in_group(group):
+        return
+    
+    #distributed environment
+    rank = get_rank(group)
+    world_size = get_world_size(group)
+    
+    #define neighborhood
+    left = ((rank - 1) + world_size) % world_size
+    right = (rank + 1) % world_size
+    
+    #seg_sizes: split tensor to segments
+    length = len(tensor)
+    seg_size = int(length / world_size)
+    residual = length % world_size
+    seg_sizes = [seg_size] * world_size
+    for i in range(residual):
+        seg_sizes[i] += 1
+        
+    #seg_ends: ith segment's ending index
+    seg_ends = [0] * world_size
+    seg_ends[0] = seg_sizes[0]
+    for i in range(1, world_size):
+        seg_ends[i] = seg_sizes[i] + seg_ends[i-1]
+    
+    recv_buff = torch.FloatTensor(length)
+    
+    #first loop
+    barrier(group)
+    for i in range(world_size - 1):
+        send_index = (rank - i + world_size) % world_size
+        recv_index = (rank - i - 1 + world_size) % world_size
+        send_start = seg_ends[send_index] - seg_sizes[send_index]
+        recv_start = seg_ends[recv_index] - seg_sizes[recv_index]
+
+        send_req = isend(tensor[send_start:seg_ends[send_index]], right, group=group)
+
+        recv(recv_buff[recv_start:seg_ends[recv_index]], src=left, group=group)        
+        tensor[recv_start:seg_ends[recv_index]].add_(recv_buff[recv_start:seg_ends[recv_index]])
+        send_req.wait()
+        barrier(group)
+        
+    #second loop
+    for i in range(world_size - 1):
+        send_index = (rank - i + 1 + world_size) % world_size
+        recv_index = (rank - i + world_size) % world_size
+        send_start = seg_ends[send_index] - seg_sizes[send_index]
+        recv_start = seg_ends[recv_index] - seg_sizes[recv_index]
+
+        send_req = isend(tensor[send_start:seg_ends[send_index]], right, group=group)
+
+        recv(tensor[recv_start:seg_ends[recv_index]], src=left, group=group)
+        send_req.wait()
+        barrier(group)
+    
+    del recv_buff
