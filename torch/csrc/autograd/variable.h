@@ -295,6 +295,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   int64_t dim() const override;
   const at::Storage& storage() const override;
   int64_t storage_offset() const override;
+  void* data(caffe2::TypeIdentifier type_id) const override;
 
   std::shared_ptr<Function> get_grad_accumulator();
   virtual std::shared_ptr<Function>& get_grad_fn() {

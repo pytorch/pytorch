@@ -85,6 +85,10 @@ void Variable::Impl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("variable impl does not have set_storage_offset");
 }
 
+void* Variable::Impl::data(caffe2::TypeIdentifier type_id) const {
+  return data_.unsafeGetTensorImpl()->data(type_id);
+}
+
 const at::Storage& Variable::Impl::storage() const {
   return data_.storage();
 }
