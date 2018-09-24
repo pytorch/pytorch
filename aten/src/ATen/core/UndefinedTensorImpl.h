@@ -4,8 +4,8 @@
 
 namespace at {
 
-struct AT_API UndefinedTensorImpl final : public TensorImpl {
-public:
+struct CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
+ public:
   // Without this, we get:
   //  error: identifier "at::UndefinedTensorImpl::_singleton" is undefined in device code
   // (ostensibly because the constexpr tricks MSVC into trying to compile this

@@ -76,7 +76,7 @@ enum class TypeID {
   NumOptions
 };
 
-struct AT_API Type {
+struct CAFFE2_API Type {
   explicit Type(TensorTypeId type_id, bool is_variable, bool is_undefined)
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
@@ -613,7 +613,6 @@ protected:
   TensorTypeId type_id_;
   bool is_variable_;
   bool is_undefined_;
-
 };
 
 } // namespace at
