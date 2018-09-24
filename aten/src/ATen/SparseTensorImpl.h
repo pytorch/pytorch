@@ -5,7 +5,7 @@
 #include "ATen/core/Error.h"
 
 namespace at {
-struct AT_API SparseTensorImpl : public TensorImpl {
+struct CAFFE2_API SparseTensorImpl : public TensorImpl {
   // Stored in COO format, indices + values.
 
   // INVARIANTS:
