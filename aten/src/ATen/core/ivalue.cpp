@@ -6,7 +6,8 @@
 
 namespace torch { namespace jit {
 
-AT_API c10::intrusive_ptr<ConstantString> ConstantString::create(std::string str_) {
+CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+    std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
 

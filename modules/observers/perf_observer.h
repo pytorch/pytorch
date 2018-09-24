@@ -4,6 +4,7 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/timer.h"
+#include "observers/macros.h"
 
 #include <unordered_map>
 

@@ -20,7 +20,7 @@ struct Tensor;
 } // namespace at
 
 namespace at {
-struct AT_API TensorImpl : public c10::intrusive_ptr_target {
+struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
   TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable);
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
