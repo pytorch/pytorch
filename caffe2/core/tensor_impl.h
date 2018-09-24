@@ -6,8 +6,6 @@
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
-// TODO: remove
-#include "caffe2/core/context_base.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
 

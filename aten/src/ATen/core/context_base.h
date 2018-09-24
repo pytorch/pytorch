@@ -191,8 +191,6 @@ AT_DECLARE_TYPED_REGISTRY(
 #define REGISTER_CONTEXT(type, ...) \
   AT_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
 
-// Registry<at::DeviceType, std::unique_ptr<at::BaseContext>, at::Device>* abc;
-
 inline std::unique_ptr<at::BaseContext> CreateContext(
     const at::Device& device) {
   return ContextRegistry()->Create(device.type(), device);

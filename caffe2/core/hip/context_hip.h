@@ -376,19 +376,6 @@ class HIPStaticContext final : public BaseStaticContext {
  public:
   std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
 
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<HIPContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<HIPContext>(option);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(int gpu_id = -1) {
-    return caffe2::make_unique<HIPContext>(gpu_id);
-  }
-
   DeviceType GetDeviceType() override {
     return HIP;
   }
