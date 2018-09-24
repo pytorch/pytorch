@@ -221,7 +221,7 @@ void FusedKernel::launch(
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
-    outputs.push_back(ref_type.toScalarType(od.scalar_type).tensor());
+    outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type)));
   }
 
   launch_with_tensors(inputs, outputs);

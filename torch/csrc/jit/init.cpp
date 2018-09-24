@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
@@ -106,6 +107,9 @@ void initJITBindings(PyObject *module) {
      return ConstantPropagation(g);
    })
    .def("_jit_pass_erase_shape_information", EraseShapeInformation)
+   .def("_jit_pass_create_autodiff_subgraphs", [](Graph& graph) {
+     CreateAutodiffSubgraphs(graph);
+   })
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
