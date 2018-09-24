@@ -101,6 +101,16 @@ macro(find_package_and_print_version PACKAGE_NAME)
   message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
 endmacro()
 
+message("\n***** Library versions from dpkg *****\n")
+execute_process(COMMAND dpkg -l COMMAND grep rocm-dev COMMAND awk "{print $2 \" VERSION: \" $3}")
+execute_process(COMMAND dpkg -l COMMAND grep rocm-libs COMMAND awk "{print $2 \" VERSION: \" $3}")
+execute_process(COMMAND dpkg -l COMMAND grep hsakmt-roct COMMAND awk "{print $2 \" VERSION: \" $3}")
+execute_process(COMMAND dpkg -l COMMAND grep rocr-dev COMMAND awk "{print $2 \" VERSION: \" $3}")
+execute_process(COMMAND dpkg -l COMMAND grep -w hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
+execute_process(COMMAND dpkg -l COMMAND grep hip_base COMMAND awk "{print $2 \" VERSION: \" $3}")
+execute_process(COMMAND dpkg -l COMMAND grep hip_hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
+
+message("\n***** Library versions from cmake find_package *****\n")
 # Find the HIP Package
 find_package_and_print_version(HIP 1.0)
 
