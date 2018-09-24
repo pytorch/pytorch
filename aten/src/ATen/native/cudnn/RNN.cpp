@@ -464,7 +464,7 @@ namespace {
               mat_numel * num_linear_layers / 2, 1};
             // Generate a new parameter tensor which is a view into the
             // weight_buf.
-            Tensor param = weight_buf.type().tensor().set_(weight_buf.storage(), offset, size);
+            Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
             params.emplace_back(std::move(param));
             layer_params_count++;
           } else {
@@ -616,7 +616,7 @@ Tensor _cudnn_rnn_flatten_weight(
   x_desc.set(getCudnnDataType(any_param), x_geom.sizes(), x_geom.strides(), 5);
 
   auto num_weights = get_num_weights(handle, rnn_desc, x_desc, rnn.datatype);
-  auto weight_buf = any_param.type().tensor(num_weights).zero_();
+  auto weight_buf = at::zeros(num_weights, any_param.options());
 
   FilterDescriptor w_desc;
   w_desc.set(weight_buf, 3);
@@ -691,13 +691,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
            "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
-  auto output = input.type().tensor(output_size);
-  auto hy = hx.type().tensor(hidden_size);
+  auto output = at::empty(output_size, input.options());
+  auto hy = at::empty(hidden_size, hx.options());
   Tensor cy;
   if (cx.defined()) {
-    cy = cx.type().tensor(hidden_size);
+    cy = at::empty(hidden_size, cx.options());
   } else {
-    cy = hx.type().tensor(); // NB: Not allowed to return undefined tensors
+    cy = at::empty({0}, hx.options()); // NB: Not allowed to return undefined tensors
   }
   auto y = output;
 
@@ -709,7 +709,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   FilterDescriptor w_desc;
   if (!weight_buf.defined()) {
     auto num_weights = get_num_weights(handle, descs.rnn_desc, descs.x_descs[0], fn.rnn.datatype);
-    weight_buf = x.type().tensor(num_weights);
+    weight_buf = at::empty(num_weights, x.options());
     w_desc.set(weight_buf, 3);
     weight_buf.zero_();
     std::vector<Tensor> params;
@@ -734,7 +734,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
         x_descs_arr.data(),
         &workspace_size
         ));
-  Tensor workspace = input.type().toScalarType(kByte).tensor(workspace_size);
+  Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
 
   Tensor reserve;
   // NB: Previously, the test was for fn.requires_grad, but we don't have
@@ -748,7 +748,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           x_descs_arr.data(),
           &reserve_size
           ));
-    reserve = input.type().toScalarType(kByte).tensor(reserve_size);
+    reserve = at::empty(reserve_size, input.options().dtype(kByte));
     AT_CUDNN_CHECK(cudnnRNNForwardTraining(
           handle,
           descs.rnn_desc.desc(),
@@ -764,7 +764,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           reserve.data_ptr(), reserve.size(0)
           ));
   } else { // inference
-    reserve = input.type().toScalarType(kByte).tensor();
+    reserve = at::empty({0}, input.options().dtype(kByte));
     AT_CUDNN_CHECK(cudnnRNNForwardInference(
           handle,
           descs.rnn_desc.desc(),
@@ -836,12 +836,12 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto dy = grad_output.contiguous();
   auto y = output;
   auto w = weight_buf;
-  auto dx = input.type().tensor(input.sizes()); // TODO: more compact way of saying this
+  auto dx = at::empty(input.sizes(), input.options()); // TODO: more compact way of saying this
   auto dhy = grad_hy.contiguous().view(hidden_size);
   auto dcy = grad_cy.defined() ? grad_cy.contiguous().view(hidden_size) : Tensor();
-  auto dhx = hx.type().tensor(hidden_size);
+  auto dhx = at::empty(hidden_size, hx.options());
   AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
-  auto dcx = cx.defined() ? cx.type().tensor(hidden_size) : Tensor();
+  auto dcx = cx.defined() ? at::empty(hidden_size, cx.options()) : Tensor();
 
   AT_CHECK(fn_train,
            "cudnn RNN backward can only be called in training mode");
@@ -881,7 +881,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
         &workspace_size
         ));
   // TODO: put this in the correct device???
-  Tensor workspace = input.type().toScalarType(kByte).tensor(workspace_size);
+  Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
 
   AT_CUDNN_CHECK(cudnnRNNBackwardData(
         handle,
@@ -965,7 +965,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
 
   auto x = input.contiguous();
   const auto& y = output;
-  auto dw = weight_buf.type().tensor(weight_buf.sizes()).zero_();
+  auto dw = at::zeros(weight_buf.sizes(), weight_buf.options());
 
   cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors);
   fn.rnn.set_algo(algo);
@@ -984,7 +984,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         x_descs_arr.data(),
         &workspace_size
         ));
-  Tensor workspace = input.type().toScalarType(kByte).tensor(workspace_size);
+  Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
 
   AT_CUDNN_CHECK(cudnnRNNBackwardWeights(
         handle,
@@ -1001,7 +1001,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   std::vector<Tensor> grad_weight_arr;
   grad_weight_arr.reserve( weight.numel() );
   for (const auto& w : weight_arr) {
-    grad_weight_arr.emplace_back(w.type().tensor(w.sizes()).zero_());
+    grad_weight_arr.emplace_back(at::zeros(w.sizes(), w.options()));
   }
 
   std::vector<Tensor> grad_params_arr;
@@ -1155,7 +1155,7 @@ Tensor try_get_weight_buf(
   // Try to get parameter storage
   auto & any_param = parameters.at(0);
   auto param_storage = any_param.storage();
-  auto weight_buf = any_param.type().tensor().set_(param_storage);
+  auto weight_buf = at::empty({0}, any_param.options()).set_(param_storage);
   if (weight_buf.size(0) < num_params) {
     return {};
   } else if (weight_buf.size(0) > num_params) {

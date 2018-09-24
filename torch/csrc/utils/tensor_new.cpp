@@ -314,7 +314,7 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.tensor();
+    return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
@@ -374,7 +374,7 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.tensor();
+    return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     return new_with_storage(type, r.storage(0));
   } else if (r.idx == 2) {
@@ -420,7 +420,7 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.tensor();
+    return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     return new_with_storage(type, r.storage(0));
   } else if (r.idx == 2) {

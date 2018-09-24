@@ -88,7 +88,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor inverse(const Tensor& self) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::inverse_out(result, self);
 }
 
@@ -111,7 +111,7 @@ Tensor pinverse(const Tensor& self, double rcond) {
            "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
-    return self.type().tensor({self.size(1), self.size(0)});
+    return at::empty({self.size(1), self.size(0)}, self.options());
   }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
@@ -345,7 +345,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 
 
 Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::baddbmm_out_cpu(result, self, batch1, batch2, beta, alpha);
 }
 
@@ -362,7 +362,7 @@ Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, S
 }
 
 Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::bmm_out_cpu(result, self, mat2);
 }
 

@@ -157,11 +157,11 @@ public:
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
 
-    auto empty_indices = indices().type().tensor({sparseDims, 0});
+    auto empty_indices = at::empty({sparseDims, 0}, indices().options());
     std::vector<int64_t> values_size = {0};
     auto dense_size = sizes().slice(sparseDims);
     values_size.insert(values_size.end(), dense_size.begin(), dense_size.end());
-    auto empty_values = values().type().tensor(values_size);
+    auto empty_values = at::empty(values_size, values().options());
     set_indices_and_values_unsafe(empty_indices, empty_values);
     refresh_numel();
   }

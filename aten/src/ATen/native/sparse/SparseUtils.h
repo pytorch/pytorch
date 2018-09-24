@@ -110,7 +110,7 @@ inline LongTensor _newFlattenedIndices(const SparseTensor& self, bool forceClone
 inline Tensor _new_values_with_size_of(const Tensor& values, int64_t nnz) {
   std::vector<int64_t> size = values.sizes().vec();
   size[0] = nnz;
-  return values.type().tensor(size);
+  return at::empty(size, values.options());
 }
 
 
