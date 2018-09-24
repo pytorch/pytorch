@@ -168,8 +168,7 @@ from tools.setup_helpers.miopen import (USE_MIOPEN, MIOPEN_LIBRARY,
                                         MIOPEN_LIB_DIR, MIOPEN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import USE_NCCL, USE_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
-from tools.setup_helpers.mkldnn import (USE_MKLDNN, MKLDNN_LIBRARY,
-                                        MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR)
+from tools.setup_helpers.mkldnn import USE_MKLDNN
 from tools.setup_helpers.nnpack import USE_NNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
@@ -378,9 +377,6 @@ def build_libs(libs):
         my_env["MIOPEN_LIBRARY"] = MIOPEN_LIBRARY
         my_env["MIOPEN_INCLUDE_DIR"] = MIOPEN_INCLUDE_DIR
     if USE_MKLDNN:
-        my_env["MKLDNN_LIB_DIR"] = MKLDNN_LIB_DIR
-        my_env["MKLDNN_LIBRARY"] = MKLDNN_LIBRARY
-        my_env["MKLDNN_INCLUDE_DIR"] = MKLDNN_INCLUDE_DIR
         build_libs_cmd += ['--use-mkldnn']
     if USE_GLOO_IBVERBS:
         build_libs_cmd += ['--use-gloo-ibverbs']
@@ -613,7 +609,7 @@ class build_ext(build_ext_parent):
         else:
             print('-- Not using CUDA')
         if USE_MKLDNN:
-            print('-- Detected MKLDNN at ' + MKLDNN_LIBRARY + ', ' + MKLDNN_INCLUDE_DIR)
+            print('-- Building with MKLDNN')
         else:
             print('-- Not using MKLDNN')
         if USE_NCCL and USE_SYSTEM_NCCL:
