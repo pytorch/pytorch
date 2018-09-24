@@ -1187,7 +1187,7 @@ def ring_all_reduce(tensor,
     for i in range(1, world_size):
         seg_ends[i] = seg_sizes[i] + seg_ends[i-1]
     
-    recv_buff = torch.FloatTensor(length)
+    recv_buff = tensor.clone()
     
     #first loop
     barrier(group)
@@ -1218,3 +1218,5 @@ def ring_all_reduce(tensor,
         barrier(group)
     
     del recv_buff
+    
+    return
