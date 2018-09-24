@@ -6,6 +6,7 @@
 #include <typeinfo>
 #include <type_traits>
 #include <vector>
+#include "caffe2/core/common.h"
 
 #include <ATen/core/typeid.h>
 #include "caffe2/core/logging.h"
