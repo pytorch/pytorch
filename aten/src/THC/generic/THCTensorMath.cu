@@ -206,12 +206,12 @@ void THCTensor_(catArray)(
         CatArrInputTensor<scalar_t, unsigned int, CAT_ARRAY_MAX_INPUT_DIMS>*>(
         THCudaMalloc(state, tensorMetadataSize));
 
-    OutputTensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
+    TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
 
     // Next, let's initialize the size, stride arrays for the output Tensor.
     for (i = 0; i < nDims; ++i) {
-      param.outputSize[i] = THCTensor_(size)(state, result, i);
-      param.outputStride[i] = THCTensor_(stride)(state, result, i);
+      param.tensorSize[i] = THCTensor_(size)(state, result, i);
+      param.tensorStride[i] = THCTensor_(stride)(state, result, i);
     }
 
     THCStream* stream = THCState_getStream(state);
@@ -220,7 +220,7 @@ void THCTensor_(catArray)(
 #define HANDLE_CASE(DIMS)                                     \
   CatArrayBatchedCopy<scalar_t, unsigned int, DIMS>           \
       <<<catGrid, applyBlock, 0, THCStream_stream(stream)>>>( \
-          data, d_inputs, param, dimension, pad_value);
+          data, d_inputs, param, dimension, pad, pad_value);
 
     // Now we loop
     offset = 0;
@@ -240,10 +240,10 @@ void THCTensor_(catArray)(
 
           int64_t dimSize = THCTensor_(size)(state, curtensor, dimension);
 
-          InputTensorSize<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> inputParam;
+          TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> inputParam;
           for (int k = 0; k < nDims; ++k) {
-            inputParam.inputSize[k] = THCTensor_(size)(state, curtensor, k);
-            inputParam.inputStride[k] = THCTensor_(stride)(state, curtensor, k);
+            inputParam.tensorSize[k] = THCTensor_(size)(state, curtensor, k);
+            inputParam.tensorStride[k] = THCTensor_(stride)(state, curtensor, k);
           }
 
           THCTensor* nt = THCTensor_(newWithTensor)(state, result);
