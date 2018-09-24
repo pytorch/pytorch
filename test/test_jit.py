@@ -7624,6 +7624,18 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
+
+    # The following fail due to #12024.
+    # A prim::ListConstruct is involved and the indices get traced as DynamicType,
+    # which always require_grad. This causes a crash in autodiff.
+    'test___getitem___adv_index',
+    'test___getitem___adv_index_beg',
+    'test___getitem___adv_index_comb',
+    'test___getitem___adv_index_dup',
+    'test___getitem___adv_index_sub',
+    'test___getitem___adv_index_sub_2',
+    'test___getitem___adv_index_sub_3',
+    'test___getitem___adv_index_var',
 }
 
 EXCLUDE_TYPE_CHECK = {
