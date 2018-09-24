@@ -10,7 +10,7 @@ bool NHWC2NCHWOp<float, CPUContext>::RunOnDevice() {
   auto ndim = X.ndim();
   CAFFE_ENFORCE_GE(ndim, 3);
   const int N = X.dim32(0), C = X.dim32(ndim - 1);
-  vector<TIndex> Y_dims(ndim);
+  vector<int64_t> Y_dims(ndim);
   Y_dims[0] = N;
   Y_dims[1] = C;
   int image_size = 1;
@@ -47,7 +47,7 @@ bool NCHW2NHWCOp<float, CPUContext>::RunOnDevice() {
   auto ndim = X.ndim();
   CAFFE_ENFORCE_GE(X.ndim(), 3);
   const int N = X.dim32(0), C = X.dim32(1);
-  vector<TIndex> Y_dims(ndim);
+  vector<int64_t> Y_dims(ndim);
   Y_dims[0] = N;
   int image_size = 1;
   for (auto i = 1; i < ndim - 1; ++i) {

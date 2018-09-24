@@ -206,6 +206,7 @@ class TestTorch(TestCase):
                        'reinforce',
                        'relu',
                        'relu_',
+                       'prelu',
                        'resize',
                        'resize_as',
                        'smm',

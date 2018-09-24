@@ -640,7 +640,7 @@ void testMPSCNN() {
               CAFFE_ENFORCE_EQ(t1.ndim(), 2);
               CAFFE_ENFORCE(t2.dim32(2) == 1 && t2.dim32(3) == 1);
               const_cast<TensorCPU&>(t2).Reshape(
-                  std::vector<TIndex>{TIndex(batchSize), TIndex(COut)});
+                  std::vector<int64_t>{int64_t(batchSize), int64_t(COut)});
               // Note dims do not match, as Metal leaves a 1x1 spatial
               // dimension.
               CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());

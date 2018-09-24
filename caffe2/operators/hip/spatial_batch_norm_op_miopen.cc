@@ -58,7 +58,7 @@ class MIOpenSpatialBNOp final : public SpatialBNOp<HIPContext> {
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t data_desc_;
   miopenTensorDescriptor_t bn_param_desc_;
-  vector<TIndex> miopen_input_dims_;
+  vector<int64_t> miopen_input_dims_;
   float alpha_;
   float beta_;
   miopenBatchNormMode_t mode_;
@@ -97,7 +97,7 @@ class MIOpenSpatialBNGradientOp final : public SpatialBNGradientOp<HIPContext> {
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t data_desc_;
   miopenTensorDescriptor_t bn_param_desc_;
-  vector<TIndex> miopen_input_dims_;
+  vector<int64_t> miopen_input_dims_;
   float alpha_;
   float beta_;
   miopenBatchNormMode_t mode_;

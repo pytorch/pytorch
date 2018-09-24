@@ -75,7 +75,7 @@ class AllgatherOp final : public Operator<Context> {
     auto comm_size =
         OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0)->size;
     const auto dims =
-        std::vector<TIndex>(1, (InputSize() - 1) * Input(1).size() * comm_size);
+        std::vector<int64_t>(1, (InputSize() - 1) * Input(1).size() * comm_size);
     Output(0)->Resize(dims);
 
     // Store which inputs/outputs this instance initialized with

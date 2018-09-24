@@ -26,14 +26,6 @@ std::mutex& gTypeRegistrationMutex() {
   return g_type_registration_mutex;
 }
 
-string GetExceptionString(const std::exception& e) {
-#ifdef __GXX_RTTI
-  return at::demangle(typeid(e).name()) + ": " + e.what();
-#else
-  return string("Exception (no RTTI available): ") + e.what();
-#endif // __GXX_RTTI
-}
-
 void TypeMeta::_ThrowRuntimeTypeLogicError(const std::string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
