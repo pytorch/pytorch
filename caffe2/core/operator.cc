@@ -581,7 +581,7 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
 }
 
 TensorShapes InferBlobShapesAndTypesFromMap(
-    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
   // Populate shapes from known blobs
@@ -597,7 +597,7 @@ TensorShapes InferBlobShapesAndTypesFromMap(
 }
 
 TensorShapes InferBlobShapesAndTypesFromMap(
-    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const CaffeMap<std::string, TensorProto_DataType>& blob_types,
     const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
@@ -691,6 +691,17 @@ std::set<std::string> GetRegisteredOperators() {
   }
 
   return all_keys;
+}
+
+static std::function<void(const OperatorDef&)> OperatorLogger =
+    [](const OperatorDef&) { return; };
+
+void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer) {
+  OperatorLogger = tracer;
+}
+
+std::function<void(const OperatorDef&)> GetOperatorLogger() {
+  return OperatorLogger;
 }
 
 }  // namespace caffe2

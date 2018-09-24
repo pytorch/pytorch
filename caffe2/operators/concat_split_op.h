@@ -161,7 +161,7 @@ bool SplitOp<Context>::RunOnDevice() {
       input_channels,
       "Sum of split dimensions do not match: should be ",
       input_channels);
-  vector<TIndex> output_dims(input.dims());
+  vector<int64_t> output_dims(input.dims());
   int before = 1, after = 1;
   for (int i = 0; i < canonical_axis; ++i) {
     before *= input.dim32(i);
@@ -215,7 +215,7 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
       input_channels,
       "Sum of split dimensions do not match: should be ",
       input_channels);
-  vector<TIndex> output_dims(input.dims());
+  vector<int64_t> output_dims(input.dims());
   int before = input.size_to_dim(canonical_axis);
   int after = input.size_from_dim(canonical_axis + 1);
   size_t input_offset = 0;
@@ -245,7 +245,7 @@ template <class Context>
 bool ConcatOp<Context>::RunOnDevice() {
   auto* output = Output(0);
   Tensor* split = this->template Output<Tensor>(1, CPU);
-  split->Resize(vector<TIndex>(1, InputSize()));
+  split->Resize(vector<int64_t>(1, InputSize()));
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
   int adj_size = input_zero.ndim() + (add_axis_ ? 1 : 0);
@@ -263,7 +263,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   }
 
   int before = 1, after = 1;
-  vector<TIndex> output_dims(input_zero.dims());
+  vector<int64_t> output_dims(input_zero.dims());
   for (int i = 0; i < input_zero.ndim(); ++i) {
     if (i == canonical_axis && !add_axis_) {
       continue;

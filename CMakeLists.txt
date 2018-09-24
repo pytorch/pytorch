@@ -124,7 +124,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
     "USE_GLOO" OFF)
-option(TORCH_USE_CEREAL "Build the C++ API with Cereal for serialization support" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)

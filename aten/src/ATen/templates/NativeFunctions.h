@@ -4,7 +4,6 @@
 
 #include <ATen/Context.h>
 #include <ATen/ScalarType.h>
-#include <ATen/TensorOperators.h>
 #include <ATen/core/TensorMethods.h>
 #include <ATen/core/TensorOptions.h>
 

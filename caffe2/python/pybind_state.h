@@ -178,7 +178,7 @@ class TensorFeeder : public BlobFeederBase {
     // numpy requires long int as its dims.
     int ndim = PyArray_NDIM(array);
     npy_intp* npy_dims = PyArray_DIMS(array);
-    std::vector<TIndex> dims;
+    std::vector<int64_t> dims;
     for (int i = 0; i < ndim; ++i) {
       dims.push_back(npy_dims[i]);
     }

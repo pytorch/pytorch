@@ -35,6 +35,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
     If you have a numpy array and want to avoid a copy, use
     :func:`torch.from_numpy`.
 
+.. warning::
+
+    When data is a tensor `x`, :func:`new_tensor()` reads out 'the data' from whatever it is passed,
+    and constructs a leaf variable. Therefore ``tensor.new_tensor(x)`` is equivalent to ``x.clone().detach()``
+    and ``tensor.new_tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
+    The equivalents using ``clone()`` and ``detach()`` are recommended.
+
 Args:
     data (array_like): The returned Tensor copies :attr:`data`.
     {dtype}
@@ -434,16 +441,35 @@ In-place version of :meth:`~Tensor.baddbmm`
 
 add_docstr_all('bernoulli',
                r"""
-bernoulli() -> Tensor
+bernoulli(*, generator=None) -> Tensor
+
+Returns a result tensor where each :math:`\texttt{result[i]}` is independently
+sampled from :math:`\text{Bernoulli}(\texttt{self[i]})`. :attr:`self` must have
+floating point ``dtype``, and the result will have the same ``dtype``.
 
 See :func:`torch.bernoulli`
 """)
 
 add_docstr_all('bernoulli_',
                r"""
-bernoulli_() -> Tensor
+.. function:: bernoulli_(p=0.5, *, generator=None) -> Tensor
 
-In-place version of :meth:`~Tensor.bernoulli`
+    Fills each location of :attr:`self` with an independent sample from
+    :math:`\text{Bernoulli}(\texttt{p})`. :attr:`self` can have integral
+    ``dtype``.
+
+.. function:: bernoulli_(p_tensor, *, generator=None) -> Tensor
+
+    :attr:`p_tensor` should be a tensor containing probabilities to be used for
+    drawing the binary random number.
+
+    The :math:`\text{i}^{th}` element of :attr:`self` tensor will be set to a
+    value sampled from :math:`\text{Bernoulli}(\texttt{p\_tensor[i]})`.
+
+    :attr:`self` can have integral ``dtype``, but :attr`p_tensor` must have
+    floating point ``dtype``.
+
+See also :meth:`~Tensor.bernoulli` and :func:`torch.bernoulli`
 """)
 
 add_docstr_all('bincount',

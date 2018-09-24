@@ -900,7 +900,7 @@ class RNNApplyLinkOp : public Operator<Context> {
     auto* external_out = Output(1);
 
     CAFFE_ENFORCE_GT(external.size(), 0);
-    const TIndex externalTimestepSize = external.size() / external.dim(0);
+    const int64_t externalTimestepSize = external.size() / external.dim(0);
     auto* externalData = external_out->template mutable_data<T>() +
         (t + offset_) * externalTimestepSize;
     auto internalDims = external_out->dims();

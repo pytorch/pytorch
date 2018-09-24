@@ -144,7 +144,8 @@ void initPythonIRBindings(PyObject * module_) {
       return ss.str();
     })
     .def("propagate_shapes", [](Graph& g, std::vector<at::Tensor> inputs, bool with_grad) {
-      PropagateInputShapes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
+      setInputTypes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+      PropagateInputShapes(g);
     })
     .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
                       int64_t onnx_opset_version, bool defer_weight_export,
@@ -215,6 +216,11 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("return_node", [](Graph &g) {
       return g.block()->return_node();
+    })
+    .def("pretty_print", [](Graph &g) {
+      std::ostringstream oss;
+      g.prettyPrint(oss);
+      return oss.str();
     })
     .GS(createFusionGroup)
     .def("createClone",[](Graph & g, Node * n, py::object fn) {
@@ -433,6 +439,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "NumberType";
         case TypeKind::NoneType:
           return "NoneType";
+        case TypeKind::UndefinedTensorType:
+          return "UndefinedTensorType";
         case TypeKind::CompleteTensorType:
           return "CompleteTensorType";
         case TypeKind::TupleType:

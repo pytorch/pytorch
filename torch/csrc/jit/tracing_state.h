@@ -97,6 +97,7 @@ inline bool isTracing() {
 using warn_fn_type = void (*)(const std::string& msg);
 TORCH_API extern const char * WARN_PYTHON_DATAFLOW;
 TORCH_API extern const char * WARN_CONSTRUCTOR;
+TORCH_API extern const char * WARN_RESIZE;
 TORCH_API void _do_warn(const char * _reason, const char * _kind);
 inline void warn(const char * _reason, const char * _kind=nullptr) {
   if (auto state = getTracingState()) {

@@ -13,10 +13,12 @@
 
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
+#include <string>
 #include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
@@ -68,7 +70,7 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               at::DeviceGuard guard(a);
-              push(stack, a.toCLong());
+              push(stack, a.item<int64_t>());
               return 0;
             };
           } else {
@@ -76,7 +78,7 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               at::DeviceGuard guard(a);
-              push(stack, a.toCDouble());
+              push(stack, a.item<double>());
               return 0;
             };
           }
@@ -90,7 +92,7 @@ RegisterOperators reg({
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/true);
               at::DeviceGuard guard(a);
-              push(stack, a.toCLong());
+              push(stack, a.item<int64_t>());
               return 0;
             };
           } else {
@@ -99,7 +101,7 @@ RegisterOperators reg({
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/false);
               at::DeviceGuard guard(a);
-              push(stack, a.toCDouble());
+              push(stack, a.item<double>());
               return 0;
             };
           }
@@ -131,6 +133,21 @@ RegisterOperators reg({
             double d;
             pop(stack, d);
             push(stack, (int64_t)d);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::StringToFloat,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto s = pop(stack).toString();
+            if (s->string() != "inf") {
+              AT_ERROR(
+                  "Only 'inf' can be cast to a float, but got '",
+                  s->string(),
+                  "'");
+            }
+            push(stack, std::numeric_limits<double>::infinity());
             return 0;
           };
         }),
@@ -710,7 +727,7 @@ RegisterOperators reg2({
             pop(stack, t);
             std::vector<int64_t> elems;
             for(int i = 0; i < t.size(0); i++){
-              elems.push_back(*t[i].toIntData());
+              elems.push_back(*t[i].data<int32_t>());
             }
             push(stack, jit::IntList::create(elems));
             return 0;

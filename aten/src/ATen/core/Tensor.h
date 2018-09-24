@@ -142,7 +142,7 @@ struct AT_API Tensor {
     return tensor_impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return tensor_impl_->scalar_type();
+    return dataTypeToScalarType(tensor_impl_->dtype().id());
   }
   const Storage& storage() const {
     return tensor_impl_->storage();
@@ -172,19 +172,11 @@ struct AT_API Tensor {
   template<typename T>
   T * data() const;
 
+  template <typename T>
+  T item() const;
+
   // Purposely not defined here to avoid inlining
   void print() const;
-
-  //toLongData(), toFloatData() etc.
-  #define TO_TYPE_DATA(T,name,_) \
-  T * to##name##Data() const;
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_TYPE_DATA)
-  #undef TO_TYPE_DATA
-
-  #define TO_C_TYPE(T,name,_) \
-  T toC##name () const;
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_C_TYPE)
-  #undef TO_C_TYPE
 
   // Return a `TensorAccessor` for CPU `Tensor`s. You have to specify scalar type and
   // dimension.
@@ -441,12 +433,10 @@ struct AT_API Tensor {
   Tensor & atan_();
   Tensor baddbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & baddbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
-  Tensor bernoulli(const Tensor & p, Generator * generator=nullptr) const;
-  Tensor bernoulli(double p, Generator * generator=nullptr) const;
-  Tensor bernoulli() const;
+  Tensor bernoulli(Generator * generator=nullptr) const;
   Tensor & bernoulli_(const Tensor & p, Generator * generator=nullptr);
-  Tensor & bernoulli_(double p, Generator * generator=nullptr);
-  Tensor & bernoulli_();
+  Tensor & bernoulli_(double p=0.5, Generator * generator=nullptr);
+  Tensor bernoulli(double p, Generator * generator=nullptr) const;
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
@@ -553,6 +543,8 @@ struct AT_API Tensor {
   Tensor & round_();
   Tensor relu() const;
   Tensor & relu_();
+  Tensor prelu(const Tensor & weight) const;
+  std::tuple<Tensor,Tensor> prelu_backward(const Tensor & grad_output, const Tensor & weight) const;
   Tensor hardshrink(Scalar lambd=0.5) const;
   Tensor hardshrink_backward(const Tensor & grad_out, Scalar lambd) const;
   Tensor rsqrt() const;
@@ -684,3 +676,5 @@ private:
   c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_tensor_impl_;
 };
 } // namespace at
+
+#include "ATen/core/TensorMethods.h"

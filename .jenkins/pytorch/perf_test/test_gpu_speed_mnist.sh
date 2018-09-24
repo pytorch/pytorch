@@ -20,6 +20,9 @@ test_gpu_speed_mnist () {
   SAMPLE_ARRAY=()
   NUM_RUNS=$1
 
+  # Needs warm up to get accurate number
+  python main.py --epochs 1 --no-log
+
   for (( i=1; i<=$NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command python main.py --epochs 1 --no-log)
     echo $runtime

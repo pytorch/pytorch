@@ -39,6 +39,17 @@
 #define AT_CORE_API AT_CORE_IMPORT
 #endif // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
 
+#ifdef __CUDACC__
+// Designates functions callable from the host (CPU) and the device (GPU)
+#define AT_HOST_DEVICE __host__ __device__
+#define AT_DEVICE __device__
+#define AT_HOST __host__
+#else
+#define AT_HOST_DEVICE
+#define AT_HOST
+#define AT_DEVICE
+#endif
+
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
 #define AT_DISABLE_COPY_AND_ASSIGN(classname) \

@@ -157,7 +157,7 @@ static void check_input_shape_forward(const at::Tensor& input,
 
   AT_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
-           "-dimensional weight ", weight.sizes(), ", but got input of size ",
+           "-dimensional weight ", weight.sizes(), ", but got ", k, "-dimensional input of size ",
            input.sizes(), " instead");
   AT_CHECK(weight.size(0) >= groups,
            "Given groups=", groups, ", expected weight to be at least ", groups,
@@ -316,7 +316,7 @@ at::Tensor _convolution(
     weight = view4d(weight);
   }
 
-  auto output = input.type().tensor();
+  auto output = at::empty({0}, input.options());
 
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
