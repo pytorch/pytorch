@@ -50,6 +50,11 @@ CAFFE2_DEFINE_int(caffe2_gpu_memory_report_interval_mb,
                   128,
                   "The threshold in MB on how frequently to report memory changes");
 
+namespace at {
+
+REGISTER_CONTEXT(DeviceType::HIP, caffe2::HIPContext);
+} // namespace at
+
 namespace caffe2 {
 
 thread_local ThreadLocalHIPObjects HIPContext::hip_objects_;
@@ -417,8 +422,6 @@ void HIPStaticContext::Delete(void* ptr) {
     }
     }
 }
-
-REGISTER_CONTEXT(HIP, HIPContext);
 
 BaseStaticContext* GetHIPStaticContext() {
   static HIPStaticContext context;

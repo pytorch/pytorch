@@ -142,6 +142,8 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   // The default cuda context constructor.
   explicit CUDAContext(const int gpu_id = -1);
   explicit CUDAContext(const DeviceOption& option);
+  explicit CUDAContext(const at::Device& device)
+      : CUDAContext(DeviceToOption(device)) {}
 
   ~CUDAContext() override {
     if (curand_generator_) {
@@ -390,7 +392,6 @@ class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
   }
 
   void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    CAFFE_ENFORCE(data, "data cannot be nullptr");
     device->set_device_type(TypeToProto(GetDeviceType()));
     device->set_cuda_gpu_id(GetGPUIDForPointer(data));
   }

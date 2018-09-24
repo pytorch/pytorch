@@ -2,6 +2,7 @@
 # Each line is a file pattern followed by one or more owners.
 
 /aten/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+/aten/src/ATen/core/
 /torch/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /docs/source @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ssnl @zou3519
 /docs/cpp @goldsborough @ebetica @apaszke @soumith @colesbury @gchanan @zdevito @ezyang

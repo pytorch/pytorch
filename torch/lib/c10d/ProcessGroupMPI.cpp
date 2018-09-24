@@ -253,33 +253,30 @@ std::shared_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
   MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &size));
   MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
 
-  globalLock.unlock();
-
   if (rank < 0 || size < 0) {
     throw std::runtime_error("Failed to get the world_size / rank");
   }
 
+  // If no ranks are specified, assume we're creating the root group
   if (ranks.empty()) {
-    return std::make_shared<ProcessGroupMPI>(rank, size, MPI_COMM_WORLD);
-  } else {
-    std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-
-    MPI_Group worldGroup;
-    MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
-
-    MPI_Group ranksGroup;
-    MPI_CHECK(
-        MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
-
-    MPI_Comm groupComm;
-    MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
-
-    MPI_CHECK(MPI_Group_free(&worldGroup));
-    MPI_CHECK(MPI_Group_free(&ranksGroup));
-
     globalLock.unlock();
-    return std::make_shared<ProcessGroupMPI>(rank, size, groupComm);
+    return std::make_shared<ProcessGroupMPI>(rank, size, MPI_COMM_WORLD);
   }
+
+  MPI_Group worldGroup;
+  MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
+
+  MPI_Group ranksGroup;
+  MPI_CHECK(MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
+
+  MPI_Comm groupComm;
+  MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
+
+  MPI_CHECK(MPI_Group_free(&worldGroup));
+  MPI_CHECK(MPI_Group_free(&ranksGroup));
+
+  globalLock.unlock();
+  return std::make_shared<ProcessGroupMPI>(rank, size, groupComm);
 }
 
 ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
@@ -649,7 +646,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::scatter(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
     std::vector<at::Tensor>& tensors,
-    int dstRank) {
+    int dstRank,
+    int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
@@ -666,7 +664,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
         tensor.numel(),
         mpiDatatype.at(tensor.type().scalarType()),
         dstRank,
-        0,
+        tag,
         pgComm_,
         &request));
   }
@@ -676,7 +674,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::send(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
     std::vector<at::Tensor>& tensors,
-    int srcRank) {
+    int srcRank,
+    int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
@@ -693,7 +692,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
         tensor.numel(),
         mpiDatatype.at(tensor.type().scalarType()),
         srcRank,
-        0,
+        tag,
         pgComm_,
         &request));
   }
@@ -703,7 +702,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recv(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
     std::vector<at::Tensor>& tensors,
-    int* srcRank) {
+    int* srcRank,
+    int tag) {
   if (pgComm_ == MPI_COMM_NULL) {
     return nullptr;
   }
@@ -720,7 +720,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::recvAnysource(
         tensor.numel(),
         mpiDatatype.at(tensor.type().scalarType()),
         MPI_ANY_SOURCE,
-        0,
+        tag,
         pgComm_,
         &request));
   }

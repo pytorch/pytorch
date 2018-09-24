@@ -2329,6 +2329,38 @@ class TestTorch(TestCase):
 
         torch.set_default_tensor_type(default_type)
 
+    def test_constructor_device_legacy(self):
+        self.assertRaises(RuntimeError, lambda: torch.FloatTensor(device='cuda'))
+        self.assertRaises(RuntimeError, lambda: torch.FloatTensor(torch.Size([2, 3, 4]), device='cuda'))
+        self.assertRaises(RuntimeError, lambda: torch.FloatTensor((2.0, 3.0), device='cuda'))
+
+        self.assertRaises(RuntimeError, lambda: torch.Tensor(device='cuda'))
+        self.assertRaises(RuntimeError, lambda: torch.Tensor(torch.Size([2, 3, 4]), device='cuda'))
+        self.assertRaises(RuntimeError, lambda: torch.Tensor((2.0, 3.0), device='cuda'))
+
+        x = torch.randn((3,), device='cpu')
+        self.assertRaises(RuntimeError, lambda: x.new(device='cuda'))
+        self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cuda'))
+        self.assertRaises(RuntimeError, lambda: x.new((2.0, 3.0), device='cuda'))
+
+        if torch.cuda.is_available():
+            self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(device='cpu'))
+            self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor(torch.Size([2, 3, 4]), device='cpu'))
+            self.assertRaises(RuntimeError, lambda: torch.cuda.FloatTensor((2.0, 3.0), device='cpu'))
+
+            default_type = torch.Tensor().type()
+            torch.set_default_tensor_type(torch.cuda.FloatTensor)
+            self.assertRaises(RuntimeError, lambda: torch.Tensor(device='cpu'))
+            self.assertRaises(RuntimeError, lambda: torch.Tensor(torch.Size([2, 3, 4]), device='cpu'))
+            self.assertRaises(RuntimeError, lambda: torch.Tensor((2.0, 3.0), device='cpu'))
+            torch.set_default_tensor_type(torch.cuda.FloatTensor)
+            torch.set_default_tensor_type(default_type)
+
+            x = torch.randn((3,), device='cuda')
+            self.assertRaises(RuntimeError, lambda: x.new(device='cpu'))
+            self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
+            self.assertRaises(RuntimeError, lambda: x.new((2.0, 3.0), device='cpu'))
+
     def test_type(self):
         x = torch.randn(3, 3).double()
         self.assertEqual(x.type('torch.FloatTensor').dtype, torch.float32)
@@ -2363,6 +2395,31 @@ class TestTorch(TestCase):
             self.assertEqual(5., res1[0].item())
             a[0] = 7.
             self.assertEqual(5., res1[0].item())
+
+    def test_tensor_factory_copy_var(self):
+        # default copy from var
+        source = torch.randn(5, 5, requires_grad=True)
+        copy = torch.tensor(source)
+        self.assertEqual(copy.data, source.data)
+        self.assertTrue(source.requires_grad)
+        self.assertTrue(copy.is_leaf)
+        self.assertFalse(copy.requires_grad)
+
+        # copy with requires_grad=False
+        source = torch.randn(5, 5, requires_grad=True)
+        copy = torch.tensor(source, requires_grad=False)
+        self.assertEqual(copy.data, source.data)
+        self.assertTrue(source.requires_grad)
+        self.assertTrue(copy.is_leaf)
+        self.assertFalse(copy.requires_grad)
+
+        # copy with requires_grad=True
+        source = torch.randn(5, 5, requires_grad=True)
+        copy = torch.tensor(source, requires_grad=True)
+        self.assertEqual(copy.data, source.data)
+        self.assertTrue(source.requires_grad)
+        self.assertTrue(copy.is_leaf)
+        self.assertTrue(copy.requires_grad)
 
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):
@@ -3965,8 +4022,9 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_gesv_batched(self, cast):
+        from common import random_fullrank_matrix_distinct_singular_value as fullrank
         # test against gesv: one batch
-        A = cast(torch.randn(1, 5, 5))
+        A = cast(fullrank(5, 1))
         b = cast(torch.randn(1, 5, 10))
         x_exp, LU_exp = torch.gesv(b.squeeze(0), A.squeeze(0))
         x, LU = torch.gesv(b, A)
@@ -3974,7 +4032,7 @@ class TestTorch(TestCase):
         self.assertEqual(LU, LU_exp.unsqueeze(0))
 
         # test against gesv in a loop: four batches
-        A = cast(torch.randn(4, 5, 5))
+        A = cast(fullrank(5, 4))
         b = cast(torch.randn(4, 5, 10))
 
         x_exp_list = list()
@@ -3991,7 +4049,7 @@ class TestTorch(TestCase):
         self.assertEqual(LU, LU_exp)
 
         # basic correctness test
-        A = cast(torch.randn(3, 5, 5))
+        A = cast(fullrank(5, 3))
         b = cast(torch.randn(3, 5, 10))
         x, LU = torch.gesv(b, A)
         self.assertEqual(torch.matmul(A, x), b)
@@ -4001,7 +4059,7 @@ class TestTorch(TestCase):
             return
         import numpy
         from numpy.linalg import solve
-        A = cast(torch.randn(2, 2, 2)).permute(1, 0, 2)
+        A = cast(fullrank(2, 2)).permute(1, 0, 2)
         b = cast(torch.randn(2, 2, 2)).permute(2, 1, 0)
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
@@ -4016,18 +4074,18 @@ class TestTorch(TestCase):
         if not TEST_NUMPY:
             return
 
-        import numpy
         from numpy.linalg import solve
+        from common import random_fullrank_matrix_distinct_singular_value as fullrank
 
         # test against numpy.linalg.solve
-        A = cast(torch.randn(2, 1, 3, 4, 4))
+        A = cast(fullrank(4, 2, 1, 3))
         b = cast(torch.randn(2, 1, 3, 4, 6))
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
         # test column major format
-        A = cast(torch.randn(2, 1, 3, 4, 4)).transpose(-2, -1)
+        A = cast(fullrank(4, 2, 1, 3)).transpose(-2, -1)
         b = cast(torch.randn(2, 1, 3, 6, 4)).transpose(-2, -1)
         assert not A.is_contiguous()
         assert not b.is_contiguous()
@@ -4036,21 +4094,21 @@ class TestTorch(TestCase):
         self.assertEqual(x.data, cast(x_exp))
 
         # broadcasting b
-        A = cast(torch.randn(2, 1, 3, 4, 4))
+        A = cast(fullrank(4, 2, 1, 3))
         b = cast(torch.randn(4, 6))
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
         # broadcasting A
-        A = cast(torch.randn(4, 4))
+        A = cast(fullrank(4))
         b = cast(torch.randn(2, 1, 3, 4, 2))
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(x.data, cast(x_exp))
 
         # broadcasting both A & b
-        A = cast(torch.randn(1, 3, 1, 4, 4))
+        A = cast(fullrank(4, 1, 3, 1))
         b = cast(torch.randn(2, 1, 3, 4, 5))
         x, _ = torch.gesv(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy()))
@@ -4631,7 +4689,7 @@ class TestTorch(TestCase):
 
         # Single matrix, but full rank
         # This is for negative powers
-        from test_autograd import random_fullrank_matrix_distinct_singular_value
+        from common import random_fullrank_matrix_distinct_singular_value
         M = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
         run_test(M)
         run_test(M, sign=-1)
@@ -5200,7 +5258,7 @@ class TestTorch(TestCase):
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
     @skipIfNoLapack
-    def tset_potri(self):
+    def test_potri(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
                           (-0.45, 2.58, -2.70, 0.27, 9.04),
@@ -5208,7 +5266,7 @@ class TestTorch(TestCase):
                           (-9.67, -5.14, -7.26, 6.08, -6.87))).t()
 
         # make sure 'a' is symmetric PSD
-        a = a * a.t()
+        a = torch.mm(a, a.t())
 
         # compute inverse directly
         inv0 = torch.inverse(a)
@@ -5219,13 +5277,13 @@ class TestTorch(TestCase):
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # upper Triangular Test
-        chol = torch.potrf(a, 'U')
-        inv1 = torch.potri(chol, 'U')
+        chol = torch.potrf(a, True)
+        inv1 = torch.potri(chol, True)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # lower Triangular Test
-        chol = torch.potrf(a, 'L')
-        inv1 = torch.potri(chol, 'L')
+        chol = torch.potrf(a, False)
+        inv1 = torch.potri(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
     @skipIfNoLapack
@@ -7320,22 +7378,51 @@ class TestTorch(TestCase):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
-    def test_bernoulli(self):
-        t = torch.ByteTensor(10, 10)
+    @staticmethod
+    def _test_bernoulli(self, p_dtype, device):
+        for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
+            x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
+            self.assertEqual(x.bernoulli().tolist(), trivial_p)
 
         def isBinary(t):
-            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum() == 0
+            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
 
-        p = 0.5
+        p = torch.rand(5, 5, dtype=p_dtype, device=device)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, 5, dtype=p_dtype, device=device)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+        p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+        # test that it works with integral tensors
+        t = torch.empty(10, 10, dtype=torch.uint8, device=device)
+
+        t.fill_(2)
+        t.bernoulli_(0.5)
+        self.assertTrue(isBinary(t))
+
+        p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
+        t.fill_(2)
         t.bernoulli_(p)
         self.assertTrue(isBinary(t))
 
-        p = torch.rand(10, 10)
-        t.bernoulli_(p)
+        t.fill_(2)
+        torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
         self.assertTrue(isBinary(t))
 
-        q = torch.rand(5, 5)
-        self.assertTrue(isBinary(q.bernoulli()))
+        t.fill_(2)
+        t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
+        self.assertTrue(isBinary(t))
+
+    def test_bernoulli(self):
+        self._test_bernoulli(self, torch.double, 'cpu')
 
     def test_normal(self):
         q = torch.Tensor(100, 100)
@@ -8841,6 +8928,10 @@ class TestTorch(TestCase):
         self.assertEqual(grid_a.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_b.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_c.shape, torch.Size([1, 3, 2]))
+        grid_a2, grid_b2, grid_c2 = torch.meshgrid(a, b, c)
+        self.assertEqual(grid_a2.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_b2.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_c2.shape, torch.Size([1, 3, 2]))
         expected_grid_a = torch.ones(1, 3, 2, dtype=torch.int64)
         expected_grid_b = torch.tensor([[[1, 1],
                                          [2, 2],
@@ -8851,6 +8942,32 @@ class TestTorch(TestCase):
         self.assertTrue(grid_a.equal(expected_grid_a))
         self.assertTrue(grid_b.equal(expected_grid_b))
         self.assertTrue(grid_c.equal(expected_grid_c))
+        self.assertTrue(grid_a2.equal(expected_grid_a))
+        self.assertTrue(grid_b2.equal(expected_grid_b))
+        self.assertTrue(grid_c2.equal(expected_grid_c))
+
+    @unittest.skipIf(torch.cuda.is_available(), "CUDA is available, can't test CUDA not built error")
+    def test_cuda_not_built(self):
+        msg = "Torch not compiled with CUDA enabled"
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.current_device())
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1], device="cuda"))
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).cuda())
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.cuda.FloatTensor())
+        self.assertRaisesRegex(AssertionError, msg, lambda: torch.tensor([1]).to(device="cuda"))
+
+    def test_cast_binary_op(self):
+        # Scalar
+        a = torch.tensor(2)
+        b = torch.tensor(3)
+        a_copy = a.clone()
+        b_copy = b.clone()
+
+        self.assertEqual(torch.tensor(6), a.float() * b)
+
+        self.assertEqual(a.type(), a_copy.type())
+        self.assertEqual(a.data.type(), a_copy.data.type())
+        self.assertEqual(b.type(), b_copy.type())
+        self.assertEqual(b.data.type(), b_copy.type())
 
 
 # Functions to test negative dimension wrapping

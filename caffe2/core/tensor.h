@@ -134,6 +134,10 @@ class CAFFE2_API Tensor final {
     return impl_.get()->GetDeviceType();
   }
 
+  at::Device GetDevice() const {
+    return impl_.get()->GetDevice();
+  }
+
   void CopyFrom(const Tensor& src, BaseContext* context = nullptr) const {
     impl_.get()->CopyFrom(*src.impl_.get(), context);
   }
@@ -280,6 +284,18 @@ class CAFFE2_API Tensor final {
 
   inline int canonical_axis_index(int axis_index) const {
     return impl_.get()->canonical_axis_index(axis_index);
+  }
+
+  inline int64_t stride(int64_t dim) const {
+    return impl_.get()->stride(dim);
+  }
+
+  inline at::DimVector strides() {
+    return impl_.get()->strides();
+  }
+
+  inline bool is_contiguous() const {
+    return impl_.get()->is_contiguous();
   }
 
   template <typename T>

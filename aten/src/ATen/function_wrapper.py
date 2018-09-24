@@ -39,7 +39,7 @@ else:
 #    declaration under Type.h  (right now, we call this template
 #    BROADCAST but it also handles default arguments)
 TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
+${return_type} ${api_name}(${type_method_formals}) const override;
 """)
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
@@ -60,18 +60,18 @@ ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
 #    for 'native' declarations (so the native dispatch is hardcoded into
 #    the template here.)
 PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0;
+virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const = 0;
 """)
 DEPRECATED_PURE_VIRTUAL_TYPE_METHOD_DECLARATION = CodeTemplate("""\
 AT_DEPRECATED(virtual ${return_type} \
-${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const = 0);
+${method_prefix_derived}${api_name}(${type_method_formals}) const = 0);
 """)
 PURE_VIRTUAL_TYPE_METHOD_DECLARATION_BROADCAST = CodeTemplate("""\
-virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const = 0;
+virtual ${return_type} ${api_name}(${type_method_formals}) const = 0;
 """)
 
 TYPE_METHOD_DECLARATION_ABSTRACT = CodeTemplate("""\
-${return_type} ${method_prefix_derived}${api_name}(${type_method_formals_with_defaults}) const override;
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
 TYPE_METHOD_DEFINITION_ABSTRACT = CodeTemplate("""\
 ${return_type} TypeDefault::${method_prefix_derived}${api_name}(${type_method_formals}) const {
@@ -79,7 +79,7 @@ ${return_type} TypeDefault::${method_prefix_derived}${api_name}(${type_method_fo
 }
 """)
 TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals_with_defaults}) const override;
+${return_type} ${api_name}(${type_method_formals}) const override;
 """)
 TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
 ${return_type} TypeDefault::${api_name}(${type_method_formals}) const {
@@ -192,7 +192,7 @@ if(${check_name}.type().is_sparse()) {
 
 BUFFER_DEFINITION = CodeTemplate("""\
 auto ${name}_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-    ${Backend}TensorId(), ScalarType::${ScalarName}, ${THTensor}_new(), false).release();
+    ${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), ${THTensor}_new(), false).release();
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -333,17 +333,18 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), false).release()',
+                 '(${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), allocator(), false).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(${Backend}TensorId(), ScalarType::Byte, allocator(), false).release()',
+                     '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Byte), allocator(), false).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                      '(${Backend}TensorId(), ScalarType::Long, allocator(), false).release()',
+                      '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Long), allocator(), false).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                        '(${Backend}TensorId(), ScalarType::Int, allocator(), false).release()',
+                        '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Int), allocator(), false).release()',
     'THDenseTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                      '(${Backend}TensorId(), ScalarType::${ScalarName}, allocator(), false).release()',
+                      '(${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), allocator(), false).release()',
     'THDenseIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                           '(${Backend}TensorId(), ScalarType::Long, allocator(), false).release()'
+                           '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Long), '
+                           'allocator(), false).release()'
 }
 
 ALLOC_WRAP = {
@@ -515,7 +516,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'type_definition_body': List[str],
     'type_method_actuals': List[str],
     'type_method_definition_dispatch': str,
-    'type_method_formals_with_defaults': List[str],
     'type_method_formals': List[str],
     'variants': str,
     'when_spares_dispatch': str,
@@ -817,7 +817,6 @@ def create_generic(top_env, declarations):
 
         # There are no cases where these differ, but they do in native_functions
         option['type_method_formals'] = option['formals']
-        option['type_method_formals_with_defaults'] = option['formals_with_defaults']
         option['type_method_actuals'] = option['actuals']
 
         option['const_mark'] = '' if option['inplace'] else ' const'
@@ -1051,7 +1050,6 @@ def create_generic(top_env, declarations):
             dispatch_type['is_type_dispatched'] = True
 
         option['type_method_formals'] = [format_formal(f) for f in formals if f != dispatch_type]
-        option['type_method_formals_with_defaults'] = [formal_with_default(f) for f in formals if f != dispatch_type]
         option['type_method_actuals'] = [f['name'] for f in formals if f != dispatch_type]
         option['native_actuals'] = [f['name'] if f != dispatch_type else '*this' for f in formals]
 
@@ -1151,7 +1149,7 @@ def create_generic(top_env, declarations):
                 option['inferred_type'] = 'detail::infer_type({})'.format(dispatch_tensor)
             else:
                 # doesn't depend on a specific type, use undefined float
-                option['inferred_type'] = 'detail::non_specific_type()'
+                option['inferred_type'] = 'at::getNonVariableType(at::Backend::Undefined, at::ScalarType::Float)'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
             if is_factory_method:

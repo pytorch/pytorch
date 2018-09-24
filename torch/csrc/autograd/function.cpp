@@ -21,6 +21,10 @@ namespace torch { namespace autograd {
 /// numbers.
 thread_local uint64_t Function_next_sequence_nr_ = 0;
 
+uint64_t Function::peek_at_next_sequence_nr() {
+  return Function_next_sequence_nr_;
+}
+
 uint64_t& Function::get_next_sequence_nr() {
   return Function_next_sequence_nr_;
 }

@@ -20,6 +20,8 @@ class IDEEPContext final : public BaseContext {
                                      : RandomNumberSeed()) {
     CAFFE_ENFORCE_EQ(option.device_type(), PROTO_IDEEP);
   }
+  explicit IDEEPContext(const at::Device& device)
+      : IDEEPContext(DeviceToOption(device)) {}
 
   ~IDEEPContext() noexcept override {}
 

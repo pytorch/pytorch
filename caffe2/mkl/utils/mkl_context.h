@@ -29,6 +29,8 @@ class MKLContext : public BaseContext {
                                      : RandomNumberSeed()) {
     CAFFE_ENFORCE_EQ(option.device_type(), PROTO_MKLDNN);
   }
+  explicit MKLContext(const at::Device& device)
+      : MKLContext(DeviceToOption(device)) {}
 
   ~MKLContext() override {}
 

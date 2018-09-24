@@ -21,6 +21,9 @@
 #include "ATen/cuda/CUDAContext.h"
 #include <cuda_runtime.h>
 #endif
+#ifndef _WIN32
+#include <time.h>
+#endif
 
 namespace torch { namespace autograd {
 
@@ -32,36 +35,48 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
-inline uint64_t getTime() {
+inline int64_t getTime() {
+#ifdef _WIN32
   using namespace std::chrono;
   using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
   return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
+#else
+  // clock_gettime is *much* faster than std::chrono implementation on Linux
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
+#endif
 }
 
-enum class EventKind {
+enum class EventKind : uint16_t {
   Mark,
   PushRange,
   PopRange
 };
 
-struct Event {
-  Event(EventKind kind, std::string name, uint32_t thread_id, bool record_cuda)
-  : kind_(kind)
-  , name_(std::move(name))
-  , thread_id_(thread_id) {
+struct Event final {
+  Event(EventKind kind, std::string name, uint16_t thread_id, bool record_cuda)
+  : owned_name_(new std::string(std::move(name)))
+  , name_ptr_(owned_name_->c_str())
+  , kind_(kind)
+  , thread_id_(thread_id) { record(record_cuda); }
+  Event(EventKind kind, const char* name, uint16_t thread_id, bool record_cuda)
+  : name_ptr_(name)
+  , kind_(kind)
+  , thread_id_(thread_id) { record(record_cuda); }
+
+  void record(bool record_cuda) {
 #ifdef USE_CUDA
-    if(record_cuda) {
+    if (record_cuda) {
       TORCH_CUDA_CHECK(cudaGetDevice(&device_));
       TORCH_CUDA_CHECK(cudaEventCreate(&event));
       auto stream = at::cuda::getCurrentCUDAStream();
       cpu_ns_ = getTime();
       TORCH_CUDA_CHECK(cudaEventRecord(event, stream));
-    } else {
-      cpu_ns_ = getTime();
+      return;
     }
-#else
-    cpu_ns_ = getTime();
 #endif
+    cpu_ns_ = getTime();
   }
   std::string kind() const {
     switch(kind_) {
@@ -71,10 +86,10 @@ struct Event {
     }
     throw std::runtime_error("unknown EventKind");
   }
-  const std::string & name() const {
-    return name_;
+  const char* name() const {
+    return name_ptr_;
   }
-  uint32_t thread_id() const {
+  uint16_t thread_id() const {
     return thread_id_;
   }
   double cpu_elapsed_us(const Event & e) {
@@ -108,14 +123,18 @@ struct Event {
     return device_;
   }
 private:
-  EventKind kind_;
-  std::string name_;
-  uint32_t thread_id_;
   int64_t cpu_ns_; // signed to allow for negative intervals
+  // std::string is a very large object (usually around 32B),
+  // and this field is used only for user-created ranges, so
+  // it's better to save on size of Events.
+  std::unique_ptr<std::string> owned_name_;
+  const char * name_ptr_;
+  EventKind kind_;
+  uint16_t thread_id_;
+  int device_ = -1;
 #ifdef USE_CUDA
   cudaEvent_t event = nullptr;
 #endif
-  int device_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -132,7 +151,14 @@ struct RangeEventList {
 
   void allocBlock() {
     blocks.emplace_front();
-    blocks.front().reserve(num_block_elements);
+    auto & new_block = blocks.front();
+    new_block.reserve(num_block_elements);
+    // Materialize all pages in the new block to release jitter when recording events.
+    const char * const end_ptr = reinterpret_cast<char*>(new_block.data() + num_block_elements);
+    for (volatile const char * ptr = reinterpret_cast<char*>(new_block.data());
+         ptr < end_ptr; ptr += 4 * 1024) {
+      (*ptr);
+    }
   }
 
   template<typename... Args>
@@ -176,10 +202,11 @@ struct TORCH_API RecordFunction {
 
   explicit RecordFunction(const char* name);
 
-  ~RecordFunction();
+  explicit RecordFunction(const char* name, int64_t current_sequence_nr);
 
-  // Needed only because we don't have Function defined yet.
-  void pushFunctionRange(Function *fn);
+  ~RecordFunction() {
+    popRange();
+  }
 };
 
 using thread_event_lists = std::vector<std::vector<Event>>;

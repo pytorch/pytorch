@@ -6,11 +6,12 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
 
-class TestLengthSplitOperator(hu.HypothesisTestCase):
+class TestLengthSplitOperator(serial.SerializedTestCase):
 
     def _length_split_op_ref(self, input_lengths, n_split_array):
         output = []
@@ -26,7 +27,7 @@ class TestLengthSplitOperator(hu.HypothesisTestCase):
                     output.append(val - 1)
         return [np.array(output).astype(np.int32)]
 
-    @given(**hu.gcs_cpu_only)
+    @serial.given(**hu.gcs_cpu_only)
     def test_length_split_edge(self, gc, dc):
         input_lengths = np.array([3, 4, 5]).astype(np.int32)
         n_split_ = np.array([5]).astype(np.int32)

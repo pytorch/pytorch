@@ -5,6 +5,10 @@
 #include <process.h>
 #endif
 
+namespace at {
+
+REGISTER_CONTEXT(DeviceType::CPU, caffe2::CPUContext);
+} // namespace at
 namespace caffe2 {
 
 uint32_t RandomNumberSeed() {
@@ -23,8 +27,6 @@ uint32_t RandomNumberSeed() {
   return kPrime0 * (seedInput++) + kPrime1 * static_cast<uint32_t>(getpid()) +
       kPrime2 * tv_sec + kPrime3 * tv_usec;
 }
-
-REGISTER_CONTEXT(CPU, CPUContext);
 
 BaseStaticContext* GetCPUStaticContext() {
   static CPUStaticContext context;

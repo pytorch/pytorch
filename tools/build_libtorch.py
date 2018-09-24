@@ -23,6 +23,8 @@ if __name__ == '__main__':
     command = [build_pytorch_libs, '--use-nnpack']
     if USE_CUDA:
         command.append('--use-cuda')
+        if os.environ.get('USE_CUDA_STATIC_LINK', False):
+            command.append('--cuda-static-link')
     if options.use_cereal:
         command.append('--use-cereal')
     command.append('caffe2')

@@ -194,7 +194,7 @@ void TensorSerializer::Serialize(
   const TensorProto::DataType data_type = TypeMetaToDataType(input.meta());
   proto.set_data_type(data_type);
   StoreDeviceDetail(input, &proto);
-  auto uniq_ptr = CreateContext(input.GetDeviceType());
+  auto uniq_ptr = CreateContext(input.GetDevice());
   // A lot of copypaste is error prone. Should we create a macro for this?
   switch (data_type) {
     case TensorProto_DataType_FLOAT:
@@ -368,7 +368,7 @@ void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
 void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
   // We create a local context for deserializing. Since Caffe2 contexts are
   // usually lightweight, this should not involve too much overhead.
-  auto uniq_ptr = CreateContext(tensor->GetDeviceType(), proto.device_detail());
+  auto uniq_ptr = CreateContext(OptionToDevice(proto.device_detail()));
   auto context = uniq_ptr.get();
   context->SwitchToDevice(0);
   vector<TIndex> dims;

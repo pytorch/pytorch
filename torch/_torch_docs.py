@@ -584,7 +584,7 @@ Example::
 
 add_docstr(torch.bernoulli,
            r"""
-bernoulli(input, out=None) -> Tensor
+bernoulli(input, *, generator=None, out=None) -> Tensor
 
 Draws binary random numbers (0 or 1) from a Bernoulli distribution.
 
@@ -594,14 +594,17 @@ Hence, all values in :attr:`input` have to be in the range:
 :math:`0 \leq \text{input}_i \leq 1`.
 
 The :math:`\text{i}^{th}` element of the output tensor will draw a
-value `1` according to the :math:`\text{i}^{th}` probability value given
+value :math:`1` according to the :math:`\text{i}^{th}` probability value given
 in :attr:`input`.
 
 .. math::
     \text{out}_{i} \sim \mathrm{Bernoulli}(p = \text{input}_{i})
 
 The returned :attr:`out` tensor only has values 0 or 1 and is of the same
-shape as :attr:`input`
+shape as :attr:`input`.
+
+:attr:`out` can have integral ``dtype``, but :attr`input` must have floating
+point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution
@@ -1694,7 +1697,7 @@ gels(B, A, out=None) -> Tensor
 
 Computes the solution to the least squares and least norm problems for a full
 rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
-size :math:`(n \times k)`.
+size :math:`(m \times k)`.
 
 If :math:`m \geq n`, :func:`gels` solves the least-squares problem:
 
@@ -1713,7 +1716,7 @@ If :math:`m < n`, :func:`gels` solves the least-norm problem:
    \end{array}
 
 Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
-rows of :math:`X` contains the solution. If :math`m \geq n`, the residual sum of squares
+rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
 for the solution in each column is given by the sum of squares of elements in the
 remaining :math:`m - n` rows of that column.
 
@@ -1834,9 +1837,9 @@ batched outputs `X, LU`.
 
 Args:
     B (Tensor): input matrix of size :math:`(*, m, k)` , where :math:`*`
-      is zero or more batch dimensions.
+                is zero or more batch dimensions.
     A (Tensor): input square matrix of size :math:`(*, m, m)`, where
-      :math:`*` is zero or more batch dimensions.
+                :math:`*` is zero or more batch dimensions.
     out ((Tensor, Tensor), optional): optional output tuple.
 
 Example::
@@ -3817,6 +3820,13 @@ Constructs a tensor with :attr:`data`.
     or :func:`torch.Tensor.detach`.
     If you have a NumPy ``ndarray`` and want to avoid a copy, use
     :func:`torch.from_numpy`.
+
+.. warning::
+
+    When data is a tensor `x`, :func:`torch.tensor` reads out 'the data' from whatever it is passed,
+    and constructs a leaf variable. Therefore ``torch.tensor(x)`` is equivalent to ``x.clone().detach()``
+    and ``torch.tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
+    The equivalents use ``clone()`` and ``detach()`` are recommended.
 
 Args:
     {data}
@@ -5989,37 +5999,4 @@ Example::
     >>>                            [4, 5, 6],
     >>>                            [7, 8, 9]]))
     (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
-""")
-
-
-add_docstr(torch.meshgrid,
-           r"""
-meshgrid(seq) -> seq
-
-Take a sequence of :math:`N` tensors, each of which can be either scalar or 1-dimensional
-vector, and create :math:`N` N-dimensional grids, where the :math:`i` th grid is defined by
-expanding the :math:`i` th input over dimensions defined by other inputs.
-
-Arguments:
-    seq (sequence of Tensors): sequence of scalars or 1 dimensional tensors. Scalars will be
-        treated as tensors of size :math:`(1,)` automatically.
-
-Returns:
-    seq (sequence of Tensors): If the input has :math:`k` tensors of size :math:`(N_1,), (N_2,), \ldots , (N_k,)`,
-    then the output would also has :math:`k` tensors, where all tensors are
-    of size :math:`(N_1, N_2, \ldots , N_k)`.
-
-Example::
-
-    >>> x = torch.tensor([1, 2, 3])
-    >>> y = torch.tensor([4, 5, 6])
-    >>> grid_x, grid_y = torch.meshgrid([x, y])
-    >>> grid_x
-    tensor([[1, 1, 1],
-            [2, 2, 2],
-            [3, 3, 3]])
-    >>> grid_y
-    tensor([[4, 5, 6],
-            [4, 5, 6],
-            [4, 5, 6]])
 """)

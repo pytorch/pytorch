@@ -127,6 +127,8 @@ class HIPContext final : public BaseContext {
   // The default HIP context constructor.
   explicit HIPContext(const int gpu_id = -1);
   explicit HIPContext(const DeviceOption& option);
+  explicit HIPContext(const at::Device& device)
+      : HIPContext(DeviceToOption(device)) {}
 
   ~HIPContext() override {
     if (hiprand_generator_) {
