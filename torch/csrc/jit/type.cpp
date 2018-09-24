@@ -36,6 +36,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << ")";
   } else if(t.kind() == TypeKind::DynamicType) {
     out << "Dynamic";
+  } else if(t.kind() == TypeKind::UndefinedTensorType) {
+    out << "Undefined";
   } else if(t.kind() == TypeKind::TupleType) {
     out << "Tuple";
   } else if(t.kind() == TypeKind::NumberType) {
@@ -61,6 +63,10 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 
 DynamicTypePtr DynamicType::get() {
   static auto value = DynamicType::create();
+  return value;
+}
+UndefinedTensorTypePtr UndefinedTensorType::get() {
+  static auto value = UndefinedTensorType::create();
   return value;
 }
 NumberTypePtr NumberType::get() {

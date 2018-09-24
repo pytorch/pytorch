@@ -1,4 +1,4 @@
-#include "catch_utils.hpp"
+#include <gtest/gtest.h>
 
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/conv.h>
@@ -10,13 +10,12 @@
 #include <torch/tensor.h>
 #include <torch/utils.h>
 
-#include <test/cpp/api/util.h>
+#include <test/cpp/api/support.h>
 
 using namespace torch::nn;
 using namespace torch::test;
 
 #include <cmath>
-#include <iostream>
 #include <random>
 
 class CartPole {
@@ -111,8 +110,6 @@ bool test_mnist(
     M&& model,
     F&& forward_op,
     O&& optimizer) {
-  std::cout << "Training MNIST for " << num_epochs
-            << " epochs, rest your eyes for a bit!\n";
   struct MNIST_Reader {
     FILE* fp_;
 
@@ -225,15 +222,13 @@ bool test_mnist(
   torch::NoGradGuard guard;
   auto result = std::get<1>(forward_op(tedata).max(1));
   torch::Tensor correct = (result == telabel).toType(torch::kFloat32);
-  std::cout << "Num correct: " << correct.sum().toCFloat() << " out of "
-            << telabel.size(0) << std::endl;
   return correct.sum().toCFloat() > telabel.size(0) * 0.8;
 }
 
-CATCH_TEST_CASE("integration/cartpole") {
+struct IntegrationTest : torch::test::SeedingFixture {};
+
+TEST_F(IntegrationTest, CartPole) {
   torch::manual_seed(0);
-  std::cerr << "Training episodic policy gradient with a critic for up to 3000"
-               " episodes, rest your eyes for a bit!\n";
   auto model = std::make_shared<SimpleContainer>();
   auto linear = model->add(Linear(4, 128), "linear");
   auto policyHead = model->add(Linear(128, 2), "policy");
@@ -326,11 +321,11 @@ CATCH_TEST_CASE("integration/cartpole") {
     if (running_reward > 150) {
       break;
     }
-    CATCH_REQUIRE(episode < 3000);
+    ASSERT_LT(episode, 3000);
   }
 }
 
-CATCH_TEST_CASE("integration/mnist", "[cuda]") {
+TEST_F(IntegrationTest, MNIST_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
@@ -357,7 +352,7 @@ CATCH_TEST_CASE("integration/mnist", "[cuda]") {
   auto optimizer = torch::optim::SGD(
       model->parameters(), torch::optim::SGDOptions(1e-2).momentum(0.5));
 
-  CATCH_REQUIRE(test_mnist(
+  ASSERT_TRUE(test_mnist(
       32, // batch_size
       3, // num_epochs
       true, // useGPU
@@ -366,7 +361,7 @@ CATCH_TEST_CASE("integration/mnist", "[cuda]") {
       optimizer));
 }
 
-CATCH_TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
+TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
@@ -393,7 +388,7 @@ CATCH_TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto optimizer = torch::optim::SGD(
       model->parameters(), torch::optim::SGDOptions(1e-2).momentum(0.5));
 
-  CATCH_REQUIRE(test_mnist(
+  ASSERT_TRUE(test_mnist(
       32, // batch_size
       3, // num_epochs
       true, // useGPU

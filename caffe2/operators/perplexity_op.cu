@@ -25,7 +25,7 @@ bool PerplexityOp<float, CUDAContext>::RunOnDevice() {
   DCHECK_EQ(X.ndim(), 1);
   int N = X.dim32(0);
 
-  Y->Resize(vector<TIndex>());
+  Y->Resize(vector<int64_t>());
   float* Ydata = Y->template mutable_data<float>();
   const float* Xdata = X.data<float>();
 

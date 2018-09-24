@@ -291,16 +291,36 @@ GraphExecutor* getGradExecutor(Operation& op) {
 // tracing concerns separated.
 struct GraphExecutorImpl {
 
-  static std::shared_ptr<Graph> prepareGraph(std::shared_ptr<Graph> graph) {
+  static std::shared_ptr<Graph> prepareGraph(std::shared_ptr<Graph>& graph) {
     auto copy = graph->copy();
     EraseShapeInformation(*copy);
     return copy;
+  }
+
+  static size_t countFlatInputs(const TypePtr& ptr) {
+    if (auto tuple_type = ptr->cast<TupleType>()) {
+      size_t total = 0;
+      for (auto & elem : tuple_type->elements()) {
+        total += countFlatInputs(elem);
+      }
+      return total;
+    }
+    return 1;
+  }
+
+  static size_t countFlatInputs(const std::shared_ptr<Graph>& graph) {
+    size_t total = 0;
+    for (Value * input : graph->inputs()) {
+      total += countFlatInputs(input->type());
+    }
+    return total;
   }
 
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
     : graph(prepareGraph(graph))
     , optimize(optimize)
     , num_inputs(this->graph->inputs().size())
+    , num_flat_inputs(countFlatInputs(graph))
     , num_outputs(this->graph->outputs().size()) {}
 
   // entry point where execution begins
@@ -317,7 +337,7 @@ struct GraphExecutorImpl {
 
   std::shared_ptr<Graph> graphFor(const Stack& stack) const {
     auto inputs = last(stack, num_inputs);
-    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
+    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
 
     if (!optimize) {
       AT_CHECK(fallback, "No graph found for given inputs");
@@ -357,7 +377,7 @@ private:
   const ExecutionPlan & getOrCompile(const Stack& stack) {
     // outside lock guard, to minimize the time holding the lock on the fast path
     // ArgumentSpec even computes its hashCode here.
-    ArgumentSpec spec(autograd::GradMode::is_enabled(), last(stack, num_inputs));
+    ArgumentSpec spec(autograd::GradMode::is_enabled(), last(stack, num_inputs), num_flat_inputs);
     {
       std::lock_guard<std::mutex> lock(compile_mutex);
       auto it = plan_cache.find(spec);
@@ -371,11 +391,11 @@ private:
 
   ExecutionPlan compileSpec(const ArgumentSpec & spec) {
     auto opt_graph = graph->copy();
+    setInputTypes(*opt_graph, spec);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
     //          to an executable form.
-    specializeGrad(opt_graph, spec);
     runRequiredPasses(opt_graph);
 
     // Phase 2. Propagate detailed information about the spec through the
@@ -384,8 +404,8 @@ private:
     //          constants, and constant propagation doesn't need shape information
     //          anyway, so it's better to run it first.
     ConstantPropagation(opt_graph);
-    PropagateInputShapes(*opt_graph, spec);
-    PropagateRequiresGrad(opt_graph, spec);
+    PropagateInputShapes(*opt_graph);
+    PropagateRequiresGrad(opt_graph);
 
     // Phase 3. Run differentiable optimizations (i.e. simple graph rewrites that
     //          we can still execute using autograd).
@@ -395,7 +415,7 @@ private:
     //          symbolically differentiable subgraphs for further optimizations.
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
     //          (or the whole grpah if we know we won't need its derivative).
-    if (needsGradient(opt_graph, spec)) {
+    if (needsGradient(opt_graph)) {
       auto diff_nodes = CreateAutodiffSubgraphs(*opt_graph);
       for (Node * dnode : diff_nodes) {
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
@@ -412,13 +432,6 @@ private:
     return ExecutionPlan(opt_graph);
   }
 
-  void specializeGrad(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
-    std::vector<bool> defined;
-    for (size_t i = 0; i < spec.size(); ++i)
-      defined.push_back(spec.at(i).defined());
-    specializeUndef(*graph, defined);
-  }
-
   void runOptimization(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
@@ -432,13 +445,13 @@ private:
     FuseGraph(graph);
   }
 
-  static bool needsGradient(const std::shared_ptr<const Graph>& graph, const ArgumentSpec& spec) {
+  static bool needsGradient(const std::shared_ptr<const Graph>& graph) {
     if (!autograd::GradMode::is_enabled())
       return false;
     if (mayIntroduceGradient(graph->block()))
       return true;
-    for(size_t i = 0; i < spec.size(); ++i) {
-      if(spec.at(i).requires_grad())
+    for (const Value * input : graph->inputs()) {
+      if (input->type()->requires_grad())
         return true;
     }
     return false;
@@ -463,7 +476,7 @@ private:
       return tracer::getValueTrace(v.toTensor());
     });
 
-    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
+    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs, num_flat_inputs);
     // NB: we could just run the fallback in here and call it a day, but that would loose all
     // the control flow information we have in the graph. Thus, we run the fallback to
     // get the correct output values, but we will override the tracing states later.
@@ -475,7 +488,8 @@ private:
     // tracing and so we only do the type propgation if no concrete types have
     // been set.
     auto local_graph = this->graph->copy();
-    PropagateInputShapes(*local_graph, spec);
+    setInputTypes(*local_graph, spec);
+    PropagateInputShapes(*local_graph);
     auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
 
     auto outputs = last(stack, num_outputs);
@@ -495,6 +509,7 @@ private:
   // for debugging.
   const bool optimize;
   const size_t num_inputs;
+  const size_t num_flat_inputs; // Number of inputs, assuming all tuples would be flattened.
   const size_t num_outputs;
 
   // Populated only when optimize is false (and in that case plan_cache will be unused).
@@ -531,6 +546,7 @@ GraphExecutorState GraphExecutor::getDebugState() {
 
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
+  specializeUndef(*g);
   LowerGradOf(*g);
   // implicit inserted expand nodes are not necessarily always valid
   // when used inside script methods that might have unstable shapes

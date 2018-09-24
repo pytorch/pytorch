@@ -206,6 +206,7 @@ class TestTorch(TestCase):
                        'reinforce',
                        'relu',
                        'relu_',
+                       'prelu',
                        'resize',
                        'resize_as',
                        'smm',
@@ -842,12 +843,20 @@ class TestTorch(TestCase):
             res = x.norm(p).item()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
+
         # one dimension
         x = torch.randn(5, 5, device=device)
         xn = x.cpu().numpy()
         for p in [0, 1, 2, 3, 4, inf]:
             res = x.norm(p, 1).cpu().numpy()
             expected = np.linalg.norm(xn, p, 1)
+            self.assertEqual(res.shape, expected.shape)
+            self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
+
+        # matrix norm
+        for p in ['fro', 'nuc']:
+            res = x.norm(p).cpu().numpy()
+            expected = np.linalg.norm(xn, p)
             self.assertEqual(res.shape, expected.shape)
             self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
 
@@ -2397,29 +2406,30 @@ class TestTorch(TestCase):
             self.assertEqual(5., res1[0].item())
 
     def test_tensor_factory_copy_var(self):
-        # default copy from var
-        source = torch.randn(5, 5, requires_grad=True)
-        copy = torch.tensor(source)
-        self.assertEqual(copy.data, source.data)
-        self.assertTrue(source.requires_grad)
-        self.assertTrue(copy.is_leaf)
-        self.assertFalse(copy.requires_grad)
 
-        # copy with requires_grad=False
-        source = torch.randn(5, 5, requires_grad=True)
-        copy = torch.tensor(source, requires_grad=False)
-        self.assertEqual(copy.data, source.data)
-        self.assertTrue(source.requires_grad)
-        self.assertTrue(copy.is_leaf)
-        self.assertFalse(copy.requires_grad)
+        def check_copy(copy, is_leaf, requires_grad, data_ptr=None):
+            if data_ptr is None:
+                data_ptr = copy.data_ptr
+            self.assertEqual(copy.data, source.data)
+            self.assertTrue(copy.is_leaf == is_leaf)
+            self.assertTrue(copy.requires_grad == requires_grad)
+            self.assertTrue(copy.data_ptr == data_ptr)
 
-        # copy with requires_grad=True
-        source = torch.randn(5, 5, requires_grad=True)
-        copy = torch.tensor(source, requires_grad=True)
-        self.assertEqual(copy.data, source.data)
-        self.assertTrue(source.requires_grad)
-        self.assertTrue(copy.is_leaf)
-        self.assertTrue(copy.requires_grad)
+        source = torch.randn(5, 5, dtype=torch.double, requires_grad=True)
+        # test torch.tensor()
+        check_copy(torch.tensor(source), True, False)
+        check_copy(torch.tensor(source, requires_grad=False), True, False)
+        check_copy(torch.tensor(source, requires_grad=True), True, True)
+
+        # test tensor.new_tensor()
+        copy = torch.randn(1)
+        check_copy(copy.new_tensor(source), True, False)
+        check_copy(copy.new_tensor(source, requires_grad=False), True, False)
+        check_copy(copy.new_tensor(source, requires_grad=True), True, True)
+
+        # test torch.as_tensor()
+        check_copy(torch.as_tensor(source), source.is_leaf, source.requires_grad, source.data_ptr)  # not copy
+        check_copy(torch.as_tensor(source, dtype=torch.float), False, True)  # copy and keep the graph
 
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):

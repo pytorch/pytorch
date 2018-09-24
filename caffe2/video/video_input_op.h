@@ -462,8 +462,8 @@ VideoInputOp<Context>::VideoInputOp(
   CAFFE_ENFORCE_GT(
       operator_def.input_size(), 0, "Need to have a DBReader blob input");
 
-  vector<TIndex> data_shape(5);
-  vector<TIndex> label_shape(2);
+  vector<int64_t> data_shape(5);
+  vector<int64_t> label_shape(2);
 
   // for RGB data
   data_shape[0] = batch_size_ * clip_per_video_ * multi_crop_count_;
@@ -486,11 +486,11 @@ VideoInputOp<Context>::VideoInputOp(
     prefetched_label_.Resize(label_shape);
   } else {
     prefetched_label_.Resize(
-        vector<TIndex>(1, batch_size_ * clip_per_video_ * multi_crop_count_));
+        vector<int64_t>(1, batch_size_ * clip_per_video_ * multi_crop_count_));
   }
 
   prefetched_video_id_.Resize(
-      vector<TIndex>(1, batch_size_ * clip_per_video_ * multi_crop_count_));
+      vector<int64_t>(1, batch_size_ * clip_per_video_ * multi_crop_count_));
 }
 
 template <class Context>

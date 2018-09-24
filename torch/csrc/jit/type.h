@@ -18,6 +18,7 @@ namespace torch { namespace jit {
 _(DynamicType) \
 _(TensorType) \
 _(CompleteTensorType) \
+_(UndefinedTensorType) \
 _(TupleType) \
 _(ListType) \
 _(NumberType) \
@@ -162,6 +163,33 @@ struct TORCH_API DynamicType : public Type {
 private:
   DynamicType()
   : Type(TypeKind::DynamicType) {}
+};
+
+struct UndefinedTensorType;
+using UndefinedTensorTypePtr = std::shared_ptr<UndefinedTensorType>;
+struct TORCH_API UndefinedTensorType : public Type {
+  static constexpr bool is_singleton = true;
+  friend struct Type;
+  static const TypeKind Kind = TypeKind::UndefinedTensorType;
+
+  template<typename ... T>
+  static UndefinedTensorTypePtr create( T&& ... all ) {
+    return UndefinedTensorTypePtr(new UndefinedTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  }
+
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return rhs->kind() == TypeKind::DynamicType ||
+           rhs->kind() == TypeKind::UndefinedTensorType;
+  }
+  std::string str() const override {
+    return "UndefinedTensor";
+  }
+  static UndefinedTensorTypePtr get();
+protected:
+  UndefinedTensorType(): Type(TypeKind::UndefinedTensorType) {}
 };
 
 struct TensorType;
@@ -356,6 +384,9 @@ struct TORCH_API ListType : public Type {
     }
     return false;
   }
+  bool requires_grad() const override {
+    return elem->requires_grad();
+  }
   std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";
@@ -403,6 +434,10 @@ struct TORCH_API TupleType : public Type {
     return compare(*rhs, [](const TypePtr a, const TypePtr b) {
       return a->isSubtypeOf(b);
     });
+  }
+  bool requires_grad() const override {
+    return std::any_of(elements_.begin(), elements_.end(),
+                       [](const TypePtr& ptr) { return ptr->requires_grad(); });
   }
   std::string str() const override {
     std::stringstream ss;

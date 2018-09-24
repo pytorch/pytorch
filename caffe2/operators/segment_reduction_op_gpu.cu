@@ -433,10 +433,10 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const TIndex dataSize = dataInput.dim(0);
+    const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
-    TIndex dataToReduceSize;
-    const TIndex outputSize = lengthsInput.dim(0);
+    int64_t dataToReduceSize;
+    const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
     auto shape = dataInput.dims();
@@ -554,10 +554,10 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
     auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const TIndex dataSize = dataInput.dim(0);
+    const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
-    TIndex dataToReduceSize;
-    const TIndex outputSize = lengthsInput.dim(0);
+    int64_t dataToReduceSize;
+    const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
     auto shape = dataInput.dims();
@@ -676,10 +676,10 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
     auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const TIndex dataSize = dataInput.dim(0);
+    const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
-    TIndex dataToReduceSize;
-    const TIndex outputSize = lengthsInput.dim(0);
+    int64_t dataToReduceSize;
+    const int64_t outputSize = lengthsInput.dim(0);
     int len_length = outputSize;
 
     auto shape = dataInput.dims();
@@ -810,10 +810,10 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
 
-    const TIndex dataSize = dataInput.dim(0);
+    const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
-    const TIndex dataToReduceSize = indicesInput.dim(0);
-    const TIndex outputSize = lengthsInput.dim(0);
+    const int64_t dataToReduceSize = indicesInput.dim(0);
+    const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
     auto shape = dataInput.dims();
@@ -954,7 +954,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
     }
 
     CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
-    TIndex slize_sz = data.size_from_dim(1);
+    int64_t slize_sz = data.size_from_dim(1);
 
     K_tensor_.Resize(1);
     // Get maximum segment id so we can size the output.

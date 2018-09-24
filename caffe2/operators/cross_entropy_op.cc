@@ -80,9 +80,9 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
 
   auto* out = Output(0);
   if (logits.ndim() == 0) {
-    out->Resize(std::vector<TIndex>{});
+    out->Resize(std::vector<int64_t>{});
   } else {
-    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
+    std::vector<int64_t> dims(logits.dims().begin(), logits.dims().end() - 1);
     out->Resize(dims);
   }
   auto* out_ptr = out->template mutable_data<float>();
@@ -162,9 +162,9 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
 
   auto* out = Output(0);
   if (logits.ndim() == 0) {
-    out->Resize(std::vector<TIndex>{});
+    out->Resize(std::vector<int64_t>{});
   } else {
-    std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
+    std::vector<int64_t> dims(logits.dims().begin(), logits.dims().end() - 1);
     out->Resize(dims);
   }
   auto* out_ptr = out->template mutable_data<float>();
@@ -260,11 +260,11 @@ bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
   auto* Y = Output(0);
   auto shape = X.dims();
   shape.push_back(2);
-  TIndex N = X.size();
+  int64_t N = X.size();
   Y->Resize(shape);
   const auto* Xdata = X.data<float>();
   auto* Ydata = Y->template mutable_data<float>();
-  for (TIndex i = 0; i < N; ++i) {
+  for (int64_t i = 0; i < N; ++i) {
     DCHECK_GE(Xdata[i], 0.0);
     DCHECK_LE(Xdata[i], 1.0);
     Ydata[i * 2] = 1.0 - Xdata[i];
@@ -284,9 +284,9 @@ bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   dX->Resize(shape);
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
-  TIndex N = dX->size();
+  int64_t N = dX->size();
   // use eigen?
-  for (TIndex i = 0; i < N; ++i) {
+  for (int64_t i = 0; i < N; ++i) {
     dXdata[i] = dYdata[i * 2 + 1] - dYdata[i * 2];
   }
   return true;
@@ -308,7 +308,7 @@ bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE(
       (label.ndim() == 1) || (label.ndim() == 2 && label.dim32(1) == D));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  Y->Resize(vector<TIndex>{N});
+  Y->Resize(vector<int64_t>{N});
   const float* Xdata = X.data<float>();
   const float* labelData = label.data<float>();
   auto* Ydata = Y->template mutable_data<float>();

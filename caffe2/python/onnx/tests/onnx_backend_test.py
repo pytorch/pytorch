@@ -38,6 +38,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      '|test_mvn.*'  # MeanVarianceNormalization is experimental and not supported.
                      '|test_dynamic_slice.*'  # MeanVarianceNormalization is experimental and not supported.
+                     '|test_constantlike.*'  # Needs implementation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.

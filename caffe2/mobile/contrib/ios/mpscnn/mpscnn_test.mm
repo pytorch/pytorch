@@ -640,7 +640,7 @@ void testMPSCNN() {
               CAFFE_ENFORCE_EQ(t1.ndim(), 2);
               CAFFE_ENFORCE(t2.dim32(2) == 1 && t2.dim32(3) == 1);
               const_cast<TensorCPU&>(t2).Reshape(
-                  std::vector<TIndex>{TIndex(batchSize), TIndex(COut)});
+                  std::vector<int64_t>{int64_t(batchSize), int64_t(COut)});
               // Note dims do not match, as Metal leaves a 1x1 spatial
               // dimension.
               CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
@@ -682,8 +682,8 @@ void testMPSCNN() {
                           LOG(INFO) << "MPSCNNPool Test: " << pool;
                           Workspace ws;
                           {
-                            auto* t =
-                                BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
+                            auto* t = BlobGetMutableTensor(
+                                ws.CreateBlob("X_cpu"), CPU);
                             t->Resize(batchSize, 8, 8, 13);
                             CPUContext ctx;
                             math::RandGaussian<float, CPUContext>(
@@ -1072,7 +1072,8 @@ void testMPSCNN() {
                       LOG(INFO) << "MPSCNNConv Test";
                       Workspace ws;
                       {
-                        auto* t = BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
+                        auto* t =
+                            BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
                         t->Resize(batchSize, 12, 57, 72);
                         CPUContext ctx;
                         math::RandGaussian<float, CPUContext>(
@@ -2661,8 +2662,8 @@ void testMPSCNN() {
                             LOG(INFO) << "MPSConvTranspose Test";
                             Workspace ws;
                             {
-                              auto* t =
-                                  BlobGetMutableTensor(ws.CreateBlob("X_cpu"), CPU);
+                              auto* t = BlobGetMutableTensor(
+                                  ws.CreateBlob("X_cpu"), CPU);
                               t->Resize(batchSize, inputChannels, 8, 12);
                               CPUContext ctx;
                               math::RandGaussian<float, CPUContext>(
@@ -3336,8 +3337,8 @@ void compareModels(const NetDef& initNet, NetDef predictNet) {
     Workspace cws;
     cws.RunNetOnce(initNet);
     {
-      auto* t =
-          BlobGetMutableTensor(cws.CreateBlob(predictNet.external_input(0)), CPU);
+      auto* t = BlobGetMutableTensor(
+          cws.CreateBlob(predictNet.external_input(0)), CPU);
       t->Resize(1, 224, 224, 4);
       for (auto i = 0; i < t->size(); ++i) {
         t->mutable_data<uint8_t>()[i] = i % 225;
@@ -3348,8 +3349,8 @@ void compareModels(const NetDef& initNet, NetDef predictNet) {
     Workspace mws;
     mws.RunNetOnce(initNet);
     {
-      auto* t =
-          BlobGetMutableTensor(mws.CreateBlob(predictNet.external_input(0)), CPU);
+      auto* t = BlobGetMutableTensor(
+          mws.CreateBlob(predictNet.external_input(0)), CPU);
       t->Resize(1, 224, 224, 4);
       for (auto i = 0; i < t->size(); ++i) {
         t->mutable_data<uint8_t>()[i] = i % 225;
@@ -3397,16 +3398,16 @@ void verifyRewrite(
   dumpDef(predictNet);
   dumpDef(metalPredictNet);
 
-#define RUN_NET(ws, predictNet)                                             \
-  ws.RunNetOnce(initNet);                                                   \
-  {                                                                         \
-    auto* t =                                                               \
-        BlobGetMutableTensor(ws.CreateBlob(predictNet.external_input(0)), CPU); \
-    t->Resize(inputDims);                                                   \
-    CPUContext ctx;                                                         \
-    math::RandGaussian<float, CPUContext>(                                  \
-        t->size(), 0, 1, t->mutable_data<float>(), &ctx);                   \
-  }                                                                         \
+#define RUN_NET(ws, predictNet)                            \
+  ws.RunNetOnce(initNet);                                  \
+  {                                                        \
+    auto* t = BlobGetMutableTensor(                        \
+        ws.CreateBlob(predictNet.external_input(0)), CPU); \
+    t->Resize(inputDims);                                  \
+    CPUContext ctx;                                        \
+    math::RandGaussian<float, CPUContext>(                 \
+        t->size(), 0, 1, t->mutable_data<float>(), &ctx);  \
+  }                                                        \
   ws.RunNetOnce(predictNet);
 
   // initialize
