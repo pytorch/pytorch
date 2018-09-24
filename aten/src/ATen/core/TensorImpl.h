@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <type_traits>
 
 #include "ATen/core/Storage.h"
 #include "ATen/core/optional.h"
@@ -38,7 +39,7 @@ namespace at {
 class Scalar;
 struct Type;
 struct Storage;
-struct Tensor;
+class Tensor;
 
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
@@ -110,6 +111,23 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0) {
     data_type_ = storage_ ? storage_.dtype() : caffe2::TypeMeta{};
+    if (storage_) {
+      switch (storage_.device_type()) {
+      case DeviceType::CPU:
+        type_id_ = CPUTensorId();
+        break;
+      case DeviceType::CUDA:
+        type_id_ = CUDATensorId();
+        break;
+      default:
+        // The other types are not supported by PyTorch Type at the moment
+        // TODO: Allocate type_ids for all of this
+        type_id_ = UndefinedTensorId();
+        break;
+      }
+    } else {
+      type_id_ = UndefinedTensorId();
+    }
   }
 
   TensorImpl(const TensorImpl&) = default;
@@ -190,20 +208,27 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <typename T>
   inline T * data() const {
+    return static_cast<T*>(data(caffe2::TypeMeta::Id<typename std::remove_const<T>::type>()));
+  }
+
+  // Default implementation assumes that metadata is stored "on premises"
+  virtual void * data(caffe2::TypeIdentifier type_id) const {
     CAFFE_ENFORCE_WITH_CALLER(
         storage_.data() || numel_ == 0,
         "The tensor is of non-zero shape, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     CAFFE_ENFORCE_WITH_CALLER(
-        storage_.IsType<T>(),
+        storage_.IsTypeIdentifier(type_id),
         "Tensor type mismatch, caller expects elements to be ",
-        caffe2::TypeMeta::TypeName<T>(),
+        type_id.name(),
         ", while tensor contains ",
         data_type_.name(),
         ". ");
     // We managed the type check ourselves
-    return storage_.unsafe_data<T>() + storage_offset_;
+    return static_cast<void*>(
+        static_cast<char*>(storage_.unsafe_data()) +
+        data_type_.itemsize() * storage_offset_);
   }
 
   inline void* data() const {

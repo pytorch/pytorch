@@ -60,6 +60,10 @@ struct CAFFE2_API Storage {
     return storage_impl_->IsType<T>();
   }
 
+  bool IsTypeIdentifier(caffe2::TypeIdentifier type_id) const {
+    return storage_impl_->IsTypeIdentifier(type_id);
+  }
+
   template <typename T>
   T* data() const { return storage_impl_->data<T>(); }
 
@@ -102,6 +106,10 @@ struct CAFFE2_API Storage {
 
   void* data() const {
     return storage_impl_.get()->data();
+  }
+
+  void* unsafe_data() const {
+    return storage_impl_->unsafe_data();
   }
 
   const caffe2::TypeMeta& dtype() const {

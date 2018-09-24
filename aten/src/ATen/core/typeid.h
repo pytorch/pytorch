@@ -37,6 +37,10 @@ struct is_fundamental<at::Half> : std::true_type {
 };
 }  // namespace std
 
+namespace at {
+  class Tensor;
+}
+
 namespace caffe2 {
 
 class TypeMeta;
@@ -60,6 +64,8 @@ class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, ui
   static constexpr TypeIdentifier uninitialized() {
     return TypeIdentifier(11);
   }
+
+  const char* name() const noexcept;
 
  private:
   constexpr explicit TypeIdentifier(uint16_t id) : IdWrapper(id) {}
@@ -91,6 +97,11 @@ namespace caffe2 {
 AT_CORE_API std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
 AT_CORE_API std::unordered_set<std::string>& gRegisteredTypeNames();
 
+inline const char* TypeIdentifier::name() const noexcept {
+  auto it = gTypeNames().find(*this);
+  assert(it != gTypeNames().end());
+  return it->second.c_str();
+}
 
 AT_CORE_API std::mutex& gTypeRegistrationMutex();
 
@@ -218,9 +229,7 @@ class AT_CORE_API TypeMeta {
    * Returns a printable name for the type.
    */
   const char* name() const noexcept {
-    auto it = gTypeNames().find(id_);
-    assert(it != gTypeNames().end());
-    return it->second.c_str();
+    return id_.name();
   }
 
   friend bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept;
@@ -454,8 +463,6 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
       #T);                                                     \
   }
 
-class Tensor;
-
 // Note: we have preallocated the numbers so they line up exactly
 // with at::ScalarType's numbering.  All other numbers do not matter.
 
@@ -474,7 +481,7 @@ CAFFE_DECLARE_KNOWN_TYPE(9, std::complex<float>)
 CAFFE_DECLARE_KNOWN_TYPE(10, std::complex<double>)
 // 11 = undefined type id
 
-CAFFE_DECLARE_KNOWN_TYPE(12, Tensor)
+CAFFE_DECLARE_KNOWN_TYPE(12, at::Tensor)
 CAFFE_DECLARE_KNOWN_TYPE(13, std::string)
 CAFFE_DECLARE_KNOWN_TYPE(14, bool)
 CAFFE_DECLARE_KNOWN_TYPE(15, uint16_t)

@@ -71,21 +71,6 @@ inline Device Tensor::device() const {
   return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
 }
 
-#define DEFINE_CAST(T, name, _)                  \
-  template <>                                    \
-  inline T* Tensor::data() const {               \
-    AT_CHECK(                                    \
-        type().scalarType() == ScalarType::name, \
-        "expected scalar type ",                 \
-        #name,                                   \
-        " but found ",                           \
-        at::toString(type().scalarType()));      \
-    return static_cast<T*>(this->data_ptr());    \
-  }
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
-#undef DEFINE_CAST
-
 #define DEFINE_TO_C_TYPE(T, name, _)   \
   template <>                          \
   inline T Tensor::item() const {      \

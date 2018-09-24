@@ -5,7 +5,7 @@
 #include "caffe2/utils/Array.h"
 #include "caffe2/utils/Metaprogramming.h"
 
-namespace caffe2 {
+namespace at {
 class Tensor;
 }  // namespace caffe2
 
@@ -19,7 +19,7 @@ namespace details {
  */
 template <class Arg>
 using is_tensor_arg = std::
-    is_same<caffe2::Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
+    is_same<at::Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
 
 inline DeviceTypeId to_device_type_id(caffe2::DeviceType device_type) {
   switch (device_type) {

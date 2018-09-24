@@ -3,6 +3,7 @@
 
 using namespace c10;
 using namespace caffe2;
+using namespace at;
 
 static_assert(details::is_tensor_arg<Tensor>::value, "");
 static_assert(details::is_tensor_arg<const Tensor&>::value, "");

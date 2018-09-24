@@ -72,6 +72,10 @@ struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
     return data_type_.Match<T>();
   }
 
+  bool IsTypeIdentifier(caffe2::TypeIdentifier type_id) const {
+    return data_type_.id() == type_id;
+  }
+
   template <typename T>
   inline T* data() const {
     // TODO: This is bad: it means storage.data<T>() calls only work on
@@ -90,6 +94,10 @@ struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
   template <typename T>
   inline T* unsafe_data() const {
     return static_cast<T*>(this->data_ptr_.get());
+  }
+
+  void* unsafe_data() const {
+    return this->data_ptr_.get();
   }
 
   void release_resources() override {
