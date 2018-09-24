@@ -30,9 +30,6 @@ struct AT_API TensorGeometry {
   // true if the tensor is contiguous
   bool is_contiguous() const;
 
-  // creates a new tensor with the sizes and strides of the source
-  Tensor zeros_with_stride(const Type& type) const;
-
   int64_t dim() const { return sizes_.size(); }
   int64_t size(int64_t dim) const {
     dim = maybe_wrap_dim(dim, this->dim());

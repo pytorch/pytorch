@@ -533,7 +533,7 @@ struct ADTestSpec {
 
 variable_list get_grad_outputs(const variable_list& vars) {
   return fmap(vars, [](const Variable& v) -> Variable {
-                      return v.type().tensor(v.sizes()).normal_();
+                      return at::randn(v.sizes(), v.options());
                     });
 }
 

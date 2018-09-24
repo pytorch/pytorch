@@ -31,17 +31,17 @@ namespace at {
 namespace native {
 
 Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
 }
 
 Tensor clamp_max(const Tensor& self, Scalar max) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return clamp_max_out(result, self, max);
 }
 
 Tensor clamp_min(const Tensor& self, Scalar min) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return clamp_min_out(result, self, min);
 }
 
@@ -123,7 +123,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 
 #define IMPLEMENT_UNARY_OP_VEC(op)                              \
   Tensor op(const Tensor& self) {                               \
-    Tensor result = self.type().tensor();                       \
+    Tensor result = at::empty({0}, self.options());             \
     return at::op##_out(result, self);                          \
   }                                                             \
   Tensor& _##op##__cpu(Tensor& self_) {                         \
@@ -143,7 +143,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 
 #define IMPLEMENT_UNARY_OP_TH(op)                               \
   Tensor op(const Tensor& self) {                               \
-    Tensor result = self.type().tensor();                       \
+    Tensor result = at::empty({0}, self.options());             \
     return at::op##_out(result, self);                          \
   }                                                             \
   Tensor& _##op##__cpu(Tensor& self) {                          \
