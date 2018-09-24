@@ -20,7 +20,7 @@ class ReplaceNaNOp final : public Operator<Context> {
   }
 
   template <typename T>
-  void ReplaceNaN(const T& value, const TIndex size, const T* X, T* Y);
+  void ReplaceNaN(const T& value, const int64_t size, const T* X, T* Y);
 
   template <typename T>
   bool DoRunWithType() {

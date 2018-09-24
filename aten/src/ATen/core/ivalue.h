@@ -4,8 +4,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorImpl.h>
 #include <ATen/core/UndefinedTensorImpl.h>
-#include <ATen/core/intrusive_ptr.h>
 #include <ATen/core/blob.h>
+#include <ATen/core/intrusive_ptr.h>
 
 #include <type_traits>
 
@@ -32,7 +32,6 @@ struct AT_API ConstantString final : c10::intrusive_ptr_target {
       std::ostream& out,
       const ConstantString& v);
 };
-
 
 // non-mutable list
 template <typename Elem>
@@ -66,8 +65,10 @@ using DoubleList = ConstantList<double>;
 // to mark whether that type is a subtype of c10::intrusive_ptr_target and needs
 // retain/release calls.
 
-#define TORCH_FORALL_TAGS(_) \
-  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList) _(Blob)
+#define TORCH_FORALL_TAGS(_)                                             \
+  _(None)                                                                \
+  _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) \
+      _(TensorList) _(Blob)
 
 struct AT_API IValue final {
   IValue()
@@ -127,18 +128,21 @@ struct AT_API IValue final {
     return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
   }
 
-  IValue(caffe2::Blob blob)
-  : tag(Tag::Blob), is_intrusive_ptr(true) {
-    // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract and
+  IValue(caffe2::Blob blob) : tag(Tag::Blob), is_intrusive_ptr(true) {
+    // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
+    // and
     //      store it as a Tensor instead.
-    payload.as_intrusive_ptr = c10::make_intrusive<caffe2::Blob>(std::move(blob)).release();
+    payload.as_intrusive_ptr =
+        c10::make_intrusive<caffe2::Blob>(std::move(blob)).release();
   }
-  bool isBlob() const { return Tag::Blob == tag; }
+  bool isBlob() const {
+    return Tag::Blob == tag;
+  }
   caffe2::Blob& toBlob() & {
     AT_ASSERT(isBlob());
     return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
   }
-  const caffe2::Blob& toBlob() const & {
+  const caffe2::Blob& toBlob() const& {
     AT_ASSERT(isBlob());
     return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
   }

@@ -319,7 +319,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
     auto storage = std::make_shared<at::Storage>(
       at::CPU(type).typeMeta(),
       std::move(storage_ptr),
-      size,
+      size / at::CPU(type).typeMeta().itemsize(),
       nullptr);
     storage_map_.insert(std::make_pair(record_number, storage));
     return at::CPU(type).tensor(*storage, storage_offset, dims, strides);
@@ -334,6 +334,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
 std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFullName(
     ModuleLookup module_lookup,
     const std::string fullname) {
+  AT_ASSERT(!fullname.empty());
   std::vector<std::string> vec;
   std::stringstream ss(fullname);
   std::string name;

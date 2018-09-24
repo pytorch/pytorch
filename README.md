@@ -202,7 +202,7 @@ REM The following two lines are needed for Python 2.7, but the support for it is
 set MSSdk=1
 set FORCE_PY27_BUILD=1
 REM As for CUDA 8, VS2015 Update 3 is also required to build PyTorch. Use the following line.
-set "CUDA_HOST_COMPILER=%VS140COMNTOOLS%\..\..\VC\bin\amd64\cl.exe"
+set "CUDAHOSTCXX=%VS140COMNTOOLS%\..\..\VC\bin\amd64\cl.exe"
 
 call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
@@ -239,7 +239,7 @@ You can then build the documentation by running ``make <format>`` from the
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](http://pytorch.org/previous-versions/).
+on [our website](http://pytorch.org/previous-versions).
 
 
 ## Getting Started

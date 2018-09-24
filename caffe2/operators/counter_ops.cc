@@ -153,7 +153,8 @@ class CounterSerializer : public BlobSerializerBase {
     proto.set_data_type(TensorProto_DataType_INT64);
     proto.add_dims(1);
     proto.add_int64_data(
-        (*static_cast<const std::unique_ptr<Counter<int64_t>>*>(pointer))->retrieve());
+        (*static_cast<const std::unique_ptr<Counter<int64_t>>*>(pointer))
+            ->retrieve());
     acceptor(name, blob_proto.SerializeAsString());
   }
 };

@@ -30,7 +30,8 @@ class MKLMemorySerializer : public BlobSerializerBase {
     device_detail->set_device_type(PROTO_MKLDNN);
     proto->set_name(name);
     if (typeMeta.Match<MKLMemory<float>>()) {
-      const MKLMemory<float>& src = *static_cast<const MKLMemory<float>*>(pointer);
+      const MKLMemory<float>& src =
+          *static_cast<const MKLMemory<float>*>(pointer);
       CAFFE_ENFORCE(
           src.buffer(), "Cannot serialize an empty MKLMemory object.");
       size_t total = 1;
@@ -44,7 +45,8 @@ class MKLMemorySerializer : public BlobSerializerBase {
       }
       src.CopyTo(proto->mutable_float_data()->mutable_data());
     } else if (typeMeta.Match<MKLMemory<double>>()) {
-      const MKLMemory<double>& src = *static_cast<const MKLMemory<double>*>(pointer);
+      const MKLMemory<double>& src =
+          *static_cast<const MKLMemory<double>*>(pointer);
       CAFFE_ENFORCE(
           src.buffer(), "Cannot serialize an empty MKLMemory object.");
       size_t total = 1;
@@ -85,8 +87,8 @@ class MKLMemoryDeserializer : public BlobDeserializerBase {
         "MKLMemory only supports either float or double formats.");
     CAFFE_ENFORCE(
         !proto.has_segment(), "MKLMemory does not support segment right now.");
-    vector<TIndex> dims;
-    for (const TIndex d : proto.dims()) {
+    vector<int64_t> dims;
+    for (const int64_t d : proto.dims()) {
       dims.push_back(d);
     }
     // TODO: right now, every time we do a deserializer we create a new MKL

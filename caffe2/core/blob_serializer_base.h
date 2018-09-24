@@ -43,8 +43,11 @@ class BlobSerializerBase {
    *     serailizer can use it to save blob in several chunks
    *     acceptor should be thread-safe
    */
-  virtual void Serialize(const void* pointer, TypeMeta typeMeta, const std::string& name,
-                        SerializationAcceptor acceptor) = 0;
+  virtual void Serialize(
+      const void* pointer,
+      TypeMeta typeMeta,
+      const std::string& name,
+      SerializationAcceptor acceptor) = 0;
 
   virtual void SerializeWithChunkSize(
       const void* pointer,

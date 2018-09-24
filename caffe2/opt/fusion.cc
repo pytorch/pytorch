@@ -44,9 +44,9 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
     CAFFE_ENFORCE(
         bnInputs.size() >= 5, "Invalid batch normalization input size");
 
-#define EXPOSE_TENSOR_DATA(name, index, inputs)                            \
-  auto name = repr::nn::get<repr::Tensor>(inputs[index]);                  \
-  assert(ws->HasBlob(name->getName()) && "Blob not in workspace");         \
+#define EXPOSE_TENSOR_DATA(name, index, inputs)                                \
+  auto name = repr::nn::get<repr::Tensor>(inputs[index]);                      \
+  assert(ws->HasBlob(name->getName()) && "Blob not in workspace");             \
   auto name##Tensor = BlobGetMutableTensor(ws->GetBlob(name->getName()), CPU); \
   auto name##Data = name##Tensor->mutable_data<float>();
 

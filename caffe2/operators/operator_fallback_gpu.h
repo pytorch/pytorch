@@ -65,8 +65,8 @@ class GPUFallbackOpEx final : public Operator<CUDAContext> {
     bool need_sync = false;
     for (int i = 0; i < InputSize(); ++i) {
       if (this->InputIsTensorType(i, CUDA)) {
-        BlobGetMutableTensor(local_input_blobs_[i], CPU)->CopyFrom(
-            Input(i), &context_);
+        BlobGetMutableTensor(local_input_blobs_[i], CPU)
+            ->CopyFrom(Input(i), &context_);
         need_sync = true;
       } else {
         VLOG(1) << "Input " << i << " is not TensorCUDA. Skipping copy.";
