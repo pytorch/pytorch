@@ -909,23 +909,20 @@ class TestCuda(TestCase):
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
     def test_mul_intertype_scalar(self):
-        x = torch.tensor(1.5, device='cuda')
-        y = torch.tensor(3, dtype=torch.int32, device='cuda')
+        def test_mul(dtype):
+            x = torch.tensor(1.5, dtype=dtype, device='cuda')
+            y = torch.tensor(3, dtype=torch.int32, device='cuda')
 
-        self.assertEqual(x * y, 4.5)
-        self.assertEqual(y * x, 4.5)
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            y *= x
-        x *= y
-        self.assertEqual(x, 4.5)
-
-        x = torch.tensor(1.5, device='cuda', dtype=torch.float16)
-        self.assertEqual(x * y, 4.5)
-        # half * int currently promotes to double
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
+            self.assertEqual(x * y, 4.5)
+            self.assertEqual(y * x, 4.5)
+            with self.assertRaisesRegex(RuntimeError, 'expected type'):
+                y *= x
             x *= y
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            y *= x
+            self.assertEqual(x, 4.5)
+
+        test_mul(torch.float16)
+        test_mul(torch.float32)
+        test_mul(torch.float64)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
