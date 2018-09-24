@@ -531,6 +531,21 @@ class TestJit(JitTestCase):
         input = torch.rand(3, 4)
         self.assertEqual(2 * input + 1, m(input))
 
+    def test_diff_subgraph_clones_constants(self):
+        @torch.jit.script
+        def f(x, y):
+            return x + x + y + x + y + x + y + x + y + x
+
+        def count_constants(graph):
+            return sum(node.kind() == 'prim::Constant' for node in graph.nodes())
+
+        graph = f.graph.copy()
+        self.run_pass('cse', graph)
+        self.run_pass('create_autodiff_subgraphs', graph)
+        nodes = list(graph.nodes())
+        self.assertEqual(count_constants(graph), 1)
+        self.assertEqual(count_constants(nodes[1].g('Subgraph')), 1)
+
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
     # and we attempted to trace its derivative (which is not

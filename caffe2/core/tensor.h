@@ -245,10 +245,6 @@ class CAFFE2_API Tensor final {
     return impl_.get()->nbytes();
   }
 
-  inline size_t capacity_nbytes() const {
-    return impl_.get()->capacity_nbytes();
-  }
-
   inline const vector<int64_t>& dims() const {
     return impl_.get()->dims();
   }
@@ -303,6 +299,10 @@ class CAFFE2_API Tensor final {
   }
 
   const Storage& storage() {
+    return impl_->storage();
+  }
+
+  const Storage& storage() const {
     return impl_->storage();
   }
 };

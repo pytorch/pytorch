@@ -49,10 +49,10 @@ enum class CPUCapability {
 CPUCapability get_cpu_capability();
 
 template <typename FnPtr, typename T>
-struct AT_API DispatchStub;
+struct CAFFE2_API DispatchStub;
 
 template <typename rT, typename T, typename... Args>
-struct AT_API DispatchStub<rT (*) (Args...), T> {
+struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
   using FnPtr = rT (*) (Args...);
 
   template <typename... ArgTypes>
@@ -114,9 +114,9 @@ struct RegisterDispatch {
 // adding parentheses and using helper struct to get rid of the parentheses, do
 // not work with MSVC. So do a `using`-declaration if you need to pass in such
 // `fn`, e.g., grid_sampler_2d_backward_cpu_kernel in GridSampleKernel.h.
-#define DECLARE_DISPATCH(fn, name) \
+#define DECLARE_DISPATCH(fn, name)         \
   struct name : DispatchStub<fn, name> {}; \
-  extern AT_API struct name name
+  extern CAFFE2_API struct name name
 
 #define DEFINE_DISPATCH(name) struct name name
 

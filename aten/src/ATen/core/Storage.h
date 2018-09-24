@@ -4,8 +4,8 @@
 
 namespace at {
 
-struct AT_API Storage {
-public:
+struct CAFFE2_API Storage {
+ public:
   Storage() {}
   Storage(c10::intrusive_ptr<StorageImpl> ptr) : storage_impl_(std::move(ptr)) {}
   Storage(

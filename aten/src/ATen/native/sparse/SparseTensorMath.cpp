@@ -135,7 +135,7 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, Sca
 }
 
 SparseTensor pow_sparse_scalar(const SparseTensor& t, Scalar value) {
-  SparseTensor r = t.type().tensor();
+  SparseTensor r = at::empty({0}, t.options());
   pow_out_sparse_scalar(r, t, value);
   return r;
 }
@@ -208,7 +208,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   Tensor t_values = t._values();
   LongTensor src_indices = src._indices();
   Tensor s_values = src._values();
-  LongTensor r_indices = t_indices.type().tensor({sparseDims, max_nnz});
+  LongTensor r_indices = at::empty({sparseDims, max_nnz}, t_indices.options());
   Tensor r_values = _new_values_with_size_of(s_values, max_nnz).zero_();
   r.resize_as_(src);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
@@ -387,7 +387,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   Tensor t_values = t._values();
   LongTensor src_indices = src._indices();
   Tensor s_values = src._values();
-  LongTensor r_indices = t_indices.type().tensor({sparseDims, max_nnz});
+  LongTensor r_indices = at::empty({sparseDims, max_nnz}, t_indices.options());
   Tensor r_values = _new_values_with_size_of(t_values, max_nnz).zero_();
   r.resize_as_(src);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
@@ -570,7 +570,7 @@ Tensor s_addmm_sparse_dense_cpu(
     Scalar beta,
     Scalar alpha
 ) {
-  Tensor r = t.type().tensor();
+  Tensor r = at::empty({0}, t.options());
   s_addmm_out_sparse_dense_cpu(r, t, sparse, dense, beta, alpha);
   return r;
 }
@@ -646,7 +646,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   }
   int64_t outNnz = i + 1;
   indices.resize_({1, outNnz});
-  Tensor values = dense.type().tensor({outNnz, n});
+  Tensor values = at::empty({outNnz, n}, dense.options());
 
   std::vector<int64_t> new_size = _get_sparse_impl(newSparse)->sizes().vec();
   new_size[0] = outNnz;
@@ -660,7 +660,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
 }
 
 SparseTensor hspmm_sparse_cpu(const SparseTensor& sparse, const Tensor& dense) {
-  SparseTensor r = sparse.type().tensor();
+  SparseTensor r = at::empty({0}, sparse.options());
   hspmm_out_sparse_cpu(r, sparse, dense);
   return r;
 }
@@ -787,7 +787,7 @@ Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
 
 // sparse, dense -> sparse
 Tensor smm(const Tensor& self, const Tensor& mat2) {
-  auto result = self.type().tensor();
+  auto result = at::empty({0}, self.options());
   at::sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
   return result;
 }
@@ -795,7 +795,7 @@ Tensor smm(const Tensor& self, const Tensor& mat2) {
 // sparse, sparse, dense, real, real -> sparse
 Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
     Scalar beta, Scalar alpha) {
-  auto result = self.type().tensor();
+  auto result = at::empty({0}, self.options());
   at::sspaddmm_out(result, self, mat1, mat2, beta, alpha);
   return result;
 }

@@ -10,7 +10,7 @@ namespace at {
 
 struct Type;
 
-struct AT_API StorageImpl : public c10::intrusive_ptr_target {
+struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   StorageImpl(
       caffe2::TypeMeta data_type,

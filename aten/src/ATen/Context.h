@@ -24,8 +24,8 @@ namespace at {
 
 struct Tensor;
 
-class AT_API Context {
-public:
+class CAFFE2_API Context {
+ public:
   Context();
   TypeExtendedInterface* getNonVariableTypeRaw(Backend p, ScalarType s) {
     return static_cast<TypeExtendedInterface*>(globalLegacyTypeDispatch().getNonVariableTypeRaw(p, s));
@@ -133,7 +133,7 @@ private:
   friend struct Type;
 };
 
-AT_API Context & globalContext();
+CAFFE2_API Context& globalContext();
 
 static inline void init() {
   globalContext();
@@ -153,11 +153,11 @@ static inline TypeExtendedInterface& getNonVariableType(DeviceType p, ScalarType
   return globalContext().getNonVariableType(deviceTypeToBackend(p), s);
 }
 
-AT_API TypeExtendedInterface& getType(TensorOptions options);
-AT_API TypeExtendedInterface& getType(const TensorImpl*);
-AT_API TypeExtendedInterface& getType(const Tensor&);
+CAFFE2_API TypeExtendedInterface& getType(TensorOptions options);
+CAFFE2_API TypeExtendedInterface& getType(const TensorImpl*);
+CAFFE2_API TypeExtendedInterface& getType(const Tensor&);
 
-AT_API Allocator* getCPUAllocator();
+CAFFE2_API Allocator* getCPUAllocator();
 
 static inline TypeExtendedInterface& CPU(ScalarType s) {
   return getNonVariableType(Backend::CPU, s);
