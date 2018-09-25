@@ -56,7 +56,7 @@ bool TensorProtosDBInput<Context>::Prefetch() {
         protos.mutable_protos(i)->clear_device_detail();
       }
       deserializer.Deserialize(
-          protos.protos(i), BlobGetMutableTensor(&prefetched_blobs_[i], CPU));
+          protos.protos(i), prefetched_blobs_[i].GetMutableTensor(CPU));
     }
   } else {
     vector<Tensor> temp_tensors;
@@ -74,11 +74,11 @@ bool TensorProtosDBInput<Context>::Prefetch() {
           vector<int> dims(
               protos.protos(i).dims().begin(), protos.protos(i).dims().end());
           dims.insert(dims.begin(), batch_size_);
-          BlobGetMutableTensor(&prefetched_blobs_[i], CPU)->Resize(dims);
+          prefetched_blobs_[i].GetMutableTensor(CPU)->Resize(dims);
         }
       }
       for (int i = 0; i < protos.protos_size(); ++i) {
-        TensorCPU* dst = BlobGetMutableTensor(&prefetched_blobs_[i], CPU);
+        TensorCPU* dst = prefetched_blobs_[i].GetMutableTensor(CPU);
         TensorCPU& src = temp_tensors[i];
         if (protos.protos(i).has_device_detail()) {
           protos.mutable_protos(i)->clear_device_detail();

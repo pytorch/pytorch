@@ -18,7 +18,7 @@ void AddConstInput(
     Context* context,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = BlobGetMutableTensor(blob, Context::GetDeviceType());
+  auto* tensor = blob->GetMutableTensor(Context::GetDeviceType());
   tensor->Resize(shape);
   math::Set<float, Context>(
       tensor->size(), value, tensor->template mutable_data<float>(), context);
@@ -39,7 +39,7 @@ void AddInput<CPUContext>(
     const string& name,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = BlobGetMutableTensor(blob, CPU);
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
       tensor->template mutable_data<float>(), tensor->size());
@@ -57,7 +57,7 @@ void AddInput<CUDAContext>(
   tmp_vec.array() = utils::AsEArrXt(values);
 
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = BlobGetMutableTensor(blob, CUDA);
+  auto* tensor = blob->GetMutableTensor(CUDA);
   tensor->CopyFrom(tmp);
 }
 

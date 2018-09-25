@@ -16,7 +16,7 @@ void AddNoiseInput(const vector<int64_t>& shape, const string& name, Workspace* 
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = BlobGetMutableTensor(blob, CPU);
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(

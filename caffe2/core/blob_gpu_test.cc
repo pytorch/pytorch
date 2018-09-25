@@ -132,7 +132,7 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
     for (int i = 0; i < 6; ++i) {                                          \
       cpu_tensor.mutable_data<TypeParam>()[i] = static_cast<TypeParam>(i); \
     }                                                                      \
-    BlobGetMutableTensor(&blob, CUDA)->CopyFrom(cpu_tensor);               \
+    blob.GetMutableTensor(CUDA)->CopyFrom(cpu_tensor);                     \
     string serialized = SerializeBlob(blob, "test");                       \
     BlobProto proto;                                                       \
     CAFFE_ENFORCE(proto.ParseFromString(serialized));                      \
@@ -149,7 +149,7 @@ TYPED_TEST(TensorGPUDeathTest, CannotAccessDataWhenEmpty) {
     }                                                                      \
     Blob new_blob;                                                         \
     EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));               \
-    EXPECT_TRUE(BlobIsTensorType(new_blob, CUDA));                         \
+    EXPECT_TRUE(new_blob.IsTensorType(CUDA));                              \
     Tensor new_cpu_tensor(blob.Get<Tensor>(), CPU);                        \
     EXPECT_EQ(new_cpu_tensor.ndim(), 2);                                   \
     EXPECT_EQ(new_cpu_tensor.dim(0), 2);                                   \
@@ -199,7 +199,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     // Test if the restored blob is still of the same device.
     blob.Reset();
     EXPECT_NO_THROW(DeserializeBlob(serialized, &blob));
-    EXPECT_TRUE(BlobIsTensorType(blob, CUDA));
+    EXPECT_TRUE(blob.IsTensorType(CUDA));
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()),
               gpu_id);
     // Test if we force the restored blob on a different device, we
@@ -207,7 +207,7 @@ TEST(TensorTest, TensorSerializationMultiDevices) {
     blob.Reset();
     proto.mutable_tensor()->mutable_device_detail()->set_cuda_gpu_id(0);
     EXPECT_NO_THROW(DeserializeBlob(proto.SerializeAsString(), &blob));
-    EXPECT_TRUE(BlobIsTensorType(blob, CUDA));
+    EXPECT_TRUE(blob.IsTensorType(CUDA));
     EXPECT_EQ(GetGPUIDForPointer(blob.Get<TensorCUDA>().data<float>()), 0);
   }
 }

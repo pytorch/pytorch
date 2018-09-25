@@ -24,7 +24,7 @@ class BatchMatMulOpTest : public testing::Test {
       const float value,
       const string& name) {
     Blob* blob = ws_.CreateBlob(name);
-    auto* tensor = BlobGetMutableTensor(blob, CPU);
+    auto* tensor = blob->GetMutableTensor(CPU);
     tensor->Resize(dims);
     math::Set<float, CPUContext>(
         tensor->size(),

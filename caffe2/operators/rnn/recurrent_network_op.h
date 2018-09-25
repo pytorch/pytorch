@@ -52,11 +52,10 @@ struct CAFFE2_API ScratchWorkspaces {
 };
 
 inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
-  BlobGetMutableTensor(ws->CreateBlob(blob_name), CPU)->Resize(1);
+  ws->CreateBlob(blob_name)->GetMutableTensor(CPU)->Resize(1);
   auto timestepBlob = ws->GetBlob(blob_name);
   CAFFE_ENFORCE(timestepBlob);
-  BlobGetMutableTensor(timestepBlob, CPU)->template mutable_data<int32_t>()[0] =
-      t;
+  timestepBlob->GetMutableTensor(CPU)->template mutable_data<int32_t>()[0] = t;
 }
 
 CAFFE2_API std::map<string, string> GetRecurrentMapping(
@@ -72,9 +71,8 @@ void applyOffsetAlias(
           << " at offset: " << oc.offset;
   auto srcBlob = ws->GetBlob(oc.src);
   CAFFE_ENFORCE(srcBlob);
-  auto* src = BlobGetMutableTensor(srcBlob, Context::GetDeviceType());
-  auto* dst =
-      BlobGetMutableTensor(ws->GetBlob(oc.dst), Context::GetDeviceType());
+  auto* src = srcBlob->GetMutableTensor(Context::GetDeviceType());
+  auto* dst = ws->GetBlob(oc.dst)->GetMutableTensor(Context::GetDeviceType());
   auto timestep = src->size() / src->dim(0);
   auto dims = src->dims();
   const int32_t startDstTimestep =
@@ -115,7 +113,7 @@ void initializeRecurrentInput(
     Context* context) {
   auto stateBlob = ws->GetBlob(rc.state);
   CAFFE_ENFORCE(stateBlob);
-  auto* state = BlobGetMutableTensor(stateBlob, Context::GetDeviceType());
+  auto* state = stateBlob->GetMutableTensor(Context::GetDeviceType());
 
   auto inputBlob = ws->GetBlob(rc.input);
   CAFFE_ENFORCE(inputBlob);
@@ -662,7 +660,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 
       auto gBlob = sharedWs_->GetBlob(param.grad);
       CAFFE_ENFORCE(gBlob);
-      auto* g = BlobGetMutableTensor(gBlob, Context::GetDeviceType());
+      auto* g = gBlob->GetMutableTensor(Context::GetDeviceType());
       g->ResizeLike(p);
       math::Set<T, Context>(
           g->size(),
@@ -678,7 +676,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
 
       auto gBlob = sharedWs_->CreateBlob(rg.grad);
       CAFFE_ENFORCE(gBlob);
-      auto* g = BlobGetMutableTensor(gBlob, Context::GetDeviceType());
+      auto* g = gBlob->GetMutableTensor(Context::GetDeviceType());
       g->ResizeLike(p);
       CAFFE_ENFORCE_EQ(g->ndim(), 3);
       const auto timestep = g->size() / g->dim(0);
@@ -705,7 +703,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
               << ". Size: " << Input(gradientInputIndex).size();
       auto pGradientBlob = sharedWs_->GetBlob(gradientName);
       CAFFE_ENFORCE(pGradientBlob);
-      auto* g = BlobGetMutableTensor(pGradientBlob, Context::GetDeviceType());
+      auto* g = pGradientBlob->GetMutableTensor(Context::GetDeviceType());
       g->ResizeLike(Input(gradientInputIndex));
       g->template mutable_data<T>();
     }
@@ -719,7 +717,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
                 << rg.lastExternalGrad << " for final time step (sep. blob)";
         auto gBlob = sharedWs_->GetBlob(rg.grad);
         CAFFE_ENFORCE(gBlob);
-        auto* g = BlobGetMutableTensor(gBlob, Context::GetDeviceType());
+        auto* g = gBlob->GetMutableTensor(Context::GetDeviceType());
 
         auto oglastBlob = sharedWs_->GetBlob(rg.lastExternalGrad);
         CAFFE_ENFORCE(oglastBlob);
@@ -781,7 +779,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
       T* output_data = Output(outputIdx)->template mutable_data<T>();
       auto pBlob = sharedWs_->GetBlob(recurrentGradients_[i].grad);
       CAFFE_ENFORCE(pBlob);
-      auto* p = BlobGetMutableTensor(pBlob, Context::GetDeviceType());
+      auto* p = pBlob->GetMutableTensor(Context::GetDeviceType());
 
       if (Input(inputId).ndim() >= 2) {
         // Gradient states blob should live. And if it gets changed by the

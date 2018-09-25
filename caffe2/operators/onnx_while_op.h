@@ -213,23 +213,23 @@ class ONNXWhileOp final : public Operator<Context> {
       lcd_tensors_.clear();
       for (int i = 2; i < body_net_def.external_input_size(); ++i) {
         Blob* b = loop_ws_->CreateBlob(body_net_def.external_input(i));
-        Tensor* t = BlobGetMutableTensor(b, Context::GetDeviceType());
+        Tensor* t = b->GetMutableTensor(Context::GetDeviceType());
         lcd_tensors_.push_back(t);
       }
       // First output is the iteration variable
       auto* iteration_var_blob = loop_ws_->CreateBlob(
           body_net_def.external_input(0));
       iteration_var_ =
-          BlobGetMutableTensor(iteration_var_blob, Context::GetDeviceType());
+          iteration_var_blob->GetMutableTensor(Context::GetDeviceType());
 
-      input_condition_var_ = BlobGetMutableTensor(
-          loop_ws_->CreateBlob(body_net_def.external_input(1)),
-          Context::GetDeviceType());
+      input_condition_var_ =
+          loop_ws_->CreateBlob(body_net_def.external_input(1))
+              ->GetMutableTensor(Context::GetDeviceType());
 
       auto* condition_var_blob =
           loop_ws_->CreateBlob(body_net_def.external_output(0));
       condition_var_ =
-          BlobGetMutableTensor(condition_var_blob, Context::GetDeviceType());
+          condition_var_blob->GetMutableTensor(Context::GetDeviceType());
       condition_var_->Resize(1);
       condition_var_->template mutable_data<bool>();
 

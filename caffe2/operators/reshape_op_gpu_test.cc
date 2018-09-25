@@ -20,7 +20,7 @@ static void AddConstInput(
   option.set_device_type(PROTO_CUDA);
   CUDAContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = BlobGetMutableTensor(blob, CUDA);
+  auto* tensor = blob->GetMutableTensor(CUDA);
   tensor->Resize(shape);
   math::Set<float, CUDAContext>(
       tensor->size(), value, tensor->template mutable_data<float>(), &context);

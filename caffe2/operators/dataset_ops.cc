@@ -1428,7 +1428,7 @@ class TreeCursorSerializer : public BlobSerializerBase {
     // serialize offsets as a tensor
     if (cursor->offsets.size() > 0) {
       Blob offsets_blob;
-      auto* offsets = BlobGetMutableTensor(&offsets_blob, CPU);
+      auto* offsets = offsets_blob.GetMutableTensor(CPU);
       offsets->Resize(cursor->offsets.size());
       std::copy(
           cursor->offsets.begin(),
