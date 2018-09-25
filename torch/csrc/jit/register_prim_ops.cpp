@@ -215,7 +215,7 @@ RegisterOperators reg({
         prim::LoadWorld,
         [](Node* node) {
           return [](Stack& stack) {
-            push(stack, World());
+            push(stack, World{0});
             return 0;
           };
         }),
