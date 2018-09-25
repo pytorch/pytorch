@@ -42,7 +42,7 @@ class CAFFE2_API WorkspaceOptimizationPass : public OptimizationPass {
 
 } // namespace caffe2
 
-C10_DECLARE_REGISTRY(WorkspaceOptimizationPassRegistry, caffe2::WorkspaceOptimizationPass, caffe2::NNModule*, caffe2::Workspace*);
+C10_DECLARE_REGISTRY(WorkspaceOptimizationPassRegistry, caffe2::WorkspaceOptimizationPass, nom::repr::NNModule*, caffe2::Workspace*);
 #define REGISTER_WS_OPT_PASS(clsname) \
   C10_REGISTER_CLASS(WorkspaceOptimizationPassRegistry, clsname, clsname)
 #define REGISTER_WS_OPT_PASS_FROM_FUNC(passname, funcname)      \
