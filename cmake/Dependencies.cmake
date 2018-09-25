@@ -39,23 +39,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
 endif()
 
-# ---[ git: used to generate git build string.
-find_package(Git)
-if(GIT_FOUND)
-  execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-                  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
-                  WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-                  OUTPUT_VARIABLE CAFFE2_GIT_VERSION
-                  RESULT_VARIABLE __git_result)
-  if(NOT ${__git_result} EQUAL 0)
-    set(CAFFE2_GIT_VERSION "unknown")
-  endif()
-else()
-  message(
-      WARNING
-      "Cannot find git, so Caffe2 won't have any git build info available")
-endif()
-
 # ---[ BLAS
 if(NOT BUILD_ATEN_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
