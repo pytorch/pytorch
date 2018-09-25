@@ -174,12 +174,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_variable() const { return is_variable_; };
 
  private:
-  int64_t storage_offset_;
+  int64_t storage_offset_ = 0;
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
 
-  bool is_contiguous_;
-  int64_t numel_;
+  bool is_contiguous_ = true;
+  int64_t numel_ = -1;
 
   int64_t compute_numel() const {
     int64_t n = 1;
