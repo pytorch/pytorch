@@ -55,7 +55,7 @@ C10_DECLARE_REGISTRY(WorkspaceOptimizationPassRegistry, caffe2::WorkspaceOptimiz
   };                                                            \
   REGISTER_WS_OPT_PASS(passname);
 
-C10_DECLARE_REGISTRY(OptimizationPassRegistry, caffe2::OptimizationPass, caffe2::NNModule*);
+C10_DECLARE_REGISTRY(OptimizationPassRegistry, caffe2::OptimizationPass, nom::repr::NNModule*);
 #define REGISTER_OPT_PASS(clsname) \
   C10_REGISTER_CLASS(OptimizationPassRegistry, clsname, clsname)
 #define REGISTER_OPT_PASS_FROM_FUNC(passname, funcname) \
