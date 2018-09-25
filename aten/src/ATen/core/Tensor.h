@@ -15,7 +15,7 @@
 namespace at {
 struct Generator;
 struct Type;
-struct Tensor;
+class Tensor;
 struct TensorOptions;
 } // namespace at
 
@@ -37,7 +37,8 @@ namespace at {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-struct CAFFE2_API Tensor {
+class CAFFE2_API Tensor {
+public:
   Tensor(){};
   Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : impl_(std::move(tensor_impl)) {
