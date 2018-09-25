@@ -78,7 +78,7 @@ class LogitRelaxedBernoulli(Distribution):
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         probs = clamp_probs(self.probs.expand(shape))
-        uniforms = clamp_probs(self.probs.new(shape).uniform_())
+        uniforms = clamp_probs(torch.rand(shape, dtype=probs.dtype, device=probs.device))
         return (uniforms.log() - (-uniforms).log1p() + probs.log() - (-probs).log1p()) / self.temperature
 
     def log_prob(self, value):
@@ -120,10 +120,7 @@ class RelaxedBernoulli(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RelaxedBernoulli, _instance)
-        base_dist = self.base_dist.expand(batch_shape)
-        super(RelaxedBernoulli, new).__init__(base_dist, SigmoidTransform(), validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+        return super(RelaxedBernoulli, self).expand(batch_shape, _instance=new)
 
     @property
     def temperature(self):

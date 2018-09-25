@@ -32,6 +32,9 @@ ${Type}::${Type}()
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
+caffe2::TypeMeta ${Type}::typeMeta() const {
+  return caffe2::TypeMeta::Make<${ScalarType}>();
+}
 Backend ${Type}::backend() const {
   return Backend::${Backend};
 }

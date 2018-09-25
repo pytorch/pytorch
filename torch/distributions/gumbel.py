@@ -40,12 +40,9 @@ class Gumbel(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Gumbel, _instance)
-        batch_shape = torch.Size(batch_shape)
-        base_dist = self.base_dist.expand(batch_shape)
-        transforms = self.transforms
-        super(Gumbel, new).__init__(base_dist, transforms, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+        new.loc = self.loc.expand(batch_shape)
+        new.scale = self.scale.expand(batch_shape)
+        return super(Gumbel, self).expand(batch_shape, _instance=new)
 
     @property
     def mean(self):

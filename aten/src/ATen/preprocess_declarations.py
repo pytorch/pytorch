@@ -220,8 +220,6 @@ def discover_sparse_tensor_operations(declaration):
 def is_extended_method(option):
     if 'method' in option['variants']:
         return False
-    elif option.get('deprecated', False):
-        return False
     elif not option['variants']:
         return False
     else:

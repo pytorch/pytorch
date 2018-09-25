@@ -3,7 +3,6 @@
 #include <structmember.h>
 #include <pybind11/pybind11.h>
 
-#include "torch/csrc/torch.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
@@ -17,6 +16,7 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_types.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include <ATen/ATen.h>
 
@@ -43,6 +43,9 @@ struct PyTensorType {
   // Precondition: Access to this struct is protected by the GIL
   at::Type* aten_type() {
     if (!aten_type_) {
+      if (is_cuda) {
+        torch::utils::cuda_lazy_init();
+      }
       auto* baseType = globalContext().getNonVariableTypeOpt(static_cast<at::Backend>(backend), static_cast<at::ScalarType>(scalar_type));
       aten_type_ = baseType ? torch::autograd::VariableType::getVariableTypeFromBaseType(*baseType) : nullptr;
     }
@@ -68,9 +71,6 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   auto aten_type = tensor_type.aten_type();
   if (!aten_type) {
     throw unavailable_type(tensor_type);
-  }
-  if (aten_type->is_cuda()) {
-    torch::utils::cuda_lazy_init();
   }
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*aten_type, args, kwargs));
   END_HANDLE_TH_ERRORS

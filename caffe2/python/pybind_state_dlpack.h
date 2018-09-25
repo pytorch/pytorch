@@ -90,7 +90,7 @@ class DLPackWrapper {
         device_option.cuda_gpu_id(),
         "Expected same device id for DLPack and C2 tensors");
 
-    std::vector<TIndex> dims;
+    std::vector<int64_t> dims;
     dims.reserve(dlTensor->ndim);
     for (int idx = 0; idx < dlTensor->ndim; ++idx) {
       dims.push_back(dlTensor->shape[idx]);
@@ -108,16 +108,21 @@ class DLPackWrapper {
     }
 
     tensor->Resize(dims);
-    const auto& meta = DLTypeToCaffe(dlTensor->dtype);
+    caffe2::TypeMeta meta = DLTypeToCaffe(dlTensor->dtype);
+    at::Device device = at::Device(tensor->GetDeviceType());
     tensor->ShareExternalPointer(
-        ((int8_t*)dlTensor->data) + dlTensor->byte_offset,
+        at::DataPtr(
+            (void*)(((int8_t*)dlTensor->data) + dlTensor->byte_offset),
+            static_cast<void*>(dlMTensor),
+            [](void* t_ptr) -> void {
+              DLManagedTensor* mt_ptr = static_cast<DLManagedTensor*>(t_ptr);
+              if (mt_ptr->destructor) {
+                mt_ptr->destructor(mt_ptr);
+              }
+            },
+            device),
         meta,
-        0,
-        [dlMTensor](void*) {
-          if (dlMTensor->destructor) {
-            dlMTensor->destructor(dlMTensor);
-          }
-        });
+        0);
   }
 
   Tensor* tensor;

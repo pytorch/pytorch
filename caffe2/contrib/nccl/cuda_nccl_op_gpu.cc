@@ -60,8 +60,8 @@ class NCCLAllreduceOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::AllReduce(getNCCLElements(this, context_));
       return true;
-    } else if (AllInputsAre<float16>(this)) {
-      nccl::NCCL<float16>::AllReduce(getNCCLElements(this, context_));
+    } else if (AllInputsAre<at::Half>(this)) {
+      nccl::NCCL<at::Half>::AllReduce(getNCCLElements(this, context_));
       return true;
     } else {
       return false;
@@ -122,8 +122,8 @@ class NCCLBroadcastOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::Broadcast(getNCCLElements(this, context_));
       return true;
-    } else if (AllInputsAre<float16>(this)) {
-      nccl::NCCL<float16>::Broadcast(getNCCLElements(this, context_));
+    } else if (AllInputsAre<at::Half>(this)) {
+      nccl::NCCL<at::Half>::Broadcast(getNCCLElements(this, context_));
       return true;
     } else {
       return false;
@@ -145,8 +145,8 @@ class NCCLReduceOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::Reduce(ex);
       return true;
-    } else if (AllInputsAre<float16>(this)) {
-      nccl::NCCL<float16>::Reduce(ex);
+    } else if (AllInputsAre<at::Half>(this)) {
+      nccl::NCCL<at::Half>::Reduce(ex);
       return true;
     } else {
       return false;
@@ -166,8 +166,8 @@ class NCCLAllGatherOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::AllGather(getNCCLElements(this, context_));
       return true;
-    } else if (AllInputsAre<float16>(this)) {
-      nccl::NCCL<float16>::AllGather(getNCCLElements(this, context_));
+    } else if (AllInputsAre<at::Half>(this)) {
+      nccl::NCCL<at::Half>::AllGather(getNCCLElements(this, context_));
       return true;
     } else {
       return false;
@@ -185,8 +185,8 @@ class NCCLReduceScatterOp final : public Operator<CUDAContext> {
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::ReduceScatter(getNCCLElements(this, context_));
       return true;
-    } else if (AllInputsAre<float16>(this)) {
-      nccl::NCCL<float16>::ReduceScatter(getNCCLElements(this, context_));
+    } else if (AllInputsAre<at::Half>(this)) {
+      nccl::NCCL<at::Half>::ReduceScatter(getNCCLElements(this, context_));
       return true;
     } else {
       return false;

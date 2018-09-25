@@ -302,8 +302,7 @@
       output: True
     - accreal start
     - accreal end
-    - arg: accreal step
-      default: 1
+    - accreal step
 ]]
 [[
   name: _arange
@@ -320,8 +319,7 @@
           output: True
         - accreal start
         - accreal end
-        - arg: accreal step
-          default: 1
+        - accreal step
     - cname: arange
       arguments:
         - arg: THTensor* result
@@ -1956,8 +1954,7 @@
       output: True
     - real start
     - real end
-    - arg: long steps
-      default: 100
+    - long steps
 ]]
 [[
   name: _logspace
@@ -1976,8 +1973,7 @@
       output: True
     - real start
     - real end
-    - arg: long steps
-      default: 100
+    - long steps
 ]]
 [[
   name: histc
@@ -2471,11 +2467,12 @@
         - THTensor* mat2
 ]]
 [[
-  name: bmm
+  name: _th_bmm
   cname: baddbmm
   variants:
-    - method
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2525,10 +2522,12 @@
     - THTensor* batch2
 ]]
 [[
-  name: baddbmm
+  name: _th_baddbmm
+  cname: baddbmm
   variants:
-    - method
     - function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -2538,22 +2537,6 @@
       kwarg_only: True
     - arg: THTensor* self
       broadcast: batch1,batch2 dims:batch1.dim0,batch1.dim1,batch2.dim2
-    - arg: real alpha
-      default: AS_REAL(1)
-      kwarg_only: True
-    - THTensor* batch1
-    - THTensor* batch2
-]]
-[[
-  name: baddbmm_
-  cname: baddbmm
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - arg: real beta
-      default: AS_REAL(1)
-      kwarg_only: True
-    - THTensor* self
     - arg: real alpha
       default: AS_REAL(1)
       kwarg_only: True
@@ -3234,38 +3217,6 @@
       default: nullptr
       kwarg_only: True
     - double p
-]]
-[[
-  name: _bernoulli_
-  backends:
-    - CPU
-    - CUDA
-  cname: bernoulli
-  return: self
-  variants: function
-  arguments:
-    - THTensor* self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - double p
-]]
-[[
-  name: _th_bernoulli
-  types:
-    - Float
-    - Double
-  return: argument 0
-  variants: function
-  cname: bernoulli_Tensor
-  arguments:
-    - arg: THTensor* output
-      output: True
-      resize: self
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - THTensor* self
 ]]
 [[
   name: _dirichlet_grad

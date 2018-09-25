@@ -22,8 +22,10 @@ import caffe2.python.predictor.predictor_py_utils as pred_utils
 from caffe2.python.predictor_constants import predictor_constants as predictor_constants
 
 '''
-Parallelized multi-GPU distributed trainer for Resnet 50. Can be used to train
-on imagenet data, for example.
+Parallelized multi-GPU distributed trainer for Resne(X)t.
+Can be used to train on imagenet data, for example.
+The default parameters can train a standard Resnet-50 (1x64d), and parameters
+can be provided to train ResNe(X)t models (e.g., ResNeXt-101 32x4d).
 
 To run the trainer in single-machine multi-gpu mode by setting num_shards = 1.
 
@@ -39,14 +41,23 @@ passing the `file_store_path` argument. Use the latter by passing the
 '''
 
 logging.basicConfig()
-log = logging.getLogger("resnet50_trainer")
+log = logging.getLogger("ResNe(X)t_trainer")
 log.setLevel(logging.DEBUG)
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/distributed:file_store_handler_ops')
 dyndep.InitOpsLibrary('@/caffe2/caffe2/distributed:redis_store_handler_ops')
 
 
-def AddImageInput(model, reader, batch_size, img_size, dtype, is_test):
+def AddImageInput(
+    model,
+    reader,
+    batch_size,
+    img_size,
+    dtype,
+    is_test,
+    mean_per_channel=None,
+    std_per_channel=None,
+):
     '''
     The image input operator loads image and label data from the reader and
     applies transformations to the images (random cropping, mirroring, ...).
@@ -58,6 +69,9 @@ def AddImageInput(model, reader, batch_size, img_size, dtype, is_test):
         output_type=dtype,
         use_gpu_transform=True if model._device_type == 1 else False,
         use_caffe_datum=True,
+        mean_per_channel=mean_per_channel,
+        std_per_channel=std_per_channel,
+        # mean_per_channel takes precedence over mean
         mean=128.,
         std=128.,
         scale=256,
@@ -166,6 +180,7 @@ def RunEpoch(
     # TODO: add loading from checkpoint
     log.info("Starting epoch {}/{}".format(epoch, args.num_epochs))
     epoch_iters = int(args.epoch_size / total_batch_size / num_shards)
+    test_epoch_iters = int(args.test_epoch_size / total_batch_size / num_shards)
     for i in range(epoch_iters):
         # This timeout is required (temporarily) since CUDA-NCCL
         # operators might deadlock when synchronizing between GPUs.
@@ -194,19 +209,25 @@ def RunEpoch(
         data_parallel_model.GetLearningRateBlobNames(train_model)[0]
     )
     test_accuracy = 0
-    if (test_model is not None):
+    test_accuracy_top5 = 0
+    if test_model is not None:
         # Run 100 iters of testing
         ntests = 0
-        for _ in range(0, 100):
+        for _ in range(test_epoch_iters):
             workspace.RunNet(test_model.net.Proto().name)
             for g in test_model._devices:
                 test_accuracy += np.asscalar(workspace.FetchBlob(
                     "{}_{}".format(test_model._device_prefix, g) + '/accuracy'
                 ))
+                test_accuracy_top5 += np.asscalar(workspace.FetchBlob(
+                    "{}_{}".format(test_model._device_prefix, g) + '/accuracy_top5'
+                ))
                 ntests += 1
         test_accuracy /= ntests
+        test_accuracy_top5 /= ntests
     else:
         test_accuracy = (-1)
+        test_accuracy_top5 = (-1)
 
     explog.log(
         input_count=num_images,
@@ -216,7 +237,8 @@ def RunEpoch(
             'loss': loss,
             'learning_rate': learning_rate,
             'epoch': epoch,
-            'test_accuracy': test_accuracy,
+            'top1_test_accuracy': test_accuracy,
+            'top5_test_accuracy': test_accuracy_top5,
         }
     )
     assert loss < 40, "Exploded gradients :("
@@ -243,6 +265,17 @@ def Train(args):
         total_batch_size % num_gpus == 0, \
         "Number of GPUs must divide batch size"
 
+    # Verify valid image mean/std per channel
+    if args.image_mean_per_channel:
+        assert \
+            len(args.image_mean_per_channel) == args.num_channels, \
+            "The number of channels of image mean doesn't match input"
+
+    if args.image_std_per_channel:
+        assert \
+            len(args.image_std_per_channel) == args.num_channels, \
+            "The number of channels of image std doesn't match input"
+
     # Round down epoch size to closest multiple of batch size across machines
     global_batch_size = total_batch_size * args.num_shards
     epoch_iters = int(args.epoch_size / global_batch_size)
@@ -262,7 +295,7 @@ def Train(args):
         'ws_nbytes_limit': (args.cudnn_workspace_limit_mb * 1024 * 1024),
     }
     train_model = model_helper.ModelHelper(
-        name="resnet50", arg_scope=train_arg_scope
+        name='resnext' + str(args.num_layers), arg_scope=train_arg_scope
     )
 
     num_shards = args.num_shards
@@ -324,7 +357,7 @@ def Train(args):
         rendezvous = None
 
     # Model building functions
-    def create_resnet50_model_ops(model, loss_scale):
+    def create_resnext_model_ops(model, loss_scale):
         initializer = (PseudoFP16Initializer if args.dtype == 'float16'
                        else Initializer)
 
@@ -333,11 +366,14 @@ def Train(args):
                             BiasInitializer=initializer,
                             enable_tensor_core=args.enable_tensor_core,
                             float16_compute=args.float16_compute):
-            pred = resnet.create_resnet50(
+            pred = resnet.create_resnext(
                 model,
                 "data",
                 num_input_channels=args.num_channels,
                 num_labels=args.num_labels,
+                num_layers=args.num_layers,
+                num_groups=args.resnext_num_groups,
+                num_width_per_group=args.resnext_width_per_group,
                 no_bias=True,
                 no_loss=True,
             )
@@ -348,7 +384,8 @@ def Train(args):
         softmax, loss = model.SoftmaxWithLoss([pred, 'label'],
                                               ['softmax', 'loss'])
         loss = model.Scale(loss, scale=loss_scale)
-        brew.accuracy(model, [softmax, "label"], "accuracy")
+        brew.accuracy(model, [softmax, "label"], "accuracy", top_k=1)
+        brew.accuracy(model, [softmax, "label"], "accuracy_top5", top_k=5)
         return [loss]
 
     def add_optimizer(model):
@@ -408,6 +445,8 @@ def Train(args):
                 img_size=args.image_size,
                 dtype=args.dtype,
                 is_test=False,
+                mean_per_channel=args.image_mean_per_channel,
+                std_per_channel=args.image_std_per_channel,
             )
 
     def add_post_sync_ops(model):
@@ -423,7 +462,7 @@ def Train(args):
     data_parallel_model.Parallelize(
         train_model,
         input_builder_fun=add_image_input,
-        forward_pass_builder_fun=create_resnet50_model_ops,
+        forward_pass_builder_fun=create_resnext_model_ops,
         optimizer_builder_fun=add_optimizer,
         post_sync_builder_fun=add_post_sync_ops,
         devices=gpus,
@@ -449,7 +488,9 @@ def Train(args):
             'cudnn_exhaustive_search': True,
         }
         test_model = model_helper.ModelHelper(
-            name="resnet50_test", arg_scope=test_arg_scope, init_params=False
+            name='resnext' + str(args.num_layers) + "_test",
+            arg_scope=test_arg_scope,
+            init_params=False,
         )
 
         test_reader = test_model.CreateDB(
@@ -466,12 +507,14 @@ def Train(args):
                 img_size=args.image_size,
                 dtype=args.dtype,
                 is_test=True,
+                mean_per_channel=args.image_mean_per_channel,
+                std_per_channel=args.image_std_per_channel,
             )
 
         data_parallel_model.Parallelize(
             test_model,
             input_builder_fun=test_input_fn,
-            forward_pass_builder_fun=create_resnet50_model_ops,
+            forward_pass_builder_fun=create_resnext_model_ops,
             post_sync_builder_fun=add_post_sync_ops,
             param_update_builder_fun=None,
             devices=gpus,
@@ -497,7 +540,8 @@ def Train(args):
         else:
             log.warning("The format of load_model_path doesn't match!")
 
-    expname = "resnet50_gpu%d_b%d_L%d_lr%.2f_v2" % (
+    expname = "resnext_%d_gpu%d_b%d_L%d_lr%.2f_v2" % (
+        args.num_layers,
         args.num_gpus,
         total_batch_size,
         args.num_labels,
@@ -534,12 +578,24 @@ def Train(args):
 def main():
     # TODO: use argv
     parser = argparse.ArgumentParser(
-        description="Caffe2: Resnet-50 training"
+        description="Caffe2: ResNe(X)t training"
     )
     parser.add_argument("--train_data", type=str, default=None, required=True,
                         help="Path to training data (or 'null' to simulate)")
+    parser.add_argument("--num_layers", type=int, default=50,
+                        help="The number of layers in ResNe(X)t model")
+    parser.add_argument("--resnext_num_groups", type=int, default=1,
+                        help="The cardinality of resnext")
+    parser.add_argument("--resnext_width_per_group", type=int, default=64,
+                        help="The cardinality of resnext")
     parser.add_argument("--test_data", type=str, default=None,
                         help="Path to test data")
+    parser.add_argument("--image_mean_per_channel", type=float, nargs='+',
+                        help="The per channel mean for the images")
+    parser.add_argument("--image_std_per_channel", type=float, nargs='+',
+                        help="The per channel standard deviation for the images")
+    parser.add_argument("--test_epoch_size", type=int, default=50000,
+                        help="Number of test images")
     parser.add_argument("--db_type", type=str, default="lmdb",
                         help="Database type (such as lmdb or leveldb)")
     parser.add_argument("--gpus", type=str,
@@ -576,7 +632,7 @@ def main():
                         help="Port of Redis server (for rendezvous)")
     parser.add_argument("--file_store_path", type=str, default="/tmp",
                         help="Path to directory to use for rendezvous")
-    parser.add_argument("--save_model_name", type=str, default="resnet50_model",
+    parser.add_argument("--save_model_name", type=str, default="resnext_model",
                         help="Save the trained model to a given name")
     parser.add_argument("--load_model_path", type=str, default=None,
                         help="Load previously saved model to continue training")
@@ -597,6 +653,7 @@ def main():
     args = parser.parse_args()
 
     Train(args)
+
 
 if __name__ == '__main__':
     workspace.GlobalInit(['caffe2', '--caffe2_log_level=2'])

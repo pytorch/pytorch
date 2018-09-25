@@ -135,7 +135,7 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, Sca
 }
 
 SparseTensor pow_sparse_scalar(const SparseTensor& t, Scalar value) {
-  SparseTensor r = t.type().tensor();
+  SparseTensor r = at::empty({0}, t.options());
   pow_out_sparse_scalar(r, t, value);
   return r;
 }
@@ -208,7 +208,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   Tensor t_values = t._values();
   LongTensor src_indices = src._indices();
   Tensor s_values = src._values();
-  LongTensor r_indices = t_indices.type().tensor({sparseDims, max_nnz});
+  LongTensor r_indices = at::empty({sparseDims, max_nnz}, t_indices.options());
   Tensor r_values = _new_values_with_size_of(s_values, max_nnz).zero_();
   r.resize_as_(src);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
@@ -250,18 +250,22 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
             for (d = 0; d < sparseDims; d++) {
               r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
             }
-            THBlas_axpy<scalar_t>(blockSize, 1,
-              t_values_ptr + t_i * blockSize, 1,
-              r_values_ptr + r_i * blockSize, 1);
+            if (t_values.numel() > 0) {  // We add all elements from t_values to r_values only if t_values is not an empty tensor
+              THBlas_axpy<scalar_t>(blockSize, 1,
+                t_values_ptr + t_i * blockSize, 1,
+                r_values_ptr + r_i * blockSize, 1);
+            }
             t_i++;
           }
           if (cmp <= 0) {
             for (d = 0; d < sparseDims; d++) {
               r_indices_accessor[d][r_i] = src_indices_accessor[d][s_i];
             }
-            THBlas_axpy<scalar_t>(blockSize, cast_value,
-              s_values_ptr + s_i * blockSize, 1,
-              r_values_ptr + r_i * blockSize, 1);
+            if (s_values.numel() > 0) {  // We add all elements from s_values to r_values only if s_values is not an empty tensor
+              THBlas_axpy<scalar_t>(blockSize, cast_value,
+                s_values_ptr + s_i * blockSize, 1,
+                r_values_ptr + r_i * blockSize, 1);
+            }
             s_i++;
           }
           r_i++;
@@ -368,6 +372,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   AT_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", src_.sizes());
 
   if (src_._nnz() == 0 || t_._nnz() == 0) {
+    r.resize_as_(src_);
     return r.zero_();
   }
 
@@ -382,7 +387,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   Tensor t_values = t._values();
   LongTensor src_indices = src._indices();
   Tensor s_values = src._values();
-  LongTensor r_indices = t_indices.type().tensor({sparseDims, max_nnz});
+  LongTensor r_indices = at::empty({sparseDims, max_nnz}, t_indices.options());
   Tensor r_values = _new_values_with_size_of(t_values, max_nnz).zero_();
   r.resize_as_(src);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
@@ -519,7 +524,6 @@ Tensor& s_addmm_out_sparse_dense_cpu(
 
   AT_CHECK(sparse_._sparseDims() == 2, "addmm: matrices expected, got ", sparse_._sparseDims(), "D tensor");
   AT_CHECK(sparse_._denseDims() == 0, "addmm: scalar values expected, got ", sparse_._denseDims(), "D values");
-  AT_CHECK(dense.numel() != 0, "addmm: matrices expected, got empty tensor");
   AT_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
 
   SparseTensor sparse = sparse_.coalesce();
@@ -566,7 +570,7 @@ Tensor s_addmm_sparse_dense_cpu(
     Scalar beta,
     Scalar alpha
 ) {
-  Tensor r = t.type().tensor();
+  Tensor r = at::empty({0}, t.options());
   s_addmm_out_sparse_dense_cpu(r, t, sparse, dense, beta, alpha);
   return r;
 }
@@ -642,7 +646,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   }
   int64_t outNnz = i + 1;
   indices.resize_({1, outNnz});
-  Tensor values = dense.type().tensor({outNnz, n});
+  Tensor values = at::empty({outNnz, n}, dense.options());
 
   std::vector<int64_t> new_size = _get_sparse_impl(newSparse)->sizes().vec();
   new_size[0] = outNnz;
@@ -656,7 +660,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
 }
 
 SparseTensor hspmm_sparse_cpu(const SparseTensor& sparse, const Tensor& dense) {
-  SparseTensor r = sparse.type().tensor();
+  SparseTensor r = at::empty({0}, sparse.options());
   hspmm_out_sparse_cpu(r, sparse, dense);
   return r;
 }
@@ -783,7 +787,7 @@ Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
 
 // sparse, dense -> sparse
 Tensor smm(const Tensor& self, const Tensor& mat2) {
-  auto result = self.type().tensor();
+  auto result = at::empty({0}, self.options());
   at::sspaddmm_out(result, result, self, mat2, 0.0, 1.0);
   return result;
 }
@@ -791,7 +795,7 @@ Tensor smm(const Tensor& self, const Tensor& mat2) {
 // sparse, sparse, dense, real, real -> sparse
 Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
     Scalar beta, Scalar alpha) {
-  auto result = self.type().tensor();
+  auto result = at::empty({0}, self.options());
   at::sspaddmm_out(result, self, mat1, mat2, beta, alpha);
   return result;
 }

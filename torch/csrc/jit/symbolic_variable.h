@@ -64,14 +64,26 @@ struct SymbolicVariable {
   SymbolicVariable operator>(at::Scalar rhs) const {
     return create(aten::gt, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
+  SymbolicVariable operator>(const SymbolicVariable rhs) const {
+    return create(aten::gt, {*this, rhs})[0].typeLikeWithScalarType(*this, at::kByte);
+  }
   SymbolicVariable operator<(at::Scalar rhs) const {
     return create(aten::lt, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
+  }
+  SymbolicVariable operator<(const SymbolicVariable rhs) const {
+    return create(aten::lt, {*this, rhs})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator>=(at::Scalar rhs) const {
     return create(aten::ge, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
+  SymbolicVariable operator>=(const SymbolicVariable rhs) const {
+    return create(aten::ge, {*this, rhs})[0].typeLikeWithScalarType(*this, at::kByte);
+  }
   SymbolicVariable operator<=(at::Scalar rhs) const {
     return create(aten::le, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
+  }
+  SymbolicVariable operator<=(const SymbolicVariable rhs) const {
+    return create(aten::le, {*this, rhs})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator==(at::Scalar rhs) const {
     return create(aten::eq, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
@@ -96,6 +108,9 @@ struct SymbolicVariable {
   }
   SymbolicVariable operator%(at::Scalar rhs) const {
     return create(aten::remainder, {*this, insertConstant(rhs)})[0].typeLike(*this);
+  }
+  SymbolicVariable isnan() const {
+    return create(aten::ne, {*this, *this})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable mm(const SymbolicVariable rhs) const {
     return create(t("mm"), {*this, rhs})[0];

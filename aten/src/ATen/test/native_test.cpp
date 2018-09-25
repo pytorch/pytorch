@@ -1,5 +1,5 @@
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 #include "ATen/ATen.h"
 #include "test_seed.h"
@@ -9,18 +9,18 @@ using namespace at;
 using Catch::Matchers::StartsWith;
 
 #define REQUIRE_EQUAL(t1, t2) \
-  REQUIRE(t1.equal(t2));
+  CATCH_REQUIRE(t1.equal(t2));
 
 #define REQUIRE_ALLCLOSE(t1, t2)   \
-  REQUIRE(t1.is_same_size(t2));    \
-  REQUIRE(t1.allclose(t2));
+  CATCH_REQUIRE(t1.is_same_size(t2));    \
+  CATCH_REQUIRE(t1.allclose(t2));
 
 #define REQUIRE_ALLCLOSE_TOLERANCES(t1, t2, atol, rtol)   \
-  REQUIRE(t1.is_same_size(t2));    \
-  REQUIRE(t1.allclose(t2, atol, rtol));
+  CATCH_REQUIRE(t1.is_same_size(t2));    \
+  CATCH_REQUIRE(t1.allclose(t2, atol, rtol));
 
 void requireEqualTensorList(TensorList t1, TensorList t2) {
-  REQUIRE(t1.size() == t2.size());
+  CATCH_REQUIRE(t1.size() == t2.size());
   for (size_t i = 0; i < t1.size(); ++i) {
     REQUIRE_EQUAL(t1[ i ], t2[ i ]);
   }
@@ -29,7 +29,7 @@ void requireEqualTensorList(TensorList t1, TensorList t2) {
 void test(Type & T, Type & AccT) {
   auto t = randn({3, 3}, T);
 
-  SECTION( "split: test method, type, namespace give same result" ) {
+  CATCH_SECTION( "split: test method, type, namespace give same result" ) {
     auto splitMethod = t.split(1, 0);
     auto splitType = T.split(t, 1, 0);
     auto splitNs = at::split(t, 1, 0);
@@ -40,7 +40,7 @@ void test(Type & T, Type & AccT) {
     REQUIRE_EQUAL(at::cat(splitMethod, 0), t);
   }
 
-  SECTION( "chunk: test method, type, namespace give same result" ) {
+  CATCH_SECTION( "chunk: test method, type, namespace give same result" ) {
     // test method, type, namespace give same result
     auto chunkMethod = t.chunk(3, 0);
     auto chunkType = T.chunk(t, 3, 0);
@@ -53,7 +53,7 @@ void test(Type & T, Type & AccT) {
   }
 
   // stack
-  SECTION( "stack" ) {
+  CATCH_SECTION( "stack" ) {
     auto x = rand({2, 3, 4});
     auto y = rand({2, 3, 4});
     auto z = rand({2, 3, 4});
@@ -66,36 +66,36 @@ void test(Type & T, Type & AccT) {
       expected_size.insert(expected_size.end(), x.sizes().begin() + dim, x.sizes().end());
 
       REQUIRE_EQUAL(res, res_neg);
-      REQUIRE(res.sizes().equals(expected_size));
+      CATCH_REQUIRE(res.sizes().equals(expected_size));
       REQUIRE_EQUAL(res.select(dim, 0), x);
       REQUIRE_EQUAL(res.select(dim, 1), y);
       REQUIRE_EQUAL(res.select(dim, 2), z);
     }
   }
 
-  SECTION( "size / stride" ) {
+  CATCH_SECTION( "size / stride" ) {
     auto scalar = randn({}, T);
-    REQUIRE_THROWS_WITH(scalar.size(0), StartsWith("dimension specified as 0 but tensor has no dimensions"));
-    REQUIRE_THROWS_WITH(scalar.size(-1), StartsWith("dimension specified as -1 but tensor has no dimensions"));
-    REQUIRE_THROWS_WITH(scalar.stride(0), StartsWith("dimension specified as 0 but tensor has no dimensions"));
-    REQUIRE_THROWS_WITH(scalar.stride(-1), StartsWith("dimension specified as -1 but tensor has no dimensions"));
+    CATCH_REQUIRE_THROWS_WITH(scalar.size(0), StartsWith("dimension specified as 0 but tensor has no dimensions"));
+    CATCH_REQUIRE_THROWS_WITH(scalar.size(-1), StartsWith("dimension specified as -1 but tensor has no dimensions"));
+    CATCH_REQUIRE_THROWS_WITH(scalar.stride(0), StartsWith("dimension specified as 0 but tensor has no dimensions"));
+    CATCH_REQUIRE_THROWS_WITH(scalar.stride(-1), StartsWith("dimension specified as -1 but tensor has no dimensions"));
 
     auto empty = randn({0}, T);
-    REQUIRE(empty.size(0) == 0);
-    REQUIRE(empty.size(-1) == 0);
-    REQUIRE(empty.stride(0) == 1);
-    REQUIRE(empty.stride(-1) == 1);
+    CATCH_REQUIRE(empty.size(0) == 0);
+    CATCH_REQUIRE(empty.size(-1) == 0);
+    CATCH_REQUIRE(empty.stride(0) == 1);
+    CATCH_REQUIRE(empty.stride(-1) == 1);
   }
 
   // matmul
-  SECTION( "matmul" ) {
+  CATCH_SECTION( "matmul" ) {
     auto scalar = randn({}, T);
     auto d1 = randn({3}, T);
     auto d2 = randn({2, 3}, T);
 
     // 0-d
-    REQUIRE_THROWS_WITH(scalar.matmul(d2), Catch::StartsWith("both arguments to matmul need to be at least 1D"));
-    REQUIRE_THROWS_WITH(d2.matmul(scalar), Catch::StartsWith("both arguments to matmul need to be at least 1D"));
+    CATCH_REQUIRE_THROWS_WITH(scalar.matmul(d2), Catch::StartsWith("both arguments to matmul need to be at least 1D"));
+    CATCH_REQUIRE_THROWS_WITH(d2.matmul(scalar), Catch::StartsWith("both arguments to matmul need to be at least 1D"));
 
     // 1-d
     REQUIRE_ALLCLOSE(d1.matmul(d1), d1.dot(d1));
@@ -140,11 +140,11 @@ void test(Type & T, Type & AccT) {
 
     // non-expandable case
     auto d5wrong = randn({2, 4, 2, 4, 3, 2}, T);
-    REQUIRE_THROWS_WITH(d5.matmul(d5wrong), Catch::Contains("must match the size"));
+    CATCH_REQUIRE_THROWS_WITH(d5.matmul(d5wrong), Catch::Contains("must match the size"));
   }
 
   // _standard_gamma_grad
-  SECTION( "_standard_gamma_grad" ) {
+  CATCH_SECTION( "_standard_gamma_grad" ) {
     // check empty
     auto empty = ones({0}, T);
     REQUIRE_EQUAL(empty, at::_standard_gamma_grad(empty, empty));
@@ -158,10 +158,10 @@ void test(Type & T, Type & AccT) {
     // check mixing types
     auto t1 = randn({3, 4}, T);
     auto t2 = randn({3, 4}, T).toType(kDouble);
-    REQUIRE_THROWS_WITH(at::_standard_gamma_grad(t1, t2), Catch::StartsWith("expected scalar type"));
+    CATCH_REQUIRE_THROWS_WITH(at::_standard_gamma_grad(t1, t2), Catch::StartsWith("expected scalar type"));
   }
 
-  SECTION( "where" ) {
+  CATCH_SECTION( "where" ) {
     // empty
     auto empty = ones({0}, T);
     auto &bT = T.toScalarType(ScalarType::Byte);
@@ -180,13 +180,13 @@ void test(Type & T, Type & AccT) {
   }
 }
 
-TEST_CASE( "native test CPU", "[cpu]" ) {
+CATCH_TEST_CASE( "native test CPU", "[cpu]" ) {
   manual_seed(123, at::kCPU);
 
   test(CPU(kFloat), CPU(kDouble));
 }
 
-TEST_CASE( "native test CUDA", "[cuda]" ) {
+CATCH_TEST_CASE( "native test CUDA", "[cuda]" ) {
   manual_seed(123, at::kCUDA);
 
   if (at::hasCUDA()) {

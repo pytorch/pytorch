@@ -8,8 +8,8 @@
 #include <sstream>
 
 #include <ATen/core/Error.h>
+#include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
-#include "caffe2/proto/caffe2_pb.h"
 
 // CAFFE2_LOG_THRESHOLD is a compile time flag that would allow us to turn off
 // logging at compile time so no logging message below that level is produced
@@ -106,9 +106,6 @@ size_t ReplaceAll(string& s, const char* from, const char* to);
 
 CAFFE2_API void SetStackTraceFetcher(std::function<string(void)> fetcher);
 
-CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
-std::function<void(const OperatorDef&)> GetOperatorLogger();
-
 using EnforceNotMet = at::Error;
 
 #define CAFFE_ENFORCE(condition, ...)                                         \
@@ -149,7 +146,7 @@ using EnforceNotMet = at::Error;
  * functions to caffe2::enforce_detail namespace. For example:
  *
  *   namespace caffe2 { namespace enforce_detail {
- *   inline EnforceFailMessage IsVector(const vector<TIndex>& shape) {
+ *   inline EnforceFailMessage IsVector(const vector<int64_t>& shape) {
  *     if (shape.size() == 1) { return EnforceOK(); }
  *     return MakeString("Shape ", shape, " is not a vector");
  *   }

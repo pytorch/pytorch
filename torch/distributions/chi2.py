@@ -24,7 +24,6 @@ class Chi2(Gamma):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Chi2, _instance)
-        batch_shape = torch.Size(batch_shape)
         return super(Chi2, self).expand(batch_shape, new)
 
     @property

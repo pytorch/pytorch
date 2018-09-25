@@ -25,6 +25,7 @@ static const std::unordered_map<int, int> binary_prec = {
     {'-',    5},
     {'*',    6},
     {'/',    6},
+    {'%',    6},
     {'@',    6},
     {TK_POW, 7},
 };

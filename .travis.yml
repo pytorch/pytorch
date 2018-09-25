@@ -28,4 +28,4 @@ matrix:
         script: mypy @mypy-files.txt
       - env: CPP_DOC_CHECK
         install: sudo apt-get install -y doxygen
-        script: cd docs/cpp && ./check-doxygen.sh
+        script: cd docs/cpp/source && ./check-doxygen.sh

@@ -426,7 +426,7 @@ class TestOperators(TestCase):
 
     def test_norm(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
-        self.assertONNX(lambda x: x.norm(dim=2), (x))
+        self.assertONNX(lambda x: x.norm(p=2, dim=2), (x))
 
     def test_upsample(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
@@ -439,6 +439,12 @@ class TestOperators(TestCase):
     def test_batchnorm_noaffine(self):
         x = Variable(torch.randn(128, 128, 1, 1), requires_grad=True)
         self.assertONNX(nn.BatchNorm2d(128, affine=False), x)
+
+    def test_embedding_bags(self):
+        emb_bag = nn.EmbeddingBag(10, 8)
+        input = Variable(torch.LongTensor([1, 2, 3, 4]))
+        offset = Variable(torch.LongTensor([0]))
+        self.assertONNX(emb_bag, (input, offset))
 
     def test_symbolic_override(self):
         """Lifted from fast-neural-style: custom implementation of instance norm

@@ -33,6 +33,7 @@ bool isDifferentiable(Node * n) {
     "aten::exp(Tensor self) -> Tensor",
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
+    "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
     "aten::type_as(Tensor self, Tensor other) -> Tensor",
     "aten::unsqueeze(Tensor self, int dim) -> Tensor",
     "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
@@ -72,25 +73,15 @@ bool isDifferentiable(Graph & g) {
 }
 
 
-bool outputRequiresGrad(Node* node, std::function<bool(Value*)> requires_grad) {
-  switch (node->kind()) {
-    case aten::le:
-    case aten::ge:
-    case aten::lt:
-    case aten::gt:
-    case aten::ne:
-    case aten::eq:
-      return false;
-    case aten::type_as:
-      // type_as has two inputs, the second of which (setting type) might require grad,
-      // but it still won't affect the output of type_as requiring grad.
-      return requires_grad(node->inputs().at(0));
-    default:
-      return std::any_of(node->inputs().begin(), node->inputs().end(), requires_grad);
-  }
-}
-
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
+  static const OperatorSet comparison_ops = {
+    "aten::lt(Tensor self, Tensor other) -> Tensor",
+    "aten::le(Tensor self, Tensor other) -> Tensor",
+    "aten::gt(Tensor self, Tensor other) -> Tensor",
+    "aten::ge(Tensor self, Tensor other) -> Tensor",
+    "aten::eq(Tensor self, Tensor other) -> Tensor",
+    "aten::ne(Tensor self, Tensor other) -> Tensor"
+  };
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
@@ -116,6 +107,20 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::relu(Tensor self) -> Tensor")) {
       return {grads.at(0) * (outputs.at(0) > at::Scalar(0)).type_as(outputs.at(0))};
 
+    } else if (node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor")) {
+      // we do two type_as and "*" in lieu of boolean "and"
+      // the "! (val > min)" is chosen such that the gradient is 0 on the
+      // boundary and the factor is 1 when the boundary is NaN
+      // the ! is expressed as "1-" for lack of a "not" function and
+      // the the fuser insisting on float
+      // A NaN input will cause the gradient to propagate through,
+      // the more pure approach would be to have NaNs in that case
+      // but that is hard to reliably code and costs extra checks
+      // so we decided against it, see
+      // https://github.com/pytorch/pytorch/pull/11574#discussion_r218104538
+      return {grads.at(0)
+	      * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0)))
+	      * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
     } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
       return {grads.at(0) * (outputs.at(0))};
 
@@ -212,6 +217,8 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         tensor_grads.push_back(nullptr); // for attr::dim
         return tensor_grads;
       }
+    } else if (comparison_ops.find(node)) {
+      return {nullptr, nullptr};
 
     } else if (node->kind() == prim::Constant) {
       return {};
@@ -225,28 +232,6 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
-
-static value_set findAllRequiresGradNodes(
-        Graph& graph, const std::vector<bool>& input_requires_grad) {
-  JIT_ASSERT(graph.inputs().size() == input_requires_grad.size());
-  std::unordered_set<Value*> requires_grad_set;
-  const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
-
-  auto inputs = graph.inputs();
-  for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
-    if (!input_requires_grad[i]) continue;
-    requires_grad_set.emplace(inputs[i]);
-  }
-
-  for (Node * node : graph.nodes()) {
-    if (!outputRequiresGrad(node, requires_grad)) continue;
-    for (Value * output : node->outputs())
-      requires_grad_set.emplace(output);
-  }
-
-  return requires_grad_set;
-}
-
 
 // If we have a function y = f(x) with jacobian J, the backwards of f is dx = J^t dy.
 // Note that because the backwards always implements this matrix multiply,
@@ -277,13 +262,11 @@ static std::vector<Value*> linearGradientForNode(Node* node, ArrayRef<Value*> gr
 }
 
 struct ReverseDetails {
-  ReverseDetails(value_map&& grad_map, value_set&& requires_grad_set, Block * reverse_block)
+  ReverseDetails(value_map&& grad_map, Block * reverse_block)
     : grad_map(std::move(grad_map))
-    , requires_grad_set(std::move(requires_grad_set))
     , reverse_block(reverse_block) {}
 
   value_map grad_map;
-  value_set requires_grad_set;
   Block * reverse_block;
 };
 
@@ -305,8 +288,7 @@ static Value* createAutogradAdd(Value* a, Value* b) {
 //     and vjp outputs for all primal inputs that require_grad
 //   - grad_desc has df_input_vjps and df_output_vjps set
 //     (but df_input_vjps will be modified later as well)
-static ReverseDetails addReverseInline(Gradient& grad_desc,
-                                  const std::vector<bool>& input_requires_grad) {
+static ReverseDetails addReverseInline(Gradient& grad_desc) {
   auto & graph = *grad_desc.f;
   // note: reverse_node is intentionally not inserted to avoid
   // accidentally acting on it (e.g. in elminate dead code),
@@ -314,8 +296,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   auto reverse_node = graph.create(prim::Reverse, 0);
   auto reverse_block = reverse_node->addBlock();
   WithInsertPoint guard(reverse_block);
-  auto requires_grad_set = findAllRequiresGradNodes(graph, input_requires_grad);
-  const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
 
   value_map grad_map; // x -> dx mapping
   const auto get_grad = [&](Value* v) -> Value* {
@@ -337,7 +317,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   auto outputs = graph.outputs();
   for (size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
     Value * output = outputs[i];
-    if (!requires_grad(output))
+    if (!output->requires_grad())
       continue;
     Value * output_grad = reverse_block->addInput()->setType(output->type());
     set_grad(output, output_grad);
@@ -347,12 +327,15 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   for (auto it = graph.nodes().rbegin(), end = graph.nodes().rend(); it != end; ++it) {
     Node *node = *it;
     auto inputs = node->inputs();
-    if (!outputRequiresGrad(node, requires_grad)) continue;
+    auto outputs = node->outputs();
+    if (std::all_of(outputs.begin(), outputs.end(), [](Value *v) { return !v->requires_grad(); })) {
+      continue;
+    }
 
     value_list grad_inputs = linearGradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
-      if (!requires_grad(inputs[i])) continue;
+      if (!inputs[i]->requires_grad()) continue;
       // NB: Not returning a gradient w.r.t. a value that requires grad is normal if the
       // input is non-differentiable. This happens e.g. in the aten::type_as case.
       if (!grad_inputs[i]) continue;
@@ -363,7 +346,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   auto inputs = graph.inputs();
   for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
     Value * input = inputs[i];
-    if (!requires_grad(input))
+    if (!input->requires_grad())
       continue;
     // NB: Not having a gradient defined w.r.t. an input to the graph which requires grad
     // can happen and is not an error. It might have been used only in non-differentiable
@@ -373,7 +356,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
-  return ReverseDetails(std::move(grad_map), std::move(requires_grad_set), reverse_block);
+  return ReverseDetails(std::move(grad_map), reverse_block);
 }
 
 // Any temporary value from the primal graphs needs to be captured for later use in the
@@ -500,7 +483,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   for (size_t i = grad_desc.f_real_outputs; i < graph.outputs().size(); ++i) {
     Value * tmp = graph.outputs().at(i);
     // Add VJP inputs only for intermediates that actually required grad.
-    if (rev_info.requires_grad_set.count(tmp) == 0) continue;
+    if (!tmp->requires_grad()) continue;
     Value * tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());
     Value * tmp_vjp_prev = rev_info.grad_map.at(tmp);
     // This is quite weird because we can't first make a sum and then replace all uses
@@ -536,7 +519,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   reverse_block->owningNode()->destroy();
 }
 
-Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& requires_grad) {
+Gradient differentiate(std::shared_ptr<Graph>& graph) {
   Gradient grad_desc;
   // Take ownership of the graph
   JIT_ASSERTM(graph.use_count() == 1,
@@ -547,7 +530,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& r
 
   WithInsertPoint guard(grad_desc.f->block());
   // Fills in df_input_vjps and df_output_vjps
-  auto rev_info = addReverseInline(grad_desc, requires_grad);
+  auto rev_info = addReverseInline(grad_desc);
   // Lift constants captured for the reverse graph into it
   liftConstants(grad_desc, rev_info);
   // addReverseInline has to call gradientForNode if *any* of the outputs

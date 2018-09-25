@@ -5,6 +5,11 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
+set(CMAKE_CXX_STANDARD 11)
+if (NOT MSVC)
+  set(CMAKE_C_STANDARD 11)
+endif()
+
 set(CAFFE2_VERSION_MAJOR 0)
 set(CAFFE2_VERSION_MINOR 8)
 set(CAFFE2_VERSION_PATCH 2)
@@ -294,6 +299,7 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 
 # ---[ Main build
+add_subdirectory(c10)
 add_subdirectory(caffe2)
 
 # --[ Documentation

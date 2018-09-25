@@ -69,6 +69,20 @@ compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
   return std::make_tuple(result_type, backend);
 }
 
+static bool needs_cast(const Tensor& tensor, const Type& dst_type) {
+  if (!tensor.defined() || dst_type == tensor.type()) {
+    return false;
+  }
+  if (dst_type.device_type() == DeviceType::CUDA &&
+      tensor.type().device_type() == DeviceType::CPU &&
+      tensor.dim() == 0) {
+    // zero-dim CPU tensors used in CUDA operations can be used directly without
+    // casting
+    return false;
+  }
+  return true;
+}
+
 void TensorIterator::compute_common_type() {
   // See [Result type computation] in TensorIterator.h
   auto result_type = ScalarType::Undefined;
@@ -95,14 +109,11 @@ void TensorIterator::compute_common_type() {
   for (auto& op : operands_) {
     if (!op.type) {
       op.type = &type;
-      if (op.tensor->defined() && type != op.tensor->type()) {
-        if (op.tensor->dim() == 0) {
-          if (type.backend() != at::Backend::CUDA) {
-            *op.tensor = op.tensor->toType(type);
-          }
-        } else {
-          op.needs_cast = true;
-        }
+      op.needs_cast = needs_cast(*op.tensor, type);
+      if (op.needs_cast && op.tensor->dim() == 0 && !op.is_output) {
+        cast_tensors_.emplace_back(op.tensor->toType(type));
+        op.tensor = &(cast_tensors_.back());
+        op.needs_cast = false;
       }
     }
   }
@@ -142,7 +153,7 @@ void TensorIterator::allocate_outputs() {
       for (int dim = 0; dim < ndim(); dim++) {
         tensor_stride[dim] /= element_size;
       }
-      *op.tensor = op.type->tensor(tensor_shape, tensor_stride);
+      *op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.type->options());
     }
   }
 }

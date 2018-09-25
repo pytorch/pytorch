@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/assertions.h"
 #include "ATen/ExpandUtils.h"
@@ -75,8 +75,8 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::type_as,
   aten::_sigmoid_backward,
   aten::_tanh_backward,
+  aten::clamp,
   // TODO support those
-  //aten::clamp,
   //aten::lerp,
   aten::rand_like,
 };
@@ -217,7 +217,8 @@ struct GraphFuser {
         node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::mul(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::div(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
+        node->matches("aten::div(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor", /*const=*/{attr::min, attr::max})) {
       auto inputs = tensorInputs(node);
       return haveSupportedType(inputs);
     }
@@ -228,6 +229,9 @@ struct GraphFuser {
         node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::le(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::gt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::gt(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::ge(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
@@ -343,7 +347,7 @@ struct GraphFuser {
     // is that if we're compiling on CPU, the fusion compiler works.
     if (consumer_device.type() == DeviceType::CPU ||
         producer_device.type() == DeviceType::CPU) {
-      return sharedFusionCompiler().canCompileOnCPU();
+      return canFuseOnCPU();
     }
     return true;
   }

@@ -35,7 +35,7 @@ namespace caffe2 {
  * objects.
  */
 template <class SrcType, class ObjectPtrType, class... Args>
-class CAFFE2_API Registry {
+class Registry {
  public:
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
@@ -104,7 +104,7 @@ class CAFFE2_API Registry {
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
-class CAFFE2_API Registerer {
+class Registerer {
  public:
   Registerer(
       const SrcType& key,
@@ -172,7 +172,7 @@ class CAFFE2_API Registerer {
       key,                                                                    \
       RegistryName(),                                                         \
       Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
-      at::demangle_type<__VA_ARGS__>());                                           \
+      at::demangle_type<__VA_ARGS__>());                                      \
   }
 
 // CAFFE_DECLARE_REGISTRY and CAFFE_DEFINE_REGISTRY are hard-wired to use string

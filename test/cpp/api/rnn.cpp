@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include <gtest/gtest.h>
 
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/rnn.h>
@@ -6,9 +6,7 @@
 #include <torch/tensor.h>
 #include <torch/utils.h>
 
-#include <test/cpp/api/util.h>
-
-using Catch::StartsWith;
+#include <test/cpp/api/support.h>
 
 using namespace torch::nn;
 using namespace torch::test;
@@ -58,7 +56,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     loss.backward();
     optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > max_epoch) {
       return false;
     }
@@ -71,23 +69,24 @@ void check_lstm_sizes(RNNOutput output) {
   // Expect the LSTM to have 64 outputs and 3 layers, with an input of batch
   // 10 and 16 time steps (10 x 16 x n)
 
-  REQUIRE(output.output.ndimension() == 3);
-  REQUIRE(output.output.size(0) == 10);
-  REQUIRE(output.output.size(1) == 16);
-  REQUIRE(output.output.size(2) == 64);
+  ASSERT_EQ(output.output.ndimension(), 3);
+  ASSERT_EQ(output.output.size(0), 10);
+  ASSERT_EQ(output.output.size(1), 16);
+  ASSERT_EQ(output.output.size(2), 64);
 
-  REQUIRE(output.state.ndimension() == 4);
-  REQUIRE(output.state.size(0) == 2); // (hx, cx)
-  REQUIRE(output.state.size(1) == 3); // layers
-  REQUIRE(output.state.size(2) == 16); // Batchsize
-  REQUIRE(output.state.size(3) == 64); // 64 hidden dims
+  ASSERT_EQ(output.state.ndimension(), 4);
+  ASSERT_EQ(output.state.size(0), 2); // (hx, cx)
+  ASSERT_EQ(output.state.size(1), 3); // layers
+  ASSERT_EQ(output.state.size(2), 16); // Batchsize
+  ASSERT_EQ(output.state.size(3), 64); // 64 hidden dims
 
   // Something is in the hiddens
-  REQUIRE(output.state.norm().toCFloat() > 0);
+  ASSERT_GT(output.state.norm().item<float>(), 0);
 }
 
-TEST_CASE("RNN/CheckOutputSizes") {
-  torch::manual_seed(0);
+struct RNNTest : torch::test::SeedingFixture {};
+
+TEST_F(RNNTest, CheckOutputSizes) {
   LSTM model(LSTMOptions(128, 64).layers(3).dropout(0.2));
   // Input size is: sequence length, batch size, input size
   auto x = torch::randn({10, 16, 128}, torch::requires_grad());
@@ -104,10 +103,10 @@ TEST_CASE("RNN/CheckOutputSizes") {
   torch::Tensor diff = next.state - output.state;
 
   // Hiddens changed
-  REQUIRE(diff.abs().sum().toCFloat() > 1e-3);
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
-TEST_CASE("RNN/CheckOutputValuesMatchPyTorch") {
+TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
   torch::manual_seed(0);
   // Make sure the outputs match pytorch outputs
   LSTM model(2, 2);
@@ -127,10 +126,10 @@ TEST_CASE("RNN/CheckOutputValuesMatchPyTorch") {
   }
 
   auto out = model->forward(x);
-  REQUIRE(out.output.ndimension() == 3);
-  REQUIRE(out.output.size(0) == 3);
-  REQUIRE(out.output.size(1) == 4);
-  REQUIRE(out.output.size(2) == 2);
+  ASSERT_EQ(out.output.ndimension(), 3);
+  ASSERT_EQ(out.output.size(0), 3);
+  ASSERT_EQ(out.output.size(1), 4);
+  ASSERT_EQ(out.output.size(2), 2);
 
   auto flat = out.output.view(3 * 4 * 2);
   float c_out[] = {0.4391, 0.5402, 0.4330, 0.5324, 0.4261, 0.5239,
@@ -138,14 +137,14 @@ TEST_CASE("RNN/CheckOutputValuesMatchPyTorch") {
                    0.6620, 0.7860, 0.6501, 0.7741, 0.7889, 0.9003,
                    0.7769, 0.8905, 0.7635, 0.8794, 0.7484, 0.8666};
   for (size_t i = 0; i < 3 * 4 * 2; i++) {
-    REQUIRE(std::abs(flat[i].toCFloat() - c_out[i]) < 1e-3);
+    ASSERT_LT(std::abs(flat[i].item<float>() - c_out[i]), 1e-3);
   }
 
-  REQUIRE(out.state.ndimension() == 4); // (hx, cx) x layers x B x 2
-  REQUIRE(out.state.size(0) == 2);
-  REQUIRE(out.state.size(1) == 1);
-  REQUIRE(out.state.size(2) == 4);
-  REQUIRE(out.state.size(3) == 2);
+  ASSERT_EQ(out.state.ndimension(), 4); // (hx, cx) x layers x B x 2
+  ASSERT_EQ(out.state.size(0), 2);
+  ASSERT_EQ(out.state.size(1), 1);
+  ASSERT_EQ(out.state.size(2), 4);
+  ASSERT_EQ(out.state.size(3), 2);
   flat = out.state.view(16);
   float h_out[] = {0.7889,
                    0.9003,
@@ -164,72 +163,67 @@ TEST_CASE("RNN/CheckOutputValuesMatchPyTorch") {
                    1.0931,
                    1.4911};
   for (size_t i = 0; i < 16; i++) {
-    REQUIRE(std::abs(flat[i].toCFloat() - h_out[i]) < 1e-3);
+    ASSERT_LT(std::abs(flat[i].item<float>() - h_out[i]), 1e-3);
   }
 }
 
-TEST_CASE("RNN/integration/LSTM") {
-  REQUIRE(test_RNN_xor<LSTM>(
+TEST_F(RNNTest, EndToEndLSTM) {
+  ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).layers(2)); }));
 }
 
-TEST_CASE("RNN/integration/GRU") {
-  REQUIRE(
+TEST_F(RNNTest, EndToEndGRU) {
+  ASSERT_TRUE(
       test_RNN_xor<GRU>([](int s) { return GRU(GRUOptions(s, s).layers(2)); }));
 }
 
-TEST_CASE("RNN/integration/RNN") {
-  SECTION("relu") {
-    REQUIRE(test_RNN_xor<RNN>(
-        [](int s) { return RNN(RNNOptions(s, s).relu().layers(2)); }));
-  }
-  SECTION("tanh") {
-    REQUIRE(test_RNN_xor<RNN>(
-        [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); }));
-  }
+TEST_F(RNNTest, EndToEndRNNRelu) {
+  ASSERT_TRUE(test_RNN_xor<RNN>(
+      [](int s) { return RNN(RNNOptions(s, s).relu().layers(2)); }));
 }
 
-TEST_CASE("rnn_cuda", "[cuda]") {
-  SECTION("sizes") {
-    torch::manual_seed(0);
-    LSTM model(LSTMOptions(128, 64).layers(3).dropout(0.2));
-    model->to(torch::kCUDA);
-    auto x = torch::randn(
-        {10, 16, 128}, torch::requires_grad().device(torch::kCUDA));
-    auto output = model->forward(x);
-    auto y = x.mean();
+TEST_F(RNNTest, EndToEndRNNTanh) {
+  ASSERT_TRUE(test_RNN_xor<RNN>(
+      [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); }));
+}
 
-    y.backward();
-    check_lstm_sizes(output);
+TEST_F(RNNTest, Sizes_CUDA) {
+  torch::manual_seed(0);
+  LSTM model(LSTMOptions(128, 64).layers(3).dropout(0.2));
+  model->to(torch::kCUDA);
+  auto x =
+      torch::randn({10, 16, 128}, torch::requires_grad().device(torch::kCUDA));
+  auto output = model->forward(x);
+  auto y = x.mean();
 
-    auto next = model->forward(x, output.state);
+  y.backward();
+  check_lstm_sizes(output);
 
-    check_lstm_sizes(next);
+  auto next = model->forward(x, output.state);
 
-    torch::Tensor diff = next.state - output.state;
+  check_lstm_sizes(next);
 
-    // Hiddens changed
-    REQUIRE(diff.abs().sum().toCFloat() > 1e-3);
-  }
+  torch::Tensor diff = next.state - output.state;
 
-  SECTION("lstm") {
-    REQUIRE(test_RNN_xor<LSTM>(
-        [](int s) { return LSTM(LSTMOptions(s, s).layers(2)); }, true));
-  }
+  // Hiddens changed
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
+}
 
-  SECTION("gru") {
-    REQUIRE(test_RNN_xor<GRU>(
-        [](int s) { return GRU(GRUOptions(s, s).layers(2)); }, true));
-  }
+TEST_F(RNNTest, EndToEndLSTM_CUDA) {
+  ASSERT_TRUE(test_RNN_xor<LSTM>(
+      [](int s) { return LSTM(LSTMOptions(s, s).layers(2)); }, true));
+}
 
-  SECTION("rnn") {
-    SECTION("relu") {
-      REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return RNN(RNNOptions(s, s).relu().layers(2)); }, true));
-    }
-    SECTION("tanh") {
-      REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); }, true));
-    }
-  }
+TEST_F(RNNTest, EndToEndGRU_CUDA) {
+  ASSERT_TRUE(test_RNN_xor<GRU>(
+      [](int s) { return GRU(GRUOptions(s, s).layers(2)); }, true));
+}
+
+TEST_F(RNNTest, EndToEndRNNRelu_CUDA) {
+  ASSERT_TRUE(test_RNN_xor<RNN>(
+      [](int s) { return RNN(RNNOptions(s, s).relu().layers(2)); }, true));
+}
+TEST_F(RNNTest, EndToEndRNNTanh_CUDA) {
+  ASSERT_TRUE(test_RNN_xor<RNN>(
+      [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); }, true));
 }

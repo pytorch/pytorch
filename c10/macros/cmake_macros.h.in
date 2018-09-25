@@ -1,0 +1,6 @@
+// Automatically generated header file for the C10 library.
+// Do not include this file directly. Instead, include c10/macros/Macros.h.
+
+#pragma once
+
+#cmakedefine C10_BUILD_SHARED_LIBS

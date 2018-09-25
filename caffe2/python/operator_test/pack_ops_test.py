@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -12,7 +13,7 @@ import numpy as np
 import time
 
 
-class TestTensorPackOps(hu.HypothesisTestCase):
+class TestTensorPackOps(serial.SerializedTestCase):
 
     def pack_segments_ref(self, return_presence_mask=False, max_length=None):
         def pack_segments_ref(lengths, data, max_length=max_length):
@@ -53,7 +54,7 @@ class TestTensorPackOps(hu.HypothesisTestCase):
 
         return pack_segments_ref
 
-    @given(
+    @serial.given(
         num_seq=st.integers(10, 100),
         cell_size=st.integers(1, 10),
         **hu.gcs

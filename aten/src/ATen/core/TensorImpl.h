@@ -20,9 +20,9 @@ struct Tensor;
 } // namespace at
 
 namespace at {
-struct AT_API TensorImpl : public c10::intrusive_ptr_target {
+struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
-  TensorImpl(TensorTypeId type_id, ScalarType scalar_type, Allocator *allocator, bool is_variable);
+  TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, bool is_variable);
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
   virtual void release_resources() override;
@@ -32,7 +32,7 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
     // could not have been created without initializing the Type first.
     // TODO: This is not actually true via the Caffe2 codepath!  Make
     // it so.
-    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), scalar_type(), is_variable());
+    return *globalLegacyTypeDispatch().getTypeRaw(tensorTypeIdToBackend(type_id()), dataTypeToScalarType(dtype().id()), is_variable());
   }
 
   TensorTypeId type_id() const { return type_id_; }
@@ -100,13 +100,19 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_.data<T>() + storage_offset_;
   }
 
+  inline void* data() const {
+    return static_cast<void*>(
+        static_cast<char*>(storage_.data()) +
+        data_type_.itemsize() * storage_offset_);
+  }
+
   template <typename T>
   inline T * unsafe_data() const {
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
-  inline at::ScalarType scalar_type() const {
-    return scalar_type_;
+  const caffe2::TypeMeta& dtype() const {
+    return data_type_;
   }
 
   virtual int64_t storage_offset() const {
@@ -192,13 +198,13 @@ struct AT_API TensorImpl : public c10::intrusive_ptr_target {
     is_contiguous_ = compute_contiguous();
   }
   TensorTypeId type_id_;
-  // INVARIANT: When storage is non-null, this scalar type must
-  // agree with the scalar type in storage
-  ScalarType scalar_type_;
+  // INVARIANT: When storage is non-null, this type meta must
+  // agree with the type meta in storage
+  caffe2::TypeMeta data_type_;
   bool is_variable_ = false;
   bool is_wrapped_number_ = false;
 
  private:
-  TensorImpl(Storage&& storage, TensorTypeId type_id, ScalarType scalar_type, bool is_variable);
+  TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable);
 };
 } // namespace at

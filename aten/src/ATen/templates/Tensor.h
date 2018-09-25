@@ -1,7 +1,5 @@
 #pragma once
 
-// ${generated_comment}
-
 #include "ATen/core/Device.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
@@ -39,7 +37,7 @@ namespace at {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-struct AT_API Tensor {
+struct CAFFE2_API Tensor {
   Tensor(){};
   Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : tensor_impl_(std::move(tensor_impl)) {
@@ -144,7 +142,7 @@ struct AT_API Tensor {
     return tensor_impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return tensor_impl_->scalar_type();
+    return dataTypeToScalarType(tensor_impl_->dtype().id());
   }
   const Storage& storage() const {
     return tensor_impl_->storage();
@@ -174,19 +172,11 @@ struct AT_API Tensor {
   template<typename T>
   T * data() const;
 
+  template <typename T>
+  T item() const;
+
   // Purposely not defined here to avoid inlining
   void print() const;
-
-  //toLongData(), toFloatData() etc.
-  #define TO_TYPE_DATA(T,name,_) \
-  T * to##name##Data() const;
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_TYPE_DATA)
-  #undef TO_TYPE_DATA
-
-  #define TO_C_TYPE(T,name,_) \
-  T toC##name () const;
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_C_TYPE)
-  #undef TO_C_TYPE
 
   // Return a `TensorAccessor` for CPU `Tensor`s. You have to specify scalar type and
   // dimension.
@@ -272,7 +262,7 @@ protected:
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl_;
 };
 
-struct AT_API WeakTensor {
+struct CAFFE2_API WeakTensor {
   WeakTensor(const Tensor& t) : weak_tensor_impl_(t.tensor_impl_) {}
 
   // XXX: this can return undefined tensors
@@ -300,3 +290,5 @@ private:
   c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_tensor_impl_;
 };
 } // namespace at
+
+#include "ATen/core/TensorMethods.h"
