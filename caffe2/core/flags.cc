@@ -9,7 +9,7 @@ namespace caffe2 {
 
 #ifdef CAFFE2_USE_GFLAGS
 
-CAFFE2_EXPORT void SetUsageMessage(const string& str) {
+CAFFE2_EXPORT void SetUsageMessage(const std::string& str) {
   if (UsageMessage() != nullptr) {
     // Usage message has already been set, so we will simply return.
     return;

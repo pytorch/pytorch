@@ -144,7 +144,7 @@ class CAFFE2_API Caffe2FlagParser {
 
 }  // namespace caffe2
 
-C10_DECLARE_REGISTRY(Caffe2FlagsRegistry, caffe2::Caffe2FlagParser, const string&);
+C10_DECLARE_REGISTRY(Caffe2FlagsRegistry, caffe2::Caffe2FlagParser, const std::string&);
 
 // The macros are defined outside the caffe2 namespace. In your code, you should
 // write the CAFFE2_DEFINE_* and CAFFE2_DECLARE_* macros outside any namespace
