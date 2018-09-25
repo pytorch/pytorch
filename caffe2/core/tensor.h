@@ -130,12 +130,12 @@ class CAFFE2_API Tensor final {
     return impl_.get()->GetStaticContext();
   }
 
-  std::unique_ptr<BaseContext> CreateContext() const {
-    return impl_.get()->CreateContext();
-  }
-
   DeviceType GetDeviceType() const {
     return impl_.get()->GetDeviceType();
+  }
+
+  at::Device GetDevice() const {
+    return impl_.get()->GetDevice();
   }
 
   void CopyFrom(const Tensor& src, BaseContext* context = nullptr) const {
@@ -262,10 +262,6 @@ class CAFFE2_API Tensor final {
     return impl_.get()->nbytes();
   }
 
-  inline size_t capacity_nbytes() const {
-    return impl_.get()->capacity_nbytes();
-  }
-
   inline const vector<int64_t>& dims() const {
     return impl_.get()->dims();
   }
@@ -320,6 +316,10 @@ class CAFFE2_API Tensor final {
   }
 
   const Storage& storage() {
+    return impl_->storage();
+  }
+
+  const Storage& storage() const {
     return impl_->storage();
   }
 };

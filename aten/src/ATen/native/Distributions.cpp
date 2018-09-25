@@ -173,7 +173,7 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
 
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
-  Tensor ret = self.type().tensor(self.sizes());
+  Tensor ret = at::empty(self.sizes(), self.options());
   AT_DISPATCH_FLOATING_TYPES(self.type(), "_standard_gamma_grad", [&] {
     CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, self, output,
       [](scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
