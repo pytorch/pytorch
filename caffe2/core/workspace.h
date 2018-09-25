@@ -151,7 +151,7 @@ class CAFFE2_API Workspace {
       auto* to_blob = CreateBlob(blob);
       CAFFE_ENFORCE(to_blob);
       const auto& from_tensor = from_blob->template Get<Tensor>();
-      auto* to_tensor = to_blob->GetMutableTensor(Context::GetDeviceType());
+      auto* to_tensor = BlobGetMutableTensor(to_blob, Context::GetDeviceType());
       to_tensor->CopyFrom(from_tensor);
     }
   }
