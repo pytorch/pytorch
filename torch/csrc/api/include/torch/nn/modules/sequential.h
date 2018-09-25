@@ -92,6 +92,8 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   using Iterator = std::vector<AnyModule>::iterator;
   using ConstIterator = std::vector<AnyModule>::const_iterator;
 
+  SequentialImpl() = default;
+
   /// Constructs the `Sequential` from a variadic list of modules.
   template <typename... Modules>
   explicit SequentialImpl(Modules&&... modules) {

@@ -44,7 +44,7 @@ bool test_optimizer_xor(Options options) {
     auto labels = torch::empty({kBatchSize});
     for (size_t i = 0; i < kBatchSize; i++) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
-      labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
+      labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
     inputs.set_requires_grad(true);
     optimizer.zero_grad();
@@ -54,7 +54,7 @@ bool test_optimizer_xor(Options options) {
 
     optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > kMaximumNumberOfEpochs) {
       std::cout << "Loss is too high after epoch " << epoch << ": "
                 << running_loss << std::endl;
@@ -286,14 +286,14 @@ TEST(OptimTest, ZeroGrad) {
 
   for (const auto& parameter : model->parameters()) {
     ASSERT_TRUE(parameter->grad().defined());
-    ASSERT_GT(parameter->grad().sum().toCFloat(), 0);
+    ASSERT_GT(parameter->grad().sum().item<float>(), 0);
   }
 
   optimizer.zero_grad();
 
   for (const auto& parameter : model->parameters()) {
     ASSERT_TRUE(parameter->grad().defined());
-    ASSERT_EQ(parameter->grad().sum().toCFloat(), 0);
+    ASSERT_EQ(parameter->grad().sum().item<float>(), 0);
   }
 }
 

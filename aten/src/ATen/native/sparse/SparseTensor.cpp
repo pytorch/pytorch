@@ -286,8 +286,8 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   SparseTensor dst = new_sparse(self.type());
   _get_sparse_impl(dst)->resize_(sparseDims, denseDims, self.sizes());
   // TODO: is there a more idiomatic way to do this?
-  LongTensor newIndices = indices.type().tensor(indices.sizes());
-  Tensor newValues = values.type().tensor(values.sizes());
+  LongTensor newIndices = at::empty(indices.sizes(), indices.options());
+  Tensor newValues = at::empty(values.sizes(), values.options());
   _alias_into_sparse(dst, newIndices, newValues);
 
   LongTensor indicesBuffer;
@@ -348,7 +348,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   int64_t sparseDims = mask._sparseDims();
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
-  Tensor r_values = r._values().type().tensor(mask_values.sizes());
+  Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   _alias_into_sparse(r, mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   int64_t r_nnz = mask._nnz();
@@ -392,7 +392,7 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
 }
 
 SparseTensor sparse_mask_cpu(const Tensor& t, SparseTensorRef mask) {
-  SparseTensor r = t.type().toSparse().tensor();
+  SparseTensor r = at::empty({0}, t.options().layout(kSparse));
   sparse_mask_out_cpu(r, t, mask.tref);
   return r;
 }
