@@ -139,7 +139,13 @@ include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
 
 # ---[ Version numbers for generated libraries
-set(TORCH_BUILD_VERSION "1.0.0" CACHE STRING "Torch build version")
+set(TORCH_DEFAULT_VERSION "1.0.0")
+set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
+if (NOT TORCH_BUILD_VERSION)
+  # An empty string was specified so force version to the default
+  set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}"
+    CACHE STRING "Torch build version" FORCE)
+endif()
 caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
 caffe2_parse_version_str(CAFFE2 ${TORCH_BUILD_VERSION})
 
