@@ -7,8 +7,8 @@ THC_API THAllocator* getTHCudaHostAllocator(void);
 // IPC doesn't support (re)allocation
 
 #ifdef __cplusplus
-class AT_API THCIpcDeleter {
-public:
+class CAFFE2_API THCIpcDeleter {
+ public:
   THCIpcDeleter(void* data, int device) : data_(data), device_(device) {};
   ~THCIpcDeleter();
   static at::DataPtr makeDataPtr(void* data, int device);

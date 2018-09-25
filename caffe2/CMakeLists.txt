@@ -194,7 +194,6 @@ target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
 target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
 
 # Compile exposed libraries.
-list(APPEND Caffe2_CPU_SRCs $<TARGET_OBJECTS:c10>)
 add_library(caffe2 ${Caffe2_CPU_SRCS})
 if (NOT WIN32)
   target_compile_options(caffe2 PRIVATE "-fvisibility=hidden")
@@ -206,6 +205,7 @@ if (${CAFFE2_LINK_LOCAL_PROTOBUF})
 else()
   target_link_libraries(caffe2 PUBLIC protobuf::libprotobuf)
 endif()
+target_link_libraries(caffe2 PUBLIC c10)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
@@ -333,7 +333,7 @@ if(USE_CUDA)
   # NB: This must be target_compile_definitions, not target_compile_options,
   # as the latter is not respected by nvcc
   if (MSVC)
-	  target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_CUDA_BUILD_MAIN_LIB")
+    target_compile_definitions(caffe2_gpu PRIVATE "-DCAFFE2_CUDA_BUILD_MAIN_LIB")
   endif()
 
   # Set standard properties on the target

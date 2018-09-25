@@ -36,7 +36,7 @@
 
 namespace caffe2 {
 
-void AddConstInput(const vector<TIndex>& shape,
+void AddConstInput(const vector<int64_t>& shape,
                    const float value,
                    const string& name,
                    Workspace* ws) {
@@ -50,7 +50,7 @@ void AddConstInput(const vector<TIndex>& shape,
                                &context);
 }
 
-void AddNoiseInput(const vector<TIndex>& shape,
+void AddNoiseInput(const vector<int64_t>& shape,
                    const string& name,
                    Workspace* ws) {
   DeviceOption option;
@@ -72,7 +72,7 @@ float snpe_run(int iters, Workspace& ws) {
   const int W = 227;
   const int C = 3;
 
-  POPULATE_DATA("X_snpe", (caffe2::vector<caffe2::TIndex>{H, W, C}), hwc);
+  POPULATE_DATA("X_snpe", (caffe2::vector<int64_t>{H, W, C}), hwc);
 
   OperatorDef def;
   def.set_name("snpe_test");
@@ -108,7 +108,7 @@ float caffe2_run(int iters, Workspace& ws) {
   ReadProtoFromBinaryFile("/data/local/tmp/squeeze_init_net.pb", &init_net);
   ReadProtoFromBinaryFile("/data/local/tmp/squeeze_predict_net.pb", &predict_net);
   ws.RunNetOnce(init_net);
-  POPULATE_DATA("data", (caffe2::vector<caffe2::TIndex>{N, C, H, W}), chw);
+  POPULATE_DATA("data", (caffe2::vector<int64_t>{N, C, H, W}), chw);
   predict_net.set_name("SqueezeNet");
   ws.CreateNet(predict_net);
 

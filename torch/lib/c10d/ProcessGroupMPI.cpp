@@ -98,7 +98,7 @@ bool ProcessGroupMPI::WorkMPI::isCompleted() {
 }
 
 bool ProcessGroupMPI::WorkMPI::isSuccess() const {
-  return !workException_;
+  return !exception_;
 }
 
 void ProcessGroupMPI::WorkMPI::synchronize() {}
@@ -124,14 +124,14 @@ void ProcessGroupMPI::WorkMPI::finishWithException(
   {
     std::unique_lock<std::mutex> lock(workMutex_);
     completed_ = true;
-    workException_ = caughtWorkException;
+    exception_ = caughtWorkException;
   }
   workCV_.notify_all();
 }
 
 const std::exception& ProcessGroupMPI::WorkMPI::exception() const {
   try {
-    std::rethrow_exception(workException_);
+    std::rethrow_exception(exception_);
   } catch (const std::exception& e) {
     return e;
   }
@@ -169,6 +169,11 @@ bool ProcessGroupMPI::AsyncWork::isCompleted() {
     *srcRank_ = status_.MPI_SOURCE;
   }
 
+  // Populate exception if request was not successful
+  if (status_.MPI_ERROR != MPI_SUCCESS) {
+    populateException();
+  }
+
   return true;
 }
 
@@ -194,19 +199,30 @@ bool ProcessGroupMPI::AsyncWork::wait() {
     *srcRank_ = status_.MPI_SOURCE;
   }
 
-  return status_.MPI_ERROR == MPI_SUCCESS;
+  auto ok = (status_.MPI_ERROR == MPI_SUCCESS);
+
+  // Populate exception if request was not successful
+  if (!ok) {
+    populateException();
+  }
+
+  return ok;
 }
 
 const std::exception& ProcessGroupMPI::AsyncWork::exception() const {
-  if (request_ != MPI_REQUEST_NULL) {
-    throw std::runtime_error(
-        "Invalid call to AsyncWork::exception before work has completed");
+  try {
+    std::rethrow_exception(exception_);
+  } catch (const std::exception& e) {
+    return e;
   }
+}
 
+void ProcessGroupMPI::AsyncWork::populateException() {
   std::array<char, MPI_MAX_ERROR_STRING> buf;
   int len = buf.size();
   MPI_CHECK(MPI_Error_string(status_.MPI_ERROR, buf.data(), &len));
-  return std::runtime_error(std::string(buf.data(), len));
+  exception_ =
+      std::make_exception_ptr(std::runtime_error(std::string(buf.data(), len)));
 }
 
 // Static global states

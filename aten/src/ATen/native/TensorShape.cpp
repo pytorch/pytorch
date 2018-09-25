@@ -133,7 +133,7 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return self.type().tensor().set_(self.storage(), storage_offset, size, stride);
+  return at::empty({0}, self.options()).set_(self.storage(), storage_offset, size, stride);
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
@@ -196,7 +196,7 @@ Tensor repeat(const Tensor& self, IntList repeats) {
 
   Tensor xtensor = self.expand(padded_size);
 
-  Tensor result = self.type().tensor(target_size);
+  Tensor result = at::empty(target_size, self.options());
   Tensor urtensor = at::alias(result);
   for (int64_t i = 0; i < xtensor.dim(); ++i) {
     // can't unfold with step 0, so make sure step is at least 1

@@ -117,7 +117,7 @@ class ONNXWhileOp final : public Operator<Context> {
 
     // Use this to keep track of the sizes of the scan outputs and validate
     // they're the same across iterations.
-    std::vector<std::vector<TIndex>> scan_outputs_sizes;
+    std::vector<std::vector<int64_t>> scan_outputs_sizes;
 
     Workspace *cur_ws = nullptr;
     bool cur_output_condition = false;
@@ -165,8 +165,8 @@ class ONNXWhileOp final : public Operator<Context> {
             dims.insert(dims.begin(), itr);
             scan_output_target->Extend(1, 2.0f, &context_);
 
-            TIndex timestep_size = 1;
-            for (const TIndex t : scan_outputs_sizes[i]) {
+            int64_t timestep_size = 1;
+            for (const int64_t t : scan_outputs_sizes[i]) {
               timestep_size *= t;
             }
 

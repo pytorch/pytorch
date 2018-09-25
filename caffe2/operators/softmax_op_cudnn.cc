@@ -64,14 +64,14 @@ class CuDNNSoftmaxOp final : public Operator<CUDAContext> {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
   int axis_;
   cudnnTensorDescriptor_t desc_;
-  vector<TIndex> dims_;
+  vector<int64_t> dims_;
 };
 
 
@@ -130,14 +130,14 @@ class CuDNNSoftmaxGradientOp final : public Operator<CUDAContext> {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:
   CuDNNWrapper cudnn_wrapper_;
   int axis_;
   cudnnTensorDescriptor_t desc_;
-  vector<TIndex> dims_;
+  vector<int64_t> dims_;
 };
 
 namespace {

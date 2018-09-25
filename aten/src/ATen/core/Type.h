@@ -33,7 +33,7 @@ class Context;
 struct Allocator;
 struct Generator;
 struct Storage;
-struct Tensor;
+class Tensor;
 
 static inline void noop_deleter(void*) {}
 
@@ -76,7 +76,7 @@ enum class TypeID {
   NumOptions
 };
 
-struct AT_API Type {
+struct CAFFE2_API Type {
   explicit Type(TensorTypeId type_id, bool is_variable, bool is_undefined)
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
@@ -364,8 +364,6 @@ struct AT_API Type {
   virtual Tensor & log_normal_(Tensor & self, double mean, double std, Generator * generator) const = 0;
   virtual Tensor & exponential_(Tensor & self, double lambd, Generator * generator) const = 0;
   virtual Tensor & geometric_(Tensor & self, double p, Generator * generator) const = 0;
-  virtual Tensor tensor(Storage storage, int64_t storageOffset, IntList size, IntList stride) const = 0;
-  virtual Tensor tensor(IntList size, IntList stride) const = 0;
   virtual Tensor abs(const Tensor & self) const = 0;
   virtual Tensor & abs_(Tensor & self) const = 0;
   virtual Tensor acos(const Tensor & self) const = 0;
@@ -381,8 +379,6 @@ struct AT_API Type {
   virtual Tensor all(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual bool allclose(const Tensor & self, const Tensor & other, double rtol, double atol, bool equal_nan) const = 0;
   virtual Tensor any(const Tensor & self, int64_t dim, bool keepdim) const = 0;
-  AT_DEPRECATED(virtual Tensor arange(Scalar start, Scalar end, Scalar step) const = 0);
-  AT_DEPRECATED(virtual Tensor arange(Scalar end) const = 0);
   virtual Tensor argmax(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor argmax(const Tensor & self) const = 0;
   virtual Tensor argmin(const Tensor & self, int64_t dim, bool keepdim) const = 0;
@@ -428,7 +424,6 @@ struct AT_API Type {
   virtual Tensor div(const Tensor & self, Scalar other) const = 0;
   virtual Tensor & div_(Tensor & self, Scalar other) const = 0;
   virtual Tensor dot(const Tensor & self, const Tensor & tensor) const = 0;
-  AT_DEPRECATED(virtual Tensor empty(IntList size) const = 0);
   virtual Tensor erf(const Tensor & self) const = 0;
   virtual Tensor & erf_(Tensor & self) const = 0;
   virtual Tensor erfc(const Tensor & self) const = 0;
@@ -439,13 +434,11 @@ struct AT_API Type {
   virtual Tensor & expm1_(Tensor & self) const = 0;
   virtual Tensor expand(const Tensor & self, IntList size, bool implicit) const = 0;
   virtual Tensor expand_as(const Tensor & self, const Tensor & other) const = 0;
-  AT_DEPRECATED(virtual Tensor eye(int64_t n, int64_t m) const = 0);
   virtual Tensor flatten(const Tensor & self, int64_t start_dim, int64_t end_dim) const = 0;
   virtual Tensor & fill_(Tensor & self, Scalar value) const = 0;
   virtual Tensor & fill_(Tensor & self, const Tensor & value) const = 0;
   virtual Tensor floor(const Tensor & self) const = 0;
   virtual Tensor & floor_(Tensor & self) const = 0;
-  AT_DEPRECATED(virtual Tensor full(IntList size, Scalar fill_value) const = 0);
   virtual Tensor ger(const Tensor & self, const Tensor & vec2) const = 0;
   virtual std::tuple<Tensor,Tensor> gesv(const Tensor & self, const Tensor & A) const = 0;
   virtual Tensor fft(const Tensor & self, int64_t signal_ndim, bool normalized) const = 0;
@@ -467,7 +460,6 @@ struct AT_API Type {
   virtual bool is_signed(const Tensor & self) const = 0;
   virtual bool is_sparse(const Tensor & self) const = 0;
   virtual std::tuple<Tensor,Tensor> kthvalue(const Tensor & self, int64_t k, int64_t dim, bool keepdim) const = 0;
-  AT_DEPRECATED(virtual Tensor linspace(Scalar start, Scalar end, int64_t steps) const = 0);
   virtual Tensor log(const Tensor & self) const = 0;
   virtual Tensor & log_(Tensor & self) const = 0;
   virtual Tensor log10(const Tensor & self) const = 0;
@@ -477,7 +469,6 @@ struct AT_API Type {
   virtual Tensor log2(const Tensor & self) const = 0;
   virtual Tensor & log2_(Tensor & self) const = 0;
   virtual Tensor logdet(const Tensor & self) const = 0;
-  AT_DEPRECATED(virtual Tensor logspace(Scalar start, Scalar end, int64_t steps) const = 0);
   virtual Tensor log_softmax(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor logsumexp(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor matmul(const Tensor & self, const Tensor & other) const = 0;
@@ -502,16 +493,9 @@ struct AT_API Type {
   virtual Tensor mvlgamma(const Tensor & self, int64_t p) const = 0;
   virtual Tensor & mvlgamma_(Tensor & self, int64_t p) const = 0;
   virtual Tensor narrow(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
-  AT_DEPRECATED(virtual Tensor ones(IntList size) const = 0);
   virtual Tensor permute(const Tensor & self, IntList dims) const = 0;
   virtual Tensor pin_memory(const Tensor & self) const = 0;
   virtual Tensor pinverse(const Tensor & self, double rcond) const = 0;
-  AT_DEPRECATED(virtual Tensor rand(IntList size, Generator * generator) const = 0);
-  AT_DEPRECATED(virtual Tensor randint(int64_t high, IntList size, Generator * generator) const = 0);
-  AT_DEPRECATED(virtual Tensor randint(int64_t low, int64_t high, IntList size, Generator * generator) const = 0);
-  AT_DEPRECATED(virtual Tensor randn(IntList size, Generator * generator) const = 0);
-  AT_DEPRECATED(virtual Tensor randperm(int64_t n, Generator * generator) const = 0);
-  AT_DEPRECATED(virtual Tensor range(Scalar start, Scalar end, Scalar step) const = 0);
   virtual Tensor repeat(const Tensor & self, IntList repeats) const = 0;
   virtual Tensor reshape(const Tensor & self, IntList shape) const = 0;
   virtual Tensor reshape_as(const Tensor & self, const Tensor & other) const = 0;
@@ -519,6 +503,8 @@ struct AT_API Type {
   virtual Tensor & round_(Tensor & self) const = 0;
   virtual Tensor relu(const Tensor & self) const = 0;
   virtual Tensor & relu_(Tensor & self) const = 0;
+  virtual Tensor prelu(const Tensor & self, const Tensor & weight) const = 0;
+  virtual std::tuple<Tensor,Tensor> prelu_backward(const Tensor & grad_output, const Tensor & self, const Tensor & weight) const = 0;
   virtual Tensor hardshrink(const Tensor & self, Scalar lambd) const = 0;
   virtual Tensor hardshrink_backward(const Tensor & grad_out, const Tensor & self, Scalar lambd) const = 0;
   virtual Tensor rsqrt(const Tensor & self) const = 0;
@@ -579,7 +565,6 @@ struct AT_API Type {
   virtual Tensor var(const Tensor & self, int64_t dim, bool unbiased, bool keepdim) const = 0;
   virtual Tensor view_as(const Tensor & self, const Tensor & other) const = 0;
   virtual Tensor where(const Tensor & condition, const Tensor & self, const Tensor & other) const = 0;
-  AT_DEPRECATED(virtual Tensor zeros(IntList size) const = 0);
   virtual Tensor norm(const Tensor & self, Scalar p) const = 0;
   virtual Tensor norm(const Tensor & self, Scalar p, int64_t dim, bool keepdim) const = 0;
   virtual Tensor clone(const Tensor & self) const = 0;
@@ -592,15 +577,6 @@ struct AT_API Type {
   virtual Tensor & sub_(Tensor & self, Scalar other, Scalar alpha) const = 0;
   virtual Tensor addmm(const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
-  virtual Tensor tensor() const = 0;
-  virtual Tensor tensor(IntList size) const = 0;
-  virtual Tensor native_sparse_coo_tensor(IntList size) const = 0;
-  virtual Tensor native_sparse_coo_tensor(const Tensor & indices, const Tensor & values) const = 0;
-  virtual Tensor native_sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntList size) const = 0;
-  virtual Tensor sparse_coo_tensor(IntList size) const = 0;
-  virtual Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values) const = 0;
-  virtual Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntList size) const = 0;
-  virtual Tensor _native_sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntList size) const = 0;
   virtual Tensor & sparse_resize_(Tensor & self, IntList size, int64_t sparseDims, int64_t denseDims) const = 0;
   virtual Tensor & sparse_resize_and_clear_(Tensor & self, IntList size, int64_t sparseDims, int64_t denseDims) const = 0;
   virtual Tensor sparse_mask(const Tensor & self, SparseTensorRef mask) const = 0;
@@ -624,7 +600,6 @@ protected:
   TensorTypeId type_id_;
   bool is_variable_;
   bool is_undefined_;
-
 };
 
 } // namespace at

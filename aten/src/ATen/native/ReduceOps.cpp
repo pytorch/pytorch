@@ -321,7 +321,7 @@ Tensor sum(const Tensor& self, IntList dim, ScalarType dtype) {
 
 Tensor _sum(const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::_sum_out(result, self, dim, keepdim);
 }
 
@@ -343,7 +343,7 @@ Tensor prod(const Tensor& self, int64_t dim, ScalarType dtype) {
 
 Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::_prod_out(result, self, dim, keepdim);
 }
 
@@ -365,7 +365,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool kee
 
 Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::logsumexp_out(result, self, dim, keepdim);
 }
 
@@ -639,7 +639,7 @@ Tensor _norm(const Tensor &self, Scalar p) {
 }
 
 Tensor norm(const Tensor& self, Scalar p, int64_t dim, bool keepdim) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::norm_out(result, self, p, dim, keepdim);
 }
 
@@ -648,7 +648,7 @@ Tensor norm(const Tensor& self, Scalar p) {
 }
 
 Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::all_out(result, self, dim, keepdim);
 }
 
@@ -665,7 +665,7 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
 }
 
 Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::any_out(result, self, dim, keepdim);
 }
 
@@ -690,7 +690,7 @@ Tensor var(const Tensor& self, bool unbiased) {
 }
 
 Tensor var(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::var_out(result, self, dim, unbiased, keepdim);
 }
 
@@ -715,7 +715,7 @@ Tensor std(const Tensor& self, bool unbiased) {
 }
 
 Tensor std(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::std_out(result, self, dim, unbiased, keepdim);
 }
 

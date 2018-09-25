@@ -197,7 +197,7 @@ void recursive_store(char* data, IntList sizes, IntList strides, int64_t dim,
 
 Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt, PyObject* data,
                                      bool copy_variables, bool copy_numpy,
-                                     bool type_inference, bool args_requires_grad=false) {
+                                     bool type_inference) {
   int32_t device_index = -1;
   if (device_opt.has_value()) {
     device_index = device_opt->index();
@@ -207,24 +207,17 @@ Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt
   }
 
   if (THPVariable_Check(data)) {
-      PyErr_WarnEx(PyExc_UserWarning,
-        "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
-        "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
-
-      auto var = reinterpret_cast<THPVariable*>(data)->cdata;
-      auto type_inference_device_type = device_opt.has_value() ? device_opt->type()
-                                                               : torch::getDeviceType(var.type());
-      // infer the scalar type and device type; it's not expected to infer the layout since these constructors
-      // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
-      const auto& type_inference_type = torch::getVariableType(var.type().scalarType(),
-                                                       *torch::getLayout(type.backend()),
-                                                       type_inference_device_type);
-      const auto& type_to_use = type_inference ? type_inference_type : type;
-      auto new_tensor = copy_variables ? new_with_tensor_copy(type_to_use, var, device_index) :
+    auto var = reinterpret_cast<THPVariable*>(data)->cdata;
+    auto type_inference_device_type = device_opt.has_value() ? device_opt->type()
+                                                             : torch::getDeviceType(var.type());
+    // infer the scalar type and device type; it's not expected to infer the layout since these constructors
+    // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
+    const auto& type_inference_type = torch::getVariableType(var.type().scalarType(),
+                                                     *torch::getLayout(type.backend()),
+                                                     type_inference_device_type);
+    const auto& type_to_use = type_inference ? type_inference_type : type;
+    return copy_variables ? new_with_tensor_copy(type_to_use, var, device_index) :
                               new_with_type_conversion(type_to_use, var, device_index);
-      new_tensor.detach_(); // making copy constructed tensor a leaf node
-      new_tensor.set_requires_grad(args_requires_grad);
-      return new_tensor;
   }
 
 #ifdef USE_NUMPY
@@ -287,12 +280,12 @@ Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwa
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
+    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), type.options());
   } else if (r.idx == 3) {
     auto deviceOptional = r.deviceOptional(3);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
+    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2), type.options());
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
@@ -321,7 +314,7 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.tensor();
+    return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
@@ -331,14 +324,14 @@ Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwar
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
+    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), type.options());
   } else if (r.idx == 3) {
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(3);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
+    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2), type.options());
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
@@ -381,7 +374,7 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.tensor();
+    return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     return new_with_storage(type, r.storage(0));
   } else if (r.idx == 2) {
@@ -427,7 +420,7 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     auto deviceOptional = r.deviceOptional(0);
     check_legacy_ctor_device(type, deviceOptional);
     at::DeviceGuard device_guard(deviceOptional);
-    return type.tensor();
+    return at::empty({0}, type.options());
   } else if (r.idx == 1) {
     return new_with_storage(type, r.storage(0));
   } else if (r.idx == 2) {
@@ -479,7 +472,7 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
     const auto& index_type = values.type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(index_type, r.deviceOptional(3), r.pyobject(0), false, true, false);
     const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
-    return sparse_type_to_use.sparse_coo_tensor(indices, values).set_requires_grad(r.toBool(4));
+    return at::sparse_coo_tensor(indices, values, sparse_type_to_use.options()).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
     const auto& sparse_type = typeWithDefault(r, 3, 4, default_sparse_type);
@@ -489,11 +482,11 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
     const auto& index_type = values.type().toScalarType(kLong);
     Tensor indices = internal_new_from_data(index_type, r.deviceOptional(4), r.pyobject(0), false, true, false);
     const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? Backend::SparseCUDA : Backend::SparseCPU);
-    return sparse_type_to_use.sparse_coo_tensor(indices, values, r.intlist(2)).set_requires_grad(r.toBool(5));
+    return at::sparse_coo_tensor(indices, values, r.intlist(2), sparse_type_to_use.options()).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {
     const auto& sparse_type_to_use = typeWithDefault(r, 1, 2, default_sparse_type);
     at::DeviceGuard device_guard(r.device(2));
-    return sparse_type_to_use.sparse_coo_tensor(r.intlist(0)).set_requires_grad(r.toBool(3));
+    return at::sparse_coo_tensor(r.intlist(0), sparse_type_to_use.options()).set_requires_grad(r.toBool(3));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }
@@ -506,18 +499,25 @@ Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    PyObject* data = r.pyobject(0);
+    if (THPVariable_Check(data)) {
+      PyErr_WarnEx(PyExc_UserWarning,
+        "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
+        "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).", 1);
+    }
+
     bool type_inference = r.isNone(1);
-    // args_requires_grad=True if requires_grad is set to True (requires_grad=True)
     bool args_requires_grad = r.toBool(3);
-    return internal_new_from_data(
+    auto new_tensor = internal_new_from_data(
                typeWithDefault(r, 1, 2, type),
                r.deviceOptional(2),
-               r.pyobject(0),
+               data,
                true,
                true,
-               type_inference,
-               args_requires_grad)
-        .set_requires_grad(r.toBool(3));
+               type_inference);
+    new_tensor.detach_(); // ensure new_tensor a leaf node
+    new_tensor.set_requires_grad(args_requires_grad);
+    return new_tensor;
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
@@ -546,11 +546,21 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return new_from_data_copy(
+    PyObject* data = r.pyobject(0);
+    if (THPVariable_Check(data)) {
+      PyErr_WarnEx(PyExc_UserWarning,
+        "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
+        "or sourceTensor.clone().detach().requires_grad_(True), rather than tensor.new_tensor(sourceTensor).", 1);
+    }
+
+    bool args_requires_grad = r.toBool(3);
+    auto new_tensor = new_from_data_copy(
                typeWithDefault(r, 1, 2, type),
                r.deviceOptional(2),
-               r.pyobject(0))
-        .set_requires_grad(r.toBool(3));
+               data);
+    new_tensor.detach_(); // ensure new_tensor a leaf node
+    new_tensor.set_requires_grad(args_requires_grad);
+    return new_tensor;
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
 }

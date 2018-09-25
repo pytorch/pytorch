@@ -30,7 +30,7 @@ class DeviceOption;
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
  */
-inline std::vector<int64_t> ToVectorTIndex(const std::vector<int>& src) {
+inline std::vector<int64_t> ToVectorint64_t(const std::vector<int>& src) {
   return std::vector<int64_t>(src.begin(), src.end());
 }
 
@@ -379,7 +379,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   inline void Reshape(const std::vector<int>& dims) {
-    Reshape(ToVectorTIndex(dims));
+    Reshape(ToVectorint64_t(dims));
   }
 
   /**
@@ -685,11 +685,6 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     ;
   }
 
-  // NB: This capacity may also include available space
-  // in the storage BEFORE the tensor data, if storage_offset != 0
-  inline size_t capacity_nbytes() const {
-    return storage_.capacity();
-  }
   /**
    * Returns the dimensions of the tensor as a vector.
    */
