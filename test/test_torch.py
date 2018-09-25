@@ -844,6 +844,15 @@ class TestTorch(TestCase):
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
 
+        # full reduction with larger size(test_size > grain_size)
+        test_size = 32768 * 5
+        x = torch.randn(test_size, device=device)
+        xn = x.cpu().numpy()
+        for p in [0, 1, 2, 3, 4, inf]:
+            res = x.norm(p).item()
+            expected = np.linalg.norm(xn, p)
+            self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
+
         # one dimension
         x = torch.randn(5, 5, device=device)
         xn = x.cpu().numpy()

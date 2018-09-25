@@ -225,19 +225,30 @@ struct NormReduction {
   }
 
   static scalar_t reduce_all(const scalar_t* data_, int64_t size,  float pval) {
-    scalar_t sum = parallel_reduce(
-      0,
-      size,
-      internal::GRAIN_SIZE,
-      (scalar_t)0,
-      [=](int64_t begin, int64_t end, scalar_t init) {
-        const scalar_t* data = &data_[begin];
-        int64_t n = end - begin;
-        scalar_t result = norm_reduce(data, n, 1, pval);
-        return result;
-      },
-      std::plus<scalar_t>());
-    return sum;
+    scalar_t result = 0;
+    if (std::isinf(pval)){
+      result = norm_reduce_sequential(data_, size, 1, pval);
+    } else {
+      result = parallel_reduce(
+        0,
+        size,
+        internal::GRAIN_SIZE,
+        (scalar_t)0,
+        [=](int64_t begin, int64_t end, scalar_t init) {
+          const scalar_t* data = &data_[begin];
+          int64_t n = end - begin;
+          scalar_t result_local = norm_reduce(data, n, 1, pval);
+          if (pval != 0) {
+            result_local = std::pow(result_local, pval);
+          }
+          return result_local;
+        },
+        std::plus<scalar_t>());
+      if (pval != 0) {
+        result = std::pow(result, 1.0/pval);
+      }
+    }
+    return result;
   }
 
   static scalar_t norm_reduce(const scalar_t* data, int64_t n, int64_t stride, float pval) {
