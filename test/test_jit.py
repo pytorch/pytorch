@@ -2645,18 +2645,17 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
-    def test_nested_list_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
-            @torch.jit.script
-            def foo(x):
-                # type: (Tuple[List[List[int]]]) -> int
-                return 4
+    def test_nested_list(self):
+        def foo(z):
+            # type: (Tuple[int, List[List[int]]]) -> int
+            x, y = z
+            return y[0][1]
+        self.checkScript(foo, ((1, [[1, 2], [3, 4]]),))
 
-    def test_nested_list_construct_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
-            @torch.jit.script
-            def foo(x):
-                return [[4]]
+    def test_nested_list_construct(self):
+        def foo():
+            return [[4]] + [[4, 5]]
+        self.checkScript(foo, ())
 
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
