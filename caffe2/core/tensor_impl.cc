@@ -20,10 +20,11 @@ static void deletePlacementDeleteContext(void* ptr) {
 
 at::DataPtr PlacementDeleteContext::makeDataPtr(
     Ctx&& prev_ctx,
-    const PlacementDtor& placement_dtor,
+    PlacementDtor placement_dtor,
     size_t size,
     at::Device device) {
-  return {prev_ctx.get(),
+  auto* ptr = prev_ctx.get();
+  return {ptr,
           new PlacementDeleteContext(std::move(prev_ctx), placement_dtor, size),
           &deletePlacementDeleteContext,
           device};

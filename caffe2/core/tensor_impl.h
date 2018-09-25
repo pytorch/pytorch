@@ -86,17 +86,14 @@ struct PlacementDeleteContext {
   PlacementDtor placement_dtor_;
   size_t size_;
   void* data_;
-  PlacementDeleteContext(
-      Ctx&& ctx,
-      const PlacementDtor& placement_dtor,
-      size_t size)
+  PlacementDeleteContext(Ctx&& ctx, PlacementDtor placement_dtor, size_t size)
       : ctx_(std::move(ctx)),
         placement_dtor_(placement_dtor),
         size_(size),
         data_(ctx_.get()) {}
   static at::DataPtr makeDataPtr(
       Ctx&& prev_ctx,
-      const PlacementDtor& placement_dtor,
+      PlacementDtor placement_dtor,
       size_t size,
       at::Device device);
   ~PlacementDeleteContext() {

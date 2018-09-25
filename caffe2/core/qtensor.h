@@ -124,7 +124,7 @@ class CAFFE2_EXPORT QTensor {
     if (!data_) {
       auto data_ptr = Context::New(nbytes());
       data_.reset(
-          static_cast<unsigned char*>(data_ptr.release_context()),
+          static_cast<unsigned char*>(data_ptr.move_context().release()),
           data_ptr.get_deleter());
       capacity_ = nbytes() * CHAR_BIT;
     }
