@@ -99,7 +99,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
 
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
-      return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
+      return {(1 - outputs.at(0)) * outputs.at(0) * grads.at(0)};
 
     } else if (node->matches("aten::tanh(Tensor self) -> Tensor")) {
       return {grads.at(0) * (1 - outputs.at(0) * outputs.at(0))};
