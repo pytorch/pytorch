@@ -54,9 +54,9 @@ int getGroup(std::map<std::string, caffe2::Argument>& argMap) {
 
 } // namespace
 
-namespace caffe2 {
+C10_DEFINE_REGISTRY(ConverterRegistry, caffe2::Converter);
 
-CAFFE_DEFINE_REGISTRY(ConverterRegistry, Converter);
+namespace caffe2 {
 
 std::map<std::string, caffe2::Argument> Converter::getArgumentsFromOperator(
     caffe2::OperatorDef op) {

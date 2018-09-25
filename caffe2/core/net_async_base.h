@@ -139,7 +139,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   friend class tracing::Tracer;
 };
 
-CAFFE_DECLARE_SHARED_REGISTRY(
+C10_DECLARE_SHARED_REGISTRY(
     ThreadPoolRegistry,
     TaskThreadPool,
     int,

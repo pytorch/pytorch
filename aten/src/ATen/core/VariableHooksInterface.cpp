@@ -14,7 +14,7 @@ namespace detail {
     std::lock_guard<std::mutex> lock(var_hooks_mutex);
 
     if (!var_hooks) {
-      var_hooks = VariableHooksRegistry()->Create("VariableHooks", VariableHooksArgs{});
+      var_hooks = c10::VariableHooksRegistry()->Create("VariableHooks", VariableHooksArgs{});
     }
     if (var_hooks) {
       return *var_hooks;

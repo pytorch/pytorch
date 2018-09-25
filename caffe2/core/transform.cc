@@ -6,11 +6,11 @@
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2_pb.h"
 
+C10_DEFINE_REGISTRY(TransformRegistry, caffe2::Transform);
+
 namespace caffe2 {
 
 using transform::Graph;
-
-CAFFE_DEFINE_REGISTRY(TransformRegistry, Transform);
 
 std::vector<std::vector<int>> Transform::PatternMatch(const Graph& graph) {
   // checks if the node at index i is matched already or not

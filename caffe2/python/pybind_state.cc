@@ -53,16 +53,20 @@ static std::string gCurrentWorkspaceName;
 BlobFetcherBase::~BlobFetcherBase() {}
 BlobFeederBase::~BlobFeederBase() {}
 
-CAFFE_DEFINE_TYPED_REGISTRY(
+} // namespace caffe2
+
+C10_DEFINE_TYPED_REGISTRY(
     BlobFetcherRegistry,
-    TypeIdentifier,
-    BlobFetcherBase,
+    caffe2::TypeIdentifier,
+    caffe2::BlobFetcherBase,
     std::unique_ptr);
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     BlobFeederRegistry,
     caffe2::DeviceType,
-    BlobFeederBase,
+    caffe2::BlobFeederBase,
     std::unique_ptr);
+
+namespace caffe2 {
 
 REGISTER_BLOB_FETCHER((TypeMeta::Id<Tensor>()), TensorFetcher);
 REGISTER_BLOB_FEEDER(CPU, TensorFeeder<CPUContext>);

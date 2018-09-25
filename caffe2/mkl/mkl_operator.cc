@@ -7,13 +7,14 @@ CAFFE2_DEFINE_bool(
     "Turn on if memonger is used to force reallocate intermediate "
     "and output buffers within each op");
 
+C10_DEFINE_REGISTRY(
+    MKLOperatorRegistry,
+    caffe2::OperatorBase,
+    const caffe2::OperatorDef&,
+    caffe2::Workspace*);
+
 namespace caffe2 {
 
-CAFFE_DEFINE_REGISTRY(
-    MKLOperatorRegistry,
-    OperatorBase,
-    const OperatorDef&,
-    Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(DeviceType::MKLDNN, MKLOperatorRegistry);
 
 } // namespace caffe2

@@ -316,31 +316,37 @@ std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
   return &g_device_type_registry;
 }
 
-CAFFE_DEFINE_REGISTRY(
+} // namespace caffe2
+
+C10_DEFINE_REGISTRY(
     CPUOperatorRegistry,
-    OperatorBase,
-    const OperatorDef&,
-    Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
+    caffe2::OperatorBase,
+    const caffe2::OperatorDef&,
+    caffe2::Workspace*);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
-    OperatorBase,
-    const OperatorDef&,
-    Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
+    caffe2::OperatorBase,
+    const caffe2::OperatorDef&,
+    caffe2::Workspace*);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     HIPOperatorRegistry,
-    OperatorBase,
-    const OperatorDef&,
-    Workspace*);
-CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
+    caffe2::OperatorBase,
+    const caffe2::OperatorDef&,
+    caffe2::Workspace*);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     GradientRegistry,
-    GradientMakerBase,
-    const OperatorDef&, const vector<GradientWrapper>&);
+    caffe2::GradientMakerBase,
+    const caffe2::OperatorDef&,
+    const vector<caffe2::GradientWrapper>&);
+
+namespace caffe2 {
+
+CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {

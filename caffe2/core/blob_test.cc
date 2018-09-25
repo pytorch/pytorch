@@ -967,7 +967,7 @@ CAFFE_KNOWN_TYPE(DummyType);
 
 namespace {
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DummyType>()), DummyTypeSerializer);
-CAFFE_REGISTER_TYPED_CLASS(
+C10_REGISTER_TYPED_CLASS(
     BlobDeserializerRegistry,
     "DummyType",
     DummyTypeDeserializer);

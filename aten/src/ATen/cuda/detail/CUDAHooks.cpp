@@ -204,10 +204,6 @@ int CUDAHooks::getNumGPUs() const {
   return count;
 }
 
-// Sigh, the registry doesn't support namespaces :(
-using at::CUDAHooksRegistry;
-using at::RegistererCUDAHooksRegistry;
-
 REGISTER_CUDA_HOOKS(CUDAHooks);
 
 } // namespace detail

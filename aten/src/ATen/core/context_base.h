@@ -197,7 +197,7 @@ namespace at {
 
 inline std::unique_ptr<at::BaseContext> CreateContext(
     const at::Device& device) {
-  return ContextRegistry()->Create(device.type(), device);
+  return c10::ContextRegistry()->Create(device.type(), device);
 }
 
 } // namespace at

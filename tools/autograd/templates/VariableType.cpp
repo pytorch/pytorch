@@ -134,10 +134,6 @@ struct VariableHooks : public at::VariableHooksInterface {
   at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
 };
 
-// Sigh, the registry doesn't support namespaces :(
-using at::RegistererVariableHooksRegistry;
-using at::VariableHooksRegistry;
-
 // WARNING: YOU MUST DO THE NEXT TWO STATIC INITIALIZERS IN THIS ORDER.
 //
 // If you do it in the other order, this is what can happen if

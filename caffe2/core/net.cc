@@ -17,13 +17,13 @@ CAFFE2_DEFINE_string(
     "",
     "Comma-separated list of executor overrides");
 
-namespace caffe2 {
-
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     NetRegistry,
     NetBase,
     const std::shared_ptr<const NetDef>&,
     Workspace*);
+
+namespace caffe2 {
 
 NetBase::NetBase(
     const std::shared_ptr<const NetDef>& def,

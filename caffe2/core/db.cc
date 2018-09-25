@@ -5,14 +5,14 @@
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/logging.h"
 
+C10_DEFINE_REGISTRY(Caffe2DBRegistry, caffe2::db::DB, const string&, caffe2::db::Mode);
+
 namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(db::DBReader);
 CAFFE_KNOWN_TYPE(db::Cursor);
 
 namespace db {
-
-CAFFE_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 
 // Below, we provide a bare minimum database "minidb" as a reference
 // implementation as well as a portable choice to store data.

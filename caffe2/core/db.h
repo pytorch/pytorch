@@ -102,11 +102,15 @@ class CAFFE2_API DB {
   AT_DISABLE_COPY_AND_ASSIGN(DB);
 };
 
+}} // namespace caffe2::db
+
 // Database classes are registered by their names so we can do optional
 // dependencies.
-CAFFE_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
+C10_DECLARE_REGISTRY(Caffe2DBRegistry, caffe2::db::DB, const string&, caffe2::db::Mode);
 #define REGISTER_CAFFE2_DB(name, ...) \
-  CAFFE_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
+
+namespace caffe2 { namespace db {
 
 /**
  * Returns a database object of the given database type, source and mode. The

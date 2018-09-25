@@ -44,7 +44,7 @@ const CUDAHooksInterface& getCUDAHooks() {
   // safe...)
   static std::once_flag once;
   std::call_once(once, [] {
-    cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
+    cuda_hooks = c10::CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
     if (!cuda_hooks) {
       cuda_hooks =
           std::unique_ptr<CUDAHooksInterface>(new CUDAHooksInterface());

@@ -10,7 +10,7 @@ const ComplexHooksInterface& getComplexHooks() {
   // Same restriction as in getCUDAHooks()
   static std::once_flag once;
   std::call_once(once, [] {
-    complex_hooks = ComplexHooksRegistry()->Create("ComplexHooks", ComplexHooksArgs{});
+    complex_hooks = c10::ComplexHooksRegistry()->Create("ComplexHooks", ComplexHooksArgs{});
     if (!complex_hooks) {
       complex_hooks =
           std::unique_ptr<ComplexHooksInterface>(new ComplexHooksInterface());

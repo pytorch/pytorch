@@ -6,17 +6,20 @@
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
-namespace {
 
 class Foo {
  public:
   explicit Foo(int x) { LOG(INFO) << "Foo " << x; }
 };
 
-CAFFE_DECLARE_REGISTRY(FooRegistry, Foo, int);
-CAFFE_DEFINE_REGISTRY(FooRegistry, Foo, int);
+} // namespace caffe2
+
+C10_DECLARE_REGISTRY(FooRegistry, Foo, int);
+C10_DEFINE_REGISTRY(FooRegistry, Foo, int);
 #define REGISTER_FOO(clsname) \
-  CAFFE_REGISTER_CLASS(FooRegistry, clsname, clsname)
+  C10_REGISTER_CLASS(FooRegistry, clsname, clsname)
+
+namespace caffe2 {
 
 class Bar : public Foo {
  public:
@@ -41,6 +44,5 @@ TEST(RegistryTest, CanRunCreator) {
 
 TEST(RegistryTest, ReturnNullOnNonExistingCreator) {
   EXPECT_EQ(FooRegistry()->Create("Non-existing bar", 1), nullptr);
-}
 }
 }  // namespace caffe2

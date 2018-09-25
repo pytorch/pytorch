@@ -44,9 +44,11 @@ class CAFFE2_API Converter {
   virtual ~Converter() {}
 };
 
-CAFFE_DECLARE_REGISTRY(ConverterRegistry, Converter);
+} // namespace caffe2
+
+C10_DECLARE_REGISTRY(ConverterRegistry, caffe2::Converter);
 #define REGISTER_CONVERTER(name, cls) \
-  CAFFE_REGISTER_CLASS(ConverterRegistry, name, cls)
+  C10_REGISTER_CLASS(ConverterRegistry, name, cls)
 
 #define TRIVIAL_CONVERTER(opName)                                             \
   class opName##Converter : public Converter {                                \
@@ -56,8 +58,6 @@ CAFFE_DECLARE_REGISTRY(ConverterRegistry, Converter);
     }                                                                         \
     virtual ~opName##Converter() {}                                           \
   };
-
-} // namespace caffe2
 
 
 #endif // CAFFE2_OPT_CONVERTER_H

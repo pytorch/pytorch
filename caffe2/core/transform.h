@@ -150,9 +150,13 @@ class CAFFE2_API Transform {
 // Creates a Transform based on a key, which should be defined in registry.
 CAFFE2_API unique_ptr<Transform> CreateTransform(string key);
 
-CAFFE_DECLARE_REGISTRY(TransformRegistry, Transform);
+} // namespace caffe2
+
+C10_DECLARE_REGISTRY(TransformRegistry, caffe2::Transform);
 #define REGISTER_TRANSFORM(name, ...) \
-  CAFFE_REGISTER_CLASS(TransformRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(TransformRegistry, name, __VA_ARGS__)
+
+namespace caffe2 {
 
 // Create a Transform object from registry,
 // and immediately apply it to a Netdef.
