@@ -363,8 +363,7 @@ void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
   auto tensor_proto = blob_proto.tensor();
   Deserialize(
       tensor_proto,
-      BlobGetMutableTensor(
-          blob,
+      blob->GetMutableTensor(
           static_cast<DeviceType>(tensor_proto.device_detail().device_type())));
 }
 

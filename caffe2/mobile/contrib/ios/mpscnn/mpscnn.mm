@@ -489,13 +489,13 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final
         "noise_size", 491 /* prime to avoid artifacts */);
     // Treaded as half4 in the kernel, so need half4 here.
     noiseSize = divRoundUp(noiseSize, 4) * 4;
-    if (!BlobIsTensorType(*noiseBlob, CPU) ||
+    if (!noiseBlob->IsTensorType(CPU) ||
         noiseBlob->Get<TensorCPU>().size() != noiseSize) {
       VLOG(2) << "Initializing stylizer with noise: " << noiseSize;
       caffe2::Timer rt;
       // Initialize random noise on first use.
       // Cache it to maintain temporal consistency.
-      auto* t = BlobGetMutableTensor(noiseBlob, CPU);
+      auto* t = noiseBlob->GetMutableTensor(CPU);
       t->Resize(noiseSize);
       math::RandGaussian<float, CPUContext>(
           t->size(),

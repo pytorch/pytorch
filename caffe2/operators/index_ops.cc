@@ -353,7 +353,7 @@ class IndexSerializer : public BlobSerializerBase {
       SerializationAcceptor acceptor) override {
     auto& base = blob.template Get<std::unique_ptr<IndexBase>>();
     Blob tensor_blob;
-    auto* tensor_out = BlobGetMutableTensor(&tensor_blob, CPU);
+    auto* tensor_out = tensor_blob.GetMutableTensor(CPU);
 
     if (base->Type().Match<std::string>()) {
       doStore<std::string>(base, tensor_out);

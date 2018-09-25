@@ -6,15 +6,15 @@
 #include <typeinfo>
 #include <type_traits>
 #include <vector>
-#include "caffe2/core/common.h"
 
-#include <ATen/core/typeid.h>
+#include "caffe2/core/blob_serializer_base.h"
+#include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/typeid.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
-
-class Tensor;
 
 /**
  * @brief Blob is a general container that hosts a typed pointer.
@@ -48,6 +48,15 @@ class CAFFE2_API Blob final {
   template <class T>
   bool IsType() const noexcept {
     return meta_.Match<T>();
+  }
+
+  bool IsTensorType(DeviceType device_type) const {
+    bool is_match = meta_.Match<Tensor>();
+    auto* tensor = static_cast<Tensor*>(pointer_);
+    if (is_match && tensor && tensor->GetDeviceType() == device_type) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -100,6 +109,9 @@ class CAFFE2_API Blob final {
         std::is_default_constructible<T>::value,
         "GetMutable can't be called with non-default-constructible types. "
         "Try using specialized methods");
+    static_assert(
+        !std::is_same<T, Tensor>::value,
+        "Use GetMutableTensor(DeviceType) instead");
     if (IsType<T>()) {
       return static_cast<T*>(pointer_);
     } else {
@@ -114,6 +126,16 @@ class CAFFE2_API Blob final {
       return static_cast<T*>(pointer_);
     } else {
       return nullptr;
+    }
+  }
+
+  inline Tensor* GetMutableTensor(DeviceType device_type) {
+    if (IsTensorType(device_type)) {
+      return static_cast<Tensor*>(pointer_);
+    } else {
+      VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
+              << " DeviceType:" << device_type;
+      return Reset<Tensor>(new Tensor(device_type));
     }
   }
 
@@ -224,30 +246,6 @@ class CAFFE2_API Blob final {
 
 inline void swap(Blob& lhs, Blob& rhs) {
   lhs.swap(rhs);
-}
-
-inline bool BlobIsTensorType(const Blob& blob, DeviceType device_type) {
-  bool is_match = blob.meta().Match<Tensor>();
-  if (!is_match) {
-    return false;
-  }
-  const Tensor* tensor = &blob.Get<Tensor>();
-  return tensor && tensor->GetDeviceType() == device_type;
-}
-
-inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {
-  if (blob->IsType<Tensor>()) {
-    Tensor* tensor = blob->GetMutable<Tensor>();
-    if (tensor->GetDeviceType() == device_type) {
-      return tensor;
-    }
-  }
-
-  // if we're here, then either Blob didn't hold a Tensor
-  // or that Tensor had the wrong DeviceType.
-  VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
-          << " DeviceType:" << device_type;
-  return blob->Reset<Tensor>(new Tensor(device_type));
 }
 
 }  // namespace caffe2

@@ -122,7 +122,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
-    return BlobGetMutableTensor(outputs_.at(idx), type);
+    return outputs_.at(idx)->GetMutableTensor(type);
   }
 
   template <typename T>
@@ -149,7 +149,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool InputIsTensorType(int idx, DeviceType device_type) {
-    return BlobIsTensorType(*inputs_.at(idx), device_type);
+    return inputs_.at(idx)->IsTensorType(device_type);
   }
 
   template <typename T>
@@ -162,7 +162,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool OutputIsTensorType(int idx, DeviceType type) {
-    return BlobIsTensorType(*outputs_.at(idx), type);
+    return outputs_.at(idx)->IsTensorType(type);
   }
 
   inline int InputSize() const {

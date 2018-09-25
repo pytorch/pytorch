@@ -150,7 +150,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
     // Reshape tensor descriptors if necessary
     if (X.dims() != cudnn_input_dims_ && !is_test_) {
       CAFFE_ENFORCE(scratch_blob_);
-      Tensor* states = BlobGetMutableTensor(scratch_blob_, CUDA);
+      Tensor* states = scratch_blob_->GetMutableTensor(CUDA);
       cudnn_input_dims_ = X.dims();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           data_desc_,

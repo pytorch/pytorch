@@ -18,7 +18,7 @@ static void AddConstInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = BlobGetMutableTensor(blob, CPU);
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
       tensor->size(), value, tensor->template mutable_data<float>(), &context);
@@ -34,7 +34,7 @@ static void AddLinSpacedInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = BlobGetMutableTensor(blob, CPU);
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
       tensor->template mutable_data<float>(), tensor->size());
@@ -51,7 +51,7 @@ static void AddInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = BlobGetMutableTensor(blob, CPU);
+  auto* tensor = blob->GetMutableTensor(CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
       tensor->template mutable_data<float>(), tensor->size());

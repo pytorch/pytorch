@@ -89,7 +89,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
           local_input_blobs_[i]->Reset();
         }
         input_share_[i] = false;
-        auto dtensor = BlobGetMutableTensor(local_input_blobs_[i], CPU);
+        auto dtensor = local_input_blobs_[i]->GetMutableTensor(CPU);
         dtensor->Resize(input.get_dims());
         if (input.is_public_format()) {
           dtensor->ShareExternalPointer(
@@ -121,7 +121,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         continue;
       }
       CAFFE_ENFORCE(
-          BlobIsTensorType(*local_output_blobs_[i], CPU),
+          local_output_blobs_[i]->IsTensorType(CPU),
           "IDEEP fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();
@@ -153,7 +153,7 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         VLOG(2) << "Output " << base_def_.output(i) << " as CPUTensor";
         Blob* dst = OperatorBase::OutputBlob(i);
         dst->Reset(new Tensor(CPU));
-        auto dtensor = BlobGetMutableTensor(dst, CPU);
+        auto dtensor = dst->GetMutableTensor(CPU);
         dtensor->Resize(src_dims);
         dtensor->ShareData(src);
       }

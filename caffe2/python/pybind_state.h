@@ -234,7 +234,7 @@ class TensorFeeder : public BlobFeederBase {
     FeedTensor(
         option,
         original_array,
-        BlobGetMutableTensor(blob, Context::GetDeviceType()));
+        blob->GetMutableTensor(Context::GetDeviceType()));
   }
 };
 
@@ -366,32 +366,31 @@ class PythonOpBase : public Operator<Context> {
 
         // make sure output blob is initialized before creating the binding
         if (forced_cpu_outputs_.count(i)) {
-          BlobGetMutableTensor(blob, Context::GetDeviceType());
+          blob->GetMutableTensor(Context::GetDeviceType());
         } else {
-          BlobGetMutableTensor(blob, Context::GetDeviceType());
+          blob->GetMutableTensor(Context::GetDeviceType());
         }
 
         py::object py_obj;
         if (blob->template IsType<Tensor>()) {
           if (use_dlpack) {
             DLPackWrapper<CPUContext> wrapper(
-                BlobGetMutableTensor(blob, Context::GetDeviceType()),
-                cpu_option);
+                blob->GetMutableTensor(Context::GetDeviceType()), cpu_option);
             py_obj = py::cast(wrapper, py::return_value_policy::copy);
           } else {
             py_obj = py::cast(
-                BlobGetMutableTensor(blob, Context::GetDeviceType()),
+                blob->GetMutableTensor(Context::GetDeviceType()),
                 py::return_value_policy::reference);
           }
         } else {
           if (use_dlpack) {
             DLPackWrapper<Context> wrapper(
-                BlobGetMutableTensor(blob, Context::GetDeviceType()),
+                blob->GetMutableTensor(Context::GetDeviceType()),
                 this->device_option());
             py_obj = py::cast(wrapper, py::return_value_policy::copy);
           } else {
             py_obj = py::cast(
-                BlobGetMutableTensor(blob, Context::GetDeviceType()),
+                blob->GetMutableTensor(Context::GetDeviceType()),
                 py::return_value_policy::reference);
           }
         }
