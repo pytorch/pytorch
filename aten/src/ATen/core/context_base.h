@@ -180,13 +180,17 @@ class AT_CORE_API BaseContext {
   }
 };
 
+} // namespace at
+
 // Context constructor registry
 C10_DECLARE_TYPED_REGISTRY(
     ContextRegistry,
     at::DeviceType,
-    BaseContext,
+    at::BaseContext,
     std::unique_ptr,
     at::Device);
+
+namespace at {
 
 #define REGISTER_CONTEXT(type, ...) \
   C10_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)

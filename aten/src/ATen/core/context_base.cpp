@@ -1,15 +1,11 @@
 #include <ATen/core/context_base.h>
 
-namespace at {
-
 C10_DEFINE_TYPED_REGISTRY(
     ContextRegistry,
-    DeviceType,
-    BaseContext,
+    at::DeviceType,
+    at::BaseContext,
     std::unique_ptr,
     at::Device);
-
-} // namespace at
 
 namespace caffe2 {
 

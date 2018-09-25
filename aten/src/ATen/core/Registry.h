@@ -151,38 +151,45 @@ class CAFFE2_API Registerer {
  * C10_DECLARE_TYPED_REGISTRY is a macro that expands to a function
  * declaration, as well as creating a convenient typename for its corresponding
  * registerer.
+ *
+ * These macros MUST be invoked from the *top* level namespace (i.e.,
+ * no qualification.)
  */
 #define C10_DECLARE_TYPED_REGISTRY(                                \
     RegistryName, SrcType, ObjectType, PtrType, ...)              \
+  namespace at {                                                  \
   CAFFE2_API Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* \
   RegistryName();                                                 \
   typedef Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>   \
       Registerer##RegistryName;                                   \
-  extern template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>;
+  extern template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>; \
+  }
 
 #define C10_DEFINE_TYPED_REGISTRY(                                         \
     RegistryName, SrcType, ObjectType, PtrType, ...)                         \
+  namespace at { \
   Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* RegistryName() {    \
     static Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* registry = \
         new Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>();         \
     return registry;                                                         \
   } \
-  template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>;
+  template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>; \
+  }
 
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
 // creator with comma in its templated arguments.
 #define C10_REGISTER_TYPED_CREATOR(RegistryName, key, ...)                  \
   namespace {                                                                 \
-  Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
-      key, RegistryName(), __VA_ARGS__);                                      \
+  ::at::Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+      key, ::at::RegistryName(), __VA_ARGS__);                                      \
   }
 
 #define C10_REGISTER_TYPED_CLASS(RegistryName, key, ...)                    \
   namespace {                                                                 \
-  Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+  ::at::Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
       key,                                                                    \
-      RegistryName(),                                                         \
-      Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
+      ::at::RegistryName(),                                                         \
+      ::at::Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
       ::at::demangle_type<__VA_ARGS__>());                                           \
   }
 

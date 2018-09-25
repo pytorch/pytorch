@@ -19,7 +19,6 @@ const ComplexHooksInterface& getComplexHooks() {
   return *complex_hooks;
 }
 } // namespace detail
+} // namespace at
 
 C10_DEFINE_REGISTRY(ComplexHooksRegistry, ComplexHooksInterface, ComplexHooksArgs)
-
-}
