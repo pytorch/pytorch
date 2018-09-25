@@ -40,8 +40,8 @@ namespace at {
 struct CAFFE2_API Tensor {
   Tensor(){};
   Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
-      : tensor_impl_(std::move(tensor_impl)) {
-    if (tensor_impl_.get() == nullptr) {
+      : impl_(std::move(tensor_impl)) {
+    if (impl_.get() == nullptr) {
       throw std::runtime_error("TensorBaseImpl with nullptr not supported");
     }
   }
@@ -50,25 +50,25 @@ struct CAFFE2_API Tensor {
   Tensor(Tensor&&) = default;
 
   int64_t dim() const {
-    return tensor_impl_->dim();
+    return impl_->dim();
   }
 
   TensorImpl * unsafeGetTensorImpl() const {
-    return tensor_impl_.get();
+    return impl_.get();
   }
   TensorImpl * unsafeReleaseTensorImpl() {
-    return tensor_impl_.release();
+    return impl_.release();
   }
   const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr() const {
-    return tensor_impl_;
+    return impl_;
   }
 
   bool defined() const {
-    return tensor_impl_;
+    return impl_;
   }
 
   void reset() {
-    tensor_impl_.reset();
+    impl_.reset();
   }
 
   // The following overloads are very intruiging.  Consider the following
@@ -102,11 +102,11 @@ struct CAFFE2_API Tensor {
   // Tensor& operator=(const Tensor&) & = default;
   // Tensor& operator=(Tensor&&) & = default;
   Tensor& operator=(const Tensor& x) & {
-    tensor_impl_ = x.tensor_impl_;
+    impl_ = x.impl_;
     return *this;
   }
   Tensor& operator=(Tensor&& x) & {
-    tensor_impl_ = std::move(x.tensor_impl_);
+    impl_ = std::move(x.impl_);
     return *this;
   }
 
@@ -115,37 +115,37 @@ struct CAFFE2_API Tensor {
   Tensor& operator=(Tensor&&) &&;
 
   bool is_same(const Tensor& other) const noexcept {
-    return tensor_impl_ == other.tensor_impl_;
+    return impl_ == other.impl_;
   }
   size_t use_count() const noexcept {
-    return tensor_impl_.use_count();
+    return impl_.use_count();
   }
   size_t weak_use_count() const noexcept {
-    return tensor_impl_.weak_use_count();
+    return impl_.weak_use_count();
   }
 
   const char * toString() const;
 
   IntList sizes() const {
-    return tensor_impl_->sizes();
+    return impl_->sizes();
   }
   IntList strides() const {
-    return tensor_impl_->strides();
+    return impl_->strides();
   }
   int64_t ndimension() const {
     return dim();
   }
   Type & type() const {
-    return tensor_impl_->type();
+    return impl_->type();
   }
   TensorTypeId type_id() const {
-    return tensor_impl_->type_id();
+    return impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return dataTypeToScalarType(tensor_impl_->dtype().id());
+    return dataTypeToScalarType(impl_->dtype().id());
   }
   const Storage& storage() const {
-    return tensor_impl_->storage();
+    return impl_->storage();
   }
   Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
@@ -222,18 +222,18 @@ struct CAFFE2_API Tensor {
   // ~~~~~ Autograd API ~~~~~
 
   Tensor& set_requires_grad(bool requires_grad) {
-    tensor_impl_->set_requires_grad(requires_grad);
+    impl_->set_requires_grad(requires_grad);
     return *this;
   }
   bool requires_grad() const {
-    return tensor_impl_->requires_grad();
+    return impl_->requires_grad();
   }
 
   Tensor& grad() {
-    return tensor_impl_->grad();
+    return impl_->grad();
   }
   const Tensor& grad() const {
-    return tensor_impl_->grad();
+    return impl_->grad();
   }
 
   void set_data(Tensor new_data);
@@ -645,35 +645,35 @@ struct CAFFE2_API Tensor {
   friend struct WeakTensor;
 
 protected:
-  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl_;
+  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
 
 struct CAFFE2_API WeakTensor {
-  WeakTensor(const Tensor& t) : weak_tensor_impl_(t.tensor_impl_) {}
+  WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
 
   // XXX: this can return undefined tensors
   // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
   Tensor lock() const {
-    return Tensor(weak_tensor_impl_.lock());
+    return Tensor(weak_impl_.lock());
   }
 
   bool is_same(const WeakTensor& other) const noexcept {
-    return weak_tensor_impl_ == other.weak_tensor_impl_;
+    return weak_impl_ == other.weak_impl_;
   }
 
   size_t use_count() const noexcept {
-    return weak_tensor_impl_.use_count();
+    return weak_impl_.use_count();
   }
   size_t weak_use_count() const noexcept {
-    return weak_tensor_impl_.weak_use_count();
+    return weak_impl_.weak_use_count();
   }
 
   TensorImpl* unsafeGetTensorImpl() const {
-    return weak_tensor_impl_._unsafe_get_target();
+    return weak_impl_._unsafe_get_target();
   }
 
 private:
-  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_tensor_impl_;
+  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
 };
 } // namespace at
 
