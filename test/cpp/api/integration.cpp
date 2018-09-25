@@ -63,10 +63,10 @@ class CartPole {
   }
 
   void step(int action) {
-    auto x = state[0].toCFloat();
-    auto x_dot = state[1].toCFloat();
-    auto theta = state[2].toCFloat();
-    auto theta_dot = state[3].toCFloat();
+    auto x = state[0].item<float>();
+    auto x_dot = state[1].item<float>();
+    auto theta = state[2].item<float>();
+    auto theta_dot = state[3].item<float>();
 
     auto force = (action == 1) ? force_mag : -force_mag;
     auto costheta = std::cos(theta);
@@ -222,7 +222,7 @@ bool test_mnist(
   torch::NoGradGuard guard;
   auto result = std::get<1>(forward_op(tedata).max(1));
   torch::Tensor correct = (result == telabel).toType(torch::kFloat32);
-  return correct.sum().toCFloat() > telabel.size(0) * 0.8;
+  return correct.sum().item<float>() > telabel.size(0) * 0.8;
 }
 
 struct IntegrationTest : torch::test::SeedingFixture {};
@@ -251,7 +251,7 @@ TEST_F(IntegrationTest, CartPole) {
     auto out = forward(state);
     auto probs = torch::Tensor(std::get<0>(out));
     auto value = torch::Tensor(std::get<1>(out));
-    auto action = probs.multinomial(1)[0].toCInt();
+    auto action = probs.multinomial(1)[0].item<int32_t>();
     // Compute the log prob of a multinomial distribution.
     // This should probably be actually implemented in autogradpp...
     auto p = probs / probs.sum(-1, true);
@@ -274,7 +274,7 @@ TEST_F(IntegrationTest, CartPole) {
     std::vector<torch::Tensor> policy_loss;
     std::vector<torch::Tensor> value_loss;
     for (auto i = 0U; i < saved_log_probs.size(); i++) {
-      auto r = rewards[i] - saved_values[i].toCFloat();
+      auto r = rewards[i] - saved_values[i].item<float>();
       policy_loss.push_back(-r * saved_log_probs[i]);
       value_loss.push_back(
           torch::smooth_l1_loss(saved_values[i], torch::ones(1) * rewards[i]));

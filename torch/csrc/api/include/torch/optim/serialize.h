@@ -51,7 +51,7 @@ void serialize(
     BufferContainer& buffers) {
   torch::Tensor size_tensor;
   archive.read(key + "/size", size_tensor);
-  const size_t size = size_tensor.toCLong();
+  const size_t size = size_tensor.item<int64_t>();
   for (size_t index = 0; index < size; ++index) {
     buffers.emplace_back();
     archive.read(
