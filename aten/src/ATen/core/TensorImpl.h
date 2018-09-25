@@ -16,7 +16,7 @@ namespace at {
 class Scalar;
 struct Type;
 struct Storage;
-struct Tensor;
+class Tensor;
 } // namespace at
 
 namespace at {
