@@ -681,7 +681,7 @@ void ModuleEncoder::EncodeTensor(
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      t = tensor.type().tensor(
+      t = at::getType(tensor).tensor(
           tensor.storage(),
           /* storageOffset = */ 0,
           /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage().size()) },

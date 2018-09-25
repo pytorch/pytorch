@@ -16,7 +16,7 @@
 namespace at {
 struct Generator;
 class Scalar;
-struct Tensor;
+class Tensor;
 struct Type;
 } // namespace at
 
