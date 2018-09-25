@@ -372,9 +372,6 @@ struct GraphExecutorImpl {
 private:
   friend struct GraphExecutor;
 
-  size_t autodiffSubgraphNodeThreshold = 2;
-  size_t autodiffSubgraphInlineThreshold = 5;
-
   const ExecutionPlan & getOrCompileFallback() {
     std::lock_guard<std::mutex> lock(compile_mutex);
     if(!fallback) {
@@ -534,6 +531,10 @@ private:
   // GraphExecutors can be accessed from multiple threads, so this thread needs to be
   // held every time we access the fallback or plan_cache.
   std::mutex compile_mutex;
+
+  // Some tunable parameters
+  size_t autodiffSubgraphNodeThreshold = 2;
+  size_t autodiffSubgraphInlineThreshold = 5;
 };
 
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)

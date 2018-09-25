@@ -7745,12 +7745,6 @@ def partial_apply_nontensors(fn, args, **kwargs):
     return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
 
 
-def assert_fully_differentiable_graph(graph):
-    nodes = list(graph.nodes())
-    if not (len(nodes) == 1 and 'prim::DifferentiableGraph' in str(nodes[0])):
-        raise RuntimeError('expected graph to be fully differentiable:\n{}'.format(graph))
-
-
 # create a trace function from input fn
 #
 # disable_autodiff_subgraph_inlining:
