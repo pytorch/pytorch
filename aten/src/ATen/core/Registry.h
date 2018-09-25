@@ -158,8 +158,7 @@ class CAFFE2_API Registerer {
   RegistryName();                                                 \
   typedef Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>   \
       Registerer##RegistryName;                                   \
-  //  extern template class Registerer<SrcType, PtrType<ObjectType>,
-  //  __VA_ARGS__>;
+  extern template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>;
 
 #define AT_DEFINE_TYPED_REGISTRY(                                          \
     RegistryName, SrcType, ObjectType, PtrType, ...)                       \
@@ -168,7 +167,7 @@ class CAFFE2_API Registerer {
         new Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>();         \
     return registry;                                                       \
   }                                                                        \
-//  template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>;
+  template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>;
 
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
 // creator with comma in its templated arguments.

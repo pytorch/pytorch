@@ -330,8 +330,8 @@ struct PinnedCPUAllocator final : public at::Allocator {
     void* data;
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
     if (IsNUMAEnabled()) {
-      auto ptr_and_deleter = baseAllocator_.allocate(nbytes);
-      data = baseAllocator_.move_context().release();
+      auto data_ptr = baseAllocator_.allocate(nbytes);
+      data = data_ptr.move_context().release();
       CAFFE_ENFORCE(data);
       HIP_ENFORCE(hipHostRegister(data, nbytes, hipHostRegisterDefault));
     } else {
