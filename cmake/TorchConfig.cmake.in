@@ -24,9 +24,13 @@ endif()
 
 # Include directories.
 if (EXISTS "${TORCH_INSTALL_PREFIX}/lib/include")
-  set(TORCH_INCLUDE_DIRS "${TORCH_INSTALL_PREFIX}/lib/include")
+  set(TORCH_INCLUDE_DIRS
+    ${TORCH_INSTALL_PREFIX}/lib/include
+    ${TORCH_INSTALL_PREFIX}/lib/include/torch/csrc/api/include)
 else()
-  set(TORCH_INCLUDE_DIRS "${TORCH_INSTALL_PREFIX}/include")
+  set(TORCH_INCLUDE_DIRS
+    ${TORCH_INSTALL_PREFIX}/include
+    ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
 endif()
 
 # Library dependencies.
@@ -45,7 +49,7 @@ if (@USE_CUDA@)
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
       ${CUDA_LIBRARIES})
-    list(APPEND TORCH_INCLUDE_DIRS "${NVTOOLEXT_HOME}/include")
+    list(APPEND TORCH_INCLUDE_DIRS ${NVTOOLEXT_HOME}/include)
   elseif(APPLE)
     set(TORCH_CUDA_LIBRARIES
       ${CUDA_TOOLKIT_ROOT_DIR}/lib/libcudart.dylib
@@ -66,8 +70,8 @@ endif()
 set(TORCH_CXX_FLAGS "-D_GLIBCXX_USE_CXX11_ABI=@GLIBCXX_USE_CXX11_ABI@")
 
 set_target_properties(torch PROPERTIES
-    IMPORTED_LOCATION ${TORCH_LIBRARY}
-    INTERFACE_INCLUDE_DIRECTORIES ${TORCH_INCLUDE_DIRS}
-    INTERFACE_COMPILE_OPTIONS ${TORCH_CXX_FLAGS}
+    IMPORTED_LOCATION "${TORCH_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${TORCH_INCLUDE_DIRS}"
+    INTERFACE_COMPILE_OPTIONS "${TORCH_CXX_FLAGS}"
     CXX_STANDARD 11
 )

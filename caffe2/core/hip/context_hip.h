@@ -323,7 +323,7 @@ inline void CPUContext::CopyBytes<CPUContext, HIPContext>(
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  */
-struct PinnedCPUAllocator final : CPUAllocator {
+struct PinnedCPUAllocator final : public at::Allocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
   at::DataPtr allocate(size_t nbytes) const override {

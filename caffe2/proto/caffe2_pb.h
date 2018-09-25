@@ -86,6 +86,7 @@ inline CAFFE2_API caffe2::DeviceOption DeviceToOption(
   caffe2::DeviceOption option;
   auto type = device.type();
   option.set_device_type(TypeToProto(type));
+  // default value for index() is -1 and
   // sets the gpu_id to -1 means we'll use the current gpu id when the function
   // is being called, see context_gpu.cu for more info.
   if (type == at::DeviceType::CUDA) {

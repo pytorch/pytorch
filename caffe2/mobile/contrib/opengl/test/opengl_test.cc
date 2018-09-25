@@ -2039,19 +2039,19 @@ void compareModelsForOpenGL(std::string name,
       CAFFE_ENFORCE_EQ(input_type, "uint8_t");
       t_gl->Resize(1, height, width, channel);
       uint8_t* input = t_gl->mutable_data<uint8_t>();
-      memcpy(input, t_cpu->mutable_data<uint8_t>(), t_cpu->capacity_nbytes());
+      memcpy(input, t_cpu->mutable_data<uint8_t>(), t_cpu->storage().capacity());
     } else if (name == "segmentation") {
       CAFFE_ENFORCE_EQ(input_order, "NCHW");
       CAFFE_ENFORCE_EQ(input_type, "float");
       t_gl->Resize(1, channel, height, width);
       float* input = t_gl->mutable_data<float>();
-      memcpy(input, t_cpu->mutable_data<float>(), t_cpu->capacity_nbytes());
+      memcpy(input, t_cpu->mutable_data<float>(), t_cpu->storage().capacity());
     } else if (name == "denoiser") {
       CAFFE_ENFORCE_EQ(input_order, "NCHW");
       CAFFE_ENFORCE_EQ(input_type, "float");
       t_gl->Resize(1, channel, height, width);
       float* input = t_gl->mutable_data<float>();
-      memcpy(input, t_cpu->mutable_data<float>(), t_cpu->capacity_nbytes());
+      memcpy(input, t_cpu->mutable_data<float>(), t_cpu->storage().capacity());
     }
 
     cws.RunNetOnce(truncatedPredictNet);
@@ -2149,14 +2149,14 @@ void compareBatchedToTiledModels(std::string name,
       CAFFE_ENFORCE_EQ(input_type, "uint8_t");
       t_tiling->Resize(1, height, width, channel);
       uint8_t* input = t_tiling->mutable_data<uint8_t>();
-      memcpy(input, t_batch->mutable_data<uint8_t>(), t_batch->capacity_nbytes());
+      memcpy(input, t_batch->mutable_data<uint8_t>(), t_batch->storage().capacity());
 
     } else if (name == "segmentation") {
       CAFFE_ENFORCE_EQ(input_order, "NCHW");
       CAFFE_ENFORCE_EQ(input_type, "float");
       t_tiling->Resize(1, channel, height, width);
       float* input = t_tiling->mutable_data<float>();
-      memcpy(input, t_batch->mutable_data<float>(), t_batch->capacity_nbytes());
+      memcpy(input, t_batch->mutable_data<float>(), t_batch->storage().capacity());
     }
 
     bws.RunNetOnce(bachedNet);

@@ -31,7 +31,7 @@ void serialize(
   serialize(archive, key, tensors);
   steps.clear();
   for (const auto& step : tensors) {
-    steps.push_back(step.toCLong());
+    steps.push_back(step.item<int64_t>());
   }
 }
 } // namespace detail

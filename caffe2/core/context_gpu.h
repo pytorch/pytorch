@@ -334,7 +334,7 @@ inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  */
-struct CAFFE2_CUDA_API PinnedCPUAllocator final : at::Allocator {
+struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
   at::DataPtr allocate(size_t nbytes) const override {
