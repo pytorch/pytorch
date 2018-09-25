@@ -153,7 +153,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/ivalue.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
@@ -176,6 +175,7 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusers/interface.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/passes/pretty_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
@@ -220,8 +220,8 @@ CONFIGURE_FILE(
 
 if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
@@ -232,14 +232,18 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/serialize.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
-    )
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
+  )
 endif()
 
 
@@ -330,13 +334,6 @@ if (NOT NO_API AND NOT USE_ROCM)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
-
-  if (TORCH_USE_CEREAL)
-    target_compile_definitions(torch PUBLIC TORCH_USE_CEREAL)
-    # SYSTEM headers are included with -isystem and thus do not trigger warnings.
-    target_include_directories(torch SYSTEM PUBLIC
-      "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
-  endif()
 endif()
 
 if(USE_CUDA)
@@ -344,6 +341,7 @@ if(USE_CUDA)
     set(TORCH_CUDA_LIBRARIES
       ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib
       ${CUDA_LIBRARIES})
+    set_target_properties(torch PROPERTIES LINK_FLAGS "/FORCE:UNRESOLVED")
     target_include_directories(torch PRIVATE "${NVTOOLEXT_HOME}/include")
   elseif(APPLE)
     set(TORCH_CUDA_LIBRARIES
@@ -413,7 +411,7 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
-install(FILES "${TORCH_SRC_DIR}/op.h"
+install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 install(TARGETS torch
@@ -436,56 +434,29 @@ if (BUILD_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
 endif()
 
 if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
-  set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
+  add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
+endif()
 
-  set(TORCH_API_TEST_SOURCES
-    ${TORCH_API_TEST_DIR}/any.cpp
-    ${TORCH_API_TEST_DIR}/cursor.cpp
-    ${TORCH_API_TEST_DIR}/integration.cpp
-    ${TORCH_API_TEST_DIR}/main.cpp
-    ${TORCH_API_TEST_DIR}/misc.cpp
-    ${TORCH_API_TEST_DIR}/module.cpp
-    ${TORCH_API_TEST_DIR}/modules.cpp
-    ${TORCH_API_TEST_DIR}/optim.cpp
-    ${TORCH_API_TEST_DIR}/parallel.cpp
-    ${TORCH_API_TEST_DIR}/rnn.cpp
-    ${TORCH_API_TEST_DIR}/sequential.cpp
-    ${TORCH_API_TEST_DIR}/static.cpp
-    ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
-    ${TORCH_API_TEST_DIR}/tensor.cpp
-    ${TORCH_API_TEST_DIR}/jit.cpp
-    ${TORCH_API_TEST_DIR}/tensor_options.cpp
-    ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
-  )
-
-  if (TORCH_USE_CEREAL)
-    list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/serialization.cpp)
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  message(STATUS "${CMAKE_CXX_COMPILER} ${CMAKE_CURRENT_LIST_DIR}/abi-check.cpp -o ${CMAKE_BINARY_DIR}/abi-check")
+  execute_process(
+    COMMAND
+      "${CMAKE_CXX_COMPILER}"
+      "${CMAKE_CURRENT_LIST_DIR}/abi-check.cpp"
+      "-o"
+      "${CMAKE_BINARY_DIR}/abi-check"
+    RESULT_VARIABLE ABI_CHECK_COMPILE_RESULT)
+  if (ABI_CHECK_COMPILE_RESULT)
+    message(FATAL_ERROR "Could not compile ABI Check: ${ABI_CHECK_COMPILE_RESULT}")
   endif()
-
-  add_executable(test_api ${TORCH_API_TEST_SOURCES})
-
-  target_include_directories(test_api
-    PUBLIC
-    "${TORCH_ROOT}/third_party/catch/single_include"
-    ${ATen_CPU_INCLUDE})
-
-  target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB})
-
-  if (NOT MSVC)
-    if (APPLE)
-      target_compile_options(test_api PRIVATE
-        # Clang has an unfixed bug leading to spurious missing braces
-        # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-        -Wno-missing-braces)
-    else()
-      target_compile_options(test_api PRIVATE
-        # Considered to be flaky.  See the discussion at
-        # https://github.com/pytorch/pytorch/pull/9608
-        -Wno-maybe-uninitialized
-        # gcc gives nonsensical warnings about variadic.h
-        -Wno-unused-but-set-parameter)
-    endif()
+  execute_process(
+    COMMAND "${CMAKE_BINARY_DIR}/abi-check"
+    RESULT_VARIABLE ABI_CHECK_RESULT
+    OUTPUT_VARIABLE GLIBCXX_USE_CXX11_ABI)
+  if (ABI_CHECK_RESULT)
+    message(WARNING "Could not run ABI Check: ${ABI_CHECK_RESULT}")
   endif()
+  message(STATUS "Determined _GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
 endif()
 
 # CMake config for external projects.

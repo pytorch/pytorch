@@ -8,7 +8,6 @@
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
 #include "ATen/core/SparseTensorRef.h"
-#include "ATen/core/Tensor.h"
 #include "ATen/core/ArrayRef.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/TensorTypeIdRegistration.h"
@@ -34,6 +33,7 @@ class Context;
 struct Allocator;
 struct Generator;
 struct Storage;
+class Tensor;
 
 static inline void noop_deleter(void*) {}
 
@@ -47,7 +47,7 @@ enum class TypeID {
   NumOptions
 };
 
-struct AT_API Type {
+struct CAFFE2_API Type {
   explicit Type(TensorTypeId type_id, bool is_variable, bool is_undefined)
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
@@ -140,7 +140,8 @@ protected:
   TensorTypeId type_id_;
   bool is_variable_;
   bool is_undefined_;
-
 };
 
 } // namespace at
+
+#include "ATen/core/Tensor.h"

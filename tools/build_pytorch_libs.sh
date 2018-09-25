@@ -22,7 +22,6 @@ USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
 CAFFE2_STATIC_LINK_CUDA=0
-TORCH_USE_CEREAL=0
 RERUN_CMAKE=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -46,9 +45,6 @@ while [[ $# -gt 0 ]]; do
           ;;
       --cuda-static-link)
           CAFFE2_STATIC_LINK_CUDA=1
-          ;;
-      --use-cereal)
-          TORCH_USE_CEREAL=1
           ;;
       *)
           break
@@ -194,7 +190,6 @@ function build() {
 		       -DTHCUNN_SO_VERSION=1 \
 		       -DTHD_SO_VERSION=1 \
 		       -DUSE_CUDA=$USE_CUDA \
-		       -DTORCH_USE_CEREAL=$TORCH_USE_CEREAL \
 		       -DBUILD_EXAMPLES=OFF \
 		       -DBUILD_TEST=$BUILD_TEST \
 		       -DNO_NNPACK=$((1-$USE_NNPACK)) \
@@ -323,15 +318,26 @@ function build_caffe2() {
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
+  # Install Python proto files
+  if [[ "$BUILD_PYTHON" == 'ON' ]]; then
+      echo "Copying Caffe2 proto files from $(pwd)/caffe2/proto to  $(cd .. && pwd)/caffe2/proto"
+      echo "All the files in caffe2/proto are $(find caffe2/proto)"
+      for proto_file in $(pwd)/caffe2/proto/*.py; do
+          cp $proto_file "$(pwd)/../caffe2/proto/"
+      done
+  fi
+
+
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
-    # root/torch/lib/tmp_install/lib
-    pushd "$INSTALL_DIR/lib"
-    for lib in *.dylib; do
-      echo "Updating install_name for $lib"
-      install_name_tool -id @rpath/$lib $lib
-    done
-    popd
+      # root/torch/lib/tmp_install/lib
+      echo "Updating all install_names in $INSTALL_DIR/lib"
+      pushd "$INSTALL_DIR/lib"
+      for lib in *.dylib; do
+          echo "Updating install_name for $(pwd)/$lib"
+          install_name_tool -id @rpath/$lib $lib
+      done
+      popd
   fi
 }
 
@@ -373,14 +379,21 @@ pushd $TORCH_LIB_DIR
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
+echo "tools/build_pytorch_libs.sh succeeded at $(date)"
+echo "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
+
+echo "Copying $INSTALL_DIR/lib to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
 fi
+echo "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
 $SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
 $SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
+
+echo "Copying $INSTALL_DIR/include to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .

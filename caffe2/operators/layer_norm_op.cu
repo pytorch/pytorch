@@ -92,7 +92,7 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
   const int right = input.size_from_dim(canonical_axis);
 
   output->ResizeLike(input);
-  std::vector<TIndex> stats_dims(
+  std::vector<int64_t> stats_dims(
       input.dims().begin(), input.dims().begin() + canonical_axis);
   stats_dims.push_back(1);
   mean->Resize(stats_dims);
@@ -256,7 +256,7 @@ bool LayerNormGradientOp<CUDAContext>::DoRunWithType<float>() {
   const unsigned long right = norm_inputs.size_from_dim(canonical_axis);
 
   ginput->ResizeLike(norm_inputs);
-  std::vector<TIndex> stats_dims(
+  std::vector<int64_t> stats_dims(
       norm_inputs.dims().begin(), norm_inputs.dims().begin() + canonical_axis);
   stats_dims.push_back(1);
   dmean_.Resize(stats_dims);

@@ -20,7 +20,7 @@ struct DefaultTensorOptions {
   /// Defined in OptionsGuard.cpp because we can't use optional in headers, due
   /// to Windows and other compilers.
   /// TODO: The inability to use optional in headers is no longer true
-  AT_API static TensorOptions& get();
+  CAFFE2_API static TensorOptions& get();
 
  private:
   /// This is an optional because of compiler bugs that mis-initialize static
@@ -64,8 +64,9 @@ struct OptionsGuard {
 #else // AT_MOBILE
 
 struct DefaultTensorOptions {
-  AT_API static const TensorOptions& get();
-private:
+  CAFFE2_API static const TensorOptions& get();
+
+ private:
   static TensorOptions options_;
 };
 

@@ -232,7 +232,7 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
 
  private:
   MaxPoolRTCFunction func_;
-  vector<TIndex> input_dims_;
+  vector<int64_t> input_dims_;
 };
 
 class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
@@ -285,7 +285,7 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
 
  private:
   MaxPoolGradientRTCFunction func_;
-  vector<TIndex> input_dims_;
+  vector<int64_t> input_dims_;
 };
 
 namespace {

@@ -25,9 +25,8 @@ aten/src/ATen/cuda/CUDAConfig.h
 build/
 dist/
 docs/src/**/*
-docs/cpp/xml/
-docs/cpp/html/
-docs/cpp/api/
+docs/cpp/build
+docs/cpp/source/api
 test/.coverage
 test/cpp/api/mnist
 test/custom_operator/model.pt

@@ -1,5 +1,5 @@
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 #include "ATen/ATen.h"
 #include "ATen/cuda/NumericLimits.cuh"
@@ -82,9 +82,9 @@ void launch_function(){
   kernel<<<1,1>>>();
 }
 
-TEST_CASE( "half common math functions tests in device", "[cuda]" ) {
+CATCH_TEST_CASE( "half common math functions tests in device", "[cuda]" ) {
   launch_function();
   cudaError_t err = cudaDeviceSynchronize();
-  REQUIRE(err == cudaSuccess);
+  CATCH_REQUIRE(err == cudaSuccess);
 }
 

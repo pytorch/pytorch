@@ -98,7 +98,7 @@ bool ProcessGroupMPI::WorkMPI::isCompleted() {
 }
 
 bool ProcessGroupMPI::WorkMPI::isSuccess() const {
-  return !workException_;
+  return !exception_;
 }
 
 void ProcessGroupMPI::WorkMPI::synchronize() {}
@@ -124,14 +124,14 @@ void ProcessGroupMPI::WorkMPI::finishWithException(
   {
     std::unique_lock<std::mutex> lock(workMutex_);
     completed_ = true;
-    workException_ = caughtWorkException;
+    exception_ = caughtWorkException;
   }
   workCV_.notify_all();
 }
 
 const std::exception& ProcessGroupMPI::WorkMPI::exception() const {
   try {
-    std::rethrow_exception(workException_);
+    std::rethrow_exception(exception_);
   } catch (const std::exception& e) {
     return e;
   }
@@ -169,6 +169,11 @@ bool ProcessGroupMPI::AsyncWork::isCompleted() {
     *srcRank_ = status_.MPI_SOURCE;
   }
 
+  // Populate exception if request was not successful
+  if (status_.MPI_ERROR != MPI_SUCCESS) {
+    populateException();
+  }
+
   return true;
 }
 
@@ -194,19 +199,30 @@ bool ProcessGroupMPI::AsyncWork::wait() {
     *srcRank_ = status_.MPI_SOURCE;
   }
 
-  return status_.MPI_ERROR == MPI_SUCCESS;
+  auto ok = (status_.MPI_ERROR == MPI_SUCCESS);
+
+  // Populate exception if request was not successful
+  if (!ok) {
+    populateException();
+  }
+
+  return ok;
 }
 
 const std::exception& ProcessGroupMPI::AsyncWork::exception() const {
-  if (request_ != MPI_REQUEST_NULL) {
-    throw std::runtime_error(
-        "Invalid call to AsyncWork::exception before work has completed");
+  try {
+    std::rethrow_exception(exception_);
+  } catch (const std::exception& e) {
+    return e;
   }
+}
 
+void ProcessGroupMPI::AsyncWork::populateException() {
   std::array<char, MPI_MAX_ERROR_STRING> buf;
   int len = buf.size();
   MPI_CHECK(MPI_Error_string(status_.MPI_ERROR, buf.data(), &len));
-  return std::runtime_error(std::string(buf.data(), len));
+  exception_ =
+      std::make_exception_ptr(std::runtime_error(std::string(buf.data(), len)));
 }
 
 // Static global states
@@ -253,33 +269,30 @@ std::shared_ptr<ProcessGroupMPI> ProcessGroupMPI::createProcessGroupMPI(
   MPI_CHECK(MPI_Comm_size(MPI_COMM_WORLD, &size));
   MPI_CHECK(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
 
-  globalLock.unlock();
-
   if (rank < 0 || size < 0) {
     throw std::runtime_error("Failed to get the world_size / rank");
   }
 
+  // If no ranks are specified, assume we're creating the root group
   if (ranks.empty()) {
-    return std::make_shared<ProcessGroupMPI>(rank, size, MPI_COMM_WORLD);
-  } else {
-    std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
-
-    MPI_Group worldGroup;
-    MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
-
-    MPI_Group ranksGroup;
-    MPI_CHECK(
-        MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
-
-    MPI_Comm groupComm;
-    MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
-
-    MPI_CHECK(MPI_Group_free(&worldGroup));
-    MPI_CHECK(MPI_Group_free(&ranksGroup));
-
     globalLock.unlock();
-    return std::make_shared<ProcessGroupMPI>(rank, size, groupComm);
+    return std::make_shared<ProcessGroupMPI>(rank, size, MPI_COMM_WORLD);
   }
+
+  MPI_Group worldGroup;
+  MPI_CHECK(MPI_Comm_group(MPI_COMM_WORLD, &worldGroup));
+
+  MPI_Group ranksGroup;
+  MPI_CHECK(MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &ranksGroup));
+
+  MPI_Comm groupComm;
+  MPI_CHECK(MPI_Comm_create(MPI_COMM_WORLD, ranksGroup, &groupComm));
+
+  MPI_CHECK(MPI_Group_free(&worldGroup));
+  MPI_CHECK(MPI_Group_free(&ranksGroup));
+
+  globalLock.unlock();
+  return std::make_shared<ProcessGroupMPI>(rank, size, groupComm);
 }
 
 ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)

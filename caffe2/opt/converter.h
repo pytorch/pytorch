@@ -3,6 +3,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/opt/annotations.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/ControlFlow.h"
@@ -12,53 +13,7 @@
 
 namespace caffe2 {
 
-class Caffe2Annotation : public nom::repr::Annotation {
-public:
-  Caffe2Annotation() : Annotation(AnnotationKind::Caffe2) {}
-  Caffe2Annotation(std::string device)
-      : Annotation(AnnotationKind::Caffe2), Device(device) {}
-  virtual ~Caffe2Annotation() {}
-
-  void setDevice(std::string device) { Device = device; }
-  const std::string getDevice() const { return Device; }
-
-  void setDeviceType(int device) {
-    DeviceType = device;
-  }
-  int getDeviceType() const {
-    return DeviceType;
-  }
-
-  void setOperatorDef(const caffe2::OperatorDef& opDef) {
-    OpDef = opDef;
-    OpDefExists = true;
-  }
-  const caffe2::OperatorDef& getOperatorDef() const {
-    CAFFE_ENFORCE(
-        OpDefExists,
-        "OperatorDef was never set.  Use Caffe2Annotation::setOperatorDef.");
-    return OpDef;
-  }
-  caffe2::OperatorDef* getMutableOperatorDef() {
-    CAFFE_ENFORCE(
-        OpDefExists,
-        "OperatorDef was never set.  Use Caffe2Annotation::setOperatorDef.");
-    return &OpDef;
-  }
-
-  static bool classof(const Annotation *A) {
-    return A->getKind() == AnnotationKind::Caffe2;
-  }
-
-private:
-  std::string Device = "";
-  caffe2::OperatorDef OpDef;
-  bool OpDefExists = false;
-  int DeviceType = caffe2::DeviceTypeProto::PROTO_CPU;
-};
-
-CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
-
+CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict = false);
 CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 
 // Pass in an oldNet to copy all the attributes of that network.
@@ -72,6 +27,10 @@ CAFFE2_API std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOpera
 
 CAFFE2_API caffe2::OperatorDef convertToOperatorDef(
     const nom::repr::NNGraph::NodeRef& instrNode);
+
+// If the annotation doesn't exist, attempt to add it
+CAFFE2_API Caffe2Annotation
+getOrAddCaffe2Annotation(nom::repr::NNGraph::NodeRef& instrNode);
 
 class CAFFE2_API Converter {
  public:

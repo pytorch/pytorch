@@ -75,8 +75,8 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::type_as,
   aten::_sigmoid_backward,
   aten::_tanh_backward,
+  aten::clamp,
   // TODO support those
-  //aten::clamp,
   //aten::lerp,
   aten::rand_like,
 };
@@ -217,7 +217,8 @@ struct GraphFuser {
         node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::mul(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::div(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
+        node->matches("aten::div(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor", /*const=*/{attr::min, attr::max})) {
       auto inputs = tensorInputs(node);
       return haveSupportedType(inputs);
     }
@@ -228,6 +229,9 @@ struct GraphFuser {
         node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::le(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
+        node->matches("aten::gt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::gt(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::ge(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
