@@ -62,6 +62,10 @@ file(GLOB_RECURSE tmp *_hip_test.cc)
 set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} ${tmp})
 # ---[ MIOPEN test files
 file(GLOB_RECURSE tmp *_miopen_test.cc)
+# Manually remove generate_proposals_op_gpu_test.cc
+# TODO: Support this with HIP
+file(GLOB tmp_gen_proposals generate_proposals_op_*_test.cc)
+exclude(tmp "${tmp}" ${tmp_gen_proposals})
 set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS} ${tmp})
 
 # ---[ CPU test files
