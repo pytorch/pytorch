@@ -106,16 +106,17 @@ class Subset(Dataset):
         return len(self.indices)
 
 
-def random_split(dataset, lengths):
+def random_split(dataset, percentages):
     """
-    Randomly split a dataset into non-overlapping new datasets of given lengths.
-
+    Randomly split a dataset into non-overlapping new datasets of given percentages.
     Arguments:
         dataset (Dataset): Dataset to be split
-        lengths (sequence): lengths of splits to be produced
+        percentages (sequence): List of decimals representing percentages in which the splits should be produced
     """
-    if sum(lengths) != len(dataset):
-        raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
+    if sum(percentages) != 1:
+        raise ValueError("Sum of the inputs does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths))
-    return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+    percentages = [round(subset*len(dataset)) for index,subset in enumerate(percentages)]
+
+    indices = randperm(sum(percentages))
+    return [Subset(dataset, indices[offset - percentage:offset]) for offset, percentage in zip(_accumulate(percentages), percentages)]
