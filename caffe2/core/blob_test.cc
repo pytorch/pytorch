@@ -86,15 +86,15 @@ TEST(BlobTest, Blob) {
   int* int_unused CAFFE2_UNUSED = blob.GetMutable<int>();
   EXPECT_TRUE(blob.IsType<int>());
   EXPECT_FALSE(blob.IsType<BlobTestFoo>());
-  EXPECT_FALSE(blob.IsTensorType(CPU));
+  EXPECT_FALSE(BlobIsTensorType(blob, CPU));
 
   BlobTestFoo* foo_unused CAFFE2_UNUSED = blob.GetMutable<BlobTestFoo>();
   EXPECT_TRUE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
-  EXPECT_FALSE(blob.IsTensorType(CPU));
+  EXPECT_FALSE(BlobIsTensorType(blob, CPU));
 
-  Tensor* tensor_unused CAFFE2_UNUSED = blob.GetMutableTensor(CPU);
-  EXPECT_TRUE(blob.IsTensorType(CPU));
+  Tensor* tensor_unused CAFFE2_UNUSED = BlobGetMutableTensor(&blob, CPU);
+  EXPECT_TRUE(BlobIsTensorType(blob, CPU));
   EXPECT_FALSE(blob.IsType<BlobTestFoo>());
   EXPECT_FALSE(blob.IsType<int>());
 }
@@ -600,7 +600,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
 #define TEST_SERIALIZATION_WITH_TYPE(TypeParam, field_name)               \
   TEST(TensorTest, TensorSerialization_##TypeParam) {                     \
     Blob blob;                                                            \
-    Tensor* tensor = blob.GetMutableTensor(CPU);                          \
+    Tensor* tensor = BlobGetMutableTensor(&blob, CPU);                    \
     tensor->Resize(2, 3);                                                 \
     for (int i = 0; i < 6; ++i) {                                         \
       tensor->mutable_data<TypeParam>()[i] = static_cast<TypeParam>(i);   \
@@ -621,7 +621,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
     }                                                                     \
     Blob new_blob;                                                        \
     EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));              \
-    EXPECT_TRUE(new_blob.IsTensorType(CPU));                              \
+    EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));                         \
     const TensorCPU& new_tensor = blob.Get<TensorCPU>();                  \
     EXPECT_EQ(new_tensor.ndim(), 2);                                      \
     EXPECT_EQ(new_tensor.dim(0), 2);                                      \
@@ -634,7 +634,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
                                                                           \
   TEST(EmptyTensorTest, TensorSerialization_##TypeParam) {                \
     Blob blob;                                                            \
-    TensorCPU* tensor = blob.GetMutableTensor(CPU);                       \
+    TensorCPU* tensor = BlobGetMutableTensor(&blob, CPU);                 \
     tensor->Resize(0, 3);                                                 \
     tensor->mutable_data<TypeParam>();                                    \
     string serialized = SerializeBlob(blob, "test");                      \
@@ -650,7 +650,7 @@ TEST(TensorDeathTest, CannotCastDownLargeDims) {
     EXPECT_EQ(tensor_proto.field_name##_size(), 0);                       \
     Blob new_blob;                                                        \
     EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));              \
-    EXPECT_TRUE(new_blob.IsTensorType(CPU));                              \
+    EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));                         \
     const TensorCPU& new_tensor = blob.Get<TensorCPU>();                  \
     EXPECT_EQ(new_tensor.ndim(), 2);                                      \
     EXPECT_EQ(new_tensor.dim(0), 0);                                      \
@@ -669,7 +669,7 @@ TEST_SERIALIZATION_WITH_TYPE(int64_t, int64_data)
 
 TEST(TensorTest, TensorSerialization_CustomType) {
   Blob blob;
-  TensorCPU* tensor = blob.GetMutableTensor(CPU);
+  TensorCPU* tensor = BlobGetMutableTensor(&blob, CPU);
   tensor->Resize(2, 3);
   for (int i = 0; i < 6; ++i) {
     tensor->mutable_data<BlobTestFoo>()[i].val = i;
@@ -681,7 +681,7 @@ TEST(TensorTest, TensorSerialization_CustomType) {
   EXPECT_EQ(proto.type(), "Tensor");
   Blob new_blob;
   EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));
-  EXPECT_TRUE(new_blob.IsTensorType(CPU));
+  EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));
   const TensorCPU& new_tensor = blob.Get<TensorCPU>();
   EXPECT_EQ(new_tensor.ndim(), 2);
   EXPECT_EQ(new_tensor.dim(0), 2);
@@ -696,7 +696,7 @@ TEST(TensorTest, TensorSerialization_CustomType) {
 TEST(TensorTest, Half) {
   const int64_t kSize = 3000000;
   Blob blob;
-  TensorCPU* tensor = blob.GetMutableTensor(CPU);
+  TensorCPU* tensor = BlobGetMutableTensor(&blob, CPU);
   tensor->Resize(kSize);
   for (int i = 0; i < tensor->size(); ++i) {
     tensor->mutable_data<at::Half>()[i].x = i % 10000;
@@ -724,7 +724,7 @@ TEST(TensorTest, Half) {
   }
   Blob new_blob;
   EXPECT_NO_THROW(DeserializeBlob(serialized, &new_blob));
-  EXPECT_TRUE(new_blob.IsTensorType(CPU));
+  EXPECT_TRUE(BlobIsTensorType(new_blob, CPU));
   const TensorCPU& new_tensor = blob.Get<TensorCPU>();
   EXPECT_EQ(new_tensor.ndim(), 1);
   EXPECT_EQ(new_tensor.dim(0), kSize);
@@ -860,7 +860,7 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
   {
     VLOG(1) << "Test begin";
     Blob blob;
-    Tensor* tensor = blob.GetMutableTensor(CPU);
+    Tensor* tensor = BlobGetMutableTensor(&blob, CPU);
     VLOG(1) << "Allocating blob";
     tensor->Resize(d1, d2);
     auto mutableData = tensor->mutable_data<TypeParam>();
@@ -903,7 +903,7 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
     load_op->Run();
     VLOG(1) << "Reading blob from workspace";
     auto new_blob = ws.GetBlob("test");
-    EXPECT_TRUE(new_blob->IsTensorType(CPU));
+    EXPECT_TRUE(BlobIsTensorType(*new_blob, CPU));
     const auto& new_tensor = new_blob->Get<TensorCPU>();
 
     EXPECT_EQ(new_tensor.ndim(), d1);
@@ -1030,7 +1030,7 @@ TEST(CustomChunkSize, BigTensorSerialization) {
   int64_t size = d1 * d2;
 
   Blob blob;
-  TensorCPU* tensor = blob.GetMutableTensor(CPU);
+  TensorCPU* tensor = BlobGetMutableTensor(&blob, CPU);
   tensor->Resize(d1, d2);
   tensor->mutable_data<float>();
   std::mutex mutex;
