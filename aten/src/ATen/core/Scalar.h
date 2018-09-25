@@ -12,7 +12,7 @@
 
 namespace at {
 
-struct Tensor;
+class Tensor;
 
 class CAFFE2_API Scalar {
  public:

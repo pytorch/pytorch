@@ -37,10 +37,10 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
   empty_t.fill_(3);
   empty_t.exp_();
 
-  auto a0 = type.tensor();
-  auto a1 = type.tensor();
-  auto a2 = type.tensor();
-  auto a3 = type.tensor();
+  auto a0 = at::empty({0}, type.options());
+  auto a1 = at::empty({0}, type.options());
+  auto a2 = at::empty({0}, type.options());
+  auto a3 = at::empty({0}, type.options());
   auto a4 = CPU(kDouble).tensor();
 
   std::vector<Tensor> tensors({a0, a1, a2, a3, a4});
