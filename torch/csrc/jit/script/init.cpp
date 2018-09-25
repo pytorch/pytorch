@@ -535,12 +535,12 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename) {
-      import_ir_module(module_lookup, filename);
-      });
+    import_ir_module(module_lookup, filename);
+  });
   m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup, const std::string& buffer) {
-      std::istringstream in(buffer);
-      import_ir_module(module_lookup, in);
-      });
+    std::istringstream in(buffer);
+    import_ir_module(module_lookup, in);
+  });
 }
 
 } // namespace script

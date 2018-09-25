@@ -87,7 +87,7 @@ class PyTorchStreamReader {
     // don't do a good job of that
     in.seekg(0L, in.end);
     file_size = in.tellg();
-    in.seekg(0L, in.beg);
+    in.seekg(0L);
     readAndValidateFileHeader();
     // Do this now since we're reasonably sure this is actually a PyT file from
     // the header.
@@ -109,7 +109,7 @@ class PyTorchStreamReader {
     }
     // Seek to the provided offset
     cursor = key;
-    in.seekg(cursor, in.beg);
+    in.seekg(cursor);
     auto tag = read64BitIntegerLittleEndian();
     if (tag != RecordTags::STORAGE) {
       throw std::runtime_error("Attempted to read a record of non-storage type");
@@ -151,7 +151,7 @@ class PyTorchStreamReader {
    size_t next_offset = (cursor + kFieldAlignment) - (cursor % kFieldAlignment);
    size_t pad_amount = next_offset - cursor;
    cursor += pad_amount;
-   in.seekg(cursor, in.beg);
+   in.seekg(cursor);
   }
 
   // File format deserialization functions
@@ -176,7 +176,7 @@ class PyTorchStreamReader {
     // Seek to location of file footer. We've already validated that the file
     // length is a multiple of the alignment size
     cursor = file_size - kFieldAlignment;
-    in.seekg(cursor, in.beg);
+    in.seekg(cursor);
     auto tag = read64BitIntegerLittleEndian();
     if (tag != RecordTags::FOOTER) {
       throw std::runtime_error("File footer has wrong record type. Is this"

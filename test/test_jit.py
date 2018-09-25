@@ -239,8 +239,10 @@ class JitTestCase(TestCase):
             imported = torch.jit.load(f.name)
         finally:
             os.unlink(f.name)
-        buffer = imported.save_to_buffer()
-        return torch.jit.load_from_buffer(buffer)
+        outb = io.BytesIO()
+        torch.jit.save(imported, outb)
+        inb = io.BytesIO(outb.getvalue())
+        return torch.jit.load(inb)
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
