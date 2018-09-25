@@ -2657,6 +2657,12 @@ class TestScript(JitTestCase):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
+    def test_generic_list_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
+            @torch.jit.script
+            def foo(x):
+                return [[x]] + [[1]]
+
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
             def foo(a):

@@ -466,7 +466,7 @@ Value* tryMatchArgument(
     concrete_type = matchTypeVariables(arg.type, value->type(), type_env);
   } catch(TypeMatchError& e) {
     err() << "could not match type " << value->type()->str() << " to "
-          << arg.type->str() << " in argument '" << arg.name << "':" << e.what() << "\n"
+          << arg.type->str() << " in argument '" << arg.name << "': " << e.what() << "\n"
           << named_value.locOr(loc);
     return nullptr;
   }

@@ -12,7 +12,7 @@
   _(String) \
   _(TensorList) \
   _(Blob) \
-  _(GenericList) \
+  _(GenericList)
 
 namespace torch { namespace jit {
 

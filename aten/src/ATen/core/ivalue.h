@@ -83,7 +83,7 @@ using GenericList = ConstantList<IValue>;
   _(String) \
   _(TensorList) \
   _(Blob) \
-  _(GenericList) \
+  _(GenericList)
 
 struct CAFFE2_API IValue final {
   IValue()

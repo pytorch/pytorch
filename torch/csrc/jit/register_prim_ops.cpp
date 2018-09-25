@@ -519,17 +519,6 @@ Operation listEq(Node* node) {
   };
 }
 
-template<>
-Operation listEq<Shared<GenericList>>(Node* node) {
-  return [=](Stack& stack) {
-    Shared<GenericList> a;
-    Shared<GenericList> b;
-    pop(stack, a, b);
-    AT_ERROR("NYI: compare generic lists");
-    return 0;
-  };
-}
-
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
 Operation listEq<Shared<TensorList>>(Node* node) {
@@ -623,7 +612,6 @@ RegisterOperators reg2({
 #define CREATE_LIST_OPS(decl_type, c_type) \
     Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
     Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
-    Operator("aten::eq(" decl_type "[] a, " decl_type "[] b) -> int", listEq<Shared<c_type>>), \
     Operator("aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type "[]", listAdd<Shared<c_type>, c_type::ElemType>), \
     Operator( \
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
@@ -634,6 +622,11 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("float", DoubleList)
     CREATE_LIST_OPS("Tensor", TensorList)
     CREATE_LIST_OPS("t", GenericList)
+
+    Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
+    Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
+    Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
+
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)
