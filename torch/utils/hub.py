@@ -6,6 +6,7 @@ import shutil
 
 import subprocess
 
+
 def git(*args):
     FNULL = open(os.devnull, 'w')
     try:
@@ -14,9 +15,29 @@ def git(*args):
         print('Failed to run \"git {}\"\nAborting...'.format(' '.join(args)))
         exit(-1)
 
-def load_model(file_path, callable_name, checkpoint=None, hub_dir=None, map_location=None, git_repo=None, git_branch='master'):
+
+def load_model(
+        file_path,
+        callable_name,
+        checkpoint=None,
+        hub_dir=None,
+        map_location=None,
+        git_repo=None,
+        git_branch='master'):
     r"""
-    TODO: doc string
+    Load a model from local/github, with pretrained weights
+
+    Args:
+        file_path: required, can be a relative path to file, or a full path if file is local.
+        callable_name: required, a funciton in :attr"`file_path` that returns the model
+        checkpoint: URL to download the checkpoint for the model
+        hub_dir: local path to save the intermediate model & checkpoint files
+        map_location: destination device when loading checkpoint
+        git_repo: URL to github repo where the model is saved
+        git_branch: branch of the github repo
+
+    Returns:
+        model: a model with pretrained weights( if :attr:`checkpoint` is specified)
     """
     if hub_dir is None:
         hub_dir = os.path.expanduser(os.getenv('TORCH_HUB_DIR', '~/.torch/hub'))
@@ -58,4 +79,3 @@ def load_model(file_path, callable_name, checkpoint=None, hub_dir=None, map_loca
         model.load_state_dict(model_zoo.load_url(checkpoint, checkpoint_dir, map_location))
 
     return model
-
