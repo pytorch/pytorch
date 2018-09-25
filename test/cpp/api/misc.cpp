@@ -49,5 +49,5 @@ TEST(NNInitTest, CanInitializeTensorThatRequiresGrad) {
       tensor.fill_(1),
       "a leaf Variable that requires grad "
       "has been used in an in-place operation");
-  ASSERT_EQ(torch::nn::init::ones_(tensor).sum().toCInt(), 12);
+  ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
 }

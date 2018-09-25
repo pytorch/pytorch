@@ -79,7 +79,7 @@ inline at::Tensor newLikeFlat(
   at::DeviceGuard gpuGuard(device);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  return t.type().tensor(sizes);
+  return at::empty(sizes, t.options());
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -90,7 +90,7 @@ inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
   at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  return t.type().tensor(sizes);
+  return at::empty(sizes, t.options());
 }
 
 inline std::vector<std::vector<int64_t>> getSizes(
