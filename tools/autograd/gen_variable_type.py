@@ -144,7 +144,7 @@ INPLACE_GUARD = CodeTemplate("""\
 jit::tracer::ensureUnique("${name}", ${mutable_input});
 """)
 
-ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
+ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
 if (tracer_state) {
@@ -199,6 +199,8 @@ def format_trace(declaration):
     local = {}
     local['trace_name'] = trace_name = uninplace_api_name(declaration['api_name'])
 
+    # *_out functions take the result as a first argument, but since we're
+    # going to de-inplace the call, we need to remove it from the argument list
     trace_inputs = declaration['arguments']
     if declaration['name'].endswith('_out'):
         trace_inputs = trace_inputs[1:]
