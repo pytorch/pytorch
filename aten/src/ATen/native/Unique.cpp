@@ -140,5 +140,15 @@ _unique_dim_cpu(const Tensor& self, const int64_t dim, const bool sorted, const 
   });
 }
 
+std::tuple<Tensor, Tensor>
+_unique_dim(const Tensor& self, int64_t dim, bool sorted, bool return_inverse) {
+  return at::unique(self, dim, sorted, return_inverse);
+}
+
+std::tuple<Tensor, Tensor>
+_unique(const Tensor& self, bool sorted, bool return_inverse) {
+  return at::unique(self, sorted, return_inverse);
+}
+
 }  // namespace native
 }  // namespace at
