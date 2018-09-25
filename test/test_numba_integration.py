@@ -1,4 +1,5 @@
 import unittest
+import sys
 
 import common
 from common import TEST_NUMBA, TEST_NUMPY
@@ -168,37 +169,66 @@ class TestNumbaIntegration(common.TestCase):
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
     def test_conversion_errors(self):
-        """Numba property reports array interface for tensor types:
+        """Numba properly detects array interface for tensor.Tensor variants."""
 
-            cpu is not a cuda array
-            sparse is not a cuda array
-            needs_grad raises an error on check or conversion
-        """
-
+        # CPU tensors are not cuda arrays.
         cput = torch.arange(100)
 
         self.assertFalse(numba.cuda.is_cuda_array(cput))
         with self.assertRaises(TypeError):
             numba.cuda.as_cuda_array(cput)
 
+        # Sparse tensors are not cuda arrays, regardless of device.
         sparset = torch.sparse_coo_tensor(cput[None, :], cput)
 
         self.assertFalse(numba.cuda.is_cuda_array(sparset))
         with self.assertRaises(TypeError):
             numba.cuda.as_cuda_array(sparset)
 
+        sparse_cuda_t = sparset.cuda()
+
+        self.assertFalse(numba.cuda.is_cuda_array(sparset))
+        with self.assertRaises(TypeError):
+            numba.cuda.as_cuda_array(sparset)
+
+        # Device-status overrides gradient status.
+        # CPU+gradient isn't a cuda array.
         cpu_gradt = torch.zeros(100).requires_grad_(True)
 
         self.assertFalse(numba.cuda.is_cuda_array(cpu_gradt))
         with self.assertRaises(TypeError):
             numba.cuda.as_cuda_array(cpu_gradt)
 
+        # CUDA+gradient raises a RuntimeError on check or conversion.
+        #
+        # Use of hasattr for interface detection causes interface change in
+        # python2; it swallows all exceptions not just AttributeError.
         cuda_gradt = torch.zeros(100).requires_grad_(True).cuda()
 
-        with self.assertRaises(RuntimeError):
-            numba.cuda.is_cuda_array(cuda_gradt)
-        with self.assertRaises(RuntimeError):
-            numba.cuda.as_cuda_array(cuda_gradt)
+        if sys.version_info.major > 2:
+            # 3+, conversion raises RuntimeError
+            with self.assertRaises(RuntimeError):
+                numba.cuda.is_cuda_array(cuda_gradt)
+            with self.assertRaises(RuntimeError):
+                numba.cuda.as_cuda_array(cuda_gradt)
+        else:
+            # 2, allow either RuntimeError on access or non-implementing
+            # behavior to future-proof against potential changes in numba.
+            try:
+                was_cuda_array = numba.cuda.is_cuda_array(cuda_gradt)
+                was_runtime_error = False
+            except RuntimeError:
+                was_cuda_array = False
+                was_runtime_error = True
+
+            self.assertFalse(was_cuda_array)
+
+            if not was_runtime_error:
+                with self.assertRaises(TypeError):
+                    numba.cuda.as_cuda_array(cuda_gradt)
+            else:
+                with self.assertRaises(RuntimeError):
+                    numba.cuda.as_cuda_array(cuda_gradt)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
@@ -225,5 +255,6 @@ class TestNumbaIntegration(common.TestCase):
                 numba.cuda.as_cuda_array(cudat), numba.cuda.devicearray.DeviceNDArray
             )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     common.run_tests()
