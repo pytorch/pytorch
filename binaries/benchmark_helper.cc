@@ -190,7 +190,7 @@ void fillInputBlob(
   if (tensor_protos_map.empty()) {
     return;
   }
-
+  static caffe2::TensorDeserializer serializer;
   for (auto& tensor_kv : tensor_protos_map) {
     caffe2::Blob* blob = workspace->GetBlob(tensor_kv.first);
     if (blob == nullptr) {
@@ -207,11 +207,14 @@ void fillInputBlob(
         (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
       }
     } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
-      int total_size = tensor_proto->float_data_size();
-      for (size_t i = 0; i < total_size; i++) {
-        (tensor->mutable_data<float>())[i] = tensor_proto->float_data(i);
-      }
+      // int total_size = tensor_proto->float_data_size();
+      caffe2::TensorCPU *tensor = new caffe2::TensorCPU();
+      serializer.Deserialize(*tensor_proto, tensor);
+      blob->Reset(tensor);
     }
+    tensor = blob->GetMutableTensor(caffe2::CPU);
+    // caffe2::TensorPrinter printer("tensor", "./tensor.txt", 1000000);
+    // printer.Print<float>(*tensor);
     // todo: for other types
   }
 }
