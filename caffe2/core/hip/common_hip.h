@@ -1,7 +1,6 @@
 #ifndef CAFFE2_CORE_COMMON_HIP_H_
 #define CAFFE2_CORE_COMMON_HIP_H_
 
-#define HIP_VERSION 1
 #include <assert.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
