@@ -8426,7 +8426,6 @@ class TestTorch(TestCase):
             self.assertFalse(isinstance(idx, int))
             self.assertEqual(x[idx], x[int(idx)])
 
-
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_array_interface(self):
         types = [
