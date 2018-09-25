@@ -4,15 +4,6 @@
 #include <ideep_pin_singletons.hpp>
 #include "ideep_context.h"
 
-C10_DEFINE_REGISTRY(
-    IDEEPOperatorRegistry,
-    caffe2::OperatorBase,
-    const caffe2::OperatorDef&,
-    caffe2::Workspace*);
-
-namespace at {
-REGISTER_CONTEXT(DeviceType::IDEEP, caffe2::IDEEPContext);
-} // namespace at
 namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(ideep::tensor);
