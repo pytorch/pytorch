@@ -61,6 +61,8 @@ class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, ui
     return TypeIdentifier(11);
   }
 
+  const char* name() const noexcept;
+
  private:
   constexpr explicit TypeIdentifier(uint16_t id) : IdWrapper(id) {}
   friend class TypeMeta;
@@ -91,6 +93,11 @@ namespace caffe2 {
 AT_CORE_API std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
 AT_CORE_API std::unordered_set<std::string>& gRegisteredTypeNames();
 
+inline const char* TypeIdentifier::name() const noexcept {
+  auto it = gTypeNames().find(*this);
+  assert(it != gTypeNames().end());
+  return it->second.c_str();
+}
 
 AT_CORE_API std::mutex& gTypeRegistrationMutex();
 
