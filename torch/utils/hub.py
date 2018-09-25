@@ -11,25 +11,26 @@ def git(*args):
     try:
         subprocess.check_call(['git'] + list(args), stdout=FNULL, stderr=FNULL)
     except subprocess.CalledProcessError as err:
-        print('Failed to run \"git {}\"'.format(' '.join(args)))
+        print('Failed to run \"git {}\"\nAborting...'.format(' '.join(args)))
+        exit(-1)
 
-def load_model(repo_url, file_path, callable_name, checkpoint=None, model_dir=None, map_location=None, git_branch='master'):
+def load_model(file_path, callable_name, checkpoint=None, hub_dir=None, map_location=None, git_repo=None, git_branch='master'):
     r"""
     TODO: doc string
     """
-    if model_dir is None:
-        torch_home = os.path.expanduser(os.getenv('TORCH_HOME', '~/.torch'))
-        model_dir = os.getenv('TORCH_HUB_DIR', os.path.join(torch_home, 'model'))
-        checkpoint_dir = os.getenv('TORCH_HUB_DIR', os.path.join(torch_home, 'checkpoint'))
-    if os.path.exists(model_dir):
-        shutil.rmtree(model_dir)
+    if hub_dir is None:
+        hub_dir = os.path.expanduser(os.getenv('TORCH_HUB_DIR', '~/.torch/hub'))
+    if git_repo:
+        model_dir = os.path.join(hub_dir, 'model')
+        if os.path.exists(model_dir):
+            shutil.rmtree(model_dir)
 
-    if not os.path.exists(checkpoint_dir):
-        os.makedirs(checkpoint_dir)
+        # clone the github repo
+        git('clone', '-b', git_branch, git_repo, model_dir)
+        module_path = os.path.join(model_dir, file_path)
+    else:
+        module_path = file_path
 
-    # clone the github repo
-    git('clone', '-b', git_branch, repo_url, model_dir)
-    module_path = os.path.join(model_dir, file_path)
     try:
         # importlib.util was added since python3.4
         spec = importlib.util.spec_from_file_location(file_path, module_path)
@@ -50,8 +51,11 @@ def load_model(repo_url, file_path, callable_name, checkpoint=None, model_dir=No
     if checkpoint is None:
         print('No pretrained weights provided. Proceeding with random initialized weights...')
     else:
-        state_dict = model_zoo.load_url(checkpoint, checkpoint_dir, map_location)
-        model.load_state_dict(state_dict)
+        checkpoint_dir = os.path.join(hub_dir, 'checkpoint')
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir)
+
+        model.load_state_dict(model_zoo.load_url(checkpoint, checkpoint_dir, map_location))
 
     return model
 
