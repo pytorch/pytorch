@@ -184,7 +184,7 @@ class AT_CORE_API BaseContext {
 AT_DECLARE_TYPED_REGISTRY(
     ContextRegistry,
     at::DeviceType,
-    BaseContext,
+    at::BaseContext,
     std::unique_ptr,
     at::Device);
 
@@ -193,7 +193,7 @@ AT_DECLARE_TYPED_REGISTRY(
 
 inline std::unique_ptr<at::BaseContext> CreateContext(
     const at::Device& device) {
-  return ContextRegistry()->Create(device.type(), device);
+  return at::ContextRegistry()->Create(device.type(), device);
 }
 
 } // namespace at
