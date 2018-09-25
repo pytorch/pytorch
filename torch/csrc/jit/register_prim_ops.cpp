@@ -70,7 +70,7 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               at::DeviceGuard guard(a);
-              push(stack, a.toCLong());
+              push(stack, a.item<int64_t>());
               return 0;
             };
           } else {
@@ -78,7 +78,7 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               at::DeviceGuard guard(a);
-              push(stack, a.toCDouble());
+              push(stack, a.item<double>());
               return 0;
             };
           }
@@ -92,7 +92,7 @@ RegisterOperators reg({
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/true);
               at::DeviceGuard guard(a);
-              push(stack, a.toCLong());
+              push(stack, a.item<int64_t>());
               return 0;
             };
           } else {
@@ -101,7 +101,7 @@ RegisterOperators reg({
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/false);
               at::DeviceGuard guard(a);
-              push(stack, a.toCDouble());
+              push(stack, a.item<double>());
               return 0;
             };
           }
@@ -727,7 +727,7 @@ RegisterOperators reg2({
             pop(stack, t);
             std::vector<int64_t> elems;
             for(int i = 0; i < t.size(0); i++){
-              elems.push_back(*t[i].toIntData());
+              elems.push_back(*t[i].data<int32_t>());
             }
             push(stack, jit::IntList::create(elems));
             return 0;

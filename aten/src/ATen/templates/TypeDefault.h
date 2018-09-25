@@ -6,7 +6,7 @@
 
 namespace at {
 
-struct AT_API TypeDefault : public TypeExtendedInterface {
+struct CAFFE2_API TypeDefault : public TypeExtendedInterface {
   explicit TypeDefault(TensorTypeId type_id, bool is_variable, bool is_undefined)
       : TypeExtendedInterface(type_id, is_variable, is_undefined) {}
 

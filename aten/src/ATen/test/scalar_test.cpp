@@ -71,7 +71,7 @@ CATCH_TEST_CASE( "scalar test", "[]" ) {
   auto t = ones({4,4});
 
   auto wha2 = zeros({4,4}).add(t).sum();
-  CATCH_REQUIRE( wha2.toCDouble() == 16.0 );
+  CATCH_REQUIRE( wha2.item<double>() == 16.0 );
 
   CATCH_REQUIRE( t.sizes()[0] == 4 );
   CATCH_REQUIRE( t.sizes()[1] == 4 );
@@ -116,10 +116,10 @@ CATCH_TEST_CASE( "scalar test", "[]" ) {
   // test direct C-scalar type conversions
   {
     auto x = ones({1,2}, T);
-    _CATCH_REQUIRE_THROWS(x.toCFloat());
+    _CATCH_REQUIRE_THROWS(x.item<float>());
   }
   auto float_one = ones({}, T);
-  CATCH_REQUIRE(float_one.toCFloat() == 1);
-  CATCH_REQUIRE(float_one.toCInt() == 1);
-  CATCH_REQUIRE((float_one.toCHalf() == 1));
+  CATCH_REQUIRE(float_one.item<float>() == 1);
+  CATCH_REQUIRE(float_one.item<int32_t>() == 1);
+  CATCH_REQUIRE((float_one.item<at::Half>() == 1));
 }

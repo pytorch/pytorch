@@ -153,7 +153,7 @@ void TensorIterator::allocate_outputs() {
       for (int dim = 0; dim < ndim(); dim++) {
         tensor_stride[dim] /= element_size;
       }
-      *op.tensor = op.type->tensor(tensor_shape, tensor_stride);
+      *op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.type->options());
     }
   }
 }

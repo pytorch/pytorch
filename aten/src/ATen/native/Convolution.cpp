@@ -316,7 +316,7 @@ at::Tensor _convolution(
     weight = view4d(weight);
   }
 
-  auto output = input.type().tensor();
+  auto output = at::empty({0}, input.options());
 
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */

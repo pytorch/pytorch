@@ -65,6 +65,8 @@ graph(%0 : Dynamic
       %3 : Dynamic
       %4 : Dynamic) {
   %23 : Dynamic, %24 : Dynamic = prim::DifferentiableGraph_0(%0, %3, %1, %4, %2)
+  %7 : int = prim::Constant[value=1]()
+  %19 : int = prim::Constant[value=1]()
   return (%24, %23);
 }
 with prim::DifferentiableGraph_0 = graph(%1 : Dynamic
@@ -74,20 +76,20 @@ with prim::DifferentiableGraph_0 = graph(%1 : Dynamic
       %17 : Dynamic) {
   %0 : Dynamic = aten::mm(%1, %2)
   %3 : Dynamic = aten::mm(%4, %5)
-  %6 : int = prim::Constant[value=1]()
-  %7 : Dynamic = aten::add(%0, %3, %6)
-  %8 : Dynamic, %9 : Dynamic, %10 : Dynamic, %11 : Dynamic = prim::ConstantChunk[chunks=4, dim=1](%7)
+  %7 : int = prim::Constant[value=1]()
+  %6 : Dynamic = aten::add(%0, %3, %7)
+  %8 : Dynamic, %9 : Dynamic, %10 : Dynamic, %11 : Dynamic = prim::ConstantChunk[chunks=4, dim=1](%6)
   %12 : Dynamic = aten::sigmoid(%8)
   %13 : Dynamic = aten::sigmoid(%11)
   %14 : Dynamic = aten::tanh(%10)
   %15 : Dynamic = aten::sigmoid(%9)
   %16 : Dynamic = aten::mul(%15, %17)
   %18 : Dynamic = aten::mul(%12, %14)
-  %19 : int = prim::Constant[value=1]()
-  %20 : Dynamic = aten::add(%16, %18, %19)
-  %21 : Dynamic = aten::tanh(%20)
+  %20 : int = prim::Constant[value=1]()
+  %19 : Dynamic = aten::add(%16, %18, %20)
+  %21 : Dynamic = aten::tanh(%19)
   %22 : Dynamic = aten::mul(%13, %21)
-  return (%20, %22);
+  return (%19, %22);
 }
 
 testDifferentiate
