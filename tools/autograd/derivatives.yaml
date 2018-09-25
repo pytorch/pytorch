@@ -866,7 +866,7 @@
 - name: log_sigmoid_forward(Tensor self)
   self: log_sigmoid_backward(grad, self, buffer)
 
-- name: _log_softmax(Tensor self, int64_t dim, bool upconvert)
+- name: _log_softmax(Tensor self, int64_t dim, bool half_to_float)
   self: _log_softmax_backward_data(grad, result, dim, self)
 
 - name: prelu(Tensor self, Tensor weight)
@@ -881,7 +881,7 @@
 - name: rrelu_with_noise_forward_(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_with_noise_backward(grad, output, noise, lower, upper, training)
 
-- name: _softmax(Tensor self, int64_t dim, bool upconvert)
+- name: _softmax(Tensor self, int64_t dim, bool half_to_float)
   self: _softmax_backward_data(grad, result, dim, self)
 
 - name: softplus_forward(Tensor self, Scalar beta, Scalar threshold)

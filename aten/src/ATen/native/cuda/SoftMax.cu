@@ -475,10 +475,10 @@ cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *grad
 
 
 template<template<typename, typename, typename> class Epilogue>
-Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool upconvert){
-  if (upconvert) AT_ASSERTM(input_.type().scalarType() == ScalarType::Half,"upconvert is supported for Half type only");
+Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_to_float){
+  if (half_to_float) AT_ASSERTM(input_.type().scalarType() == ScalarType::Half,"conversion is supported for Half type only");
   auto input = input_.contiguous();
-  Tensor output = upconvert ? at::empty_like(input, input.options().dtype(ScalarType::Float)) : at::empty_like(input);
+  Tensor output = half_to_float ? at::empty_like(input, input.options().dtype(ScalarType::Float)) : at::empty_like(input);
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (input.dim() == 0) input = input.view(1);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
@@ -501,7 +501,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool upconv
       dim3 block = SoftMax_getBlockSize(ILP, dim_size);
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
-      if (!upconvert) {
+      if (!half_to_float) {
           cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
             <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
               output.data<scalar_t>(), input.data<scalar_t>(), dim_size
@@ -521,7 +521,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool upconv
       dim3 grid, block;
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
-      if (!upconvert) {
+      if (!half_to_float) {
           SpatialSoftMax_getLaunchSizes<accscalar_t>(
               &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, scalar_t, Epilogue>,
               outer_size, dim_size, inner_size,
@@ -548,10 +548,10 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool upconv
 }
 
 template<template<typename, typename, typename> class Epilogue>
-Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_, bool upconvert){
+Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t dim_, bool half_to_float){
   int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
   auto grad = grad_.contiguous();
-  Tensor gI = upconvert? at::empty_like(grad, grad.options().dtype(ScalarType::Half)) : at::empty_like(grad);
+  Tensor gI = half_to_float ? at::empty_like(grad, grad.options().dtype(ScalarType::Half)) : at::empty_like(grad);
   static_assert(std::is_same<acc_type<at::Half, true>, float>::value, "accscalar_t for half should be float");
   if (grad.dim() == 0) grad = grad.view(1);
   AT_CHECK(dim >=0 && dim < grad.dim(), "dim must be non-negative and less than input dimensions");
@@ -572,7 +572,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     dim3 block = SoftMax_getBlockSize(ILP, dim_size);
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(gI.type(), "host_softmax_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
-    if (!upconvert) {
+    if (!half_to_float) {
         cunn_SoftMaxBackward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
          <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
             gI.data<scalar_t>(), output.data<scalar_t>(), grad.data<scalar_t>(), dim_size
@@ -589,7 +589,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
     dim3 grid, block;
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "host_softmax_backward", [&] {
     using accscalar_t = acc_type<scalar_t, true>;
-    if (!upconvert) {
+    if (!half_to_float) {
         SpatialSoftMax_getLaunchSizes<accscalar_t>(
             &cunn_SpatialSoftMaxBackward<scalar_t, accscalar_t, scalar_t, Epilogue>,
             outer_size, dim_size, inner_size,
@@ -619,29 +619,29 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
 }
 }
 
-Tensor log_softmax_cuda(const Tensor &input, const int64_t dim, const bool upconvert){
-  return host_softmax<LogSoftMaxForwardEpilogue>(input, dim, upconvert);
+Tensor log_softmax_cuda(const Tensor &input, const int64_t dim, const bool half_to_float){
+  return host_softmax<LogSoftMaxForwardEpilogue>(input, dim, half_to_float);
 }
 
 Tensor log_softmax_backward_cuda(const Tensor &grad, const Tensor &output, int64_t dim, const Tensor &input){
-  bool upconvert = grad.type().scalarType() != input.type().scalarType();
-  if (upconvert) {
+  bool half_to_float = grad.type().scalarType() != input.type().scalarType();
+  if (half_to_float) {
      AT_ASSERTM((grad.type().scalarType() == ScalarType::Float && input.type().scalarType() == ScalarType::Half), "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
-  return host_softmax_backward<LogSoftMaxBackwardEpilogue>(grad, output, dim, upconvert);
+  return host_softmax_backward<LogSoftMaxBackwardEpilogue>(grad, output, dim, half_to_float);
 }
 
-Tensor softmax_cuda(const Tensor &input, const int64_t dim, const bool upconvert){
-  return host_softmax<SoftMaxForwardEpilogue>(input, dim, upconvert);
+Tensor softmax_cuda(const Tensor &input, const int64_t dim, const bool half_to_float){
+  return host_softmax<SoftMaxForwardEpilogue>(input, dim, half_to_float);
 }
 
 Tensor softmax_backward_cuda(const Tensor &grad, const Tensor &output, int64_t dim, const Tensor &input){
-  bool upconvert = grad.type().scalarType() != input.type().scalarType();
-  if (upconvert) {
+  bool half_to_float = grad.type().scalarType() != input.type().scalarType();
+  if (half_to_float) {
      AT_ASSERTM((grad.type().scalarType() == ScalarType::Float && input.type().scalarType() == ScalarType::Half), "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   Tensor tmp = grad * output;
-  return host_softmax_backward<SoftMaxBackwardEpilogue>(tmp, output, dim, upconvert);
+  return host_softmax_backward<SoftMaxBackwardEpilogue>(tmp, output, dim, half_to_float);
 }
 
 }

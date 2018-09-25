@@ -1010,7 +1010,7 @@
 - func: log_softmax(Tensor self, int64_t dim) -> Tensor
   variants: function, method
 
-- func: _log_softmax(Tensor self, int64_t dim, bool upconvert) -> Tensor
+- func: _log_softmax(Tensor self, int64_t dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
@@ -1445,7 +1445,7 @@
 - func: softmax(Tensor self, int64_t dim) -> Tensor
   variants: function, method
 
-- func: _softmax(Tensor self, int64_t dim, bool upconvert) -> Tensor
+- func: _softmax(Tensor self, int64_t dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: softmax_cpu
     CUDA: softmax_cuda

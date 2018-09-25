@@ -1893,10 +1893,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types([torch.float, torch.half])
     def test_softmax_dtype(self, dtype=torch.float):
-        input = torch.tensor([32, 100], device="cuda", dtype=dtype).uniform_()
-        input.requires_grad = True
-        inputf = input.to(torch.float).detach()
-        inputf.requires_grad = True
+        input = torch.rand(32, 100, device="cuda", dtype=dtype, requires_grad=True)
+        inputf = input.to(torch.float).detach().requires_grad_(True)
         out = F.softmax(input, dim=-1, dtype=torch.float)
         outf = F.softmax(inputf, dim=-1)
         # should be bitwise equal
