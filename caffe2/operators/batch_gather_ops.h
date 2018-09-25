@@ -26,7 +26,7 @@ class BatchGatherOp final : public Operator<Context> {
 
     CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
 
-    vector<TIndex> shape;
+    vector<int64_t> shape;
     shape.push_back(data.dim(0));
     shape.insert(shape.end(), indices.dims().begin(), indices.dims().end());
     shape.insert(shape.end(), data.dims().begin() + 2, data.dims().end());

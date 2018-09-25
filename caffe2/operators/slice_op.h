@@ -204,15 +204,15 @@ class SliceOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(this->template GetRepeatedArgument<TIndex>("starts")),
-        ends_(this->template GetRepeatedArgument<TIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
     if (InputSize() > 1) {
-      return DispatchHelper<TensorTypes<int, TIndex>>::call(this, Input(1));
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
     } else {
-      return DoRunWithType<TIndex>();
+      return DoRunWithType<int64_t>();
     }
   }
 
@@ -252,8 +252,8 @@ class SliceOp : public Operator<Context> {
   AT_DISABLE_COPY_AND_ASSIGN(SliceOp);
 
  protected:
-  std::vector<TIndex> starts_;
-  std::vector<TIndex> ends_;
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
   Tensor starts_host_{CPU};
   Tensor ends_host_{CPU};
@@ -265,17 +265,17 @@ class SliceGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(this->template GetRepeatedArgument<TIndex>("starts")),
-        ends_(this->template GetRepeatedArgument<TIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
         AT_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
 
   bool RunOnDevice() override {
     if (InputSize() == 4) {
-      return DispatchHelper<TensorTypes<int, TIndex>>::call(this, Input(1));
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
     } else {
-      return DoRunWithType<TIndex>();
+      return DoRunWithType<int64_t>();
     }
   }
 
@@ -321,8 +321,8 @@ class SliceGradientOp : public Operator<Context> {
 
  private:
 
-  std::vector<TIndex> starts_;
-  std::vector<TIndex> ends_;
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
   Tensor starts_host_{CPU};
   Tensor ends_host_{CPU};

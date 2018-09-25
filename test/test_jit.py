@@ -239,6 +239,13 @@ class JitTestCase(TestCase):
             imported = torch.jit.load(f.name)
         finally:
             os.unlink(f.name)
+        f = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            f.close()
+            imported.save(f.name)
+            imported = torch.jit.load(f.name)
+        finally:
+            os.unlink(f.name)
         return imported
 
     def assertGraphContains(self, graph, kind):
@@ -366,7 +373,10 @@ class JitTestCase(TestCase):
         return ge
 
     def assertAllFused(self, graph):
-        self.assertTrue(all(node.kind() in {'prim::Constant', 'prim::FusionGroup'} for node in graph.nodes()))
+        if [n.kind() for n in graph.nodes()] == ['prim::DifferentiableGraph']:
+            graph = next(graph.nodes()).g('Subgraph')
+        self.assertTrue(all(node.kind() in {'prim::Constant', 'prim::FusionGroup'} for node in graph.nodes()),
+                        'got {}'.format(graph))
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
 
     def assertExportImport(self, trace, inputs):
@@ -520,6 +530,21 @@ class TestJit(JitTestCase):
         m = MyModule()
         input = torch.rand(3, 4)
         self.assertEqual(2 * input + 1, m(input))
+
+    def test_diff_subgraph_clones_constants(self):
+        @torch.jit.script
+        def f(x, y):
+            return x + x + y + x + y + x + y + x + y + x
+
+        def count_constants(graph):
+            return sum(node.kind() == 'prim::Constant' for node in graph.nodes())
+
+        graph = f.graph.copy()
+        self.run_pass('cse', graph)
+        self.run_pass('create_autodiff_subgraphs', graph)
+        nodes = list(graph.nodes())
+        self.assertEqual(count_constants(graph), 1)
+        self.assertEqual(count_constants(nodes[1].g('Subgraph')), 1)
 
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
@@ -1580,18 +1605,6 @@ class TestJit(JitTestCase):
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
 
-    def test_addmm_fusion_scalar_type(self):
-        @torch.jit.script
-        def addmm(a, b, c):
-            return a + b.mm(c)
-
-        a, b, c = [torch.tensor(e) for e in (1, [[2.]], [[3.]])]
-        addmm(a, b, c)
-        graph = addmm.graph_for(a, b, c)
-        # graph fusion skipped in windows, which runs cse
-        self.run_pass('cse', graph)
-        self.assertExpectedGraph(graph)
-
     def test_index_put(self):
         ten = torch.zeros(3, 3)
         mask = torch.Tensor([[True, True, True],
@@ -1619,13 +1632,22 @@ class TestJit(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
             sparse(get_sparse())
 
-        # has a different entry point than calling sparse directly
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            torch._C._jit_pass_shape_analysis(
-                sparse.graph, (get_sparse(),), False)
-
         with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
             sparse(torch.tensor([1]))
+
+    def test_tuple_specialization(self):
+        @torch.jit.script
+        def f(t):
+            # type: (Tuple[Tensor, Tensor]) -> Tensor
+            x, y = t
+            return x + y
+
+        t = torch.randn(2, 2), torch.randn(2, 2)
+        f(t)
+        graph = f.graph_for(t)
+        input_types = list(next(graph.inputs()).type().elements())
+        for t in input_types:
+            self.assertEqual(t.kind(), 'TensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -2691,6 +2713,23 @@ a")
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @skipIfRocm
+    def test_clamp_fusion(self):
+        def func(a, b):
+            return torch.clamp(a + b, min=0, max=2)
+
+        a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
+        b = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        s = self.checkScript(func, (a, b))
+        self.assertAllFused(s.graph_for(a, b))
+
+        c = s(a, b)
+        c.sum().backward()
+        self.assertAllFused(backward_graph(s))
+
     def test_mul(self):
         def func(a, b):
             return a * b
@@ -3433,6 +3472,18 @@ a")
         real_outs = cu.test_view_shape_prop(*inputs)
         self.assertEqual(real_outs, outputs)
 
+    def test_view_listconstruct_shape_prop(self):
+        def fn(x):
+            B = x.size(0)
+            C = x.size(1)
+            T = x.size(2)
+            return x.view(T, B, C)
+
+        x = torch.randn(3, 1, 5, requires_grad=True)
+        graph = torch.jit.script(fn).graph
+        torch._C._jit_pass_shape_analysis(graph, (x,), False)
+        self.assertTrue(next(graph.outputs()).type().kind() != 'DynamicType')
+
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
         def test_integral_shape_inference(a):
@@ -3462,10 +3513,10 @@ a")
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skip("this test is flaky, see #11360")
+    @enable_cpu_fuser
     def test_scalar_fusion(self):
         def fn(x, y):
-            return x + y.type_as(x)
+            return 2 * x + y
 
         x = torch.tensor(0.1, dtype=torch.float, device='cpu')
         y = torch.tensor(1, dtype=torch.float, device='cpu')
@@ -7625,8 +7676,9 @@ EXCLUDE_SCRIPT = {
     'test_var_dim_1d',
     'test_var_dim_1d_neg0',
     'test_var_dim_neg0',
-    'test_matrix_power_n=-1',  # involves inverse
-    'test_matrix_power_n=-3',  # involves inverse
+    'test_norm_fro',
+    'test_norm_fro_default',
+    'test_norm_nuc',
     # skipped nn functional tests
     # ops involves sampling which could not test
     'test_nn_dropout',

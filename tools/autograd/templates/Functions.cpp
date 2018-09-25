@@ -219,7 +219,7 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
 
   Tensor zero_mask = (input == 0);
   Tensor slice_zero_count = zero_mask.sum(dim, true);
-  int64_t total_zeros = slice_zero_count.sum().toCLong();
+  int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
     return (grad * result) / input;
   } else {
@@ -321,7 +321,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   }
 
   // Simple case with nonzero elements in the input
-  if ((input != 0).all().toCByte()) {
+  if ((input != 0).all().item<uint8_t>()) {
     Tensor result = at::cumprod(input, dim);
     return sum_scan_exclusive(result * grad, dim) / input;
   }
@@ -1399,26 +1399,28 @@ std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self
 // each output separately; there is not all that much sharing
 // of computation going on here.
 std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
-    const Tensor & mb_ggI,
-    const Tensor & mb_ggW,
-    const Tensor & mb_gO,
-    const Tensor & input,
-    const Tensor & weight,
-    std::array<bool, 3> output_mask) {
+    const Tensor & grad_grad_input,
+    const Tensor & grad_grad_weight,
+    const Tensor & grad_out,
+    const Tensor & input_,
+    const Tensor & weight_) {
+
+    auto input = input_.contiguous();
+    auto weight = weight_.contiguous();
 
   // Zero-fill undefined grads (TODO: do this more efficiently)
-  auto ggI = mb_ggI.defined() ? mb_ggI : at::zeros_like(input);
-  auto ggW = mb_ggW.defined() ? mb_ggW : at::zeros_like(weight);
-  auto gO = mb_gO.defined() ? mb_gO : at::zeros_like(input);
+  auto ggI = grad_grad_input.defined() ? grad_grad_input.contiguous() : at::zeros_like(input);
+  auto ggW = grad_grad_weight.defined() ? grad_grad_weight.contiguous() : at::zeros_like(weight);
+  auto gO = grad_out.defined() ? grad_out.contiguous() : at::zeros_like(input);
 
   auto positive_mask = (input > 0).type_as(ggI);
   auto nonpositive_mask = (input <= 0).type_as(ggW);
 
   // Explanation: Let input be i, weight be w, grad_output be gO.
-  // f(i, w) = i  if i > 0
-  //         = wi if i <= 0
-  // df/di * gO  = gO      if i > 0      df/dw * g0 = 0      if i > 0
-  //             = g0 * w  if i <= 0                = g0 * i  if i <= 0
+  // f(i, w) = i      if i > 0
+  //         = w * i  if i <= 0
+  // gI = df/di * gO  = gO      if i > 0    gW = df/dw * gO = 0       if i > 0
+  //                  = gO * w  if i <= 0                   = gO * i  if i <= 0
   // The rest is taking derivatives of these wrt i, w, gO and summing/expanding properly.
 
   if (weight.numel() == 1) {
@@ -1462,7 +1464,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       }
 
       Tensor ggO;
-      if (output_mask[0]) {
+      if (gO.requires_grad()) {
           // expand weight as input as in ggW/ggI above
           auto weight_expanded = weight;
           for (int64_t i = 0; i < dims_to_unsqueeze; i++) {
@@ -1598,7 +1600,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
 // Invertible case is derived from Jacobi's formula, and also can be found at:
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
-  auto det_val = det.toCDouble();
+  auto det_val = det.item<double>();
   if (det_val != 0 /* invertible */) {
     return grad * det * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
@@ -1610,7 +1612,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
-  auto logdet_val = logdet.toCDouble();
+  auto logdet_val = logdet.item<double>();
   if (logdet_val != -INFINITY /* det != 0, invertible */) {
     return grad * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
@@ -1626,7 +1628,7 @@ Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
   AT_ASSERTM(!grads[0].defined(), "slogdet's sign output should never have gradient");
-  auto signdet_val = signdet.toCDouble();
+  auto signdet_val = signdet.item<double>();
   if (signdet_val != 0 /* det != 0, invertible */) {
     return grads[1] * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {

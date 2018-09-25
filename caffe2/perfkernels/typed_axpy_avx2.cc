@@ -8,10 +8,10 @@
 
 namespace caffe2 {
 
-void TypedAxpy_float16_float__avx2_fma(
+void TypedAxpyHalffloat__avx2_fma(
     int N,
     const float a,
-    const float16* x,
+    const at::Half* x,
     float* y) {
   // if x does not start at the 16 byte boundary, we will process the first few.
   // before we get to a real one.

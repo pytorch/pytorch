@@ -19,7 +19,7 @@ CAFFE_KNOWN_TYPE(mkl::MKLMemory<float>);
 CAFFE_KNOWN_TYPE(mkl::MKLMemory<double>);
 
 template <typename T>
-static vector<TIndex> GetMKLTensorInfo(
+static vector<int64_t> GetMKLTensorInfo(
     const void* c,
     size_t* capacity,
     DeviceOption* device) {

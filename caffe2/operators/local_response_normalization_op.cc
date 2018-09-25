@@ -27,7 +27,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   scale_->ResizeLike(X);
   float* scale_data = scale_->template mutable_data<float>();
   math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
-  Tensor padded_square(vector<TIndex>{C + size_ - 1, H, W}, CPU);
+  Tensor padded_square(vector<int64_t>{C + size_ - 1, H, W}, CPU);
   float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
                                &context_);
@@ -91,7 +91,7 @@ bool LRNOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   scale_->ResizeLike(X);
   float* scale_data = scale_->template mutable_data<float>();
 
-  Tensor padded_square(vector<TIndex>(1, C + size_ - 1), CPU);
+  Tensor padded_square(vector<int64_t>(1, C + size_ - 1), CPU);
   float* padded_square_data = padded_square.template mutable_data<float>();
   math::Set<float, CPUContext>(padded_square.size(), 0., padded_square_data,
                                &context_);
@@ -146,7 +146,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const float* dYdata = dY.data<float>();
   float* dXdata = dX->template mutable_data<float>();
 
-  Tensor padded_ratio(vector<TIndex>{C + size_ - 1, H, W}, CPU);
+  Tensor padded_ratio(vector<int64_t>{C + size_ - 1, H, W}, CPU);
   float* padded_ratio_data = padded_ratio.template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio
   math::Set<float, CPUContext>(X.size(), bias_, scale_data, &context_);
@@ -183,7 +183,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
   math::Set<float, CPUContext>(padded_ratio.size(), 0., padded_ratio_data,
                                &context_);
-  Tensor accum_ratio(vector<TIndex>{H, W}, CPU);
+  Tensor accum_ratio(vector<int64_t>{H, W}, CPU);
   float* accum_ratio_data = accum_ratio.template mutable_data<float>();
 
   const float cache_ratio = 2. * alpha_ * beta_ / size_;
@@ -243,7 +243,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
     scale_ = &local_scale_tensor_;
   }
   scale_->ResizeLike(X);
-  Tensor padded_ratio(vector<TIndex>(1, C + size_ - 1), CPU);
+  Tensor padded_ratio(vector<int64_t>(1, C + size_ - 1), CPU);
   float* padded_ratio_data = padded_ratio.template mutable_data<float>();
   float* scale_data = scale_->template mutable_data<float>();
   // Compute scale(copied from LRNOp) - reusing padded_ratio

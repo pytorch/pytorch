@@ -132,10 +132,10 @@ Y:
         "*(type: bool; default: False)* Whether we calculate norm or averaged_norm.The Lp_averaged_norm(x) is defined as Lp_averaged_norm(x) = LpNorm(x) / size(x)")
     .TensorInferenceFunction([](const OperatorDef& /* unused */,
                                 const vector<TensorShape>& in) {
-      std::vector<TIndex> output_dims(1);
+      std::vector<int64_t> output_dims(1);
       output_dims[0] = 1; // 1
       return vector<TensorShape>{
-          CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+          CreateTensorShape(vector<int64_t>{output_dims}, in[0].data_type())};
     });
 
 OPERATOR_SCHEMA(LpNormGradient)

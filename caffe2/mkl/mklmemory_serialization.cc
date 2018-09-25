@@ -84,8 +84,8 @@ class MKLMemoryDeserializer : public BlobDeserializerBase {
         "MKLMemory only supports either float or double formats.");
     CAFFE_ENFORCE(
         !proto.has_segment(), "MKLMemory does not support segment right now.");
-    vector<TIndex> dims;
-    for (const TIndex d : proto.dims()) {
+    vector<int64_t> dims;
+    for (const int64_t d : proto.dims()) {
       dims.push_back(d);
     }
     // TODO: right now, every time we do a deserializer we create a new MKL

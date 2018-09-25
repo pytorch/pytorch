@@ -44,7 +44,7 @@ inline void PrintOffendingKey(const std::string& key) {
  * objects.
  */
 template <class SrcType, class ObjectPtrType, class... Args>
-class AT_API Registry {
+class CAFFE2_API Registry {
  public:
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
@@ -114,7 +114,7 @@ class AT_API Registry {
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
-class AT_API Registerer {
+class CAFFE2_API Registerer {
  public:
   Registerer(
       const SrcType& key,
@@ -152,11 +152,12 @@ class AT_API Registerer {
  * declaration, as well as creating a convenient typename for its corresponding
  * registerer.
  */
-#define AT_DECLARE_TYPED_REGISTRY(                                    \
-    RegistryName, SrcType, ObjectType, PtrType, ...)                     \
-  AT_API Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* RegistryName(); \
-  typedef Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>        \
-      Registerer##RegistryName; \
+#define AT_DECLARE_TYPED_REGISTRY(                                \
+    RegistryName, SrcType, ObjectType, PtrType, ...)              \
+  CAFFE2_API Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* \
+  RegistryName();                                                 \
+  typedef Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>   \
+      Registerer##RegistryName;                                   \
   extern template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>;
 
 #define AT_DEFINE_TYPED_REGISTRY(                                         \
