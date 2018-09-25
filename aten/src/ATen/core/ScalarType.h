@@ -188,7 +188,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
 
-struct Tensor;
+class Tensor;
 typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;
 

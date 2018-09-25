@@ -38,7 +38,7 @@ namespace at {
 class Scalar;
 struct Type;
 struct Storage;
-struct Tensor;
+class Tensor;
 
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
