@@ -206,6 +206,7 @@ class TestTorch(TestCase):
                        'reinforce',
                        'relu',
                        'relu_',
+                       'prelu',
                        'resize',
                        'resize_as',
                        'smm',
@@ -1088,7 +1089,6 @@ class TestTorch(TestCase):
             self.assertEqual(torch.zeros(0, device=device), torch.pairwise_distance(x, y))
             self.assertEqual(torch.zeros((0, 1), device=device), torch.pairwise_distance(x, y, keepdim=True))
 
-    @skipIfRocm
     def test_pdist_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -1104,7 +1104,6 @@ class TestTorch(TestCase):
             x = torch.randn(shape, device=device)
             self.assertEqual(torch.zeros(3, device=device), torch.pdist(x))
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_pdist_scipy(self):
         from scipy.spatial.distance import pdist
@@ -2287,7 +2286,6 @@ class TestTorch(TestCase):
                                                 dtype=int64_dtype, layout=layout, device=device, requires_grad=False),
                                 int64_dtype, layout, device, fv + 5, False)
 
-    @skipIfRocm
     def test_empty_full(self):
         self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
@@ -2405,29 +2403,30 @@ class TestTorch(TestCase):
             self.assertEqual(5., res1[0].item())
 
     def test_tensor_factory_copy_var(self):
-        # default copy from var
-        source = torch.randn(5, 5, requires_grad=True)
-        copy = torch.tensor(source)
-        self.assertEqual(copy.data, source.data)
-        self.assertTrue(source.requires_grad)
-        self.assertTrue(copy.is_leaf)
-        self.assertFalse(copy.requires_grad)
 
-        # copy with requires_grad=False
-        source = torch.randn(5, 5, requires_grad=True)
-        copy = torch.tensor(source, requires_grad=False)
-        self.assertEqual(copy.data, source.data)
-        self.assertTrue(source.requires_grad)
-        self.assertTrue(copy.is_leaf)
-        self.assertFalse(copy.requires_grad)
+        def check_copy(copy, is_leaf, requires_grad, data_ptr=None):
+            if data_ptr is None:
+                data_ptr = copy.data_ptr
+            self.assertEqual(copy.data, source.data)
+            self.assertTrue(copy.is_leaf == is_leaf)
+            self.assertTrue(copy.requires_grad == requires_grad)
+            self.assertTrue(copy.data_ptr == data_ptr)
 
-        # copy with requires_grad=True
-        source = torch.randn(5, 5, requires_grad=True)
-        copy = torch.tensor(source, requires_grad=True)
-        self.assertEqual(copy.data, source.data)
-        self.assertTrue(source.requires_grad)
-        self.assertTrue(copy.is_leaf)
-        self.assertTrue(copy.requires_grad)
+        source = torch.randn(5, 5, dtype=torch.double, requires_grad=True)
+        # test torch.tensor()
+        check_copy(torch.tensor(source), True, False)
+        check_copy(torch.tensor(source, requires_grad=False), True, False)
+        check_copy(torch.tensor(source, requires_grad=True), True, True)
+
+        # test tensor.new_tensor()
+        copy = torch.randn(1)
+        check_copy(copy.new_tensor(source), True, False)
+        check_copy(copy.new_tensor(source, requires_grad=False), True, False)
+        check_copy(copy.new_tensor(source, requires_grad=True), True, True)
+
+        # test torch.as_tensor()
+        check_copy(torch.as_tensor(source), source.is_leaf, source.requires_grad, source.data_ptr)  # not copy
+        check_copy(torch.as_tensor(source, dtype=torch.float), False, True)  # copy and keep the graph
 
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):
@@ -3831,7 +3830,6 @@ class TestTorch(TestCase):
         self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
         self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
 
-    @skipIfRocm
     def test_narrow_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -3997,6 +3995,7 @@ class TestTorch(TestCase):
         self.assertEqual(torch.cuda.HalfTensor(10).is_signed(), True)
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_gesv(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
                           (-6.05, -3.30, 5.36, -4.44, 1.08),
@@ -4123,11 +4122,11 @@ class TestTorch(TestCase):
         self.assertEqual(x.data, cast(x_exp))
 
     @skipIfNoLapack
-    @skipIfRocm
     def test_gesv_batched_dims(self):
         self._test_gesv_batched_dims(self, lambda t: t)
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_qr(self):
 
         # Since the QR decomposition is unique only up to the signs of the rows of
@@ -4310,10 +4309,12 @@ class TestTorch(TestCase):
         self.assertEqual(res1, tb, 0)
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_trtrs(self):
         self._test_trtrs(self, lambda t: t)
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_gels(self):
         def _test_underdetermined(a, b, expectedNorm):
             m = a.size()[0]
@@ -4429,6 +4430,7 @@ class TestTorch(TestCase):
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, 1e-8)
 
     @skipIfNoLapack
+    @skipIfRocm
     def test_eig(self):
         a = torch.Tensor(((1.96, 0.00, 0.00, 0.00, 0.00),
                           (-6.49, 3.80, 0.00, 0.00, 0.00),
@@ -7677,7 +7679,6 @@ class TestTorch(TestCase):
             self.assertEqual(device, device_copied)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_half_tensor_cuda(self):
         x = torch.randn(5, 5).half()
         self.assertEqual(x.cuda(), x)

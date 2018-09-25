@@ -16,7 +16,7 @@ template <typename Context, typename I_Type, typename O_Type>
 void FillTensor(
     caffe2::Workspace* ws,
     const std::string& name,
-    const std::vector<caffe2::TIndex>& shape,
+    const std::vector<int64_t>& shape,
     const std::vector<I_Type>& values) {
   auto* blob = ws->CreateBlob(name);
   auto* tensor = blob->GetMutableTensor(Context::GetDeviceType());

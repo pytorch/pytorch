@@ -31,7 +31,7 @@ from random import shuffle
 
 import torch
 from torch._six import inf
-from common import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN
+from common import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, skipIfRocm
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -1176,6 +1176,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfRocm
     def test_poisson_gpu_sample(self):
         set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
@@ -1965,6 +1966,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @skipIfRocm
     def test_gamma_gpu_sample(self):
         set_rng_seed(0)
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -2242,6 +2244,7 @@ class TestDistributions(TestCase):
                         self.assertEqual(expanded.event_shape, indep_dist.event_shape)
                         self.assertEqual(expanded.batch_shape, expanded_shape)
 
+    @skipIfRocm
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
         for Dist, params in EXAMPLES:
@@ -4108,6 +4111,7 @@ class TestConstraintRegistry(TestCase):
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @skipIfRocm
     def test_transform_to_cuda(self):
         for constraint in self.get_constraints(is_cuda=True):
             t = transform_to(constraint)

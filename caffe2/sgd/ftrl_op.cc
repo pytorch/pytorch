@@ -88,10 +88,10 @@ void SparseFtrlOp<T>::DoRun() {
   auto& grad = Input(GRAD);
   CAFFE_ENFORCE_EQ(&Input(VAR), var, "In place operation is required");
   CAFFE_ENFORCE_EQ(&Input(N_Z), n_z, "In place operation is required");
-  TIndex M = var->size();
-  TIndex N = var->dim(0);
-  TIndex block_size = M / N;
-  TIndex K = indices.size();
+  int64_t M = var->size();
+  int64_t N = var->dim(0);
+  int64_t block_size = M / N;
+  int64_t K = indices.size();
   DCHECK_EQ(M * 2, n_z->size());
   DCHECK_EQ(grad.size(), K * block_size);
   T* w = var->template mutable_data<T>();
@@ -101,7 +101,7 @@ void SparseFtrlOp<T>::DoRun() {
 
   // TODO(cxj): use OMP when it is reliable
   // #pragma omp parallel for
-  for (TIndex i = 0; i < K; ++i) {
+  for (int64_t i = 0; i < K; ++i) {
     SIndex idx = idxs[i];
     DCHECK(0 <= idx && idx < N) << "Index out of bounds: " << idx
                                 << ", range 0 to " << N;
@@ -116,7 +116,7 @@ void SparseFtrlOp<T>::DoRun() {
           nz[idx * 2 + 1],
           params_);
     } else {
-      TIndex x = block_size * idx;
+      int64_t x = block_size * idx;
       ftrl_update(
           block_size,
           w + x,

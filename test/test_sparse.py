@@ -1410,6 +1410,7 @@ class TestSparse(TestCase):
         test_tensor(indices, values, False, True)  # An empty tensor's data_ptr is always equal to 0
 
     @cpu_only  # just run once, we test both cpu and cuda
+    @skipIfRocm
     def test_constructor_device_legacy(self):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
         v = torch.tensor([3., 4., 5.])
@@ -1556,6 +1557,7 @@ class TestSparse(TestCase):
             self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
                                     [1, 1], [1, 2, 0], [2, 2, 0])
 
+    @skipIfRocm
     def test_is_nonzero(self):
         self.assertTrue(torch.sparse_coo_tensor(([0],), 1., (1,)).is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0],), 0., (1,)).is_nonzero())

@@ -1,10 +1,14 @@
 #pragma once
 
+#include <gtest/gtest.h>
+
 #include <torch/nn/cloneable.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -63,5 +67,25 @@ struct TempFile {
   int fd_;
 };
 #endif
+
+struct SeedingFixture : public ::testing::Test {
+  SeedingFixture() {
+    torch::manual_seed(0);
+  }
+};
+
+#define ASSERT_THROWS_WITH(statement, prefix)                            \
+  try {                                                                  \
+    (void)statement;                                                     \
+    FAIL() << "Expected statement `" #statement                          \
+              "` to throw an exception, but it did not";                 \
+  } catch (const std::exception& e) {                                    \
+    std::string message = e.what();                                      \
+    if (message.find(prefix) == std::string::npos) {                     \
+      FAIL() << "Error message \"" << message                            \
+             << "\" did not match expected prefix \"" << prefix << "\""; \
+    }                                                                    \
+  }
+
 } // namespace test
 } // namespace torch

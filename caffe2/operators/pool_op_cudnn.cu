@@ -285,7 +285,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
   }
 
  protected:
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t bottom_desc_;
@@ -498,7 +498,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
   }
 
  protected:
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t bottom_desc_;

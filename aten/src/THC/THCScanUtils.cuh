@@ -159,9 +159,15 @@ __device__ void exclusivePrefixScan(T* smem, T in, T* out, T* carry, BinaryFunct
 template <typename T, bool KillWARDependency, class BinaryFunction>
 __device__ void inclusiveBinaryPrefixScan(T* smem, bool in, T* out, BinaryFunction binop) {
   // Within-warp, we use warp voting.
+#if defined (__HIP_PLATFORM_HCC__)
+  unsigned long long int vote = WARP_BALLOT(in);
+  T index = __popcll(getLaneMaskLe() & vote);
+  T carry = __popcll(vote);
+#else
   T vote = WARP_BALLOT(in);
   T index = __popc(getLaneMaskLe() & vote);
   T carry = __popc(vote);
+#endif
 
   int warp = threadIdx.x / SCAN_UTILS_WARP_SIZE;
 

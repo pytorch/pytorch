@@ -141,7 +141,7 @@ class PackedFCOp final : public Operator<CPUContext> {
   }
   size_t axis_{1};
   uint32_t hash_{0};
-  vector<TIndex> Y_shape_cache_;
+  vector<int64_t> Y_shape_cache_;
   Tensor bias_multiplier_{CPU};
   std::unique_ptr<MKLPackedMatrix> local_packed_matrix_;
 };

@@ -125,6 +125,7 @@ struct ConvolutionDescriptor
     miopenDataType_t mathType = dataType;
     if (dataType == miopenHalf) mathType = miopenFloat;
     MIOPEN_CHECK(miopenInitConvolutionDescriptor(mut_desc(), miopenConvolution, *pad, *pad, *stride, *stride, 1, 1));
+    MIOPEN_CHECK(miopenSetConvolutionGroupCount(mut_desc(), groups));
   }
 };
 

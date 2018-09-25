@@ -90,7 +90,7 @@ class DLPackWrapper {
         device_option.cuda_gpu_id(),
         "Expected same device id for DLPack and C2 tensors");
 
-    std::vector<TIndex> dims;
+    std::vector<int64_t> dims;
     dims.reserve(dlTensor->ndim);
     for (int idx = 0; idx < dlTensor->ndim; ++idx) {
       dims.push_back(dlTensor->shape[idx]);
