@@ -7,10 +7,9 @@ namespace {
 
 using namespace at;
 
-Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, const TensorOptions &options) {
+Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, TensorOptions opt) {
   // get a mask that has value 1 whose indices satisfies i < j < k < ...
   // or i <= j <= k <= ... (depending on diagonal)
-  TensorOptions opt = options;
   Tensor range = at::arange(n, opt.dtype(kLong));
   std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range));
   Tensor mask = at::ones(index_grids[0].sizes(), opt.dtype(kByte));
