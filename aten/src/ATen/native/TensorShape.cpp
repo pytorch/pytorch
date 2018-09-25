@@ -176,7 +176,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
     newValues = self._values().narrow_copy(ddim, start, length);
   }
 
-  SparseTensor newTensor = self.type().sparse_coo_tensor(newIndices, newValues, newSizes);
+  SparseTensor newTensor = at::sparse_coo_tensor(newIndices, newValues, newSizes, self.type().options());
   _get_sparse_impl(newTensor)->set_coalesced(self.is_coalesced());
   return newTensor;
 }
