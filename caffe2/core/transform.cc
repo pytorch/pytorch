@@ -181,7 +181,7 @@ NetDef Transform::ApplyTo(const NetDef& orig_net) {
 
 // Create a Transform object
 unique_ptr<Transform> CreateTransform(string key) {
-  auto t = TransformRegistry()->Create(key);
+  auto t = c10::TransformRegistry()->Create(key);
   CAFFE_ENFORCE(t != nullptr, "Transform not found in registry: ", key);
   return t;
 }

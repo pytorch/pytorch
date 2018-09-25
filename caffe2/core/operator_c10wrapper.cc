@@ -5,4 +5,3 @@ C10_DEFINE_REGISTRY(
     caffe2::OperatorBase,
     const caffe2::OperatorDef&,
     caffe2::Workspace*);
-}

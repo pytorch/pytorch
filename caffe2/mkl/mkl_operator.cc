@@ -15,6 +15,6 @@ C10_DEFINE_REGISTRY(
 
 namespace caffe2 {
 
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::MKLDNN, MKLOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(DeviceType::MKLDNN, c10::MKLOperatorRegistry);
 
 } // namespace caffe2

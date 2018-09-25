@@ -105,7 +105,7 @@ unique_ptr<OperatorBase> TryCreateC10Operator(
     const string& key,
     const OperatorDef& operator_def,
     Workspace* ws) {
-  return C10OperatorRegistry()->Create(key, operator_def, ws);
+  return c10::C10OperatorRegistry()->Create(key, operator_def, ws);
 }
 
 unique_ptr<OperatorBase> TryCreateOperator(
@@ -340,18 +340,18 @@ C10_DEFINE_REGISTRY(
     GradientRegistry,
     caffe2::GradientMakerBase,
     const caffe2::OperatorDef&,
-    const vector<caffe2::GradientWrapper>&);
+    const std::vector<caffe2::GradientWrapper>&);
 
 namespace caffe2 {
 
-CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
-CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
-CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(CPU, c10::CPUOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(CUDA, c10::CUDAOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(HIP, c10::HIPOperatorRegistry);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
   std::unique_ptr<GradientMakerBase> maker(
-      GradientRegistry()->Create(def.type(), def, g_output));
+      c10::GradientRegistry()->Create(def.type(), def, g_output));
   CAFFE_ENFORCE(maker,
       "Gradient maker for operator ", def.type(), " not implemented.");
   GradientOpsMeta meta = maker->Get();
@@ -678,21 +678,21 @@ std::set<std::string> GetRegisteredOperators() {
   std::set<std::string> all_keys;
 
   // CPU operators
-  for (const auto& name : CPUOperatorRegistry()->Keys()) {
+  for (const auto& name : c10::CPUOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
   // CUDA operators
-  for (const auto& name : CUDAOperatorRegistry()->Keys()) {
+  for (const auto& name : c10::CUDAOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 
   // HIP operators
-  for (const auto& name : HIPOperatorRegistry()->Keys()) {
+  for (const auto& name : c10::HIPOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 
   // C10 operators
-  for (const auto& name : C10OperatorRegistry()->Keys()) {
+  for (const auto& name : c10::C10OperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 

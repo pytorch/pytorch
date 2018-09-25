@@ -898,8 +898,7 @@ namespace caffe2 {
 // You should not need to use this class.
 struct StaticLinkingProtector {
   StaticLinkingProtector() {
-    // TODO: Figure out why I have to do that
-    const int registered_ops = ::c10::CPUOperatorRegistry()->Keys().size();
+    const int registered_ops = c10::CPUOperatorRegistry()->Keys().size();
     // Note: this is a check failure instead of an exception, because if
     // the linking is wrong, Caffe2 won't be able to run properly anyway,
     // so it's better to fail loud.

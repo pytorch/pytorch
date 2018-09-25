@@ -127,7 +127,7 @@ TaskThreadPool* AsyncNetBase::pool_getter(
   std::unique_lock<std::mutex> pools_lock(pools_mutex_);
   auto pool = pools[device_id][pool_size];
   if (!pool) {
-    pool = ThreadPoolRegistry()->Create(
+    pool = c10::ThreadPoolRegistry()->Create(
         DeviceTypeName(device_type), device_id, pool_size, use_per_net_pools_);
     pools[device_id][pool_size] = pool;
   }
@@ -408,12 +408,16 @@ void AsyncNetBase::finalizeEvents() {
 
 AsyncNetBase::~AsyncNetBase() {}
 
+} // namespace caffe2
+
 C10_DEFINE_SHARED_REGISTRY(
     ThreadPoolRegistry,
-    TaskThreadPool,
+    caffe2::TaskThreadPool,
     int,
     int,
     bool);
+
+namespace caffe2 {
 
 C10_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
 
