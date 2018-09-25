@@ -12,11 +12,13 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
+import torchvision.models as models
 import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
+from torch.utils.hub import load_model
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
 from common import IS_WINDOWS, IS_PPC, skipIfRocm
@@ -697,6 +699,38 @@ class TestONNXUtils(TestCase):
         dims1 = [3, 4]
         dims2 = [1, 1]
         try_check_onnx_broadcast(dims1, dims2, True, False)
+
+
+class TestHub(TestCase):
+    def test_load_from_github(self):
+        hub_model = load_model(
+            'torchvision/models/resnet.py',  # git path
+            'resnet18',
+            git_repo='https://github.com/pytorch/vision.git',
+            checkpoint='https://download.pytorch.org/models/resnet18-5c106cde.pth')
+        vision_model = models.__dict__['resnet18'](pretrained=True)
+        self.assertEqual(vision_model.state_dict(), hub_model.state_dict())
+
+    def test_load_from_local_path(self):
+        # TODO: this is a hacky way to test local path.
+        hub_model = load_model(
+            '/private/home/ailzhang/vision/torchvision/models/resnet.py',  # local path
+            'resnet18',
+            checkpoint='https://download.pytorch.org/models/resnet18-5c106cde.pth')
+        vision_model = models.__dict__['resnet18'](pretrained=True)
+        self.assertEqual(vision_model.state_dict(), hub_model.state_dict())
+
+    @unittest.skipIf(not HAS_CUDA, "CUDA is not available")
+    def test_map_location(self):
+        # TODO: fix this: load_state_dict doesn't take map_location
+        hub_model = load_model(
+            'torchvision/models/resnet.py',  # git path
+            'resnet18',
+            map_location=lambda storage, loc: storage.cuda(0),
+            git_repo='https://github.com/pytorch/vision.git',
+            checkpoint='https://download.pytorch.org/models/resnet18-5c106cde.pth')
+        vision_model = models.__dict__['resnet18'](pretrained=True)
+        self.assertEqual(vision_model.state_dict(), hub_model.state_dict())
 
 
 if __name__ == '__main__':

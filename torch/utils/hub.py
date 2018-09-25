@@ -13,7 +13,9 @@ def git(*args):
         subprocess.check_call(['git'] + list(args), stdout=FNULL, stderr=FNULL)
     except subprocess.CalledProcessError as err:
         print('Failed to run \"git {}\"\nAborting...'.format(' '.join(args)))
+        FNULL.close()
         exit(-1)
+    FNULL.close()
 
 
 def load_model(
