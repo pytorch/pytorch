@@ -3516,7 +3516,7 @@ a")
     @enable_cpu_fuser
     def test_scalar_fusion(self):
         def fn(x, y):
-            return x + y.type_as(x)
+            return 2 * x + y
 
         x = torch.tensor(0.1, dtype=torch.float, device='cpu')
         y = torch.tensor(1, dtype=torch.float, device='cpu')
