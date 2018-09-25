@@ -131,9 +131,13 @@ struct CAFFE2_API CUDAHooksInterface {
 // for the "..." in a variadic macro"
 struct CAFFE2_API CUDAHooksArgs {};
 
-C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+} // namespace at
+
+C10_DECLARE_REGISTRY(CUDAHooksRegistry, at::CUDAHooksInterface, at::CUDAHooksArgs)
 #define REGISTER_CUDA_HOOKS(clsname) \
   C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
+
+namespace at {
 
 namespace detail {
 CAFFE2_API const CUDAHooksInterface& getCUDAHooks();

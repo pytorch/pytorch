@@ -39,11 +39,11 @@ struct CAFFE2_API VariableHooksInterface {
 // for the "..." in a variadic macro"
 struct CAFFE2_API VariableHooksArgs {};
 
-C10_DECLARE_REGISTRY(VariableHooksRegistry, VariableHooksInterface, VariableHooksArgs)
-#define REGISTER_VARIABLE_HOOKS(clsname) C10_REGISTER_CLASS(VariableHooksRegistry, clsname, clsname)
-
 namespace detail {
 CAFFE2_API const VariableHooksInterface& getVariableHooks();
 }
 
 } // namespace at
+
+C10_DECLARE_REGISTRY(VariableHooksRegistry, at::VariableHooksInterface, at::VariableHooksArgs)
+#define REGISTER_VARIABLE_HOOKS(clsname) C10_REGISTER_CLASS(VariableHooksRegistry, clsname, clsname)

@@ -43,8 +43,13 @@ struct AT_CORE_API LegacyTypeInitInterface {
   }
 };
 struct AT_CORE_API LegacyTypeInitArgs {};
-C10_DECLARE_REGISTRY(LegacyTypeInitRegistry, LegacyTypeInitInterface, LegacyTypeInitArgs);
+
+} // namespace at
+
+C10_DECLARE_REGISTRY(LegacyTypeInitRegistry, at::LegacyTypeInitInterface, at::LegacyTypeInitArgs);
 #define REGISTER_LEGACY_TYPE_INIT(clsname) C10_REGISTER_CLASS(LegacyTypeInitRegistry, clsname, clsname)
+
+namespace at {
 
 AT_CORE_API const LegacyTypeInitInterface& getLegacyTypeInit();
 
