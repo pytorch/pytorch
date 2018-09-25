@@ -53,7 +53,7 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
-  static at::Type* getVariableTypeFromBaseType(const at::Type& baseType);
+  static at::TypeExtendedInterface* getVariableTypeFromBaseType(const at::Type& baseType);
   static bool isVariableType(const at::Type& type);
   static std::vector<at::Type*> allCUDATypes();
   static std::vector<at::Type*> allCPUTypes();

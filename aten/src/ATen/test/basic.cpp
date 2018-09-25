@@ -21,7 +21,7 @@ using Catch::Matchers::StartsWith;
 
 static void test(Type & type) {
   CATCH_SECTION( "resize" ) {
-    auto a = type.tensor();
+    auto a = at::empty({0}, type.options());
     a.resize_({3,4});
     CATCH_REQUIRE(a.numel() == 12);
     a.resize_({5, 7});

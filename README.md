@@ -163,7 +163,7 @@ conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 conda install -c mingfeima mkldnn
 
 # Add LAPACK support for the GPU
-conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
+conda install -c pytorch magma-cuda92 # or [magma-cuda80 | magma-cuda91] depending on your cuda version
 ```
 
 On macOS
