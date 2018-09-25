@@ -33,10 +33,11 @@ bool GatherOp<CUDAContext>::RunOnDevice() {
 }
 
 template <>
-template <typename Index>
+template <typename TInd>
 bool GatherOp<CUDAContext>::DoRunWithType() {
   auto& data = Input(DATA);
   auto& indices = Input(INDICES);
+  auto axis = axis_;
   auto* output = Output(0);
 
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
@@ -69,14 +70,14 @@ bool GatherOp<CUDAContext>::DoRunWithType() {
       std::min(N * block_size, CAFFE_CUDA_NUM_THREADS),
       0,
       context_.cuda_stream()>>>(
-          src_base,
-          out,
-          idxs,
-          M,
-          N,
-          data_batch_size,
-          gathered_batch_size,
-          block_size);
+      src_base,
+      out,
+      idxs,
+      M,
+      N,
+      data_batch_size,
+      gathered_batch_size,
+      block_size);
   return true;
 }
 

@@ -31,14 +31,16 @@ class GatherOp : public Operator<Context> {
     auto axis = axis_;
     auto* output = Output(0);
 
-    CAFFE_ENFORCE_GE(data.ndim(), axis + 1, "DATA should be at least [axis+1]-D");
+    CAFFE_ENFORCE_GE(
+        data.ndim(), axis + 1, "DATA should be at least [axis+1]-D");
     CAFFE_ENFORCE_GE(axis, 0, "Axis should be non-negative");
     CAFFE_ENFORCE_LT(axis, data.ndim(), "Axis out of range");
 
     vector<TIndex> shape;
     shape.insert(shape.end(), data.dims().begin(), data.dims().begin() + axis);
     shape.insert(shape.end(), indices.dims().begin(), indices.dims().end());
-    shape.insert(shape.end(), data.dims().begin() + axis + 1, data.dims().end());
+    shape.insert(
+        shape.end(), data.dims().begin() + axis + 1, data.dims().end());
     output->Resize(shape);
 
     auto outer_size = data.size_to_dim(axis);
@@ -46,24 +48,30 @@ class GatherOp : public Operator<Context> {
     auto block_bytesize = data.size_from_dim(axis + 1) * data.meta().itemsize();
     auto N = indices.size();
 
-    auto data_batch_bytesize = data.size_from_dim(axis) * data.meta().itemsize();
+    auto data_batch_bytesize =
+        data.size_from_dim(axis) * data.meta().itemsize();
     auto gathered_batch_bytesize = N * block_size * data.meta().itemsize();
     const TInd* idxs = indices.template data<TInd>();
     auto src_base = static_cast<const char*>(data.raw_data());
     auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
-
+    auto data_axis_dim = data.dim(axis);
     for (auto batch = 0; batch < outer_size; ++batch) {
       for (auto i = 0; i < N; ++i) {
         auto idx = idxs[i];
+        if (idx < 0) {
+          idx = idx + data_axis_dim;
+        }
         CAFFE_ENFORCE(
-          0 <= idx && idx < data.dim(axis),
-          "INDICES element is out of DATA bounds, id=",
-          idx,
-          " data_dim=",
-          data.dim(axis));
-        auto src = src_base + idx * block_bytesize + batch * data_batch_bytesize;
+            0 <= idx && idx < data_axis_dim,
+            "INDICES element is out of DATA bounds, id=",
+            idx,
+            " data_axis_dim=",
+            data_axis_dim);
+        auto src =
+            src_base + idx * block_bytesize + batch * data_batch_bytesize;
         auto dst = out + i * block_bytesize + batch * gathered_batch_bytesize;
-        context_.template CopyItems<Context, Context>(data.meta(), block_size, src, dst);
+        context_.template CopyItems<Context, Context>(
+            data.meta(), block_size, src, dst);
       }
     }
     return true;

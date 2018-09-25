@@ -17,7 +17,9 @@ class GatherReference:
     def build_ref_gather(axis):
         def inner(data, ind):
             if ind.size == 0:
-                return [np.zeros((0, *data.shape[1:])).astype(np.float32)]
+                shape = list(data.shape)
+                shape[0] = 0
+                return [np.zeros(tuple(shape)).astype(np.float32)]
 
             output = [np.array(x, dtype=np.float32) for x in data.take(ind, axis).astype(np.float32)]
             return [output]
