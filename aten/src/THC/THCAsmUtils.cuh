@@ -105,16 +105,18 @@ __device__ __forceinline__ unsigned getLaneMaskLt() {
 #endif
 }
 
-__device__ __forceinline__ unsigned getLaneMaskLe() {
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined (__HIP_PLATFORM_HCC__)
+__device__ __forceinline__ unsigned long long int getLaneMaskLe() {
   std::uint64_t m = (1ull << (getLaneId() + 1ull)) - 1ull;
   return m;
+}
 #else
+__device__ __forceinline__ unsigned getLaneMaskLe() {
   unsigned mask;
   asm("mov.u32 %0, %%lanemask_le;" : "=r"(mask));
   return mask;
-#endif
 }
+#endif
 
 __device__ __forceinline__ unsigned getLaneMaskGt() {
 #if defined(__HIP_PLATFORM_HCC__)
