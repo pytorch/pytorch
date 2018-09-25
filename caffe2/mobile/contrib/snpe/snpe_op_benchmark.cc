@@ -14,7 +14,7 @@
 #define POPULATE_DATA(_n, _s, _l)                                         \
   do {                                                                    \
     Blob* _blob = ws.CreateBlob((_n));                                    \
-    auto* _tensor = _blob->GetMutableTensor(CPU);                         \
+    auto* _tensor = BlobGetMutableTensor(_blob, CPU);                     \
     _tensor->Resize((_s));                                                \
     memcpy(_tensor->mutable_data<float>(), data_##_l, _tensor->nbytes()); \
   } while (0)
@@ -23,7 +23,7 @@
 #define POPULATE_DATA(_n, _s, _l)                                 \
   do {                                                            \
     Blob* _blob = ws.CreateBlob((_n));                            \
-    auto* _tensor = _blob->GetMutableTensor(CPU);                 \
+    auto* _tensor = BlobGetMutableTensor(_blob, CPU);             \
     _tensor->Resize((_s));                                        \
     memset(_tensor->mutable_data<float>(), 1, _tensor->nbytes()); \
   } while (0)
@@ -43,7 +43,7 @@ void AddConstInput(const vector<int64_t>& shape,
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(tensor->size(), value,
                                tensor->mutable_data<float>(),
@@ -56,7 +56,7 @@ void AddNoiseInput(const vector<int64_t>& shape,
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
