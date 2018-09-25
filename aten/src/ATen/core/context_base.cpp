@@ -1,12 +1,5 @@
 #include <ATen/core/context_base.h>
 
-C10_DEFINE_TYPED_REGISTRY(
-    ContextRegistry,
-    at::DeviceType,
-    at::BaseContext,
-    std::unique_ptr,
-    at::Device);
-
 namespace caffe2 {
 
 // TODO: rename context.h -> context_cpu.h & context_base.h -> context.h
