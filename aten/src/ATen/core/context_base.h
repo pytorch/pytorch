@@ -192,9 +192,9 @@ using at::BaseContext;
 using at::BaseStaticContext;
 
 using StaticContextMap = std::unordered_map<at::DeviceType, BaseStaticContext*>;
-AT_API StaticContextMap& GetStaticContexts();
-AT_API void set_static_context(at::DeviceType t, BaseStaticContext* ptr);
-AT_API BaseStaticContext* get_static_context(at::DeviceType t);
+CAFFE2_API StaticContextMap& GetStaticContexts();
+CAFFE2_API void set_static_context(at::DeviceType t, BaseStaticContext* ptr);
+CAFFE2_API BaseStaticContext* get_static_context(at::DeviceType t);
 
 template <at::DeviceType t>
 struct StaticContextFunctionRegisterer {

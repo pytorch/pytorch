@@ -49,14 +49,14 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
     result.copy_(randperm_out_cuda(result_float, n, generator));
   } else {
     if (n < 30000) {  // For small inputs, we offload it to CPU instead.
-      auto result_cpu = result.type().cpu().tensor({n});
+      auto result_cpu = at::empty({n}, result.options().device(kCPU));
       randperm_out(result_cpu, n, generator);
       result.copy_(result_cpu);
     } else {
       // Generate random values for the keys array
       AT_DISPATCH_ALL_TYPES(
         result.type(), "randperm_out_cuda", [&] {
-          auto keys = result.type().tensor(result.sizes()).random_(generator);
+          auto keys = at::empty(result.sizes(), result.options()).random_(generator);
 
           auto result_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
           auto keys_data = thrust::device_ptr<scalar_t>(keys.data<scalar_t>());
