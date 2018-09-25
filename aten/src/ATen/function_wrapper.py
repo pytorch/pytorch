@@ -1574,8 +1574,8 @@ def create_derived(backend_type_env, declarations):
                         else:
                             type_derived_call_actuals.append(actual)
                     type_object_definitions.append(
-                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env,
-                            type_derived_call_actuals=type_derived_call_actuals))
+                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(
+                            env, type_derived_call_actuals=type_derived_call_actuals))
 
     for declaration in declarations:
         for option in declaration['options']:
