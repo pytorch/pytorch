@@ -5,7 +5,7 @@
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/logging.h"
 
-C10_DEFINE_REGISTRY(Caffe2DBRegistry, caffe2::db::DB, const string&, caffe2::db::Mode);
+C10_DEFINE_REGISTRY(Caffe2DBRegistry, caffe2::db::DB, const std::string&, caffe2::db::Mode);
 
 namespace caffe2 {
 
