@@ -4,8 +4,8 @@ namespace at {
 
 AT_DEFINE_TYPED_REGISTRY(
     ContextRegistry,
-    DeviceType,
-    BaseContext,
+    at::DeviceType,
+    at::BaseContext,
     std::unique_ptr,
     at::Device);
 

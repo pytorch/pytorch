@@ -80,7 +80,7 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
 
 using PlacementDtor = void (*)(void*, size_t);
 
-struct PlacementDeleteContext {
+struct CAFFE2_API PlacementDeleteContext {
   using Ctx = std::unique_ptr<void, at::DeleterFnPtr>;
   Ctx ctx_;
   PlacementDtor placement_dtor_;
