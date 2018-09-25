@@ -181,7 +181,7 @@ class AT_CORE_API BaseContext {
 };
 
 // Context constructor registry
-AT_DECLARE_TYPED_REGISTRY(
+C10_DECLARE_TYPED_REGISTRY(
     ContextRegistry,
     at::DeviceType,
     BaseContext,
@@ -189,7 +189,7 @@ AT_DECLARE_TYPED_REGISTRY(
     at::Device);
 
 #define REGISTER_CONTEXT(type, ...) \
-  AT_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
 
 inline std::unique_ptr<at::BaseContext> CreateContext(
     const at::Device& device) {
