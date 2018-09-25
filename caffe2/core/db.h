@@ -106,7 +106,7 @@ class CAFFE2_API DB {
 
 // Database classes are registered by their names so we can do optional
 // dependencies.
-C10_DECLARE_REGISTRY(Caffe2DBRegistry, caffe2::db::DB, const string&, caffe2::db::Mode);
+C10_DECLARE_REGISTRY(Caffe2DBRegistry, caffe2::db::DB, const std::string&, caffe2::db::Mode);
 #define REGISTER_CAFFE2_DB(name, ...) \
   C10_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
 
@@ -120,7 +120,7 @@ namespace caffe2 { namespace db {
  */
 inline unique_ptr<DB> CreateDB(
     const string& db_type, const string& source, Mode mode) {
-  auto result = Caffe2DBRegistry()->Create(db_type, source, mode);
+  auto result = c10::Caffe2DBRegistry()->Create(db_type, source, mode);
   VLOG(1) << ((!result) ? "not found db " : "found db ") << db_type;
   return result;
 }

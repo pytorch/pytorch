@@ -97,7 +97,7 @@ namespace caffe2 {
 
 // Creates an operator with the given operator definition.
 inline unique_ptr<BlobDeserializerBase> CreateDeserializer(const string& type) {
-  return BlobDeserializerRegistry()->Create(type);
+  return c10::BlobDeserializerRegistry()->Create(type);
 }
 
 

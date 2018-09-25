@@ -21,4 +21,4 @@ const ComplexHooksInterface& getComplexHooks() {
 } // namespace detail
 } // namespace at
 
-C10_DEFINE_REGISTRY(ComplexHooksRegistry, ComplexHooksInterface, ComplexHooksArgs)
+C10_DEFINE_REGISTRY(ComplexHooksRegistry, at::ComplexHooksInterface, at::ComplexHooksArgs)
