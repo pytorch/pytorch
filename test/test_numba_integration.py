@@ -1,6 +1,7 @@
 import unittest
 
-from common import TEST_NUMBA, TEST_NUMPY, TestCase
+import common
+from common import TEST_NUMBA, TEST_NUMPY
 from common_cuda import TEST_NUMBA_CUDA, TEST_CUDA, TEST_MULTIGPU
 
 import torch
@@ -15,7 +16,7 @@ if TEST_NUMBA_CUDA:
     import numba.cuda
 
 
-class TestNumbaIntegration(TestCase):
+class TestNumbaIntegration(common.TestCase):
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_cuda_array_interface(self):
@@ -168,6 +169,7 @@ class TestNumbaIntegration(TestCase):
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
     def test_conversion_errors(self):
         """Numba property reports array interface for tensor types:
+
             cpu is not a cuda array
             sparse is not a cuda array
             needs_grad raises an error on check or conversion
@@ -222,3 +224,6 @@ class TestNumbaIntegration(TestCase):
             self.assertIsInstance(
                 numba.cuda.as_cuda_array(cudat), numba.cuda.devicearray.DeviceNDArray
             )
+
+if __name__ == '__main__':
+    common.run_tests()
