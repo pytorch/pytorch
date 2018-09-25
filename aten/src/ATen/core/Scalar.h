@@ -14,8 +14,8 @@ namespace at {
 
 struct Tensor;
 
-class AT_API Scalar {
-public:
+class CAFFE2_API Scalar {
+ public:
   Scalar() : Scalar(int64_t(0)) {}
 
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \

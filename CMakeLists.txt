@@ -5,6 +5,11 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
+set(CMAKE_CXX_STANDARD 11)
+if (NOT MSVC)
+  set(CMAKE_C_STANDARD 11)
+endif()
+
 set(CAFFE2_VERSION_MAJOR 0)
 set(CAFFE2_VERSION_MINOR 8)
 set(CAFFE2_VERSION_PATCH 2)
@@ -124,7 +129,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_GLOO_IBVERBS "Use Gloo IB verbs for distributed. Only available if USE_GLOO is on." OFF
     "USE_GLOO" OFF)
-option(TORCH_USE_CEREAL "Build the C++ API with Cereal for serialization support" OFF)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
@@ -295,6 +299,7 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 
 # ---[ Main build
+add_subdirectory(c10)
 add_subdirectory(caffe2)
 
 # --[ Documentation

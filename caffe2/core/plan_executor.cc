@@ -417,7 +417,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           } catch (const std::exception& ex) {
             std::lock_guard<std::mutex> guard(exception_mutex);
             if (!first_exception.size()) {
-              first_exception = GetExceptionString(ex);
+              first_exception = at::GetExceptionString(ex);
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
             }
             compiledStep->gotFailure = true;

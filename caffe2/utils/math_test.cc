@@ -171,9 +171,9 @@ class GemmBatchedTest
  protected:
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
-    X_.Resize(std::vector<TIndex>{3, 5, 10});
-    W_.Resize(std::vector<TIndex>{3, 6, 10});
-    Y_.Resize(std::vector<TIndex>{3, 5, 6});
+    X_.Resize(std::vector<int64_t>{3, 5, 10});
+    W_.Resize(std::vector<int64_t>{3, 6, 10});
+    Y_.Resize(std::vector<int64_t>{3, 5, 6});
     math::Set<float, CPUContext>(
         X_.size(), 1, X_.mutable_data<float>(), cpu_context_.get());
     math::Set<float, CPUContext>(
@@ -407,16 +407,14 @@ TEST(MathTest, GemvTrans) {
   }
 }
 
-using convert::cpu_float2half_rn;
-using convert::cpu_half2float;
 TEST(MathTest, FloatToHalfConversion) {
   float a = 1.0f;
   float b = 1.75f;
   float c = 128.125f;
 
-  float converted_a = cpu_half2float(cpu_float2half_rn(a));
-  float converted_b = cpu_half2float(cpu_float2half_rn(b));
-  float converted_c = cpu_half2float(cpu_float2half_rn(c));
+  float converted_a = static_cast<float>(at::Half(a));
+  float converted_b = static_cast<float>(at::Half(b));
+  float converted_c = static_cast<float>(at::Half(c));
 
   CHECK_EQ(a, converted_a);
   CHECK_EQ(b, converted_b);

@@ -234,7 +234,7 @@ void test(Type &T) {
                        [&]() {
                          int64_t dim0 = lhs.dim() == 0 ? 1 : lhs.size(0);
                          int64_t dim1 = rhs.dim() == 0 ? 1 : rhs.size(0);
-                         require_equal_size_dim(result, result.type().tensor({dim0, dim1}));
+                         require_equal_size_dim(result, at::empty({dim0, dim1}, result.options()));
                        }(););
       }
 

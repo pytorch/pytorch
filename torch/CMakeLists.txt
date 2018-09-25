@@ -220,8 +220,8 @@ CONFIGURE_FILE(
 
 if (NOT NO_API AND NOT USE_ROCM)
   list(APPEND TORCH_SRCS
-    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
@@ -232,14 +232,18 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/serialize.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
-    )
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
+  )
 endif()
 
 
@@ -330,13 +334,6 @@ if (NOT NO_API AND NOT USE_ROCM)
   target_include_directories(torch PUBLIC
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
-
-  if (TORCH_USE_CEREAL)
-    target_compile_definitions(torch PUBLIC TORCH_USE_CEREAL)
-    # SYSTEM headers are included with -isystem and thus do not trigger warnings.
-    target_include_directories(torch SYSTEM PUBLIC
-      "${TORCH_ROOT}/third_party/cereal/include") # For cereal/
-  endif()
 endif()
 
 if(USE_CUDA)
@@ -414,7 +411,7 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
         FILES_MATCHING PATTERN "*.h")
-install(FILES "${TORCH_SRC_DIR}/script.h"
+install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h"
         DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 install(TARGETS torch
@@ -437,74 +434,7 @@ if (BUILD_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
 endif()
 
 if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)
-
-  #Catch test of api.
-  #TODO: Change all these tests to Google test.
-  set(TORCH_API_TEST_DIR "${TORCH_ROOT}/test/cpp/api")
-  set(TORCH_API_TEST_SOURCES
-    ${TORCH_API_TEST_DIR}/any.cpp
-    ${TORCH_API_TEST_DIR}/cursor.cpp
-    ${TORCH_API_TEST_DIR}/integration.cpp
-    ${TORCH_API_TEST_DIR}/main.cpp
-    ${TORCH_API_TEST_DIR}/misc.cpp
-    ${TORCH_API_TEST_DIR}/module.cpp
-    ${TORCH_API_TEST_DIR}/modules.cpp
-    ${TORCH_API_TEST_DIR}/optim.cpp
-    ${TORCH_API_TEST_DIR}/parallel.cpp
-    ${TORCH_API_TEST_DIR}/rnn.cpp
-    ${TORCH_API_TEST_DIR}/sequential.cpp
-    ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
-    ${TORCH_API_TEST_DIR}/tensor.cpp
-    ${TORCH_API_TEST_DIR}/jit.cpp
-    ${TORCH_API_TEST_DIR}/tensor_options.cpp
-    ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
-  )
-
-  if (TORCH_USE_CEREAL)
-    list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/serialization.cpp)
-  endif()
-
-  add_executable(test_api ${TORCH_API_TEST_SOURCES})
-
-  target_include_directories(test_api
-    PUBLIC
-    "${TORCH_ROOT}/third_party/catch/single_include"
-    ${ATen_CPU_INCLUDE})
-
-  target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB})
-
-   #Google test of api.
-   set(TORCH_API_GTEST_DIR "${TORCH_ROOT}/test/cpp/api/")
-   add_executable(gtest_api
-		${TORCH_API_GTEST_DIR}/static.cpp
-		)
-   target_include_directories(gtest_api PRIVATE ${ATen_CPU_INCLUDE})
-   target_link_libraries(gtest_api torch gtest_main)
-   if (USE_CUDA)
-      target_link_libraries(gtest_api ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB} ${TORCH_CUDA_LIBRARIES})
-   endif()
-
-  #Adding compile options for both tests.
-  if (NOT MSVC)
-    if (APPLE)
-      target_compile_options(test_api PRIVATE
-        # Clang has an unfixed bug leading to spurious missing braces
-        # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
-        -Wno-missing-braces)
-      target_compile_options(gtest_api PRIVATE
-        -Wno-missing-braces)
-	else()
-      target_compile_options(test_api PRIVATE
-        # Considered to be flaky.  See the discussion at
-        # https://github.com/pytorch/pytorch/pull/9608
-        -Wno-maybe-uninitialized
-        # gcc gives nonsensical warnings about variadic.h
-        -Wno-unused-but-set-parameter)
-     target_compile_options(gtest_api PRIVATE
-		-Wno-maybe-uninitialized
-		-Wno-unused-but-set-parameter)
-    endif()
-  endif()
+  add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
 endif()
 
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")

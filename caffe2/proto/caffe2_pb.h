@@ -1,5 +1,5 @@
 #pragma once
-#include <ATen/core/DeviceType.h>
+#include <ATen/core/Device.h>
 #include <ATen/core/Error.h>
 #include <caffe2/proto/caffe2.pb.h>
 
@@ -47,6 +47,10 @@ inline CAFFE2_API DeviceType ProtoToType(const caffe2::DeviceTypeProto p) {
   }
 }
 
+inline CAFFE2_API DeviceType ProtoToType(int p) {
+  return ProtoToType(static_cast<caffe2::DeviceTypeProto>(p));
+}
+
 inline CAFFE2_API DeviceTypeProto TypeToProto(const DeviceType& t) {
   switch (t) {
     case DeviceType::CPU:
@@ -75,6 +79,32 @@ inline CAFFE2_API DeviceTypeProto TypeToProto(const DeviceType& t) {
           "device type, did you forget to update the ProtoToType() and TypeToProto"
           "function to reflect such recent changes?");
   }
+}
+
+inline CAFFE2_API caffe2::DeviceOption DeviceToOption(
+    const at::Device& device) {
+  caffe2::DeviceOption option;
+  auto type = device.type();
+  option.set_device_type(TypeToProto(type));
+  // sets the gpu_id to -1 means we'll use the current gpu id when the function
+  // is being called, see context_gpu.cu for more info.
+  if (type == at::DeviceType::CUDA) {
+    option.set_cuda_gpu_id(device.index());
+  } else if (type == at::DeviceType::HIP) {
+    option.set_hip_gpu_id(device.index());
+  }
+  return option;
+}
+
+inline CAFFE2_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
+  at::Device device(ProtoToType(option.device_type()));
+  auto type = device.type();
+  if (type == at::DeviceType::CUDA) {
+    device.set_index(option.cuda_gpu_id());
+  } else if (type == at::DeviceType::HIP) {
+    device.set_index(option.hip_gpu_id());
+  }
+  return device;
 }
 
 } // namespace caffe2

@@ -1,6 +1,5 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/tensor.h"
 #include "caffe2/core/typeid.h"
 
 CAFFE2_DEFINE_bool(
