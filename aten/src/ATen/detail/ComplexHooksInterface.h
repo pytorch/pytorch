@@ -16,9 +16,9 @@ struct CAFFE2_API ComplexHooksInterface {
 };
 
 struct CAFFE2_API ComplexHooksArgs {};
-AT_DECLARE_REGISTRY(ComplexHooksRegistry, ComplexHooksInterface, ComplexHooksArgs)
+C10_DECLARE_REGISTRY(ComplexHooksRegistry, ComplexHooksInterface, ComplexHooksArgs)
 #define REGISTER_COMPLEX_HOOKS(clsname) \
-  AT_REGISTER_CLASS(ComplexHooksRegistry, clsname, clsname)
+  C10_REGISTER_CLASS(ComplexHooksRegistry, clsname, clsname)
 
 namespace detail {
 CAFFE2_API const ComplexHooksInterface& getComplexHooks();
