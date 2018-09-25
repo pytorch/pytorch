@@ -23,13 +23,6 @@ extern char **environ;
 #endif
 #endif
 
-#ifndef USE_POSIX_SPAWN
-#ifndef __APPLE__
-#include <malloc.h>
-#define USE_MALLOC_TRIM
-#endif
-#endif
-
 namespace torch { namespace jit { namespace cpufuser {
 
 CPUFusionCompiler& getFusionCompiler() {
@@ -41,14 +34,10 @@ CPUFusionCompiler& getFusionCompiler() {
 struct PosixSpawnAttrVfork {
   explicit PosixSpawnAttrVfork() {
     int err = posix_spawnattr_init(&attr);
-    if (err != 0) {
-      AT_ERROR("posix_spawnattr_init: ", strerror(err));
-    }
+    AT_CHECK(err == 0, "posix_spawnattr_init: ", strerror(err));
 
     err = posix_spawnattr_setflags(&attr, POSIX_SPAWN_USEVFORK);
-    if (err != 0) {
-      AT_ERROR("posix_spawnattr_setflags: ", strerror(err));
-    }
+    AT_CHECK(err == 0, "posix_spawnattr_setflags: ", strerror(err));
   }
   ~PosixSpawnAttrVfork() {
     int err = posix_spawnattr_destroy(&attr);
@@ -74,19 +63,13 @@ int runCommand(const std::string& command) {
   char* argv[] = {"sh", "-c", cmd_copy.data(), NULL};
 
   int status = posix_spawn(&pid, "/bin/sh", NULL, &attr.attr, argv, environ);
-  if (status != 0) {
-    AT_ERROR("posix_spawn: ", strerror(status));
-  }
-  if (waitpid(pid, &status, 0) == -1) {
-    AT_ERROR("waitpid: ", strerror(errno));
-  }
+  AT_CHECK(status == 0, "posix_spawn: ", strerror(status));
+
+  AT_CHECK(waitpid(pid, &status, 0) != -1, "waitpid: ", strerror(errno));
   return WEXITSTATUS(status);
 #else
 
-  // No posix_spawn with vfork found on the system: try malloc_trim + system
-#ifdef USE_MALLOC_TRIM
-  malloc_trim(/*pad=*/0);
-#endif // USE_MALLOC_TRIM
+  // No posix_spawn + vfork found: use system() and pray we don't OOM
   int retval = system(command.c_str());
   if (retval == -1) {
     AT_ERROR("system(): ", strerror(errno));
@@ -161,7 +144,4 @@ std::vector<at::Tensor> CPUFusionCompiler::debugLaunchGraph(
 } // namespace torch
 #ifdef USE_POSIX_SPAWN
 #undef USE_POSIX_SPAWN
-#endif
-#ifdef USE_MALLOC_TRIM
-#undef USE_MALLOC_TRIM
 #endif

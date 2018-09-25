@@ -38,9 +38,7 @@ static const std::string compile_string =
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
 static void checkCommandFailure(const std::string& activity, int retval) {
-  if (retval != 0) {
-    AT_ERROR("Failed to ", activity, ": child exited with return value ", retval);
-  }
+  AT_CHECK(retval == 0, "Failed to ", activity, ": child exited with return value ", retval);
 }
 
 static void runCompiler(
