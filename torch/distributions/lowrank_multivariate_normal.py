@@ -8,6 +8,7 @@ from torch.distributions.multivariate_normal import (_batch_diag, _batch_mahalan
 from torch.distributions.utils import _standard_normal, lazy_property
 
 
+
 def _batch_vector_diag(bvec):
     """
     Returns the diagonal matrices of a batch of vectors.
