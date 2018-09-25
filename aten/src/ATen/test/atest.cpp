@@ -18,7 +18,7 @@ void trace() {
     trace += foo_a[i][i];
   }
 
-  EXPECT_FLOAT_EQ(foo.trace().toCFloat(), trace);
+  EXPECT_FLOAT_EQ(foo.trace().item<float>(), trace);
 }
 
 // TEST_CASE( "atest", "[]" ) {
@@ -27,7 +27,6 @@ TEST(atest, atest) {
   manual_seed(123, at::kCUDA);
 
   auto foo = rand({12,6});
-  EXPECT_EQ(foo.data<float>(), foo.toFloatData());
 
   EXPECT_EQ(foo.size(0), 12);
   EXPECT_EQ(foo.size(1), 6);

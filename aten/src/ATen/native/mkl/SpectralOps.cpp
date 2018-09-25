@@ -207,7 +207,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
       onumel *= osize;
     }
   }
-  Tensor output = input.type().tensor(output_sizes);
+  Tensor output = at::empty(output_sizes, input.options());
 
   // precision
   DFTI_CONFIG_VALUE prec;

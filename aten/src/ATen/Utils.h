@@ -24,7 +24,7 @@
 
 namespace at {
 
-AT_API int _crash_if_asan(int);
+CAFFE2_API int _crash_if_asan(int);
 
 static inline const Storage& checked_storage(
     const Storage& expr,

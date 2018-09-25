@@ -9,19 +9,19 @@ from . import PrefixStore
 from . import ProcessGroupGloo
 
 
-_MPI_AVAILBLE = True
-_NCCL_AVAILBLE = True
+_MPI_AVAILABLE = True
+_NCCL_AVAILABLE = True
 
 
 try:
     from. import ProcessGroupMPI
 except ImportError:
-    _MPI_AVAILBLE = False
+    _MPI_AVAILABLE = False
 
 try:
     from. import ProcessGroupNCCL
 except ImportError:
-    _NCCL_AVAILBLE = False
+    _NCCL_AVAILABLE = False
 
 
 class DistBackend(object):
@@ -166,7 +166,7 @@ def is_mpi_available():
     Checks if MPI is available
 
     """
-    return _MPI_AVAILBLE
+    return _MPI_AVAILABLE
 
 
 def is_nccl_available():
@@ -174,7 +174,7 @@ def is_nccl_available():
     Checks if NCCL is available
 
     """
-    return _NCCL_AVAILBLE
+    return _NCCL_AVAILABLE
 
 
 def is_initialized():

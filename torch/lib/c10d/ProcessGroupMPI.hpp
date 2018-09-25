@@ -101,8 +101,7 @@ class ProcessGroupMPI : public ProcessGroup {
     std::mutex workMutex_;
     std::condition_variable workCV_;
     std::atomic<bool> completed_;
-
-    std::exception_ptr workException_;
+    std::exception_ptr exception_;
 
     friend class ProcessGroupMPI;
   };
@@ -123,10 +122,13 @@ class ProcessGroupMPI : public ProcessGroup {
     const std::exception& exception() const override;
 
    protected:
+    void populateException();
+
     at::Tensor tensor_;
     MPI_Request request_;
     int* const srcRank_;
     MPI_Status status_;
+    std::exception_ptr exception_;
   };
 
   // Constructor will spawn up the worker thread loop

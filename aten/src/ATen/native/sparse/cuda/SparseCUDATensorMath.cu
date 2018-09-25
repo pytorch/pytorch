@@ -238,7 +238,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 }
 
 SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) {
-  SparseTensor r = sparse.type().tensor();
+  SparseTensor r = at::empty({0}, sparse.options());
   hspmm_out_sparse_cuda(r, sparse, dense);
   return r;
 }

@@ -693,11 +693,6 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     ;
   }
 
-  // NB: This capacity may also include available space
-  // in the storage BEFORE the tensor data, if storage_offset != 0
-  inline size_t capacity_nbytes() const {
-    return storage_.capacity();
-  }
   /**
    * Returns the dimensions of the tensor as a vector.
    */
