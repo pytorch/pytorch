@@ -535,6 +535,8 @@ if(NOT BUILD_ATEN_MOBILE)
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-duplicate-decl-specifier")
 
+    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -DHIP_VERSION=${HIP_VERSION_MAJOR}")
+
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
 
