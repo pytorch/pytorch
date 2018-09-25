@@ -625,7 +625,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
             numel_ * storage_.itemsize()); // Removing this can get rid of
                                            // InefficientStdFunctionContext
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
-            std::move(data_ptr.release()),
+            std::move(data_ptr.move_context()),
             dtor,
             size,
             at::Device(storage_.device_type())));

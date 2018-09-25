@@ -331,7 +331,7 @@ struct PinnedCPUAllocator final : CPUAllocator {
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
     if (IsNUMAEnabled()) {
       auto ptr_and_deleter = baseAllocator_.allocate(nbytes);
-      data = baseAllocator_.release().release();
+      data = baseAllocator_.move_context().release();
       CAFFE_ENFORCE(data);
       HIP_ENFORCE(hipHostRegister(data, nbytes, hipHostRegisterDefault));
     } else {

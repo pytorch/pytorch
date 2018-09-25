@@ -342,8 +342,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : at::Allocator {
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
     if (IsNUMAEnabled()) {
       auto data_ptr = baseAllocator_.allocate(nbytes);
-      // maybe need to change the name of first release...
-      data = data_ptr.release().release();
+      data = data_ptr.move_context().release();
       CAFFE_ENFORCE(data);
       CUDA_ENFORCE(cudaHostRegister(data, nbytes, cudaHostRegisterDefault));
     } else {
