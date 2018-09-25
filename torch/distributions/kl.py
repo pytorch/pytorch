@@ -213,8 +213,8 @@ def _kl_binomial_binomial(p, q):
 @register_kl(Categorical, Categorical)
 def _kl_categorical_categorical(p, q):
     t = p.probs * (p.logits - q.logits)
-    t[q.probs == 0] = inf
-    t[p.probs == 0] = 0
+    t[(q.probs == 0).expand_as(t)] = inf
+    t[(p.probs == 0).expand_as(t)] = 0
     return t.sum(-1)
 
 

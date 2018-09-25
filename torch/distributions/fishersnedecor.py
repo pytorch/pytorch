@@ -10,7 +10,7 @@ from torch.distributions.utils import broadcast_all, _finfo
 
 class FisherSnedecor(Distribution):
     r"""
-    Creates a Fisher-Snedecor distribution parameterized by `df1` and `df2`.
+    Creates a Fisher-Snedecor distribution parameterized by :attr:`df1` and :attr:`df2`.
 
     Example::
 
@@ -36,6 +36,17 @@ class FisherSnedecor(Distribution):
         else:
             batch_shape = self.df1.size()
         super(FisherSnedecor, self).__init__(batch_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(FisherSnedecor, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.df1 = self.df1.expand(batch_shape)
+        new.df2 = self.df2.expand(batch_shape)
+        new._gamma1 = self._gamma1.expand(batch_shape)
+        new._gamma2 = self._gamma2.expand(batch_shape)
+        super(FisherSnedecor, new).__init__(batch_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @property
     def mean(self):

@@ -2,6 +2,8 @@
 
 #include "Context.h"
 
+#include <ATen/core/TensorOptions.h>
+
 #include <thread>
 #include <mutex>
 #include <sstream>
@@ -9,6 +11,10 @@
 #include <stdexcept>
 
 #include "ATen/CPUGenerator.h"
+#include "ATen/RegisterCPU.h"
+#include "ATen/Tensor.h"
+
+#include "TH/TH.h"  // for USE_LAPACK
 
 #ifdef USE_SSE3
 #include <pmmintrin.h>
@@ -32,9 +38,9 @@ Context::Context()
   THSetDefaultErrorHandler(errorHandler,nullptr);
   THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
 
-  generator_registry[static_cast<int>(Backend::CPU)]
+  generator_registry[static_cast<int>(DeviceType::CPU)]
     .reset(new CPUGenerator(this));
-  Type::registerCPU(this);
+  register_cpu_types(this);
 }
 
 // TODO: This could be bad juju if someone calls globalContext() in the
@@ -79,6 +85,14 @@ bool Context::hasMKL() const {
 #endif
 }
 
+bool Context::hasLAPACK() const {
+#ifdef USE_LAPACK
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::setFlushDenormal(bool on) {
 #ifdef USE_SSE3
   // Setting flush-to-zero (FTZ) flag
@@ -93,5 +107,38 @@ bool Context::setFlushDenormal(bool on) {
   return false;
 #endif
 }
+
+TypeExtendedInterface& getType(TensorOptions options) {
+  return globalContext().getType(
+            options.backend(), options.dtype(), options.is_variable());
+}
+
+TypeExtendedInterface& getType(const TensorImpl* impl) {
+  Backend backend = tensorTypeIdToBackend(impl->type_id());
+  return globalContext().getType(
+            backend, dataTypeToScalarType(impl->dtype().id()), impl->is_variable());
+}
+
+TypeExtendedInterface& getType(const Tensor& t) {
+  return getType(t.unsafeGetTensorImpl());
+}
+
+Allocator* getCPUAllocator() {
+  return getTHDefaultAllocator();
+}
+
+struct LegacyTypeInit : public LegacyTypeInitInterface {
+  LegacyTypeInit(LegacyTypeInitArgs) {}
+  void initCPU() const override {
+    globalContext();
+  }
+  void initCUDA() const override {
+    globalContext().lazyInitCUDA();
+  }
+  void initComplex() const override {
+    globalContext().lazyInitComplex();
+  }
+};
+REGISTER_LEGACY_TYPE_INIT(LegacyTypeInit);
 
 }

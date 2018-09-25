@@ -112,28 +112,28 @@ op = core.CreateOperator(
     ["Y"]
 )
 
-# Create X
+// Create X
 X = np.array([[1,2,3,4,5],[6,8,9,16,10]])
 print("X:\n",X)
 
-# Create w
+// Create w
 w = np.array([1,1/2.,1/3.,1/4.,1/5.])
 print("w:\n",w)
 
-# Create b
+// Create b
 b = np.array([1.,1.,1.,1.,1.])
 print("b:\n",b)
 
 
-# Feed X & w & b into workspace
+// Feed X & w & b into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("w", w.astype(np.float32))
 workspace.FeedBlob("b", b.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Y:\n", workspace.FetchBlob("Y"))
 
 ```

@@ -108,7 +108,7 @@ class BinaryElementwiseWithArgsOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
         OP_SINGLE_ARG(int, "axis", axis_, -1),
-        OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
+        OP_SINGLE_ARG(string, "axis_str", axis_str_, string("")),
         OP_SINGLE_ARG(string, "order", order_, "NCHW"),
         functor_(*this) {
     if (legacy_broadcast_) {

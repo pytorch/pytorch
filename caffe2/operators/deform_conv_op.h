@@ -17,28 +17,28 @@ class DeformConvOpBase : public ConvPoolOpBase<Context> {
   DeformConvOpBase(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws),
         deformable_group_(
-            OperatorBase::GetSingleArgument<int>("deformable_group", 1)) {}
+            this->template GetSingleArgument<int>("deformable_group", 1)) {}
   ~DeformConvOpBase() {}
 
  protected:
   void DeformableIm2col(
       const T* data_im,
       const T* data_offset,
-      const std::vector<TIndex>& im_shape,
-      const std::vector<TIndex>& col_shape,
+      const std::vector<int64_t>& im_shape,
+      const std::vector<int64_t>& col_shape,
       T* data_col);
   void DeformableCol2im(
       const T* data_col,
       const T* data_offset,
-      const std::vector<TIndex>& im_shape,
-      const std::vector<TIndex>& col_shape,
+      const std::vector<int64_t>& im_shape,
+      const std::vector<int64_t>& col_shape,
       T* grad_im);
   void DeformableCol2imCoord(
       const T* data_col,
       const T* data_im,
       const T* data_offset,
-      const std::vector<TIndex>& im_shape,
-      const std::vector<TIndex>& col_shape,
+      const std::vector<int64_t>& im_shape,
+      const std::vector<int64_t>& col_shape,
       T* grad_offset);
 
  protected:
@@ -86,7 +86,7 @@ class DeformConvGradientOp final : public DeformConvOpBase<T, Context> {
 
   DeformConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : DeformConvOpBase<T, Context>(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
+        no_bias_(this->template GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 4),
         "If bias is not present, you should not have 4 grad output.");

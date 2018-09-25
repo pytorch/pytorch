@@ -26,7 +26,7 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
 
   ~CPUSparseLengthsReductionOp() {}
 
-  // Currently, we support float and float16 inputs for input data type, and
+  // Currently, we support float and at::Half inputs for input data type, and
   // int32_t and int64_t for the index type.
 
   bool RunOnDevice() override {
@@ -47,10 +47,10 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
 
     CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const TIndex N = dataInput.dim(0);
+    const int64_t N = dataInput.dim(0);
     const int D = dataInput.size_from_dim(1);
-    const TIndex M = lengthsInput.dim(0);
-    const TIndex indices_size = indicesInput.size();
+    const int64_t M = lengthsInput.dim(0);
+    const int64_t indices_size = indicesInput.size();
 
     auto* output = Output(0);
     auto shape = dataInput.dims();
@@ -92,23 +92,6 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     return true;
   }
 
-  std::vector<TensorFiller<CPUContext>> InputFillers(
-      const std::vector<std::vector<TIndex>>& shapes) override {
-    CAFFE_ENFORCE_EQ(shapes.size(), Operator<CPUContext>::Inputs().size());
-    auto fillers = Operator<CPUContext>::InputFillers(shapes);
-    if (USE_WEIGHT) {
-      // TODO: enable the fillers
-      throw UnsupportedOperatorFeature(
-          OperatorBase::type() + " does not have input fillers");
-    }
-    Operator<CPUContext>::SparseLengthsFillerHelper(
-        shapes, INDICES, LENGTHS, &fillers);
-    Operator<CPUContext>::SparseSegmentsFillerHelper(
-        shapes, DATA, INDICES, &fillers);
-    return fillers;
-  }
-
- private:
   enum {
     DATA = 0, // Data input.
     WEIGHT = 1, // Weight input used in SparseLengthsWeightedSum

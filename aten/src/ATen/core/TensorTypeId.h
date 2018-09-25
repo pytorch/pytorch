@@ -5,12 +5,7 @@
 #include <string>
 #include <unordered_set>
 #include "ATen/core/IdWrapper.h"
-
-namespace at {
-class TensorTypeId;
-}
-
-std::ostream& operator<<(std::ostream&, at::TensorTypeId);
+#include "ATen/core/Macros.h"
 
 namespace at {
 
@@ -22,7 +17,7 @@ using _tensorTypeId_underlyingType = uint8_t;
  * Dynamic type ID of a Tensor argument.  It represents something like
  * CPUTensor, etc.
  */
-class TensorTypeId final
+class AT_CORE_API TensorTypeId final
     : public at::
           IdWrapper<TensorTypeId, details::_tensorTypeId_underlyingType> {
  public:
@@ -37,8 +32,10 @@ class TensorTypeId final
       : IdWrapper(id) {}
 
   friend class TensorTypeIdCreator;
-  friend std::ostream& ::operator<<(std::ostream&, TensorTypeId);
+  friend AT_CORE_API std::ostream& operator<<(std::ostream&, TensorTypeId);
 };
+
+AT_CORE_API std::ostream& operator<<(std::ostream&, at::TensorTypeId);
 
 } // namespace at
 

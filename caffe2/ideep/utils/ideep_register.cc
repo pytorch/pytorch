@@ -1,9 +1,12 @@
 #include <caffe2/core/event_cpu.h>
 #include <caffe2/core/operator.h>
-#include <caffe2/proto/caffe2.pb.h>
+#include <caffe2/proto/caffe2_pb.h>
 #include <ideep_pin_singletons.hpp>
 #include "ideep_context.h"
 
+namespace at {
+REGISTER_CONTEXT(DeviceType::IDEEP, caffe2::IDEEPContext);
+} // namespace at
 namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(ideep::tensor);

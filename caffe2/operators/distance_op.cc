@@ -1,5 +1,9 @@
 #include "caffe2/operators/distance_op.h"
 #include "caffe2/utils/eigen_utils.h"
+#ifdef CAFFE2_USE_IDEEP
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
 
 namespace caffe2 {
 
@@ -233,7 +237,7 @@ vector<TensorShape> TensorInferenceForDotProduct(
     const vector<TensorShape>& in) {
   CAFFE_ENFORCE_GT(in.size(), 0);
 
-  vector<TIndex> dims(1);
+  vector<int64_t> dims(1);
   dims[0] = in[0].dims().size() > 0 ? in[0].dims(0) : 1;
   return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
 }
@@ -396,6 +400,11 @@ REGISTER_CPU_OPERATOR(L1Distance, L1DistanceOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(
     L1DistanceGradient,
     L1DistanceGradientOp<float, CPUContext>);
+#ifdef CAFFE2_USE_IDEEP
+REGISTER_IDEEP_OPERATOR(
+    L1DistanceGradient,
+    IDEEPFallbackOp<L1DistanceGradientOp<float, CPUContext>>);
+#endif
 
 OPERATOR_SCHEMA(L1Distance)
     .NumInputs(2)
@@ -428,22 +437,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = 5*np.ones((1, 4))
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.ones((1, 4))
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```
@@ -636,22 +645,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = np.random.randn(3, 3)
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.random.randn(3, 3)
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```

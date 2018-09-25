@@ -16,8 +16,8 @@ class TileOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   TileOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        tiles_(OperatorBase::GetSingleArgument<int32_t>("tiles", 1)),
-        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 0)) {}
+        tiles_(this->template GetSingleArgument<int32_t>("tiles", 1)),
+        axis_(this->template GetSingleArgument<int32_t>("axis", 0)) {}
   ~TileOp() {}
 
   bool RunOnDevice() override {
@@ -72,7 +72,7 @@ class TileOp : public Operator<Context> {
     const auto axis = input.canonical_axis_index(axis_);
 
     // reshape output to be input tiled along the axis
-    vector<TIndex> output_dims(input.dims());
+    vector<int64_t> output_dims(input.dims());
     output_dims[axis_] = output_dims[axis_] * tiles_;
     output->Resize(output_dims);
 
@@ -131,8 +131,8 @@ class TileGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   TileGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        tiles_(OperatorBase::GetSingleArgument<int32_t>("tiles", 1)),
-        axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 0)) {}
+        tiles_(this->template GetSingleArgument<int32_t>("tiles", 1)),
+        axis_(this->template GetSingleArgument<int32_t>("axis", 0)) {}
   ~TileGradientOp() {}
 
   bool RunOnDevice() override {
@@ -187,7 +187,7 @@ class TileGradientOp : public Operator<Context> {
     const auto axis = input.canonical_axis_index(axis_);
 
     // reshape output to be input "untiled" along the axis
-    vector<TIndex> output_dims(input.dims());
+    vector<int64_t> output_dims(input.dims());
     output_dims[axis_] = output_dims[axis_] / tiles_;
     output->Resize(output_dims);
 

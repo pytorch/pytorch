@@ -47,14 +47,14 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
       _device_guard.set_index(device);
-      tensors.push_back(type.tensor(tensor.sizes()));
+      tensors.push_back(at::empty(tensor.sizes(), type.options()));
     }
     nccl::broadcast(tensors);
   } else {
 #else
   {
 #endif
-    auto & gpu_type = type.toBackend(type.is_sparse() ? at::kSparseCUDA : at::kCUDA);
+    auto & gpu_type = type.toBackend(type.is_sparse() ? at::Backend::SparseCUDA : at::Backend::CUDA);
     if (type.is_cuda()) {
       tensors.push_back(tensor);
     }
@@ -72,6 +72,9 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
                    [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
     throw std::runtime_error("all tensors must be on devices[0]");
   }
+#ifdef USE_NCCL
+  buffer_size = std::min(torch::cuda::nccl::get_max_count(), buffer_size);
+#endif
 
   tensor_list2d outputs(devices.size());
   outputs[0] = tensors.vec();
@@ -157,7 +160,7 @@ std::vector<at::Tensor> scatter(
       cuda_guard.set_stream(at::cuda::CUDAStream((*streams)[chunk]));
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
-        {at::kCUDA, device_index}, /*non_blocking=*/true);
+        {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);
   }
   return chunks;
 }
@@ -186,9 +189,9 @@ at::Tensor gather(
     total_size += tensor.size(dim);
   }
   expected_size[dim] = total_size;
-  at::Device device(at::kCPU);
+  at::Device device(at::DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
-    device = at::Device(at::kCUDA, destination_index ? *destination_index : -1);
+    device = at::Device(at::DeviceType::CUDA, destination_index ? *destination_index : -1);
   }
   result = at::empty(expected_size, first.options().device(device));
 

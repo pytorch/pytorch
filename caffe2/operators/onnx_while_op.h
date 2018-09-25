@@ -15,11 +15,11 @@ class ONNXWhileOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         parent_ws_(ws),
         has_trip_count_(
-            OperatorBase::GetSingleArgument<int64_t>("has_trip_count", 0)),
-        has_cond_(OperatorBase::GetSingleArgument<int64_t>("has_cond", 0)),
-        save_scopes_(OperatorBase::GetSingleArgument<int64_t>("save_scopes", 0)),
-        disable_scopes_(OperatorBase::GetSingleArgument<int64_t>("disable_scopes", 0)),
-        num_loop_carried_deps_(OperatorBase::GetSingleArgument<int64_t>("num_loop_carried_deps", -1)) {
+            this->template GetSingleArgument<int64_t>("has_trip_count", 0)),
+        has_cond_(this->template GetSingleArgument<int64_t>("has_cond", 0)),
+        save_scopes_(this->template GetSingleArgument<int64_t>("save_scopes", 0)),
+        disable_scopes_(this->template GetSingleArgument<int64_t>("disable_scopes", 0)),
+        num_loop_carried_deps_(this->template GetSingleArgument<int64_t>("num_loop_carried_deps", -1)) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("body"),
         "body net must be specified in ONNXWhile operator");
@@ -117,7 +117,7 @@ class ONNXWhileOp final : public Operator<Context> {
 
     // Use this to keep track of the sizes of the scan outputs and validate
     // they're the same across iterations.
-    std::vector<std::vector<TIndex>> scan_outputs_sizes;
+    std::vector<std::vector<int64_t>> scan_outputs_sizes;
 
     Workspace *cur_ws = nullptr;
     bool cur_output_condition = false;
@@ -165,8 +165,8 @@ class ONNXWhileOp final : public Operator<Context> {
             dims.insert(dims.begin(), itr);
             scan_output_target->Extend(1, 2.0f, &context_);
 
-            TIndex timestep_size = 1;
-            for (const TIndex t : scan_outputs_sizes[i]) {
+            int64_t timestep_size = 1;
+            for (const int64_t t : scan_outputs_sizes[i]) {
               timestep_size *= t;
             }
 

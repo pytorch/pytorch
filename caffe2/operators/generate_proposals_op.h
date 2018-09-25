@@ -45,7 +45,7 @@ class ConstTensorView {
 // anchors: predefined anchors, size(A, 4)
 // Return: all_anchors_vec: (H * W, A * 4)
 // Need to reshape to (H * W * A, 4) to match the format in python
-ERMatXf ComputeAllAnchors(
+CAFFE2_API ERMatXf ComputeAllAnchors(
     const TensorCPU& anchors,
     int height,
     int width,
@@ -67,26 +67,26 @@ class GenerateProposalsOp final : public Operator<Context> {
   GenerateProposalsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         spatial_scale_(
-            OperatorBase::GetSingleArgument<float>("spatial_scale", 1.0 / 16)),
+            this->template GetSingleArgument<float>("spatial_scale", 1.0 / 16)),
         feat_stride_(1.0 / spatial_scale_),
         rpn_pre_nms_topN_(
-            OperatorBase::GetSingleArgument<int>("pre_nms_topN", 6000)),
+            this->template GetSingleArgument<int>("pre_nms_topN", 6000)),
         rpn_post_nms_topN_(
-            OperatorBase::GetSingleArgument<int>("post_nms_topN", 300)),
+            this->template GetSingleArgument<int>("post_nms_topN", 300)),
         rpn_nms_thresh_(
-            OperatorBase::GetSingleArgument<float>("nms_thresh", 0.7f)),
-        rpn_min_size_(OperatorBase::GetSingleArgument<float>("min_size", 16)),
-        correct_transform_coords_(OperatorBase::GetSingleArgument<bool>(
+            this->template GetSingleArgument<float>("nms_thresh", 0.7f)),
+        rpn_min_size_(this->template GetSingleArgument<float>("min_size", 16)),
+        correct_transform_coords_(this->template GetSingleArgument<bool>(
             "correct_transform_coords",
             false)),
         angle_bound_on_(
-            OperatorBase::GetSingleArgument<bool>("angle_bound_on", true)),
+            this->template GetSingleArgument<bool>("angle_bound_on", true)),
         angle_bound_lo_(
-            OperatorBase::GetSingleArgument<int>("angle_bound_lo", -90)),
+            this->template GetSingleArgument<int>("angle_bound_lo", -90)),
         angle_bound_hi_(
-            OperatorBase::GetSingleArgument<int>("angle_bound_hi", 90)),
+            this->template GetSingleArgument<int>("angle_bound_hi", 90)),
         clip_angle_thresh_(
-            OperatorBase::GetSingleArgument<float>("clip_angle_thresh", 1.0)) {}
+            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)) {}
 
   ~GenerateProposalsOp() {}
 

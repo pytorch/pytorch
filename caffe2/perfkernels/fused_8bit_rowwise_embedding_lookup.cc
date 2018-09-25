@@ -16,10 +16,10 @@ template <
     typename OutType,
     bool IS_WEIGHT_POSITIONAL = false>
 static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const InType* input,
     const IndexType* indices,
     const int* lengths,
@@ -29,14 +29,14 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
   // block_size is the number of elements and fused_block_size is the size of
   // an entire row, including scale and bias.
   const auto scale_bias_offset = 8 / sizeof(InType);
-  const TIndex fused_block_size = block_size + scale_bias_offset;
-  TIndex current = 0;
+  const int64_t fused_block_size = block_size + scale_bias_offset;
+  int64_t current = 0;
   for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     EigenVectorArrayMap<OutType> out_vector(out, block_size);
     for (int i = 0; i < lengths[m]; ++i) {
       CAFFE_ENFORCE_LT(current, index_size);
-      TIndex idx = indices[current];
+      int64_t idx = indices[current];
       CAFFE_ENFORCE(
           0 <= idx && idx < data_size,
           "Index ",
@@ -89,10 +89,10 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
     IndexType, InType, OutType)                                                         \
   void                                                                                  \
       Fused8BitRowwiseEmbeddingLookup_##IndexType##_##InType##_##OutType##_false__base( \
-          const TIndex block_size,                                                      \
-          const TIndex output_size,                                                     \
-          const TIndex index_size,                                                      \
-          const TIndex data_size,                                                       \
+          const int64_t block_size,                                                      \
+          const int64_t output_size,                                                     \
+          const int64_t index_size,                                                      \
+          const int64_t data_size,                                                       \
           const InType* input,                                                          \
           const IndexType* indices,                                                     \
           const int* lengths,                                                           \
@@ -117,10 +117,10 @@ static void Fused8BitRowwiseEmbeddingLookupGenericSlow(
   }                                                                                     \
   template <>                                                                           \
   void Fused8BitRowwiseEmbeddingLookup<IndexType, InType, OutType, false>(              \
-      const TIndex block_size,                                                          \
-      const TIndex output_size,                                                         \
-      const TIndex index_size,                                                          \
-      const TIndex data_size,                                                           \
+      const int64_t block_size,                                                          \
+      const int64_t output_size,                                                         \
+      const int64_t index_size,                                                          \
+      const int64_t data_size,                                                           \
       const InType* input,                                                              \
       const IndexType* indices,                                                         \
       const int* lengths,                                                               \

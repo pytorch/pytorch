@@ -19,19 +19,19 @@ class RecurrentNetworkBlobFetcherOp final : public Operator<Context> {
 
   RecurrentNetworkBlobFetcherOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    prefix_ = OperatorBase::GetSingleArgument<std::string>("prefix", "rnn");
+    prefix_ = this->template GetSingleArgument<std::string>("prefix", "rnn");
     ws_ = ws;
   }
 
   bool RunOnDevice() override {
     const detail::ScratchWorkspaces& scratch =
-        OperatorBase::Input<detail::ScratchWorkspaces>(0);
+        this->template Input<detail::ScratchWorkspaces>(0);
     const std::vector<std::shared_ptr<Workspace>>& stepWorkspaces =
         scratch.stepWorkspaces;
 
     std::vector<std::string> blob_names_vector = {};
 
-    for (TIndex i = 0; i < stepWorkspaces.size(); i++) {
+    for (int64_t i = 0; i < stepWorkspaces.size(); i++) {
       Workspace* currentStepWorkspace = stepWorkspaces[i].get();
       std::vector<std::string> blob_names = currentStepWorkspace->LocalBlobs();
 

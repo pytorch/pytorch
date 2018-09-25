@@ -16,7 +16,7 @@ class SumElementsOp : public Operator<Context> {
 
   SumElementsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        average_(OperatorBase::GetSingleArgument<bool>("average", false)) {}
+        average_(this->template GetSingleArgument<bool>("average", false)) {}
   SumElementsOp(const OperatorDef& operator_def, Workspace* ws, bool average)
       : Operator<Context>(operator_def, ws), average_(average) {}
   ~SumElementsOp() {}
@@ -24,7 +24,7 @@ class SumElementsOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* sum = Output(0);
-    sum->Resize(vector<TIndex>());
+    sum->Resize(vector<int64_t>());
 
     T* data = sum->template mutable_data<T>();
 
@@ -58,7 +58,7 @@ class SumElementsIntOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& X = Input(0);
     auto* sum = Output(0);
-    sum->Resize(vector<TIndex>());
+    sum->Resize(vector<int64_t>());
     T* data = sum->template mutable_data<T>();
     math::Sum<T, Context>(
         X.size(), X.template data<T>(), data, &context_, &scratch_);
@@ -76,7 +76,7 @@ class SumElementsGradientOp : public Operator<Context> {
 
   SumElementsGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        average_(OperatorBase::GetSingleArgument<bool>("average", false)) {}
+        average_(this->template GetSingleArgument<bool>("average", false)) {}
   SumElementsGradientOp(
       const OperatorDef& operator_def,
       Workspace* ws,
@@ -102,10 +102,10 @@ class SumSqrElementsOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    bool average = OperatorBase::GetSingleArgument<bool>("average", false);
+    bool average = this->template GetSingleArgument<bool>("average", false);
     auto& X = Input(0);
     auto* sum = Output(0);
-    sum->Resize(vector<TIndex>());
+    sum->Resize(vector<int64_t>());
     math::SumSqr<T, Context>(
         X.size(),
         X.template data<T>(),

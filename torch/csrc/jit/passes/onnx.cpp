@@ -156,10 +156,10 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
     auto scalar_it = op->scalar_args.begin();
     for (auto arg_type : op->cconv) {
       py::object obj;
-      if (arg_type == 's') {
+      if (arg_type == 'c') {
         JIT_ASSERTM(scalar_it != op->scalar_args.end(), "expected too many scalar args");
         obj = py::reinterpret_borrow<py::object>(py::handle((scalar_it++)->get()));
-      } else if (arg_type == 't') {
+      } else if (arg_type == 'd') {
         JIT_ASSERTM(node_it != inputs.end(), "expected too many inputs");
         obj = py::cast(envFn(*node_it++));
       } else {

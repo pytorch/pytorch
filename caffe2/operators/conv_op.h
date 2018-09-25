@@ -19,8 +19,9 @@ class ConvOp final : public ConvPoolOpBase<Context> {
     // Since this is the default convolution implementation, we will
     // use CAFFE_ENFORCE instead of OPERATOR_NEEDS_FEATURE.
     CAFFE_ENFORCE(
-        group_ == 1 || order_ == StorageOrder::NCHW,
-        "Group convolution only supports NCHW order right now.");
+        (group_ == 1 || order_ == StorageOrder::NCHW ||
+         std::is_same<Context, CPUContext>::value),
+        "Group convolution only supports NCHW order or CPUContext right now.");
 
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
@@ -69,13 +70,14 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
   USE_CONV_POOL_BASE_FUNCTIONS(Context);
   ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<Context>(operator_def, ws),
-        no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
+        no_bias_(this->template GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
     CAFFE_ENFORCE(
-        group_ == 1 || order_ == StorageOrder::NCHW,
-        "Group convolution only supports NCHW order right now.");
+        (group_ == 1 || order_ == StorageOrder::NCHW ||
+         std::is_same<Context, CPUContext>::value),
+        "Group convolution only supports NCHW order or CPUContext right now.");
   }
   ~ConvGradientOp() {}
 

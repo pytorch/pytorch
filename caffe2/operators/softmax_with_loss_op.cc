@@ -252,7 +252,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  avg_loss->Resize(vector<TIndex>());
+  avg_loss->Resize(vector<int64_t>());
   float* avg_loss_data = avg_loss->template mutable_data<float>();
   if (weight_sum != 0.0) {
     avg_loss_data[0] = loss_sum * scale_ / weight_sum;

@@ -57,9 +57,17 @@ CAFFE2_DEFINE_int(
     128,
     "The threshold in MB on how frequently to report memory changes");
 
+namespace at {
+
+REGISTER_CONTEXT(DeviceType::CUDA, caffe2::CUDAContext);
+} // namespace at
+
 namespace caffe2 {
 
-thread_local ThreadLocalCUDAObjects CUDAContext::cuda_objects_;
+ThreadLocalCUDAObjects& CUDAContext::getCudaObjects() {
+  static thread_local ThreadLocalCUDAObjects cuda_objects_;
+  return cuda_objects_;
+}
 
 // TODO(jiayq): these variables shouldn't be currently accessed during static
 // initialization. We should consider moving them to a Mayer's singleton to
@@ -254,7 +262,7 @@ CUDAContext::CUDAContext(const DeviceOption& option)
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
-  DCHECK_EQ(option.device_type(), CUDA);
+  DCHECK_EQ(option.device_type(), PROTO_CUDA);
 }
 
 // shared mutex to lock out alloc / free during NCCL launches

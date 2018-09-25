@@ -23,18 +23,37 @@ constexpr auto kTensorBlobType = "Tensor";
 // String used to separate chunk id from the blob name when storing in DB
 constexpr auto kChunkIdSeparator = "#%";
 
-// The Blob serialization registry and serializer creator functions.
-CAFFE_DECLARE_TYPED_REGISTRY(
-    BlobSerializerRegistry,
-    TypeIdentifier,
-    BlobSerializerBase,
-    std::unique_ptr);
-#define REGISTER_BLOB_SERIALIZER(id, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(BlobSerializerRegistry, id, __VA_ARGS__)
-// Creates an operator with the given operator definition.
-inline unique_ptr<BlobSerializerBase> CreateSerializer(TypeIdentifier id) {
-  return BlobSerializerRegistry()->Create(id);
-}
+/**
+ * Serializes the given blob, if possible. Note that this serialization uses
+ * the registration mechanism and one has to implement specific serialization
+ * approaches for specific classes. Acceptor should take care of writing data
+ * to the actual storage.
+ */
+CAFFE2_API void SerializeBlob(
+    const Blob& blob,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor,
+    int chunk_size = kDefaultChunkSize);
+
+/**
+ * @brief Convenience function to serialize a blob to a string.
+ *
+ * This is a conveinence function to serialize small Blobs that produce
+ * manageable serialized strings. To serialize big blobs such as
+ * large sparse tensors, use the fully-functional interface in
+ * blob_serializer_base.h.
+ *
+ * NOTE: this function doesn't do chunking and might break with big tensors.
+ */
+CAFFE2_API string SerializeBlob(const Blob& blob, const string& name);
+
+/**
+ * Deserializes from a string containing either BlobProto or TensorProto. If
+ * the deserialization fails, the content in the blob should no longer be
+ * trusted.
+ */
+CAFFE2_API void DeserializeBlob(const string& content, Blob* result);
+CAFFE2_API void DeserializeBlob(const BlobProto& proto, Blob* result);
 
 /**
  * @brief TensorSerializer is the serializer for Tensors.
@@ -42,7 +61,7 @@ inline unique_ptr<BlobSerializerBase> CreateSerializer(TypeIdentifier id) {
  * TensorSerializer takes in a blob that contains a Tensor, and serializes it
  * into a TensorProto protocol buffer.
  */
-class TensorSerializer : public BlobSerializerBase {
+class CAFFE2_API TensorSerializer : public BlobSerializerBase {
  public:
   TensorSerializer() {}
   ~TensorSerializer() override {}
@@ -73,25 +92,6 @@ class TensorSerializer : public BlobSerializerBase {
   unique_ptr<BaseContext> context_;
 };
 
-/**
- * @brief BlobDeserializerBase is an abstract class that deserializes a blob
- * from a BlobProto or a TensorProto.
- */
-class BlobDeserializerBase {
- public:
-  virtual ~BlobDeserializerBase() {}
-
-  // Deserializes from a BlobProto object.
-  virtual void Deserialize(const BlobProto& proto, Blob* blob) = 0;
-};
-
-CAFFE_DECLARE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
-#define REGISTER_BLOB_DESERIALIZER(name, ...) \
-  CAFFE_REGISTER_CLASS(BlobDeserializerRegistry, name, __VA_ARGS__)
-// Creates an operator with the given operator definition.
-inline unique_ptr<BlobDeserializerBase> CreateDeserializer(const string& type) {
-  return BlobDeserializerRegistry()->Create(type);
-}
 
 /**
  * @brief TensorDeserializer is the deserializer for Tensors.
@@ -101,7 +101,7 @@ inline unique_ptr<BlobDeserializerBase> CreateDeserializer(const string& type) {
  * tensor, change the TensorProto's corresponding fields before calling
  * Deserialize.
  */
-class TensorDeserializer : public BlobDeserializerBase {
+class CAFFE2_API TensorDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override;
   void Deserialize(const TensorProto& proto, Tensor* tensor);

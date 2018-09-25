@@ -19,7 +19,7 @@ def add_tensor(net, name, blob):
         np.dtype('float32'): "GivenTensorFill",
         np.dtype('int32'): "GivenTensorIntFill",
         np.dtype('int64'): "GivenTensorInt64Fill",
-        np.dtype('uint8'): "GivenTensorStringFill",
+        np.dtype('uint8'): "GivenTensorByteStringToUInt8Fill",
         np.dtype('O'): "GivenTensorStringFill"
     }
 
@@ -28,8 +28,8 @@ def add_tensor(net, name, blob):
     # pass array of uint8 as a string to save storage
     # storing uint8_t has a large overhead for now
     if blob.dtype == np.dtype('uint8'):
-        shape = [1]
-        values = [str(blob.data)]
+        shape = blob.shape
+        values = [blob.tobytes()]
     # Only allow string arrays as objects.
     # The only intended use case for this is to store arrays of strings in the
     # model which can be used for post processing results in subsequent ops.

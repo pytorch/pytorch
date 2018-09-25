@@ -19,13 +19,13 @@ CAFFE_KNOWN_TYPE(mkl::MKLMemory<float>);
 CAFFE_KNOWN_TYPE(mkl::MKLMemory<double>);
 
 template <typename T>
-static vector<TIndex> GetMKLTensorInfo(
+static vector<int64_t> GetMKLTensorInfo(
     const void* c,
     size_t* capacity,
     DeviceOption* device) {
   const mkl::MKLMemory<T>* tc = static_cast<const mkl::MKLMemory<T>*>(c);
   *capacity = tc->size() * sizeof(T);
-  device->set_device_type(MKLDNN);
+  device->set_device_type(PROTO_MKLDNN);
   device->set_cuda_gpu_id(0);
   return tc->dims();
 }

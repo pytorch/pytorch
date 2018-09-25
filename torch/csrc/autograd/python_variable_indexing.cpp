@@ -11,10 +11,11 @@
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_conversion_dispatch.h"
+#include "torch/csrc/jit/tracer.h"
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 #include <vector>
 #include <tuple>
@@ -67,9 +68,9 @@ static void invalid_index(PyObject* obj) {
 }
 
 static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, bool ensure_view=false) {
-  Py_ssize_t start, stop, step, slicelength;
+  Py_ssize_t start, stop, step;
   auto length = self.size(dim);
-  if (!THPUtils_parseSlice(slice, length, &start, &stop, &step, &slicelength)) {
+  if (!THPUtils_unpackSlice(slice, &start, &stop, &step)) {
     throw python_error();
   }
   if (step == 0) {
@@ -79,7 +80,10 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
     // TODO: implement negative step
     throw ValueError("negative step not yet supported");
   }
-  if (!ensure_view && start == 0 && stop == length && step == 1) {
+  // Skip this optimization if we are tracing, as the trace may be polymorphic
+  // over the shape of the `self` tensor, and we still want to record
+  // the slice.
+  if (!ensure_view && start == 0 && stop == length && step == 1 && !jit::tracer::isTracing()) {
     return self;
   }
   return self.slice(dim, start, stop, step);
@@ -87,20 +91,18 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
 
 static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
   if (index == 0 && dim == 0 && self.dim() == 0) {
-    // Deprecated support for indexing 0-dim tensors as if they were 1-dim.
-    PyErr_WarnEx(PyExc_UserWarning,
-        "invalid index of a 0-dim tensor. This will be an error in PyTorch 0.5. "
-        "Use tensor.item() to convert a 0-dim tensor to a Python number", 1);
-    return at::alias(self);
+    throw IndexError(
+        "invalid index of a 0-dim tensor. "
+        "Use tensor.item() to convert a 0-dim tensor to a Python number");
   }
   int64_t size = self.size(dim);
   if (index < -size || index >= size) {
     throw IndexError("index %lld is out of bounds for dimension %lld with size %lld",
       index, dim, size);
   }
-  if (index < 0) {
-    index += size;
-  }
+  // if the index is negative, do not normalize it because that would fix the index
+  // on the current tensor size in the tracer.
+  // aten::select also works on negative indices
   return self.select(dim, index);
 }
 
@@ -171,7 +173,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
           result = applySelect(result, dim, THPUtils_unpackLong(obj));
         } else {
           result = result.unsqueeze(dim);
-          handle_var(boolToIndexingTensor(result, var.toCByte() != 0));
+          handle_var(boolToIndexingTensor(result, var.item<uint8_t>() != 0));
         }
       } else {
         handle_var(var);

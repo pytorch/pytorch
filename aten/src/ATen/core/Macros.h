@@ -1,28 +1,45 @@
 #pragma once
 
-// You can use the definition AT_CORE_STATIC_WINDOWS to control whether
-// or not we apply __declspec.  You will want to set this as
-// -DAT_CORE_STATIC_WINDOWS=1 when compiling code which links
-// against ATen/core on Windows, when ATen/core is built as a
-// static library (in which case, saying the symbol is coming
-// from a DLL would be incorrect).
+#include <sstream>
+#include <string>
 
-#ifdef _WIN32
-#if !defined(AT_CORE_STATIC_WINDOWS)
-#if defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
-#define AT_CORE_API __declspec(dllexport)
+#include "c10/macros/Macros.h"
+
+#ifdef __CUDACC__
+// Designates functions callable from the host (CPU) and the device (GPU)
+#define AT_HOST_DEVICE __host__ __device__
+#define AT_DEVICE __device__
+#define AT_HOST __host__
 #else
-#define AT_CORE_API __declspec(dllimport)
-#endif
-#else
-#define AT_CORE_API
-#endif
-#else
-#define AT_CORE_API
+#define AT_HOST_DEVICE
+#define AT_HOST
+#define AT_DEVICE
 #endif
 
-// Disable the copy and assignment operator for a class. Note that this will
-// disable the usage of the class in std containers.
-#define AT_DISABLE_COPY_AND_ASSIGN(classname) \
-  classname(const classname&) = delete;       \
-  classname& operator=(const classname&) = delete
+#if defined(__ANDROID__)
+#define AT_ANDROID 1
+#define AT_MOBILE 1
+#elif (defined(__APPLE__) &&                                            \
+       (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
+#define AT_IOS 1
+#define AT_MOBILE 1
+#elif (defined(__APPLE__) && TARGET_OS_MAC)
+#define AT_IOS 1
+#define AT_MOBILE 0
+#else
+#define AT_MOBILE 0
+#endif // ANDROID / IOS / MACOS
+
+namespace at {
+inline int stoi(const std::string& str) {
+#if defined(__ANDROID__)
+  std::stringstream ss;
+  int n = 0;
+  ss << str;
+  ss >> n;
+  return n;
+#else
+  return std::stoi(str);
+#endif // defined(__ANDROID__)
+}
+} // namespace at

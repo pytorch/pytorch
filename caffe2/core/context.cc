@@ -5,13 +5,11 @@
 #include <process.h>
 #endif
 
-namespace caffe2 {
+namespace at {
 
-// We put this here because context.h rather than context_base.h is included in
-// user code
-// TODO: rename context.h -> context_cpu.h & context_base.h -> context.h
-CAFFE2_API BaseStaticContext*
-    BaseContext::static_context_[COMPILE_TIME_MAX_DEVICE_TYPES];
+REGISTER_CONTEXT(DeviceType::CPU, caffe2::CPUContext);
+} // namespace at
+namespace caffe2 {
 
 uint32_t RandomNumberSeed() {
   // Originally copied from folly::randomNumberSeed (at 418ad4)

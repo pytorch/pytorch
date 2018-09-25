@@ -20,9 +20,9 @@ class PackSegmentsOp final : public Operator<Context> {
 
   PackSegmentsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        max_length_(OperatorBase::GetSingleArgument<int>("max_length", -1)),
-        pad_minf_(OperatorBase::GetSingleArgument<bool>("pad_minf", false)),
-        return_presence_mask_(OperatorBase::GetSingleArgument<bool>(
+        max_length_(this->template GetSingleArgument<int>("max_length", -1)),
+        pad_minf_(this->template GetSingleArgument<bool>("pad_minf", false)),
+        return_presence_mask_(this->template GetSingleArgument<bool>(
             "return_presence_mask",
             false)) {
     if (pad_minf_) {
@@ -45,7 +45,7 @@ class PackSegmentsOp final : public Operator<Context> {
   INPUT_TAGS(LENGTHS, DATA);
 
  private:
-  TIndex max_length_;
+  int64_t max_length_;
   bool pad_minf_;
   float padding_;
   bool return_presence_mask_;
@@ -65,7 +65,7 @@ class UnpackSegmentsOp final : public Operator<Context> {
 
   UnpackSegmentsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        max_length_(OperatorBase::GetSingleArgument<int>("max_length", -1)) {}
+        max_length_(this->template GetSingleArgument<int>("max_length", -1)) {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int, long>>::call(this, Input(LENGTHS));
@@ -80,7 +80,7 @@ class UnpackSegmentsOp final : public Operator<Context> {
   INPUT_TAGS(LENGTHS, DATA);
 
  private:
-  TIndex max_length_;
+  int64_t max_length_;
   Tensor dev_buffer_{Context::GetDeviceType()};
   Tensor dev_lengths_prefix_sum_{Context::GetDeviceType()};
   Tensor dev_max_length_{Context::GetDeviceType()};

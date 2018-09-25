@@ -13,8 +13,8 @@ class LayerNormOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LayerNormOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        axis_(this->template GetSingleArgument<int>("axis", 1)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
   ~LayerNormOp() {}
 
   template <typename T>
@@ -38,8 +38,8 @@ class LayerNormGradientOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LayerNormGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 0.001f)) {}
+        axis_(this->template GetSingleArgument<int>("axis", 1)),
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 0.001f)) {}
   ~LayerNormGradientOp() {}
 
   template <typename T>

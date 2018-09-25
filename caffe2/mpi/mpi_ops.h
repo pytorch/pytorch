@@ -36,7 +36,7 @@ class MPIBroadcastOp final : public Operator<Context> {
   bool RunOnDevice() override {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     CAFFE_ENFORCE(
-        OperatorBase::OutputIsType<Tensor>(0, Context::GetDeviceType()),
+        OperatorBase::OutputIsTensorType(0, Context::GetDeviceType()),
         "Output is of wrong type.");
     auto* output = Output(0);
     // Make sure that output is already allocated.
@@ -98,7 +98,7 @@ class MPIAllgatherOp final : public Operator<Context> {
     MPI_Comm comm = OperatorBase::Input<MPICommonWorldWrapper>(0).comm();
     auto& input = Input(1);
     auto* output = Output(0);
-    vector<TIndex> output_dims = input.dims();
+    vector<int64_t> output_dims = input.dims();
     output_dims[0] *= OperatorBase::Input<MPICommonWorldWrapper>(0).size();
     output->Resize(output_dims);
     MPI_CHECK(MPI_Allgather(

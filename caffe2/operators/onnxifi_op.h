@@ -21,7 +21,7 @@ class OnnxifiOp final : public Operator<Context> {
     lib_ = onnx::initOnnxifiLibrary();
     CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
     auto onnx_model_str =
-        OperatorBase::GetSingleArgument<std::string>("onnx_model", "");
+        this->template GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
 
     // Setup input/output descriptor templates
@@ -36,9 +36,9 @@ class OnnxifiOp final : public Operator<Context> {
 
       // For output, we try to get its output size hint
       const std::string key = MakeString("output_size_hint_", output_idx);
-      auto output_size_hint = OperatorBase::GetRepeatedArgument<int>(key);
+      auto output_size_hint = this->template GetRepeatedArgument<int>(key);
       if (!output_size_hint.empty()) {
-        std::vector<TIndex> dims;
+        std::vector<int64_t> dims;
         for (const auto v : output_size_hint) {
           dims.push_back(v);
         }
@@ -57,7 +57,7 @@ class OnnxifiOp final : public Operator<Context> {
     // setGraphIO. Notice that since we may have rewritten the net, we need to
     // map the weight names
     auto initializers =
-        OperatorBase::GetRepeatedArgument<std::string>("initializers");
+        this->template GetRepeatedArgument<std::string>("initializers");
     CAFFE_ENFORCE_EQ(
         initializers.size() % 2, 0, "initializers should come in pairs");
     std::unordered_set<std::string> initializer_set;
@@ -127,7 +127,7 @@ class OnnxifiOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  private:
-  void SetOutputShape(int output_idx, std::vector<TIndex>* dims) {
+  void SetOutputShape(int output_idx, std::vector<int64_t>* dims) {
     const auto it = output_size_hints_.find(output_idx);
     if (it != output_size_hints_.end()) {
       *dims = it->second;
@@ -163,7 +163,7 @@ class OnnxifiOp final : public Operator<Context> {
   std::vector<std::vector<uint64_t>> output_shapes_;
 
   // output shape hints
-  std::unordered_map<int, std::vector<TIndex>> output_size_hints_;
+  std::unordered_map<int, std::vector<int64_t>> output_size_hints_;
 };
 
 } // namespace caffe2

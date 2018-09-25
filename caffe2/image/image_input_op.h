@@ -372,14 +372,14 @@ ImageInputOp<Context>::ImageInputOp(
     randgen_per_thread_.emplace_back(meta_randgen());
   }
   prefetched_image_.Resize(
-      TIndex(batch_size_),
-      TIndex(crop_),
-      TIndex(crop_),
-      TIndex(color_ ? 3 : 1));
+      int64_t(batch_size_),
+      int64_t(crop_),
+      int64_t(crop_),
+      int64_t(color_ ? 3 : 1));
   if (label_type_ != SINGLE_LABEL && label_type_ != SINGLE_LABEL_WEIGHTED) {
-    prefetched_label_.Resize(TIndex(batch_size_), TIndex(num_labels_));
+    prefetched_label_.Resize(int64_t(batch_size_), int64_t(num_labels_));
   } else {
-    prefetched_label_.Resize(vector<TIndex>(1, batch_size_));
+    prefetched_label_.Resize(vector<int64_t>(1, batch_size_));
   }
 
   for (int i = 0; i < additional_output_sizes.size(); ++i) {
@@ -387,7 +387,7 @@ ImageInputOp<Context>::ImageInputOp(
         Context::GetDeviceType());
     prefetched_additional_outputs_.emplace_back(CPU);
     prefetched_additional_outputs_[i].Resize(
-        TIndex(batch_size_), TIndex(additional_output_sizes[i]));
+        int64_t(batch_size_), int64_t(additional_output_sizes[i]));
   }
 }
 
@@ -1264,7 +1264,7 @@ bool ImageInputOp<Context>::CopyPrefetched() {
                                               image_output, mean_gpu_,
                                               std_gpu_, &context_);
       } else if (output_type_ == TensorProto_DataType_FLOAT16) {
-        TransformOnGPU<uint8_t,float16,Context>(prefetched_image_on_device_,
+        TransformOnGPU<uint8_t,at::Half,Context>(prefetched_image_on_device_,
                                                 image_output, mean_gpu_,
                                                 std_gpu_, &context_);
       }  else {

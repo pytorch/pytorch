@@ -31,17 +31,17 @@ namespace at {
 namespace native {
 
 Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
 }
 
 Tensor clamp_max(const Tensor& self, Scalar max) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return clamp_max_out(result, self, max);
 }
 
 Tensor clamp_min(const Tensor& self, Scalar min) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return clamp_min_out(result, self, min);
 }
 
@@ -89,17 +89,17 @@ Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
 }
 
 Tensor& fill_(Tensor& self, Scalar value) {
-  return self._fill_(value);
+  return at::_fill_(self, value);
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  return self._fill_(value);
+  return at::_fill_(self, value);
 }
 
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()),
            "mvlgamma is not implemented for ", self.type());
-  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+  AT_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
   AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
@@ -110,7 +110,7 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()),
            "mvlgamma is not implemented for ", self.type());
-  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+  AT_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
   AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
@@ -123,7 +123,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 
 #define IMPLEMENT_UNARY_OP_VEC(op)                              \
   Tensor op(const Tensor& self) {                               \
-    Tensor result = self.type().tensor();                       \
+    Tensor result = at::empty({0}, self.options());             \
     return at::op##_out(result, self);                          \
   }                                                             \
   Tensor& _##op##__cpu(Tensor& self_) {                         \
@@ -143,7 +143,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 
 #define IMPLEMENT_UNARY_OP_TH(op)                               \
   Tensor op(const Tensor& self) {                               \
-    Tensor result = self.type().tensor();                       \
+    Tensor result = at::empty({0}, self.options());             \
     return at::op##_out(result, self);                          \
   }                                                             \
   Tensor& _##op##__cpu(Tensor& self) {                          \

@@ -181,22 +181,49 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   }
 }
 
-bool hasSingleOutputAndConsumer(NNGraph::NodeRef nodeRef) {
-  auto nodeOutputs = nn::getOutputs(nodeRef);
-  NOM_REQUIRE_OR_RET_FALSE(nodeOutputs.size() == 1);
-  auto nodeConsumers = nn::getConsumers(nodeOutputs.front());
-  return nodeConsumers.size() == 1;
+std::ostream& operator<<(
+    std::ostream& oss,
+    const NNNodeMatchCriteria& criteria) {
+  return oss << criteria.debugString;
 }
 
-NNNodeMatchCriteria matchAnyNode() {
-  return [](NNGraph::NodeRef /* unused */) { return true; };
+NNNodeMatchCriteria criteriaSingleOutputAndConsumer() {
+  return NNNodeMatchCriteria(
+      [](NNGraph::NodeRef nodeRef) {
+        auto nodeOutputs = nn::getOutputs(nodeRef);
+        NOM_REQUIRE_OR_RET_FALSE(nodeOutputs.size() == 1);
+        auto nodeConsumers = nn::getConsumers(nodeOutputs.front());
+        return nodeConsumers.size() == 1;
+      },
+      "Single output and consumer");
 }
 
-NNSubtree operatorTree(
-    const NNNodeMatchCriteria& root,
-    const std::vector<NNSubtree>& childrenCriteria,
-    int count) {
-  return NNSubtree(matchAnyNode(), {NNSubtree(root, childrenCriteria)}, count);
+NNNodeMatchCriteria criteriaSingleConsumer() {
+  return NNNodeMatchCriteria(
+      [](NNGraph::NodeRef nodeRef) {
+        auto nodeOutputs = nn::getOutputs(nodeRef);
+        NNGraph::NodeRef nodeConsumer = nullptr;
+        for (auto nodeOutput : nodeOutputs) {
+          for (auto consumer : nn::getConsumers(nodeOutput)) {
+            if (nodeConsumer && consumer && consumer != nodeConsumer) {
+              return false;
+            }
+            nodeConsumer = consumer;
+          }
+        }
+        return true;
+      },
+      "Single consumer");
+}
+
+NNNodeMatchCriteria matchTensor(const std::string& debugString) {
+  return matchOp<nom::repr::Tensor>(debugString);
+}
+
+NNMatchNode matchExternalTensorNode(const std::string& debugString) {
+  return NNMatchNode(matchTensor(debugString))
+      .nonTerminal()
+      .excludeFromSubgraph();
 }
 
 } // namespace nn

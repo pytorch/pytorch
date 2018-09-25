@@ -41,7 +41,7 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
     // bytes of each row for scale (4 bytes) and bias (4 bytes).
     // | ... int8 data ... | scale | bias |
     // | number_of_columns |  4B   |  4B  |
-    const std::vector<TIndex> output_dimensions = {input_rows,
+    const std::vector<int64_t> output_dimensions = {input_rows,
                                                    input_columns + 8};
     output->Resize(output_dimensions);
 
@@ -96,7 +96,7 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
 
     // The last 8 bytes per row are the scale and the bias. The rest of
     // input_columns is the number of values in the original row.
-    const std::vector<TIndex> output_dimensions = {input_rows,
+    const std::vector<int64_t> output_dimensions = {input_rows,
                                                    input_columns - 8};
     output->Resize(output_dimensions);
     const auto output_columns = output->dim(1);

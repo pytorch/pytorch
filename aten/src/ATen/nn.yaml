@@ -5,11 +5,6 @@
   scalar_check:
     output: reduction != Reduction::None || self_->dim() == 0
 
-- name: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
-  cname: DistKLDivCriterion
-  scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
-
 - name: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
   cname: AbsCriterion
   scalar_check:
@@ -90,11 +85,6 @@
   scalar_check:
     output: self_->dim() == 0
     buffer: self_->dim() == 0
-
-- name: prelu(Tensor self, Tensor weight)
-  cname: PReLU
-  scalar_check:
-    output: self_->dim() == 0
 
 # NOTE: we treat noise as an input (it's really a buffer) because the codegen
 # can't handle in-place functions that have buffers

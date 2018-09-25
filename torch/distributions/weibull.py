@@ -1,5 +1,3 @@
-from numbers import Number
-import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
@@ -32,7 +30,23 @@ class Weibull(TransformedDistribution):
         base_dist = Exponential(self.scale.new(self.scale.size()).fill_(1.0))
         transforms = [PowerTransform(exponent=self.concentration_reciprocal),
                       AffineTransform(loc=0, scale=self.scale)]
-        super(Weibull, self).__init__(base_dist, transforms, validate_args=validate_args)
+        super(Weibull, self).__init__(base_dist,
+                                      transforms,
+                                      validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Weibull, _instance)
+        new.scale = self.scale.expand(batch_shape)
+        new.concentration = self.concentration.expand(batch_shape)
+        new.concentration_reciprocal = new.concentration.reciprocal()
+        base_dist = self.base_dist.expand(batch_shape)
+        transforms = [PowerTransform(exponent=new.concentration_reciprocal),
+                      AffineTransform(loc=0, scale=new.scale)]
+        super(Weibull, new).__init__(base_dist,
+                                     transforms,
+                                     validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     @property
     def mean(self):

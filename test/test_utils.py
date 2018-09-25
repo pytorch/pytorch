@@ -19,7 +19,7 @@ from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
-from common import IS_WINDOWS, IS_PPC, TEST_WITH_ROCM
+from common import IS_WINDOWS, IS_PPC, skipIfRocm
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -412,8 +412,9 @@ class TestFFI(TestCase):
 
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
     @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_gpu(self):
+        from torch.utils.cpp_extension import CUDA_HOME
         create_extension(
             name='gpulib',
             headers=[test_dir + '/ffi/src/cuda/cudalib.h'],
@@ -422,6 +423,7 @@ class TestFFI(TestCase):
             ],
             with_cuda=True,
             verbose=False,
+            include_dirs=[os.path.join(CUDA_HOME, 'include')],
         ).build()
         import gpulib
         tensor = torch.ones(2, 2).float()
@@ -437,98 +439,6 @@ class TestFFI(TestCase):
                           lambda: gpulib.cuda_func(tensor, 2, 1.5))
         self.assertRaises(TypeError,
                           lambda: gpulib.cuda_func(ctensor.storage(), 2, 1.5))
-
-
-class TestLuaReader(TestCase):
-
-    @staticmethod
-    def _module_test(name, test):
-        def do_test(self):
-            module = test['module']
-            input = test['input']
-            grad_output = test['grad_output']
-            if hasattr(self, '_transform_' + name):
-                input = getattr(self, '_transform_' + name)(input)
-            output = module.forward(input)
-            module.zeroGradParameters()
-            grad_input = module.backward(input, grad_output)
-            self.assertEqual(output, test['output'])
-            self.assertEqual(grad_input, test['grad_input'])
-            if module.parameters() is not None:
-                params, d_params = module.parameters()
-                self.assertEqual(params, test['params'])
-                self.assertEqual(d_params, test['d_params'])
-            else:
-                self.assertFalse('params' in test and test['params'])
-                self.assertFalse('params' in test and test['d_params'])
-        return do_test
-
-    @staticmethod
-    def _criterion_test(name, test):
-        def do_test(self):
-            module = test['module']
-            input = test['input']
-            if name == 'L1Cost':
-                target = None
-            else:
-                target = test['target']
-            if hasattr(self, '_transform_' + name):
-                input, target = getattr(self, '_transform_' + name)(input, target)
-
-            output = module.forward(input, target)
-            grad_input = module.backward(input, target)
-            self.assertEqual(output, test['loss'])
-            self.assertEqual(grad_input, test['grad_input'])
-        return do_test
-
-    @classmethod
-    def init(cls):
-        try:
-            path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
-        except unittest.SkipTest:
-            return
-        long_size = 8 if sys.platform == 'win32' else None
-        tests = load_lua(path, long_size=long_size)
-        for name, test in tests['modules'].items():
-            if name == "HardShrink":
-                continue
-            test_name = 'test_' + name.replace('nn.', '')
-            setattr(cls, test_name, cls._module_test(name, test))
-        for name, test in tests['criterions'].items():
-            if name == "HardShrink":
-                continue
-            test_name = 'test_' + name.replace('nn.', '')
-            setattr(cls, test_name, cls._criterion_test(name, test))
-
-    def _transform_Index(self, input):
-        return [input[0], input[1].sub(1)]
-
-    def _transform_LookupTable(self, input):
-        return input.sub(1)
-
-    def _transform_MultiLabelMarginCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_ClassNLLCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_SpatialClassNLLCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_ClassSimplexCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_CrossEntropyCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_ParallelCriterion(self, input, target):
-        return input, [target[0].sub(1), target[1]]
-
-    def _transform_MultiCriterion(self, input, target):
-        return input, target.sub(1)
-
-    def _transform_MultiMarginCriterion(self, input, target):
-        return input, target.sub(1)
 
 
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
@@ -616,7 +526,7 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
     @unittest.skipIf(not HAS_CUDA, 'No CUDA')
-    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
+    @skipIfRocm
     def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
@@ -698,6 +608,4 @@ class TestONNXUtils(TestCase):
 
 
 if __name__ == '__main__':
-    from torch.utils.serialization import load_lua
-    TestLuaReader.init()
     run_tests()

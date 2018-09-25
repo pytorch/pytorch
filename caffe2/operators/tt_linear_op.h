@@ -20,9 +20,9 @@ class TTLinearOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   TTLinearOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        inp_sizes_(OperatorBase::GetRepeatedArgument<int>("inp_sizes")),
-        out_sizes_(OperatorBase::GetRepeatedArgument<int>("out_sizes")),
-        tt_ranks_(OperatorBase::GetRepeatedArgument<int>("tt_ranks")),
+        inp_sizes_(this->template GetRepeatedArgument<int>("inp_sizes")),
+        out_sizes_(this->template GetRepeatedArgument<int>("out_sizes")),
+        tt_ranks_(this->template GetRepeatedArgument<int>("tt_ranks")),
         Y_temp_(unique_ptr<Blob>(new Blob())) {}
   ~TTLinearOp() {}
 

@@ -52,6 +52,8 @@ class AsyncTest {
     // Use tiny timeout to make this test run fast
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
+    ::gloo::transport::tcp::attr attr;
+    options.devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
         new ::c10d::ProcessGroupGloo(store, rank, size, options));
@@ -69,14 +71,11 @@ class AsyncInputIsOutputTest : public AsyncTest {
         numTensors_(numTensors),
         numDevices_(cudaNumDevices()),
         state_(::at::globalContext().lazyInitCUDA()) {
-    const auto& type = at::getType(at::kCUDA, at::kFloat);
 
     // Allocate inputs on available devices in a round robin fashion.
     inputs_.resize(numTensors_);
-    at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numTensors_; i++) {
-      deviceGuard.set_index(i % numDevices_);
-      inputs_[i] = type.tensor({16, 16});
+      inputs_[i] = at::empty({16, 16}, at::device({at::kCUDA, i % numDevices_}));
     }
 
     // Allocate a stream per device.
@@ -86,6 +85,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     // and pass this along to the collective (since it uses the THC
     // getters to retrieve the current stream).
     //
+    at::DeviceGuard deviceGuard;
     streams_.resize(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
       deviceGuard.set_index(i);
@@ -116,7 +116,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
 
     // Copy inputs to outputs
     for (auto i = 0; i < numTensors_; i++) {
-      outputs[i] = inputs_[i].toBackend(at::kCPU);
+      outputs[i] = inputs_[i].cpu();
     }
 
     return outputs;
@@ -264,4 +264,5 @@ int main(int argc, char** argv) {
     TemporaryFile file;
     runAsyncBroadcastTest(file.path, 4, 1);
   }
+  std::cout << "Test successful" << std::endl;
 }

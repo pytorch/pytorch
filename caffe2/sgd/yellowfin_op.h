@@ -20,12 +20,12 @@ class YellowFinOp final : public Operator<Context> {
   YellowFinOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         curv_win_width_(
-            OperatorBase::GetSingleArgument<int>("curv_win_width", 20)),
-        nesterov_(OperatorBase::GetSingleArgument<int>("nesterov", false)),
+            this->template GetSingleArgument<int>("curv_win_width", 20)),
+        nesterov_(this->template GetSingleArgument<int>("nesterov", false)),
         zero_debias_(
-            OperatorBase::GetSingleArgument<bool>("zero_debias", true)),
-        epsilon_(OperatorBase::GetSingleArgument<T>("epsilon", 1e-6f)),
-        beta_(OperatorBase::GetSingleArgument<T>("beta", 0.999f)) {}
+            this->template GetSingleArgument<bool>("zero_debias", true)),
+        epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-6f)),
+        beta_(this->template GetSingleArgument<T>("beta", 0.999f)) {}
 
  protected:
   // GetLrMu and MomentumSgdUpdate have different implementations for GPU and
@@ -126,7 +126,7 @@ CAFFE2_YF_READ_INPUT(SCALARS_MEMORY, scalars_memory)
 CAFFE2_YF_READ_INPUT(GRAD, grad)
 #undef CAFFE2_YF_READ_OUTPUT
 
-CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(ITER, CPU));
+CAFFE_ENFORCE(OperatorBase::InputIsTensorType(ITER, CPU));
 CAFFE_ENFORCE_EQ(lr_avg_tensor.size(), 1);
 CAFFE_ENFORCE_EQ(mu_avg_tensor.size(), 1);
 CAFFE_ENFORCE_EQ(param_tensor.ndim(), moment_tensor.ndim());
