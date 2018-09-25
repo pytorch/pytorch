@@ -50,11 +50,6 @@ CAFFE2_DEFINE_int(caffe2_gpu_memory_report_interval_mb,
                   128,
                   "The threshold in MB on how frequently to report memory changes");
 
-namespace at {
-
-REGISTER_CONTEXT(DeviceType::HIP, caffe2::HIPContext);
-} // namespace at
-
 namespace caffe2 {
 
 thread_local ThreadLocalHIPObjects HIPContext::hip_objects_;
@@ -413,12 +408,13 @@ void HIPStaticContext::Delete(void* ptr) {
         g_hip_device_affiliation.erase(it);
         break;
     }
-    case HipMemoryPoolType::THC: {
-      HIP_ENFORCE(g_thc_allocator->Free(ptr));
-      if (FLAGS_caffe2_gpu_memory_tracking) {
-        g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
-      }
-      break;
+    case HipMemoryPoolType::THC: 
+    {
+        HIP_ENFORCE(g_thc_allocator->Free(ptr));
+        if (FLAGS_caffe2_gpu_memory_tracking) {
+          g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
+        }
+        break;
     }
     }
 }
