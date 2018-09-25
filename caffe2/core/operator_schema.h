@@ -578,14 +578,14 @@ OpSchema::Cost PointwiseCostInference(
 
 #define OPERATOR_SCHEMA(name)                                     \
   CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
 #define OPERATOR_SCHEMA(name)                                     \
   CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+  static OpSchema* C10_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA

@@ -33,7 +33,7 @@ struct BlobStatRegistry {
 
 #define REGISTER_BLOB_STAT_GETTER(Type, BlobStatGetterClass)    \
   static BlobStatRegistry::Registrar<Type, BlobStatGetterClass> \
-      CAFFE_ANONYMOUS_VARIABLE(BlobStatRegistry)
+      C10_ANONYMOUS_VARIABLE(BlobStatRegistry)
 
 namespace BlobStat {
 

@@ -295,16 +295,25 @@ struct GradientNotImplementedYet : public GradientMakerBase {
   }
 };
 
-CAFFE_DECLARE_REGISTRY(
+/**
+ * @brief Gets the GradientOpsMeta for the given operator def.
+ */
+CAFFE2_API GradientOpsMeta GetGradientForOp(
+    const OperatorDef& def,
+    const vector<GradientWrapper>& g_output);
+
+} // namespace caffe2
+
+C10_DECLARE_REGISTRY(
     GradientRegistry,
-    GradientMakerBase,
-    const OperatorDef&,
-    const vector<GradientWrapper>&);
+    caffe2::GradientMakerBase,
+    const caffe2::OperatorDef&,
+    const std::vector<caffe2::GradientWrapper>&);
 
 #define REGISTER_GRADIENT(name, ...) \
-  CAFFE_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
 #define REGISTER_GRADIENT_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
 
 // NO_GRADIENT means that the operator does not need any gradient computation.
 #define NO_GRADIENT(name) REGISTER_GRADIENT(name, NoGradient)
@@ -317,14 +326,5 @@ CAFFE_DECLARE_REGISTRY(
 
 #define GRADIENT_NOT_IMPLEMENTED_YET(name) \
   REGISTER_GRADIENT(name, GradientNotImplementedYet)
-
-/**
- * @brief Gets the GradientOpsMeta for the given operator def.
- */
-CAFFE2_API GradientOpsMeta GetGradientForOp(
-    const OperatorDef& def,
-    const vector<GradientWrapper>& g_output);
-
-} // namespace caffe2
 
 #endif // CAFFE2_CORE_OPERATOR_GRADIENT_H_

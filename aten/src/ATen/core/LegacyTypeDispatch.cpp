@@ -13,7 +13,7 @@ const LegacyTypeInitInterface& getLegacyTypeInit() {
   static std::unique_ptr<LegacyTypeInitInterface> legacy_type_init;
   static std::once_flag once;
   std::call_once(once, [] {
-    legacy_type_init = LegacyTypeInitRegistry()->Create("LegacyTypeInit", LegacyTypeInitArgs{});
+    legacy_type_init = c10::LegacyTypeInitRegistry()->Create("LegacyTypeInit", LegacyTypeInitArgs{});
     if (!legacy_type_init) {
       legacy_type_init =
           std::unique_ptr<LegacyTypeInitInterface>(new LegacyTypeInitInterface());

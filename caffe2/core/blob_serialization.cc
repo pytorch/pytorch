@@ -321,14 +321,19 @@ void TensorSerializer::StoreDeviceDetail(
     TensorProto* proto) {
   input.ExtractDeviceOption(proto->mutable_device_detail());
 }
+
+} // namespace caffe2
+
 // The actual serialization registry objects.
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
-    TypeIdentifier,
-    BlobSerializerBase,
+    caffe2::TypeIdentifier,
+    caffe2::BlobSerializerBase,
     std::unique_ptr);
 
-CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
+C10_DEFINE_REGISTRY(BlobDeserializerRegistry, caffe2::BlobDeserializerBase);
+
+namespace caffe2 {
 
 void DeserializeBlob(const string& content, Blob* result) {
   BlobProto blob_proto;

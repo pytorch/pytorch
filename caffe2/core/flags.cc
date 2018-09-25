@@ -9,7 +9,7 @@ namespace caffe2 {
 
 #ifdef CAFFE2_USE_GFLAGS
 
-CAFFE2_EXPORT void SetUsageMessage(const string& str) {
+CAFFE2_EXPORT void SetUsageMessage(const std::string& str) {
   if (UsageMessage() != nullptr) {
     // Usage message has already been set, so we will simply return.
     return;
@@ -33,8 +33,11 @@ CAFFE2_EXPORT bool CommandLineFlagsHasBeenParsed() {
 
 #else  // CAFFE2_USE_GFLAGS
 
+} // namespace caffe2
 
-CAFFE_DEFINE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
+C10_DEFINE_REGISTRY(Caffe2FlagsRegistry, caffe2::Caffe2FlagParser, const string&);
+
+namespace caffe2 {
 
 namespace {
 static bool gCommandLineFlagsParsed = false;

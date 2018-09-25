@@ -3,18 +3,19 @@
 #include <caffe2/proto/caffe2_pb.h>
 #include <ideep_pin_singletons.hpp>
 #include "ideep_context.h"
+#include <caffe2/ideep/utils/ideep_operator.h>
+
+C10_DEFINE_REGISTRY(
+    IDEEPOperatorRegistry,
+    caffe2::OperatorBase,
+    const caffe2::OperatorDef&,
+    caffe2::Workspace*);
 
 namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(ideep::tensor);
 
-CAFFE_DEFINE_REGISTRY(
-    IDEEPOperatorRegistry,
-    OperatorBase,
-    const OperatorDef&,
-    Workspace*);
-
-CAFFE_REGISTER_DEVICE_TYPE(DeviceType::IDEEP, IDEEPOperatorRegistry);
+CAFFE_REGISTER_DEVICE_TYPE(DeviceType::IDEEP, c10::IDEEPOperatorRegistry);
 
 REGISTER_EVENT_CREATE_FUNCTION(IDEEP, EventCreateCPU);
 REGISTER_EVENT_RECORD_FUNCTION(IDEEP, EventRecordCPU);

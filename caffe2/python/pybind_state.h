@@ -60,26 +60,36 @@ class BlobFeederBase {
   Feed(const DeviceOption& option, PyArrayObject* array, Blob* blob) = 0;
 };
 
-CAFFE2_EXPORT CAFFE_DECLARE_TYPED_REGISTRY(
+} // namespace caffe2
+
+C10_DECLARE_TYPED_REGISTRY(
     BlobFetcherRegistry,
-    TypeIdentifier,
-    BlobFetcherBase,
+    caffe2::TypeIdentifier,
+    caffe2::BlobFetcherBase,
     std::unique_ptr);
 #define REGISTER_BLOB_FETCHER(id, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(BlobFetcherRegistry, id, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(BlobFetcherRegistry, id, __VA_ARGS__)
+
+namespace caffe2 {
+
 inline unique_ptr<BlobFetcherBase> CreateFetcher(TypeIdentifier id) {
-  return BlobFetcherRegistry()->Create(id);
+  return c10::BlobFetcherRegistry()->Create(id);
 }
 
-CAFFE_DECLARE_TYPED_REGISTRY(
+} // namespace caffe2
+
+C10_DECLARE_TYPED_REGISTRY(
     BlobFeederRegistry,
-    DeviceType,
-    BlobFeederBase,
+    caffe2::DeviceType,
+    caffe2::BlobFeederBase,
     std::unique_ptr);
 #define REGISTER_BLOB_FEEDER(device_type, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(BlobFeederRegistry, device_type, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(BlobFeederRegistry, device_type, __VA_ARGS__)
+
+namespace caffe2 {
+
 inline unique_ptr<BlobFeederBase> CreateFeeder(int device_type) {
-  return BlobFeederRegistry()->Create(
+  return c10::BlobFeederRegistry()->Create(
       caffe2::ProtoToType(static_cast<DeviceTypeProto>(device_type)));
 }
 

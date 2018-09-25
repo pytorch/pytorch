@@ -6,11 +6,11 @@
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2_pb.h"
 
+C10_DEFINE_REGISTRY(TransformRegistry, caffe2::Transform);
+
 namespace caffe2 {
 
 using transform::Graph;
-
-CAFFE_DEFINE_REGISTRY(TransformRegistry, Transform);
 
 std::vector<std::vector<int>> Transform::PatternMatch(const Graph& graph) {
   // checks if the node at index i is matched already or not
@@ -181,7 +181,7 @@ NetDef Transform::ApplyTo(const NetDef& orig_net) {
 
 // Create a Transform object
 unique_ptr<Transform> CreateTransform(string key) {
-  auto t = TransformRegistry()->Create(key);
+  auto t = c10::TransformRegistry()->Create(key);
   CAFFE_ENFORCE(t != nullptr, "Transform not found in registry: ", key);
   return t;
 }

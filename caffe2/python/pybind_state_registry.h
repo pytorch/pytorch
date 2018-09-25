@@ -3,6 +3,8 @@
 #include <pybind11/pybind11.h>
 #include "caffe2/core/registry.h"
 
+C10_DECLARE_REGISTRY(PybindAdditionRegistry, caffe2::PybindAddition, pybind11::module&);
+
 namespace caffe2 {
 namespace python {
 
@@ -14,8 +16,6 @@ struct PybindAddition {
   virtual ~PybindAddition(){};
 };
 
-CAFFE_DECLARE_REGISTRY(PybindAdditionRegistry, PybindAddition, py::module&);
-
 #define REGISTER_PYBIND_ADDITION(funcname)        \
   namespace {                                     \
   struct funcname##Impl : public PybindAddition { \
@@ -23,7 +23,7 @@ CAFFE_DECLARE_REGISTRY(PybindAdditionRegistry, PybindAddition, py::module&);
       funcname(m);                                \
     }                                             \
   };                                              \
-  CAFFE_REGISTER_CLASS(                           \
+  C10_REGISTER_CLASS(                           \
       PybindAdditionRegistry,                     \
       funcname##Impl,                             \
       funcname##Impl);                            \

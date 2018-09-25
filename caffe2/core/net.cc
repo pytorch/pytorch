@@ -17,13 +17,13 @@ CAFFE2_DEFINE_string(
     "",
     "Comma-separated list of executor overrides");
 
-namespace caffe2 {
-
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     NetRegistry,
-    NetBase,
-    const std::shared_ptr<const NetDef>&,
-    Workspace*);
+    caffe2::NetBase,
+    const std::shared_ptr<const caffe2::NetDef>&,
+    caffe2::Workspace*);
+
+namespace caffe2 {
 
 NetBase::NetBase(
     const std::shared_ptr<const NetDef>& def,
@@ -161,7 +161,7 @@ unique_ptr<NetBase> CreateNet(
     net_type = kSimpleNet;
   }
   checkExecutorOverride(net_type);
-  unique_ptr<NetBase> net = NetRegistry()->Create(net_type, net_def, ws);
+  unique_ptr<NetBase> net = c10::NetRegistry()->Create(net_type, net_def, ws);
 
   VLOG(1) << "Adding a global observer to a net";
   if (net) {

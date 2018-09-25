@@ -21,7 +21,7 @@
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Backtrace.h>
 
-namespace at {
+namespace c10 {
 
 template <typename KeyType>
 inline void PrintOffendingKey(const KeyType& /*key*/) {
@@ -157,39 +157,37 @@ class CAFFE2_API Registerer {
  */
 #define C10_DECLARE_TYPED_REGISTRY(                                \
     RegistryName, SrcType, ObjectType, PtrType, ...)              \
-  namespace at {                                                  \
-  CAFFE2_API Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* \
+  namespace c10 {                                                  \
+  CAFFE2_API Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* \
   RegistryName();                                                 \
-  typedef Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>   \
+  typedef Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>   \
       Registerer##RegistryName;                                   \
-  extern template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>; \
   }
 
 #define C10_DEFINE_TYPED_REGISTRY(                                         \
     RegistryName, SrcType, ObjectType, PtrType, ...)                         \
-  namespace at { \
-  Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* RegistryName() {    \
-    static Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>* registry = \
-        new Registry<SrcType, PtrType<ObjectType>, __VA_ARGS__>();         \
+  namespace c10 { \
+  Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName() {    \
+    static Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* registry = \
+        new Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>();         \
     return registry;                                                         \
   } \
-  template class Registerer<SrcType, PtrType<ObjectType>, __VA_ARGS__>; \
   }
 
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
 // creator with comma in its templated arguments.
 #define C10_REGISTER_TYPED_CREATOR(RegistryName, key, ...)                  \
   namespace {                                                                 \
-  ::at::Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
-      key, ::at::RegistryName(), __VA_ARGS__);                                      \
+  ::c10::Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+      key, ::c10::RegistryName(), ##__VA_ARGS__);                                      \
   }
 
 #define C10_REGISTER_TYPED_CLASS(RegistryName, key, ...)                    \
   namespace {                                                                 \
-  ::at::Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
+  ::c10::Registerer##RegistryName C10_ANONYMOUS_VARIABLE(g_##RegistryName)( \
       key,                                                                    \
-      ::at::RegistryName(),                                                         \
-      ::at::Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
+      ::c10::RegistryName(),                                                         \
+      ::c10::Registerer##RegistryName::DefaultCreator<__VA_ARGS__>,                  \
       ::at::demangle_type<__VA_ARGS__>());                                           \
   }
 
@@ -198,27 +196,27 @@ class CAFFE2_API Registerer {
 // type, because that is the most commonly used cases.
 #define C10_DECLARE_REGISTRY(RegistryName, ObjectType, ...) \
   C10_DECLARE_TYPED_REGISTRY(                               \
-      RegistryName, std::string, ObjectType, std::unique_ptr, __VA_ARGS__)
+      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
 
 #define C10_DEFINE_REGISTRY(RegistryName, ObjectType, ...) \
   C10_DEFINE_TYPED_REGISTRY(                               \
-      RegistryName, std::string, ObjectType, std::unique_ptr, __VA_ARGS__)
+      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
 
 #define C10_DECLARE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
   C10_DECLARE_TYPED_REGISTRY(                                      \
-      RegistryName, std::string, ObjectType, std::shared_ptr, __VA_ARGS__)
+      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
 #define C10_DEFINE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
   C10_DEFINE_TYPED_REGISTRY(                                      \
-      RegistryName, std::string, ObjectType, std::shared_ptr, __VA_ARGS__)
+      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
 // C10_REGISTER_CREATOR and C10_REGISTER_CLASS are hard-wired to use std::string
 // as the key
 // type, because that is the most commonly used cases.
 #define C10_REGISTER_CREATOR(RegistryName, key, ...) \
-  C10_REGISTER_TYPED_CREATOR(RegistryName, #key, __VA_ARGS__)
+  C10_REGISTER_TYPED_CREATOR(RegistryName, #key, ##__VA_ARGS__)
 
 #define C10_REGISTER_CLASS(RegistryName, key, ...) \
-  C10_REGISTER_TYPED_CLASS(RegistryName, #key, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(RegistryName, #key, ##__VA_ARGS__)
 
-}  // namespace at
+}  // namespace c10
