@@ -2165,10 +2165,6 @@ class TestAutograd(TestCase):
         keys = dir(x)
         self.assertIn('shape', keys)
 
-        # __cuda_array_interface__ attribute is not valid for non-cuda tensors,
-        # Marks this via "AttributeError", hasattr is False
-        keys.remove("__cuda_array_interface__")
-
         for key in keys:
             self.assertTrue(hasattr(x, key))
 

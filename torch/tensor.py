@@ -422,6 +422,11 @@ class Tensor(torch._C._TensorBase):
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
         keys = tensor_methods + attrs
+
+        # property only available dense, cuda tensors
+        if (not self.is_cuda) or self.is_sparse:
+            keys.remove("__cuda_array_interface__")
+
         return sorted(keys)
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
@@ -451,7 +456,7 @@ class Tensor(torch._C._TensorBase):
 
         # raise AttributeError for unsupported tensors, so that
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
-        if not self.device.type == "cuda":
+        if not self.is_cuda:
             raise AttributeError(
                 "Can't get __cuda_array_interface__ on non-CUDA tensor type: %s "
                 "If CUDA data is required use tensor.cuda() to copy tensor to device memory." %
