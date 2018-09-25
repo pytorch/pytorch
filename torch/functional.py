@@ -673,7 +673,7 @@ def cartesian_prod(*tensors):
                 [3, 4],
                 [3, 5]])
     """
-    return torch._C._VariableFunctions._cartesian_prod(tensors)
+    return torch._C._VariableFunctions.cartesian_prod(tensors)
 
 
 def norm(input, p="fro", dim=None, keepdim=False, out=None):
