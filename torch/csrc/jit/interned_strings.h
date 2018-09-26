@@ -15,7 +15,6 @@ namespace torch { namespace jit {
   _(namespaces, aten)              \
   _(namespaces, onnx)              \
   _(namespaces, attr)              \
-  _(namespaces, weak)              \
   _(namespaces, scope)             \
   _(namespaces, namespaces)        \
   _(prim, Assign)                  \
@@ -178,7 +177,6 @@ struct TORCH_API Symbol {
   static Symbol aten(const std::string & s);
   static Symbol onnx(const std::string & s);
   static Symbol prim(const std::string & s);
-  static Symbol weak(const std::string & s);
   // TODO: eliminate me
   static Symbol scope(const std::string & s);
 
@@ -186,7 +184,6 @@ struct TORCH_API Symbol {
   bool is_aten() const;
   bool is_prim() const;
   bool is_onnx() const;
-  bool is_weak() const;
 
   // So we can switch on this
   constexpr operator unique_t() const {
@@ -244,13 +241,11 @@ inline Symbol Symbol::attr(const std::string & s) { return Symbol::fromQualStrin
 inline Symbol Symbol::aten(const std::string & s)  { return Symbol::fromQualString("aten::" + s); }
 inline Symbol Symbol::onnx(const std::string & s)  { return Symbol::fromQualString("onnx::" + s); }
 inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualString("prim::" + s); }
-inline Symbol Symbol::weak(const std::string & s) { return Symbol::fromQualString("weak::" + s); }
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }
 inline bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 inline bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 inline bool Symbol::is_prim() const { return ns() == namespaces::prim; }
 inline bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
-inline bool Symbol::is_weak() const { return ns() == namespaces::weak; }
 
 }} // namespace torch::jit
 

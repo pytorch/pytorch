@@ -7048,13 +7048,23 @@ a")
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
 
     def test_weak_script_function(self):
-        def plain_python(x):
+        def not_a_script_fn(x):
             return x + 2
 
+        @torch.jit.script
+        def strong_script_fn(x):
+            if bool(x.norm() > 2):
+                x = x + 3
+            return x + 4
+
+        @torch.jit.weak_script
+        def weak_script_fn(x):
+            return x + 5
+
         def fn(x):
-            x = plain_python(x)
-            y = torch.nn.functional.softsign(x)
-            return torch.nn.functional.tanhshrink(x) + y
+            x = not_a_script_fn(x)
+            x = strong_script_fn(x)
+            return weak_script_fn(x)
 
         scripted = torch.jit.script(fn)
 

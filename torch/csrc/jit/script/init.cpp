@@ -8,7 +8,6 @@
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/pybind_utils.h"
-#include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/function_schema.h"
@@ -50,8 +49,6 @@ inline std::shared_ptr<SugaredValue> toSimple(Value* v) {
   return std::make_shared<SimpleValue>(v);
 }
 
-static py::function compile_func_;
-
 // NB: This should be the single entry-point for instantiating a SugaredValue
 // from a Python object. If you are adding support for converting a new Python
 // type, *add it in this function's implementation*.
@@ -61,38 +58,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     SourceRange loc,
     bool is_constant = false,
     bool is_submodule = false);
-
-Resolver pythonResolver(ResolutionCallback rcb) {
-  return [=](const std::string& name,
-             Method& m,
-             const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
-    AutoGIL ag;
-    py::object obj = rcb(name);
-    if (obj.is(py::none())) {
-      return nullptr;
-    }
-    return toSugaredValue(obj, m, loc);
-  };
-}
-
-static void registerWeakOperator(const Node* node, py::function func) {
-  auto name = node->kind();
-  py::tuple tuple = py::cast<py::tuple>(compile_func_(func));
-  const Def& def = py::cast<const Def&>(tuple[0]);
-  ResolutionCallback rcb = py::cast<ResolutionCallback>(tuple[1]);
-  auto m = std::make_shared<Module>();
-  defineMethodsInModule(*m, {def}, {pythonResolver(rcb)}, nullptr);
-
-  RegisterOperators reg({Operator(name, [=](Node* node) {
-    Method& method = m->get_method(name.toUnqualString());
-    return [&](Stack& stack) {
-      auto res = method(stack);
-      drop(stack, method.num_inputs());
-      pack(stack, res);
-      return 0;
-    };
-  })});
-}
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
@@ -156,43 +121,17 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
     // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
-
-    Node* new_node = nullptr;
-    bool is_weak = py::hasattr(func, "is_weak") &&
-        py::cast<bool>(py::getattr(func, "is_weak"));
-
-    // Set up node as a PythonOp or as a weak script
-    if (is_weak) {
-      auto name = std::make_shared<Symbol>(
-          Symbol::weak(py::str(py::getattr(func, "__name__"))));
-      new_node = m.graph()->insertNode(m.graph()->create(*name, 0));
-    } else {
-      // Create node that calls up to Python
-      std::string cconv(inputs.size(), 'd');
-      new_node = m.graph()->insertNode(m.graph()->createPythonOp(
-        THPObjectPtr(func.release().ptr()), cconv, {}));
-    }
-
-    // Set common node properties
+    std::string cconv(inputs.size(), 'd');
+    Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
+      THPObjectPtr(func.release().ptr()), cconv, {}));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
-
-    for (auto &i : *all_inputs) {
+    for(auto &i : *all_inputs)
       new_node->addInput(i);
-    }
 
     std::vector<Value*> outputs;
-    for (auto & ret_arg : schema.returns) {
+    for(auto & ret_arg : schema.returns) {
       outputs.push_back(new_node->addOutput()->setType(ret_arg.type));
     }
-
-    // Check if there already is an operator for this script
-    auto op = findOperatorFor(new_node);
-
-    if (is_weak && op == nullptr) {
-      // Weak script doesn't have operator, so compile and register
-      registerWeakOperator(new_node, std::move(func));
-    }
-
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
 
@@ -377,6 +316,17 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   }
+
+  bool is_weak = py::hasattr(obj, "_jit_is_weak_script") &&
+      py::cast<bool>(py::getattr(obj, "_jit_is_weak_script"));
+
+  if (is_weak) {
+    auto compiled_fn =
+        py::module::import("torch.jit").attr("script")(obj, true, 0, true);
+    auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
+    return std::make_shared<ModuleValue>(mod);
+  }
+
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
@@ -409,6 +359,19 @@ static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const 
   for(const auto & sub : m.get_modules()) {
     gatherParametersAndBuffers(values, *sub->module);
   }
+}
+
+Resolver pythonResolver(ResolutionCallback rcb) {
+  return [=](const std::string& name,
+             Method& m,
+             const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
+    AutoGIL ag;
+    py::object obj = rcb(name);
+    if (obj.is(py::none())) {
+      return nullptr;
+    }
+    return toSugaredValue(obj, m, loc);
+  };
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -567,10 +530,6 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
     return compileFunction(def, pythonResolver(rcb));
-  });
-
-  m.def("_jit_register_preprocessor", [](py::function func) {
-    compile_func_ = func;
   });
 
   m.def("parse_type_comment", [](const std::string& comment) {

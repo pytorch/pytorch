@@ -44,6 +44,7 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
+compiled_weak_fns = weakref.WeakKeyDictionary()
 
 
 @contextlib.contextmanager
@@ -582,23 +583,15 @@ class CompilationUnit(object):
 
 
 def weak_script(fn):
-    # register op for jit
-    # no op if called from python
-    fn.is_weak = True
+    fn._jit_is_weak_script = True
     return fn
 
 
-def graph_from_fn(fn, _frames_up=0):
-    rcb = createResolutionCallback(_frames_up + 1)
-    ast = get_jit_ast(fn, is_method=False)
-    return (ast, rcb)
-
-torch._C._jit_register_preprocessor(graph_from_fn)
-
-
-def script(fn, optimize=True, _frames_up=0):
+def script(fn, optimize=True, _frames_up=0, is_weak=False):
     if not _enabled:
         return fn
+    if is_weak and fn in compiled_weak_fns:
+        return compiled_weak_fns[fn]
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
     graph = _jit_script_compile(ast, rcb)
@@ -611,6 +604,9 @@ def script(fn, optimize=True, _frames_up=0):
     mod.__getattr__('forward').forward_schema(ast, False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
+
+    if is_weak:
+        compiled_weak_fns[fn] = mod
     return mod
 
 

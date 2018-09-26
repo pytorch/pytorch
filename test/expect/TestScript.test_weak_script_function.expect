@@ -1,8 +1,25 @@
 graph(%x.1 : Dynamic) {
-  %x : Dynamic = ^plain_python()(%x.1)
-  %y : Dynamic = weak::softsign(%x)
-  %3 : Dynamic = weak::tanhshrink(%x)
-  %4 : int = prim::Constant[value=1]()
-  %5 : Dynamic = aten::add(%3, %y, %4)
-  return (%5);
+  %x.3 : Dynamic = ^not_a_script_fn()(%x.1)
+  %2 : int = prim::Constant[value=8]()
+  %3 : int = prim::Constant[value=22]()
+  %4 : int = prim::Constant[value=2]()
+  %5 : int = prim::Constant[value=2]()
+  %6 : Dynamic = aten::norm(%x.3, %5)
+  %7 : Dynamic = aten::gt(%6, %4)
+  %8 : int = prim::TensorToNum(%7)
+  %x.4 : Dynamic = prim::If(%8)
+    block0() {
+      %10 : int = prim::Constant[value=1]()
+      %x.2 : Dynamic = aten::add(%x.3, %3, %10)
+      -> (%x.2)
+    }
+    block1() {
+      -> (%x.3)
+    }
+  %12 : int = prim::Constant[value=1]()
+  %x : Dynamic = aten::add(%x.4, %2, %12)
+  %14 : int = prim::Constant[value=400]()
+  %15 : int = prim::Constant[value=1]()
+  %16 : Dynamic = aten::add(%x, %14, %15)
+  return (%16);
 }
