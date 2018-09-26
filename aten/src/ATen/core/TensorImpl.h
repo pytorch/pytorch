@@ -48,14 +48,14 @@ class Tensor;
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
  */
-inline std::vector<int64_t> ToVectorint64_t(const std::vector<int>& src) {
+inline std::vector<int64_t> ToVectorint64_t(ArrayRef<int> src) {
   return std::vector<int64_t>(src.begin(), src.end());
 }
 
 /**
  * Return product of all dimensions starting from k
  */
-inline int64_t size_from_dim_(int k, const std::vector<int64_t>& dims) {
+inline int64_t size_from_dim_(int k, IntList dims) {
   int64_t r = 1;
   for (size_t i = k; i < dims.size(); ++i) {
     r *= dims[i];
@@ -64,7 +64,7 @@ inline int64_t size_from_dim_(int k, const std::vector<int64_t>& dims) {
 }
 
 // Product of all dims up to k (not including dims[k])
-inline int64_t size_to_dim_(int k, const std::vector<int64_t>& dims) {
+inline int64_t size_to_dim_(int k, IntList dims) {
   CAFFE_ENFORCE((unsigned)k <= dims.size());
   int64_t r = 1;
   for (int i = 0; i < k; ++i) {
@@ -74,7 +74,7 @@ inline int64_t size_to_dim_(int k, const std::vector<int64_t>& dims) {
 }
 
 // Product of all dims between k and l (not including dims[k] and dims[l])
-inline int64_t size_between_dim_(int k, int l, const std::vector<int64_t>& dims) {
+inline int64_t size_between_dim_(int k, int l, IntList dims) {
   CAFFE_ENFORCE((unsigned)l < dims.size());
   int64_t r = 1;
   if (k < l) {
@@ -785,43 +785,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }
 
-  // NB: This capacity may also include available space
-  // in the storage BEFORE the tensor data, if storage_offset != 0
-  inline size_t capacity_nbytes() const {
-    return storage_.capacity();
-  }
   /**
    * Returns the dimensions of the tensor as a vector.
    */
   inline const std::vector<int64_t>& dims() const {
+    // TODO: This method will no longer work if we change the
+    // internal representation of dims().  That's BAD.  Let's get
+    // people to stop using this.
     return sizes_;
-  }
-
-  inline int64_t size_from_dim(int k) const {
-    return size_from_dim_(k, sizes_);
-  }
-
-  inline int64_t size_to_dim(int k) const {
-    return size_to_dim_(k, sizes_);
-  }
-
-  inline int64_t size_between_dim(int k, int l) const {
-    return size_between_dim_(k, l, sizes_);
-  }
-
-  /**
-   * Returns the 'canonical' version of a (usually)  user-specified axis,
-   * allowing for negative indexing (e.g., -1 for the last axis).
-   *
-   * @param axis_index the axis index.
-   *        If 0 <= index < dim(), return index.
-   *        If -ndim <= index <= -1, return (dim() - (-index)),
-   *        e.g., the last axis index (dim() - 1) if index == -1,
-   *        the second to last if index == -2, etc.
-   *        Dies on out of range index.
-   */
-  inline int canonical_axis_index(int axis_index) const {
-    return canonical_axis_index_(axis_index, dim());
   }
 
   /**
