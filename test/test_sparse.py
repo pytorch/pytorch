@@ -497,57 +497,67 @@ class TestSparse(TestCase):
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
     def test_Sparse_to_Sparse_copy_(self):
-        # TODO: use _gen_sparse to generate inputs
-        I, V, size = torch.LongTensor([[0, 1, 2]]), torch.FloatTensor([3, 4, 5]), torch.Size([3])
-        expected_output = V
-        copy_src = torch.sparse_coo_tensor(I, V, size)
-        device = torch.device('cuda:0') if self.is_cuda else torch.device('cpu')
-        input = torch.sparse_coo_tensor(I, torch.ones_like(V), size, device=device)
+        # This is for testing torch.copy_(SparseTensor, SparseTensor)
+        sparse_dims = 3
+        nnz = 10
+        sizes = [2, 3, 4, 5]  # hybrid sparse
+        x1, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+        x2, _, _ = self._gen_sparse(sparse_dims, nnz + 10, sizes)
 
         # test copy
-        input.copy_(copy_src)
-        self.assertEqual(expected_output, input.to_dense())
+        x2_dense = x2.to_dense()
+        x1.copy_(x2)
+        self.assertEqual(x2_dense, x1.to_dense())
 
-        # test type conversion
-        input_dtype = input.dtype
-        copy_src = torch.sparse_coo_tensor(I, V.type(torch.DoubleTensor), size)
-        input.copy_(copy_src, non_blocking=True)
-        self.assertEqual(input_dtype, input.dtype)
-        self.assertEqual(expected_output, input.to_dense())
+        # test type conversion (when x1.copy_(x2), x1.dtype should stay the same)
+        x1 = x1.to(torch.float32)
+        x2 = x2.to(torch.float64)
+        x1_dtype = x1.dtype
+        x1.copy_(x2)
+        self.assertEqual(x1_dtype, x1.dtype)
 
         # test no broadcast
-        src = torch.sparse_coo_tensor(torch.LongTensor([[0]]), torch.FloatTensor([2]), torch.Size([1]))
-        self.assertRaises(RuntimeError, lambda: input.copy_(src))
+        self.assertRaises(RuntimeError, lambda: x1.copy_(x2.narrow_copy(0, 0, 1)))
 
-        # TODO: test raise error on copy_() between dense and sparse Tensors
+        # test raise error on copy_() between dense and sparse Tensors
+        self.assertRaises(RuntimeError, lambda: x1.copy_(torch.randn(5, 5)))
 
         # test autograd
-        input = torch.sparse_coo_tensor(I, torch.ones_like(V), size, device=device)
-        copy_src = torch.sparse_coo_tensor(I, V, size, requires_grad=True)
-        input.copy_(copy_src)
-        y = input * 2
-        y.backward(torch.sparse_coo_tensor(I, V, size, device=device))
-        expected_grad = torch.sparse_coo_tensor(I, V, size) * 2
-        self.assertEqual(expected_grad.to_dense().data, copy_src.grad.to_dense().data)
-        self.assertEqual(None, input.grad)
+        x1, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+        x2, _, _ = self._gen_sparse(sparse_dims, nnz + 10, sizes)
+        x2.requires_grad_(True)
+        x1.copy_(x2)
+        y = x1 * 2
+        x2_clone = x2.clone()
+        y.backward(x2_clone)
+        expected_grad = x2_clone * 2
+        self.assertEqual(expected_grad.to_dense(), x2.grad.to_dense())
+        self.assertEqual(None, x1.grad)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
     def test_Sparse_to_Sparse_copy_multi_gpu(self):
-        I, V, size = torch.LongTensor([[0, 1, 2]]), torch.FloatTensor([3, 4, 5]), torch.Size([3])
-        device = torch.device('cuda:0')
-        expected_output = V
-        # test copy between two different gpus
-        input_cuda0 = torch.sparse_coo_tensor(I, torch.ones_like(V), size, device=device)
-        input_cuda1 = torch.sparse_coo_tensor(I, V, size, device=torch.device('cuda:1'), requires_grad=True)
-        input_cuda0.copy_(input_cuda1)
-        self.assertEqual(expected_output, input_cuda0.to_dense())
-        self.assertEqual(torch.device('cuda:0'), input_cuda0.device)
+        # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
+        sparse_dims = 3
+        nnz = 10
+        sizes = [2, 3, 4, 5]  # hybrid sparse
+        x1, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+        x2, _, _ = self._gen_sparse(sparse_dims, nnz + 10, sizes)
+        x1 = x1.to('cuda:0')
+        x2 = x2.to('cuda:1')
+        x1_device = x1.device
+        x1.copy_(x2)
+        self.assertEqual(x2.to('cuda:0').to_dense(), x1.to_dense())
+        self.assertEqual(x1_device, x1.device)
 
-        y = input_cuda0 * 2
-        y.backward(torch.sparse_coo_tensor(I, V, size, device=device))
-        expected_grad = torch.sparse_coo_tensor(I, V, size) * 2
-        self.assertEqual(expected_grad.to_dense().data, input_cuda1.grad.to_dense().data)
-        self.assertEqual(None, input_cuda0.grad)
+        # test autograd
+        x2.requires_grad_(True)
+        x1.copy_(x2)
+        y = x1 * 2
+        x2_clone = x2.clone().to('cuda:0')
+        y.backward(x2_clone)
+        expected_grad = x2_clone * 2
+        self.assertEqual(expected_grad.to_dense(), x2.grad.to('cuda:0').to_dense())
+        self.assertEqual(None, x1.grad)
 
     @cuda_only
     def test_cuda_empty(self):
