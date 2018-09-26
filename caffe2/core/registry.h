@@ -100,7 +100,7 @@ class Registry {
   CaffeMap<SrcType, string> help_message_;
   std::mutex register_mutex_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(Registry);
+  C10_DISABLE_COPY_AND_ASSIGN(Registry);
 };
 
 template <class SrcType, class ObjectPtrType, class... Args>
@@ -142,16 +142,16 @@ class Registerer {
  * declaration, as well as creating a convenient typename for its corresponding
  * registerer.
  */
-#define CAFFE_DECLARE_TYPED_REGISTRY(                                    \
-    RegistryName, SrcType, ObjectType, PtrType, ...)                     \
-  CAFFE2_EXPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*   \
-  RegistryName();                                                        \
-  typedef Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>        \
+#define CAFFE_DECLARE_TYPED_REGISTRY(                               \
+    RegistryName, SrcType, ObjectType, PtrType, ...)                \
+  C10_EXPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* \
+  RegistryName();                                                   \
+  typedef Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>   \
       Registerer##RegistryName;
 
 #define CAFFE_DEFINE_TYPED_REGISTRY(                                         \
     RegistryName, SrcType, ObjectType, PtrType, ...)                         \
-  CAFFE2_EXPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*       \
+  C10_EXPORT Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*          \
   RegistryName() {                                                           \
     static Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* registry = \
         new Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>();         \

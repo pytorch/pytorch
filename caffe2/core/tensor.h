@@ -16,6 +16,8 @@ using at::UndefinedTensorImpl;
  * redirects API calls to TensorImpl;
  * Copying of Tensor results in sharing the same underlying implementation
  * object
+ *
+ * NB: See TensorImpl for documentation on these methods.
  */
 class CAFFE2_API Tensor final {
  protected:
