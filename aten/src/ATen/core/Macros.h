@@ -16,6 +16,12 @@
 #define AT_DEVICE
 #endif
 
+#ifdef __HIP_PLATFORM_HCC__
+#define HIP_HOST_DEVICE __host__ __device__
+#else
+#define HIP_HOST_DEVICE
+#endif
+
 #if defined(__ANDROID__)
 #define AT_ANDROID 1
 #define AT_MOBILE 1

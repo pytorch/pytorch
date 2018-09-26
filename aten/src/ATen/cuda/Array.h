@@ -13,9 +13,9 @@ struct Array {
   AT_HOST_DEVICE T operator[](int i) const { return data[i]; }
   AT_HOST_DEVICE T& operator[](int i) { return data[i]; }
 
-  Array() = default;
-  Array(const Array&) = default;
-  Array& operator=(const Array&) = default;
+  HIP_HOST_DEVICE Array() = default;
+  HIP_HOST_DEVICE Array(const Array&) = default;
+  HIP_HOST_DEVICE Array& operator=(const Array&) = default;
 
   // Fill the array with x.
   AT_HOST_DEVICE Array(T x) {
