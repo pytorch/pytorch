@@ -60,7 +60,7 @@ static void allocate_reduction_result(
   if (result.defined()) {
     result.resize_(shape);
   } else {
-    result = self.type().toScalarType(dtype).tensor(shape);
+    result = at::empty(shape, self.type().toScalarType(dtype));
   }
 }
 

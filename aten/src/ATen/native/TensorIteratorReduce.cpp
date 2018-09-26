@@ -33,7 +33,7 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
   auto& dst = iter.tensor(0);
   auto buffer_shape = DimVector(dst.sizes());
   buffer_shape.insert(buffer_shape.begin(), num_threads);
-  auto buffer = dst.type().tensor(buffer_shape);
+  auto buffer = at::empty(buffer_shape, dst.type());
 
   at::parallel_for(0, iter.numel(), internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
     auto slice = buffer[at::get_thread_num()];

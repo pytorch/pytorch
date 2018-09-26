@@ -137,10 +137,9 @@ void TensorIterator::compute_common_type() {
   for (auto& op : operands_) {
     if (!op.type) {
       op.type = &type;
-      op.needs_cast = needs_cast(*op.tensor, type);
-      if (op.needs_cast && op.tensor->dim() == 0 && !op.is_output) {
-        cast_tensors_.emplace_back(op.tensor->toType(type));
-        op.tensor = &(cast_tensors_.back());
+      op.needs_cast = needs_cast(op.tensor, type);
+      if (op.needs_cast && op.tensor.dim() == 0 && !op.is_output) {
+        op.tensor = op.tensor.toType(type);
         op.needs_cast = false;
       }
     }
@@ -180,7 +179,7 @@ void TensorIterator::allocate_outputs() {
       for (int dim = 0; dim < ndim(); dim++) {
         tensor_stride[dim] /= element_size;
       }
-      *op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.type->options());
+      op.tensor = at::empty_strided(tensor_shape, tensor_stride, op.type->options());
     }
   }
 }
