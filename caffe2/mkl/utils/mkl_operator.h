@@ -16,7 +16,7 @@ C10_DECLARE_REGISTRY(
     const OperatorDef&,
     Workspace*);
 #define REGISTER_MKL_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(MKLOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(MKLOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_MKL_OPERATOR(name, ...) \
   C10_REGISTER_CLASS(MKLOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_MKL_OPERATOR_STR(str_name, ...) \

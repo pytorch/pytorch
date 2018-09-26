@@ -9,7 +9,7 @@ namespace caffe2 {
 C10_DECLARE_REGISTRY(GLOperatorRegistry, OperatorBase, const OperatorDef &,
                        Workspace *);
 #define REGISTER_GL_OPERATOR_CREATOR(key, ...)                                 \
-  CAFFE_REGISTER_CREATOR(GLOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(GLOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_GL_OPERATOR(name, ...)                                        \
   extern void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                  \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_GL##name() {              \

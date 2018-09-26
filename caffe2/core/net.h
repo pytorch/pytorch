@@ -140,7 +140,7 @@ C10_DECLARE_REGISTRY(
     const std::shared_ptr<const NetDef>&,
     Workspace*);
 #define REGISTER_NET_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(NetRegistry, key, __VA_ARGS__)
 #define REGISTER_NET(name, ...) \
   C10_REGISTER_CLASS(NetRegistry, name, __VA_ARGS__)
 

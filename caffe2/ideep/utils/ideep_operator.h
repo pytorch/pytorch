@@ -13,7 +13,7 @@ C10_DECLARE_REGISTRY(
     Workspace*);
 
 #define REGISTER_IDEEP_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(IDEEPOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(IDEEPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR(name, ...) \
   C10_REGISTER_CLASS(IDEEPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_IDEEP_OPERATOR_STR(str_name, ...) \
