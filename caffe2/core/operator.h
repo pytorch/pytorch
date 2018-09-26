@@ -400,6 +400,8 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   C10_DISABLE_COPY_AND_ASSIGN(OperatorBase);
 };
 
+extern template class Observable<OperatorBase>;
+
 // If your operator does not need any specialized contructor or destructor,
 // you can simply use this to save two lines of code.
 #define USE_SIMPLE_BASE_CTOR_DTOR(name)                                        \
