@@ -26,8 +26,8 @@ struct MIOPENWorkspace
         if(nbytes_ < nbytes)
         {
             reset();
-            auto data_and_deleter = HIPContext::New(nbytes);
-            data_                 = {data_and_deleter.first, data_and_deleter.second};
+            auto data_ptr = HIPContext::New(nbytes);
+            data_                 = {data_ptr.move_context().release, data_ptr.get_deleter()};
             nbytes_               = nbytes;
         }
         CAFFE_ENFORCE_GE(nbytes_, nbytes);
@@ -41,6 +41,7 @@ struct MIOPENWorkspace
     }
 
     private:
+    // TODO: change to at::DataPtr
     std::unique_ptr<void, MemoryDeleter> data_{nullptr, NoDelete};
     size_t nbytes_{0};
 };
