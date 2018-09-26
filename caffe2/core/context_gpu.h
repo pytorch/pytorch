@@ -397,9 +397,13 @@ class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
     device->set_cuda_gpu_id(GetGPUIDForPointer(data));
   }
 
- protected:
-  static void Delete(void* data);
 };
+
+// Get the CUDA Alloctor.
+CAFFE2_API at::Allocator* GetCUDAAllocator();
+// Sets the CUDA allocator to the given allocator: the caller gives away the
+// ownership of the pointer.
+CAFFE2_API void SetCUDAAllocator(at::Allocator* alloc);
 
 using TensorCUDA = Tensor;
 

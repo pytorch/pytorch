@@ -385,9 +385,13 @@ class HIPStaticContext final : public BaseStaticContext {
     device->set_hip_gpu_id(GetGPUIDForPointer(data));
   }
 
- protected:
-  static void Delete(void* data);
 };
+
+// Get the HIP Alloctor.
+CAFFE2_API at::Allocator* GetHIPAllocator();
+// Sets the HIP allocator to the given allocator: the caller gives away the
+// ownership of the pointer.
+CAFFE2_API void SetHIPAllocator(at::Allocator* alloc);
 
 typedef Tensor TensorHIP;
 
