@@ -28,7 +28,7 @@ fi
 # Install numba to enable integration testing in a limited set of target
 # environments.
 if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
-  conda install numba cudatoolkit=9.0
+  conda install numba=0.39 cudatoolkit=9.0
 fi
 
 
