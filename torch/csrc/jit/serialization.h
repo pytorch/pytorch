@@ -266,7 +266,8 @@ class PyTorchStreamWriter {
 class PyTorchFileReader {
  public:
   PyTorchFileReader(const std::string& filename) :
-    in(filename), stream_reader(in) {}
+    in(filename, std::ios_base::binary),
+    stream_reader(in) {}
 
   std::tuple<at::DataPtr, size_t> getLastRecord() {
     return stream_reader.getLastRecord();
@@ -284,7 +285,8 @@ class PyTorchFileReader {
 class PyTorchFileWriter {
  public:
   PyTorchFileWriter(const std::string& filename) :
-    out(filename), stream_writer(out) {}
+    out(filename, std::ios_base::binary),
+    stream_writer(out) {}
 
   uint64_t writeRecord(const char* data, size_t size) {
     return stream_writer.writeRecord(data, size);
