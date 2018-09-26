@@ -225,7 +225,7 @@ struct StaticContextFunctionRegisterer {
 //     at::Allocator*
 // );
 
-// #define REGISTER_ALLOCATOR(key, alloc) \
+// #define REGISTER_ALLOCATOR(key, alloc)
 //   AT_REGISTER_TYPED_CREATOR(AllocatorRegistry, key, alloc)
 
 using AllocatorGetter = at::Allocator* (*)(void);
@@ -247,7 +247,7 @@ struct AllocatorGetterRegisterer {
   }
 
 inline at::Allocator* GetAllocator(at::DeviceType t) {
-  auto* alloc_getter = GetAllocatorGetterMap()[t];
+  auto alloc_getter = GetAllocatorGetterMap()[t];
   AT_ASSERTM(
       alloc_getter, "Allocator Getter for ", t, " is not registered yet.");
   return alloc_getter();
