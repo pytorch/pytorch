@@ -582,21 +582,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * Resize the tensor like the source tensor. Note that this is just a
-   * sugar wrapper that essentially calls Resize(src_tensor.dims()).
-   * This method respects caffe2_keep_on_shrink.
-   */
-  inline void ResizeLike(const TensorImpl& src_tensor) {
-    CAFFE_ENFORCE_WITH_CALLER(
-        src_tensor.is_contiguous(),
-        "Right now ResizeLike is only supported for contiguous Tensor.");
-    // Note: need casting for different context types.
-    if (static_cast<void*>(this) != static_cast<const void*>(&src_tensor)) {
-      Resize(src_tensor.dims());
-    }
-  }
-
-  /**
    * Resizes the tensor without touching underlying storage.
    * This requires the total size of the tensor to remains constant.
    */
