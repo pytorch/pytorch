@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <ATen/core/typeid.h>
+#include <c10/macros/Macros.h>
 
 namespace caffe2 {
 
@@ -19,7 +20,7 @@ class Tensor;
  * properly when the blob is deallocated or re-allocated with a new type. A blob
  * could contain anything, although the most common case is to contain a Tensor.
  */
-class AT_CORE_API Blob final {
+class CAFFE2_API Blob final {
  public:
   using DestroyCall = void(void*);
 
