@@ -385,25 +385,46 @@ class CAFFE2_API Tensor final {
     return impl_.get()->is_contiguous();
   }
 
+  /**
+   * Checks if the tensor content is of the given data type.
+   */
   template <typename T>
   inline bool IsType() const {
-    return impl_.get()->IsType<T>();
+    return impl_->storage().IsType<T>();
   }
 
+  /**
+   * Returns the TypeMeta object associated with the current data type.
+   */
   inline const TypeMeta& meta() const {
-    return impl_.get()->meta();
+    return impl_->dtype();
   }
 
+  /**
+   * Returns the i-th dimension of the tensor in int.
+   *
+   * This function returns an int value instead of int64_t, which depending on
+   * the typedef could be int64. If you want int64 dim values, make sure you
+   * call dim() instead.
+   */
   inline int dim32(const int i) const {
-    return impl_.get()->dim32(i);
+#ifndef NDEBUG
+    CAFFE_ENFORCE_LT_WITH_CALLER(i, static_cast<int>(impl_->dim()), "Exceeding ndim limit");
+    CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
+#endif
+    auto s = impl_->size(i);
+    CAFFE_ENFORCE_LT_WITH_CALLER(s, std::numeric_limits<int>::max());
+    return static_cast<int>(s);
   }
 
   inline int64_t dim(const int i) const {
-    return impl_.get()->dim(i);
+    return impl_->size(i);
   }
 
   inline void ExtractDeviceOption(DeviceOption* device) const {
-    return impl_.get()->ExtractDeviceOption(device);
+    auto* context = GetStaticContext();
+    CHECK(context);
+    context->ExtractDeviceOption(device, impl_->data());
   }
 
   const Storage& storage() {
