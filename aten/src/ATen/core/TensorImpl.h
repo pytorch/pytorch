@@ -604,6 +604,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         "been changed. If you find this error, most likely you will need "
         "to change corresponding code from Reshape to Resize.");
     sizes_ = dims;
+    update_to_contiguous_strides();
   }
 
   inline void Reshape(const std::vector<int>& dims) {
