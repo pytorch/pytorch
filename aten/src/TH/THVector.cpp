@@ -1,6 +1,6 @@
 #include "THVector.h"
 
-#include "generic/simd/simd.h"
+#include "vector/simd.h"
 
 #ifdef __NEON__
 #include "vector/NEON.cpp"
