@@ -48,7 +48,14 @@ namespace at {
 ///     at::zeros({2,2}, at::requires_grad());
 ///
 struct CAFFE2_API TensorOptions {
-  TensorOptions() {}
+  // NB: Explicit construction of all optional fields is REQUIRED
+  // to work around an nvcc bug.  Otherwise, you get:
+  //
+  //    Error: Internal Compiler Error (codegen): "there was an error in
+  //    verifying the lgenfe output!"
+  //
+  // This bug only occurs when compiling with --expt-relaxed-constexpr
+  TensorOptions() : dtype_(), device_(), layout_(), requires_grad_(), is_variable_() {}
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
