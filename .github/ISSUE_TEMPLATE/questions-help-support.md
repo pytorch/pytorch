@@ -8,11 +8,9 @@ about: Do you need support? We have resources.
 
 ### Please note that this issue tracker is not a help form and this issue will be closed.
 
-Please contact us instead. We have a few channels:
+We have a set of [listed resources available on the website](https://pytorch.org/resources). Here is a set of support channels, in order of where you should begin looking for help:
 
+- [Stack Overflow](https://stackoverflow.com/questions/tagged/pytorch)
+- [Discussion Forum](https://discuss.pytorch.org/)
 - [Slack](https://pytorch.slack.com/)
 - [Twitter](https://twitter.com/pytorch)
-- [Discussion Forum](https://discuss.pytorch.org/)
-- [Stack Overflow](https://stackoverflow.com/questions/tagged/pytorch)
-
-... and [click here for further resources](https://pytorch.org/resources).
