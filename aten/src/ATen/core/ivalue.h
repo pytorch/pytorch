@@ -34,7 +34,7 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
 
 // non-mutable list
 template <typename Elem>
-struct AT_CORE_EXPORT ConstantList final : c10::intrusive_ptr_target {
+struct C10_EXPORT ConstantList final : c10::intrusive_ptr_target {
  private:
   const std::vector<Elem> elements_;
  public:

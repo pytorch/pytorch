@@ -124,7 +124,7 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
   string name_;
   vector<const Event*> events_;
   std::shared_ptr<const NetDef> net_def_;
-  AT_DISABLE_COPY_AND_ASSIGN(NetBase);
+  C10_DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
 class CAFFE2_API ExecutorHelper {

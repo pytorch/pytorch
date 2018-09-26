@@ -219,7 +219,7 @@ class CAFFE2_API Blob final {
   void* pointer_ = nullptr;
   DestroyCall* destroy_ = nullptr;
 
-  AT_DISABLE_COPY_AND_ASSIGN(Blob);
+  C10_DISABLE_COPY_AND_ASSIGN(Blob);
 };
 
 inline void swap(Blob& lhs, Blob& rhs) {
