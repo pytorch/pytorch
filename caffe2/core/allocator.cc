@@ -26,6 +26,8 @@ void SetCPUAllocator(at::Allocator* alloc) {
   g_cpu_allocator.reset(alloc);
 }
 
+REGISTER_ALLOCATOR_GETTER(CPU, GetCPUAllocator);
+
 MemoryAllocationReporter DefaultCPUAllocator::reporter_;
 
 void MemoryAllocationReporter::New(void* ptr, size_t nbytes) {

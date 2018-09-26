@@ -326,10 +326,6 @@ void TrackMemoryAlloc(size_t nbytes)
 }
 }
 
-at::DataPtr HIPStaticContext::New(size_t nbytes) const {
-  return GetHIPAllocator()->allocate(nbytes);
-}
-
 struct DefaultHIPAllocator final : public at::Allocator {
   DefaultHIPAllocator() {}
   ~DefaultHIPAllocator() override {}
@@ -442,6 +438,8 @@ at::Allocator* GetHIPAllocator() {
 void SetHIPAllocator(at::Allocator* alloc) {
   g_hip_allocator.reset(alloc);
 }
+
+REGISTER_ALLOCATOR(HIP, GetHIPAllocator());
 
 BaseStaticContext* GetHIPStaticContext() {
   static HIPStaticContext context;

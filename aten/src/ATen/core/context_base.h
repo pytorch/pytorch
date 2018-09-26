@@ -31,8 +31,6 @@ class AT_CORE_API BaseStaticContext {
  public:
   virtual ~BaseStaticContext() noexcept {}
 
-  virtual at::DataPtr New(size_t nbytes) const = 0;
-
   virtual DeviceType GetDeviceType() = 0;
 
   /*
@@ -220,5 +218,39 @@ struct StaticContextFunctionRegisterer {
   namespace {                                                        \
   static StaticContextFunctionRegisterer<t> g_static_context_##d(f); \
   }
+
+// AT_DECLARE_OBJECT_PTR_REGISTRY(
+//     AllocatorRegistry,
+//     at::DeviceType,
+//     at::Allocator*
+// );
+
+// #define REGISTER_ALLOCATOR(key, alloc) \
+//   AT_REGISTER_TYPED_CREATOR(AllocatorRegistry, key, alloc)
+
+using AllocatorGetter = at::Allocator* (*)(void);
+using AllocatorGetterMap = std::unordered_map<at::DeviceType, AllocatorGetter>;
+CAFFE2_API AllocatorGetterMap& GetAllocatorGetterMap();
+CAFFE2_API void SetAllocatorGetter(
+    at::DeviceType t,
+    AllocatorGetter alloc_getter);
+template <at::DeviceType t>
+struct AllocatorGetterRegisterer {
+  explicit AllocatorGetterRegisterer(AllocatorGetter alloc_getter) {
+    SetAllocatorGetter(t, alloc_getter);
+  }
+};
+
+#define REGISTER_ALLOCATOR_GETTER(t, f)                   \
+  namespace {                                             \
+  static AllocatorGetterRegisterer<t> g_allocator_##d(f); \
+  }
+
+inline at::Allocator* GetAllocator(at::DeviceType t) {
+  auto* alloc_getter = GetAllocatorGetterMap()[t];
+  AT_ASSERTM(
+      alloc_getter, "Allocator Getter for ", t, " is not registered yet.");
+  return alloc_getter();
+}
 
 } // namespace caffe2

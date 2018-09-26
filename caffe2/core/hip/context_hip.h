@@ -207,7 +207,7 @@ class HIPContext final : public BaseContext {
   }
 
   static at::DataPtr New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+    return GetHIPAllocator()->allocate(nbytes);
   }
 
   // Get a mutex to lock out hipMalloc / hipFree calls when
@@ -374,8 +374,6 @@ struct PinnedCPUAllocator final : public at::Allocator {
 
 class HIPStaticContext final : public BaseStaticContext {
  public:
-  at::DataPtr New(size_t nbytes) const override;
-
   DeviceType GetDeviceType() override {
     return HIP;
   }

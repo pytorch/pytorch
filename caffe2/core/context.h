@@ -86,7 +86,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
   }
 
   inline static at::DataPtr New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+    return GetCPUAllocator()->allocate(nbytes);
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
@@ -185,9 +185,6 @@ inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
 // TODO(jerryzh): merge CPUStaticContext with Allocator
 class CAFFE2_API CPUStaticContext : public BaseStaticContext {
  public:
-  at::DataPtr New(size_t nbytes) const override {
-    return GetCPUAllocator()->allocate(nbytes);
-  }
 
   DeviceType GetDeviceType() override {
     return CPU;

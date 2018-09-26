@@ -137,6 +137,12 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
 
 CAFFE2_CUDA_API BaseStaticContext* GetCUDAStaticContext();
 
+// Get the CUDA Alloctor.
+CAFFE2_CUDA_API at::Allocator* GetCUDAAllocator();
+// Sets the CUDA allocator to the given allocator: the caller gives away the
+// ownership of the pointer.
+CAFFE2_CUDA_API void SetCUDAAllocator(at::Allocator* alloc);
+
 class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
  public:
   // The default cuda context constructor.
@@ -224,7 +230,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   }
 
   inline static at::DataPtr New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+    return GetCUDAAllocator()->allocate(nbytes);
   }
 
   // Get a mutex to lock out cudaMalloc / cudaFree calls when
@@ -385,8 +391,6 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
 
 class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
  public:
-  at::DataPtr New(size_t nbytes) const override;
-
   DeviceType GetDeviceType() override {
     return CUDA;
   }
@@ -398,12 +402,6 @@ class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
   }
 
 };
-
-// Get the CUDA Alloctor.
-CAFFE2_API at::Allocator* GetCUDAAllocator();
-// Sets the CUDA allocator to the given allocator: the caller gives away the
-// ownership of the pointer.
-CAFFE2_API void SetCUDAAllocator(at::Allocator* alloc);
 
 using TensorCUDA = Tensor;
 

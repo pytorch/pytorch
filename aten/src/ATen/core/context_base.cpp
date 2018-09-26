@@ -30,4 +30,20 @@ BaseStaticContext* get_static_context(at::DeviceType t) {
   return ptr;
 }
 
+// AT_DEFINE_OBJECT_PTR_REGISTRY(
+//     AllocatorRegistry,
+//     at::DeviceType,
+//     at::Allocator*
+// );
+
+AllocatorGetterMap& GetAllocatorGetterMap() {
+  static AllocatorGetterMap alloc_getter_map;
+  return alloc_getter_map;
+}
+
+void SetAllocatorGetter(at::DeviceType t, AllocatorGetter alloc_getter) {
+  auto& alloc_getter_map = GetAllocatorGetterMap();
+  alloc_getter_map[t] = alloc_getter;
+}
+
 } // namespace caffe2

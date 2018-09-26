@@ -612,13 +612,18 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       CAFFE_ENFORCE(
           allocator == nullptr,
           "Allocator is not used within Caffe2 functions, please use StaticContext instead.");
+      allocator = GetAllocator(storage_.device_type());
+      CAFFE_ENFORCE(
+          allocator != nullptr,
+          "Allocator must be registered for device type",
+          storage_.device_type());
       if (meta.ctor()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.dtor();
-        auto data_ptr = GetStaticContext()->New(
+        auto data_ptr = allocator->allocate(
             numel_ * storage_.itemsize()); // Removing this can get rid of
                                            // InefficientStdFunctionContext
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
@@ -629,7 +634,9 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         data_type_.ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
-        auto data_ptr = GetStaticContext()->New(numel_ * storage_.itemsize());
+        LOG(INFO) << "allocator: " << allocator;
+        allocator->allocate(1);
+        auto data_ptr = allocator->allocate(numel_ * storage_.itemsize());
         storage_.set_data_ptr(std::move(data_ptr));
       }
       storage_.set_numel(numel_);

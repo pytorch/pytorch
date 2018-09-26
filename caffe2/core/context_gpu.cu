@@ -314,11 +314,6 @@ void TrackMemoryAlloc(size_t nbytes) {
 }
 }
 
-// TODO: wrap this function in DefaultCUDAAllocator
-at::DataPtr CUDAStaticContext::New(size_t nbytes) const {
-  return GetCUDAAllocator()->allocate(nbytes);
-}
-
 struct DefaultCUDAAllocator final : public at::Allocator {
   DefaultCUDAAllocator() {}
   ~DefaultCUDAAllocator() override {}
@@ -427,6 +422,8 @@ at::Allocator* GetCUDAAllocator() {
 void SetCUDAAllocator(at::Allocator* alloc) {
   g_cuda_allocator.reset(alloc);
 }
+
+REGISTER_ALLOCATOR_GETTER(CUDA, GetCUDAAllocator);
 
 BaseStaticContext* GetCUDAStaticContext() {
   static CUDAStaticContext context;
