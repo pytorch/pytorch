@@ -497,6 +497,7 @@ class TestSparse(TestCase):
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
     def test_Sparse_to_Sparse_copy_(self):
+        # TODO: use _gen_sparse to generate inputs
         I, V, size = torch.LongTensor([[0, 1, 2]]), torch.FloatTensor([3, 4, 5]), torch.Size([3])
         expected_output = V
         copy_src = torch.sparse_coo_tensor(I, V, size)
@@ -515,11 +516,10 @@ class TestSparse(TestCase):
         self.assertEqual(expected_output, input.to_dense())
 
         # test no broadcast
-        input.copy_(torch.sparse_coo_tensor(
-            torch.LongTensor([[0]]),
-            torch.FloatTensor([2]),
-            torch.Size([1])))
-        self.assertEqual(torch.tensor([2]), input.to_dense())
+        src = torch.sparse_coo_tensor(torch.LongTensor([[0]]), torch.FloatTensor([2]), torch.Size([1]))
+        self.assertRaises(RuntimeError, lambda: input.copy_(src))
+
+        # TODO: test raise error on copy_() between dense and sparse Tensors
 
         # test autograd
         input = torch.sparse_coo_tensor(I, torch.ones_like(V), size, device=device)
