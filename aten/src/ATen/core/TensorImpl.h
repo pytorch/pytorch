@@ -71,9 +71,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   // numbers. Otherwise, they behave like their non-wrapped equivalents.
   // See [Result type computation] in TensorIterator.h.
   bool is_wrapped_number() const {
+    AT_ASSERT(!is_variable());
     return is_wrapped_number_;
   }
   void set_wrapped_number(bool value) {
+    AT_ASSERT(!is_variable());
     AT_ASSERT(dim() == 0);
     is_wrapped_number_ = value;
   }
@@ -99,6 +101,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <typename T>
   inline T * data() const {
+    AT_ASSERT(!is_variable());
     CAFFE_ENFORCE_WITH_CALLER(
         storage_.data() || numel_ == 0,
         "The tensor is of non-zero shape, but its data is not allocated yet. "
@@ -115,6 +118,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   inline void* data() const {
+    AT_ASSERT(!is_variable());
     return static_cast<void*>(
         static_cast<char*>(storage_.data()) +
         data_type_.itemsize() * storage_offset_);
@@ -122,6 +126,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   template <typename T>
   inline T * unsafe_data() const {
+    AT_ASSERT(!is_variable());
     return storage_.unsafe_data<T>() + storage_offset_;
   }
 
@@ -169,6 +174,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   // sizes/strides are in bounds for the storage that is allocated;
   // this is the responsibility of the caller
   void set_sizes_and_strides(at::IntList new_size, at::IntList new_stride) {
+    AT_ASSERT(!is_variable());
     AT_CHECK(
         new_size.size() == new_stride.size(),
         "dimensionality of sizes (",
@@ -206,9 +212,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
  protected:
   void refresh_numel() {
+    AT_ASSERT(!is_variable());
     numel_ = compute_numel();
   }
   void refresh_contiguous() {
+    AT_ASSERT(!is_variable());
     is_contiguous_ = compute_contiguous();
   }
   TensorTypeId type_id_;

@@ -9,7 +9,7 @@ namespace caffe2 {
 
 #ifdef CAFFE2_USE_GFLAGS
 
-CAFFE2_EXPORT void SetUsageMessage(const string& str) {
+C10_EXPORT void SetUsageMessage(const string& str) {
   if (UsageMessage() != nullptr) {
     // Usage message has already been set, so we will simply return.
     return;
@@ -17,16 +17,16 @@ CAFFE2_EXPORT void SetUsageMessage(const string& str) {
   gflags::SetUsageMessage(str);
 }
 
-CAFFE2_EXPORT const char* UsageMessage() {
+C10_EXPORT const char* UsageMessage() {
   return gflags::ProgramUsage();
 }
 
-CAFFE2_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
+C10_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
   if (*pargc == 0) return true;
   return gflags::ParseCommandLineFlags(pargc, pargv, true);
 }
 
-CAFFE2_EXPORT bool CommandLineFlagsHasBeenParsed() {
+C10_EXPORT bool CommandLineFlagsHasBeenParsed() {
   // There is no way we query gflags right now, so we will simply return true.
   return true;
 }
@@ -48,11 +48,14 @@ std::stringstream& GlobalInitStream() {
 static string gUsageMessage = "(Usage message not set.)";
 }
 
+C10_EXPORT void SetUsageMessage(const string& str) {
+  gUsageMessage = str;
+}
+C10_EXPORT const char* UsageMessage() {
+  return gUsageMessage.c_str();
+}
 
-CAFFE2_EXPORT void SetUsageMessage(const string& str) { gUsageMessage = str; }
-CAFFE2_EXPORT const char* UsageMessage() { return gUsageMessage.c_str(); }
-
-CAFFE2_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
+C10_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
   if (*pargc == 0) return true;
   char** argv = *pargv;
   bool success = true;
@@ -136,18 +139,22 @@ CAFFE2_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
   return success;
 }
 
-CAFFE2_EXPORT bool CommandLineFlagsHasBeenParsed() {
+C10_EXPORT bool CommandLineFlagsHasBeenParsed() {
   return gCommandLineFlagsParsed;
 }
 
 template <>
-CAFFE2_EXPORT bool Caffe2FlagParser::Parse<string>(const string& content, string* value) {
+C10_EXPORT bool Caffe2FlagParser::Parse<string>(
+    const string& content,
+    string* value) {
   *value = content;
   return true;
 }
 
 template <>
-CAFFE2_EXPORT bool Caffe2FlagParser::Parse<int>(const string& content, int* value) {
+C10_EXPORT bool Caffe2FlagParser::Parse<int>(
+    const string& content,
+    int* value) {
   try {
     *value = std::atoi(content.c_str());
     return true;
@@ -159,7 +166,9 @@ CAFFE2_EXPORT bool Caffe2FlagParser::Parse<int>(const string& content, int* valu
 }
 
 template <>
-CAFFE2_EXPORT bool Caffe2FlagParser::Parse<int64_t>(const string& content, int64_t* value) {
+C10_EXPORT bool Caffe2FlagParser::Parse<int64_t>(
+    const string& content,
+    int64_t* value) {
   try {
     static_assert(sizeof(long long) == sizeof(int64_t), "");
 #ifdef __ANDROID__
@@ -177,7 +186,9 @@ CAFFE2_EXPORT bool Caffe2FlagParser::Parse<int64_t>(const string& content, int64
 }
 
 template <>
-CAFFE2_EXPORT bool Caffe2FlagParser::Parse<double>(const string& content, double* value) {
+C10_EXPORT bool Caffe2FlagParser::Parse<double>(
+    const string& content,
+    double* value) {
   try {
     *value = std::atof(content.c_str());
     return true;
@@ -190,7 +201,9 @@ CAFFE2_EXPORT bool Caffe2FlagParser::Parse<double>(const string& content, double
 }
 
 template <>
-CAFFE2_EXPORT bool Caffe2FlagParser::Parse<bool>(const string& content, bool* value) {
+C10_EXPORT bool Caffe2FlagParser::Parse<bool>(
+    const string& content,
+    bool* value) {
   if (content == "false" || content == "False" || content == "FALSE" ||
       content == "0") {
     *value = false;

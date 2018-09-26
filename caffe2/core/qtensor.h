@@ -14,7 +14,7 @@
 namespace caffe2 {
 
 template <class Context>
-class CAFFE2_EXPORT QTensor {
+class C10_EXPORT QTensor {
  public:
   QTensor() {}
   virtual ~QTensor() {}

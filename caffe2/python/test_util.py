@@ -16,6 +16,28 @@ def rand_array(*dims):
     return np.array(np.random.rand(*dims) - 0.5).astype(np.float32)
 
 
+def randBlob(name, type, *dims, **kwargs):
+    offset = kwargs['offset'] if 'offset' in kwargs else 0.0
+    workspace.FeedBlob(name, np.random.rand(*dims).astype(type) + offset)
+
+
+def randBlobFloat32(name, *dims, **kwargs):
+    randBlob(name, np.float32, *dims, **kwargs)
+
+
+def randBlobsFloat32(names, *dims, **kwargs):
+    for name in names:
+        randBlobFloat32(name, *dims, **kwargs)
+
+
+def str_compare(a, b, encoding="utf8"):
+    if isinstance(a, bytes):
+        a = a.decode(encoding)
+    if isinstance(b, bytes):
+        b = b.decode(encoding)
+    return a == b
+
+
 class TestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
