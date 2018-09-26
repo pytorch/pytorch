@@ -260,8 +260,10 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     return NoneType::get();
   } else if (kind == "GeneratorType") {
     return GeneratorType::get();
-  }else if (kind == "StringType") {
+  } else if (kind == "StringType") {
     return StringType::get();
+  } else if (kind.find("TypeVar:") == 0) {
+    return VarType::create(kind.substr(strlen("TypeVar:")));
   } else {
     throw std::runtime_error("unexpected string for type kind");
   }
