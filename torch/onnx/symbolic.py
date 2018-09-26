@@ -316,9 +316,6 @@ def _reduce_op_symbolic(onnx_op_name):
         else:
             # dim-reduce path
             dim, keepdim = _get_const(dim, 'i', 'dim'), _get_const(keepdim, 'i', 'keepdim')
-            dims = self.type().sizes()
-            if dim < 0:
-                dim = dim + len(dims)
             return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
     return symbolic
 
@@ -974,19 +971,19 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('is', 'i', 'v', 'v')
+@parse_args('v', 'i', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
-    return g.op("ConstantFill", shape_i=sizes, dtype_i=scalar_type_to_onnx[dtype], value_f=0)
-
-
-@parse_args('is', 'i', 'v', 'v')
-def ones(g, sizes, dtype, layout, device):
-    return g.op("ConstantFill", shape_i=sizes, dtype_i=scalar_type_to_onnx[dtype], value_f=1)
+    return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=0)
 
 
 def zeros_like(g, input):
     return g.op("Sub", input, input).setType(input.type().contiguous())
+
+
+@parse_args('v', 'i', 'v', 'v')
+def ones(g, sizes, dtype, layout, device):
+    return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=1)
 
 
 def full(g, sizes, value, dtype, layout, device):
