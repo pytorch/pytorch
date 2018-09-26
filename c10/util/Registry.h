@@ -146,6 +146,19 @@ class Registerer {
  * declaration, as well as creating a convenient typename for its corresponding
  * registerer.
  */
+// Note on C10_IMPORT and C10_EXPORT below: we need to explicitly mark DECLARE
+// as import and DEFINE as export, because these registry macros will be used
+// in downstream shared libraries as well, and one cannot use *_API - the API
+// macro will be defined on a per-shared-library basis. Semantically, when one
+// declares a typed registry it is always going to be IMPORT, and when one
+// defines a registry (which should happen ONLY ONCE and ONLY IN SOURCE FILE),
+// the instantiation unit is always going to be exported.
+//
+// The only unique condition is when in the same file one does DECLARE and
+// DEFINE - in Windows compilers, this generates a warning that dllimport and
+// dllexport are mixed, but the warning is fine and linker will be properly
+// exporting the symbol. Same thing happens in the gflags flag declaration and
+// definition caes.
 #define C10_DECLARE_TYPED_REGISTRY(                                \
     RegistryName, SrcType, ObjectType, PtrType, ...)              \
   C10_IMPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* \
@@ -155,7 +168,7 @@ class Registerer {
 
 #define C10_DEFINE_TYPED_REGISTRY(                                         \
     RegistryName, SrcType, ObjectType, PtrType, ...)                         \
-  ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName() {    \
+  C10_EXPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName() {    \
     static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* registry = \
         new ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>();         \
     return registry;                                                         \
