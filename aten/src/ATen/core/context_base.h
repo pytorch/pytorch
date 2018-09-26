@@ -25,7 +25,7 @@ class BaseContext;
    functions that are invoked statically before in Tensor class, e.g. New,
    We will merge this with Allocator later.
  */
-class AT_CORE_API BaseStaticContext {
+class CAFFE2_API BaseStaticContext {
  public:
   virtual ~BaseStaticContext() noexcept {}
 
@@ -55,7 +55,7 @@ class AT_CORE_API BaseStaticContext {
  * functions in the BaseContext class.
  * TODO: add docs after this is finalized.
  */
-class AT_CORE_API BaseContext {
+class CAFFE2_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 

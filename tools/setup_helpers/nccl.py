@@ -33,9 +33,11 @@ if USE_CUDA and not check_negative_env_flag('USE_SYSTEM_NCCL'):
         os.path.join(ENV_ROOT, 'lib64') if ENV_ROOT is not None else None,
         os.path.join(CUDA_HOME, 'lib'),
         os.path.join(CUDA_HOME, 'lib64'),
+        '/usr/local/lib',
         '/usr/lib/x86_64-linux-gnu/',
         '/usr/lib/powerpc64le-linux-gnu/',
         '/usr/lib/aarch64-linux-gnu/',
+        '/usr/lib',
     ] + gather_paths([
         'LIBRARY_PATH',
     ]) + gather_paths([
@@ -45,7 +47,9 @@ if USE_CUDA and not check_negative_env_flag('USE_SYSTEM_NCCL'):
         INCLUDE_DIR,
         ENV_ROOT,
         os.path.join(ENV_ROOT, 'include') if ENV_ROOT is not None else None,
-        '/usr/include'
+        os.path.join(CUDA_HOME, 'include'),
+        '/usr/local/include',
+        '/usr/include',
     ]))
 
     if IS_CONDA:
