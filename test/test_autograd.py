@@ -299,6 +299,33 @@ class TestAutograd(TestCase):
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
+    def test_grad_nonleaf_register_hook(self):
+        # This checks an edge case for register_hook.
+        # We want to capture grad of a nonleaf tensor,
+        # but avoid segfault during backward of other nonleaf tensors
+        x = torch.randn(5, requires_grad=True)
+        x_list = x.unbind()
+
+        x0 = x_list[0]
+        hook_results = [None]
+
+        def hook(grad):
+            hook_results[0] = grad
+        x0.register_hook(hook)
+
+        x_list[0].backward()
+        self.assertEqual(hook_results[0], torch.tensor(1.))
+        expected_grad = torch.tensor([1., 0, 0, 0, 0])
+        self.assertEqual(x.grad, expected_grad)
+        self.assertIsNone(x_list[0].grad)
+
+        for i in range(1, 5, 1):
+            x_list[i].backward()
+            self.assertEqual(hook_results[0], None)
+            expected_grad[i] = 1.0
+            self.assertEqual(x.grad, expected_grad)
+            self.assertIsNone(x_list[i].grad)
+
     def test_sharded_grad(self):
         leaves = [torch.zeros(5, 5, requires_grad=True) for _ in range(10)]
         intermediates = [l * i + l * l for i, l in enumerate(leaves)]
