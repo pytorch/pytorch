@@ -110,10 +110,10 @@ class IDeepFeeder : public BlobFeederBase {
 public:
   void FeedTensor(
       const DeviceOption &option,
-      PyObject *original_array,
+      PyArrayObject *original_array,
       itensor *tensor) {
 #ifdef USE_NUMPY
-    PyArrayObject *array = PyArray_GETCONTIGUOUS((PyArrayObject*)original_array);
+    PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
     const auto npy_type = PyArray_TYPE(array);
     const TypeMeta &meta = NumpyTypeToCaffe(npy_type);

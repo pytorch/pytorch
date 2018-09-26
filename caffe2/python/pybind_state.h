@@ -33,6 +33,10 @@
 #define PyArray_SetBaseObject(arr, x) (PyArray_BASE(arr) = (x))
 #endif
 
+#else
+
+struct PyArrayObject;  // Forward declaring PyArrayObject for safety
+
 #endif // USE_NUMPY
 
 namespace caffe2 {
@@ -62,7 +66,7 @@ class BlobFeederBase {
  public:
   virtual ~BlobFeederBase();
   virtual void
-  Feed(const DeviceOption& option, PyObject* array, Blob* blob) = 0;
+  Feed(const DeviceOption& option, PyArrayObject* array, Blob* blob) = 0;
 };
 
 CAFFE2_EXPORT CAFFE_DECLARE_TYPED_REGISTRY(
@@ -174,10 +178,10 @@ class TensorFeeder : public BlobFeederBase {
  public:
   void FeedTensor(
       const DeviceOption& option,
-      PyObject* original_array,
+      PyArrayObject* original_array,
       Tensor* tensor) {
 #ifdef USE_NUMPY
-    PyArrayObject* array = PyArray_GETCONTIGUOUS((PyArrayObject*)original_array);
+    PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
     const auto npy_type = PyArray_TYPE(array);
@@ -247,7 +251,7 @@ class TensorFeeder : public BlobFeederBase {
   }
 
   virtual void
-  Feed(const DeviceOption& option, PyObject* original_array, Blob* blob) {
+  Feed(const DeviceOption& option, PyArrayObject* original_array, Blob* blob) {
     FeedTensor(
         option,
         original_array,
