@@ -11,15 +11,6 @@
 
 namespace at {
 
-TensorOptions::TensorOptions(bool use_thread_local_default_options) {
-  if (use_thread_local_default_options) {
-    this->dtype(DefaultTensorOptions::get().dtype());
-    this->device(DefaultTensorOptions::get().device());
-    this->layout(DefaultTensorOptions::get().layout());
-    this->requires_grad(DefaultTensorOptions::get().requires_grad());
-  }
-}
-
 std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options) {
@@ -28,6 +19,26 @@ std::ostream& operator<<(
                 << ", layout=" << options.layout()
                 << ", requires_grad=" << std::boolalpha
                 << options.requires_grad() << ")";
+}
+
+Device TensorOptions::device() const noexcept {
+  return device_.value_or(DefaultTensorOptions::get().device());
+}
+
+ScalarType TensorOptions::dtype() const noexcept {
+  return dtype_.value_or(DefaultTensorOptions::get().dtype());
+}
+
+Layout TensorOptions::layout() const noexcept {
+  return layout_.value_or(DefaultTensorOptions::get().layout());
+}
+
+bool TensorOptions::requires_grad() const noexcept {
+  return requires_grad_.value_or(DefaultTensorOptions::get().requires_grad());
+}
+
+bool TensorOptions::is_variable() const noexcept {
+  return is_variable_.value_or(DefaultTensorOptions::get().is_variable());
 }
 
 } // namespace at

@@ -9,27 +9,69 @@
 
 namespace at {
 
-// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-// thread_local is not supported.  In that case, we don't provide
-// an OptionsGuard; and force you to pass around options manually.
-#if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-
 /// A wrapper over a thread local TensorOptions instance.
+/// INVARIANT: all fields are NOT nullopt
 struct DefaultTensorOptions {
   /// Returns the current thread local default options.
   /// Defined in OptionsGuard.cpp because we can't use optional in headers, due
   /// to Windows and other compilers.
   /// TODO: The inability to use optional in headers is no longer true
-  CAFFE2_API static TensorOptions& get();
+  CAFFE2_API static DefaultTensorOptions& get();
+
+  DefaultTensorOptions() {}
+  DefaultTensorOptions(const DefaultTensorOptions&) = default;
+  DefaultTensorOptions& operator=(const DefaultTensorOptions&) = default;
+  DefaultTensorOptions(DefaultTensorOptions&&) = default;
+  DefaultTensorOptions& operator=(DefaultTensorOptions&&) = default;
+
+  ScalarType dtype()    const { return dtype_; }
+  Device device()       const { return device_; }
+  Layout layout()       const { return layout_; }
+  bool requires_grad()  const { return requires_grad_; }
+  bool is_variable()    const { return is_variable_; }
+
+  DefaultTensorOptions& apply(const TensorOptions& options) {
+    if (options.dtype_opt().has_value()) {
+      dtype_ = options.dtype();
+    }
+    if (options.device_opt().has_value()) {
+      device_ = options.device();
+    }
+    if (options.layout_opt().has_value()) {
+      layout_ = options.layout();
+    }
+    if (options.requires_grad_opt().has_value()) {
+      requires_grad_ = options.requires_grad();
+    }
+    if (options.is_variable_opt().has_value()) {
+      is_variable_ = options.is_variable();
+    }
+    return *this;
+  }
 
  private:
+  ScalarType dtype_ = at::kFloat;
+  Device device_ = at::kCPU;
+  Layout layout_ = at::kStrided;
+  bool requires_grad_ = false;
+  bool is_variable_ = false;
+
+// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
+// thread_local is not supported.  In that case, we don't provide
+// an OptionsGuard; and force you to pass around options manually.
+#if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+
   /// This is an optional because of compiler bugs that mis-initialize static
   /// thread local variables. The workaround is lazy initialization, i.e.
   /// `DefaultTensorOptions::get()` will initialize the `options_` to a proper
   /// value upon first invocation.
   /// https://gcc.gnu.org/ml/gcc-bugs/2013-12/msg00026.html
-  static thread_local at::optional<TensorOptions> options_;
+  static thread_local at::optional<DefaultTensorOptions> options_;
+
+#endif
 };
+
+#if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
 /// RAII guard that stores the current default options upon construction, sets
 /// the current default options to the ones given to its constructor, and
@@ -40,8 +82,8 @@ struct DefaultTensorOptions {
 struct OptionsGuard {
   /// Stores the current default options and sets them to the given ones.
   explicit OptionsGuard(const TensorOptions& options)
-      : original_(DefaultTensorOptions::get()) {
-    DefaultTensorOptions::get() = options;
+      : original_(DefaultTensorOptions::get()) { // copy
+    DefaultTensorOptions::get().apply(options);
   }
 
   /// Restores the original default options.
@@ -49,26 +91,13 @@ struct OptionsGuard {
     DefaultTensorOptions::get() = original_;
   }
 
-  /// Returns the original options that were in place at the time of
-  /// construction of this object.
-  const TensorOptions& original() {
-    return original_;
-  }
-
  private:
   /// The original options that were in place at the time of construction of
   /// this object.
-  TensorOptions original_;
+  DefaultTensorOptions original_;
 };
 
 #else // AT_MOBILE
-
-struct DefaultTensorOptions {
-  CAFFE2_API static const TensorOptions& get();
-
- private:
-  static TensorOptions options_;
-};
 
 template<typename T = void>
 struct OptionsGuard {

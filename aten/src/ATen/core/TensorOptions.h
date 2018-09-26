@@ -48,16 +48,7 @@ namespace at {
 ///     at::zeros({2,2}, at::requires_grad());
 ///
 struct CAFFE2_API TensorOptions {
-  TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
-
-  /// Constructs the `TensorOptions` with defaults taken from the thread local
-  /// `TensorOptions` object if `use_thread_local_default_options`, else
-  /// defaults to:
-  /// - dtype: kFloat,
-  /// - device: kCPU,
-  /// - layout: kStrided,
-  /// - requires_grad: false
-  explicit TensorOptions(bool use_thread_local_default_options);
+  TensorOptions() {}
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
@@ -132,39 +123,39 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Returns the device of the `TensorOptions`.
-  const Device& device() const noexcept {
-    return device_;
-  }
+  Device device() const noexcept;
+
+  optional<Device> device_opt() const noexcept { return device_; }
 
   /// Returns the device index of the `TensorOptions`.
   int32_t device_index() const noexcept {
-    return device_.index();
+    return device().index();
   }
 
   /// Returns the dtype of the `TensorOptions`.
-  ScalarType dtype() const noexcept {
-    return dtype_;
-  }
+  ScalarType dtype() const noexcept;
+
+  optional<ScalarType> dtype_opt() const noexcept { return dtype_; }
 
   /// Returns the layout of the `TensorOptions`.
-  Layout layout() const noexcept {
-    return layout_;
-  }
+  Layout layout() const noexcept;
+
+  optional<Layout> layout_opt() const noexcept { return layout_; }
 
   /// Returns the `requires_grad` property of the `TensorOptions`.
-  bool requires_grad() const noexcept {
-    return requires_grad_;
-  }
+  bool requires_grad() const noexcept;
+
+  optional<bool> requires_grad_opt() const noexcept { return requires_grad_; }
 
   /// Returns the `is_variable` property of the `TensorOptions`.
-  bool is_variable() const noexcept {
-    return is_variable_;
-  }
+  bool is_variable() const noexcept;
+
+  optional<bool> is_variable_opt() const noexcept { return is_variable_; }
 
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
     Backend backend;
-    if (device_.type() == Device::Type::CPU) {
+    if (device().type() == Device::Type::CPU) {
       backend = (layout_ == kStrided) ? Backend::CPU : Backend::SparseCPU;
     } else {
       backend = (layout_ == kStrided) ? Backend::CUDA : Backend::SparseCUDA;
@@ -175,11 +166,11 @@ struct CAFFE2_API TensorOptions {
  private:
   // WARNING: If you edit TensorOptions to add more options, you
   // must adjust the implementation of Tensor::options
-  ScalarType dtype_{kFloat};
-  Device device_{Device::Type::CPU};
-  Layout layout_{Layout::Strided};
-  bool requires_grad_{false};
-  bool is_variable_{false};
+  optional<ScalarType> dtype_;
+  optional<Device> device_;
+  optional<Layout> layout_;
+  optional<bool> requires_grad_;
+  optional<bool> is_variable_;
 };
 
 /// Convenience function that returns a `TensorOptions` object with the `dtype`
