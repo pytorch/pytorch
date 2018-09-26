@@ -141,29 +141,6 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
     return allocated;
   }
 
-  inline void* Reset(
-      void* allocated,
-      const TypeMeta& meta,
-      DestroyCall* destroy) {
-    if (pointer_ && destroy_) {
-      destroy_(pointer_);
-    }
-    meta_ = meta;
-    pointer_ = static_cast<void*>(allocated);
-    destroy_ = destroy;
-    return allocated;
-  }
-
-  /**
-   * Releases the ownership, if any, this Blob has on the underlying pointer.
-   * The user is then responsible for freeing the data if needed
-   */
-  inline DestroyCall* Release() {
-    DestroyCall* d = destroy_;
-    destroy_ = nullptr;
-    return d;
-  }
-
   /**
    * Sets the underlying object to the allocated one, but does not take over
    * the ownership of the passed in pointer. If there is already an object in
