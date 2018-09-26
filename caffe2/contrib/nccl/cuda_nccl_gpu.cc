@@ -72,7 +72,7 @@ class NCCLContext {
   cudaEvent_t master_event_;
   std::vector<cudaEvent_t> events_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(NCCLContext);
+  C10_DISABLE_COPY_AND_ASSIGN(NCCLContext);
 };
 
 // We share the contexts across multiple operators, hence the
