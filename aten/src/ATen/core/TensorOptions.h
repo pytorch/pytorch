@@ -96,7 +96,7 @@ struct CAFFE2_API TensorOptions {
 
   /// Sets the device of the `TensorOptions`.
   TensorOptions& device(Device device) {
-    device_ = std::move(device);
+    device_ = device;
     return *this;
   }
 
@@ -163,9 +163,9 @@ struct CAFFE2_API TensorOptions {
   Backend backend() const noexcept {
     Backend backend;
     if (device().type() == Device::Type::CPU) {
-      backend = (layout_ == kStrided) ? Backend::CPU : Backend::SparseCPU;
+      backend = (layout() == kStrided) ? Backend::CPU : Backend::SparseCPU;
     } else {
-      backend = (layout_ == kStrided) ? Backend::CUDA : Backend::SparseCUDA;
+      backend = (layout() == kStrided) ? Backend::CUDA : Backend::SparseCUDA;
     }
     return backend;
   }
