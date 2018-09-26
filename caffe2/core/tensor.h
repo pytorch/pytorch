@@ -192,7 +192,7 @@ class CAFFE2_API Tensor final {
   }
 
   inline void Reshape(const vector<int>& dims) const {
-    impl_.get()->Reshape(dims);
+    impl_.get()->Reshape(ToVectorint64_t(dims));
   }
 
   inline void FreeMemory() const {

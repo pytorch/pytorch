@@ -607,10 +607,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     update_to_contiguous_strides();
   }
 
-  inline void Reshape(const std::vector<int>& dims) {
-    Reshape(ToVectorint64_t(dims));
-  }
-
   /**
    * Release whatever memory the tensor was holding but keep size and type
    * information. Subsequent call to mutable_data will trigger new memory
