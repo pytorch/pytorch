@@ -30,7 +30,7 @@ class CAFFE2_API AsyncSchedulingNet : public AsyncNetBase {
 
   std::atomic<int> processed_tasks_num_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
+  C10_DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
 };
 
 } // namespace caffe2

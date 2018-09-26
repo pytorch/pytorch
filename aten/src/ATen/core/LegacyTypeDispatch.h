@@ -30,7 +30,7 @@
 
 namespace at {
 
-struct AT_CORE_API LegacyTypeInitInterface {
+struct CAFFE2_API LegacyTypeInitInterface {
   virtual ~LegacyTypeInitInterface() {}
   virtual void initCPU() const {
     AT_ERROR("cannot use CPU without ATen library");
@@ -42,15 +42,15 @@ struct AT_CORE_API LegacyTypeInitInterface {
     AT_ERROR("cannot use complex without ATen Complex library");
   }
 };
-struct AT_CORE_API LegacyTypeInitArgs {};
+struct CAFFE2_API LegacyTypeInitArgs {};
 AT_DECLARE_REGISTRY(LegacyTypeInitRegistry, LegacyTypeInitInterface, LegacyTypeInitArgs);
 #define REGISTER_LEGACY_TYPE_INIT(clsname) AT_REGISTER_CLASS(LegacyTypeInitRegistry, clsname, clsname)
 
-AT_CORE_API const LegacyTypeInitInterface& getLegacyTypeInit();
+CAFFE2_API const LegacyTypeInitInterface& getLegacyTypeInit();
 
 struct Type;
 
-struct AT_CORE_API LegacyTypeDeleter {
+struct CAFFE2_API LegacyTypeDeleter {
   using TypeDeleterFun = void(Type*);
   TypeDeleterFun *fn_ = nullptr;
   LegacyTypeDeleter() {}
@@ -62,8 +62,8 @@ struct AT_CORE_API LegacyTypeDeleter {
   }
 };
 
-class AT_CORE_API LegacyTypeDispatch {
-public:
+class CAFFE2_API LegacyTypeDispatch {
+ public:
   using TypeUniquePtr = std::unique_ptr<Type, LegacyTypeDeleter>;
   // WARNING: This function has the precondition that you have
   // initialized the type you want to call.  This initialization
@@ -150,6 +150,6 @@ private:
     [static_cast<int>(ScalarType::NumOptions)];
 };
 
-AT_CORE_API LegacyTypeDispatch & globalLegacyTypeDispatch();
+CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
 
 } // namespace at

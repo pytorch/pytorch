@@ -39,23 +39,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
 endif()
 
-# ---[ git: used to generate git build string.
-find_package(Git)
-if(GIT_FOUND)
-  execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-                  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
-                  WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-                  OUTPUT_VARIABLE CAFFE2_GIT_VERSION
-                  RESULT_VARIABLE __git_result)
-  if(NOT ${__git_result} EQUAL 0)
-    set(CAFFE2_GIT_VERSION "unknown")
-  endif()
-else()
-  message(
-      WARNING
-      "Cannot find git, so Caffe2 won't have any git build info available")
-endif()
-
 # ---[ BLAS
 if(NOT BUILD_ATEN_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -419,13 +402,15 @@ find_package(pybind11 CONFIG)
 if((DEFINED pybind11_DIR) AND pybind11_DIR)
   get_target_property(pybind11_INCLUDE_DIRS pybind11::pybind11 INTERFACE_INCLUDE_DIRECTORIES)
 else()
-  message("pybind11 config not found. Fallback to legacy find.")
   find_package(pybind11)
 endif()
 
 if(pybind11_FOUND)
+    message(STATUS "System pybind11 found")
+    message(STATUS "pybind11l include dirs: " ${pybind11_INCLUDE_DIRS})
     include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
 else()
+    message(STATUS "Using third_party/pybind11.")
     include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
 endif()
 

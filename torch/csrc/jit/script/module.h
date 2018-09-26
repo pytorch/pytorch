@@ -165,6 +165,10 @@ struct Method {
     return get_executor().getDebugState();
   }
 
+  void debugDisableAutodiffSubgraphInlining() {
+    return get_executor().debugDisableAutodiffSubgraphInlining();
+  }
+
   bool is_optimized() {
     return optimize;
   }

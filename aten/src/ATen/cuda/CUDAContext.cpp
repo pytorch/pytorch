@@ -54,9 +54,15 @@ Allocator* getCUDADeviceAllocator() {
 }
 
 /* Handles */
-cusparseHandle_t getCurrentCUDASparseHandle() {
-  return THCState_getCurrentSparseHandle(at::globalContext().getTHCState());
-}
+#ifndef __HIP_PLATFORM_HCC__
+  cusparseHandle_t getCurrentCUDASparseHandle() {
+    return THCState_getCurrentSparseHandle(at::globalContext().getTHCState());
+  }
+
+  cublasHandle_t getCurrentCUDABlasHandle() {
+    return THCState_getCurrentBlasHandle(at::globalContext().getTHCState());
+  }
+#endif
 
 } // namespace cuda
 

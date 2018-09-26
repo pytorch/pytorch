@@ -108,15 +108,15 @@ class ReduceScatterOp final : public Operator<Context> {
     params.inputs.resize(InputSize() - 2);
     params.outputs.resize(OutputSize() - 1);
     for (auto i = 0; i < params.inputs.size(); i++) {
-      params.inputs[i] = Input(i + 1).template raw_data();
-      params.outputs[i] = Output(i)->template raw_mutable_data();
+      params.inputs[i] = Input(i + 1).raw_data();
+      params.outputs[i] = Output(i)->raw_mutable_data();
     }
     params.size = Output(0)->size();
     params.meta = Output(0)->meta();
 
     // Verify recvCountsSize == comm_size
     CAFFE_ENFORCE_EQ(Input(InputSize() - 1).size(), params.context->size);
-    int* recvCounts = (int*)Input(InputSize() - 1).template raw_data();
+    int* recvCounts = (int*)Input(InputSize() - 1).raw_data();
     recvCounts_.assign(recvCounts, recvCounts + Input(InputSize() - 1).size());
   }
 
