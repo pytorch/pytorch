@@ -1,5 +1,5 @@
 #define CATCH_CONFIG_MAIN
-#include "catch.hpp"
+#include "catch_utils.hpp"
 
 #include "ATen/ATen.h"
 #include "ATen/CPUApplyUtils.h"
@@ -37,10 +37,10 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
   empty_t.fill_(3);
   empty_t.exp_();
 
-  auto a0 = type.tensor();
-  auto a1 = type.tensor();
-  auto a2 = type.tensor();
-  auto a3 = type.tensor();
+  auto a0 = at::empty({0}, type.options());
+  auto a1 = at::empty({0}, type.options());
+  auto a2 = at::empty({0}, type.options());
+  auto a3 = at::empty({0}, type.options());
   auto a4 = CPU(kDouble).tensor();
 
   std::vector<Tensor> tensors({a0, a1, a2, a3, a4});
@@ -108,32 +108,32 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
   });
 }
 
-TEST_CASE("apply utils test 2-dim small contiguous", "[cpu]") {
+CATCH_TEST_CASE("apply utils test 2-dim small contiguous", "[cpu]") {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {2, 1}, -1, -1);
 }
 
-TEST_CASE("apply utils test 2-dim small", "[cpu]") {
+CATCH_TEST_CASE("apply utils test 2-dim small", "[cpu]") {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {2, 1});
 }
 
-TEST_CASE("apply utils test 2-dim", "[cpu]") {
+CATCH_TEST_CASE("apply utils test 2-dim", "[cpu]") {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {20, 10});
 }
 
-TEST_CASE("apply utils test 3-dim", "[cpu]") {
+CATCH_TEST_CASE("apply utils test 3-dim", "[cpu]") {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {3, 4, 2});
 }
 
-TEST_CASE("apply utils test 3-dim medium", "[cpu]") {
+CATCH_TEST_CASE("apply utils test 3-dim medium", "[cpu]") {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {3, 40, 2});
 }
 
-TEST_CASE("apply utils test 10-dim", "[cpu]") {
+CATCH_TEST_CASE("apply utils test 10-dim", "[cpu]") {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {3, 4, 2, 5, 2, 1, 3, 4, 2, 3});
 }

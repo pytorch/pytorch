@@ -14,7 +14,7 @@
 namespace caffe2 {
 
 template <class Context>
-class CAFFE2_API QTensor {
+class C10_EXPORT QTensor {
  public:
   QTensor() {}
   virtual ~QTensor() {}
@@ -212,8 +212,8 @@ class CAFFE2_API QTensor {
   /**
    * Return product of all dimensions starting from K.
    */
-  inline TIndex size_from_dim(int k) const {
-    TIndex r = 1;
+  inline int64_t size_from_dim(int k) const {
+    int64_t r = 1;
     for (int i = k; i < dims_.size(); ++i) {
       r *= dims_[i];
     }
@@ -223,9 +223,9 @@ class CAFFE2_API QTensor {
   /**
    * Product of all dims up to.
    */
-  inline TIndex size_to_dim(int k) const {
+  inline int64_t size_to_dim(int k) const {
     CAFFE_ENFORCE(k < dims_.size());
-    TIndex r = 1;
+    int64_t r = 1;
     for (int i = 0; i < k; ++i) {
       r *= dims_[i];
     }

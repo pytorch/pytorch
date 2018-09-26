@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
@@ -33,6 +34,7 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/fusers/interface.h"
 
 #include <pybind11/functional.h>
 
@@ -84,11 +86,18 @@ void initJITBindings(PyObject *module) {
      return Canonicalize(g);
    })
    .def("_jit_pass_lint", LintGraph)
-   .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     PropagateInputShapes(graph, ArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+   .def("_jit_pass_shape_analysis", [](Graph& graph, std::vector<at::Tensor> inputs, bool with_grad) {
+     setInputTypes(graph, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+     PropagateInputShapes(graph);
    })
    .def("_jit_pass_complete_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     PropagateInputShapes(graph, CompleteArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+     CompleteArgumentSpec spec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs()));
+     auto graph_inputs = graph.inputs();
+     JIT_ASSERT(spec.size() == graph_inputs.size());
+     for (size_t i = 0; i < graph_inputs.size(); ++i) {
+       graph_inputs[i]->setType(spec.at(i));
+     }
+     PropagateInputShapes(graph);
    })
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
@@ -98,6 +107,9 @@ void initJITBindings(PyObject *module) {
      return ConstantPropagation(g);
    })
    .def("_jit_pass_erase_shape_information", EraseShapeInformation)
+   .def("_jit_pass_create_autodiff_subgraphs", [](Graph& graph) {
+     CreateAutodiffSubgraphs(graph);
+   })
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
@@ -115,13 +127,14 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx_block", BlockToONNX)
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
    .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
-    .def("_jit_pass_specialize_undef", specializeUndef)
-   .def("_jit_differentiate", [](Graph &g, const std::vector<bool>& requires_grad) {
+   .def("_jit_pass_specialize_undef", specializeUndef)
+   .def("_jit_override_can_fuse_on_cpu", &overrideCanFuseOnCPU)
+   .def("_jit_differentiate", [](Graph &g) {
        // the python binding slightly differs in semantics
        // it makes a copy of the input Graph, and works on that
        // jit::differentiate mutates the input Graph
        auto g_clone = g.copy();
-       return differentiate(g_clone, requires_grad);
+       return differentiate(g_clone);
    });
 
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")

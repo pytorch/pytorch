@@ -122,7 +122,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
-    return outputs_.at(idx)->GetMutableTensor(type);
+    return BlobGetMutableTensor(outputs_.at(idx), type);
   }
 
   template <typename T>
@@ -149,7 +149,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool InputIsTensorType(int idx, DeviceType device_type) {
-    return inputs_.at(idx)->IsTensorType(device_type);
+    return BlobIsTensorType(*inputs_.at(idx), device_type);
   }
 
   template <typename T>
@@ -162,7 +162,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   }
 
   inline bool OutputIsTensorType(int idx, DeviceType type) {
-    return outputs_.at(idx)->IsTensorType(type);
+    return BlobIsTensorType(*outputs_.at(idx), type);
   }
 
   inline int InputSize() const {
@@ -397,7 +397,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   // An event used by asynchronous execution.
   std::unique_ptr<Event> event_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(OperatorBase);
+  C10_DISABLE_COPY_AND_ASSIGN(OperatorBase);
 };
 
 // If your operator does not need any specialized contructor or destructor,
@@ -700,7 +700,7 @@ struct DispatchHelper<FixedValues<FirstVal, Values...>, ExtraArgs...> {
 template <typename... ExtraArgs>
 struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   template <typename Op>
-  static bool call(Op* op, TIndex /*size*/) {
+  static bool call(Op* op, int64_t /*size*/) {
     return op->template DoRunWithValue<ExtraArgs..., -1>();
   }
 };
@@ -825,7 +825,7 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR(name, ...)                           \
-  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();\
+  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
   }                                                                \
@@ -844,7 +844,7 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR(name, ...)                           \
-  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();   \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
   }                                                                 \
@@ -869,10 +869,10 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR(name, ...)                           \
-  CAFFE2_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();       \
+  C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
-  }                                                                 \
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
+  }                                                                \
   CAFFE_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR_STR(str_name, ...) \
   CAFFE_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
@@ -973,11 +973,11 @@ CAFFE2_API TensorShapes InferBlobShapesAndTypesFromWorkspace(
     const vector<NetDef*>& nets);
 
 CAFFE2_API TensorShapes InferBlobShapesAndTypesFromMap(
-    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const vector<NetDef*>& nets);
 
 CAFFE2_API TensorShapes InferBlobShapesAndTypesFromMap(
-    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const CaffeMap<std::string, TensorProto_DataType>& blob_types,
     const vector<NetDef*>& nets);
 
@@ -987,6 +987,10 @@ CAFFE2_API std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTenso
 
 // Get a set of registered operator names
 CAFFE2_API std::set<std::string> GetRegisteredOperators();
+
+// Operator logging capabilities
+CAFFE2_API void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer);
+std::function<void(const OperatorDef&)> GetOperatorLogger();
 
 }  // namespace caffe2
 

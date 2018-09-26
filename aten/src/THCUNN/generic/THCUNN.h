@@ -369,29 +369,6 @@ THC_API void THNN_(MultiMarginCriterion_updateGradInput)(
                   int p,
                   THCTensor *weights,           // [OPTIONAL]
                   accreal margin);
-
-THC_API void THNN_(PReLU_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCTensor *weight);
-
-THC_API void THNN_(PReLU_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *weight);
-
-THC_API void THNN_(PReLU_accGradParameters)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *weight,
-                  THCTensor *gradWeight,
-                  accreal scale);
-
 THC_API void THNN_(SmoothL1Criterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,

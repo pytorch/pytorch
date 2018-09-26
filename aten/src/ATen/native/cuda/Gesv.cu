@@ -53,10 +53,14 @@ static magma_queue_t createMagmaQueue(const Tensor& tensor) {
   magma_queue_create_from_cuda(
       tensor.get_device(),
       at::cuda::getCurrentCUDAStream(),
-      THCState_getCurrentBlasHandle(context.getTHCState()),
-      THCState_getCurrentSparseHandle(context.getTHCState()),
+      at::cuda::getCurrentCUDABlasHandle(),
+      at::cuda::getCurrentCUDASparseHandle(),
       &magma_queue);
   return magma_queue;
+}
+
+static void destroyMagmaQueue(magma_queue_t& existing_queue) {
+  magma_queue_destroy(existing_queue);
 }
 
 static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
@@ -84,7 +88,7 @@ static inline Storage pin_memory(int64_t size, Tensor dummy) {
   name = static_cast<type*>(storage_##name.data());
 
 template <typename scalar_t>
-static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
+static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("gesv: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -117,9 +121,11 @@ AT_ERROR("gesv: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
+  magma_queue_t gesv_queue = createMagmaQueue(b);
   magmaGesvBatched<scalar_t>(
       n, nrhs, A_array, n, ipiv_array, b_array, n,
-      info_array, batch_size, createMagmaQueue(b));
+      info_array, batch_size, gesv_queue);
+  destroyMagmaQueue(gesv_queue);
 
   for (int64_t i = 0; i < batch_size; i++) {
     infos[i] = info_array[i];

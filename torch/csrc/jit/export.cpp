@@ -179,6 +179,8 @@ void EncoderBase::EncodeValueInfo(
       shape->mutable_dim(i)->set_dim_value(sizes[i]);
     }
     tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
+  } else {
+    tensor_type->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   }
 }
 
@@ -500,6 +502,7 @@ void ModuleEncoder::EncodeTypeInfo(
   auto kind = type->kind();
   if (kind == TypeKind::DynamicType) {
     type_proto->set_denotation("DynamicType");
+    tensortype_proto->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   } else if (kind == TypeKind::TensorType) {
     type_proto->set_denotation("TensorType");
     // encode the number of dimensions by pushing that number of ones into the shape proto
@@ -559,6 +562,8 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("NoneType");
   } else if (kind == TypeKind::GeneratorType) {
     type_proto->set_denotation("GeneratorType");
+  } else if (kind == TypeKind::StringType) {
+    type_proto->set_denotation("StringType");
   } else {
     throw std::runtime_error("unexpected type kind");
   }
@@ -676,7 +681,7 @@ void ModuleEncoder::EncodeTensor(
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      t = tensor.type().tensor(
+      t = at::getType(tensor).tensor(
           tensor.storage(),
           /* storageOffset = */ 0,
           /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage().size()) },

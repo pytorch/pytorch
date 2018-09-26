@@ -50,7 +50,7 @@
 
 namespace at {
 
-struct AT_API OperandInfo {
+struct CAFFE2_API OperandInfo {
   OperandInfo() {}
   OperandInfo(const Tensor& t) : tensor(const_cast<Tensor*>(&t)) {}
 
@@ -82,7 +82,7 @@ struct AT_API OperandInfo {
 
 struct SplitUntil32Bit;
 
-struct AT_API TensorIterator {
+struct CAFFE2_API TensorIterator {
   struct Builder;
   friend struct Builder;
 
@@ -184,6 +184,7 @@ private:
   DimVector shape_;
   DimVector perm_;
   SmallVector<OperandInfo, 4> operands_;
+  SmallVector<Tensor, 4> cast_tensors_;
   int num_outputs_ = 0;
   bool has_coalesced_dimensions_ = false;
 };
@@ -211,8 +212,8 @@ private:
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.
-struct AT_API SplitUntil32Bit {
-  struct AT_API iterator {
+struct CAFFE2_API SplitUntil32Bit {
+  struct CAFFE2_API iterator {
     iterator() {};
     iterator(const TensorIterator& iter);
     iterator(iterator&&) = default;

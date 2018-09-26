@@ -19,7 +19,7 @@ namespace at {
 namespace detail {
 
 // Obtains the base name from a full path.
-AT_CORE_API std::string StripBasename(const std::string& full_path);
+CAFFE2_API std::string StripBasename(const std::string& full_path);
 
 inline std::ostream& _str(std::ostream& ss) {
   return ss;
@@ -56,7 +56,7 @@ inline std::string str(const char* c_str) {
 }
 
 /// Represents a location in source code (for debugging).
-struct AT_CORE_API SourceLocation {
+struct CAFFE2_API SourceLocation {
   const char* function;
   const char* file;
   uint32_t line;
@@ -71,7 +71,7 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
 ///
 /// NB: at::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
-class AT_CORE_API Error : public std::exception {
+class CAFFE2_API Error : public std::exception {
   std::vector<std::string> msg_stack_;
   std::string backtrace_;
 
@@ -128,7 +128,7 @@ class AT_CORE_API Error : public std::exception {
   }
 };
 
-class AT_CORE_API Warning {
+class CAFFE2_API Warning {
   using handler_t =
       void (*)(const SourceLocation& source_location, const char* msg);
 
@@ -149,6 +149,10 @@ class AT_CORE_API Warning {
  private:
   static handler_t warning_handler_;
 };
+
+// A utility function to return an exception std::string by prepending its
+// exception type before its what() content
+CAFFE2_API std::string GetExceptionString(const std::exception& e);
 
 } // namespace at
 

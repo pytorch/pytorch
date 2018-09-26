@@ -605,14 +605,8 @@ inline Tensor Tensor::baddbmm(const Tensor & batch1, const Tensor & batch2, Scal
 inline Tensor & Tensor::baddbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta, Scalar alpha) {
     return type().baddbmm_(*this, batch1, batch2, beta, alpha);
 }
-inline Tensor Tensor::bernoulli(const Tensor & p, Generator * generator) const {
-    return type().bernoulli(*this, p, generator);
-}
-inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
-    return type().bernoulli(*this, p, generator);
-}
-inline Tensor Tensor::bernoulli() const {
-    return type().bernoulli(*this);
+inline Tensor Tensor::bernoulli(Generator * generator) const {
+    return type().bernoulli(*this, generator);
 }
 inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) {
     return type().bernoulli_(*this, p, generator);
@@ -620,8 +614,8 @@ inline Tensor & Tensor::bernoulli_(const Tensor & p, Generator * generator) {
 inline Tensor & Tensor::bernoulli_(double p, Generator * generator) {
     return type().bernoulli_(*this, p, generator);
 }
-inline Tensor & Tensor::bernoulli_() {
-    return type().bernoulli_(*this);
+inline Tensor Tensor::bernoulli(double p, Generator * generator) const {
+    return type().bernoulli(*this, p, generator);
 }
 inline Tensor Tensor::bincount(const Tensor & weights, int64_t minlength) const {
     return type().bincount(*this, weights, minlength);
@@ -941,6 +935,12 @@ inline Tensor Tensor::relu() const {
 inline Tensor & Tensor::relu_() {
     return type().relu_(*this);
 }
+inline Tensor Tensor::prelu(const Tensor & weight) const {
+    return type().prelu(*this, weight);
+}
+inline std::tuple<Tensor,Tensor> Tensor::prelu_backward(const Tensor & grad_output, const Tensor & weight) const {
+    return type().prelu_backward(grad_output, *this, weight);
+}
 inline Tensor Tensor::hardshrink(Scalar lambd) const {
     return type().hardshrink(*this, lambd);
 }
@@ -1215,6 +1215,22 @@ inline Scalar Tensor::_local_scalar() const {
     return type()._local_scalar(*this);
 }
 
+inline bool Tensor::is_variable() const noexcept {
+  return type().is_variable();
+}
+
+inline ScalarType Tensor::dtype() const noexcept {
+  return type().scalarType();
+}
+
+inline Layout Tensor::layout() const noexcept {
+  return type().layout();
+}
+
+inline Device Tensor::device() const {
+  return Device(type().device_type(), type().is_cuda() ? get_device() : -1);
+}
+
 #define DEFINE_CAST(T, name, _)                  \
   template <>                                    \
   inline T* Tensor::data() const {               \
@@ -1225,16 +1241,16 @@ inline Scalar Tensor::_local_scalar() const {
         " but found ",                           \
         at::toString(type().scalarType()));      \
     return static_cast<T*>(this->data_ptr());    \
-  }                                              \
-  inline T* Tensor::to##name##Data() const {     \
-    return data<T>();                            \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_TO_C_TYPE(T,name,_) \
-inline T Tensor::toC##name () const { return _local_scalar().to##name (); }
+#define DEFINE_TO_C_TYPE(T, name, _)   \
+  template <>                          \
+  inline T Tensor::item() const {      \
+    return _local_scalar().to##name(); \
+  }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO_C_TYPE)
 #undef DEFINE_TO_C_TYPE

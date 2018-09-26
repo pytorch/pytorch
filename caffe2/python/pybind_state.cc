@@ -30,6 +30,7 @@
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
 #include "caffe2/utils/cpuid.h"
+#include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
@@ -87,7 +88,7 @@ int CaffeToNumpyType(const TypeMeta& meta) {
       {TypeMeta::Id<bool>(), NPY_BOOL},
       {TypeMeta::Id<double>(), NPY_DOUBLE},
       {TypeMeta::Id<float>(), NPY_FLOAT},
-      {TypeMeta::Id<float16>(), NPY_FLOAT16},
+      {TypeMeta::Id<at::Half>(), NPY_FLOAT16},
       {TypeMeta::Id<int>(), NPY_INT},
       {TypeMeta::Id<int8_t>(), NPY_INT8},
       {TypeMeta::Id<int16_t>(), NPY_INT16},
@@ -106,7 +107,7 @@ const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
       {NPY_BOOL, TypeMeta::Make<bool>()},
       {NPY_DOUBLE, TypeMeta::Make<double>()},
       {NPY_FLOAT, TypeMeta::Make<float>()},
-      {NPY_FLOAT16, TypeMeta::Make<float16>()},
+      {NPY_FLOAT16, TypeMeta::Make<at::Half>()},
       {NPY_INT, TypeMeta::Make<int>()},
       {NPY_INT8, TypeMeta::Make<int8_t>()},
       {NPY_INT16, TypeMeta::Make<int16_t>()},
@@ -308,12 +309,12 @@ void addObjectMethods(py::module& m) {
       .def(
           "serialize",
           [](const Blob& blob, const std::string& name) -> py::bytes {
-            return blob.Serialize(name);
+            return SerializeBlob(blob, name);
           })
       .def(
           "deserialize",
           [](Blob* blob, py::bytes serialized) {
-            blob->Deserialize(serialized);
+            DeserializeBlob(serialized, blob);
           })
       .def(
           "fetch",
@@ -327,7 +328,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "tensor",
-          [](Blob* blob) { return py::cast(blob->GetMutableTensor(CPU)); },
+          [](Blob* blob) { return py::cast(BlobGetMutableTensor(blob, CPU)); },
           py::return_value_policy::reference_internal)
       .def(
           "_feed",
@@ -391,7 +392,7 @@ void addObjectMethods(py::module& m) {
           })
       .def(
           "_reshape",
-          [](DLPackWrapper<CPUContext>* t, std::vector<TIndex> dims) {
+          [](DLPackWrapper<CPUContext>* t, std::vector<int64_t> dims) {
             auto* tensor = t->tensor;
             tensor->Resize(dims);
           });
@@ -429,7 +430,7 @@ void addObjectMethods(py::module& m) {
           "Copy data from this tensor into a new numpy array.")
       .def(
           "init",
-          [](Tensor* t, std::vector<TIndex> dims, int caffe_type) {
+          [](Tensor* t, std::vector<int64_t> dims, int caffe_type) {
             const auto& meta =
                 DataTypeToTypeMeta((TensorProto::DataType)caffe_type);
             CAFFE_ENFORCE(
@@ -442,7 +443,7 @@ void addObjectMethods(py::module& m) {
           "Fail if the given data type cannot be accessed from python.")
       .def_property_readonly(
           "_shape", [](const TensorCPU& t) { return t.dims(); })
-      .def("_reshape", [](TensorCPU* t, std::vector<TIndex> dims) {
+      .def("_reshape", [](TensorCPU* t, std::vector<int64_t> dims) {
         t->Resize(dims);
       });
 
@@ -1186,11 +1187,17 @@ void addGlobalMethods(py::module& m) {
     return true;
   });
   m.def("nets", []() { return gWorkspace->Nets(); });
-  m.def("run_operator_once", [](const py::bytes& op_def) {
+  m.def("run_operator_once", [](const py::bytes& op_def, bool legacy_proto=true) {
     CAFFE_ENFORCE(gWorkspace);
     OperatorDef def;
-    CAFFE_ENFORCE(
-        ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
+    if (legacy_proto) {
+      CAFFE_ENFORCE(ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
+    } else {
+      ::torch::NodeProto node;
+      CAFFE_ENFORCE(
+          ParseProtoFromLargeString(op_def.cast<std::string>(), &node));
+      NodeProtoToOperatorDef(node, &def);
+    }
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunOperatorOnce(def));
     return true;
@@ -1354,7 +1361,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "infer_shapes_and_types_from_map",
       [](const std::vector<py::bytes>& net_protos,
-         const std::map<std::string, std::vector<TIndex>> blob_dimensions) {
+         const std::map<std::string, std::vector<int64_t>> blob_dimensions) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
         std::vector<caffe2::NetDef*> nets_ptr;
@@ -1374,7 +1381,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "infer_shapes_and_types_from_map",
       [](const std::vector<py::bytes>& net_protos,
-         const std::map<std::string, std::vector<TIndex>> blob_dimensions,
+         const std::map<std::string, std::vector<int64_t>> blob_dimensions,
          const std::map<std::string, int> int_blob_types) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
@@ -1443,14 +1450,14 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(gWorkspace);
     auto* blob = gWorkspace->GetBlob(name);
     CAFFE_ENFORCE(blob);
-    return py::bytes(blob->Serialize(name));
+    return py::bytes(SerializeBlob(*blob, name));
   });
   m.def(
       "deserialize_blob",
       [](const std::string& name, const py::bytes& serialized) {
         CAFFE_ENFORCE(gWorkspace);
         auto* blob = gWorkspace->CreateBlob(name);
-        blob->Deserialize(serialized.cast<std::string>());
+        DeserializeBlob(serialized.cast<std::string>(), blob);
       });
 
   // we support 2 possible signatures of python op: (inputs, outputs) or
@@ -1526,6 +1533,38 @@ void addGlobalMethods(py::module& m) {
     auto* blob = gWorkspace->GetBlob(blob_name);
     CAFFE_ENFORCE(blob);
     return BlobStat::sizeBytes(*blob);
+  });
+  m.def("argument_to_attribute_proto", [](py::bytes arg_str) -> py::bytes {
+    Argument arg;
+    CAFFE_ENFORCE(
+      ParseProtoFromLargeString(arg_str.cast<std::string>(), &arg));
+    ::torch::AttributeProto attr;
+    ArgumentToAttributeProto(arg, &attr);
+    return attr.SerializeAsString();
+  });
+  m.def("attribute_proto_to_argument", [](py::bytes attr_str) -> py::bytes {
+    ::torch::AttributeProto attr;
+    CAFFE_ENFORCE(
+      ParseProtoFromLargeString(attr_str.cast<std::string>(), &attr));
+    Argument arg;
+    AttributeProtoToArgument(attr, &arg);
+    return arg.SerializeAsString();
+  });
+  m.def("operator_def_to_node_proto", [](py::bytes op_str) -> py::bytes {
+    OperatorDef op_def;
+    CAFFE_ENFORCE(
+      ParseProtoFromLargeString(op_str.cast<std::string>(), &op_def));
+    ::torch::NodeProto node;
+    OperatorDefToNodeProto(op_def, &node);
+    return node.SerializeAsString();
+  });
+  m.def("node_proto_to_operator_def", [](py::bytes node_str) -> py::bytes {
+    ::torch::NodeProto node_proto;
+    CAFFE_ENFORCE(
+      ParseProtoFromLargeString(node_str.cast<std::string>(), &node_proto));
+    OperatorDef op_def;
+    NodeProtoToOperatorDef(node_proto, &op_def);
+    return op_def.SerializeAsString();
   });
   m.def("support_onnx_export", [](const std::string& op) -> bool {
     const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(op);

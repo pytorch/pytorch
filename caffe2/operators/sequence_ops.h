@@ -25,11 +25,11 @@ class GatherPaddingOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     if (startPaddingWidth_ == 0 && endPaddingWidth_ == 0) {
-      Output(0)->Resize(std::vector<TIndex>(0));
-      Output(0)->template mutable_data<TIndex>();
+      Output(0)->Resize(std::vector<int64_t>(0));
+      Output(0)->template mutable_data<int64_t>();
       if (OutputSize() == 2) {
-        Output(1)->Resize(std::vector<TIndex>(0));
-        Output(1)->template mutable_data<TIndex>();
+        Output(1)->Resize(std::vector<int64_t>(0));
+        Output(1)->template mutable_data<int64_t>();
       }
       return true;
     }
@@ -53,7 +53,7 @@ class GatherPaddingOp final : public Operator<Context> {
       lengths_ptr = lengths.template data<int32_t>();
       lengths_size = lengths.size();
     }
-    std::vector<TIndex> padShape(in.dims().begin() + 1, in.dims().end());
+    std::vector<int64_t> padShape(in.dims().begin() + 1, in.dims().end());
     // output will contain accumulator over paddings
     Output(0)->Resize(padShape);
     T* padding_start_ptr = Output(0)->template mutable_data<T>();

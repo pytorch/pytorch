@@ -62,24 +62,26 @@ class StringDeserializer : public BlobDeserializerBase {
 };
 
 // The blob serialization member function implementation.
-void Blob::Serialize(
+void SerializeBlob(
+    const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
-    int chunk_size) const {
-  std::unique_ptr<BlobSerializerBase> serializer(CreateSerializer(meta_.id()));
-  CAFFE_ENFORCE(serializer, "No known serializer for ", meta_.name());
-  serializer->SerializeWithChunkSize(*this, name, acceptor, chunk_size);
+    int chunk_size) {
+  std::unique_ptr<BlobSerializerBase> serializer(
+      CreateSerializer(blob.meta().id()));
+  CAFFE_ENFORCE(serializer, "No known serializer for ", blob.meta().name());
+  serializer->SerializeWithChunkSize(blob, name, acceptor, chunk_size);
 }
 
 // The blob serialization member function implementation.
-std::string Blob::Serialize(const string& name) const {
+std::string SerializeBlob(const Blob& blob, const string& name) {
   std::string data;
-  BlobSerializerBase::SerializationAcceptor acceptor = [&data](
-      const std::string&, const std::string& blob) {
-    DCHECK(data.empty()); // should be called once with kNoChunking
-    data = blob;
-  };
-  this->Serialize(name, acceptor, kNoChunking);
+  BlobSerializerBase::SerializationAcceptor acceptor =
+      [&data](const std::string&, const std::string& blob_str) {
+        DCHECK(data.empty()); // should be called once with kNoChunking
+        data = blob_str;
+      };
+  SerializeBlob(blob, name, acceptor, kNoChunking);
   return data;
 }
 
@@ -137,7 +139,7 @@ void TensorSerializer::SerializeWithChunkSize(
   // Serialize whole vector. If vector is empty, it's shape still needs to be
   // serialized in empty proto
   for (size_t chunkBegin = 0;
-       chunkBegin < std::max(tensor.size(), static_cast<TIndex>(1));
+       chunkBegin < std::max(tensor.size(), static_cast<int64_t>(1));
        chunkBegin += chunk_size) {
     VLOG(2) << "Starting a chunk at " << chunkBegin;
 #ifndef __ANDROID__
@@ -277,14 +279,14 @@ void TensorSerializer::Serialize(
         this->context_->template CopyToCPU<char>(
             2 * chunkSize,
             reinterpret_cast<const char*>(
-                input.template data<float16>() + chunkBegin),
+                input.template data<at::Half>() + chunkBegin),
             buffer.get());
         this->context_->FinishDeviceComputation();
         proto.set_byte_data(buffer.release(), 2 * chunkSize);
       } else {
         detail::CopyToProtoWithCast(
             chunkSize,
-            reinterpret_cast<const uint16_t*>(input.template data<float16>()) +
+            reinterpret_cast<const uint16_t*>(input.template data<at::Half>()) +
                 chunkBegin,
             proto.mutable_int32_data(),
             uniq_ptr.get());
@@ -304,7 +306,7 @@ void TensorSerializer::Serialize(
       for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
         temp_blob.ShareExternal(
             const_cast<char*>(raw_data + i * input.itemsize()), input.meta());
-        proto.add_string_data(temp_blob.Serialize(""));
+        proto.add_string_data(SerializeBlob(temp_blob, ""));
       }
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
@@ -328,15 +330,15 @@ CAFFE_DEFINE_TYPED_REGISTRY(
 
 CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
-void Blob::Deserialize(const string& content) {
+void DeserializeBlob(const string& content, Blob* result) {
   BlobProto blob_proto;
   CAFFE_ENFORCE(
       blob_proto.ParseFromString(content),
       "Cannot parse content into a BlobProto.");
-  Deserialize(blob_proto);
+  DeserializeBlob(blob_proto, result);
 }
 
-void Blob::Deserialize(const BlobProto& blob_proto) {
+void DeserializeBlob(const BlobProto& blob_proto, Blob* result) {
   if (blob_proto.type() == kTensorBlobType) {
     // This is a tensor object. Depending on the device type, we will
     // use the corresponding TensorDeserializer.
@@ -346,14 +348,14 @@ void Blob::Deserialize(const BlobProto& blob_proto) {
     // Tensor's deserializer should always be registered, but we will double
     // check if it is not null anyway.
     CAFFE_ENFORCE(deserializer.get());
-    deserializer->Deserialize(blob_proto, this);
+    deserializer->Deserialize(blob_proto, result);
   } else {
     auto deserializer = CreateDeserializer(blob_proto.type());
     CAFFE_ENFORCE(
         deserializer.get(),
         "No registered deserializer for type ",
         blob_proto.type());
-    deserializer->Deserialize(blob_proto, this);
+    deserializer->Deserialize(blob_proto, result);
   }
 }
 
@@ -361,7 +363,8 @@ void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
   auto tensor_proto = blob_proto.tensor();
   Deserialize(
       tensor_proto,
-      blob->GetMutableTensor(
+      BlobGetMutableTensor(
+          blob,
           static_cast<DeviceType>(tensor_proto.device_detail().device_type())));
 }
 
@@ -372,8 +375,8 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       tensor->GetStaticContext()->CreateContext(proto.device_detail());
   auto context = uniq_ptr.get();
   context->SwitchToDevice(0);
-  vector<TIndex> dims;
-  for (const TIndex d : proto.dims()) {
+  vector<int64_t> dims;
+  for (const int64_t d : proto.dims()) {
     dims.push_back(d);
   }
   tensor->Resize(dims);
@@ -482,17 +485,17 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
             2 * chunkSize,
             proto.byte_data().size(),
             "Incorrect proto field size.");
-        context->template CopyToCPU<float16>(
+        context->template CopyToCPU<at::Half>(
             chunkSize,
-            reinterpret_cast<const float16*>(proto.byte_data().data()),
-            tensor->template mutable_data<float16>() + chunkBegin);
+            reinterpret_cast<const at::Half*>(proto.byte_data().data()),
+            tensor->template mutable_data<at::Half>() + chunkBegin);
       } else {
         // Backward compatibility with models which used int32_data field
         detail::CopyFromProtoWithCast(
             chunkSize,
             proto.int32_data(),
             reinterpret_cast<uint16_t*>(
-                tensor->template mutable_data<float16>()) +
+                tensor->template mutable_data<at::Half>()) +
                 chunkBegin,
             context);
       }
@@ -508,7 +511,7 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       Blob temp_blob;
       void* raw_ptr = nullptr;
       for (int i = 0; i < chunkSize; ++i) {
-        temp_blob.Deserialize(proto.string_data(i));
+        DeserializeBlob(proto.string_data(i), &temp_blob);
         if (i == 0) {
           raw_ptr = tensor->raw_mutable_data(temp_blob.meta());
         }

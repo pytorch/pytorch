@@ -26,13 +26,13 @@ TEST(MathROCBLASTest, GemmNoTransNoTrans) {
   vector<int> shapeX{5, 10};
   vector<int> shapeW{10, 6};
   vector<int> shapeY{5, 6};
-  auto* tensorX = blobX->GetMutableTensor(HIP);
+  auto* tensorX = BlobGetMutableTensor(blobX, HIP);
   tensorX->Resize(shapeX);
-  auto* tensorW = blobW->GetMutableTensor(HIP);
+  auto* tensorW = BlobGetMutableTensor(blobW, HIP);
   tensorW->Resize(shapeW);
-  auto* tensorY = blobY->GetMutableTensor(HIP);
+  auto* tensorY = BlobGetMutableTensor(blobY, HIP);
   tensorY->Resize(shapeY);
-  auto* tensorY_host = blobY_host->GetMutableTensor(CPU);
+  auto* tensorY_host = BlobGetMutableTensor(blobY_host, CPU);
   tensorY_host->Resize(shapeY);
 
   EXPECT_EQ(tensorX->size(), 50);
@@ -126,13 +126,13 @@ TEST(MathROCBLASTest, GemmNoTransTrans) {
   vector<int> shapeX{5, 10};
   vector<int> shapeW{6, 10};
   vector<int> shapeY{5, 6};
-  auto* tensorX = blobX->GetMutableTensor(HIP);
+  auto* tensorX = BlobGetMutableTensor(blobX, HIP);
   tensorX->Resize(shapeX);
-  auto* tensorW = blobW->GetMutableTensor(HIP);
+  auto* tensorW = BlobGetMutableTensor(blobW, HIP);
   tensorW->Resize(shapeW);
-  auto* tensorY = blobY->GetMutableTensor(HIP);
+  auto* tensorY = BlobGetMutableTensor(blobY, HIP);
   tensorY->Resize(shapeY);
-  auto* tensorY_host = blobY_host->GetMutableTensor(CPU);
+  auto* tensorY_host = BlobGetMutableTensor(blobY_host, CPU);
   tensorY_host->Resize(shapeY);
 
   EXPECT_EQ(tensorX->size(), 50);
@@ -225,13 +225,13 @@ TEST(MathROCBLASTest, GemvNoTrans) {
   vector<int> shapeA{5, 10};
   vector<int> shapeX{10};
   vector<int> shapeY{5};
-  auto* tensorA = blobA->GetMutableTensor(HIP);
+  auto* tensorA = BlobGetMutableTensor(blobA, HIP);
   tensorA->Resize(shapeA);
-  auto* tensorX = blobX->GetMutableTensor(HIP);
+  auto* tensorX = BlobGetMutableTensor(blobX, HIP);
   tensorX->Resize(shapeX);
-  auto* tensorY = blobY->GetMutableTensor(HIP);
+  auto* tensorY = BlobGetMutableTensor(blobY, HIP);
   tensorY->Resize(shapeY);
-  auto* tensorY_host = blobY_host->GetMutableTensor(CPU);
+  auto* tensorY_host = BlobGetMutableTensor(blobY_host, CPU);
   tensorY_host->Resize(shapeY);
 
   EXPECT_EQ(tensorA->size(), 50);
@@ -315,13 +315,13 @@ TEST(MathROCBLASTest, GemvTrans) {
   vector<int> shapeA{6, 10};
   vector<int> shapeX{6};
   vector<int> shapeY{10};
-  auto* tensorA = blobA->GetMutableTensor(HIP);
+  auto* tensorA = BlobGetMutableTensor(blobA, HIP);
   tensorA->Resize(shapeA);
-  auto* tensorX = blobX->GetMutableTensor(HIP);
+  auto* tensorX = BlobGetMutableTensor(blobX, HIP);
   tensorX->Resize(shapeX);
-  auto* tensorY = blobY->GetMutableTensor(HIP);
+  auto* tensorY = BlobGetMutableTensor(blobY, HIP);
   tensorY->Resize(shapeY);
-  auto* tensorY_host = blobY_host->GetMutableTensor(CPU);
+  auto* tensorY_host = BlobGetMutableTensor(blobY_host, CPU);
   tensorY_host->Resize(shapeY);
 
   EXPECT_EQ(tensorA->size(), 60);

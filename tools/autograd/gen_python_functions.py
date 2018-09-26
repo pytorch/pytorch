@@ -396,7 +396,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
                     if not has_tensor_options:
                         # add type, device formals and corresponding actuals.
-                        # The type actual isthe ATen type mapped from (ScalarType, Layout, Device)
+                        # The type actual is the ATen type mapped from (ScalarType, Layout, Device)
                         # The device actual is the corresponding AutoGPU index for the Device.
                         formal_args.append(parsed_type_args[1])
                         formal_args.append(device_type)
@@ -427,9 +427,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['actuals'] = actuals
 
         if has_tensor_options:
-            env['initialize_cuda'] = 'maybe_initialize_cuda(at::getType(options));'
+            env['initialize_cuda'] = 'maybe_initialize_cuda(options);'
         else:
-            env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(type_args[0]['name']) if type_args else ''
+            env['initialize_cuda'] = ''
 
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']

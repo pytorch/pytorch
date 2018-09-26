@@ -11,14 +11,14 @@
 namespace caffe2 {
 
 static void AddConstInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const float value,
     const string& name,
     Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
       tensor->size(), value, tensor->template mutable_data<float>(), &context);
@@ -26,7 +26,7 @@ static void AddConstInput(
 }
 
 static void AddLinSpacedInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const float min_val,
     const float max_val,
     const string& name,
@@ -34,7 +34,7 @@ static void AddLinSpacedInput(
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
       tensor->template mutable_data<float>(), tensor->size());
@@ -44,14 +44,14 @@ static void AddLinSpacedInput(
 }
 
 static void AddInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const vector<float>& values,
     const string& name,
     Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
       tensor->template mutable_data<float>(), tensor->size());
@@ -79,7 +79,7 @@ TEST(GenerateProposalsTest, TestComputeAllAnchors) {
       79, -68, 8, 115, 103, -160, -40, 207, 151, -6, 32, 85, 79, -52, 8, 131,
       103, -144, -40, 223, 151;
 
-  Tensor anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()}, CPU);
+  Tensor anchors_tensor(vector<int64_t>{anchors.rows(), anchors.cols()}, CPU);
   Eigen::Map<ERMatXf>(
       anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
       anchors;
@@ -143,7 +143,7 @@ TEST(GenerateProposalsTest, TestComputeAllAnchorsRotated) {
     all_anchors_gt(i, 4) = angles[i % angles.size()];
   }
 
-  Tensor anchors_tensor(vector<TIndex>{anchors.rows(), anchors.cols()}, CPU);
+  Tensor anchors_tensor(vector<int64_t>{anchors.rows(), anchors.cols()}, CPU);
   Eigen::Map<ERMatXf>(
       anchors_tensor.mutable_data<float>(), anchors.rows(), anchors.cols()) =
       anchors;
@@ -171,11 +171,11 @@ TEST(GenerateProposalsTest, TestEmpty) {
   const int A = 4;
   const int H = 10;
   const int W = 8;
-  AddConstInput(vector<TIndex>{img_count, A, H, W}, 1., "scores", &ws);
+  AddConstInput(vector<int64_t>{img_count, A, H, W}, 1., "scores", &ws);
   AddLinSpacedInput(
-      vector<TIndex>{img_count, 4 * A, H, W}, 0, 10, "bbox_deltas", &ws);
-  AddConstInput(vector<TIndex>{img_count, 3}, 0.1, "im_info", &ws);
-  AddConstInput(vector<TIndex>{A, 4}, 1.0, "anchors", &ws);
+      vector<int64_t>{img_count, 4 * A, H, W}, 0, 10, "bbox_deltas", &ws);
+  AddConstInput(vector<int64_t>{img_count, 3}, 0.1, "im_info", &ws);
+  AddConstInput(vector<int64_t>{A, 4}, 1.0, "anchors", &ws);
 
   def.add_arg()->CopyFrom(MakeArgument("spatial_scale", 2.0f));
 
@@ -280,10 +280,10 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
                               1.50015003e-05f,
                               8.91025957e-06f};
 
-  AddInput(vector<TIndex>{img_count, A, H, W}, scores, "scores", &ws);
-  AddInput(vector<TIndex>{img_count, 4 * A, H, W}, bbx, "bbox_deltas", &ws);
-  AddInput(vector<TIndex>{img_count, 3}, im_info, "im_info", &ws);
-  AddInput(vector<TIndex>{A, 4}, anchors, "anchors", &ws);
+  AddInput(vector<int64_t>{img_count, A, H, W}, scores, "scores", &ws);
+  AddInput(vector<int64_t>{img_count, 4 * A, H, W}, bbx, "bbox_deltas", &ws);
+  AddInput(vector<int64_t>{img_count, 3}, im_info, "im_info", &ws);
+  AddInput(vector<int64_t>{A, 4}, anchors, "anchors", &ws);
 
   def.add_arg()->CopyFrom(MakeArgument("spatial_scale", 1.0f / 16.0f));
   def.add_arg()->CopyFrom(MakeArgument("pre_nms_topN", 6000));
@@ -300,7 +300,7 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois.dims(), (vector<TIndex>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-4);
@@ -309,7 +309,7 @@ TEST(GenerateProposalsTest, TestRealDownSampled) {
   Blob* rois_probs_blob = ws.GetBlob("rois_probs");
   EXPECT_NE(nullptr, rois_probs_blob);
   auto& rois_probs = rois_probs_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois_probs.dims(), (vector<TIndex>{TIndex(rois_probs_gt.size())}));
+  EXPECT_EQ(rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
   EXPECT_NEAR(
@@ -445,14 +445,14 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
                               1.50015003e-05f,
                               8.91025957e-06f};
 
-  AddInput(vector<TIndex>{img_count, A, H, W}, scores, "scores", &ws);
+  AddInput(vector<int64_t>{img_count, A, H, W}, scores, "scores", &ws);
   AddInput(
-      vector<TIndex>{img_count, 5 * A, H, W},
+      vector<int64_t>{img_count, 5 * A, H, W},
       bbx_with_angle,
       "bbox_deltas",
       &ws);
-  AddInput(vector<TIndex>{img_count, 3}, im_info, "im_info", &ws);
-  AddInput(vector<TIndex>{A, 5}, anchors, "anchors", &ws);
+  AddInput(vector<int64_t>{img_count, 3}, im_info, "im_info", &ws);
+  AddInput(vector<int64_t>{A, 5}, anchors, "anchors", &ws);
 
   def.add_arg()->CopyFrom(MakeArgument("spatial_scale", 1.0f / 16.0f));
   def.add_arg()->CopyFrom(MakeArgument("pre_nms_topN", 6000));
@@ -470,7 +470,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   Blob* rois_blob = ws.GetBlob("rois");
   EXPECT_NE(nullptr, rois_blob);
   auto& rois = rois_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois.dims(), (vector<TIndex>{rois_gt.rows(), rois_gt.cols()}));
+  EXPECT_EQ(rois.dims(), (vector<int64_t>{rois_gt.rows(), rois_gt.cols()}));
   auto rois_data =
       Eigen::Map<const ERMatXf>(rois.data<float>(), rois.dim(0), rois.dim(1));
   EXPECT_NEAR((rois_data.matrix() - rois_gt).cwiseAbs().maxCoeff(), 0, 1e-3);
@@ -479,7 +479,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
   Blob* rois_probs_blob = ws.GetBlob("rois_probs");
   EXPECT_NE(nullptr, rois_probs_blob);
   auto& rois_probs = rois_probs_blob->Get<TensorCPU>();
-  EXPECT_EQ(rois_probs.dims(), (vector<TIndex>{TIndex(rois_probs_gt.size())}));
+  EXPECT_EQ(rois_probs.dims(), (vector<int64_t>{int64_t(rois_probs_gt.size())}));
   auto rois_probs_data =
       ConstEigenVectorArrayMap<float>(rois_probs.data<float>(), rois.dim(0));
   EXPECT_NEAR(
@@ -587,14 +587,14 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
   // vector<float> anchors{-38, -16, 53, 31, -120, -120, 135, 135};
   vector<float> anchors{8, 8, 92, 48, angle, 8, 8, 256, 256, angle};
 
-  AddInput(vector<TIndex>{img_count, A, H, W}, scores, "scores", &ws);
+  AddInput(vector<int64_t>{img_count, A, H, W}, scores, "scores", &ws);
   AddInput(
-      vector<TIndex>{img_count, 5 * A, H, W},
+      vector<int64_t>{img_count, 5 * A, H, W},
       bbx_with_angle,
       "bbox_deltas",
       &ws);
-  AddInput(vector<TIndex>{img_count, 3}, im_info, "im_info", &ws);
-  AddInput(vector<TIndex>{A, 5}, anchors, "anchors", &ws);
+  AddInput(vector<int64_t>{img_count, 3}, im_info, "im_info", &ws);
+  AddInput(vector<int64_t>{A, 5}, anchors, "anchors", &ws);
 
   def.add_arg()->CopyFrom(MakeArgument("spatial_scale", 1.0f / 16.0f));
   def.add_arg()->CopyFrom(MakeArgument("pre_nms_topN", 6000));

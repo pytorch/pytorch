@@ -22,7 +22,7 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
   std::tie(lu, p, info) = self.unsqueeze(0).btrifact_with_info();
   p.squeeze_(0);
   lu.squeeze_(0);
-  int int_info = info.squeeze_().toCInt();
+  int int_info = info.squeeze_().item<int32_t>();
   AT_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
   auto n = self.size(0);
   auto num_exchanges = (at::arange(1, n + 1, p.type()) != p).nonzero().size(0);
@@ -63,7 +63,7 @@ Tensor logdet(const Tensor& self) {
   } else {
     det = diag_U.prod().mul_(det_P);
   }
-  if (det.sign().toCDouble() <= 0) {
+  if (det.sign().item<double>() <= 0) {
     return det.log_();  // in order to get proper -inf (det=0) or nan (det<0)
   } else {
     return diag_U.abs().log().sum();
@@ -88,7 +88,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor inverse(const Tensor& self) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::inverse_out(result, self);
 }
 
@@ -111,7 +111,7 @@ Tensor pinverse(const Tensor& self, double rcond) {
            "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
-    return self.type().tensor({self.size(1), self.size(0)});
+    return at::empty({self.size(1), self.size(0)}, self.options());
   }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
@@ -307,7 +307,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   } else if (contraction_size == 0) {
     return self_or_result.zero_();
   }
-  
+
   auto batch_items_contiguous_or_transposed = [&](const Tensor& t) {
     return (t.stride(2) == 1 && t.stride(1) == t.size(2))
             || (t.stride(1) == 1 && t.stride(2) == t.size(1));
@@ -345,7 +345,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
 
 
 Tensor baddbmm_cpu(const Tensor& self, const Tensor& batch1, const Tensor& batch2, Scalar beta, Scalar alpha) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::baddbmm_out_cpu(result, self, batch1, batch2, beta, alpha);
 }
 
@@ -362,7 +362,7 @@ Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, S
 }
 
 Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   return at::native::bmm_out_cpu(result, self, mat2);
 }
 
@@ -534,6 +534,56 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
     }
   }
   return result;
+}
+
+Tensor frobenius_norm(const Tensor& self) {
+  return at::norm(self);
+}
+
+Tensor frobenius_norm(const Tensor& self, IntList dim, bool keepdim) {
+  AT_CHECK(
+      dim.size() <= 2,
+      "Expected at most 2 dimensions, but got ",
+      dim.size(),
+      " dimensions instead.");
+  if (dim.size() == 1) {
+    return at::norm(self, 2, dim[0], keepdim);
+  }
+  return at::sqrt(at::sum(self * self, dim, keepdim));
+}
+
+Tensor &frobenius_norm_out(
+    Tensor& result,
+    const Tensor& self,
+    IntList dim,
+    bool keepdim) {
+  AT_CHECK(
+      dim.size() <= 2,
+      "Expected at most 2 dimensions, but got ",
+      dim.size(),
+      " dimensions instead.");
+  if (dim.size() == 1) {
+    return at::norm_out(result, self, 2, dim[0], keepdim);
+  }
+  return at::sqrt_out(result, at::sum(self * self, dim, keepdim));
+}
+
+Tensor nuclear_norm(const Tensor& self, bool keepdim) {
+  AT_CHECK(
+      self.dim() == 2,
+      "Expected a tensor with 2 dimensions, but got a ",
+      self.dim(),
+      " dimensions tensor instead.");
+  return at::sum(std::get<1>(at::svd(self)), 0, keepdim);
+}
+
+Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
+  AT_CHECK(
+      self.dim() == 2,
+      "Expected a tensor with 2 dimensions, but got a ",
+      self.dim(),
+      " dimensions tensor instead.");
+  return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
 }
 
 } // namespace native

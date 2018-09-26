@@ -60,7 +60,7 @@ void window_function_checks(
 }
 
 const TypeExtendedInterface& getFactoryType(const TensorOptions& options) {
-  return static_cast<const TypeExtendedInterface&>(at::getType(options));
+  return at::getType(options);
 }
 
 } // namespace
@@ -98,7 +98,7 @@ Tensor& arange_out(Tensor& result, Scalar end) {
 }
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
-  return static_cast<const TypeExtendedInterface&>(like.type().toScalarType(at::kLong))._arange(like.size(dim));
+  return at::getType(like.options().dtype(at::kLong))._arange(like.size(dim));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -117,6 +117,12 @@ Tensor& empty_out(Tensor& result, IntList size) {
   }
   return result;
 }
+
+Tensor empty_strided(IntList size, IntList stride, const TensorOptions& options) {
+  // Note [Native bindings for legacy TH factory functions]
+  return getFactoryType(options).tensor(size, stride);
+}
+
 
 // Temporary type cast operators. These are needed to trace type-casts now since
 // Type's are not supported in the IR. Instead, we call down to these

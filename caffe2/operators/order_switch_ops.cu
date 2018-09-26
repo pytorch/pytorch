@@ -8,20 +8,42 @@ namespace caffe2 {
 template <typename T>
 __global__ void NHWC2NCHWCUDAKernel(
     const int size,
+#ifndef __HIPCC__
     const FixedDivisor<int> C,
     const FixedDivisor<int> HxW,
+#else
+    const int C,
+    const int HxW,
+#endif
     const T* X,
     T* Y) {
   CUDA_1D_KERNEL_LOOP(i, size) {
     int n;
     int c;
     int hxw;
+
+    int c_d;
+    int hxw_d;
+#ifndef __HIPCC__
     HxW.DivMod(i, &c, &hxw);
     C.DivMod(c, &n, &c);
-#if __CUDA_ARCH__ >= 350
-    Y[i] = __ldg(X + (n * HxW.d() + hxw) * C.d() + c);
+
+    c_d = C.d();
+    hxw_d = HxW.d();
 #else
-    Y[i] = X[(n * HxW.d() + hxw) * C.d() + c];
+    c = i / HxW;
+    hxw = i % HxW;
+    n = c / C;
+    c = c % C;
+
+    c_d = C;
+    hxw_d = HxW;
+#endif
+
+#if __CUDA_ARCH__ >= 350
+    Y[i] = __ldg(X + (n * hxw_d + hxw) * c_d + c);
+#else
+    Y[i] = X[(n * hxw_d + hxw) * c_d + c];
 #endif
   }
 }
@@ -29,20 +51,41 @@ __global__ void NHWC2NCHWCUDAKernel(
 template <typename T>
 __global__ void NCHW2NHWCCUDAKernel(
     const int size,
+#ifndef __HIPCC__
     const FixedDivisor<int> C,
     const FixedDivisor<int> HxW,
+#else
+    const int C,
+    const int HxW,
+#endif
     const T* X,
     T* Y) {
   CUDA_1D_KERNEL_LOOP(i, size) {
     int n;
     int c;
     int hxw;
+
+    int c_d;
+    int hxw_d;
+#ifndef __HIPCC__
     C.DivMod(i, &hxw, &c);
     HxW.DivMod(hxw, &n, &hxw);
-#if __CUDA_ARCH__ >= 350
-    Y[i] = __ldg(X + (n * C.d() + c) * HxW.d() + hxw);
+
+    c_d = C.d();
+    hxw_d = HxW.d();
 #else
-    Y[i] = X[(n * C.d() + c) * HxW.d() + hxw];
+    hxw = i / C;
+    c = i % C;
+    n = hxw / HxW;
+    hxw = hxw % HxW;
+
+    c_d = C;
+    hxw_d = HxW;
+#endif
+#if __CUDA_ARCH__ >= 350
+    Y[i] = __ldg(X + (n * c_d + c) * hxw_d + hxw);
+#else
+    Y[i] = X[(n * c_d + c) * hxw_d + hxw];
 #endif
   }
 }
@@ -55,7 +98,7 @@ bool NHWC2NCHWOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_GE(ndim, 3);
   const int N = X.dim32(0);
   const int C = X.dim32(ndim - 1);
-  vector<TIndex> Y_dims(ndim);
+  vector<int64_t> Y_dims(ndim);
   Y_dims[0] = N;
   Y_dims[1] = C;
   int HxW = 1;
@@ -71,8 +114,13 @@ bool NHWC2NCHWOp<float, CUDAContext>::RunOnDevice() {
          0,
          context_.cuda_stream()>>>(
           size,
+#ifndef __HIPCC__
           FixedDivisor<int>(C),
           FixedDivisor<int>(HxW),
+#else
+          C,
+          HxW,
+#endif
           X.data<float>(),
           Y->template mutable_data<float>());
   return true;
@@ -86,7 +134,7 @@ bool NCHW2NHWCOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_GE(X.ndim(), 3);
   const int N = X.dim32(0);
   const int C = X.dim32(1);
-  vector<TIndex> Y_dims(ndim);
+  vector<int64_t> Y_dims(ndim);
   Y_dims[0] = N;
   int HxW = 1;
   for (auto i = 1; i < ndim - 1; ++i) {
@@ -102,8 +150,13 @@ bool NCHW2NHWCOp<float, CUDAContext>::RunOnDevice() {
          0,
          context_.cuda_stream()>>>(
           size,
+#ifndef __HIPCC__
           FixedDivisor<int>(C),
           FixedDivisor<int>(HxW),
+#else
+          C,
+          HxW,
+#endif
           X.data<float>(),
           Y->template mutable_data<float>());
   return true;

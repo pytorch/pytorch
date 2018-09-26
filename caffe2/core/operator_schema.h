@@ -383,11 +383,11 @@ class CAFFE2_API OpSchema {
   OpSchema& DisallowInputFillers();
 
   std::vector<TensorFiller> InputFillers(
-      const std::vector<std::vector<TIndex>>& shapes) const;
+      const std::vector<std::vector<int64_t>>& shapes) const;
 
  private:
   std::vector<TensorFiller> SupplyDenseFillers(
-      const std::vector<std::vector<TIndex>>& shapes);
+      const std::vector<std::vector<int64_t>>& shapes);
 
  private:
   string type_;
@@ -438,9 +438,9 @@ class CAFFE2_API OpSchema {
       };
 
   std::function<std::vector<TensorFiller>(
-      const std::vector<std::vector<TIndex>>&)>
+      const std::vector<std::vector<int64_t>>&)>
       filler_supplier_ =
-          [this](const std::vector<std::vector<TIndex>>& shapes) {
+          [this](const std::vector<std::vector<int64_t>>& shapes) {
             return SupplyDenseFillers(shapes);
           };
 };
@@ -508,8 +508,8 @@ inline TensorShape CreateTensorShape(
 }
 
 // Helper function
-inline vector<TIndex> GetDimsVector(const TensorShape& shape) {
-  vector<TIndex> dims;
+inline vector<int64_t> GetDimsVector(const TensorShape& shape) {
+  vector<int64_t> dims;
   for (auto d : shape.dims()) {
     dims.push_back(d);
   }
@@ -576,16 +576,16 @@ OpSchema::Cost PointwiseCostInference(
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                     \
-  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =   \
       &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #else // CAFFE2_NO_OPERATOR_SCHEMA
 
-#define OPERATOR_SCHEMA(name)                                     \
-  CAFFE2_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){};          \
-  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED = \
+#define OPERATOR_SCHEMA(name)                                       \
+  C10_EXPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name(){}; \
+  static OpSchema* CAFFE_ANONYMOUS_VARIABLE(name) CAFFE2_UNUSED =   \
       1 ? nullptr : &OpSchemaRegistry::NewSchema(#name, __FILE__, __LINE__)
 
 #endif // CAFFE2_NO_OPERATOR_SCHEMA

@@ -31,10 +31,10 @@ using at::ScalarType;
 using at::optional;
 using at::Device;
 
-void register_variable_type_for(at::Type* baseType);
+void register_variable_type_for(at::TypeExtendedInterface* baseType);
 
 struct TORCH_API VariableType final : public at::TypeDefault {
-  VariableType(Context* context, at::Type* baseType);
+  VariableType(Context* context, at::TypeExtendedInterface* baseType);
   at::ScalarType scalarType() const override;
   virtual caffe2::TypeMeta typeMeta() const override;
   at::Backend backend() const override;
@@ -53,7 +53,7 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   Storage unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
-  static at::Type* getVariableTypeFromBaseType(const at::Type& baseType);
+  static at::TypeExtendedInterface* getVariableTypeFromBaseType(const at::Type& baseType);
   static bool isVariableType(const at::Type& type);
   static std::vector<at::Type*> allCUDATypes();
   static std::vector<at::Type*> allCPUTypes();

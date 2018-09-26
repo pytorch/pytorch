@@ -76,6 +76,8 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
     n = graph.createFloatToInt(value);
   } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
     n = graph.createIntToFloat(value);
+  } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(StringType::get())) {
+    n = graph.createStringToFloat(value);
   } else {
     throw ErrorReport(loc) << "Cannot cast type '" << orig->str() << "' to type '"
       << dst->str() << "'.";
@@ -988,11 +990,15 @@ private:
 
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond);
-    if(v->type()->isSubtypeOf(DynamicType::get())) {
-      v = typeCast(cond.range(), v, IntType::get());
-    }
-    if(!v->type()->isSubtypeOf(IntType::get())) {
-      throw ErrorReport(cond) << "expected a tensor or integer expression for condition but found " << v->type()->str();
+    if (!v->type()->isSubtypeOf(IntType::get())) {
+      ErrorReport error(cond);
+      error << "expected an integer expression for condition but found "
+            << v->type()->str();
+      if (v->type()->isSubtypeOf(DynamicType::get())) {
+        error << ", to use a tensor in a boolean"
+              << " expression, explicitly cast it with `bool()`";
+      }
+      throw error;
     }
     return v;
   }

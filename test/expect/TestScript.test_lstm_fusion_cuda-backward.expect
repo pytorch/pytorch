@@ -1,12 +1,12 @@
 graph(%0 : Float(*, *)
       %1 : Float(*, *)
-      %2 : Dynamic
-      %3 : Dynamic
-      %4 : Dynamic
-      %5 : Dynamic
-      %6 : Dynamic
-      %7 : Dynamic
-      %8 : Dynamic
+      %2 : Undefined
+      %3 : Undefined
+      %4 : Undefined
+      %5 : Undefined
+      %6 : Undefined
+      %7 : Undefined
+      %8 : Undefined
       %9 : Float(*, *)
       %10 : Float(*, *)
       %11 : Float(*, *)
@@ -17,22 +17,18 @@ graph(%0 : Float(*, *)
       %cellgate : Float(*, *)
       %outgate : Float(*, *)
       %18 : Float(*, *)) {
-  %19 : int = prim::Constant[value=1]()
-  %20 : Float(*, *), %21 : Float(*, *) = prim::FusionGroup_0[device=0](%ingate, %forgetgate, %cellgate, %outgate, %11, %1, %18, %0)
-  %22 : Float(*, *) = aten::mul(%20, %19)
-  %23 : Float(*, *) = aten::t(%12)
-  %24 : Float(*, *) = aten::mm(%20, %23)
-  %25 : Float(*, *) = aten::mul(%24, %19)
-  %26 : Float(*, *) = aten::t(%10)
-  %27 : Float(*, *) = aten::mm(%26, %20)
-  %28 : Float(*, *) = aten::mul(%27, %19)
-  %29 : Float(*, *) = aten::t(%13)
-  %30 : Float(*, *) = aten::mm(%22, %29)
-  %31 : Float(*, *) = aten::t(%9)
-  %32 : Float(*, *) = aten::mm(%31, %22)
-  %33 : Float(*, *) = aten::t(%32)
-  %34 : Float(*, *) = aten::t(%28)
-  return (%34, %33, %30, %25, %22, %22, %21);
+  %19 : Float(*, *), %20 : Float(*, *) = prim::FusionGroup_0[device=0](%ingate, %forgetgate, %cellgate, %outgate, %11, %1, %18, %0)
+  %21 : Float(*, *) = aten::t(%13)
+  %22 : Float(*, *) = aten::mm(%19, %21)
+  %23 : Float(*, *) = aten::t(%10)
+  %24 : Float(*, *) = aten::mm(%23, %19)
+  %25 : Float(*, *) = aten::t(%24)
+  %26 : Float(*, *) = aten::t(%12)
+  %27 : Float(*, *) = aten::mm(%19, %26)
+  %28 : Float(*, *) = aten::t(%9)
+  %29 : Float(*, *) = aten::mm(%28, %19)
+  %30 : Float(*, *) = aten::t(%29)
+  return (%30, %27, %25, %22, %19, %19, %20);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)
       %1 : Float(*, *)
@@ -54,31 +50,29 @@ with prim::FusionGroup_0 = graph(%0 : Float(*, *)
   %17 : Float(*, *) = aten::add(%7, %14, %16)
   %18 : Float(*, *) = aten::mul(%17, %1)
   %19 : Float(*, *) = aten::mul(%5, %6)
-  %20 : int = prim::Constant[value=1]()
-  %21 : Float(*, *) = aten::mul(%17, %20)
-  %22 : Float(*, *) = aten::mul(%21, %2)
-  %23 : Float(*, *) = aten::mul(%21, %0)
-  %24 : Float(*, *) = aten::mul(%17, %4)
-  %25 : Float(*, *) = aten::neg(%3)
-  %26 : int = prim::Constant[value=1]()
-  %27 : Float(*, *) = aten::add(%25, %26, %26)
-  %28 : Float(*, *) = aten::mul(%19, %3)
-  %29 : Float(*, *) = aten::mul(%28, %27)
-  %30 : Float(*, *) = aten::mul(%2, %2)
-  %31 : Float(*, *) = aten::neg(%30)
-  %32 : int = prim::Constant[value=1]()
-  %33 : Float(*, *) = aten::add(%31, %32, %32)
-  %34 : Float(*, *) = aten::mul(%23, %33)
-  %35 : Float(*, *) = aten::neg(%1)
-  %36 : int = prim::Constant[value=1]()
-  %37 : Float(*, *) = aten::add(%35, %36, %36)
-  %38 : Float(*, *) = aten::mul(%24, %1)
-  %39 : Float(*, *) = aten::mul(%38, %37)
-  %40 : Float(*, *) = aten::neg(%0)
-  %41 : int = prim::Constant[value=1]()
-  %42 : Float(*, *) = aten::add(%40, %41, %41)
-  %43 : Float(*, *) = aten::mul(%22, %0)
-  %44 : Float(*, *) = aten::mul(%43, %42)
-  %45 : Float(*, *) = prim::FusedConcat[dim=1](%44, %39, %34, %29)
-  return (%45, %18);
+  %20 : Float(*, *) = aten::mul(%17, %2)
+  %21 : Float(*, *) = aten::mul(%17, %0)
+  %22 : Float(*, *) = aten::mul(%17, %4)
+  %23 : Float(*, *) = aten::neg(%3)
+  %24 : int = prim::Constant[value=1]()
+  %25 : Float(*, *) = aten::add(%23, %24, %24)
+  %26 : Float(*, *) = aten::mul(%19, %3)
+  %27 : Float(*, *) = aten::mul(%26, %25)
+  %28 : Float(*, *) = aten::mul(%2, %2)
+  %29 : Float(*, *) = aten::neg(%28)
+  %30 : int = prim::Constant[value=1]()
+  %31 : Float(*, *) = aten::add(%29, %30, %30)
+  %32 : Float(*, *) = aten::mul(%21, %31)
+  %33 : Float(*, *) = aten::neg(%1)
+  %34 : int = prim::Constant[value=1]()
+  %35 : Float(*, *) = aten::add(%33, %34, %34)
+  %36 : Float(*, *) = aten::mul(%22, %1)
+  %37 : Float(*, *) = aten::mul(%36, %35)
+  %38 : Float(*, *) = aten::neg(%0)
+  %39 : int = prim::Constant[value=1]()
+  %40 : Float(*, *) = aten::add(%38, %39, %39)
+  %41 : Float(*, *) = aten::mul(%20, %0)
+  %42 : Float(*, *) = aten::mul(%41, %40)
+  %43 : Float(*, *) = prim::FusedConcat[dim=1](%42, %37, %32, %27)
+  return (%43, %18);
 }
