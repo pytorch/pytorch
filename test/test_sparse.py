@@ -1038,7 +1038,6 @@ class TestSparse(TestCase):
         input, _, _ = self._gen_sparse(4, 19, shape)
         for narrow_args in self._all_narrow_combs(shape):
             self._test_narrow(input, narrow_args)
-            self._test_narrow(input.coalesce(), narrow_args)
 
         self.assertRaises(RuntimeError, lambda: input.narrow_copy(-1, 0, 3))  # dim < 0
         self.assertRaises(RuntimeError, lambda: input.narrow_copy(10, 0, 3))  # dim > input.dim()
@@ -1048,9 +1047,8 @@ class TestSparse(TestCase):
         with_dense, _, _ = self._gen_sparse(2, 7, shape)
         for narrow_args in self._all_narrow_combs(shape):
             self._test_narrow(with_dense, narrow_args)
-            self._test_narrow(with_dense, narrow_args)
 
-        self.assertRaises(RuntimeError, lambda: input.narrow_copy(10, 0, 3))  # dim > sparseDim + denseDim
+        self.assertRaises(RuntimeError, lambda: with_dense.narrow_copy(10, 0, 3))  # dim > sparseDim + denseDim
 
     def _test_log1p_tensor(self, input, dense_tensor):
         expected_output = torch.tensor(dense_tensor).log1p_()

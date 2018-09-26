@@ -149,13 +149,15 @@ Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
 }
 
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-  AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  auto cur_size = self.size(dim);
-  AT_CHECK(length >= 0 && start <= cur_size - length,
-           "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
+  int64_t allDim = self.dim();
+  int64_t end = start+length;
+  AT_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  AT_CHECK(dim >= 0 && dim < allDim, 
+    "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
+  AT_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
+    "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
   LongTensor indices = self._indices();
   int64_t sparseDims = self._sparseDims();
-  int64_t end = start+length;
   
   std::vector<int64_t> newSizes = self.sizes().vec();
   newSizes[dim]=length;
