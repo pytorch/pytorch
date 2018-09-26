@@ -18,9 +18,9 @@ if(USE_GLOO)
     )
 
   set(Caffe2_CONTRIB_GLOO_HIP_SRC
-    "${CMAKE_CURRENT_SOURCE_DIR}/allreduce_ops_hip.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/broadcast_ops_hip.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/common_world_ops_hip.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hip/allreduce_ops_hip.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hip/broadcast_ops_hip.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/hip/common_world_ops_hip.cc"
     )
 
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${Caffe2_CONTRIB_GLOO_CPU_SRC} PARENT_SCOPE)
