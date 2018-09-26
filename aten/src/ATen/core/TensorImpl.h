@@ -19,11 +19,16 @@
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
 // keep the memory allocated for its maximum capacity reshaped to so far.
+//
+// This parameter is respected "upper-case" methods which call Resize()
+// (e.g., CopyFrom, ResizeLike); it is NOT respected by Tensor::resize_
+// or ShrinkTo, both of which guarantee to never to free memory.
 CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 
 // Since we can have high variance in blob memory allocated across different
 // inputs in the same run, we will shrink the blob only if the memory gain
-// is larger than this flag in bytes.
+// is larger than this flag in bytes.  This only applies to functions which
+// respect caffe2_keep_on_shrink.
 CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 
@@ -95,13 +100,28 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
 }
 
 /**
- * @brief TensorImpl is the implementation of a tensor and the basic class
- * in Caffe2 that stores a contiguous memory with its shape information.
+ * The low-level representation of a tensor, which contains a storage
+ * (which contains the actual data) and metadata (e.g., sizes and strides)
+ * describing this data as a tensor.
  *
- * The TensorImpl class is essentially a wrapper around a device-specific memory
- * (the device is specified by the Context template argument), and deals with
- * the allocation and de-allocation of such memory. We make a simplified
- * assumption that the memory is always contiguous.
+ * Some basic characteristics about our in-memory representation of
+ * tensors:
+ *
+ *  - It contains a pointer to a storage struct (Storage/StorageImpl)
+ *    which contains the pointer to the actual data and records the
+ *    data type and device of the view.  This allows multiple tensors
+ *    to alias the same underlying data, which allows to efficiently
+ *    implement differing *views* on a tensor.
+ *
+ *  - The tensor struct itself records view-specific metadata about
+ *    the tensor, e.g., sizes, strides and offset into storage.
+ *    Each view of a storage can have a different size or offset.
+ *
+ *  - This class is intrusively refcounted.  It is refcounted so that
+ *    we can support prompt deallocation of large tensors; it is
+ *    intrusively refcounted so that we can still perform reference
+ *    counted operations on raw pointers, which is often more convenient
+ *    when passing tensors across language boundaries.
  */
 struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
@@ -117,9 +137,23 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(TensorImpl&&) = default;
   TensorImpl& operator=(TensorImpl&&) = default;
 
-
   virtual void release_resources() override;
 
+  // TODO: Ideally, type_id() would be the *only* key we need to consult
+  // to do a dispatch, instead of having to grovel through three different
+  // variables.  Here's what's standing in the way:
+  //
+  //  - To eliminate ScalarType, we have to allocate a TensorTypeId for
+  //    each ScalarType+Backend combination, and then set it appropriately
+  //    when we initially allocate a TensorImpl.
+  //
+  //  - To eliminate is_variable, we have to allocate two classes of
+  //    TensorTypeId: ones that are variables, and ones that are not.
+  //    We may not want to eliminate this in the short term, because
+  //    hard-coding variable status into type_id() makes it more difficult
+  //    to do the "thread-local no_grad" trick (where we process Variables
+  //    "as if" they were non-Variables by setting a thread local variable.)
+  //
   Type & type() const {
     // NB: It's valid to use getTypeRaw here, because the TensorImpl
     // could not have been created without initializing the Type first.
@@ -135,6 +169,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual const Storage& storage() const;
   friend struct Type;
 
+  /**
+   * The number of elements in a tensor.
+   *
+   * WARNING: If you are using the Caffe2 API, this method can sometimes
+   * return -1, specifically when a tensor has not yet had its storage
+   * allocated by calling mutable_data().  You can use this case to
+   * test if a tensor is initialized or not.
+   */
   virtual int64_t numel() const {
 #ifdef DEBUG
     AT_ASSERT(compute_numel() == numel_);
@@ -192,7 +234,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   inline T * data() const {
     CAFFE_ENFORCE_WITH_CALLER(
         storage_.data() || numel_ == 0,
-        "The tensor is of non-zero shape, but its data is not allocated yet. "
+        "The tensor has a non-zero number of elements (shape: ", sizes(),
+        "), but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     CAFFE_ENFORCE_WITH_CALLER(
@@ -315,9 +358,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
  public:
 
-  /*
-   * Since we removed template from tensor, we now store a static
-   * context pointer in tensor, which indicates the type of the tensor.
+  /**
+   * The static context of a tensor intuitively represents the device
+   * type of a tensor; e.g., a CPU tensor is associated with the
+   * GetCPUStaticContext().  This method replaces the former Context template
+   * parameter which was previously used to identify the device type
+   * of a tensor.
    */
   at::BaseStaticContext* GetStaticContext() const {
     auto device_type = GetDeviceType();
@@ -329,7 +375,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * as the tensor.
    * Note that this doesn't support passing in argument
    * TODO(jerryzh): move this to a global registry
-   * that can create context for us
+   * that can create context for us, and then eliminate
+   * this method.
    */
   std::unique_ptr<at::BaseContext> CreateContext() const {
     return GetStaticContext()->CreateContext();
@@ -341,7 +388,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * @brief Copies the data from a source tensor, with a contex provided to
-   * carry out the underlying memcpy operation.
+   * carry out the underlying memcpy operation.  This method respects
+   * caffe2_keep_on_shrink.
    */
   void CopyFrom(const TensorImpl& src, at::BaseContext* context = nullptr) {
     if ((void*)&src == (void*)this) {
@@ -463,7 +511,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * @brief Shrinks the outer-most dimension to given size, keeping the data.
    *
    * This method guarantees that no re-allocations are carried out, which means
-   * that the extra capacity after the end of the shurnk tensor is maintained.
+   * that the extra capacity after the end of the shrunk tensor is maintained.
+   * Notably, this function does NOT respect caffe2_keep_on_shrink.
    */
   void ShrinkTo(int64_t outer_dim) {
     CAFFE_ENFORCE_WITH_CALLER(
@@ -533,6 +582,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * is deleted and new memory will be allocated next time you call
    * mutable_data(). However, if the shape is different but the total number of
    * items is the same, the underlying storage is kept.
+   *
+   * This method respects caffe2_keep_on_shrink.  Consult the internal logic
+   * of this method to see exactly under what circumstances this flag matters.
    */
   template <typename... Ts>
   void Resize(Ts... dim_source) {
@@ -562,6 +614,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Resize the tensor like the source tensor. Note that this is just a
    * sugar wrapper that essentially calls Resize(src_tensor.dims()).
+   * This method respects caffe2_keep_on_shrink.
    */
   inline void ResizeLike(const TensorImpl& src_tensor) {
     CAFFE_ENFORCE_WITH_CALLER(
