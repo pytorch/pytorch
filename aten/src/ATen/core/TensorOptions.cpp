@@ -22,43 +22,23 @@ std::ostream& operator<<(
 }
 
 Device TensorOptions::device() const noexcept {
-  if (has_device_) {
-    return device_;
-  } else {
-    return DefaultTensorOptions::get().device();
-  }
+  return device_.value_or(DefaultTensorOptions::get().device());
 }
 
 ScalarType TensorOptions::dtype() const noexcept {
-  if (has_dtype_) {
-    return dtype_;
-  } else {
-    return DefaultTensorOptions::get().dtype();
-  }
+  return dtype_.value_or(DefaultTensorOptions::get().dtype());
 }
 
 Layout TensorOptions::layout() const noexcept {
-  if (has_layout_) {
-    return layout_;
-  } else {
-    return DefaultTensorOptions::get().layout();
-  }
+  return layout_.value_or(DefaultTensorOptions::get().layout());
 }
 
 bool TensorOptions::requires_grad() const noexcept {
-  if (has_requires_grad_) {
-    return requires_grad_;
-  } else {
-    return DefaultTensorOptions::get().requires_grad();
-  }
+  return requires_grad_.value_or(DefaultTensorOptions::get().requires_grad());
 }
 
 bool TensorOptions::is_variable() const noexcept {
-  if (has_is_variable_) {
-    return is_variable_;
-  } else {
-    return DefaultTensorOptions::get().is_variable();
-  }
+  return is_variable_.value_or(DefaultTensorOptions::get().is_variable());
 }
 
 } // namespace at

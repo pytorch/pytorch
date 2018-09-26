@@ -31,19 +31,19 @@ struct DefaultTensorOptions {
   bool is_variable()    const { return is_variable_; }
 
   DefaultTensorOptions& apply(const TensorOptions& options) {
-    if (options.has_dtype()) {
+    if (options.dtype_opt().has_value()) {
       dtype_ = options.dtype();
     }
-    if (options.has_device()) {
+    if (options.device_opt().has_value()) {
       device_ = options.device();
     }
-    if (options.has_layout()) {
+    if (options.layout_opt().has_value()) {
       layout_ = options.layout();
     }
-    if (options.has_requires_grad()) {
+    if (options.requires_grad_opt().has_value()) {
       requires_grad_ = options.requires_grad();
     }
-    if (options.has_is_variable()) {
+    if (options.is_variable_opt().has_value()) {
       is_variable_ = options.is_variable();
     }
     return *this;
