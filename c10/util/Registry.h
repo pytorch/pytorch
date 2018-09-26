@@ -1,4 +1,5 @@
-#pragma once
+#ifndef C10_UTIL_REGISTRY_H_
+#define C10_UTIL_REGISTRY_H_
 
 /**
  * Simple registry implementation that uses static variables to
@@ -202,3 +203,5 @@ class Registerer {
   C10_REGISTER_TYPED_CLASS(RegistryName, #key, __VA_ARGS__)
 
 }  // namespace c10
+
+#endif // C10_UTIL_REGISTRY_H_

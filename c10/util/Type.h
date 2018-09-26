@@ -1,4 +1,5 @@
-#pragma once
+#ifndef C10_UTIL_TYPE_H_
+#define C10_UTIL_TYPE_H_
 
 #include <cstddef>
 #include <string>
@@ -23,3 +24,5 @@ inline const char* demangle_type() {
 }
 
 } // namespace c10
+
+#endif // C10_UTIL_TYPE_H_
