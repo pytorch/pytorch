@@ -199,8 +199,20 @@ class CAFFE2_API Tensor final {
     impl_.get()->FreeMemory();
   }
 
+  /**
+   * A utility function to print the debug string for the tensor. Note that this
+   * is very slow since it involves quite some string operations, so do not use
+   * it in your performance-critical code.
+   */
   string DebugString() const {
-    return impl_.get()->DebugString();
+    std::stringstream ss;
+    ss << "A Tensor of item size " << impl_->storage().itemsize() << " and type "
+       << impl_->dtype().name() << " and dimension (";
+    for (int d : impl_->sizes()) {
+      ss << d << ",";
+    }
+    ss << ").";
+    return ss.str();
   }
 
   // NB: a.swap(b) is not equivalent to std::swap(a, b);
