@@ -365,7 +365,7 @@ bool Operator::matches(const Node* node) const {
     return false;
 
 
-  std::unordered_map<std::string, TypePtr> type_env;
+  TypeEnv type_env;
   for(size_t i = 0; i < formals.size(); ++i) {
     try {
       TypePtr formal = matchTypeVariables(formals[i].type, actuals[i]->type(), type_env);

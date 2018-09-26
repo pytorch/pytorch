@@ -172,7 +172,7 @@ at::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   return at::nullopt;
 }
 
-TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, std::unordered_map<std::string, TypePtr>& type_env) {
+TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env) {
   if(!formal->hasFreeVariables())
     return formal;
   if(auto vt = formal->cast<VarType>()) {
@@ -220,7 +220,7 @@ TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, std::unordered_map<st
   AT_ERROR("unhandled free variable container: ", formal->str());
 }
 
-// change return types like List[List[int]] into List[List[int]]
+// change return types like List[List[t]] into List[List[int]]
 TORCH_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env) {
   if(!type->hasFreeVariables())
     return type;

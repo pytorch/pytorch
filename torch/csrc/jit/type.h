@@ -745,8 +745,8 @@ struct TORCH_API TypeMatchError : public std::exception {
 private:
   std::string msg_;
 };
-
-TORCH_API TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, std::unordered_map<std::string, TypePtr>& type_env);
-TORCH_API TypePtr evalTypeVariables(TypePtr type, std::unordered_map<std::string, TypePtr>& type_env);
+using TypeEnv = std::unordered_map<std::string, TypePtr>;
+TORCH_API TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv & type_env);
+TORCH_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
 }} // namespace torch::jit

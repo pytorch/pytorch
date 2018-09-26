@@ -450,7 +450,7 @@ Value* tryMatchArgument(
     const NamedValue& named_value,
     std::function<std::ostream&()> err,
     bool convert_tensors_to_nums,
-    std::unordered_map<std::string, TypePtr>& type_env) {
+    TypeEnv & type_env) {
   Value* value = named_value.value(graph);
 
   // some functions that take lists of integers for fixed size arrays
@@ -521,7 +521,7 @@ Value* tryCreateList(
     at::ArrayRef<NamedValue> varargs,
     std::function<std::ostream&()> err,
     bool convert_tensor_to_num,
-    std::unordered_map<std::string, TypePtr>& type_env) {
+    TypeEnv & type_env) {
   Argument elem_arg("<varargs>", elem_type);
   std::vector<Value*> list_ctor;
   for(const auto& a : varargs) {
@@ -561,7 +561,7 @@ at::optional<MatchedSchema> tryMatchSchema(
       return failure_messages;
     };
 
-    std::unordered_map<std::string, TypePtr> type_env;
+    TypeEnv type_env;
     std::vector<Value*> positional_inputs;
     std::vector<bool> used_kwarg(kwargs.size(), false);
 
@@ -630,10 +630,10 @@ at::optional<MatchedSchema> tryMatchSchema(
         return at::nullopt;
       }
     }
-    auto return_type = fmap(schema.returns, [&](const Argument& r) {
+    auto return_types = fmap(schema.returns, [&](const Argument& r) {
       return evalTypeVariables(r.type, type_env);
     });
-    return MatchedSchema {std::move(positional_inputs), std::move(return_type) };
+    return MatchedSchema {std::move(positional_inputs), std::move(return_types) };
 }
 
 
@@ -745,19 +745,6 @@ inline bool isSupportedListElementType(TypePtr type) {
       type->isSubtypeOf(NumberType::get());
 }
 
-// guard for List types we do not currently have operations for
-inline void ensureLegalType(const SourceRange& range, TypePtr ptr) {
-  if(TupleTypePtr tt = ptr->cast<TupleType>()) {
-    for(auto elem : tt->elements()) {
-      ensureLegalType(range, elem);
-    }
-  } else if(ListTypePtr lt = ptr->cast<ListType>()) {
-    if(!isSupportedListElementType(lt->getElementType())) {
-        throw ErrorReport(range) << "Lists can only contain numbers or Tensors, but found " << lt->getElementType()->str();
-    }
-  }
-}
-
 struct to_ir {
   to_ir(
       Def def,
@@ -808,7 +795,6 @@ struct to_ir {
       // Record the type for the schema and set the Type on the Value*
       arguments.push_back(schema.arguments.at(arg_annotation_idx++));
       new_input->setType(arguments.back().type);
-      // ensureLegalType((*it).ident().range(), arguments.back().type);
     }
     // body
     auto stmts = def.statements();
@@ -1594,7 +1580,6 @@ private:
         }
         Value* result = graph->insertNode(graph->createList(elem_type, values))
             ->output();
-        // ensureLegalType(tree->range(), result->type());
         return result;
       } break;
       case TK_TUPLE_LITERAL: {
