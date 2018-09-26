@@ -127,8 +127,15 @@ class CAFFE2_API Tensor final {
     impl_.get()->CopyFrom(*src.impl_.get(), context);
   }
 
+  /**
+   * @brief Extend the outer-most dimension of this tensor
+   *        to dimension of `num`.
+   */
   void ExtendTo(int64_t num, float growthPct, BaseContext* context) const {
-    impl_.get()->ExtendTo(num, growthPct, context);
+    CAFFE_ENFORCE_GE_WITH_CALLER(impl_->dim(), 1);
+    CAFFE_ENFORCE_GE_WITH_CALLER(growthPct, 0);
+    CAFFE_ENFORCE(context != nullptr, "Context must be provided.");
+    Extend(num - impl_->size(0), growthPct, context);
   }
 
   void Extend(int64_t num, float growthPct, BaseContext* context) const {
