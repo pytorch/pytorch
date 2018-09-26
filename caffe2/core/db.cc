@@ -119,7 +119,7 @@ class MiniDBTransaction : public Transaction {
   FILE* file_;
   std::lock_guard<std::mutex> lock_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(MiniDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(MiniDBTransaction);
 };
 
 class MiniDB : public DB {
