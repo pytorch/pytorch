@@ -135,7 +135,7 @@ goto:eof
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_C_FLAGS="%C_FLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%LINK_FLAGS%" ^
-                  -DCMAKE_CXX_FLAGS="/MT %C_FLAGS% %CPP_FLAGS%" ^
+                  -DCMAKE_CXX_FLAGS="/MP %C_FLAGS% %CPP_FLAGS%" ^
                   -DCUDA_NVCC_FLAGS="%BASIC_CUDA_FLAGS%" ^
                   -Dcwrap_files="%CWRAP_FILES%" ^
                   -DTH_INCLUDE_PATH="%INSTALL_DIR%/include" ^
@@ -202,7 +202,7 @@ goto:eof
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
-                  -DCMAKE_CXX_FLAGS="/EHa /MT %USER_CFLAGS%" ^
+                  -DCMAKE_CXX_FLAGS="/EHa /MP %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
                   -DUSE_ROCM=%USE_ROCM%
