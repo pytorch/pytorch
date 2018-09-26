@@ -84,7 +84,7 @@ class CAFFE2_API DAGNetBase : public NetBase {
   mutable std::vector<DAGNetStats> stats_;
   std::unordered_map<int, std::unique_ptr<Timer>> task_timers_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(DAGNetBase);
+  C10_DISABLE_COPY_AND_ASSIGN(DAGNetBase);
 };
 
 class CAFFE2_API DAGNet : public DAGNetBase {

@@ -114,7 +114,7 @@ class AllgatherOp final : public Operator<Context> {
     params.size = Input(1).size();
     params.meta = Input(1).meta();
     for (auto i = 0; i < params.inputs.size(); i++) {
-      params.inputs[i] = Input(i + 1).template raw_data();
+      params.inputs[i] = Input(i + 1).raw_data();
     }
     params.outputs.resize(OutputSize());
     params.outputs[0] = Output(0)->raw_mutable_data(params.meta);
