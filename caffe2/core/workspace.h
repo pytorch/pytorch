@@ -151,7 +151,7 @@ class CAFFE2_API Workspace {
       auto* to_blob = CreateBlob(blob);
       CAFFE_ENFORCE(to_blob);
       const auto& from_tensor = from_blob->template Get<Tensor>();
-      auto* to_tensor = to_blob->GetMutableTensor(Context::GetDeviceType());
+      auto* to_tensor = BlobGetMutableTensor(to_blob, Context::GetDeviceType());
       to_tensor->CopyFrom(from_tensor);
     }
   }
@@ -328,7 +328,7 @@ class CAFFE2_API Workspace {
   std::mutex thread_pool_creation_mutex_;
   std::shared_ptr<Bookkeeper> bookkeeper_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(Workspace);
+  C10_DISABLE_COPY_AND_ASSIGN(Workspace);
 };
 
 }  // namespace caffe2
