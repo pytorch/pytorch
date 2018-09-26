@@ -25,7 +25,7 @@ static inline bool is_outer_reduction(const int64_t* strides) {
 }
 
 template <typename func_t, typename vec_func_t>
-void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, int ident=0) {
+void binary_kernel_reduce_vec(TensorIterator& iter, func_t op, vec_func_t vop, double ident=0) {
   using traits = binary_function_traits<func_t>;
   static_assert(
     std::is_same<typename traits::result_type, typename traits::arg1_t>::value,
