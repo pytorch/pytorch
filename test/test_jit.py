@@ -1224,13 +1224,18 @@ class TestJit(JitTestCase):
 
             def fn(x):
                 return x + torch.ones(2, 3, **kwargs)
-            input = torch.ones(2, 3, **kwargs)
+
+            input_kwargs = kwargs.copy()
+            if 'out' in input_kwargs:
+                del input_kwargs['out']
+            input = torch.ones(2, 3, **input_kwargs)
             self.checkTrace(fn, (input,), inputs_require_grads=inputs_require_grads)
             # check we recorded 'ones' and did not just record a constant
             tfn = torch.jit.trace(fn, input)
             self.assertTrue("ones" in str(tfn.graph))
         run()
         run(dtype=torch.int, inputs_require_grads=False)
+        run(out=torch.tensor([]))
         if RUN_CUDA:
             run(device="cuda:0")
         if RUN_CUDA_MULTI_GPU:
