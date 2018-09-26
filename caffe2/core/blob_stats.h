@@ -1,7 +1,7 @@
 #pragma once
 
 #include "caffe2/core/blob.h"
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 #include "caffe2/core/typeid.h"
 
 #include <unordered_map>

@@ -16,7 +16,7 @@
 #include "caffe2/core/net_dag_utils.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/timer.h"

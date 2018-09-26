@@ -5,7 +5,7 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/net_async_base.h"
 #include "caffe2/core/net_dag_utils.h"
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
@@ -139,7 +139,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   friend class tracing::Tracer;
 };
 
-CAFFE_DECLARE_SHARED_REGISTRY(
+C10_DECLARE_SHARED_REGISTRY(
     ThreadPoolRegistry,
     TaskThreadPool,
     int,

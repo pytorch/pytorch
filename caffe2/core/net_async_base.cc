@@ -408,14 +408,14 @@ void AsyncNetBase::finalizeEvents() {
 
 AsyncNetBase::~AsyncNetBase() {}
 
-CAFFE_DEFINE_SHARED_REGISTRY(
+C10_DEFINE_SHARED_REGISTRY(
     ThreadPoolRegistry,
     TaskThreadPool,
     int,
     int,
     bool);
 
-CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
 
 /* static */
 std::shared_ptr<TaskThreadPool>

@@ -10,7 +10,7 @@ CAFFE2_DECLARE_bool(caffe2_mkl_memonger_in_use);
 
 namespace caffe2 {
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     MKLOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
@@ -18,12 +18,12 @@ CAFFE_DECLARE_REGISTRY(
 #define REGISTER_MKL_OPERATOR_CREATOR(key, ...) \
   CAFFE_REGISTER_CREATOR(MKLOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_MKL_OPERATOR(name, ...) \
-  CAFFE_REGISTER_CLASS(MKLOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(MKLOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_MKL_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(MKLOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(MKLOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_MKL_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(MKLOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(MKLOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 namespace mkl {
 // MKLOperator is the base scaffolding of the operators that uses MKLDNN. It
