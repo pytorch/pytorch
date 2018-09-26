@@ -237,8 +237,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     AT_ASSERT(!is_variable());
     CAFFE_ENFORCE_WITH_CALLER(
         storage_.data() || numel_ == 0,
-        "The tensor has a non-zero number of elements (shape: ", sizes(),
-        "), but its data is not allocated yet. "
+        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     CAFFE_ENFORCE_WITH_CALLER(
