@@ -45,7 +45,7 @@ std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
     auto pytuple = pyobj.cast<py::tuple>();
     out << "(";
     size_t i = 0;
-    for (auto& o : pytuple) {
+    for (const auto& o : pytuple) {
       if (i > 0) {
         out << ", ";
       }

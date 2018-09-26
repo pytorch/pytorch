@@ -22,7 +22,7 @@
 
 namespace at {
 
-struct Tensor;
+class Tensor;
 
 class CAFFE2_API Context {
  public:
