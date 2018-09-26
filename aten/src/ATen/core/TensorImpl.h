@@ -653,42 +653,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     storage_offset_ = src.storage_offset();
   }
 
-  /**
-   * @brief Shares the data with an externally managed pointer.
-   *
-   * This is similar to ShareData() but the source is a pointer with an advanced
-   * deleter option. In default, no deletion takes place, and one needs to make
-   * sure that the external memory is deallocated only after the tensor finishes
-   * using it. If a Deleter object is passed in, when this tensor is reallocated
-   * or freed, the deleter function is going to be called.
-   */
-  template <typename T>
-  void
-  ShareExternalPointer(T* src, size_t capacity = 0, caffe2::MemoryDeleter d = nullptr) {
-    ShareExternalPointer((void*)src, caffe2::TypeMeta::Make<T>(), capacity, d);
-  }
-
-  template <typename T>
-  void ShareExternalPointer(at::DataPtr&& data_ptr, size_t capacity = 0) {
-    ShareExternalPointer(std::move(data_ptr), caffe2::TypeMeta::Make<T>(), capacity);
-  }
-
-  void ShareExternalPointer(
-      void* src,
-      const caffe2::TypeMeta& data_type,
-      size_t capacity = 0,
-      caffe2::MemoryDeleter d = nullptr) {
-    CAFFE_ENFORCE_WITH_CALLER(
-        is_contiguous_,
-        "Right now ShareExternalPointer is only supported for contiguos Tensor.");
-    CAFFE_ENFORCE_WITH_CALLER(
-        data_type.id() != caffe2::TypeIdentifier::uninitialized(),
-        "To share with a raw external pointer you need to pass in an "
-        "initialized data_type(TypeMeta).");
-    ShareExternalPointer(
-        at::DataPtr(src, src, d, device_type()), data_type, capacity);
-  }
-
   void ShareExternalPointer(
       at::DataPtr&& data_ptr,
       const caffe2::TypeMeta& data_type,
