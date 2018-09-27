@@ -101,13 +101,13 @@ To see more complete examples of using the PyTorch C++ frontend, see `the exampl
 Philosophy
 ----------
 
-PyTorch's C++ frontend was designed with the idea that the Python frontend
-is great, and should be used when possible; but in some settings, performance
-and portability requirements make the use of the Python interpreter infeasible.
-For example, Python is poor choice for low latency, high performance or
+PyTorch's C++ frontend was designed with the idea that the Python frontend is
+great, and should be used when possible; but in some settings, performance and
+portability requirements make the use of the Python interpreter infeasible. For
+example, Python is a poor choice for low latency, high performance or
 multithreaded environments, such as video games or production servers.  The
-goal of the C++ frontend is to address these use cases, while not sacrificing the
-user experience of the Python frontend.
+goal of the C++ frontend is to address these use cases, while not sacrificing
+the user experience of the Python frontend.
 
 As such, the C++ frontend has been written with a few philosophical goals in mind:
 
