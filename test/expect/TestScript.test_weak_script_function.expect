@@ -18,6 +18,8 @@ graph(%x.1 : Dynamic) {
     }
   %12 : int = prim::Constant[value=1]()
   %x : Dynamic = aten::add(%x.4, %2, %12)
-  %14 : Dynamic = ^weak_script_fn()(%x)
-  return (%14);
+  %14 : int = prim::Constant[value=5]()
+  %15 : int = prim::Constant[value=1]()
+  %16 : Dynamic = aten::add(%x, %14, %15)
+  return (%16);
 }
