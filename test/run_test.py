@@ -150,7 +150,8 @@ def test_distributed(python, test_module, test_directory, options):
     config = DISTRIBUTED_TESTS_CONFIG
     if test_module == "test_thd_distributed":
         config = THD_DISTRIBUTED_TESTS_CONFIG
-    for backend, env_vars in config.items():
+    for backend in options.backend:
+        env_vars = config[backend]
         if backend == 'mpi' and not mpi_available:
             continue
         for with_init_file in {True, False}:
@@ -236,6 +237,15 @@ def parse_args():
         help='select a set of tests to include (defaults to ALL tests).'
              ' tests can be specified with module name, module.TestClass'
              ' or module.TestClass.test_method')
+    parser.add_argument(
+        '-b',
+        '--backend',
+        nargs='+',
+        choices=DISTRIBUTED_TESTS_CONFIG.keys(),
+        metavar='BACKENDS',
+        default=DISTRIBUTED_TESTS_CONFIG.keys(),
+        help='backends to run when running the distributed tests'
+        )
     parser.add_argument(
         '-x',
         '--exclude',
