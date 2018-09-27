@@ -316,6 +316,10 @@ def _reduce_op_symbolic(onnx_op_name):
         else:
             # dim-reduce path
             dim, keepdim = _get_const(dim, 'i', 'dim'), _get_const(keepdim, 'i', 'keepdim')
+            dims = self.type().sizes()
+            if dim < 0:
+                dim = dim + len(dims)
+
             return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
     return symbolic
 
@@ -633,12 +637,12 @@ def lt(g, input, other):
 
 def ge(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", lt(g, _if_scalar_type_as(g, other, input), input))
+    return g.op("Not", lt(g, input, _if_scalar_type_as(g, other, input)))
 
 
 def le(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", gt(g, _if_scalar_type_as(g, other, input), input))
+    return g.op("Not", gt(g, input, _if_scalar_type_as(g, other, input)))
 
 
 @parse_args('v', 'i')
