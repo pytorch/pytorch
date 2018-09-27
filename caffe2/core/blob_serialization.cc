@@ -322,13 +322,13 @@ void TensorSerializer::StoreDeviceDetail(
   input.ExtractDeviceOption(proto->mutable_device_detail());
 }
 // The actual serialization registry objects.
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
     TypeIdentifier,
     BlobSerializerBase,
     std::unique_ptr);
 
-CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
+C10_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
 void DeserializeBlob(const string& content, Blob* result) {
   BlobProto blob_proto;

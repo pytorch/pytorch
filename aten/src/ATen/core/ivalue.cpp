@@ -1,10 +1,18 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Formatting.h>
 
-#define TORCH_FORALL_TAGS(_)                                             \
-  _(None)                                                                \
-  _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) \
-      _(TensorList) _(Blob)
+#define TORCH_FORALL_TAGS(_) \
+  _(None) \
+  _(Tensor) \
+  _(Double) \
+  _(Int) \
+  _(Tuple) \
+  _(IntList) \
+  _(DoubleList) \
+  _(String) \
+  _(TensorList) \
+  _(Blob) \
+  _(GenericList)
 
 namespace torch { namespace jit {
 
