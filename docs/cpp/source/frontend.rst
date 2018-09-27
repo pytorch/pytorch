@@ -142,5 +142,5 @@ Installation
 ------------
 
 Instructions on how to install the C++ frontend library distribution, including
-an example for how to build a minimal application depending on libtorch, may be
+an example for how to build a minimal application depending on LibTorch, may be
 found by following `this <https://pytorch.org/cppdocs/installation.html>`_ link.
