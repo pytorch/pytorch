@@ -1,20 +1,17 @@
 The PyTorch C++ Frontend
 ========================
 
-The PyTorch C++ frontend is a pure C++(11) library for GPU and CPU enabled
+The PyTorch C++ frontend is a pure C++11 library for CPU and GPU
 tensor computation, with automatic differentation and high level building
 blocks for state of the art machine learning applications.
 
 Description
 -----------
 
-As part of the `greater PyTorch C++ API
-<https://pytorch.org/cppdocs/index.html>`_, it is based on the ATen ``Tensor``
-library, augmented with an automatic differentiation system by the PyTorch
-``Autograd`` API, and builds on top of this a research and production ready
-solution to high performance machine learning and dynamic (eager) neural
-networks in pure C++. In finer granularity, the C++ frontend consists of the
-following components:
+The PyTorch C++ frontend can be thought of as a C++ version of the
+PyTorch Python frontend, providing automatic differentiation and various higher
+level abstractions for machine learning and neural networks.  Specifically,
+it consists of the following components:
 
 +----------------------+------------------------------------------------------------------------+
 | Component            | Description                                                            |
@@ -34,12 +31,11 @@ following components:
 | ``torch::jit``       | Pure C++ access to the TorchScript JIT compiler                        |
 +----------------------+------------------------------------------------------------------------+
 
-End-To-End Example
+End-to-end example
 ------------------
 
-To offer you a taste of the PyTorch C++ frontend, what follows below is an
-end-to-end example tying together many of the above components into a simple
-neural network training routine.
+Here is a simple, end-to-end example of defining and training a simple
+neural network on the MNIST dataset:
 
 .. code-block:: cpp
 
@@ -99,12 +95,11 @@ neural network training routine.
       }
     }
 
-To see more complete examples of using the PyTorch C++ frontend, please do
-explore `the example repository
+To see more complete examples of using the PyTorch C++ frontend, see `the example repository
 <https://github.com/goldsborough/examples/tree/cpp/cpp>`_.
 
-Philosophy and Origin
----------------------
+Philosophy
+----------
 
 The PyTorch C++ frontend was originally born out of the necessity to train
 machine learning models in low latency, high performance, **pure C++**
