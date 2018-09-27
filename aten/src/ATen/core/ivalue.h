@@ -88,7 +88,6 @@ using GenericList = ConstantList<IValue>;
   _(Blob) \
   _(GenericList)
 
-
 struct CAFFE2_API IValue final {
   IValue()
   : payload{0}
