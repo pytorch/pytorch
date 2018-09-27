@@ -7,7 +7,7 @@ from itertools import product
 import torch
 import torch.cuda
 from torch.nn.functional import _Reduction
-from common import TestCase, to_gpu, freeze_rng_state, is_iterable
+from common import TestCase, to_gpu, freeze_rng_state, is_iterable, TEST_WITH_ROCM
 from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn
@@ -40,7 +40,8 @@ module_tests = [
         module_name='Linear',
         constructor_args=(10, 8),
         input_size=(4, 10),
-        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
+        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Linear',
@@ -102,17 +103,20 @@ module_tests = [
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmax2d',
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, False)),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LogSoftmax',
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_(),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LogSoftmax',
@@ -120,11 +124,14 @@ module_tests = [
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
         desc='multiparam',
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='ELU',
         constructor_args=(2.,),
         input_size=(3, 2, 5),
+        reference_fn=lambda x, _: torch.where(x >= 0, x, 2 * (x.exp() - 1)),
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     # TODO: reference function
     dict(
@@ -197,6 +204,7 @@ module_tests = [
         input_size=(2, 3, 4),
         desc='1d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -210,6 +218,7 @@ module_tests = [
         input_size=(2, 3, 4, 5),
         desc='2d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -223,26 +232,31 @@ module_tests = [
         input_size=(2, 3, 4, 5, 6),
         desc='3d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softsign',
         input_size=(3, 2, 5),
         reference_fn=lambda i, _: i.div(1 + torch.abs(i)),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmin',
         constructor_args=(1,),
         input_size=(10, 20),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmin',
         constructor_args=(1,),
         input_size=(2, 3, 5, 10),
         desc='multidim',
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Tanhshrink',
-        input_size=(2, 3, 4, 5)
+        input_size=(2, 3, 4, 5),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
 ]
 
@@ -448,6 +462,43 @@ def marginrankingloss_reference(input1, input2, target, margin=0, reduction='ele
     return output
 
 
+# this directly follows Graves et al's paper, in contrast to the production implementation, it does not use log-space
+def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='elementwise_mean'):
+    input_lengths = torch.tensor(input_lengths, dtype=torch.long)
+    target_lengths = torch.tensor(target_lengths, dtype=torch.long)
+    dt = log_probs.dtype
+    log_probs = log_probs.double()  # we need the accuracy as we are not in logspace
+    targets = targets.long()
+    cum_target_lengths = target_lengths.cumsum(0)
+    losses = []
+    for i in range(log_probs.size(1)):
+        input_length = input_lengths[i].item()
+        target_length = target_lengths[i].item()
+        cum_target_length = cum_target_lengths[i].item()
+        targets_prime = targets.new_full((2 * target_length + 1,), blank)
+        if targets.dim() == 2:
+            targets_prime[1::2] = targets[i, :target_length]
+        else:
+            targets_prime[1::2] = targets[cum_target_length - target_length:cum_target_length]
+        probs = log_probs[:input_length, i].exp()
+        alpha = log_probs.new_zeros((target_length * 2 + 1,))
+        alpha[0] = probs[0, blank]
+        alpha[1] = probs[0, targets_prime[1]]
+        mask_third = (targets_prime[:-2] != targets_prime[2:])
+        for t in range(1, input_length):
+            alpha_next = alpha.clone()
+            alpha_next[1:] += alpha[:-1]
+            alpha_next[2:] += torch.where(mask_third, alpha[:-2], alpha.new_zeros(1))
+            alpha = probs[t, targets_prime] * alpha_next
+        losses.append(-alpha[-2:].sum().log()[None])
+    output = torch.cat(losses, 0)
+    if reduction == 'elementwise_mean':
+        return (output / target_lengths.to(dtype=output.dtype, device=output.device)).mean()
+    elif reduction == 'sum':
+        return output.sum()
+    output = output.to(dt)
+    return output
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
@@ -460,6 +511,7 @@ loss_reference_fns = {
     'CosineEmbeddingLoss': cosineembeddingloss_reference,
     'TripletMarginLoss': tripletmarginloss_reference,
     'MarginRankingLoss': marginrankingloss_reference,
+    'CTCLoss': ctcloss_reference,
 }
 
 
@@ -521,6 +573,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             kldivloss_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MSELoss',
@@ -537,6 +590,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
         check_gradgrad=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='BCELoss',
@@ -547,6 +601,7 @@ criterion_tests = [
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
         check_gradgrad=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -567,6 +622,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             hingeembeddingloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -577,6 +633,7 @@ criterion_tests = [
             hingeembeddingloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -603,6 +660,7 @@ criterion_tests = [
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         reference_fn=lambda i, t, m: -(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()).sum() / i.numel(),
         check_gradgrad=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MultiMarginLoss',
@@ -681,6 +739,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             cosineembeddingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CosineEmbeddingLoss',
@@ -691,6 +750,7 @@ criterion_tests = [
             cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -699,6 +759,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             marginrankingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -709,6 +770,7 @@ criterion_tests = [
             marginrankingloss_reference(i[0], i[1], t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
 ]
 
@@ -754,7 +816,10 @@ class NNTestCase(TestCase):
             jacobian_param = torch.zeros(num_param, output_size)
 
         for i in range(output_size):
-            _, d_param = self._get_parameters(module)
+            param, d_param = self._get_parameters(module)
+            # make non grad zeros
+            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
+
             d_out = torch.zeros_like(output)
             flat_d_out = d_out.view(-1)
             flat_d_out[i] = 1
@@ -838,7 +903,7 @@ class NNTestCase(TestCase):
 
 class TestBase(object):
 
-    _required_arg_names = {'constructor_args', 'input'}
+    _required_arg_names = {'constructor_args', 'input', 'extra_args'}
 
     def __init__(self, constructor, desc='', reference_fn=None, fullname=None, **kwargs):
         self.desc = desc
@@ -847,8 +912,8 @@ class TestBase(object):
         self.reference_fn = reference_fn
         for name in self._required_arg_names:
             if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
-                if name == 'constructor_args':
-                    kwargs['constructor_args'] = tuple()
+                if name in {'constructor_args', 'extra_args'}:
+                    kwargs[name] = tuple()
                 else:
                     raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!"
                                      .format(self.get_name(), name))
@@ -875,6 +940,10 @@ class TestBase(object):
     @property
     def constructor_args(self):
         return self._get_arg('constructor_args', True)
+
+    @property
+    def extra_args(self):
+        return self._get_arg('extra_args', True)
 
     def _get_arg(self, name, unpack):
         assert name in self._required_arg_names
@@ -948,7 +1017,16 @@ class ModuleTest(TestBase):
             return [self.noncontiguize(o) for o in obj]
         tensor = obj
         ndim = tensor.dim()
-        noncontig = torch.stack([torch.zeros_like(tensor), tensor], ndim).select(ndim, 1).detach()
+        # Always making only the last dimension noncontiguous is easy to hide
+        # bugs because .view(-1) will still work. So try to find a dim with size
+        # > 1 and make that non-contiguous, i.e., stack + select on the
+        # dimension directly after that.
+        dim = ndim
+        for d in range(ndim):
+            if tensor.size(d) > 1:
+                dim = d + 1
+                break
+        noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
         assert noncontig.numel() == 1 or not noncontig.is_contiguous()
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
@@ -977,11 +1055,7 @@ class ModuleTest(TestBase):
             test_case._zero_grad_parameters(module)
             test_case._zero_grad_input(i)
             with freeze_rng_state():
-                try:
-                    out = test_case._forward(module, i)
-                except Exception:
-                    # Some modules will fail because of non contiguous inputs and we're ok with that
-                    continue
+                out = test_case._forward(module, i)
                 grad = test_case._backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)
@@ -1079,6 +1153,7 @@ class CriterionTest(TestBase):
     def __init__(self, *args, **kwargs):
         super(CriterionTest, self).__init__(*args, **kwargs)
         self.should_test_cuda = kwargs.get('test_cuda', True)
+        self.check_forward_only = kwargs.get('check_forward_only', True)
 
     def _get_target(self):
         return self._get_arg('target', True)
@@ -1094,12 +1169,15 @@ class CriterionTest(TestBase):
         target = self._get_target()
 
         if self.reference_fn is not None:
-            out = test_case._forward_criterion(module, input, target)
-            expected_out = self.reference_fn(deepcopy(input),
-                                             deepcopy(target), module)
+            out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
+            ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
+            expected_out = self.reference_fn(*ref_args)
             if isinstance(expected_out, torch.Tensor):
                 expected_out = expected_out.item()
             test_case.assertEqual(out, expected_out)
+
+        if self.check_forward_only:
+            return
 
         test_case.check_criterion_jacobian(module, input, target)
         self._do_extra_tests(test_case, module, input, target)

@@ -7,7 +7,7 @@ namespace caffe2 {
 template <>
 template <typename T>
 bool EnforceFiniteOp<CUDAContext>::DoRunWithType() {
-  buffer_.CopyFrom<CUDAContext, CUDAContext>(Input(0), &context_);
+  buffer_.CopyFrom(Input(0), &context_);
   EnforceOnCPU<T>(buffer_);
   return true;
 }

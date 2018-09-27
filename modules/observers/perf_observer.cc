@@ -1,10 +1,41 @@
 #include "observers/perf_observer.h"
 #include "observers/observer_config.h"
+#if !CAFFE2_MOBILE
+#include "caffe2/core/flags.h"
+#include "observers/net_observer_reporter_print.h"
+#endif
 
 #include <random>
 #include "caffe2/core/common.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
+
+#if !CAFFE2_MOBILE
+CAFFE2_DEFINE_int64(
+    aiBench_netInitSampleRate,
+    0,
+    "One in N sampling rate for net delay");
+
+CAFFE2_DEFINE_int64(
+    aiBench_netFollowupSampleRate,
+    0,
+    "One in N sampling rate for net delay");
+
+CAFFE2_DEFINE_int64(
+    aiBench_netFollowupSampleCount,
+    0,
+    "control the following c logs");
+
+CAFFE2_DEFINE_int64(
+    aiBench_operatorNetSampleRatio,
+    0,
+    "One in N sampling rate for operator delay");
+
+CAFFE2_DEFINE_int64(
+    aiBench_skipIters,
+    0,
+    "skip the first N iterations of the net run");
+#endif
 
 namespace caffe2 {
 namespace {
@@ -13,6 +44,20 @@ bool registerGlobalPerfNetObserverCreator(int* /*pargc*/, char*** /*pargv*/) {
   AddGlobalNetObserverCreator([](NetBase* subject) {
     return caffe2::make_unique<PerfNetObserver>(subject);
   });
+
+#if !CAFFE2_MOBILE
+  // for aibench usage
+  caffe2::ObserverConfig::setReporter(
+      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
+
+  caffe2::ObserverConfig::initSampleRate(
+      FLAGS_aiBench_netInitSampleRate,
+      FLAGS_aiBench_netFollowupSampleRate,
+      FLAGS_aiBench_netFollowupSampleCount,
+      FLAGS_aiBench_operatorNetSampleRatio,
+      FLAGS_aiBench_skipIters);
+#endif
+
   return true;
 }
 } // namespace
@@ -85,15 +130,13 @@ void PerfNetObserver::Stop() {
 
       p.latency = static_cast<const PerfOperatorObserver*>(observerMap_[op])
                       ->getMilliseconds();
-#ifndef CAFFE2_IOS
-      auto cost = static_cast<const PerfOperatorObserver*>(observerMap_[op])
-                      ->getAnalyticalCost();
-      p.flops = cost.flops;
-#endif // CAFFE2_MOBILE
 
       p.engine = op->engine();
       p.type = op->type();
-      p.tensor_shapes = op->InputTensorShapes();
+      p.tensor_shapes =
+          static_cast<const PerfOperatorObserver*>(observerMap_[op])
+              ->getTensorShapes();
+
       if (op->has_debug_def()) {
         for (auto arg : op->debug_def().arg()) {
           p.args.emplace_back(arg);
@@ -152,31 +195,15 @@ void PerfOperatorObserver::Stop() {
   /* Time from the start of the net minus the time spent on all other
      operators is the time spent on this operator */
   milliseconds_ = netObserver_->getTimer().MilliSeconds() - milliseconds_;
+  tensor_shapes_ = subject_->InputTensorShapes();
 }
 
 double PerfOperatorObserver::getMilliseconds() const {
   return milliseconds_;
 }
 
-OpSchema::Cost PerfOperatorObserver::getAnalyticalCost() const {
-  auto* op = subject_;
-  auto* schema = OpSchemaRegistry::Schema(op->type());
-  OpSchema::Cost cost;
-  if (schema && schema->HasCostInferenceFunction()) {
-    vector<TensorShape> shapes = op->InputTensorShapes();
-
-    auto all_good_shapes = std::accumulate(
-        shapes.begin(),
-        shapes.end(),
-        true,
-        [](bool acc, const TensorShape& shape) {
-          return acc && !shape.unknown_shape();
-        });
-    if (all_good_shapes) {
-      cost = schema->InferCost(op->debug_def(), shapes);
-    }
-  }
-  return cost;
+std::vector<TensorShape> PerfOperatorObserver::getTensorShapes() const {
+  return tensor_shapes_;
 }
 
 } // namespace caffe2

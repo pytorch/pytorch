@@ -2,6 +2,11 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 
+#ifdef CAFFE2_USE_IDEEP
+#include <caffe2/ideep/operators/operator_fallback_ideep.h>
+#include <caffe2/ideep/utils/ideep_operator.h>
+#endif
+
 namespace caffe2 {
 namespace fb {
 namespace {
@@ -29,12 +34,12 @@ class AtomicFetchAddOp final : public Operator<CPUContext> {
     auto& b = Input(2);
     auto* c = Output(0);
     auto* d = Output(1);
-    c->Resize(std::vector<TIndex>());
-    d->Resize(std::vector<TIndex>());
+    c->Resize(std::vector<int64_t>());
+    d->Resize(std::vector<int64_t>());
     auto* aPtr = a.data<int32_t>();
     auto* bPtr = b.data<int32_t>();
-    auto* cPtr = c->mutable_data<int32_t>();
-    auto* dPtr = d->mutable_data<int32_t>();
+    auto* cPtr = c->template mutable_data<int32_t>();
+    auto* dPtr = d->template mutable_data<int32_t>();
     std::lock_guard<std::mutex> lg(*mutex);
     *dPtr = *aPtr;
     *cPtr = *aPtr + *bPtr;
@@ -77,13 +82,17 @@ class CheckAtomicBoolOp final : public Operator<CPUContext> {
   bool RunOnDevice() override {
     auto& ptr = OperatorBase::Input<std::unique_ptr<std::atomic<bool>>>(0);
     Output(0)->Resize(1);
-    *Output(0)->mutable_data<bool>() = ptr->load();
+    *Output(0)->template mutable_data<bool>() = ptr->load();
     return true;
   }
 };
 
 REGISTER_CPU_OPERATOR(CreateMutex, CreateMutexOp);
 REGISTER_CPU_OPERATOR(AtomicFetchAdd, AtomicFetchAddOp);
+
+#ifdef CAFFE2_USE_IDEEP
+REGISTER_IDEEP_OPERATOR(CreateMutex, IDEEPFallbackOp<CreateMutexOp, SkipIndices<0>>);
+#endif
 
 REGISTER_CPU_OPERATOR(CreateAtomicBool, CreateAtomicBoolOp);
 REGISTER_CPU_OPERATOR(ConditionalSetAtomicBool, ConditionalSetAtomicBoolOp);
@@ -93,7 +102,8 @@ OPERATOR_SCHEMA(CreateMutex)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Creates an unlocked mutex and returns it in a unique_ptr blob.")
-    .Output(0, "mutex_ptr", "Blob containing a std::unique_ptr<mutex>.");
+    .Output(0, "mutex_ptr", "Blob containing a std::unique_ptr<mutex>.")
+    .ScalarType(TensorProto_DataType_UNDEFINED);
 
 OPERATOR_SCHEMA(AtomicFetchAdd)
     .NumInputs(3)

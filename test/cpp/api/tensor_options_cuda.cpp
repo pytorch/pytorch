@@ -1,51 +1,53 @@
-#include "catch.hpp"
+#include <gtest/gtest.h>
 
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
-#include <ATen/TensorOptions.h>
+#include <ATen/core/TensorOptions.h>
 
 using namespace at;
 
 // A macro so we don't lose location information when an assertion fails.
-#define REQUIRE_OPTIONS(device_, index_, type_, layout_)                    \
-  REQUIRE(options.device().type() == Device((device_), (index_)).type());   \
-  REQUIRE(options.device().index() == Device((device_), (index_)).index()); \
-  REQUIRE(options.dtype() == (type_));                                      \
-  REQUIRE(options.layout() == (layout_))
+#define REQUIRE_OPTIONS(device_, index_, type_, layout_)                      \
+  ASSERT_EQ(options.device().type(), Device((device_), (index_)).type()); \
+  ASSERT_TRUE(                                                                \
+      options.device().index() == Device((device_), (index_)).index());       \
+  ASSERT_EQ(options.dtype(), (type_));                                    \
+  ASSERT_TRUE(options.layout() == (layout_))
 
-#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
-  REQUIRE(tensor.device().type() == Device((device_), (index_)).type());   \
-  REQUIRE(tensor.device().index() == Device((device_), (index_)).index()); \
-  REQUIRE(tensor.type().scalarType() == (type_));                          \
-  REQUIRE(tensor.type().layout() == (layout_))
+#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \
+  ASSERT_EQ(tensor.device().type(), Device((device_), (index_)).type());   \
+  ASSERT_EQ(tensor.device().index(), Device((device_), (index_)).index()); \
+  ASSERT_EQ(tensor.type().scalarType(), (type_));                          \
+  ASSERT_TRUE(tensor.type().layout() == (layout_))
 
-TEST_CASE("TensorOptions/ConstructsWellFromCUDATypes", "[cuda]") {
-  auto options = TensorOptions(CUDA(kFloat));
+TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
+  auto options = CUDA(kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kStrided);
 
-  options = TensorOptions(CUDA(kInt));
+  options = CUDA(kInt).options();
   REQUIRE_OPTIONS(kCUDA, -1, kInt, kStrided);
 
-  options = TensorOptions(getType(kSparseCUDA, kFloat));
+  options = getNonVariableType(Backend::SparseCUDA, kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kSparse);
 
-  options = TensorOptions(getType(kSparseCUDA, kByte));
+  options = getNonVariableType(Backend::SparseCUDA, kByte).options();
   REQUIRE_OPTIONS(kCUDA, -1, kByte, kSparse);
 
-  options = TensorOptions(CUDA(kFloat), /*device=*/5);
+  options = CUDA(kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kStrided);
 
-  options = TensorOptions(getType(kSparseCUDA, kFloat), /*device=*/5);
+  options =
+      getNonVariableType(Backend::SparseCUDA, kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
-TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[cuda]") {
-  auto options = TensorOptions(empty(5, device(kCUDA).dtype(kDouble)));
+TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
+  auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
-  options = TensorOptions(empty(5, getType(kSparseCUDA, kByte)));
+  options = empty(5, getNonVariableType(Backend::SparseCUDA, kByte)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
 
   if (at::globalContext().getNumGPUs() > 1) {
@@ -54,19 +56,19 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[cuda]") {
       DeviceGuard guard(1);
       tensor = empty(5, device(kCUDA));
     }
-    options = TensorOptions(tensor);
+    options = tensor.options();
     REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
 
     {
       DeviceGuard guard(1);
       tensor = empty(5, device(kCUDA).layout(kSparse));
     }
-    options = TensorOptions(tensor);
+    options = tensor.options();
     REQUIRE_OPTIONS(kCUDA, 1, kFloat, kSparse);
   }
 }
 
-TEST_CASE("OptionsGuardCUDA", "[cuda]") {
+TEST(OptionsGuardTest, TestFunctionality_CUDA) {
   Tensor tensor;
   {
     OptionsGuard guard(device(kCUDA));
@@ -87,7 +89,7 @@ TEST_CASE("OptionsGuardCUDA", "[cuda]") {
   REQUIRE_TENSOR_OPTIONS(kCUDA, 0, kInt, kStrided);
 }
 
-TEST_CASE("DeviceGuardOptionsGuardInteraction", "[cuda]") {
+TEST(OptionsGuardTest, DeviceGuardOptionsGuardInteraction_MultiCUDA) {
   Tensor tensor;
   {
     // Check that OptionsGuard respects any active device before construction.
@@ -110,4 +112,19 @@ TEST_CASE("DeviceGuardOptionsGuardInteraction", "[cuda]") {
       }
     }
   }
+}
+
+TEST(DeviceGuardTest, IsMovable_CUDA) {
+  DeviceGuard first(1);
+  ASSERT_EQ(first.original_index(), 0);
+  ASSERT_EQ(first.last_index(), 1);
+  DeviceGuard second(std::move(first));
+  ASSERT_EQ(second.original_index(), 0);
+  ASSERT_EQ(second.last_index(), 1);
+  ASSERT_EQ(first.original_index(), -1);
+  DeviceGuard third;
+  third = std::move(second);
+  ASSERT_EQ(third.original_index(), 0);
+  ASSERT_EQ(third.last_index(), 1);
+  ASSERT_EQ(second.original_index(), -1);
 }

@@ -137,7 +137,7 @@ void THPUtils_setError(const char *format, ...)
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods)
 {
   if (!vector.empty()) {
-    // remove NULL terminator
+    // remove nullptr terminator
     vector.pop_back();
   }
   while (1) {
@@ -230,6 +230,7 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
 
 template<>
 void THPPointer<THTensor>::free() {
-  if (ptr)
+  if (ptr) {
     THTensor_free(LIBRARY_STATE ptr);
+  }
 }

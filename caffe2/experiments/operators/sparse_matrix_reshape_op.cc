@@ -24,6 +24,7 @@ REGISTER_CPU_OPERATOR(SparseMatrixReshape, SparseMatrixReshapeOp<CPUContext>);
 OPERATOR_SCHEMA(SparseMatrixReshape)
     .NumInputs(2)
     .NumOutputs(2)
+    .DisallowInputFillers() // TODO: enable the filler
     .AllowInplace({{0, 0}, {1, 1}})
     .SetDoc(R"DOC(
 Compute the indices of the reshaped sparse matrix.

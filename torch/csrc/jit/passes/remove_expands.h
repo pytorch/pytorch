@@ -4,6 +4,6 @@
 
 namespace torch { namespace jit {
 
-void RemoveExpands(const std::shared_ptr<Graph>& graph);
+TORCH_API void RemoveExpands(const std::shared_ptr<Graph>& graph);
 
 }}

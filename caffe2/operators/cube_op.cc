@@ -1,4 +1,5 @@
 #include "caffe2/operators/cube_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 #include <algorithm>
 #include <functional>

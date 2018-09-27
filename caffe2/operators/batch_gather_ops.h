@@ -15,7 +15,7 @@ class BatchGatherOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(INDICES));
+        this, this->template Input<Tensor>(INDICES, CPU));
   }
 
   template <typename TInd>
@@ -26,7 +26,7 @@ class BatchGatherOp final : public Operator<Context> {
 
     CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
 
-    vector<TIndex> shape;
+    vector<int64_t> shape;
     shape.push_back(data.dim(0));
     shape.insert(shape.end(), indices.dims().begin(), indices.dims().end());
     shape.insert(shape.end(), data.dims().begin() + 2, data.dims().end());
@@ -54,8 +54,7 @@ class BatchGatherOp final : public Operator<Context> {
         auto src =
             src_base + idx * block_bytesize + batch * data_batch_bytesize;
         auto dst = out + i * block_bytesize + batch * gathered_batch_bytesize;
-        context_.template CopyItems<Context, Context>(
-            data.meta(), block_size, src, dst);
+        context_.CopyItemsSameDevice(data.meta(), block_size, src, dst);
       }
     }
     return true;
@@ -72,7 +71,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<TensorCPU>(INDICES));
+        this, this->template Input<Tensor>(INDICES, CPU));
   }
 
   template <typename TInd>

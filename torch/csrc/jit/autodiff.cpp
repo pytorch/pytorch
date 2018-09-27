@@ -1,39 +1,97 @@
 #include "torch/csrc/jit/autodiff.h"
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/utils/functional.h"
 
+#include <torch/csrc/jit/assertions.h>
+
 #include <algorithm>
+#include <memory>
 
 namespace torch { namespace jit {
 
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
-bool hasOneValuedAttribute(Node *n, torch::jit::Symbol name) {
-  return n->hasAttribute(name) && at::Scalar(n->t(name)).toDouble() == 1.0;
+void wrapDim(int64_t & dim, const std::vector<int64_t> & sizes) {
+  if (dim < 0) {
+    dim += sizes.size();
+  }
 }
 
 bool isDifferentiable(Node * n) {
-  static std::unordered_set<Symbol> differentiable_kinds = {
-    aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
-    aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
-    aten::unsqueeze, aten::expand, aten::addmm, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as,
-    aten::relu, aten::exp, prim::AutogradAdd
+  // TODO: scalar-tensor ops should be canonicalized
+  static OperatorSet differentiable_ops = {
+    "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+    "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+    "aten::add(Scalar other, Tensor self) -> Tensor",
+    "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+    "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+    "aten::sub(Scalar other, Tensor self) -> Tensor",
+    "aten::mul(Tensor self, Tensor other) -> Tensor",
+    "aten::mul(Tensor self, Scalar other) -> Tensor",
+    "aten::mul(Scalar other, Tensor self) -> Tensor",
+    "aten::div(Scalar other, Tensor self) -> Tensor",
+    "aten::div(Tensor self, Tensor other) -> Tensor",
+    "aten::div(Tensor self, Scalar other) -> Tensor",
+    "aten::sigmoid(Tensor self) -> Tensor",
+    "aten::tanh(Tensor self) -> Tensor",
+    "aten::relu(Tensor self) -> Tensor",
+    "aten::exp(Tensor self) -> Tensor",
+    "aten::t(Tensor self) -> Tensor",
+    "aten::neg(Tensor self) -> Tensor",
+    "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
+    "aten::type_as(Tensor self, Tensor other) -> Tensor",
+    "aten::unsqueeze(Tensor self, int dim) -> Tensor",
+    "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
+    "aten::mm(Tensor self, Tensor mat2) -> Tensor",
+    "aten::lt(Tensor self, Tensor other) -> Tensor",
+    "aten::le(Tensor self, Tensor other) -> Tensor",
+    "aten::gt(Tensor self, Tensor other) -> Tensor",
+    "aten::ge(Tensor self, Tensor other) -> Tensor",
+    "aten::eq(Tensor self, Tensor other) -> Tensor",
+    "aten::ne(Tensor self, Tensor other) -> Tensor",
+    "aten::abs(Tensor self) -> Tensor",
+    "aten::acos(Tensor self) -> Tensor",
+    "aten::asin(Tensor self) -> Tensor",
+    "aten::atan(Tensor self) -> Tensor",
+    "aten::ceil(Tensor self) -> Tensor",
+    "aten::cos(Tensor self) -> Tensor",
+    "aten::cosh(Tensor self) -> Tensor",
+    "aten::exp(Tensor self) -> Tensor",
+    "aten::expm1(Tensor self) -> Tensor",
+    "aten::floor(Tensor self) -> Tensor",
+    "aten::fmod(Tensor self, Scalar other) -> Tensor",
+    "aten::frac(Tensor self) -> Tensor",
+    "aten::log(Tensor self) -> Tensor",
+    "aten::log10(Tensor self) -> Tensor",
+    "aten::log1p(Tensor self) -> Tensor",
+    "aten::log2(Tensor self) -> Tensor",
+    "aten::reciprocal(Tensor self) -> Tensor",
+    "aten::remainder(Tensor self, Scalar other) -> Tensor",
+    "aten::round(Tensor self) -> Tensor",
+    "aten::rsqrt(Tensor self) -> Tensor",
+    "aten::sin(Tensor self) -> Tensor",
+    "aten::sinh(Tensor self) -> Tensor",
+    "aten::tan(Tensor self) -> Tensor",
+    "aten::trunc(Tensor self) -> Tensor",
   };
-  // TODO: check this more generally via schema
-  // This check ensures that the `alpha` and `beta` attributes on this addmm
-  // node are constant and equivalent to 1.0
-  if (n->kind() == aten::addmm) {
-    if (n->inputs().size() > 3)
-      return false;
-    if (!hasOneValuedAttribute(n, attr::alpha) || !hasOneValuedAttribute(n, attr::beta))
-      return false;
-  }
-  if (n->kind() == aten::type_as && !n->inputs().at(1)->isTensor()) {
-    return false;
-  }
+
+  // TODO: add support for the following fusible operators.
+  // They're a little tricky to implement; max/min require mutability for best perf
+  // "aten::atan2(Tensor self) -> Tensor",
+  // "aten::max(Tensor self) -> Tensor",
+  // "aten::min(Tensor self) -> Tensor"
+
+  if (n->kind() == prim::Constant ||
+      n->kind() == prim::AutogradAdd ||
+      n->kind() == prim::ConstantChunk)
+    return true;
+  if (differentiable_ops.find(n))
+    return true;
 
   // linear blocks may appear as inputs to graph executors, but they are removed
   // before differentiation occurs
@@ -45,7 +103,7 @@ bool isDifferentiable(Node * n) {
         static_cast<bool (*)(Node*)>(isDifferentiable));
   }
 
-  return differentiable_kinds.count(n->kind()) > 0;
+  return false;
 }
 
 
@@ -55,155 +113,256 @@ bool isDifferentiable(Graph & g) {
 }
 
 
-bool outputRequiresGrad(Node* node, std::function<bool(Value*)> requires_grad) {
-  switch (node->kind()) {
-    case aten::le:
-    case aten::ge:
-    case aten::lt:
-    case aten::gt:
-    case aten::ne:
-    case aten::eq:
-      return false;
-    case aten::type_as:
-    //type_as has two inputs, the second of which (setting type) might require grad, but it still won't affect the output of type_as requiring grad.
-      return requires_grad(node->inputs().at(0));
-    default:
-      return std::any_of(node->inputs().begin(), node->inputs().end(), requires_grad);
-  }
-}
-
-
-
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
+  static const OperatorSet comparison_ops = {
+    "aten::lt(Tensor self, Tensor other) -> Tensor",
+    "aten::le(Tensor self, Tensor other) -> Tensor",
+    "aten::gt(Tensor self, Tensor other) -> Tensor",
+    "aten::ge(Tensor self, Tensor other) -> Tensor",
+    "aten::eq(Tensor self, Tensor other) -> Tensor",
+    "aten::ne(Tensor self, Tensor other) -> Tensor"
+  };
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
-    switch(node->kind()) {
-      case aten::add:
-        // o = a - alpha*other
-        if(inputs.size() == 1)
-          return { grads.at(0) };
-          // o = a + alpha*b
-        return {grads.at(0), grads.at(0) * at::Scalar(node->t(attr::alpha)) };
-      case aten::sub:
-        // o = a - alpha*other
-        if(inputs.size() == 1)
-          return {grads.at(0)};
-        // o = a - alpha*b
-        return {grads.at(0), -grads.at(0) * at::Scalar(node->t(attr::alpha))};
-      case aten::mul:
-        // o = a * other
-        if(inputs.size() == 1)
-          return {grads.at(0) * at::Scalar(node->t(attr::other))};
-        // o = a * b
-        return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
-      case prim::Constant:
-        return {};
-      case prim::ReplaceIfUndef:
-        return {grads.at(0), grads.at(0)};
-      case aten::sigmoid:
-        return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
-      case aten::tanh:
-        return {grads.at(0) * (1 - outputs.at(0) * outputs.at(0))};
-      case aten::relu:
-        return {grads.at(0) * (outputs.at(0) > at::Scalar(0)).type_as(outputs.at(0))};
-      case aten::exp:
-        return {grads.at(0) * (outputs.at(0))};
-      case aten::chunk:
-      case aten::split:
-        return {SymbolicVariable::cat(grads, node->i(attr::dim))};
-      case aten::t:
-        return {grads.at(0).t()};
-      case aten::neg:
-        return {-grads.at(0)};
-      case aten::view:
-        return {grads.at(0).view(inputs.at(0).sizes())};
-      case aten::type_as:
-        return {grads.at(0).type_as(inputs.at(0))};
-      case aten::unsqueeze:
-        return {grads.at(0).squeeze(node->i(attr::dim))};
-      case aten::mm: {
-        SymbolicVariable dmat1, dmat2;
-        if (auto type = inputs.at(0).value()->type()->cast<TensorType>()) {
-          auto sizes = type->sizes(), strides = type->strides();
-          if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
-            dmat1 = inputs.at(1).mm(grads.at(0).t()).t();
-          } else {
-            dmat1 = grads.at(0).mm(inputs.at(1).t());
-          }
-        } else {
-          dmat1 = grads.at(0).mm(inputs.at(1).t());
-        }
-        if (auto type = inputs.at(1).value()->type()->cast<TensorType>()) {
-          auto sizes = type->sizes(), strides = type->strides();
-          if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
-            dmat2 = grads.at(0).t().mm(inputs.at(0)).t();
-          } else {
-            dmat2 = inputs.at(0).t().mm(grads.at(0));
-          }
-        } else {
-          dmat2 = inputs.at(0).t().mm(grads.at(0));
-        }
-        return {dmat1, dmat2};
+
+    if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+      return {grads.at(0), grads.at(0) * node->namedInput(attr::alpha), nullptr};
+
+    } else if (node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor")) {
+      return {grads.at(0), nullptr, nullptr};
+
+    } else if (node->matches("aten::add(Scalar other, Tensor self) -> Tensor")) {
+      return {nullptr, grads.at(0)};
+
+    } else if (node->kind() == prim::AutogradAdd) {
+      return {grads.at(0), grads.at(0)};
+
+    } else if (node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor")) {
+      return {grads.at(0), -grads.at(0) * node->namedInput(attr::alpha), nullptr};
+
+    } else if (node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor")) {
+      return {grads.at(0), nullptr, nullptr};
+
+    } else if (node->matches("aten::sub(Scalar other, Tensor self) -> Tensor")) {
+      return {nullptr, -grads.at(0)};
+
+    } else if (node->matches("aten::mul(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
+
+    } else if (node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
+      return {grads.at(0) * inputs.at(1), nullptr};
+
+    } else if (node->matches("aten::mul(Scalar other, Tensor self) -> Tensor")) {
+      return {nullptr, grads.at(0) * inputs.at(0)};
+
+    } else if (node->matches("aten::div(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0) / inputs.at(1), -grads.at(0) * inputs.at(0) / (inputs.at(1) * inputs.at(1))};
+
+    } else if (node->matches("aten::div(Tensor self, Scalar other) -> Tensor")) {
+      return {grads.at(0) / inputs.at(1), nullptr};
+
+    } else if (node->matches("aten::div(Scalar other, Tensor self) -> Tensor")) {
+      return {nullptr, -grads.at(0) * inputs.at(0) / (inputs.at(1) * inputs.at(1))};
+
+    } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
+      return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
+
+    } else if (node->matches("aten::tanh(Tensor self) -> Tensor")) {
+      return {grads.at(0) * (1 - outputs.at(0) * outputs.at(0))};
+
+    } else if (node->matches("aten::relu(Tensor self) -> Tensor")) {
+      return {grads.at(0) * (outputs.at(0) > at::Scalar(0)).type_as(outputs.at(0))};
+
+    } else if (node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor")) {
+      // we do two type_as and "*" in lieu of boolean "and"
+      // the "! (val > min)" is chosen such that the gradient is 0 on the
+      // boundary and the factor is 1 when the boundary is NaN
+      // the ! is expressed as "1-" for lack of a "not" function and
+      // the the fuser insisting on float
+      // A NaN input will cause the gradient to propagate through,
+      // the more pure approach would be to have NaNs in that case
+      // but that is hard to reliably code and costs extra checks
+      // so we decided against it, see
+      // https://github.com/pytorch/pytorch/pull/11574#discussion_r218104538
+      return {grads.at(0)
+	      * (1-(inputs.at(0) <= inputs.at(1)).type_as(inputs.at(0)))
+	      * (1-(inputs.at(0) >= inputs.at(2)).type_as(inputs.at(0))), nullptr, nullptr};
+    } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
+      return {grads.at(0) * (outputs.at(0))};
+
+    } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
+      return {grads.at(0).t()};
+
+    } else if (node->matches("aten::neg(Tensor self) -> Tensor")) {
+      return {-grads.at(0)};
+
+    } else if (node->matches("aten::abs(Tensor self) -> Tensor")) {
+      return {grads.at(0) * inputs.at(0).sign()};
+
+    } else if (node->matches("aten::acos(Tensor self) -> Tensor")) {
+      return {grads.at(0) * -((-inputs.at(0) * inputs.at(0) + at::Scalar(1)).rsqrt())};
+
+    } else if (node->matches("aten::asin(Tensor self) -> Tensor")) {
+      return {grads.at(0) * (-inputs.at(0) * inputs.at(0) + at::Scalar(1)).rsqrt()};
+
+    } else if (node->matches("aten::atan(Tensor self) -> Tensor")) {
+      return {grads.at(0) / (inputs.at(0) * inputs.at(0) + at::Scalar(1))};
+
+    } else if (node->matches("aten::ceil(Tensor self) -> Tensor")) {
+      return {SymbolicVariable::zeros_like(grads.at(0))};
+
+    } else if (node->matches("aten::cos(Tensor self) -> Tensor")) {
+      return {grads.at(0) * -inputs.at(0).sin()};
+
+    } else if (node->matches("aten::cosh(Tensor self) -> Tensor")) {
+      return {grads.at(0) * inputs.at(0).sinh()};
+
+    } else if (node->matches("aten::exp(Tensor self) -> Tensor")) {
+      return {grads.at(0) * outputs.at(0)};
+
+    } else if (node->matches("aten::expm1(Tensor self) -> Tensor")) {
+      return {grads.at(0) * (outputs.at(0) + at::Scalar(1))};
+
+    } else if (node->matches("aten::floor(Tensor self) -> Tensor")) {
+      return {SymbolicVariable::zeros_like(grads.at(0))};
+
+    } else if (node->matches("aten::fmod(Tensor self, Scalar other) -> Tensor")) {
+      return {grads.at(0), nullptr};
+
+    } else if (node->matches("aten::frac(Tensor self) -> Tensor")) {
+      return {grads.at(0)};
+
+    } else if (node->matches("aten::log(Tensor self) -> Tensor")) {
+      return {grads.at(0) / inputs.at(0)};
+
+    } else if (node->matches("aten::log10(Tensor self) -> Tensor")) {
+      return {grads.at(0) / (inputs.at(0) * 2.3025850929940456)};
+
+    } else if (node->matches("aten::log1p(Tensor self) -> Tensor")) {
+      return {grads.at(0) / (inputs.at(0) + at::Scalar(1))};
+
+    } else if (node->matches("aten::log2(Tensor self) -> Tensor")) {
+      return {grads.at(0) / (inputs.at(0) * 0.6931471805599453)};
+
+    } else if (node->matches("aten::reciprocal(Tensor self) -> Tensor")) {
+      return {-grads.at(0) * outputs.at(0) * outputs.at(0)};
+
+    } else if (node->matches("aten::remainder(Tensor self, Scalar other) -> Tensor")) {
+      return {grads.at(0), nullptr};
+
+    } else if (node->matches("aten::round(Tensor self) -> Tensor")) {
+      return {SymbolicVariable::zeros_like(grads.at(0))};
+
+    } else if (node->matches("aten::rsqrt(Tensor self) -> Tensor")) {
+      return {grads.at(0) * outputs.at(0).pow(3.) * -0.5};
+
+    } else if (node->matches("aten::sin(Tensor self) -> Tensor")) {
+      return {grads.at(0) * inputs.at(0).cos()};
+
+    } else if (node->matches("aten::sinh(Tensor self) -> Tensor")) {
+      return {grads.at(0) * inputs.at(0).cosh()};
+
+    } else if (node->matches("aten::tan(Tensor self) -> Tensor")) {
+      return {grads.at(0) * (1. + outputs.at(0) * outputs.at(0))};
+
+    } else if (node->matches("aten::trunc(Tensor self) -> Tensor")) {
+      return {SymbolicVariable::zeros_like(grads.at(0))};
+
+    } else if (node->kind() == prim::ConstantChunk) {
+      return {SymbolicVariable::cat(grads, node->i(attr::dim))};
+
+    } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor") ||
+               node->matches("aten::reshape(Tensor self, int[] shape) -> Tensor")) {
+      // TODO: if sizes are not available statically, add an operator that reutrns them as a tuple
+      auto sizes = node->namedInput(attr::self)->type()->expect<CompleteTensorType>()->sizes();
+      return {grads.at(0).reshape(sizes), nullptr};
+
+    } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+      return {grads.at(0).type_as(inputs.at(0)), nullptr};
+
+    } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor")) {
+      return {grads.at(0).squeeze(node->namedInput(attr::dim)), nullptr};
+
+    } else if (node->matches("aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor")) {
+      return {grads.at(0) * node->namedInput(attr::beta),
+              grads.at(0).mm(inputs.at(2).t()) * node->namedInput(attr::alpha),
+              inputs.at(1).t().mm(grads.at(0)) * node->namedInput(attr::alpha),
+              nullptr, nullptr};
+
+    } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
+      return {grads.at(0).mm(inputs.at(1).t()), inputs.at(0).t().mm(grads.at(0))};
+
+    } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor")) {
+      const auto& input_sizes = inputs.at(0).sizes();
+      if (input_sizes.size() == 0)
+        return {grads.at(0).sum(), nullptr, nullptr};
+      auto grad_sizes = node->get<std::vector<int64_t>>(attr::size).value();
+      auto grad = grads.at(0);
+      while (grad_sizes.size() > input_sizes.size()) {
+        grad = grad.sum(0, false);
+        grad_sizes.erase(grad_sizes.begin());
       }
-      case aten::expand: {
-        const auto& input_sizes = inputs.at(0).sizes();
-        if (input_sizes.size() == 0)
-          return {grads.at(0).sum()};
-        auto grad_sizes = node->is(attr::size);
+      for (size_t i = 0; i < input_sizes.size(); ++i) {
+        if (input_sizes[i] == 1 && grad_sizes[i] > 1) {
+          grad = grad.sum(i, true);
+        }
+      }
+      return {grad, nullptr, nullptr};
+
+    } else if (node->matches("aten::squeeze(Tensor self) -> Tensor")) {
+      const auto& sizes = inputs.at(0).sizes();
+      std::vector<size_t> squeezed_dims;
+      for (size_t i = 0; i < sizes.size(); ++i) {
+        if (sizes[i] != 1) continue;
+        squeezed_dims.push_back(i);
+      }
+      SymbolicVariable returned_grad = grads.at(0);
+      for (auto it = squeezed_dims.begin(); it != squeezed_dims.end(); ++it)
+        returned_grad = returned_grad.unsqueeze(*it);
+      return {returned_grad};
+
+    } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const=*/attr::dim)) {
+      int64_t dim = *node->get<int64_t>(attr::dim);
+      const auto& sizes = inputs.at(0).sizes();
+      wrapDim(dim, sizes);
+      if (sizes.size() == 0)  {
+        return {grads.at(0), nullptr};
+      }
+      return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim), nullptr};
+
+    } else if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*const=*/attr::dim)) {
+      int dim = *node->get<int64_t>(attr::dim);
+      auto tensor_inputs = inputs; tensor_inputs.pop_back();
+      const auto& first_sizes = tensor_inputs.at(0).sizes();
+      const auto has_first_sizes = [&first_sizes](SymbolicVariable var) {
+        return var.sizes() == first_sizes;
+      };
+
+      // NB: this is a specialization for the common case where all inputs are
+      // of equal sizes. We can use a single split operation to handle that.
+      if (std::all_of(tensor_inputs.begin(), tensor_inputs.end(), has_first_sizes)) {
+        auto tensor_grads = grads.at(0).chunk(tensor_inputs.size(), dim);
+        tensor_grads.push_back(nullptr); // for attr::dim
+        return tensor_grads;
+      } else {
+        size_t offset = 0;
         auto grad = grads.at(0);
-        while (grad_sizes.size() > input_sizes.size()) {
-          grad = grad.sum(0, false);
-          grad_sizes.erase(grad_sizes.begin());
+        std::vector<SymbolicVariable> tensor_grads;
+        for (auto input : tensor_inputs) {
+          tensor_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
+          offset += input.sizes()[dim];
         }
-        for (size_t i = 0; i < input_sizes.size(); ++i) {
-          if (input_sizes[i] == 1 && grad_sizes[i] > 1) {
-            grad = grad.sum(i, true);
-          }
-        }
-        return {grad};
+        tensor_grads.push_back(nullptr); // for attr::dim
+        return tensor_grads;
       }
-      case aten::squeeze: {
-        const auto& sizes = inputs.at(0).sizes();
-        if (node->hasAttribute(attr::dim)) {
-          int dim = node->i(attr::dim);
-          return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim)};
-        } else {
-          std::vector<size_t> squeezed_dims;
-          for (size_t i = 0; i < sizes.size(); ++i) {
-            if (sizes[i] != 1) continue;
-            squeezed_dims.push_back(i);
-          }
-          SymbolicVariable returned_grad = grads.at(0);
-          for (auto it = squeezed_dims.rbegin(); it != squeezed_dims.rend(); ++it)
-            returned_grad = returned_grad.unsqueeze(*it);
-          return {returned_grad};
-        }
-      }
-      case aten::cat: {
-        int dim = node->i(attr::dim);
-        const auto& first_sizes = inputs.at(0).sizes();
-        const auto has_first_sizes = [&first_sizes](SymbolicVariable var) {
-          return var.sizes() == first_sizes;
-        };
-        // NB: this is a specialization for the common case where all inputs are
-        // of equal sizes. We can use a single split operation to handle that.
-        if (std::all_of(inputs.begin(), inputs.end(), has_first_sizes)) {
-          return grads.at(0).chunk(inputs.size(), dim);
-        } else {
-          size_t offset = 0;
-          auto grad = grads.at(0);
-          std::vector<SymbolicVariable> returned_grads;
-          for (auto input : inputs) {
-            returned_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
-            offset += input.sizes()[dim];
-          }
-          return returned_grads;
-        }
-      }
+    } else if (comparison_ops.find(node)) {
+      return {nullptr, nullptr};
+
+    } else if (node->kind() == prim::Constant) {
+      return {};
     }
-    throw std::runtime_error(std::string("don't support differentiation of `") +
-                            node->kind().toDisplayString() + "`");
+    throw std::runtime_error(std::string("failed to differentiate `") + node->kind().toDisplayString() + "`");
   };
   if (!isDifferentiable(node)) {
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
@@ -212,28 +371,6 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
-
-static value_set findAllRequiresGradNodes(
-        Graph& graph, const std::vector<bool>& input_requires_grad) {
-  JIT_ASSERT(graph.inputs().size() == input_requires_grad.size());
-  std::unordered_set<Value*> requires_grad_set;
-  const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
-
-  auto inputs = graph.inputs();
-  for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
-    if (!input_requires_grad[i]) continue;
-    requires_grad_set.emplace(inputs[i]);
-  }
-
-  for (Node * node : graph.nodes()) {
-    if (!outputRequiresGrad(node, requires_grad)) continue;
-    for (Value * output : node->outputs())
-      requires_grad_set.emplace(output);
-  }
-
-  return requires_grad_set;
-}
-
 
 // If we have a function y = f(x) with jacobian J, the backwards of f is dx = J^t dy.
 // Note that because the backwards always implements this matrix multiply,
@@ -254,25 +391,21 @@ static std::vector<Value*> linearGradientForNode(Node* node, ArrayRef<Value*> gr
   // to make reading gradient graphs easier, remember the name of the forward op
   linear->s_(attr::name, node->kind().toDisplayString());
   auto block = linear->addBlock();
-  {
-    WithInsertPoint guard(block);
-    auto results = gradientForNode(node, grad_values);
-    for(auto r : results) {
-      block->registerOutput(r);
-      linear->addOutput()->copyMetadata(r);
-    }
-  }
-  return linear->outputs();
+  WithInsertPoint guard(block);
+  auto results = gradientForNode(node, grad_values);
+  return fmap(results, [block, linear](Value *grad) -> Value* {
+    if (!grad) return nullptr;
+    block->registerOutput(grad);
+    return linear->addOutput()->copyMetadata(grad);
+  });
 }
 
 struct ReverseDetails {
-  ReverseDetails(value_map&& grad_map, value_set&& requires_grad_set, Block * reverse_block)
+  ReverseDetails(value_map&& grad_map, Block * reverse_block)
     : grad_map(std::move(grad_map))
-    , requires_grad_set(std::move(requires_grad_set))
     , reverse_block(reverse_block) {}
 
   value_map grad_map;
-  value_set requires_grad_set;
   Block * reverse_block;
 };
 
@@ -294,8 +427,7 @@ static Value* createAutogradAdd(Value* a, Value* b) {
 //     and vjp outputs for all primal inputs that require_grad
 //   - grad_desc has df_input_vjps and df_output_vjps set
 //     (but df_input_vjps will be modified later as well)
-static ReverseDetails addReverseInline(Gradient& grad_desc,
-                                  const std::vector<bool>& input_requires_grad) {
+static ReverseDetails addReverseInline(Gradient& grad_desc) {
   auto & graph = *grad_desc.f;
   // note: reverse_node is intentionally not inserted to avoid
   // accidentally acting on it (e.g. in elminate dead code),
@@ -303,8 +435,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   auto reverse_node = graph.create(prim::Reverse, 0);
   auto reverse_block = reverse_node->addBlock();
   WithInsertPoint guard(reverse_block);
-  auto requires_grad_set = findAllRequiresGradNodes(graph, input_requires_grad);
-  const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
 
   value_map grad_map; // x -> dx mapping
   const auto get_grad = [&](Value* v) -> Value* {
@@ -326,7 +456,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   auto outputs = graph.outputs();
   for (size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
     Value * output = outputs[i];
-    if (!requires_grad(output))
+    if (!output->requires_grad())
       continue;
     Value * output_grad = reverse_block->addInput()->setType(output->type());
     set_grad(output, output_grad);
@@ -336,11 +466,18 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   for (auto it = graph.nodes().rbegin(), end = graph.nodes().rend(); it != end; ++it) {
     Node *node = *it;
     auto inputs = node->inputs();
-    if (!outputRequiresGrad(node, requires_grad)) continue;
+    auto outputs = node->outputs();
+    if (std::all_of(outputs.begin(), outputs.end(), [](Value *v) { return !v->requires_grad(); })) {
+      continue;
+    }
 
     value_list grad_inputs = linearGradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
+      if (!inputs[i]->requires_grad()) continue;
+      // NB: Not returning a gradient w.r.t. a value that requires grad is normal if the
+      // input is non-differentiable. This happens e.g. in the aten::type_as case.
+      if (!grad_inputs[i]) continue;
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
@@ -348,12 +485,51 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   auto inputs = graph.inputs();
   for (size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
     Value * input = inputs[i];
-    if (!requires_grad(input))
+    if (!input->requires_grad())
       continue;
+    // NB: Not having a gradient defined w.r.t. an input to the graph which requires grad
+    // can happen and is not an error. It might have been used only in non-differentiable
+    // contexts (e.g. as second input to aten::type_as). In that case we simply ignore it
+    // as an output, because it won't ever produce any meaningful values.
+    if (grad_map.count(input) == 0) continue;
     reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
-  return ReverseDetails(std::move(grad_map), std::move(requires_grad_set), reverse_block);
+  return ReverseDetails(std::move(grad_map), reverse_block);
+}
+
+// Any temporary value from the primal graphs needs to be captured for later use in the
+// reverse graph, to avoid costly recomputations. However, a lot of the nodes we have
+// in our graphs are simply constants, which are cheap to execute and replicate, and so
+// it's better to just copy them into the reverse graph, without polluting the output
+// lists unnecessarily.
+static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
+  static const auto err = [](Value*) -> Value* {
+    throw std::runtime_error("unexpected input");
+  };
+  auto & graph = *grad_desc.f;
+  Block* reverse_block = rev_info.reverse_block;
+
+  for (Node *top_node : reverse_block->nodes()) {
+    JIT_ASSERT(top_node->kind() == prim::GradOf ||
+               top_node->kind() == prim::AutogradAdd ||
+               top_node->kind() == prim::Undefined);
+    if (top_node->kind() != prim::GradOf) continue;
+    Block * grad_body = top_node->blocks().at(0);
+    for (Node *node : grad_body->nodes()) {
+      for (Value * input : node->inputs()) {
+        if (input->node()->kind() != prim::Constant) continue;
+        if (input->node()->owningBlock() == grad_body) continue;
+        Node *lifted_constant = graph.createClone(input->node(), err);
+        reverse_block->prependNode(lifted_constant);
+        node->replaceInputWith(input, lifted_constant->output());
+      }
+    }
+  }
+
+  // It's possible the we've cloned the same constants many times,
+  // so we use CSE to deduplicate them.
+  EliminateCommonSubexpression(reverse_block);
 }
 
 // Takes a grad_desc.f returned from `addReverseInline` and splits off the
@@ -446,7 +622,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   for (size_t i = grad_desc.f_real_outputs; i < graph.outputs().size(); ++i) {
     Value * tmp = graph.outputs().at(i);
     // Add VJP inputs only for intermediates that actually required grad.
-    if (rev_info.requires_grad_set.count(tmp) == 0) continue;
+    if (!tmp->requires_grad()) continue;
     Value * tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());
     Value * tmp_vjp_prev = rev_info.grad_map.at(tmp);
     // This is quite weird because we can't first make a sum and then replace all uses
@@ -482,22 +658,24 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   reverse_block->owningNode()->destroy();
 }
 
-Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& requires_grad) {
+Gradient differentiate(std::shared_ptr<Graph>& graph) {
   Gradient grad_desc;
   // Take ownership of the graph
-  JIT_ASSERTM(_graph.use_count() == 1,
+  JIT_ASSERTM(graph.use_count() == 1,
               "differentiate will mutate and destroy the graph, so it requires "
-              "graph.use_count() == 1, but found %d", _graph.use_count());
-  std::swap(_graph, grad_desc.f);
+              "graph.use_count() == 1, but found %d", graph.use_count());
+  std::swap(graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
   WithInsertPoint guard(grad_desc.f->block());
   // Fills in df_input_vjps and df_output_vjps
-  auto rev_info = addReverseInline(grad_desc, requires_grad);
+  auto rev_info = addReverseInline(grad_desc);
+  // Lift constants captured for the reverse graph into it
+  liftConstants(grad_desc, rev_info);
   // addReverseInline has to call gradientForNode if *any* of the outputs
   // require grad, but it will emit vjps for *all* outputs. Use DCE to remove
   // unnecessary nodes.
-  EliminateDeadCode(grad_desc.f);
+  EliminateDeadCode(rev_info.reverse_block);
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);

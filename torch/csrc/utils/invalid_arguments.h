@@ -7,7 +7,9 @@
 namespace torch {
 
 std::string format_invalid_args(
-    PyObject *args, PyObject *kwargs, const std::string& name,
+    PyObject* given_args,
+    PyObject* given_kwargs,
+    const std::string& function_name,
     const std::vector<std::string>& options);
 
 } // namespace torch

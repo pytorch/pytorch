@@ -185,8 +185,8 @@ bool ChannelStatsOp<CUDAContext>::RunOnDevice() {
           numBlocksPerChannel,
           sumScratch_.data<float>(),
           sumsqScratch_.data<float>(),
-          sum->mutable_data<float>(),
-          sumsq->mutable_data<float>());
+          sum->template mutable_data<float>(),
+          sumsq->template mutable_data<float>());
 
   return true;
 }

@@ -5,11 +5,11 @@
 
 namespace at {
 
-struct AT_API TensorGeometry {
+struct CAFFE2_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
   explicit TensorGeometry(IntList sizes)
-    : sizes_(sizes)
+    : sizes_(sizes.vec())
     , strides_(sizes.size())
     , storage_offset_(0) {
       int64_t dim = sizes.size();
@@ -18,18 +18,17 @@ struct AT_API TensorGeometry {
         strides_[i] = expected_stride;
         expected_stride *= sizes_[i];
       }
+      numel_ = expected_stride;
   }
 
   explicit TensorGeometry(const Tensor& t)
-    : sizes_(t.sizes())
-    , strides_(t.strides())
-    , storage_offset_(t.storage_offset()) {}
+    : sizes_(t.sizes().vec())
+    , strides_(t.strides().vec())
+    , storage_offset_(t.storage_offset())
+    , numel_(t.numel()) {}
 
   // true if the tensor is contiguous
   bool is_contiguous() const;
-
-  // creates a new tensor with the sizes and strides of the source
-  Tensor zeros_with_stride(const Type& type) const;
 
   int64_t dim() const { return sizes_.size(); }
   int64_t size(int64_t dim) const {
@@ -43,13 +42,7 @@ struct AT_API TensorGeometry {
   }
   IntList strides() const { return IntList{ strides_ }; }
   int64_t storage_offset() const { return storage_offset_; }
-  int64_t numel() const {
-    int64_t r = 1;
-    for (auto s : sizes()) {
-      r *= s;
-    }
-    return r;
-  }
+  int64_t numel() const { return numel_; }
 
   TensorGeometry transpose(int64_t dim0, int64_t dim1) {
     TensorGeometry r = *this; // copy
@@ -63,6 +56,7 @@ struct AT_API TensorGeometry {
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
   int64_t storage_offset_;
+  int64_t numel_;
 };
 
 } // namespace at

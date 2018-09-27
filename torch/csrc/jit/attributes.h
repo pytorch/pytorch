@@ -1,15 +1,18 @@
 #pragma once
 #include <vector>
-#include <stdint.h>
+#include <cstdint>
 #include <string>
 #include <memory>
 #include <vector>
 #include <ATen/ATen.h>
+#include "ATen/Utils.h"
 
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/assertions.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/interned_strings.h>
 
 namespace torch { namespace jit {
+
+constexpr int max_tensor_display_size = 10;
 
 enum class AttributeKind {
   f,fs,i,is,s,ss,t,ts,g,gs
@@ -27,7 +30,7 @@ struct AttributeValue {
   Symbol name;
   virtual AttributeKind kind() const = 0;
   virtual Ptr clone() const = 0;
-  virtual ~AttributeValue() {}
+  virtual ~AttributeValue() = default;
 };
 
 template<typename T, AttributeKind Kind>
@@ -35,14 +38,14 @@ struct ScalarAttributeValue : public AttributeValue {
   using ConstructorType = T;
   using ValueType = T;
   ScalarAttributeValue(Symbol name, ConstructorType value_)
-  : AttributeValue(name), value_(value_) {}
+  : AttributeValue(name), value_(std::move(value_)) {}
   ValueType & value() {
     return value_;
   }
-  virtual Ptr clone() const override {
+  Ptr clone() const override {
     return Ptr(new ScalarAttributeValue(name, value_));
   }
-  virtual AttributeKind kind() const override { return Kind; }
+  AttributeKind kind() const override { return Kind; }
 private:
   ValueType value_;
 };
@@ -56,8 +59,8 @@ struct VectorAttributeValue : public AttributeValue {
   ValueType & value() {
     return value_;
   }
-  virtual AttributeKind kind() const override { return Kind; }
-  virtual std::unique_ptr<AttributeValue> clone() const override {
+  AttributeKind kind() const override { return Kind; }
+  std::unique_ptr<AttributeValue> clone() const override {
     auto copy = value_;
     return Ptr(new VectorAttributeValue(name, std::move(copy)));
   }
@@ -87,7 +90,7 @@ struct AttributeError : public std::exception {
     }
     msg = ss.str();
   }
-  virtual const char* what() const noexcept override  {
+  const char* what() const noexcept override  {
     return msg.c_str();
   }
 private:
@@ -100,7 +103,7 @@ private:
 // we return Derived* pointers because Nodes are normally held as pointers.
 template<typename Derived>
 struct Attributes {
-  Attributes() {}
+  Attributes() = default;
   void copyAttributes(const Attributes & rhs) {
     values_.clear();
     for(auto & i : rhs.values_) {
@@ -175,6 +178,12 @@ struct Attributes {
 
   #undef CREATE_ACCESSOR
 
+  // Our Graphs are not very const-correct, so we need to allow returning
+  // non-const references too
+  GraphAttr::ValueType& g(Symbol name) {
+    return get<GraphAttr>(name);
+  }
+
   // does not use CREATE_ACCESSOR because we need additional asserts
   Derived* t_(Symbol name, TensorAttr::ConstructorType v) {
     JIT_ASSERT(!v.defined() || !v.is_variable());
@@ -194,8 +203,92 @@ struct Attributes {
     return get<TensorsAttr>(name);
   }
 
+  template<typename T>
+  static void printPrimList(std::ostream & out, const std::vector<T> & items) {
+    out << "[";
+    int i = 0;
+    for(auto & item : items) {
+      if(i++ > 0)
+        out << ", ";
+      out << item;
+    }
+    out << "]";
+  }
+
+  static std::string escapeString(std::string s) {
+    std::vector<char> search = {'\n', '\t', '\v'};
+    std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
+    for (size_t i = 0; i < search.size(); i++) {
+      size_t pos = s.find(search[i]);
+      while(pos != std::string::npos) {
+        s.replace(pos, 1, replace[i]);
+        pos = s.find(search[i], pos + 1);
+      }
+    }
+    return s;
+  }
+
+  void printValue(std::ostream & out, Symbol & name) const {
+    switch(kindOf(name)) {
+      case AttributeKind::f:
+        out << f(name);
+        break;
+      case AttributeKind::fs:
+        printPrimList(out, fs(name));
+        break;
+      case AttributeKind::i:
+        out << i(name);
+        break;
+      case AttributeKind::is:
+        printPrimList(out, is(name));
+        break;
+      case AttributeKind::s:
+        out << "\"" << escapeString(s(name)) << "\"";
+        break;
+      case AttributeKind::ss:
+        printPrimList(out,ss(name));
+        break;
+      case AttributeKind::t:
+        {
+          at::Tensor tensor = t(name);
+          // 1-elem tensors are usually boxed scalars, so print them like it
+          if (tensor.numel() == 1) {
+            auto scalar_tensor = at::_local_scalar(tensor.view({}));
+            out << "{";
+            if (scalar_tensor.isFloatingPoint()) {
+              out << scalar_tensor.toDouble();
+            } else {
+              out << scalar_tensor.toLong();
+            }
+            out << "}";
+          } else if (tensor.numel() <= max_tensor_display_size) {
+            // TODO: This is awful code.  Also it doesn't work on Windows.
+            std::ostringstream tensor_ss;
+            tensor_ss << tensor;
+            std::string tensor_s{tensor_ss.str()};
+            // Remove newlines
+            std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
+            out << tensor_s;
+          } else {
+            out << "<Tensor>";
+          }
+          break;
+        }
+      case AttributeKind::ts:
+        out << "[<Tensors>]";
+        break;
+      case AttributeKind::g:
+        out << "<Graph>";
+        break;
+      case AttributeKind::gs:
+        out << "[<Graphs>]";
+        break;
+    }
+  }
+
 private:
-  Derived* This() {
+  // UBSAN error: https://github.com/pytorch/pytorch/issues/9055
+  Derived* This() __ubsan_ignore_vptr__ {
     return static_cast<Derived*>(this);
   }
   template<typename T>
@@ -214,7 +307,7 @@ private:
   typename T::ValueType & get(Symbol name) const {
     JIT_ASSERT(name.is_attr());
     auto it = find(name, true);
-    T* child = dynamic_cast<T*>(it->get());
+    auto* child = dynamic_cast<T*>(it->get());
     if(child == nullptr) {
       throw AttributeError(name, true);
     }

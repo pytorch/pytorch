@@ -37,3 +37,17 @@ class TestEnforceFinite(hu.HypothesisTestCase):
         else:
             with self.assertRaises(RuntimeError):
                 workspace.RunNetOnce(net)
+
+    @given(
+        X=hu.tensor(
+            elements=st.floats(min_value=0, max_value=10, allow_nan=False, allow_infinity=False),
+        ),
+        **hu.gcs
+    )
+    def test_enforce_finite_device_check(self, X, gc, dc):
+        op = core.CreateOperator(
+            "EnforceFinite",
+            ["X"],
+            [],
+        )
+        self.assertDeviceChecks(dc, op, [X], [])

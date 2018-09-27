@@ -10,7 +10,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/create_scope_op.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -78,7 +78,7 @@ class DoOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto* ws_stack =
-        OperatorBase::Output<detail::WorkspaceStack>(OutputSize() - 1);
+        this->template Output<detail::WorkspaceStack>(OutputSize() - 1);
     std::shared_ptr<Workspace> net_workspace;
     if (is_gradient_op_) {
       net_workspace =

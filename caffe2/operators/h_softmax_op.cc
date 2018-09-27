@@ -36,8 +36,8 @@ float HSoftmaxOp<float, CPUContext>::RunForwardSingle(const float* X,
     scale_.mutable_data<float>(), &context_);
 
   // Put the intermediate result X - max(X) into Y
-  context_.template Copy<float, CPUContext, CPUContext>(dim_out, fc_output_data,
-    softmax_output_data);
+  context_.template CopyFromCPU<float>(
+      dim_out, fc_output_data, softmax_output_data);
   // Subtract the scale
   math::Gemv<float, CPUContext>(CblasNoTrans, dim_out, 1, -1,
     sum_multiplier_.data<float>(), scale_.data<float>(), 1, softmax_output_data,
@@ -86,14 +86,14 @@ bool HSoftmaxOp<float, CPUContext>::RunOnDevice() {
   int N = W.dim32(0);
   CAFFE_ENFORCE_EQ(N, b.dim32(0));
   Y->Resize(M);
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
   math::Set<float, CPUContext>(M, 0.f, Ydata, &context_);
   const auto* labeldata = label.data<int>();
 
   auto hierarchy = getHierarchyForLabels(M, labeldata, hierarchy_all_map_);
   int int_output_size = getIntermediateOutputSize(labeldata, M, hierarchy);
   intermediate_output->Resize(int_output_size);
-  float * int_output_data = intermediate_output->mutable_data<float>();
+  float* int_output_data = intermediate_output->template mutable_data<float>();
   int int_output_offset = 0;
 
   if (bias_multiplier_.size() != M) {
@@ -151,7 +151,7 @@ void HSoftmaxGradientOp<float, CPUContext>::RunBackwardSingle(const float* X,
   }
 
   float* dX_softmax = dint_output + int_output_offset - dim_out;
-  context_.Copy<float, CPUContext, CPUContext>(dim_out, dX_entropy, dX_softmax);
+  context_.CopyFromCPU<float>(dim_out, dX_entropy, dX_softmax);
 
   math::Dot<float, CPUContext>(dim_out, X_entropy, dX_entropy, scaledata,
     &context_);
@@ -205,10 +205,10 @@ bool HSoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   db->ResizeLike(b);
   dX_intermediate_output->ResizeLike(intermediate_output);
 
-  float* dX_data = dX->mutable_data<float>();
-  float* dW_data = dW->mutable_data<float>();
-  float* db_data = db->mutable_data<float>();
-  float* dOutput_data = dX_intermediate_output->mutable_data<float>();
+  float* dX_data = dX->template mutable_data<float>();
+  float* dW_data = dW->template mutable_data<float>();
+  float* db_data = db->template mutable_data<float>();
+  float* dOutput_data = dX_intermediate_output->template mutable_data<float>();
 
   math::Set<float, CPUContext>(X.size(), 0.f, dX_data, &context_);
   math::Set<float, CPUContext>(W.size(), 0.f, dW_data, &context_);
@@ -257,7 +257,7 @@ bool HSoftmaxSearchOp<float, CPUContext>::pruning(
     float parent_score,
     float beam) {
   int w_length = src_node.children_size() + src_node.word_ids_size();
-  Tensor<CPUContext> intermediate_data;
+  Tensor intermediate_data{CPU};
   intermediate_data.Resize(2 * w_length);
   float* int_output_data = intermediate_data.template mutable_data<float>();
   int int_output_offset = 0;
@@ -398,8 +398,10 @@ bool HSoftmaxSearchOp<float, CPUContext>::RunOnDevice() {
         [&](std::pair<string, float> a, std::pair<string, float> b) {
           return a.second < b.second;
         });
-    auto* y_name_data = Y_names->mutable_data<string>() + sample * top_n_;
-    auto* y_score_data = Y_scores->mutable_data<float>() + sample * top_n_;
+    auto* y_name_data =
+        Y_names->template mutable_data<string>() + sample * top_n_;
+    auto* y_score_data =
+        Y_scores->template mutable_data<float>() + sample * top_n_;
     for (int i = 0; i < top_n_; i++) {
       if (i < info.size()) {
         y_name_data[i] = info[i].first;
@@ -543,18 +545,18 @@ REGISTER_CPU_OPERATOR(
     HuffmanTreeHierarchyOp<int64_t, CPUContext>);
 
 OPERATOR_SCHEMA(HSoftmax)
-  .NumInputs(4)
-  .NumOutputs(2)
-  .SetDoc(R"DOC(
+    .NumInputs(4)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
 Hierarchical softmax is an operator which approximates the softmax operator
 while giving significant training speed gains and reasonably comparable
 performance. In this operator, instead of calculating the probabilities of all
 the classes, we calculate the probability of each step in the path from root to
 the target word in the hierarchy.
 
-The operator takes a 2-D tensor (Tensor<float>) containing a batch of layers, a
+The operator takes a 2-D tensor (Tensor) containing a batch of layers, a
 set of parameters represented by the weight matrix and bias terms, and a 1-D
-tensor (Tensor<int>) holding labels, or the indices of the target class. The
+tensor (Tensor) holding labels, or the indices of the target class. The
 hierarchy has to be specified as an argument to the operator.
 
 The operator returns a 1-D tensor holding the computed log probability of the
@@ -562,20 +564,28 @@ target class and a 2-D tensor of intermediate outputs (from the weight matrix
 and softmax from each step in the path from root to target class) which will be
 used by the gradient operator to compute gradients for all samples in the batch.
 )DOC")
-  .Arg("hierarchy", "Serialized HierarchyProto string containing list of "
-  "vocabulary words and their paths from root of hierarchy to the leaf")
-  .Input(0, "X", "Input data from previous layer")
-  .Input(1, "W", "2D blob containing 'stacked' fully connected weight "
-  "matrices. Each node in the hierarchy contributes one FC weight matrix if "
-  "it has children nodes. Dimension is N*D, D is input dimension of data (X), "
-  "N is sum of all output dimensions, or total number of nodes (excl root)")
-  .Input(2, "b", "1D blob with N parameters")
-  .Input(3, "labels", "int word_id of the target word")
-  .Output(0, "Y", "1-D of log probability outputs, one per sample")
-  .Output(1, "intermediate_output", "Extra blob to store the intermediate "
-  "FC and softmax outputs for each node in the hierarchical path of a word. "
-  "The outputs from samples are stored in consecutive blocks in the forward "
-  "pass and are used in reverse order in the backward gradientOp pass");
+    .Arg(
+        "hierarchy",
+        "Serialized HierarchyProto string containing list of "
+        "vocabulary words and their paths from root of hierarchy to the leaf")
+    .Input(0, "X", "Input data from previous layer")
+    .Input(
+        1,
+        "W",
+        "2D blob containing 'stacked' fully connected weight "
+        "matrices. Each node in the hierarchy contributes one FC weight matrix if "
+        "it has children nodes. Dimension is N*D, D is input dimension of data (X), "
+        "N is sum of all output dimensions, or total number of nodes (excl root)")
+    .Input(2, "b", "1D blob with N parameters")
+    .Input(3, "labels", "int word_id of the target word")
+    .Output(0, "Y", "1-D of log probability outputs, one per sample")
+    .Output(
+        1,
+        "intermediate_output",
+        "Extra blob to store the intermediate "
+        "FC and softmax outputs for each node in the hierarchical path of a word. "
+        "The outputs from samples are stored in consecutive blocks in the forward "
+        "pass and are used in reverse order in the backward gradientOp pass");
 
 OPERATOR_SCHEMA(HSoftmaxGradient).NumInputs(6).NumOutputs(4);
 

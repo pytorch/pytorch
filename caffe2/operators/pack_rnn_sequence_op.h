@@ -30,7 +30,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
     CAFFE_ENFORCE_GT(values.ndim(), dim_offset);
 
     // block_size is the size for each individual feature
-    TIndex block_size = values.size_from_dim(dim_offset);
+    int64_t block_size = values.size_from_dim(dim_offset);
     auto values_vec = values.template data<ValT>();
 
     auto& lengths = Input(LENGTHS);
@@ -47,7 +47,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
       math::Sum<int, Context>(cols, lengths_vec, &length_sum, &context_);
     }
 
-    vector<TIndex> shape;
+    vector<int64_t> shape;
     // the output shape is rows * cols for the pack,
     // or length_sum for the sequence
     if (Forward) {
@@ -73,7 +73,7 @@ class PackRNNSequenceOpBase : public Operator<Context> {
       for (int r = 0; r < lengths_vec[c]; r++) {
         auto input_offset = Forward ? (offset + r) : (r * cols + c);
         auto output_offset = Forward ? (r * cols + c) : (offset + r);
-        context_.template CopyItems<Context, Context>(
+        context_.CopyItemsSameDevice(
             values.meta(),
             block_size,
             values_vec + input_offset * block_size,

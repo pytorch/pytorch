@@ -78,7 +78,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_in.size());
   CAFFE_ENFORCE_EQ(Y_hat.size(), alpha_out.size());
 
-  avg_loss->Resize(vector<TIndex>());
+  avg_loss->Resize(vector<int64_t>());
   buff_.ResizeLike(Y);
 
   // Difference
@@ -116,7 +116,7 @@ bool SmoothL1LossOp<float, CUDAContext>::RunOnDevice() {
       buff_.size(), buff_.data<float>(), avg_loss_data, &context_);
   // Average of input batch size
   // al := 1/N * al
-  math::Scale<float, CUDAContext>(
+  math::Scale<float, float, CUDAContext>(
       1, scale_ / N, avg_loss_data, avg_loss_data, &context_);
   return true;
 }

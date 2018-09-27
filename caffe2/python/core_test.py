@@ -9,7 +9,7 @@ import unittest
 import numpy as np
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, test_util
+from caffe2.python import core, workspace, schema, test_util
 from caffe2.python.task import Node, Task
 
 
@@ -197,6 +197,58 @@ class TestCloneNet(test_util.TestCase):
 
         params._CheckLookupTables()
         n._CheckLookupTables()
+
+    def test_mask_clone_update_external_list(self):
+        n = core.Net('original')
+        a1 = n.AddExternalInput('a1')
+        a2 = n.AddExternalInput('a2')
+        p1 = 'p1'
+        b1, b2 = n.Concat([a1, a2], ['b1', 'b2'], axis=0)
+        c1 = n.Sum([b1, p1], ['c1'])
+        c2 = n.Sum([b2], ['c2'])
+        n.Sum([c1, c2], ['d'])
+        new_net = n.Clone(
+            "new", op_id_mask=[0, 1], keep_schema=True, update_external_list=True)
+        self.assertEqual(
+            sorted(map(str, new_net.external_inputs)),
+            ["a1", "a2", "p1"],
+            "external input not matched",
+        )
+        self.assertEqual(
+            sorted(map(str, new_net.external_outputs)),
+            ["b2", "c1"],
+            "external output not matched",
+        )
+        new_net = n.Clone(
+            "new2", op_id_mask=[2, 3], keep_schema=True, update_external_list=True)
+        self.assertEqual(
+            sorted(map(str, new_net.external_inputs)),
+            ["b2", "c1"],
+            "external input not matched",
+        )
+        self.assertEqual(
+            sorted(map(str, new_net.external_outputs)),
+            ["d"],
+            "external output not matched",
+        )
+
+
+class TestExternalInputs(test_util.TestCase):
+    def testSetInputRecordWithBlobs(self):
+        net = core.Net("test")
+        record = schema.NewRecord(net, schema.Struct(
+            ("x", schema.Scalar(np.float)),
+        ))
+        input_record = net.set_input_record(record)
+        self.assertTrue(net.BlobIsDefined(input_record.x()))
+        self.assertIn(input_record.x(), net.external_inputs)
+
+    def testSetInputRecordWithoutBlobs(self):
+        net = core.Net("test")
+        record = schema.Struct(("x", schema.Scalar(np.float)))
+        input_record = net.set_input_record(record)
+        self.assertTrue(net.BlobIsDefined(input_record.x()))
+        self.assertIn(input_record.x(), net.external_inputs)
 
 
 class TestCreateOperator(test_util.TestCase):
@@ -481,8 +533,11 @@ class TestCreatePlan(test_util.TestCase):
 
         self.assertEqual(len(plan.Steps()), 1)
         self.assertEqual(len(test_plan.Steps()), 1)
+        self.assertEqual(len(plan.Proto().network), 9)
+        self.assertEqual(len(test_plan.Proto().network), 9)
+        self.assertEqual(len(plan.Proto().execution_step), 1)
+        self.assertEqual(len(test_plan.Proto().execution_step), 1)
         self.assertEqual(plan.Steps()[0].Name(), test_plan.Steps()[0].Name())
-
         self.assertEqual(len(plan.Nets()), len(test_plan.Nets()))
         for idx in range(0, len(plan.Nets())):
             # When we create Net for test_plan, we will end up with new Net
@@ -1093,6 +1148,20 @@ external_input: "data"
             net.Relu('nonsense_input_gpu', 'moment')
         with self.assertRaises(RuntimeError):
             core.InjectCrossDeviceCopies(net)
+
+
+class TestRerouteTensor(test_util.TestCase):
+    def test_reroute_tensor(self):
+        net = core.Net("reroute_tensor")
+        net.Conv(["input", "w", "b"], "conv1")
+        net.Relu(["conv1"], "conv1_relu")
+        new_op = core.CreateOperator("SpatialBN",
+            ["conv1", "scale", "bias", "mean", "var"],
+            ["conv1_bn", "mean", "var", "saved_mean", "saved_var"])
+        # insert bn between conv and relu
+        net.reroute_tensor("conv1", new_op, [net.Proto().op[1]])
+        self.assertEqual(new_op, net.Proto().op[1], "insertion failed")
+        self.assertEqual(net.Proto().op[2].input[0], "conv1_bn", "reroute failed")
 
 
 if __name__ == '__main__':

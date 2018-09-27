@@ -4,8 +4,7 @@ namespace caffe2 {
 
 namespace {
 
-template <class Context>
-const float* getTensorDataPtr(const Tensor<Context>& tensor, int t, int n) {
+const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
   const auto& dims = tensor.dims();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
   int offset = (t * dims[1] + n) * dims[2];
@@ -33,8 +32,8 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
       (InputSize() == 2) ? Input(SEQ_LEN).data<int>() : nullptr;
 
   vector<int> values_cach;
-  output_len->Resize(vector<TIndex>{batch_size});
-  int* output_len_data = output_len->mutable_data<int>();
+  output_len->Resize(vector<int64_t>{batch_size});
+  int* output_len_data = output_len->template mutable_data<int>();
 
   for (int32_t i = 0; i < batch_size; ++i) {
     int previous_label = 0, t_dec = 0;
@@ -55,7 +54,7 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
   }
 
   int32_t values_cach_size = values_cach.size();
-  values->Resize(vector<TIndex>{values_cach_size});
+  values->Resize(vector<int64_t>{values_cach_size});
   int* values_data = values->mutable_data<int>();
   for (int i = 0; i < values_cach.size(); ++i) {
     values_data[i] = values_cach.at(i);

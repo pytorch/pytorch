@@ -1,16 +1,19 @@
 #pragma once
 
+#include <torch/arg.h>
 #include <torch/nn/module.h>
-#include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
-
-#include <ATen/ATen.h>
-
-#include <cereal/access.hpp>
-#include <cereal/cereal.hpp>
+#include <torch/optim/serialize.h>
 
 #include <utility>
 #include <vector>
+
+namespace torch {
+namespace serialize {
+class OutputArchive;
+class InputArchive;
+} // namespace serialize
+} // namespace torch
 
 namespace torch {
 namespace optim {
@@ -30,38 +33,30 @@ class Adam : public Optimizer {
   template <typename ParameterContainer>
   explicit Adam(ParameterContainer&& parameters, const AdamOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options),
-        step_buffers_(parameters_.size(), 0),
-        exp_average_buffers_(zero_buffers_like(parameters_)),
-        exp_average_sq_buffers_(zero_buffers_like(parameters_)) {
-    if (options_.amsgrad_) {
-      max_exp_average_sq_buffers_ = zero_buffers_like(parameters_);
-    }
-  }
+        options(options) {}
 
   void step() override;
 
-  template <class Archive>
-  void serialize(Archive& ar) {
-    ar(CEREAL_NVP(step_buffers_),
-       CEREAL_NVP(exp_average_buffers_),
-       CEREAL_NVP(exp_average_sq_buffers_),
-       CEREAL_NVP(max_exp_average_sq_buffers_));
-  }
+  void save(serialize::OutputArchive& archive) const override;
+  void load(serialize::InputArchive& archive) override;
 
-  const AdamOptions& options() const noexcept;
+  AdamOptions options;
+
+  std::vector<int64_t> step_buffers;
+  std::vector<Tensor> exp_average_buffers;
+  std::vector<Tensor> exp_average_sq_buffers;
+  std::vector<Tensor> max_exp_average_sq_buffers;
 
  private:
-  friend class cereal::access;
-  Adam() : options_(0) {}
+  Adam() : options(0) {}
 
-  AdamOptions options_;
-
-  std::vector<int64_t> step_buffers_;
-  std::vector<Tensor> exp_average_buffers_;
-  std::vector<Tensor> exp_average_sq_buffers_;
-  std::vector<Tensor> max_exp_average_sq_buffers_;
+  template <typename Self, typename Archive>
+  static void serialize(Self& self, Archive& archive) {
+    TORCH_OPTIM_SERIALIZE(step_buffers);
+    TORCH_OPTIM_SERIALIZE(exp_average_buffers);
+    TORCH_OPTIM_SERIALIZE(exp_average_sq_buffers);
+    TORCH_OPTIM_SERIALIZE(max_exp_average_sq_buffers);
+  }
 };
-
 } // namespace optim
 } // namespace torch

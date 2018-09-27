@@ -36,7 +36,7 @@ bool LeakyReluOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), alpha_, X.data<float>(), Y->mutable_data<float>());
+      X.size(), alpha_, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
@@ -56,7 +56,7 @@ bool LeakyReluGradientOp<float, CUDAContext>::RunOnDevice() {
       alpha_,
       Y.data<float>(),
       dY.data<float>(),
-      dX->mutable_data<float>());
+      dX->template mutable_data<float>());
   return true;
 }
 

@@ -193,7 +193,7 @@ featureLPPoolingUpdateOutput(const THCDeviceTensor<T, 4> input,
 
     if (Stride < Width) {
       // Shift registers for calculating the next point
-      RegisterUtils<T, Width>::shiftLeft<Stride>(in);
+      RegisterUtils<T, Width>::template shiftLeft<Stride>(in);
     }
   }
 }
@@ -377,7 +377,7 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
 
     if (Stride < Width) {
       // Shift registers for calculating the next point
-      RegisterUtils<T, Width>::shiftLeft<Stride>(in);
+      RegisterUtils<T, Width>::template shiftLeft<Stride>(in);
     }
   }
 }

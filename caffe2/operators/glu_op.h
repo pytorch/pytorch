@@ -10,14 +10,14 @@ class GluOp final : public Operator<Context> {
  public:
   GluOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        dim_(OperatorBase::GetSingleArgument<int>("dim", -1)) {}
+        dim_(this->template GetSingleArgument<int>("dim", -1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() {
     auto& X = Input(0);
     auto* Y = Output(0);
-    vector<TIndex> Yshape;
+    vector<int64_t> Yshape;
     Yshape.insert(Yshape.end(), X.dims().begin(), X.dims().end());
     const int split_index = dim_ == -1 ? Yshape.size() - 1 : dim_;
     CAFFE_ENFORCE(

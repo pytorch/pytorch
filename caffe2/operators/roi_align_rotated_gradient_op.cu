@@ -3,7 +3,7 @@
 #endif // _MSC_VER
 #include <cmath>
 
-#include "roi_align_rotated_gradient_op.h"
+#include "caffe2/operators/roi_align_rotated_gradient_op.h"
 
 #include <stdio.h>
 #include <cfloat>

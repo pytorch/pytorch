@@ -140,13 +140,13 @@ class LSTMUnitOp : public Operator<Context> {
   LSTMUnitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         forget_bias_(
-            static_cast<float>(OperatorBase::template GetSingleArgument<float>(
+            static_cast<float>(this->template GetSingleArgument<float>(
                 "forget_bias",
                 0.0))),
-        sequence_lengths_(OperatorBase::template GetSingleArgument<bool>(
+        sequence_lengths_(this->template GetSingleArgument<bool>(
             "sequence_lengths",
             true)),
-        drop_states_(OperatorBase::template GetSingleArgument<bool>(
+        drop_states_(this->template GetSingleArgument<bool>(
             "drop_states",
             false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -176,7 +176,7 @@ class LSTMUnitOp : public Operator<Context> {
     }
 
     const auto t = static_cast<OperatorBase*>(this)
-                       ->Input<Tensor<CPUContext>>(TIMESTEP)
+                       ->Input<Tensor>(TIMESTEP, CPU)
                        .template data<int32_t>()[0];
     Output(CELL_T)->ResizeLike(Input(CELL_T_M_1));
     auto* C = Output(CELL_T)->template mutable_data<T>();
@@ -221,13 +221,13 @@ class LSTMUnitGradientOp : public Operator<Context> {
   LSTMUnitGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         forget_bias_(
-            static_cast<float>(OperatorBase::template GetSingleArgument<float>(
+            static_cast<float>(this->template GetSingleArgument<float>(
                 "forget_bias",
                 0.0))),
-        sequence_lengths_(OperatorBase::template GetSingleArgument<bool>(
+        sequence_lengths_(this->template GetSingleArgument<bool>(
             "sequence_lengths",
             true)),
-        drop_states_(OperatorBase::template GetSingleArgument<bool>(
+        drop_states_(this->template GetSingleArgument<bool>(
             "drop_states",
             false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -253,7 +253,7 @@ class LSTMUnitGradientOp : public Operator<Context> {
     const auto* C_prev = Input(CELL_T_M_1).template data<T>();
     const auto* X = Input(GATES).template data<T>();
     const auto t = static_cast<OperatorBase*>(this)
-                       ->Input<Tensor<CPUContext>>(TIMESTEP)
+                       ->Input<Tensor>(TIMESTEP, CPU)
                        .template data<int32_t>()[0];
     const auto* C = Input(CELL_T).template data<T>();
     const auto* H = Input(HIDDEN_T).template data<T>();

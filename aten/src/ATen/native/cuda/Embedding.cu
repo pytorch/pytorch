@@ -1,8 +1,8 @@
 #include "ATen/ATen.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Error.h"
-
 #include "ATen/AccumulateType.h"
+#include "ATen/TensorUtils.h"
+#include "ATen/core/Error.h"
+#include "ATen/cuda/CUDAContext.h"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -47,14 +47,18 @@ __global__ void embedding_backward_feature_kernel
     if(batch_start + tid < n)
       indices_batch[tid] = (int)indices[batch_start + tid];
 
+    int batch_end = batch_start + blockDim.x*blockDim.y < n ? 
+                    batch_start + blockDim.x*blockDim.y : n;
+
     // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
-    for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
+    for(int chunk_start = batch_start; chunk_start < batch_end; chunk_start += blockDim.y)
     {
       // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group
       // leaders are done with their accumulates before other warps start loading again.
       __syncthreads();
 
-      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y;
+      int n_this_chunk = (batch_end - chunk_start) < blockDim.y ? 
+                         (batch_end - chunk_start) : blockDim.y;
 
       int src_row = chunk_start + threadIdx.y;
       int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
@@ -163,18 +167,19 @@ __global__ void embedding_backward_kernel(
 template <typename scalar_t, typename accscalar_t>
 __global__ void renorm_kernel(
     scalar_t* weights, int64_t* indices, accscalar_t max_norm,
-    accscalar_t norm_type, int dim) {
+    accscalar_t norm_type, int64_t dim,
+    int64_t weights_stride0, int64_t weights_stride1) {
 
   // Some casting hacks since dynamic shared memory and templates don't work together:
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
 
   int tid = threadIdx.x;
-  int base_index = indices[blockIdx.x] * dim;
+  int base_index = indices[blockIdx.x] * weights_stride0;
 
   accscalar_t v = 0;
   for (int i = tid; i < dim; i += blockDim.x) {
-    auto x = static_cast<accscalar_t>(weights[base_index + i]);
+    auto x = static_cast<accscalar_t>(weights[base_index + i * weights_stride1]);
     if (norm_type == 1) {
       v += std::abs(x);
     } else if (norm_type == 2) {
@@ -196,30 +201,31 @@ __global__ void renorm_kernel(
   if (sdata[0] > max_norm) {
     auto factor = static_cast<scalar_t>(max_norm / (sdata[0] + 1e-7));
     for (int i = tid; i < dim; i += blockDim.x) {
-      weights[base_index + i] *= factor;
+      weights[base_index + i * weights_stride1] *= factor;
     }
   }
 }
 
 } // anonymous namespace
 
-Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
+Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices,
                                int64_t num_weights, int64_t padding_idx,
                                bool scale_grad_by_freq) {
   auto grad_arg = TensorArg(grad_, "grad", 1);
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_backward", indices_arg, kLong);
-  checkContiguous("embedding_backward", indices_arg);
   checkSameGPU("embedding_backward", grad_arg, indices_arg);
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
-  auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.type());
+  auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
 
   int64_t stride = grad_weight.stride(0);
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   if (num_indices <= 768 && !scale_grad_by_freq) {
+    auto indices_contig = indices.contiguous();
+
     dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
@@ -234,7 +240,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
               block,
               sizeof(accscalar_t)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
               stream>>>
-           (indices.data<int64_t>(),
+           (indices_contig.data<int64_t>(),
             grad.data<scalar_t>(),
             grad_weight.data<scalar_t>(),
             num_indices,
@@ -246,8 +252,8 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
     return grad_weight;
   }
 
-  auto sorted_indices = indices.type().tensor(indices.sizes());
-  auto orig_indices = indices.type().tensor(indices.sizes());
+  auto sorted_indices = at::empty_like(indices);
+  auto orig_indices = at::empty_like(indices);
   using device_ptr = thrust::device_ptr<int64_t>;
 
   // Sort the inputs into sorted with the corresponding indices; we
@@ -272,7 +278,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
 
   Tensor count;
   if (scale_grad_by_freq) {
-    count = indices.type().tensor(indices.sizes());
+    count = at::empty_like(indices);
 
     auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     auto policy = thrust::cuda::par(allocator).on(stream);
@@ -327,24 +333,23 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
                                 double max_norm, double norm_type) {
   auto self_arg = TensorArg(self, "self", 1);
   auto indices_arg = TensorArg(indices, "indices", 1);
-  checkContiguous("embedding_renorm_", self_arg);
-  checkContiguous("embedding_renorm", indices_arg);
   checkDim("embedding_renorm_", self_arg, 2);
   checkSameGPU("embedding_renorm", self_arg, indices_arg);
 
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   using device_ptr = thrust::device_ptr<int64_t>;
 
   auto num_indices = indices.numel();
-  auto indices_data = device_ptr(indices.data<int64_t>());
+  auto indices_contig = indices.contiguous();
+  auto indices_data = device_ptr(indices_contig.data<int64_t>());
 
   // FIXME: thrust::unique only removes consecutive elements that are equal.
   // We have race conditions when indices contain duplicates which are not
   // adjacent
-  auto unique_indices = indices.type().tensor(indices.numel());
+  auto unique_indices = at::empty(indices.numel(), indices.options());
   auto unique_data = device_ptr(unique_indices.data<int64_t>());
   auto end = thrust::unique_copy(policy, indices_data, indices_data + num_indices, unique_data);
   auto num_unique_indices = static_cast<int>(end - unique_data);
@@ -360,7 +365,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
       unique_indices.data<int64_t>(),
       static_cast<accscalar_t>(max_norm),
       static_cast<accscalar_t>(norm_type),
-      dim);
+      dim, self.stride(0), self.stride(1));
   });
   THCudaCheck(cudaGetLastError());
 

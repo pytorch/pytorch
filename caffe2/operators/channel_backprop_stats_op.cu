@@ -199,8 +199,8 @@ bool ChannelBackpropStatsOp<CUDAContext>::RunOnDevice() {
           numBlocksPerChannel,
           dBiasScratch_.data<float>(),
           dScaleScratch_.data<float>(),
-          dBias->mutable_data<float>(),
-          dScale->mutable_data<float>());
+          dBias->template mutable_data<float>(),
+          dScale->template mutable_data<float>());
 
   return true;
 }

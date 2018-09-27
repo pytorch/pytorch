@@ -15,11 +15,11 @@ class ONNXWhileOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         parent_ws_(ws),
         has_trip_count_(
-            OperatorBase::GetSingleArgument<int64_t>("has_trip_count", 0)),
-        has_cond_(OperatorBase::GetSingleArgument<int64_t>("has_cond", 0)),
-        save_scopes_(OperatorBase::GetSingleArgument<int64_t>("save_scopes", 0)),
-        disable_scopes_(OperatorBase::GetSingleArgument<int64_t>("disable_scopes", 0)),
-        num_loop_carried_deps_(OperatorBase::GetSingleArgument<int64_t>("num_loop_carried_deps", -1)) {
+            this->template GetSingleArgument<int64_t>("has_trip_count", 0)),
+        has_cond_(this->template GetSingleArgument<int64_t>("has_cond", 0)),
+        save_scopes_(this->template GetSingleArgument<int64_t>("save_scopes", 0)),
+        disable_scopes_(this->template GetSingleArgument<int64_t>("disable_scopes", 0)),
+        num_loop_carried_deps_(this->template GetSingleArgument<int64_t>("num_loop_carried_deps", -1)) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("body"),
         "body net must be specified in ONNXWhile operator");
@@ -117,7 +117,7 @@ class ONNXWhileOp final : public Operator<Context> {
 
     // Use this to keep track of the sizes of the scan outputs and validate
     // they're the same across iterations.
-    std::vector<std::vector<TIndex>> scan_outputs_sizes;
+    std::vector<std::vector<int64_t>> scan_outputs_sizes;
 
     Workspace *cur_ws = nullptr;
     bool cur_output_condition = false;
@@ -140,16 +140,15 @@ class ONNXWhileOp final : public Operator<Context> {
         for (int i = 0; i < num_loop_carried_deps; ++i) {
           Blob* b = cur_ws->GetBlob(
               scope_->net()->external_output()[i + 1]);
-          const Tensor<Context>& t = b->template Get<Tensor<Context>>();
+          const Tensor& t = b->template Get<Tensor>();
           scope_->lcd_tensor(i)->CopyFrom(t);
         }
         // Copy out scan_outputs
         for (int i = 0; i < num_scan_outputs; ++i) {
           int net_output_idx = i + 1 + num_loop_carried_deps;
-          const Tensor<Context>& scan_output =
-              cur_ws->GetBlob(
-                  scope_->net()->external_output()[net_output_idx])
-                  ->template Get<Tensor<Context>>();
+          const Tensor& scan_output =
+              cur_ws->GetBlob(scope_->net()->external_output()[net_output_idx])
+                  ->template Get<Tensor>();
           auto* scan_output_target = Output(i + num_loop_carried_deps);
           if (itr == 0) {
             auto dims = scan_output.dims();
@@ -166,8 +165,8 @@ class ONNXWhileOp final : public Operator<Context> {
             dims.insert(dims.begin(), itr);
             scan_output_target->Extend(1, 2.0f, &context_);
 
-            TIndex timestep_size = 1;
-            for (const TIndex t : scan_outputs_sizes[i]) {
+            int64_t timestep_size = 1;
+            for (const int64_t t : scan_outputs_sizes[i]) {
               timestep_size *= t;
             }
 
@@ -214,22 +213,23 @@ class ONNXWhileOp final : public Operator<Context> {
       lcd_tensors_.clear();
       for (int i = 2; i < body_net_def.external_input_size(); ++i) {
         Blob* b = loop_ws_->CreateBlob(body_net_def.external_input(i));
-        Tensor<Context>* t = b->template GetMutable<Tensor<Context>>();
+        Tensor* t = BlobGetMutableTensor(b, Context::GetDeviceType());
         lcd_tensors_.push_back(t);
       }
       // First output is the iteration variable
       auto* iteration_var_blob = loop_ws_->CreateBlob(
           body_net_def.external_input(0));
       iteration_var_ =
-          iteration_var_blob->template GetMutable<Tensor<Context>>();
+          BlobGetMutableTensor(iteration_var_blob, Context::GetDeviceType());
 
-      input_condition_var_ = loop_ws_->CreateBlob(
-          body_net_def.external_input(1))
-          ->template GetMutable<Tensor<Context>>();
+      input_condition_var_ = BlobGetMutableTensor(
+          loop_ws_->CreateBlob(body_net_def.external_input(1)),
+          Context::GetDeviceType());
 
       auto* condition_var_blob =
           loop_ws_->CreateBlob(body_net_def.external_output(0));
-      condition_var_ = condition_var_blob->template GetMutable<Tensor<Context>>();
+      condition_var_ =
+          BlobGetMutableTensor(condition_var_blob, Context::GetDeviceType());
       condition_var_->Resize(1);
       condition_var_->template mutable_data<bool>();
 
@@ -254,7 +254,7 @@ class ONNXWhileOp final : public Operator<Context> {
       return *iteration_var_ptr;
     }
 
-    Tensor<Context>* lcd_tensor(int idx) {
+    Tensor* lcd_tensor(int idx) {
       return lcd_tensors_[idx];
     }
 
@@ -284,11 +284,11 @@ class ONNXWhileOp final : public Operator<Context> {
     Workspace *loop_ws_;
 
     NetBase* body_net_; // owned by a workspace
-    Tensor<Context>* iteration_var_;
-    Tensor<Context>* input_condition_var_;
-    Tensor<Context>* condition_var_;
+    Tensor* iteration_var_;
+    Tensor* input_condition_var_;
+    Tensor* condition_var_;
 
-    std::vector<Tensor<Context>*> lcd_tensors_;
+    std::vector<Tensor*> lcd_tensors_;
   };
 
   NetDef body_net_def_;

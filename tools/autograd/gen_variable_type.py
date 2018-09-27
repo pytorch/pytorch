@@ -31,7 +31,7 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'contiguous', 'resize_', 'resize_as_'
+    'contiguous', 'resize_', 'resize_as_', 'detach', 'detach_',
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -41,19 +41,21 @@ MANUAL_IMPLEMENTATIONS = {
 # NO EFFECT otherwise.
 DONT_RECORD_TRACE = {
     'convolution', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d',
-    'conv_transpose2d', 'conv_transpose3d',
+    'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
+    'rnn_tanh_cell', 'rnn_relu_cell', 'linear'
 }
 
 # These functions have their names recorded under trace renamed,
 RENAME_TRACE = {
-    'th_add': 'add',
-    's_native_add': 'add',
-    'th_sub': 'sub',
-    's_native_sub': 'sub',
-    'th_mul': 'mul',
-    's_native_mul': 'mul',
     'th_addmm': 'addmm',
     's_native_addmm': 'addmm',
+    'zero': 'zeros_like',
+    'fill': 'full_like',
+}
+
+# (declaration name, argument name) -> attribute name
+RENAME_ATTRIBUTES = {
+    ('fill_', 'value'): 'fill_value'
 }
 
 # These functions are not worth profiling because they are very cheap and may
@@ -78,7 +80,7 @@ DONT_REQUIRE_DERIVATIVE = {
 }
 
 METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
+${return_type} ${method_prefix_derived}${api_name}(${type_method_formals}) const override;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
@@ -106,7 +108,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
-Type::${method_prefix_derived}${api_name}(${type_method_args})""")
+TypeDefault::${method_prefix_derived}${api_name}(${type_method_args})""")
 
 CALL_VIA_DERIVED = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
@@ -122,50 +124,54 @@ if (${cond}) {
 """)
 
 RECORD_FUNCTION = CodeTemplate("""\
-profiler::RecordFunction profiler("${name}");""")
+profiler::RecordFunction profiler("${name}", Function::peek_at_next_sequence_nr());""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
-jit::tracer::PreTraceInfo trace_info;
-if (jit::tracer::isTracing( ${tensor_args} )) {
-  trace_info = jit::tracer::preRecordTrace( jit::aten::${trace_name}, ${trace_inputs} );
-  if (!jit::tracer::ArgumentStash::empty()) {
-    ${record_positional_attributes}
-    TORCH_ASSERT(jit::tracer::ArgumentStash::empty());
-  } else {
-    ${record_attributes}
-  }
+torch::jit::Node* node = nullptr;
+std::shared_ptr<jit::tracer::TracingState> tracer_state;
+if (jit::tracer::isTracing()) {
+  tracer_state = jit::tracer::getTracingState();
+  node = tracer_state->graph->create(jit::aten::${trace_name}, /*outputs=*/0);
+  jit::tracer::recordSourceLocation(node);
+  ${add_trace_inputs}
+  tracer_state->graph->appendNode(node);
+  ${inplace_guard}
+  jit::tracer::setTracingState(nullptr);
 }
 """)
+
+INPLACE_GUARD = CodeTemplate("""\
+jit::tracer::ensureUnique("${name}", ${mutable_input});
+""")
+
+ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
-if (trace_info.state != nullptr) {
-  jit::tracer::postRecordTrace( trace_info,  ${trace_outputs} );
+if (tracer_state) {
+  jit::tracer::setTracingState(std::move(tracer_state));
+  ${record_trace_outputs}
 }
 """)
 
-RECORD_ATTRIBUTE = CodeTemplate("""\
-setattr(trace_info.n, jit::attr::${name}, ${name});""")
 
-RECORD_POSITIONAL_ATTRIBUTE = CodeTemplate("""\
-setposattr(trace_info.n, ${i}, "${name}", ${name});""")
+FACTORY_FUNCTION_NAMES = None
 
-POSITIONAL_ATTR_NYI = """\
-throw std::runtime_error("Can't have size-dependent arguments to functions that "
-                         "take variable number of tensor arguments");
-"""
+
+def find_factory_functions(declarations):
+    global FACTORY_FUNCTION_NAMES
+    FACTORY_FUNCTION_NAMES = set()
+
+    for declaration in declarations:
+        if any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments']):
+            FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
 
 
 def should_trace(declaration):
-    # Operations involving Generator, Storage, Type are not traceable
-    # at the moment
-    if any(arg['simple_type'] in {'Generator', 'Storage', 'ScalarType', 'Type', 'optional<ScalarType>'}
-            for arg in declaration['arguments']):
+    # Operations involving Storage or Type are not traceable at the moment
+    if any(arg['simple_type'] in {'Storage', 'Type'} for arg in declaration['arguments']):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns
     if 'Tensor' not in declaration['return_type']:
-        return False
-    tensor_args = [arg for arg in declaration['arguments'] if arg['simple_type'] in {'Tensor', 'TensorList'}]
-    if len(tensor_args) == 0:
         return False
     name = declaration['name']
     base_name = name[:-1] if declaration['inplace'] else name[:-4] if name.endswith('_out') else name
@@ -176,15 +182,54 @@ def should_trace(declaration):
     # However, we can't use DONT_RECORD_TRACE, because we must only disable
     # these for overloads that come from native (the TH overloads still "work")
     overload = [arg['simple_type'] for arg in declaration['arguments'] if not arg.get('output', False)]
-    if base_name == 'add' and overload == ['Tensor', 'Tensor', 'Scalar']:
-        return False
-    if base_name == 'sub' and overload == ['Tensor', 'Tensor', 'Scalar']:
-        return False
-    if base_name == 'mul' and overload == ['Tensor', 'Tensor', 'Scalar']:
-        return False
     if base_name == 'addmm' and overload == ['Tensor', 'Tensor', 'Tensor', 'Scalar', 'Scalar']:
         return False
     return True
+
+
+def record_trace_outputs(declaration):
+    if declaration['name'].endswith('_out'):
+        output_names = [arg['name'] for arg in declaration['arguments'] if arg.get('output', False)]
+    else:
+        output_names = [r['name'] for r in declaration['returns']]
+    return ['jit::tracer::addOutput(node, {});'.format(n) for n in output_names]
+
+
+def format_trace(declaration):
+    local = {}
+    local['trace_name'] = trace_name = uninplace_api_name(declaration['api_name'])
+
+    # *_out functions take the result as a first argument, but since we're
+    # going to de-inplace the call, we need to remove it from the argument list
+    trace_inputs = declaration['arguments']
+    if declaration['name'].endswith('_out'):
+        trace_inputs = trace_inputs[1:]
+    trace_input_spec = [(i['name'], i['name']) for i in trace_inputs]
+
+    # factories are a bit special because their out-of-place overloads
+    # take an extra TensorOptions argument, which is missing in the _out function
+    has_factory_name = trace_name in FACTORY_FUNCTION_NAMES
+    is_out_overload = any(arg['name'] == 'result' for arg in declaration['arguments'])
+    if has_factory_name and is_out_overload:
+        trace_input_spec.append(('result', 'result.options()'))
+
+    local['add_trace_inputs'] = \
+        '\n'.join(ADD_TRACE_INPUT.substitute(name=name, input=value) for name, value in trace_input_spec)
+
+    # Record inplace operations as out-of-place operations (e.g.,
+    # not add_ but add)
+    # TODO: Add a proper concept of side effects to the IR, and
+    # properly record inplace operations.
+    local['inplace_guard'] = ''
+    if local['trace_name'] != declaration['api_name']:
+        local['inplace_guard'] = INPLACE_GUARD.substitute(name=declaration['api_name'],
+                                                          mutable_input=declaration['arguments'][0]['name'])
+    if local['trace_name'] in RENAME_TRACE:
+        local['trace_name'] = RENAME_TRACE[local['trace_name']]
+
+    local['record_trace_outputs'] = record_trace_outputs(declaration)
+
+    return (PRE_RECORD_TRACE.substitute(local), POST_RECORD_TRACE.substitute(local))
 
 
 def gen_variable_type(out, aten_declarations, template_path):
@@ -194,6 +239,7 @@ def gen_variable_type(out, aten_declarations, template_path):
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
+    find_factory_functions(aten_declarations)
 
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
@@ -269,16 +315,12 @@ def emit_body(declaration):
         print('WARNING: derivative ignored for {}'.format(name), file=sys.stderr)
 
     def setup_derivative():
-        def error_msg():
-            name = declaration['api_name']
-            return '"the derivative for {} is not implemented"'.format(name)
-
         args_with_derivatives = find_args_with_derivatives()
 
         env = {}
         env['args_with_derivatives'] = reference_args(args_with_derivatives)
-        env['op'] = func['op'] if func is not None else 'Error'
-        env['op_ctor'] = '' if func is not None else error_msg()
+        env['op'] = func['op'] if func is not None else 'NotImplemented'
+        env['op_ctor'] = '' if func is not None else '"{}"'.format(declaration['api_name'])
 
         if is_out_fn:
             setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
@@ -351,6 +393,8 @@ def emit_body(declaration):
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])
+            elif arg['type'] == 'IntList':
+                expr = expr + ".vec()"
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 
@@ -363,84 +407,10 @@ def emit_body(declaration):
                 res.append(arg['name'])
         return res
 
-    def get_trace_outputs(declaration):
-        if declaration['return_type'] == 'std::vector<Tensor>':
-            return 'flatten_tensor_args({})'.format(declaration['returns'][0]['name'])
-        elif name.endswith('_out'):
-            output_args = [arg['name'] for arg in arguments
-                           if arg.get('output', False)]
-            return '{' + ', '.join(output_args) + '}'
-        trace_outs = [r['name'] for r in declaration['returns']]
-        if any(ret['dynamic_type'] == 'TensorList' for ret in declaration['returns']):
-            return CodeTemplate("flatten_tensor_args( ${outs} )").substitute(outs=trace_outs)
-        else:
-            return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
-
     def emit_record_trace(env):
         if not should_trace(declaration):
             return ('', '')
-
-        # Note [clang-802.0.42 tuple overload bug]
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Originally, my plan for emit_$ecord_trace was to keep it as
-        # simple as possible, if at the expense of some somewhat ugly
-        # overloads.  So this meant we had a 'recordTrace' function
-        # with overloads like this:
-        #
-        #   recordTrace(..., const Variable& out)
-        #   recordTrace(..., const std::tuple<Variable, Variable>& out)
-        #
-        # Unfortunately, this triggers a bug in clang-802.0.42
-        # (widely used in macOS Sierra 10.12.6) wherein a Variable is
-        # implicitly convertible into a std::tuple<Variable, Variable>;
-        # a minimal repro can be seen below here:
-        #
-        #   #include <tuple>
-        #   struct T {};
-        #   void f(const std::tuple<T, T>&) {}
-        #   void g(T& x) { f(x); }
-        #
-        # To work around this bug, the code generator is a bit more
-        # complicated, and is taught how to handle this situation.
-
-        local = {}
-
-        tensor_args = [arg for arg in declaration['arguments'] if arg['simple_type'] in {'Tensor', 'TensorList'}]
-        local['tensor_args'] = [arg['name'] for arg in tensor_args]
-        if any(arg['simple_type'] == 'TensorList' for arg in tensor_args):
-            # Allocate a temporary vector with flatten and pass it in
-            local['trace_inputs'] = CodeTemplate("flatten_tensor_args( $tensor_args )").substitute(local)
-        else:
-            local['trace_inputs'] = CodeTemplate("{ ${tensor_args} }").substitute(local)
-
-        local['record_attributes'] = []
-        for arg in declaration['arguments']:
-            if arg['simple_type'] in {'Tensor', 'TensorList'}:
-                continue
-            local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(name=arg['name']))
-
-        local['record_positional_attributes'] = []
-        for i, arg in enumerate(declaration['arguments']):
-            if arg['simple_type'] == 'Tensor':
-                continue
-            if arg['simple_type'] == 'TensorList':
-                local['record_positional_attributes'] = POSITIONAL_ATTR_NYI
-                break
-            local['record_positional_attributes'].append(
-                RECORD_POSITIONAL_ATTRIBUTE.substitute(name=arg['name'], i=i))
-
-        # Record inplace operations as out-of-place operations (e.g.,
-        # not add_ but add)
-        # TODO: Add a proper concept of side effects to the IR, and
-        # properly record inplace operations.
-        local['trace_name'] = uninplace_api_name(declaration['api_name'])
-        if local['trace_name'] in RENAME_TRACE:
-            local['trace_name'] = RENAME_TRACE[local['trace_name']]
-
-        local['trace_outputs'] = get_trace_outputs(declaration)
-
-        combined = nested_dict(local, nested_dict(env, declaration))
-        return (PRE_RECORD_TRACE.substitute(combined), POST_RECORD_TRACE.substitute(combined))
+        return format_trace(declaration)
 
     def declare_returned_variables():
         if modifies_arguments:

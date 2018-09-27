@@ -11,13 +11,13 @@ namespace {
 
 template <class SIndex, class Context>
 bool SliceImpl(
-    Tensor<Context>* output,
-    const Tensor<Context>& data,
-    const Tensor<Context>& starts,
-    const Tensor<Context>& ends,
+    Tensor* output,
+    const Tensor& data,
+    const Tensor& starts,
+    const Tensor& ends,
     Context* context,
-    Tensor<Context>* gdata = nullptr,
-    const Tensor<Context>* go = nullptr) {
+    Tensor* gdata = nullptr,
+    const Tensor* go = nullptr) {
   bool backward = output == nullptr;
 
   auto* starts_data = starts.template data<SIndex>();
@@ -140,7 +140,7 @@ bool SliceImpl(
       DCHECK_LE(
           static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes),
           static_cast<void*>(dst_bytes + dst_nbytes));
-      context->template CopyItems<Context, Context>(
+      context->CopyItemsSameDevice(
           data.meta(),
           dst_block_size,
           (void*)local_src_offset_bytes,
@@ -186,7 +186,7 @@ bool SliceImpl(
       DCHECK_LE(
           local_dst_offset_bytes + src_block_size_bytes,
           dst_bytes + dst_nbytes);
-      context->template CopyItems<Context, Context>(
+      context->CopyItemsSameDevice(
           go->meta(),
           src_block_size,
           (void*)local_src_offset_bytes,
@@ -198,25 +198,29 @@ bool SliceImpl(
 
 } // namespace
 
-template <class SIndex, class Context>
+template <class Context>
 class SliceOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
-        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
-    return RunOnDeviceImpl(Input(0), Output(0));
+    if (InputSize() > 1) {
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
+    } else {
+      return DoRunWithType<int64_t>();
+    }
   }
 
- protected:
-  bool RunOnDeviceImpl(const Tensor<Context>& data, Tensor<Context>* output) {
+  template <typename SIndex>
+  bool DoRunWithType() {
     if (InputSize() > 1) {
-      starts_host_.template CopyFrom<Context>(Input(1));
-      ends_host_.template CopyFrom<Context>(Input(2));
+      starts_host_.CopyFrom(Input(1));
+      ends_host_.CopyFrom(Input(2));
     } else {
       if (!statically_inited_) {
         CAFFE_ENFORCE(HasArgument("starts"));
@@ -238,37 +242,51 @@ class SliceOp : public Operator<Context> {
       }
     }
 
+    auto data = Input(0);
+    auto output = Output(0);
+
     return SliceImpl<SIndex, Context>(
         output, data, starts_host_, ends_host_, &context_);
   }
 
-  DISABLE_COPY_AND_ASSIGN(SliceOp);
+  C10_DISABLE_COPY_AND_ASSIGN(SliceOp);
 
- private:
-  std::vector<SIndex> starts_;
-  std::vector<SIndex> ends_;
+ protected:
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
-  TensorCPU starts_host_;
-  TensorCPU ends_host_;
+  Tensor starts_host_{CPU};
+  Tensor ends_host_{CPU};
 };
 
-template <class SIndex, class Context>
+template <class Context>
 class SliceGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(OperatorBase::GetRepeatedArgument<SIndex>("starts")),
-        ends_(OperatorBase::GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
+  C10_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
+
   bool RunOnDevice() override {
+    if (InputSize() == 4) {
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
+    } else {
+      return DoRunWithType<int64_t>();
+    }
+  }
+
+  template <typename SIndex>
+  bool DoRunWithType()  {
     auto* gdata = Output(0);
     auto& data = Input(0);
 
     if (InputSize() == 4) {
-      starts_host_.template CopyFrom<Context>(Input(1));
-      ends_host_.template CopyFrom<Context>(Input(2));
+      starts_host_.CopyFrom(Input(1));
+      ends_host_.CopyFrom(Input(2));
 
       auto& go = Input(3);
 
@@ -301,13 +319,12 @@ class SliceGradientOp : public Operator<Context> {
     }
   }
 
-  DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
-
  private:
-  std::vector<SIndex> starts_;
-  std::vector<SIndex> ends_;
+
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
-  TensorCPU starts_host_;
-  TensorCPU ends_host_;
+  Tensor starts_host_{CPU};
+  Tensor ends_host_{CPU};
 };
 } // namespace caffe2

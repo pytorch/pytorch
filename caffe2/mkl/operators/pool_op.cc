@@ -41,8 +41,8 @@ class MKLPoolOp final : public ConvPoolOpBase<MKLContext> {
   // Input: X
   // Output: Y
  private:
-  vector<TIndex> cached_input_dims_;
-  // vector<TIndex> cached_avgpool_input_dims_;
+  vector<int64_t> cached_input_dims_;
+  // vector<int64_t> cached_avgpool_input_dims_;
   LayoutWrapper<T> workspace_layout_;
   std::unique_ptr<MKLWorkspace<T>> workspace_buffer_;
   PrimitiveWrapper<T> primitive_;
@@ -61,8 +61,8 @@ bool MKLPoolOp<float>::RunOnDeviceWithOrderNCHW() {
   if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
     // We will utilize the SetOutputSize() function in the base class
     // with dummy TensorCPU input and output to calculate the sizes.
-    TensorCPU dummy_input(X.dims());
-    TensorCPU dummy_output;
+    Tensor dummy_input(X.dims(), CPU);
+    Tensor dummy_output(CPU);
 
     ConvPoolOpBase<MKLContext>::SetOutputSize(
         dummy_input, &dummy_output, X.dim32(1));

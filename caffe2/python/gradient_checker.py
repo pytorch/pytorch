@@ -11,6 +11,11 @@ from caffe2.python import core, workspace, net_drawer
 from caffe2.proto import caffe2_pb2
 
 
+def getGradientForOp(op):
+    return core.GradientRegistry.GetGradientForOp(
+        op, [s + '_grad' for s in op.output])
+
+
 def _get_grad_blob(grad_map, input_to_check):
     grad_blob = grad_map[input_to_check]
 
@@ -257,8 +262,7 @@ class GradientChecker:
         if grad_ops is None:
             # TODO(jiayq): use the gradient registration instead of the old
             # hack.
-            grad_ops, g_input = core.GradientRegistry.GetGradientForOp(
-                op, [s + '_grad' for s in op.output])
+            grad_ops, g_input = getGradientForOp(op)
 
         dims_to_check = inputs[input_to_check].size
         _input_device_options = input_device_options or \

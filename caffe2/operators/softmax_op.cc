@@ -12,7 +12,7 @@ bool SoftmaxOp<float, CPUContext>::RunOnDevice() {
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
   Y->ResizeLike(X);
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
   // First, get scales
   if (scale_.size() != N) {
     scale_.Resize(N);
@@ -64,7 +64,7 @@ bool SoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   if (N == 0) {
     return true;
   }
-  context_.Copy<float, CPUContext, CPUContext>(Y.size(), dYdata, dXdata);
+  context_.CopySameDevice<float>(Y.size(), dYdata, dXdata);
   float* scaledata = scale_.mutable_data<float>();
   for (int i = 0; i < N; ++i) {
     math::Dot<float, CPUContext>(D, Ydata + i * D, dYdata + i * D,

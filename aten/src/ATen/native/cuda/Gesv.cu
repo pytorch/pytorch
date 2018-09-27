@@ -1,4 +1,5 @@
 #include "ATen/Context.h"
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/PinnedMemoryAllocator.h"
@@ -47,15 +48,19 @@ void magmaGesvBatched<double>(
 }
 
 static magma_queue_t createMagmaQueue(const Tensor& tensor) {
-  auto& context = tensor.type().get_context();
+  auto& context = at::globalContext();
   magma_queue_t magma_queue;
   magma_queue_create_from_cuda(
       tensor.get_device(),
-      context.getCurrentCUDAStream(),
-      THCState_getCurrentBlasHandle(context.getTHCState()),
-      THCState_getCurrentSparseHandle(context.getTHCState()),
+      at::cuda::getCurrentCUDAStream(),
+      at::cuda::getCurrentCUDABlasHandle(),
+      at::cuda::getCurrentCUDASparseHandle(),
       &magma_queue);
   return magma_queue;
+}
+
+static void destroyMagmaQueue(magma_queue_t& existing_queue) {
+  magma_queue_destroy(existing_queue);
 }
 
 static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
@@ -71,19 +76,19 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
 // Creates an array of size elements of type T, backed by pinned memory
 // wrapped in a Storage
 template<class T>
-static inline std::unique_ptr<Storage> pin_memory(int64_t size, Tensor dummy) {
+static inline Storage pin_memory(int64_t size, Tensor dummy) {
   int64_t adjusted_size = size * sizeof(T);
   auto* allocator = cuda::getPinnedMemoryAllocator();
-  auto& backend = dummy.type().toBackend(kCPU).toScalarType(kByte);
+  auto& backend = dummy.type().toBackend(Backend::CPU).toScalarType(kByte);
   return backend.storageWithAllocator(adjusted_size, allocator);
 }
 
 #define ALLOCATE_ARRAY(name, type, size, dummy_tensor) \
   auto storage_##name = pin_memory<type>(size, dummy_tensor); \
-  name = reinterpret_cast<type*>(storage_##name->data());
+  name = static_cast<type*>(storage_##name.data());
 
 template <typename scalar_t>
-static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
+static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("gesv: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -116,9 +121,11 @@ AT_ERROR("gesv: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
+  magma_queue_t gesv_queue = createMagmaQueue(b);
   magmaGesvBatched<scalar_t>(
       n, nrhs, A_array, n, ipiv_array, b_array, n,
-      info_array, batch_size, createMagmaQueue(b));
+      info_array, batch_size, gesv_queue);
+  destroyMagmaQueue(gesv_queue);
 
   for (int64_t i = 0; i < batch_size; i++) {
     infos[i] = info_array[i];

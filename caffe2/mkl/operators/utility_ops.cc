@@ -10,7 +10,7 @@ class CopyCPUToMKLOp final : public MKLOperator<float> {
  public:
   using MKLOperator<float>::MKLOperator;
   bool RunOnDevice() override {
-    const auto& X = OperatorBase::Input<TensorCPU>(0);
+    const auto& X = OperatorBase::Input<Tensor>(0, CPU);
     auto* Y = OperatorBase::OutputBlob(0);
     if (!Y->template IsType<MKLMemory<float>>() ||
         Y->Get<MKLMemory<float>>().dims() != X.dims()) {
@@ -27,7 +27,7 @@ class CopyMKLToCPUOp final : public MKLOperator<float> {
 
   bool RunOnDevice() override {
     const auto& X = OperatorBase::Input<MKLMemory<float>>(0);
-    auto* Y = OperatorBase::Output<TensorCPU>(0);
+    auto* Y = OperatorBase::Output<Tensor>(0, CPU);
     X.CopyTo(Y);
     return true;
   }

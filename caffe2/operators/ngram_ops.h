@@ -14,10 +14,10 @@ class NGramFromCategoricalOp : public Operator<Context> {
 
   NGramFromCategoricalOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        col_ids_(OperatorBase::GetRepeatedArgument<int>("col_ids")),
+        col_ids_(this->template GetRepeatedArgument<int>("col_ids")),
         categorical_limits_(
-            OperatorBase::GetRepeatedArgument<int>("categorical_limits")),
-        vals_(OperatorBase::GetRepeatedArgument<int>("vals")) {
+            this->template GetRepeatedArgument<int>("categorical_limits")),
+        vals_(this->template GetRepeatedArgument<int>("vals")) {
     col_num_ = col_ids_.size();
     max_col_id_ = *std::max_element(col_ids_.begin(), col_ids_.end());
     CAFFE_ENFORCE_EQ(col_num_, categorical_limits_.size());

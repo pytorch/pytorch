@@ -150,13 +150,13 @@ class TextFileReaderReadOp : public Operator<CPUContext> {
     }
 
     for (int i = 0; i < numFields; ++i) {
-      Output(i)->Shrink(rowsRead);
+      Output(i)->ShrinkTo(rowsRead);
     }
     return true;
   }
 
  private:
-  TIndex batchSize_;
+  int64_t batchSize_;
 };
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<TextFileReaderInstance>);

@@ -11,7 +11,7 @@ import six
 
 class Initializer(object):
     '''
-    This class abstracts out parameter creation. One cancome up with a new
+    This class abstracts out parameter creation. One can come up with a new
     Initializer in order to implement more complex parameter initializaion logic
     '''
 

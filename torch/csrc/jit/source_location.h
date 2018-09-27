@@ -17,7 +17,7 @@ struct SourceLocation {
   void wrapAndRethrowException(const std::exception & e, const std::string & additional = "") {
     std::stringstream msg;
     msg << "\n" << e.what() << ":\n";
-    if(additional.size() != 0) {
+    if(!additional.empty()) {
       msg << additional << ":\n";
     }
     highlight(msg);
@@ -35,7 +35,7 @@ inline std::ostream& operator<<(std::ostream& out, const SourceLocation& sl) {
 struct StringSourceLocation : public SourceLocation {
   StringSourceLocation(std::string context)
   : context(std::move(context)) {}
-  virtual void highlight(std::ostream & out) const override {
+  void highlight(std::ostream & out) const override {
     out << context;
   }
 private:

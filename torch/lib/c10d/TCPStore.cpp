@@ -1,6 +1,7 @@
 #include "TCPStore.hpp"
 
 #include <poll.h>
+
 #include <unistd.h>
 #include <algorithm>
 #include <system_error>
@@ -338,6 +339,10 @@ bool TCPStore::check(const std::vector<std::string>& keys) {
   } else {
     throw std::runtime_error("ready or not_ready response expected");
   }
+}
+
+void TCPStore::wait(const std::vector<std::string>& keys) {
+  wait(keys, timeout_);
 }
 
 void TCPStore::wait(

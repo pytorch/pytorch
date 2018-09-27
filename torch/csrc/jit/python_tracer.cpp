@@ -2,11 +2,12 @@
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+
+#include "ATen/core/Error.h"
 
 #include <sstream>
 
@@ -23,47 +24,48 @@ namespace torch { namespace jit { namespace tracer {
 std::string getPythonInterpreterStackTrace() {
   std::stringstream stack_trace;
   AutoGIL gil;
-  PyThreadState *tstate = PyThreadState_GET();
-  if (NULL != tstate && NULL != tstate->frame) {
-    PyFrameObject *frame = tstate->frame;
-
-    while (NULL != frame) {
-      int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-      std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
-      std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-      stack_trace << filename << "(" << line << "): " << funcname << "\n";
-      frame = frame->f_back;
-    }
+  PyFrameObject *frame = PyEval_GetFrame();
+  while (nullptr != frame) {
+    int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
+    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+    stack_trace << filename << "(" << line << "): " << funcname << "\n";
+    frame = frame->f_back;
   }
   return stack_trace.str();
 }
 
-// This is a temporary constructor so that we can write python tests of
-// the executor. It does not have most of the functionality of CompiledFunction
-// such as being able to hold parameters...
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
         py::function func,
-        tracer::variable_list trace_inputs,
-        size_t num_func_inputs) {
-  auto enter_info = tracer::enter(std::move(trace_inputs), 1);
-  py::tuple py_inputs(num_func_inputs);
-  for(size_t i = 0; i < num_func_inputs; ++i) {
-    py_inputs[i] = py::cast(enter_info.second[i]);
+        Stack trace_inputs,
+        at::optional<size_t> num_real_inputs) {
+  size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
+  auto enter_info = tracer::enter(std::move(trace_inputs));
+  try {
+
+    py::tuple py_inputs(num_func_inputs);
+    for(size_t i = 0; i < num_func_inputs; ++i) {
+      py_inputs[i] = py::cast(enter_info.second[i]);
+    }
+    auto out = func(*py_inputs);
+    if (out.ptr() == Py_None) {
+      AT_ERROR("The traced function didn't return any values! Side-effects are not "
+               "captured in traces, so it would be a no-op.");
+    }
+    if (!PyTuple_Check(out.ptr())) {
+      out = py::make_tuple(out);
+    }
+    tracer::exit(toStack(out));
+    auto graph = enter_info.first->graph;
+    EliminateDeadCode(graph);
+    return graph;
+  } catch (...) {
+    tracer::abandon();
+    throw;
   }
-  auto out = func(*py_inputs);
-  std::vector<autograd::Variable> outputs;
-  if(PyTuple_Check(out.ptr())) {
-    outputs = py::cast<std::vector<autograd::Variable>>(out);
-  } else {
-    outputs.push_back(py::cast<autograd::Variable>(out));
-  }
-  tracer::exit(outputs);
-  auto graph = enter_info.first->graph;
-  EliminateDeadCode(graph);
-  return graph;
 }
 
-PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
+Node* preRecordPythonTrace(THPObjectPtr pyobj,
                                   std::string arg_types,
                                   at::ArrayRef<Variable> inputs,
                                   pyobj_list scalar_args) {
@@ -71,12 +73,21 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
   if(!apply) {
     throw python_error();
   }
-  return makePreTraceInfo(inputs, [&](const std::shared_ptr<TracingState>& state, Graph& graph) {
-    return graph.createPythonOp(
-        std::move(apply),
-        arg_types,
-        std::move(scalar_args));
-  });
+
+  auto & graph = getTracingState()->graph;
+
+  Node* n = graph->createPythonOp(
+      std::move(apply), arg_types, std::move(scalar_args));
+  recordSourceLocation(n);
+
+  for (const Variable & input : inputs) {
+    n->addInput(getValueTrace(input));
+  }
+
+  // NB: Order matters. This must append after inputs but before outputs.
+  graph->appendNode(n);
+
+  return n;
 }
 
 void pythonRecordSourceLocation(Node* n) {
@@ -84,12 +95,16 @@ void pythonRecordSourceLocation(Node* n) {
   n->setSourceLocation(sl);
 }
 
-#define ASSERT_UNEXPIRED(METHOD_NAME) if (s.is_expired()) throw std::runtime_error("calling " METHOD_NAME " on an expired trace")
+void pythonWarn(const std::string& reason) {
+  AutoGIL gil;
+  auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
+  PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);
+}
 
-void initPythonTracerBindings(PyObject* module_) {
+void initPythonTracerBindings(PyObject* module) {
   setRecordSourceLocation(pythonRecordSourceLocation);
 
-  auto m = py::handle(module_).cast<py::module>();
+  auto m = py::handle(module).cast<py::module>();
   py::class_<TracingState,std::shared_ptr<TracingState>>(m, "TracingState", py::dynamic_attr())
     // NB: no constructor; you have to get it from C++ code
     .def("__repr__", [](const TracingState& s) {
@@ -98,49 +113,46 @@ void initPythonTracerBindings(PyObject* module_) {
       return ss.str();
     })
     .def("__str__", [](const TracingState& s) -> std::string {
-      if (s.is_expired()) return "<expired TracingState>";
       std::ostringstream ss;
       ss << *s.graph;
       return ss.str();
     })
     .def("push_scope", [](TracingState& s, const std::string& scope_name) {
-      ASSERT_UNEXPIRED("push_scope");
-      s.push_scope(scope_name);
+      s.graph->push_scope(scope_name);
     })
     .def("pop_scope", [](TracingState& s) {
-      ASSERT_UNEXPIRED("pop_scope");
-      s.pop_scope();
+      s.graph->pop_scope();
     })
     .def("set_graph", [](TracingState& s, std::shared_ptr<Graph> g) {
       s.graph = g;
     })
     .def("graph", [](TracingState& s) {
       return s.graph;
-    })
-    .def_property_readonly("is_expired", [](TracingState& s) {
-      return s.is_expired();
-    })
-    .def_property_readonly("is_complete", [](TracingState& s) {
-      return s.is_complete();
     });
 
-  m.def("_tracer_enter", [](variable_list trace_inputs, size_t num_backwards) {
-    return tracer::enter(std::move(trace_inputs), num_backwards + 1);
+  m.def("_tracer_warn_use_python", []() {
+    tracer::setWarn(pythonWarn);
   });
-  m.def("_tracer_exit", [](variable_list var_outputs) {
-    tracer::exit(var_outputs);
+  m.def("_tracer_enter", [](py::args trace_inputs) {
+    return tracer::enter(toStack(trace_inputs));
   });
-  m.def("_get_tracing_state", [](const variable_list& vars) {
-    return getTracingState(vars);
+  m.def("_tracer_exit", [](py::tuple var_outputs) {
+    tracer::exit(toStack(var_outputs));
   });
-  m.def("_get_value_trace", [](std::shared_ptr<TracingState>& state, const Variable& var) {
-    return getValueTrace(state, var);
+  m.def("_tracer_abandon", []() {
+    tracer::abandon();
   });
-  m.def("_set_value_trace", [](std::shared_ptr<TracingState>& state, const Variable& var, Value* value) {
-    return setValueTrace(state, var, value);
+  m.def("_get_tracing_state", []() {
+    return getTracingState();
   });
-  m.def("_is_tracing", [](const variable_list& vars) {
-    return isTracingVar(vars);
+  m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
+    return setTracingState(state);
+  });
+  m.def("_get_value_trace", [](const Variable& var) {
+    return getValueTrace(var);
+  });
+  m.def("_set_value_trace", [](const Variable& var, Value* value) {
+    return setValueTrace(var, value);
   });
 }
 

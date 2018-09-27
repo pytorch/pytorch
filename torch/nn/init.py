@@ -17,7 +17,7 @@ def calculate_gain(nonlinearity, param=None):
     Sigmoid           :math:`1`
     Tanh              :math:`\frac{5}{3}`
     ReLU              :math:`\sqrt{2}`
-    Leaky Relu        :math:`\sqrt{\frac{2}{1 + \text{negative_slope}^2}}`
+    Leaky Relu        :math:`\sqrt{\frac{2}{1 + \text{negative\_slope}^2}}`
     ================= ====================================================
 
     Args:
@@ -178,7 +178,7 @@ def dirac_(tensor):
 def _calculate_fan_in_and_fan_out(tensor):
     dimensions = tensor.ndimension()
     if dimensions < 2:
-        raise ValueError("Fan in and fan out can not be computed for tensor with less than 2 dimensions")
+        raise ValueError("Fan in and fan out can not be computed for tensor with fewer than 2 dimensions")
 
     if dimensions == 2:  # Linear
         fan_in = tensor.size(1)
@@ -203,7 +203,7 @@ def xavier_uniform_(tensor, gain=1):
     :math:`\mathcal{U}(-a, a)` where
 
     .. math::
-        a = \text{gain} \times \sqrt{\frac{6}{\text{fan_in} + \text{fan_out}}}
+        a = \text{gain} \times \sqrt{\frac{6}{\text{fan\_in} + \text{fan\_out}}}
 
     Also known as Glorot initialization.
 
@@ -230,7 +230,7 @@ def xavier_normal_(tensor, gain=1):
     :math:`\mathcal{N}(0, \text{std})` where
 
     .. math::
-        \text{std} = \text{gain} \times \sqrt{\frac{2}{\text{fan_in} + \text{fan_out}}}
+        \text{std} = \text{gain} \times \sqrt{\frac{2}{\text{fan\_in} + \text{fan\_out}}}
 
     Also known as Glorot initialization.
 
@@ -266,7 +266,7 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
 
     .. math::
-        \text{bound} = \sqrt{\frac{6}{(1 + a^2) \times \text{fan_in}}}
+        \text{bound} = \sqrt{\frac{6}{(1 + a^2) \times \text{fan\_in}}}
 
     Also known as He initialization.
 
@@ -301,7 +301,7 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu'):
     :math:`\mathcal{N}(0, \text{std})` where
 
     .. math::
-        \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \text{fan_in}}}
+        \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \text{fan\_in}}}
 
     Also known as He initialization.
 
@@ -417,6 +417,7 @@ def _make_deprecate(meth):
 
     See :func:`~torch.nn.init.{new_name}` for details.""".format(
         old_name=old_name, new_name=new_name)
+    deprecated_init.__name__ = old_name
     return deprecated_init
 
 

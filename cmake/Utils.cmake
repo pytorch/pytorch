@@ -113,6 +113,21 @@ function(caffe_parse_header_single_define LIBNAME HDR_PATH VARNAME)
   endif()
 endfunction()
 
+################################################################################################
+# Parses a version string that might have values beyond major, minor, and patch
+# and set version variables for the library.
+# Usage:
+#   caffe2_parse_version_str(<library_name> <version_string>)
+function(caffe2_parse_version_str LIBNAME VERSIONSTR)
+  string(REGEX REPLACE "^([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_MAJOR "${VERSIONSTR}")
+  string(REGEX REPLACE "^[0-9]+\\.([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_MINOR  "${VERSIONSTR}")
+  string(REGEX REPLACE "[0-9]+\\.[0-9]+\\.([0-9]+).*$" "\\1" ${LIBNAME}_VERSION_PATCH "${VERSIONSTR}")
+  set(${LIBNAME}_VERSION_MAJOR ${${LIBNAME}_VERSION_MAJOR} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION_MINOR ${${LIBNAME}_VERSION_MINOR} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION_PATCH ${${LIBNAME}_VERSION_PATCH} ${ARGN} PARENT_SCOPE)
+  set(${LIBNAME}_VERSION "${${LIBNAME}_VERSION_MAJOR}.${${LIBNAME}_VERSION_MINOR}.${${LIBNAME}_VERSION_PATCH}" PARENT_SCOPE)
+endfunction()
+
 ##############################################################################
 # Helper function to automatically generate __init__.py files where python
 # sources reside but there are no __init__.py present.
@@ -137,8 +152,6 @@ function(caffe_autogen_init_py_files)
   list(REMOVE_DUPLICATES python_paths_need_init_py)
   # Since the _pb2.py files are yet to be created, we will need to manually
   # add them to the list.
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe)
-  list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe/proto)
   list(APPEND python_paths_need_init_py ${CMAKE_BINARY_DIR}/caffe2/proto)
 
   foreach(tmp ${python_paths_need_init_py})
@@ -188,6 +201,25 @@ function(dedent outvar text)
 endfunction()
 
 
+function(pycmd_no_exit outvar exitcode cmd)
+  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
+  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  # run the actual command
+  execute_process(
+    COMMAND "${_python_exe}" -c "${cmd}"
+    RESULT_VARIABLE _exitcode
+    OUTPUT_VARIABLE _output)
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_output}" _output)
+  set(${outvar} "${_output}" PARENT_SCOPE)
+  set(${exitcode} "${_exitcode}" PARENT_SCOPE)
+endfunction()
+
+
 ###
 # Helper function to run `python -c "<cmd>"` and capture the results of stdout
 #
@@ -204,17 +236,8 @@ endfunction()
 #
 function(pycmd outvar cmd)
   dedent(_dedent_cmd "${cmd}")
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
-  else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
-  endif()
-  # run the actual command
-  execute_process(
-    COMMAND "${_python_exe}" -c "${_dedent_cmd}"
-    RESULT_VARIABLE _exitcode
-    OUTPUT_VARIABLE _output)
+  pycmd_no_exit(_output _exitcode "${_dedent_cmd}")
+
   if(NOT ${_exitcode} EQUAL 0)
     message(ERROR " Failed when running python code: \"\"\"\n${_dedent_cmd}\n\"\"\"")
     message(FATAL_ERROR " Python command failed with error code: ${_exitcode}")
@@ -276,10 +299,11 @@ function(target_enable_style_warnings TARGET)
             -Wmissing-include-dirs
             -Woverloaded-virtual
             -Wredundant-decls
+            -Wno-shadow
             -Wsign-promo
-            -Wstrict-overflow=5
+            -Wno-strict-overflow
             -fdiagnostics-show-option
-            -Wconversion
+            -Wno-conversion
             -Wpedantic
             -Wundef
             )
@@ -300,6 +324,9 @@ function(target_enable_style_warnings TARGET)
     if (WERROR)
       list(APPEND WARNING_OPTIONS "-Werror")
     endif()
+  endif()
+  if(APPLE)
+    set(WARNING_OPTIONS -Wno-gnu-zero-variadic-macro-arguments)
   endif()
   target_compile_options(${TARGET} PRIVATE ${WARNING_OPTIONS})
 endfunction()

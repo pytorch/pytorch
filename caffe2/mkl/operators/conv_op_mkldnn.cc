@@ -28,7 +28,7 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
     auto& X = Input(INPUT);
     auto& filter = Input(FILTER);
     auto& bias = Input(BIAS);
-    TensorCPU* Y = Output(0);
+    Tensor* Y = Output(0);
     CAFFE_ENFORCE(4 == X.ndim());
     const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
     CAFFE_ENFORCE(4 == filter.ndim());
@@ -106,8 +106,8 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
  private:
   // Input: X, W, b
   // Output: Y
-  vector<TIndex> cached_input_dims_;
-  vector<TIndex> cached_filter_dims_;
+  vector<int64_t> cached_input_dims_;
+  vector<int64_t> cached_filter_dims_;
   PrimitiveWrapper<T> primitive_;
   unique_ptr<MKLMemory<T>> X_wrapper_ = nullptr;
   unique_ptr<MKLMemory<T>> filter_wrapper_ = nullptr;

@@ -1,36 +1,16 @@
 #pragma once
 
 #include <ATen/Allocator.h>
-#include <ATen/Error.h>
-#include <ATen/Generator.h>
-#include <ATen/Registry.h>
+#include <ATen/core/Generator.h>
+#include <ATen/core/Registry.h>
+#include <ATen/core/Error.h>
 
 #include <cstddef>
 #include <functional>
 #include <memory>
 
-// Forward declare these CUDA types here to avoid including CUDA headers in
-// ATen headers, which would make ATen always require CUDA to build.
+// Forward-declares THCState
 struct THCState;
-struct CUstream_st;
-typedef struct CUstream_st* cudaStream_t;
-struct cudaDeviceProp;
-
-#ifndef __HIP_PLATFORM_HCC__
-// pyHIPIFY rewrites this as:
-//
-//    struct cusparseContext;
-//    typedef struct cusparseContext *hipsparseHandle_t;
-//
-// however, this forward declaration is wrong
-// the way that the HIP headers define hipsparseHandle_t is
-//
-//    typedef cusparseHandle_t hipsparseHandle_t
-//
-// so the rewrite is wrong.
-struct cusparseContext;
-typedef struct cusparseContext *cusparseHandle_t;
-#endif
 
 namespace at {
 class Context;
@@ -67,7 +47,7 @@ constexpr const char* CUDA_HELP =
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-struct AT_API CUDAHooksInterface {
+struct CAFFE2_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~CUDAHooksInterface() {}
@@ -85,32 +65,12 @@ struct AT_API CUDAHooksInterface {
     return false;
   }
 
-  virtual bool hasCuDNN() const {
+  virtual bool hasMAGMA() const {
     return false;
   }
 
-  virtual cudaStream_t getCurrentCUDAStream(THCState*) const {
-    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-#ifndef __HIP_PLATFORM_HCC__
-  virtual cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const {
-    AT_ERROR("Cannot getCurrentCUDASparseHandle() without ATen_cuda library. ", CUDA_HELP);
-  }
-#endif
-
-  virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device)
-      const {
-    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const {
-    AT_ERROR("Cannot getCurrentDeviceProperties() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual struct cudaDeviceProp* getDeviceProperties(THCState*, int device)
-      const {
-    AT_ERROR("Cannot getDeviceProperties() without ATen_cuda library. ", CUDA_HELP);
+  virtual bool hasCuDNN() const {
+    return false;
   }
 
   virtual int64_t current_device() const {
@@ -126,6 +86,10 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual bool compiledWithCuDNN() const {
+    return false;
+  }
+
+  virtual bool compiledWithMIOpen() const {
     return false;
   }
 
@@ -165,14 +129,14 @@ struct AT_API CUDAHooksInterface {
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
 // for the "..." in a variadic macro"
-struct AT_API CUDAHooksArgs {};
+struct CAFFE2_API CUDAHooksArgs {};
 
 AT_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 #define REGISTER_CUDA_HOOKS(clsname) \
   AT_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
-AT_API const CUDAHooksInterface& getCUDAHooks();
+CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
 
 /// This class exists to let us access `cudaSetDevice`, `cudaGetDevice` and CUDA
 /// error handling functions, when CUDA is available. These functions will first
@@ -180,7 +144,7 @@ AT_API const CUDAHooksInterface& getCUDAHooks();
 /// the `cudaSetDevice`/`cudaGetDevice` functions. This allows us to access them
 /// with only a single pointer indirection, while virtual dispatch would require
 /// two (one for the virtual call, one for `cudaSetDevice`/`cudaGetDevice`).
-struct AT_API DynamicCUDAInterface {
+struct CAFFE2_API DynamicCUDAInterface {
   static void (*set_device)(int32_t);
   static void (*get_device)(int32_t*);
   static void (*unchecked_set_device)(int32_t);

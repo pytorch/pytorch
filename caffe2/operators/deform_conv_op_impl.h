@@ -14,10 +14,10 @@ namespace caffe2 {
 
 template <typename T, class Context>
 bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const Tensor<Context>& X = Input(INPUT);
-  const Tensor<Context>& offset = Input(OFFSET);
+  const Tensor& X = Input(INPUT);
+  const Tensor& offset = Input(OFFSET);
   auto& filter = Input(FILTER);
-  Tensor<Context>* Y = Output(0);
+  Tensor* Y = Output(0);
   const int N = X.dim32(0), C = X.dim32(1);
   CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
   const int M = filter.dim32(0);
@@ -119,7 +119,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with
       // one.
-      bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
@@ -133,7 +133,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     bias_data = Input(BIAS).template data<T>();
   }
 
-  auto f = [&](Tensor<Context>* col_buffer) {
+  auto f = [&](Tensor* col_buffer) {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2col, followed by gemm.
@@ -274,9 +274,9 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
   // The col buffer is stored in CHW order as well - kernel_dim, and the
   // height and width.
-  vector<TIndex> img_shape;
+  vector<int64_t> img_shape;
   img_shape.assign(X.dims().begin() + 1, X.dims().end());
-  vector<TIndex> col_buffer_shape;
+  vector<int64_t> col_buffer_shape;
   col_buffer_shape.push_back(C * kernel_dims_size);
   col_buffer_shape.insert(
       col_buffer_shape.end(), output_dims.begin(), output_dims.end());
@@ -301,7 +301,7 @@ bool DeformConvGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     dbias->Resize(M);
     if (bias_multiplier_.size() != output_image_size) {
       // If the helper bias multiplier is not M, reshape and fill it with one.
-      bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+      bias_multiplier_.Resize(vector<int64_t>(1, output_image_size));
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),

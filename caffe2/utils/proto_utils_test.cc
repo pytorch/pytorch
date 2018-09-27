@@ -15,8 +15,8 @@ TEST(ProtoUtilsTest, IsSameDevice) {
   EXPECT_FALSE(IsSameDevice(a, b));
   a.set_cuda_gpu_id(2);
   EXPECT_TRUE(IsSameDevice(a, b));
-  a.set_device_type(DeviceType::CUDA);
-  b.set_device_type(DeviceType::CPU);
+  a.set_device_type(DeviceTypeProto::PROTO_CUDA);
+  b.set_device_type(DeviceTypeProto::PROTO_CPU);
   EXPECT_FALSE(IsSameDevice(a, b));
 }
 

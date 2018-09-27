@@ -19,21 +19,24 @@ methods:
 - :meth:`~Function.forward` - the code that performs the operation. It can take
   as many arguments as you want, with some of them being optional, if you
   specify the default values. All kinds of Python objects are accepted here.
-  :class:`Variable` arguments will be converted to :class:`Tensor` s before the
-  call, and their use will be registered in the graph. Note that this logic won't
-  traverse lists/dicts/any other data structures and will only consider Variables
-  that are direct arguments to the call. You can return either a single
-  :class:`Tensor` output, or a :class:`tuple` of :class:`Tensor` s if there are
-  multiple outputs. Also, please refer to the docs of :class:`Function` to find
-  descriptions of useful methods that can be called only from :meth:`~Function.forward`.
+  :class:`Tensor` arguments that track history (i.e., with
+  ``requires_grad=True``) will be converted to ones that don't track history
+  before the call, and their use will be registered in the graph. Note that this
+  logic won't traverse lists/dicts/any other data structures and will only
+  consider :class:`Tensor` s that are direct arguments to the call. You can
+  return either a single :class:`Tensor` output, or a :class:`tuple` of
+  :class:`Tensor` s if there are multiple outputs. Also, please refer to the
+  docs of :class:`Function` to find descriptions of useful methods that can be
+  called only from :meth:`~Function.forward`.
 - :meth:`~Function.backward` - gradient formula. It will be given
-  as many :class:`Variable` arguments as there were outputs, with each of them
+  as many :class:`Tensor` arguments as there were outputs, with each of them
   representing gradient w.r.t. that output. It should return as many
-  :class:`Variable` s as there were inputs, with each of them containing the
+  :class:`Tensor` s as there were inputs, with each of them containing the
   gradient w.r.t. its corresponding input. If your inputs didn't require
-  gradient (see :attr:`~Variable.needs_input_grad`), or were non-:class:`Variable`
+  gradient (:attr:`~ctx.needs_input_grad` is a tuple of booleans indicating
+  whether each input needs gradient computation), or were non-:class:`Tensor`
   objects, you can return :class:`python:None`. Also, if you have optional
-  arguments to :meth:`~Variable.forward` you can return more gradients than there
+  arguments to :meth:`~Function.forward` you can return more gradients than there
   were inputs, as long as they're all :any:`python:None`.
 
 Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
@@ -82,7 +85,7 @@ Now, to make it easier to use these custom ops, we recommend aliasing their
     linear = LinearFunction.apply
 
 Here, we give an additional example of a function that is parametrized by
-non-Variable arguments::
+non-Tensor arguments::
 
     class MulConstant(Function):
         @staticmethod
@@ -157,7 +160,7 @@ This is how a ``Linear`` module can be implemented::
             self.input_features = input_features
             self.output_features = output_features
 
-            # nn.Parameter is a special kind of Variable, that will get
+            # nn.Parameter is a special kind of Tensor, that will get
             # automatically registered as Module's parameter once it's assigned
             # as an attribute. Parameters and buffers need to be registered, or
             # they won't appear in .parameters() (doesn't apply to buffers), and
@@ -189,8 +192,18 @@ This is how a ``Linear`` module can be implemented::
             )
 
 
+Writing custom C++ extensions
+-----------------------------
+
+See this
+`PyTorch tutorial <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
+for a detailed explanation and examples.
+
+Documentations are available at :doc:`../cpp_extension`.
+
+
 Writing custom C extensions
 ---------------------------
 
-Coming soon. For now you can find an example at
-`GitHub <https://github.com/pytorch/extension-ffi>`_.
+Example available at
+`this GitHub repository <https://github.com/pytorch/extension-ffi>`_.

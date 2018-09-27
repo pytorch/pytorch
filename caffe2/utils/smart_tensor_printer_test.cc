@@ -30,14 +30,17 @@ void printTensorAndCheck(const std::vector<T>& values) {
   testing::internal::CaptureStderr();
   CPUContext cpuContext;
 
-  Tensor<CPUContext> tensor(
-      std::vector<TIndex>{static_cast<TIndex>(values.size())},
+  Tensor tensor(
+      std::vector<int64_t>{static_cast<int64_t>(values.size())},
       values,
       &cpuContext);
 
   SmartTensorPrinter::PrintTensor(tensor);
   expect_stderr_contains(values);
 }
+
+// We need real glog for this test to pass
+#ifdef CAFFE2_USE_GOOGLE_GLOG
 
 #if !(__APPLE__) // TODO(janusz): thread_local does not work under mac.
 
@@ -47,5 +50,7 @@ TEST(SmartTensorPrinterTest, SimpleTest) {
 }
 
 #endif // !(__APPLE__)
+
+#endif // CAFFE2_USE_GOOGLE_GLOG
 
 } // namespace caffe2

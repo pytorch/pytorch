@@ -1,45 +1,53 @@
 #include "caffe2/operators/elu_op.h"
 
-#include "caffe2/utils/math.h"
+#include <algorithm>
+#include <functional>
+#include <string>
+
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
 template <>
-bool EluOp<float, CPUContext>::RunOnDevice() {
-  auto& X = Input(0);
-  auto* Y = Output(0);
-  // Otherwise inplace gradient and Elu dosen't make sense.
-  CAFFE_ENFORCE_GE(alpha_, 0);
-  Y->ResizeLike(X);
-  const auto* Xdata = X.template data<float>();
-  auto* Ydata = Y->template mutable_data<float>();
-  ConstEigenVectorArrayMap<float> Xvec(Xdata, X.size());
-  EigenVectorArrayMap<float> Yvec(Ydata, Y->size());
-  Yvec = Xvec.cwiseMax(0.f) + (alpha_ * (Xvec.exp() - 1.0f)).cwiseMin(0.f);
+template <typename T>
+bool EluFunctor<CPUContext>::
+operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
+  ConstEigenVectorArrayMap<T> X_arr(X, N);
+  EigenVectorMap<T>(Y, N) =
+      (X_arr < 0).select(alpha * (X_arr.exp() - T(1)), X_arr);
   return true;
 }
 
 template <>
-bool EluGradientOp<float, CPUContext>::RunOnDevice() {
-  auto& Y = Input(0);
-  auto& dY = Input(1);
-  auto* dX = Output(0);
-  DCHECK_GT(Y.size(), 0);
-  DCHECK_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
-
-  const float* Ydata = Y.data<float>();
-  const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
-  ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.size());
-  ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.size());
-  EigenVectorArrayMap<float> dXvec(dXdata, dX->size());
-  dXvec = (Yvec > 0).select(dYvec, dYvec * (Yvec + alpha_));
+template <typename T>
+bool EluGradientFunctor<CPUContext>::Forward(
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& /* dY_dims */,
+    const T* Y,
+    const T* dY,
+    T* dX,
+    CPUContext* /* context */) const {
+  const int size = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  ConstEigenVectorArrayMap<T> Y_arr(Y, size);
+  ConstEigenVectorArrayMap<T> dY_arr(dY, size);
+  EigenVectorArrayMap<T>(dX, size) =
+      (Y_arr < 0).select(dY_arr * (Y_arr + alpha), dY_arr);
   return true;
 }
 
-REGISTER_CPU_OPERATOR(Elu, EluOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(EluGradient, EluGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    Elu,
+    UnaryElementwiseWithArgsOp<
+        TensorTypes<float>,
+        CPUContext,
+        EluFunctor<CPUContext>>);
+REGISTER_CPU_OPERATOR(
+    EluGradient,
+    BinaryElementwiseWithArgsOp<
+        TensorTypes<float>,
+        CPUContext,
+        EluGradientFunctor<CPUContext>>);
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(Elu)
@@ -102,9 +110,10 @@ Y:
 )DOC")
     .Input(0, "X", "1D input tensor of data to be operated on.")
     .Output(0, "Y", "1D input tensor, calculated as described above.")
-    .Arg("alpha", "*(type: float; default: 1.0)* Defines alpha parameter used in calculation.")
+    .Arg(
+        "alpha",
+        "*(type: float; default: 1.0)* Defines alpha parameter used in calculation.")
     .InheritOnnxSchema("Elu");
-
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(EluGradient)
@@ -116,16 +125,21 @@ EluGradient takes both Y and dY and uses this to update dX according to the
 chain rule and derivatives of the rectified linear function.
 )DOC");
 
+namespace {
+
 class GetEluGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         def_.type() + "Gradient",
         "",
-        vector<string>{O(0), GO(0)},
-        vector<string>{GI(0)});
+        std::vector<std::string>{O(0), GO(0)},
+        std::vector<std::string>{GI(0)});
   }
 };
+
+} // namespace
+
 REGISTER_GRADIENT(Elu, GetEluGradient);
 
 } // namespace caffe2

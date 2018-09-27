@@ -24,7 +24,7 @@ class MKLMemoryFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
     const MKLMemory<T>& src = blob.Get<MKLMemory<T>>();
-    CAFFE_ENFORCE(src.buffer(), "Trying to fetch unitilized tensor");
+    CAFFE_ENFORCE(src.buffer(), "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(TypeMeta::Make<T>());
     CAFFE_ENFORCE(
         numpy_type != -1,
@@ -70,7 +70,7 @@ class MKLMemoryFeeder : public BlobFeederBase {
     // numpy requires long int as its dims.
     int ndim = PyArray_NDIM(array);
     npy_intp* npy_dims = PyArray_DIMS(array);
-    std::vector<TIndex> dims;
+    std::vector<int64_t> dims;
     for (int i = 0; i < ndim; ++i) {
       dims.push_back(npy_dims[i]);
     }

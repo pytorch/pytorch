@@ -16,7 +16,7 @@ class MergeSingleScalarFeatureTensorsOp : public Operator<Context> {
       Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
-    featureIDs_ = OperatorBase::GetRepeatedArgument<int64_t>("feature_ids");
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
   virtual ~MergeSingleScalarFeatureTensorsOp() noexcept {}
 
@@ -137,7 +137,7 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
-    featureIDs_ = OperatorBase::GetRepeatedArgument<int64_t>("feature_ids");
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
   virtual ~MergeSingleListFeatureTensorsOp() noexcept {}
 
@@ -198,7 +198,7 @@ class MergeSingleListFeatureTensorsOp : public Operator<Context> {
           ++outLengthsData[exampleIndex];
           outKeysData[keysOffset] = featureIDs_[inputIndex];
           outValuesLengthsData[keysOffset] = inLengthsData[exampleIndex];
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               inValues.meta(),
               inLengthsData[exampleIndex],
               &inValues.template data<T>()[inValuesOffset_[inputIndex]],
@@ -268,7 +268,7 @@ class MergeSingleListOrMapFeatureTensorsGradientOp : public Operator<Context> {
             Input(kNumTensorsPerInput * inputIndex + 1).template data<bool>();
         if (inPresenceData[exampleIndex]) {
           T* outFeatureValues = Output(inputIndex)->template mutable_data<T>();
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               inValuesValuesGrad.meta(),
               inLengthsData[exampleIndex],
               &inValuesValuesGradData[inValuesValuesOffset],
@@ -295,7 +295,7 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     numInputs_ = InputSize() / kNumTensorsPerInput;
     inValuesOffset_.resize(numInputs_);
-    featureIDs_ = OperatorBase::GetRepeatedArgument<int64_t>("feature_ids");
+    featureIDs_ = this->template GetRepeatedArgument<int64_t>("feature_ids");
   }
   virtual ~MergeSingleMapFeatureTensorsOp() noexcept {}
 
@@ -367,12 +367,12 @@ class MergeSingleMapFeatureTensorsOp : public Operator<Context> {
           ++outLengthsData[exampleIndex];
           outKeysData[keysOffset] = featureIDs_[inputIndex];
           outValuesLengthsData[keysOffset] = inLengthsData[exampleIndex];
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               inKeys.meta(),
               inLengthsData[exampleIndex],
               &inKeys.template data<K>()[inValuesOffset_[inputIndex]],
               &outValuesKeysData[valuesOffset]);
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               inValues.meta(),
               inLengthsData[exampleIndex],
               &inValues.template data<V>()[inValuesOffset_[inputIndex]],
@@ -510,7 +510,7 @@ class MergeMultiScalarFeatureTensorsGradientOp : public Operator<Context> {
             Input(kNumTensorsPerInput * inputIndex).template data<int32_t>();
         if (inLengthsData[exampleIndex] > 0) {
           T* outFeatureValues = Output(inputIndex)->template mutable_data<T>();
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               inValuesGrad.meta(),
               inLengthsData[exampleIndex],
               &inValuesGradData[inValuesOffset],
@@ -597,7 +597,7 @@ class MergeMultiListFeatureTensorsOp : public Operator<Context> {
           outKeysData[outKeysOffset] = inKeysData[inKeysOffset_[inputIndex]];
           outValuesLengthsData[outKeysOffset] =
               inValuesLengthsData[inKeysOffset_[inputIndex]];
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               inValuesValues.meta(),
               inValuesLengthsData[inKeysOffset_[inputIndex]],
               &inValuesValues
@@ -703,13 +703,13 @@ class MergeMultiMapFeatureTensorsOp : public Operator<Context> {
           outKeysData[outKeysOffset] = inKeysData[inKeysOffset_[inputIndex]];
           outValuesLengthsData[outKeysOffset] =
               inValuesLengthsData[inKeysOffset_[inputIndex]];
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               inValuesKeys.meta(),
               inValuesLengthsData[inKeysOffset_[inputIndex]],
               &inValuesKeys
                    .template data<K>()[inValuesValuesOffset_[inputIndex]],
               &outValuesKeysData[outValuesValuesOffset]);
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               inValuesValues.meta(),
               inValuesLengthsData[inKeysOffset_[inputIndex]],
               &inValuesValues
@@ -791,7 +791,7 @@ class MergeMultiListOrMapFeatureTensorsGradientOp : public Operator<Context> {
         }
         if (valuesLengthCopy > 0) {
           T* outFeatureValues = Output(inputIndex)->template mutable_data<T>();
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               inValuesValuesGrad.meta(),
               valuesLengthCopy,
               &inValuesValuesGradData[inValuesValuesOffset],

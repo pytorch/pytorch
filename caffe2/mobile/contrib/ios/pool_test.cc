@@ -12,11 +12,11 @@ namespace caffe2 {
 
 namespace {
 
-void AddNoiseInput(const vector<TIndex>& shape, const string& name, Workspace* ws) {
+void AddNoiseInput(const vector<int64_t>& shape, const string& name, Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutable<TensorCPU>();
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
@@ -58,7 +58,7 @@ void compareMaxPooling(int N,
   def1.add_arg()->CopyFrom(MakeArgument("pad_b", padB));
   def1.add_arg()->CopyFrom(MakeArgument("pad_r", padR));
 
-  AddNoiseInput(vector<TIndex>{N, C, H, W}, "X", &ws);
+  AddNoiseInput(vector<int64_t>{N, C, H, W}, "X", &ws);
 
   unique_ptr<OperatorBase> op1(CreateOperator(def1, &ws));
   EXPECT_NE(nullptr, op1.get());
