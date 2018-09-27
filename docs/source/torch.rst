@@ -270,6 +270,8 @@ Other Operations
 .. autofunction:: trace
 .. autofunction:: tril
 .. autofunction:: triu
+.. autofunction:: argsort
+.. autofunction:: broadcast_tensors
 
 
 BLAS and LAPACK Operations
