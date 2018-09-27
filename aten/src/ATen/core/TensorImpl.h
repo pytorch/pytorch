@@ -179,7 +179,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual int64_t numel() const {
 #ifdef DEBUG
-    AT_ASSERT(compute_numel() == numel_);
+    AT_ASSERT(numel_ == -1 || compute_numel() == numel_);
 #endif
     return numel_;
   }
