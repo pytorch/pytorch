@@ -703,6 +703,22 @@ class TestCaffe2Backend(unittest.TestCase):
         x = Variable(torch.randn(5, 6, 7, 8))
         self.run_model_test(MyModel(), train=False, input=x, batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_comparison_gt_lt(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+
+            def forward(self, a, b):
+                mask = (x > 0).type_as(x)
+                z = x * mask + y
+                mask = (x < 0).type_as(x)
+                z = z * mask + y
+                return z
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        self.run_model_test(MyModel(), train=False, input=(x, y), batch_size=BATCH_SIZE, use_gpu=False)
+
+
     def test_sum(self):
         shape = (3, 4, 5)
         for params in [{}] + [{'dim': i} for i in range(len(shape))]:
@@ -918,6 +934,15 @@ class TestCaffe2Backend(unittest.TestCase):
 
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_tensor_factories(self):
+        class TensorFactory(torch.nn.Module):
+            def forward(self, x):
+                return torch.zeros(x.size()) + torch.ones(x.size())
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
 
 # a bit of metaprogramming to set up all the rnn tests
 
