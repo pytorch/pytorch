@@ -843,12 +843,20 @@ class TestTorch(TestCase):
             res = x.norm(p).item()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
+
         # one dimension
         x = torch.randn(5, 5, device=device)
         xn = x.cpu().numpy()
         for p in [0, 1, 2, 3, 4, inf]:
             res = x.norm(p, 1).cpu().numpy()
             expected = np.linalg.norm(xn, p, 1)
+            self.assertEqual(res.shape, expected.shape)
+            self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
+
+        # matrix norm
+        for p in ['fro', 'nuc']:
+            res = x.norm(p).cpu().numpy()
+            expected = np.linalg.norm(xn, p)
             self.assertEqual(res.shape, expected.shape)
             self.assertTrue(np.allclose(res, expected), "dim reduction failed for {}-norm".format(p))
 
@@ -3731,23 +3739,6 @@ class TestTorch(TestCase):
 
         self.assertRaises(RuntimeError, lambda: torch.cat([]))
 
-    def test_cat_padding(self):
-        x = torch.rand(13, 1, 3)
-        y = torch.rand(17, 2, 2)
-        z = torch.rand(19, 3, 1)
-
-        for pad_value in [0, 0.5, 1]:
-            res1 = torch.cat((x, y, z), 0, pad_value)
-            self.assertEqual(x, res1.narrow(0, 0, 13).narrow(1, 0, 1).narrow(2, 0, 3), 0)
-            self.assertEqual(y, res1.narrow(0, 13, 17).narrow(1, 0, 2).narrow(2, 0, 2), 0)
-            self.assertEqual(z, res1.narrow(0, 30, 19).narrow(1, 0, 3).narrow(2, 0, 1), 0)
-
-            expect2 = torch.full((49, 3, 3), pad_value)
-            expect2[0:13, 0:1, 0:3] = x
-            expect2[13:30, 0:2, 0:2] = y
-            expect2[30:49, 0:3, 0:1] = z
-            self.assertEqual(expect2, res1, 0)
-
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1)
         y = torch.randn(2, 1, 1)
@@ -3795,6 +3786,26 @@ class TestTorch(TestCase):
 
     def test_cat_empty_legacy(self):
         self._test_cat_empty_legacy(self)
+
+    def _test_cat_padding(self):
+        x = torch.rand(13, 1, 3)
+        y = torch.rand(17, 2, 2)
+        z = torch.rand(19, 3, 1)
+
+        for pad_value in [0, 0.5, 1]:
+            res1 = torch.cat((x, y, z), 0, pad_value)
+            self.assertEqual(x, res1.narrow(0, 0, 13).narrow(1, 0, 1).narrow(2, 0, 3), 0)
+            self.assertEqual(y, res1.narrow(0, 13, 17).narrow(1, 0, 2).narrow(2, 0, 2), 0)
+            self.assertEqual(z, res1.narrow(0, 30, 19).narrow(1, 0, 3).narrow(2, 0, 1), 0)
+
+        expect2 = torch.full((49, 3, 3), pad_value)
+        expect2[0:13, 0:1, 0:3] = x
+        expect2[13:30, 0:2, 0:2] = y
+        expect2[30:49, 0:3, 0:1] = z
+        self.assertEqual(expect2, res1, 0)
+
+    def test_cat_padding(self):
+        self._test_cat_padding(self)
 
     @staticmethod
     def _test_cat_empty(self, use_cuda=False):
@@ -7397,22 +7408,51 @@ class TestTorch(TestCase):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
-    def test_bernoulli(self):
-        t = torch.ByteTensor(10, 10)
+    @staticmethod
+    def _test_bernoulli(self, p_dtype, device):
+        for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
+            x = torch.tensor(trivial_p, dtype=p_dtype, device=device)
+            self.assertEqual(x.bernoulli().tolist(), trivial_p)
 
         def isBinary(t):
-            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum() == 0
+            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum().item() == 0
 
-        p = 0.5
+        p = torch.rand(5, 5, dtype=p_dtype, device=device)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
+        self.assertTrue(isBinary(p.bernoulli()))
+
+        p = torch.rand(5, 5, dtype=p_dtype, device=device)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+        p = torch.rand(5, dtype=p_dtype, device=device).expand(5, 5)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
+        # test that it works with integral tensors
+        t = torch.empty(10, 10, dtype=torch.uint8, device=device)
+
+        t.fill_(2)
+        t.bernoulli_(0.5)
+        self.assertTrue(isBinary(t))
+
+        p = torch.rand(10, dtype=p_dtype, device=device).expand(10, 10)
+        t.fill_(2)
         t.bernoulli_(p)
         self.assertTrue(isBinary(t))
 
-        p = torch.rand(10, 10)
-        t.bernoulli_(p)
+        t.fill_(2)
+        torch.bernoulli(torch.rand_like(t, dtype=p_dtype), out=t)
         self.assertTrue(isBinary(t))
 
-        q = torch.rand(5, 5)
-        self.assertTrue(isBinary(q.bernoulli()))
+        t.fill_(2)
+        t.bernoulli_(torch.rand_like(t, dtype=p_dtype))
+        self.assertTrue(isBinary(t))
+
+    def test_bernoulli(self):
+        self._test_bernoulli(self, torch.double, 'cpu')
 
     def test_normal(self):
         q = torch.Tensor(100, 100)
