@@ -1353,7 +1353,8 @@ void THTensor_(catArray)(
   // wasn't possible to cat empty tensors unless all the other tensors were
   // 1-dimensional, so we allowed these tensors to be "skipped".  We maintain
   // this behavior for backwards compatibility, but only for this specific size
-  // (i.e. other empty sizes are not skipped).
+  // (i.e. other empty sizes are not skipped). In addition, if pad is true, no
+  // tensor will be skipped.
   // FIXME: warn if this is the case
   bool allSkipped = true;
   int64_t nDims = 0;

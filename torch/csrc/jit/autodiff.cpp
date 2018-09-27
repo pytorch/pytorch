@@ -78,6 +78,8 @@ bool isDifferentiable(Node * n) {
     "aten::sinh(Tensor self) -> Tensor",
     "aten::tan(Tensor self) -> Tensor",
     "aten::trunc(Tensor self) -> Tensor",
+    "aten::cat(Tensor[] tensors, int dim) -> Tensor",
+    "aten::cat(Tensor[] tensors, int dim, Scalar pad_value)",
   };
 
   // TODO: add support for the following fusible operators.
@@ -336,11 +338,19 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
 
     } else if (
         node->matches(
+            "aten::cat(Tensor[] tensors, int dim) -> Tensor",
+            /*const=*/attr::dim) ||
+        node->matches(
             "aten::cat(Tensor[] tensors, int dim, Scalar pad_value) -> Tensor",
             /*const=*/{attr::dim})) {
       int dim = *node->get<int64_t>(attr::dim);
-      at::Scalar pad_value = *node->get<at::Scalar>(attr::pad_value);
-      bool pad = std::isnan(pad_value.toFloat());
+      bool pad = false;
+      if (node->matches(
+              "aten::cat(Tensor[] tensors, int dim, Scalar pad_value) -> Tensor",
+              /*const=*/{attr::dim})) {
+        at::Scalar pad_value = *node->get<at::Scalar>(attr::pad_value);
+        pad = std::isnan(pad_value.toFloat());
+      }
       auto tensor_inputs = inputs;
       tensor_inputs.pop_back();
       const auto& first_sizes = tensor_inputs.at(0).sizes();
@@ -366,9 +376,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
             for (int64_t i = 0; i < ndim; ++i) {
               auto result = grad;
               if (i == dim) {
-                result = result.narrow(dim, offset, input.sizes()[dim]);
+                result = result.narrow(i, offset, input.sizes()[dim]);
               } else {
-                result = result.narrow(dim, 0, input.sizes()[i]);
+                result = result.narrow(i, 0, input.sizes()[i]);
               }
               tensor_grads.push_back(result);
             }

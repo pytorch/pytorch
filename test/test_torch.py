@@ -3732,23 +3732,20 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.cat([]))
 
     def test_cat_padding(self):
-        x = torch.rand(13, 1)
-        y = torch.rand(17, 2)
-        z = torch.rand(19, 3)
+        x = torch.rand(13, 1, 3)
+        y = torch.rand(17, 2, 2)
+        z = torch.rand(19, 3, 1)
 
         for pad_value in [0, 0.5, 1]:
             res1 = torch.cat((x, y, z), 0, pad_value)
-            self.assertEqual(x, res1.narrow(0, 0, 13).narrow(1, 0, 1), 0)
-            self.assertEqual(y, res1.narrow(0, 13, 17).narrow(1, 0, 2), 0)
-            self.assertEqual(z, res1.narrow(0, 30, 19).narrow(1, 0, 3), 0)
+            self.assertEqual(x, res1.narrow(0, 0, 13).narrow(1, 0, 1).narrow(2, 0, 3), 0)
+            self.assertEqual(y, res1.narrow(0, 13, 17).narrow(1, 0, 2).narrow(2, 0, 2), 0)
+            self.assertEqual(z, res1.narrow(0, 30, 19).narrow(1, 0, 3).narrow(2, 0, 1), 0)
 
-            expect2 = torch.ones(49, 3) * pad_value
-            res1[0:13, 0:1] -= x
-            expect2[0:13, 0:1] *= 0
-            res1[13:30, 0:2] -= y
-            expect2[13:30, 0:2] *= 0
-            res1[30:49, 0:3] -= z
-            expect2[30:49, 0:3] *= 0
+            expect2 = torch.full((49, 3, 3), pad_value)
+            expect2[0:13, 0:1, 0:3] = x
+            expect2[13:30, 0:2, 0:2] = y
+            expect2[30:49, 0:3, 0:1] = z
             self.assertEqual(expect2, res1, 0)
 
     def test_cat_bad_input_sizes(self):

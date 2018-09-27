@@ -743,14 +743,16 @@ add_docstr(torch.cat,
 cat(seq, dim=0, pad_value=None, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
-If pad_value is set to None, all tensors must have the same shape,
-except in the dimension corresponding to :attr:`dim`.
-If pad_value is set to a scalar, all tensors only need to have the same number
-of dimensions.The size of the resulting tensor is the size of the sum of the
-dimensions in the concatenating dimension, and the maximum of the
+If pad_value is None, all tensors must have the same shape, except in the
+dimension corresponding to :attr:`dim`.
+If pad_value is not None (i.e. a scalar), all tensors only need to have the same
+number of dimensions. The size of the resulting tensor is the size of the sum
+of the dimensions sizes in the concatenating dimension, and the maximum of the
 dimension sizes in all other dimensions. If an input tensor needs to be
 logically expanded to fill out its place in the resulting tensor, it is
-padded with :attr:pad_value.
+padded with :attr:pad_value. For example, if we cat tensors with size
+(x0, x1, ..., xn) and (y0, y1, ..., yn) along 0 axis, the size of result tensor
+is (x0 + y0, max(x1, y1), ..., max(xn, yn)).
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`.

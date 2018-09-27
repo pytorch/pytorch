@@ -233,23 +233,47 @@ void PropagateCatShape(Node* cat_node, bool pad) {
     if (dim < 0 || dim >= ndim)
       return false;
 
-    sizes[dim] = 0;
-    for (auto& tp : input_types) {
-      auto& tp_sizes = tp->sizes();
-      if (sizes.size() != tp_sizes.size())
-        return false;
+    if (pad) {
+      sizes[dim] = 0;
       for (int64_t i = 0; i < ndim; ++i) {
-        if (sizes[i] != tp_sizes[i] && i != dim && !pad) {
-          return false;
+        if (i != dim) {
+          int maxDimSize = 0;
+          for (auto& tp : input_types) {
+            auto& tp_sizes = tp->sizes();
+            if (tp_sizes[i] > maxDimSize) {
+              maxDimSize = tp_sizes[i];
+            }
+          }
+          if (sizes[i] != maxDimSize){
+            return false;
+          }
         }
       }
-      sizes[dim] += tp_sizes[dim];
+      for (auto& tp : input_types) {
+        auto& tp_sizes = tp->sizes();
+        if (sizes.size() != tp_sizes.size())
+          return false;
+        sizes[dim] += tp_sizes[dim];
+      }
+    } else {
+      sizes[dim] = 0;
+      for (auto& tp : input_types) {
+        auto& tp_sizes = tp->sizes();
+        if (sizes.size() != tp_sizes.size())
+          return false;
+        for (int64_t i = 0; i < ndim; ++i) {
+          if (sizes[i] != tp_sizes[i] && i != dim) {
+            return false;
+          }
+        }
+        sizes[dim] += tp_sizes[dim];
+      }
     }
     node->output()->setType(input_types[0]->withSizes(sizes));
     return true;
   };
   static const auto propagate =
-      [](Node* node, bool pad, at::ArrayRef<Value*> tensors) -> bool {
+      [](Node* node, at::ArrayRef<Value*> tensors) -> bool {
     for (Value* v : tensors) {
       if (auto type = v->type()->cast<TensorType>()) {
         node->output()->setType(type);
@@ -261,10 +285,10 @@ void PropagateCatShape(Node* cat_node, bool pad) {
   auto list_node = cat_node->namedInput(attr::tensors)->node();
   if (list_node->kind() == prim::ListConstruct) {
     auto tensors = list_node->inputs();
-    if (!tensors.empty()) {
+    if (!tensors.empty() || pad) {
       if (propagate_complete(cat_node, pad, tensors)) {
         return;
-      } else if (propagate(cat_node, pad, tensors)) {
+      } else if (propagate(cat_node, tensors)) {
         return;
       }
     }

@@ -117,7 +117,8 @@ void THCTensor_(catArray)(
   // wasn't possible to cat empty tensors unless all the other tensors were
   // 1-dimensional, so we allowed these tensors to be "skipped".  We maintain
   // this behavior for backwards compatibility, but only for this specific size
-  // (i.e. other empty sizes are not skipped).
+  // (i.e. other empty sizes are not skipped). In addition, if pad is true, no
+  // tensor will be skipped.
   // FIXME: warn if this is the case
   int i, j, cohortMax;
   int64_t offset;
@@ -311,8 +312,9 @@ void THCTensor_(catArray)(
     }
     offset = 0;
     for (j = 0; j < numInputs; j++) {
-      if (should_skip(inputs[j], pad))
+      if (should_skip(inputs[j], pad)){
         continue;
+      }
       int64_t dimSize = THCTensor_(size)(state, inputs[j], dimension);
       THCTensor* nt = THCTensor_(newWithTensor)(state, result);
       if (pad) {

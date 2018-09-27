@@ -31,12 +31,6 @@ Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   return at::_cat_out(result, tensors, dim, false, 0);
 }
 
-Tensor cat(TensorList tensors, int64_t dim) {
-  check_cat_no_zero_dim(tensors);
-  dim = legacy_cat_wrap_dim(dim, tensors);
-  return at::_cat(tensors, dim, false, 0);
-}
-
 Tensor& cat_out(
     Tensor& result,
     TensorList tensors,
@@ -46,6 +40,12 @@ Tensor& cat_out(
     return at::cat_out(result, tensors, dim);
   }
   return at::_cat_out(result, tensors, dim, true, pad_value);
+}
+
+Tensor cat(TensorList tensors, int64_t dim) {
+  check_cat_no_zero_dim(tensors);
+  dim = legacy_cat_wrap_dim(dim, tensors);
+  return at::_cat(tensors, dim, false, 0);
 }
 
 Tensor cat(TensorList tensors, int64_t dim, Scalar pad_value) {
@@ -170,16 +170,16 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
   int64_t allDim = self.dim();
   int64_t end = start+length;
   AT_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  AT_CHECK(dim >= 0 && dim < allDim, 
+  AT_CHECK(dim >= 0 && dim < allDim,
     "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
   AT_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
     "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
   LongTensor indices = self._indices();
   int64_t sparseDims = self._sparseDims();
-  
+
   std::vector<int64_t> newSizes = self.sizes().vec();
   newSizes[dim]=length;
-  
+
   Tensor newValues;
   LongTensor newIndices;
   if(dim < sparseDims){
