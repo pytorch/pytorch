@@ -1,7 +1,7 @@
 The PyTorch C++ Frontend
 ========================
 
-The PyTorch C++ frontend is a pure C++11 library for CPU and GPU
+The PyTorch C++ frontend is a C++11 library for CPU and GPU
 tensor computation, with automatic differentation and high level building
 blocks for state of the art machine learning applications.
 
@@ -101,50 +101,38 @@ To see more complete examples of using the PyTorch C++ frontend, see `the exampl
 Philosophy
 ----------
 
-The PyTorch C++ frontend was originally born out of the necessity to train
-machine learning models in low latency, high performance, **pure C++**
-environments such as video game engines or production servers. While the Python
-frontend to PyTorch provided a flexible, friendly, comparatively fast and
-overall formidable solution to machine learning research, its exposure through
-Python barred it from reaching the latency guarantees offered by a native, bare
-metal language like C++. At the same time, while there were a number of pure
-C++ frameworks for machine learning, none were nearly as flexible nor powerful
-as PyTorch. As such, the originators of the PyTorch C++ frontend identified a
-gap between the superior research experience provided by PyTorch, and the world
-of low latencies provided by C++, and thus undertook the creation of a new,
-pure C++ frontend to the existing C++ implementations underpinning PyTorch's
-Python interface (the "backend"). This frontend is what is presented in this
-document. We claim that it succeeds in filling the aforementioned gap, allowing
-high performance yet flexible definition and execution of machine learning
-models in pure C++, with no Python in the loop what-so-ever.
+PyTorch's C++ frontend was designed with the idea that the Python frontend
+is great, and should be used when possible; but in some settings, performance
+and portability requirements make the use of the Python interpreter infeasible.
+For example, Python is poor choice for low latency, high performance or
+multithreaded environments, such as video games or production servers.  The
+goal of the C++ frontend is to address these use cases, while not sacrificing the
+user experience of the Python frontend.
 
-Owing to its heritage and original goals, the PyTorch C++ frontend is intended
-to closely model the Python frontend in its design, naming, conventions and
-functionality. We claim that it largely follows through on those intentions.
-While there are certainly occasional differences to be found between the two
-interfaces, such as cases where we opt not to bring deprecated features or
-functions (no matter how popular) into this new, fresh API, we can guarantee to
-a high degree that the effort in porting a Python model to C++ lies almost
-exclusively in **translating language features**, but **not modifying
-functionality or behavior**.
+As such, the C++ frontend has been written with a few philosophical goals in mind:
 
-As a corollary to the above, we would also like to note that in many cases
-where we were faced between choosing between flexibility and friendliness
-towards research versus micro-optimization and robustness in the face of all
-possible edge cases, we opted for the former, friendlier path. Flexibility and
-dynamism is at the heart of PyTorch, and we aim to preserve this across the
-language boundary the C++ frontend bridges.
+* **Closely model the Python frontend in its design**, naming, conventions and
+  functionality.  While there may be occasional differences between the two
+  frontends (e.g., where we have dropped deprecated features or fixed "warts"
+  in the Python frontend), we guarantee that the effort in porting a Python model
+  to C++ should lie exclusively in **translating language features**,
+  not modifying functionality or behavior.
 
-Lastly, a word of warning: the Python interface is not necessarily slower than
-C++. It already calls into C++ for almost anything computationally expensive
-(especially any kind of numeric operation). Translating your model to C++ will
-usually not make it magically faster, and you may often not notice any
-significant performance gain at all! The problem the C++ frontend solves is not
-a performance problem. The problem it solves is being able to write friendly,
-flexible and intuitive machine learning applications in environments where C++
-is your language of choice, or necessity. If you would prefer to write Python,
+* **Prioritize flexibility and user-friendliness over micro-optimization.**
+  In C++, you can often get optimal code, but at the cost of an extremely
+  unfriendly user experience.  Flexibility and dynamism is at the heart of
+  PyTorch, and the C++ frontend seeks to preserve this experience, in some
+  cases sacrificing performance (or "hiding" performance knobs) to keep APIs
+  simple and explicable.  We want researchers who don't write C++ for a living
+  to be able to use our APIs.
+
+A word of warning: Python is not necessarily slower than
+C++! The Python frontend calls into C++ for almost anything computationally expensive
+(especially any kind of numeric operation), and these operations will take up
+the bulk of time spent in a program.  If you would prefer to write Python,
 and can afford to write Python, we recommend using the Python interface to
-PyTorch. However, if you would prefer to write C++, or need to write C++, the
+PyTorch. However, if you would prefer to write C++, or need to write C++
+(because of multithreading, latency or deployment requirements), the
 C++ frontend to PyTorch provides an API that is approximately as convenient,
 flexible, friendly and intuitive as its Python counterpart. The two frontends
 serve different use cases, work hand in hand, and neither is meant to
@@ -154,5 +142,5 @@ Installation
 ------------
 
 Instructions on how to install the C++ frontend library distribution, including
-an example for how to build a minimal application depending on LibTorch, may be
+an example for how to build a minimal application depending on libtorch, may be
 found by following `this <https://pytorch.org/cppdocs/installation.html>`_ link.
