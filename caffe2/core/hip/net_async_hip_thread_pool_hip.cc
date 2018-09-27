@@ -55,6 +55,6 @@ GetAsyncNetHIPThreadPool(int hip_gpu_id, int pool_size, bool create_new) {
   }
 }
 
-CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, HIP, GetAsyncNetHIPThreadPool);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, HIP, GetAsyncNetHIPThreadPool);
 
 } // namespace caffe2

@@ -1,3 +1,6 @@
+#ifndef C10_MACROS_EXPORT_H_
+#define C10_MACROS_EXPORT_H_
+
 /* Header file to define the common scaffolding for exported symbols.
  *
  * Export is by itself a quite tricky situation to deal with, and if you are
@@ -8,8 +11,6 @@
  *
  * Do NOT include this file directly. Instead, use c10/macros/Macros.h
  */
-
-#pragma once
 
 // You do not need to edit this part of file unless you are changing the core
 // pytorch export abstractions.
@@ -74,3 +75,5 @@
 #else
 #define CAFFE2_API C10_IMPORT
 #endif
+
+#endif // C10_MACROS_MACROS_H_
