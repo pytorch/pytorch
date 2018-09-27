@@ -43,7 +43,7 @@ class AsyncSimpleNet : public NetBase {
 
   vector<unique_ptr<OperatorBase>> operators_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(AsyncSimpleNet);
+  C10_DISABLE_COPY_AND_ASSIGN(AsyncSimpleNet);
 };
 
 } // namespace caffe2

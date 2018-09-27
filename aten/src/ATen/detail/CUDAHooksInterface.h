@@ -47,7 +47,7 @@ constexpr const char* CUDA_HELP =
 // TODO: Consider putting the stub definitions in another class, so that one
 // never forgets to implement each virtual function in the real implementation
 // in CUDAHooks.  This probably doesn't buy us much though.
-struct AT_API CUDAHooksInterface {
+struct CAFFE2_API CUDAHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
   virtual ~CUDAHooksInterface() {}
@@ -129,14 +129,14 @@ struct AT_API CUDAHooksInterface {
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument
 // for the "..." in a variadic macro"
-struct AT_API CUDAHooksArgs {};
+struct CAFFE2_API CUDAHooksArgs {};
 
 AT_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 #define REGISTER_CUDA_HOOKS(clsname) \
   AT_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
-AT_API const CUDAHooksInterface& getCUDAHooks();
+CAFFE2_API const CUDAHooksInterface& getCUDAHooks();
 
 /// This class exists to let us access `cudaSetDevice`, `cudaGetDevice` and CUDA
 /// error handling functions, when CUDA is available. These functions will first
@@ -144,7 +144,7 @@ AT_API const CUDAHooksInterface& getCUDAHooks();
 /// the `cudaSetDevice`/`cudaGetDevice` functions. This allows us to access them
 /// with only a single pointer indirection, while virtual dispatch would require
 /// two (one for the virtual call, one for `cudaSetDevice`/`cudaGetDevice`).
-struct AT_API DynamicCUDAInterface {
+struct CAFFE2_API DynamicCUDAInterface {
   static void (*set_device)(int32_t);
   static void (*get_device)(int32_t*);
   static void (*unchecked_set_device)(int32_t);

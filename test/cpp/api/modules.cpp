@@ -134,7 +134,7 @@ TEST_F(ModulesTest, SimpleContainer) {
   ASSERT_EQ(x.ndimension(), 2);
   ASSERT_EQ(x.size(0), 1000);
   ASSERT_EQ(x.size(1), 100);
-  ASSERT_EQ(x.min().toCFloat(), 0);
+  ASSERT_EQ(x.min().item<float>(), 0);
 }
 
 TEST_F(ModulesTest, EmbeddingBasic) {
@@ -181,12 +181,12 @@ TEST_F(ModulesTest, Dropout) {
   y.backward();
   ASSERT_EQ(y.ndimension(), 1);
   ASSERT_EQ(y.size(0), 100);
-  ASSERT_LT(y.sum().toCFloat(), 130); // Probably
-  ASSERT_GT(y.sum().toCFloat(), 70); // Probably
+  ASSERT_LT(y.sum().item<float>(), 130); // Probably
+  ASSERT_GT(y.sum().item<float>(), 70); // Probably
 
   dropout->eval();
   y = dropout->forward(x);
-  ASSERT_EQ(y.sum().toCFloat(), 100);
+  ASSERT_EQ(y.sum().item<float>(), 100);
 }
 
 TEST_F(ModulesTest, Parameters) {
@@ -228,15 +228,15 @@ TEST_F(ModulesTest, FunctionalCallsSuppliedFunction) {
 
 TEST_F(ModulesTest, FunctionalWithTorchFunction) {
   auto functional = Functional(torch::relu);
-  ASSERT_EQ(functional(torch::ones({})).toCFloat(), 1);
-  ASSERT_EQ(functional(torch::ones({})).toCFloat(), 1);
-  ASSERT_EQ(functional(torch::ones({}) * -1).toCFloat(), 0);
+  ASSERT_EQ(functional(torch::ones({})).item<float>(), 1);
+  ASSERT_EQ(functional(torch::ones({})).item<float>(), 1);
+  ASSERT_EQ(functional(torch::ones({}) * -1).item<float>(), 0);
 }
 
 TEST_F(ModulesTest, FunctionalArgumentBinding) {
   auto functional =
       Functional(torch::elu, /*alpha=*/1, /*scale=*/0, /*input_scale=*/1);
-  ASSERT_EQ(functional(torch::ones({})).toCFloat(), 0);
+  ASSERT_EQ(functional(torch::ones({})).item<float>(), 0);
 }
 
 TEST_F(ModulesTest, BatchNormStateful) {

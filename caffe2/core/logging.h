@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include <ATen/core/Error.h>
+#include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
 
 // CAFFE2_LOG_THRESHOLD is a compile time flag that would allow us to turn off

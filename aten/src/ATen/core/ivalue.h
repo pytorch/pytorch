@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorImpl.h>
 #include <ATen/core/UndefinedTensorImpl.h>
+#include <ATen/core/blob.h>
 #include <ATen/core/intrusive_ptr.h>
 
 #include <type_traits>
@@ -14,7 +15,7 @@ template <typename T>
 using Shared = c10::intrusive_ptr<T>;
 
 // string
-struct AT_API ConstantString final : c10::intrusive_ptr_target {
+struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
  private:
   const std::string str_;
  public:
@@ -27,14 +28,14 @@ struct AT_API ConstantString final : c10::intrusive_ptr_target {
   operator const std::string & () const {
     return string();
   }
-  AT_API friend std::ostream& operator<<(
+  CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const ConstantString& v);
 };
 
 // non-mutable list
 template <typename Elem>
-struct AT_CORE_EXPORT ConstantList final : c10::intrusive_ptr_target {
+struct C10_EXPORT ConstantList final : c10::intrusive_ptr_target {
  private:
   const std::vector<Elem> elements_;
  public:
@@ -64,10 +65,12 @@ using DoubleList = ConstantList<double>;
 // to mark whether that type is a subtype of c10::intrusive_ptr_target and needs
 // retain/release calls.
 
-#define TORCH_FORALL_TAGS(_) \
-  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
+#define TORCH_FORALL_TAGS(_)                                             \
+  _(None)                                                                \
+  _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) \
+      _(TensorList) _(Blob)
 
-struct AT_API IValue final {
+struct CAFFE2_API IValue final {
   IValue()
   : payload{0}
   , tag(Tag::None)
@@ -123,6 +126,25 @@ struct AT_API IValue final {
   at::Tensor toTensor() const & {
     AT_ASSERT(isTensor());
     return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
+  }
+
+  IValue(caffe2::Blob blob) : tag(Tag::Blob), is_intrusive_ptr(true) {
+    // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
+    // and
+    //      store it as a Tensor instead.
+    payload.as_intrusive_ptr =
+        c10::make_intrusive<caffe2::Blob>(std::move(blob)).release();
+  }
+  bool isBlob() const {
+    return Tag::Blob == tag;
+  }
+  caffe2::Blob& toBlob() & {
+    AT_ASSERT(isBlob());
+    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
+  }
+  const caffe2::Blob& toBlob() const& {
+    AT_ASSERT(isBlob());
+    return *static_cast<caffe2::Blob*>(payload.as_intrusive_ptr);
   }
 
   // Tuple
@@ -277,7 +299,9 @@ struct AT_API IValue final {
   template<typename T>
   T to() const &;
 
-  AT_API friend std::ostream& operator<<(std::ostream& out, const IValue& v);
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const IValue& v);
 
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode

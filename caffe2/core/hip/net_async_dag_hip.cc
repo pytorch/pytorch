@@ -58,7 +58,7 @@ class ProfiledRange
     ProfiledRange(const OperatorDef& def, Color color) {}
 
     private:
-    AT_DISABLE_COPY_AND_ASSIGN(ProfiledRange);
+     C10_DISABLE_COPY_AND_ASSIGN(ProfiledRange);
 };
 
 } // namespace

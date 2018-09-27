@@ -30,9 +30,11 @@ if not TEST_CUDA:
     TestCase = object  # noqa: F811
 
 TEST_MAGMA = TEST_CUDA
+TEST_LARGE_TENSOR = TEST_CUDA
 if TEST_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     TEST_MAGMA = torch.cuda.has_magma
+    TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 9e9
 
 floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
                 torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
@@ -889,23 +891,20 @@ class TestCuda(TestCase):
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
     def test_mul_intertype_scalar(self):
-        x = torch.tensor(1.5, device='cuda')
-        y = torch.tensor(3, dtype=torch.int32, device='cuda')
+        def test_mul(dtype):
+            x = torch.tensor(1.5, dtype=dtype, device='cuda')
+            y = torch.tensor(3, dtype=torch.int32, device='cuda')
 
-        self.assertEqual(x * y, 4.5)
-        self.assertEqual(y * x, 4.5)
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            y *= x
-        x *= y
-        self.assertEqual(x, 4.5)
-
-        x = torch.tensor(1.5, device='cuda', dtype=torch.float16)
-        self.assertEqual(x * y, 4.5)
-        # half * int currently promotes to double
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
+            self.assertEqual(x * y, 4.5)
+            self.assertEqual(y * x, 4.5)
+            with self.assertRaisesRegex(RuntimeError, 'expected type'):
+                y *= x
             x *= y
-        with self.assertRaisesRegex(RuntimeError, 'expected type'):
-            y *= x
+            self.assertEqual(x, 4.5)
+
+        test_mul(torch.float16)
+        test_mul(torch.float32)
+        test_mul(torch.float64)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     @skipIfRocm
@@ -917,6 +916,28 @@ class TestCuda(TestCase):
 
     def test_neg(self):
         TestTorch._test_neg(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_arithmetic_large_tensor(self):
+        x = torch.empty(2**30, device='cuda')
+
+        x.fill_(1)
+        self.assertEqual(x.sum(), 2**30)
+
+        x += 1
+        self.assertEqual(x.sum(), 2**31)
+
+        x.fill_(1)
+        x -= 0.5
+        self.assertEqual(x.sum(), 2**29)
+
+        x.fill_(1)
+        x *= 2
+        self.assertEqual(x.sum(), 2**31)
+
+        x.fill_(1)
+        x /= 2
+        self.assertEqual(x.sum(), 2**29)
 
     def _test_broadcast(self, input):
         if not TEST_MULTIGPU:
