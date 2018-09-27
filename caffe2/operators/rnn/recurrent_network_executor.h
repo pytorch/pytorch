@@ -111,10 +111,10 @@ class RecurrentNetworkExecutorBase {
       // the forward-only mode.
       std::string this_timestep_blob =
           timestep_blob_ + "_rnnexec_t" + caffe2::to_string(t);
-      ws->CreateBlob(this_timestep_blob)->GetMutableTensor(CPU)->Resize(1);
+      BlobGetMutableTensor(ws->CreateBlob(this_timestep_blob), CPU)->Resize(1);
       auto b = ws->GetBlob(this_timestep_blob);
       CAFFE_ENFORCE(b);
-      b->GetMutableTensor(CPU)->template mutable_data<int32_t>()[0] = t;
+      BlobGetMutableTensor(b, CPU)->template mutable_data<int32_t>()[0] = t;
 
       // Copy the operators from template
       for (auto& template_rnn_op : timestep_ops_template_) {

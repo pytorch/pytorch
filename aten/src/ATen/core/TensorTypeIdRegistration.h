@@ -16,7 +16,7 @@
 
 namespace at {
 
-class AT_CORE_API TensorTypeIdCreator final {
+class CAFFE2_API TensorTypeIdCreator final {
  public:
   TensorTypeIdCreator();
 
@@ -29,10 +29,10 @@ class AT_CORE_API TensorTypeIdCreator final {
  private:
   std::atomic<details::_tensorTypeId_underlyingType> last_id_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdCreator);
 };
 
-class AT_CORE_API TensorTypeIdRegistry final {
+class CAFFE2_API TensorTypeIdRegistry final {
  public:
   TensorTypeIdRegistry();
 
@@ -43,10 +43,10 @@ class AT_CORE_API TensorTypeIdRegistry final {
   std::unordered_set<at::TensorTypeId> registeredTypeIds_;
   std::mutex mutex_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistry);
 };
 
-class AT_CORE_API TensorTypeIds final {
+class CAFFE2_API TensorTypeIds final {
  public:
   static TensorTypeIds& singleton();
 
@@ -61,14 +61,14 @@ class AT_CORE_API TensorTypeIds final {
   TensorTypeIdCreator creator_;
   TensorTypeIdRegistry registry_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIds);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIds);
 };
 
 inline constexpr at::TensorTypeId TensorTypeIds::undefined() noexcept {
   return TensorTypeIdCreator::undefined();
 }
 
-class AT_CORE_API TensorTypeIdRegistrar final {
+class CAFFE2_API TensorTypeIdRegistrar final {
  public:
   TensorTypeIdRegistrar();
   ~TensorTypeIdRegistrar();
@@ -78,14 +78,15 @@ class AT_CORE_API TensorTypeIdRegistrar final {
  private:
   at::TensorTypeId id_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistrar);
+  C10_DISABLE_COPY_AND_ASSIGN(TensorTypeIdRegistrar);
 };
 
 inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
   return id_;
 }
 
-#define AT_DECLARE_TENSOR_TYPE(TensorName) AT_CORE_API at::TensorTypeId TensorName();
+#define AT_DECLARE_TENSOR_TYPE(TensorName) \
+  CAFFE2_API at::TensorTypeId TensorName();
 
 #define AT_DEFINE_TENSOR_TYPE(TensorName)           \
   at::TensorTypeId TensorName() {                   \

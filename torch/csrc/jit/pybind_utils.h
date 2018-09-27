@@ -142,6 +142,7 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
       }
       case TypeKind::NumberType:
       case TypeKind::GeneratorType:
+      case TypeKind::VarType:
         break;
     }
   AT_ERROR("Missing cases in toIValue for type: ", type->str(), "! File a bug report.");
@@ -199,6 +200,14 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::cast(ivalue.toDoubleListRef());
   } else if (ivalue.isTensorList()) {
     return py::cast(ivalue.toTensorListRef());
+  } else if (ivalue.isGenericList()) {
+    auto list = ivalue.toGenericList();
+    const auto & elements = list->elements();
+    py::list t { elements.size() };
+    for (size_t i = 0; i < elements.size(); ++i) {
+      t[i] = toPyObject(IValue{elements[i]});
+    }
+    return t;
   } else if (ivalue.isTuple()) {
     auto tuple = ivalue.toTuple();
     const auto & elements = tuple->elements();

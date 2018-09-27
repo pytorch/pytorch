@@ -533,6 +533,7 @@ public:
   Tensor mv(const Tensor & vec) const;
   Tensor mvlgamma(int64_t p) const;
   Tensor & mvlgamma_(int64_t p);
+  Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntList dims) const;
   Tensor pin_memory() const;

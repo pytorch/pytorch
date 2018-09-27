@@ -72,11 +72,10 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
     AT_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
     int64_t channel_size = 1; // channel_size default to 1
-    int64_t input_dim0_size = 1, input_stride0 = 1, input_stride1 = 1;
+    int64_t input_stride0 = 1, input_stride1 = 1;
 
     if (input_ndim > 1) {
       channel_size = input.size(1); // channel is the 2nd dim of input
-      input_dim0_size = input.size(0);
       input_stride0 = strides[0];
       input_stride1 = strides[1];
     }
@@ -189,11 +188,10 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
     AT_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
     int64_t channel_size = 1; // channel_size default to 1
-    int64_t input_dim0_size = 1, input_stride0 = 1, input_stride1 = 1;
+    int64_t input_stride0 = 1, input_stride1 = 1;
 
     if (input_ndim > 1) {
       channel_size = input.size(1); // channel is the 2nd dim of input
-      input_dim0_size = input.size(0);
       input_stride0 = strides[0];
       input_stride1 = strides[1];
     }
