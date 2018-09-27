@@ -41,8 +41,8 @@ class MKLPoolOp final : public ConvPoolOpBase<MKLContext> {
   // Input: X
   // Output: Y
  private:
-  vector<TIndex> cached_input_dims_;
-  // vector<TIndex> cached_avgpool_input_dims_;
+  vector<int64_t> cached_input_dims_;
+  // vector<int64_t> cached_avgpool_input_dims_;
   LayoutWrapper<T> workspace_layout_;
   std::unique_ptr<MKLWorkspace<T>> workspace_buffer_;
   PrimitiveWrapper<T> primitive_;

@@ -51,7 +51,7 @@ class MIOPEN_LRNOP final : public Operator<HIPContext> {
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t data_desc_;
   miopenLRNDescriptor_t norm_desc_;
-  vector<TIndex> miopen_input_dims_;
+  vector<int64_t> miopen_input_dims_;
   const miopenLRNMode_t mode_;
   const int size_;
   const float alpha_;
@@ -103,7 +103,7 @@ class MIOPENLRNGradientOp final : public Operator<HIPContext> {
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t data_desc_;
   miopenLRNDescriptor_t norm_desc_;
-  vector<TIndex> miopen_input_dims_;
+  vector<int64_t> miopen_input_dims_;
   const miopenLRNMode_t mode_;
   const int size_;
   const float alpha_;

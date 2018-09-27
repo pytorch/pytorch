@@ -23,7 +23,8 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
-from test_autograd import method_tests, create_input, unpack_variables, \
+from test_autograd import method_tests as autograd_method_tests
+from test_autograd import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
@@ -530,6 +531,21 @@ class TestJit(JitTestCase):
         m = MyModule()
         input = torch.rand(3, 4)
         self.assertEqual(2 * input + 1, m(input))
+
+    def test_diff_subgraph_clones_constants(self):
+        @torch.jit.script
+        def f(x, y):
+            return x + x + y + x + y + x + y + x + y + x
+
+        def count_constants(graph):
+            return sum(node.kind() == 'prim::Constant' for node in graph.nodes())
+
+        graph = f.graph.copy()
+        self.run_pass('cse', graph)
+        self.run_pass('create_autodiff_subgraphs', graph)
+        nodes = list(graph.nodes())
+        self.assertEqual(count_constants(graph), 1)
+        self.assertEqual(count_constants(nodes[1].g('Subgraph')), 1)
 
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
@@ -1208,13 +1224,18 @@ class TestJit(JitTestCase):
 
             def fn(x):
                 return x + torch.ones(2, 3, **kwargs)
-            input = torch.ones(2, 3, **kwargs)
+
+            input_kwargs = kwargs.copy()
+            if 'out' in input_kwargs:
+                del input_kwargs['out']
+            input = torch.ones(2, 3, **input_kwargs)
             self.checkTrace(fn, (input,), inputs_require_grads=inputs_require_grads)
             # check we recorded 'ones' and did not just record a constant
             tfn = torch.jit.trace(fn, input)
             self.assertTrue("ones" in str(tfn.graph))
         run()
         run(dtype=torch.int, inputs_require_grads=False)
+        run(out=torch.tensor([]))
         if RUN_CUDA:
             run(device="cuda:0")
         if RUN_CUDA_MULTI_GPU:
@@ -1590,18 +1611,6 @@ class TestJit(JitTestCase):
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
 
-    def test_addmm_fusion_scalar_type(self):
-        @torch.jit.script
-        def addmm(a, b, c):
-            return a + b.mm(c)
-
-        a, b, c = [torch.tensor(e) for e in (1, [[2.]], [[3.]])]
-        addmm(a, b, c)
-        graph = addmm.graph_for(a, b, c)
-        # graph fusion skipped in windows, which runs cse
-        self.run_pass('cse', graph)
-        self.assertExpectedGraph(graph)
-
     def test_index_put(self):
         ten = torch.zeros(3, 3)
         mask = torch.Tensor([[True, True, True],
@@ -1629,13 +1638,22 @@ class TestJit(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
             sparse(get_sparse())
 
-        # has a different entry point than calling sparse directly
-        with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
-            torch._C._jit_pass_shape_analysis(
-                sparse.graph, (get_sparse(),), False)
-
         with self.assertRaisesRegex(RuntimeError, "sparse tensors not supported"):
             sparse(torch.tensor([1]))
+
+    def test_tuple_specialization(self):
+        @torch.jit.script
+        def f(t):
+            # type: (Tuple[Tensor, Tensor]) -> Tensor
+            x, y = t
+            return x + y
+
+        t = torch.randn(2, 2), torch.randn(2, 2)
+        f(t)
+        graph = f.graph_for(t)
+        input_types = list(next(graph.inputs()).type().elements())
+        for t in input_types:
+            self.assertEqual(t.kind(), 'TensorType')
 
     def test_constant_prop_simple(self):
         @torch.jit.script
@@ -2627,18 +2645,23 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
-    def test_nested_list_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
-            @torch.jit.script
-            def foo(x):
-                # type: (Tuple[List[List[int]]]) -> int
-                return 4
+    def test_nested_list(self):
+        def foo(z):
+            # type: (Tuple[int, List[List[int]]]) -> int
+            x, y = z
+            return y[0][1]
+        self.checkScript(foo, ((1, [[1, 2], [3, 4]]),))
 
-    def test_nested_list_construct_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
+    def test_nested_list_construct(self):
+        def foo():
+            return [[4]] + [[4, 5]]
+        self.checkScript(foo, ())
+
+    def test_generic_list_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
             def foo(x):
-                return [[4]]
+                return [[x]] + [[1]]
 
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
@@ -3460,6 +3483,18 @@ a")
         real_outs = cu.test_view_shape_prop(*inputs)
         self.assertEqual(real_outs, outputs)
 
+    def test_view_listconstruct_shape_prop(self):
+        def fn(x):
+            B = x.size(0)
+            C = x.size(1)
+            T = x.size(2)
+            return x.view(T, B, C)
+
+        x = torch.randn(3, 1, 5, requires_grad=True)
+        graph = torch.jit.script(fn).graph
+        torch._C._jit_pass_shape_analysis(graph, (x,), False)
+        self.assertTrue(next(graph.outputs()).type().kind() != 'DynamicType')
+
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
         def test_integral_shape_inference(a):
@@ -3492,7 +3527,7 @@ a")
     @enable_cpu_fuser
     def test_scalar_fusion(self):
         def fn(x, y):
-            return x + y.type_as(x)
+            return 2 * x + y
 
         x = torch.tensor(0.1, dtype=torch.float, device='cpu')
         y = torch.tensor(1, dtype=torch.float, device='cpu')
@@ -7639,6 +7674,18 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
+
+    # The following fail due to #12024.
+    # A prim::ListConstruct is involved and the indices get traced as DynamicType,
+    # which always require_grad. This causes a crash in autodiff.
+    'test___getitem___adv_index',
+    'test___getitem___adv_index_beg',
+    'test___getitem___adv_index_comb',
+    'test___getitem___adv_index_dup',
+    'test___getitem___adv_index_sub',
+    'test___getitem___adv_index_sub_2',
+    'test___getitem___adv_index_sub_3',
+    'test___getitem___adv_index_var',
 }
 
 EXCLUDE_TYPE_CHECK = {
@@ -7677,14 +7724,9 @@ EXCLUDE_SCRIPT = {
     'test_var_dim_1d',
     'test_var_dim_1d_neg0',
     'test_var_dim_neg0',
-    'test_norm_inf',
-    'test_norm_inf_2_dim',
     'test_norm_fro',
     'test_norm_fro_default',
     'test_norm_nuc',
-    'test_renorm_norm_inf',
-    'test_matrix_power_n=-1',  # involves inverse
-    'test_matrix_power_n=-3',  # involves inverse
     # skipped nn functional tests
     # ops involves sampling which could not test
     'test_nn_dropout',
@@ -7754,11 +7796,17 @@ def partial_apply_nontensors(fn, args, **kwargs):
 
 
 # create a trace function from input fn
-def create_traced_fn(self, fn):
+#
+# disable_autodiff_subgraph_inlining:
+#   Don't inline autodiff subgraphs so we can test autodiff
+def create_traced_fn(self, fn,
+                     disable_autodiff_subgraph_inlining=False):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(fn_tensors, inputs_tensors)
         self.assertExportImport(traced.graph, inputs_tensors)
+        if disable_autodiff_subgraph_inlining:
+            traced.debug_disable_autodiff_subgraph_inlining()
         output = traced(*inputs_tensors)
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)
         return output
@@ -7779,7 +7827,8 @@ def get_constant(x):
 # create a script function from (name, func_type, output_process_fn),
 # returns a function takes in (args, kwargs) and runs the compiled function and
 # then applies the post process fn to the outputs
-def create_script_fn(self, method_name, func_type, output_process_fn):
+def create_script_fn(self, method_name, func_type, output_process_fn,
+                     disable_autodiff_subgraph_inlining=False):
     def script_fn(*args, **kwargs):
         formals = []
         tensors = []
@@ -7810,6 +7859,8 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
         import math
 
         CU = torch.jit.CompilationUnit(script)
+        if disable_autodiff_subgraph_inlining:
+            CU.the_method.debug_disable_autodiff_subgraph_inlining()
         self.assertExportImport(CU.the_method.graph, tensors)
         output = output_process_fn(CU.the_method(*tensors))
         script_fn.last_graph = CU.the_method.graph_for(*tensors)
@@ -8147,7 +8198,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
 ])
 
 
-def add_test(
+def add_autograd_test(
         name,
         self_size,
         args,
@@ -8190,14 +8241,20 @@ def add_test(
                 check_types = test_name not in EXCLUDE_TYPE_CHECK
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
+                    # Test with disable_autodiff_subgraph_inlining, which forces the graph
+                    # to contain DifferentiableGraph nodes whenever possible. This allows us
+                    # to test autodiff; we assume that autograd is correct and use autodiff for backprop
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(self, fn),
+                        check_against_reference(self,
+                                                create_traced_fn(self, fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(self, name, 'method', output_process_fn),
+                                                create_script_fn(self, name, 'method', output_process_fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
 
@@ -8211,12 +8268,15 @@ def add_test(
                     f_args_tensor = (self_tensor,) + args_tensor
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(self, fn), fn,
-                                                f_args_variable, kwargs_variable, check_types=check_types)
+                        check_against_reference(self,
+                                                create_traced_fn(self, fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
+                                                fn, f_args_variable, kwargs_variable, check_types=check_types)
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(self, name, 'functional', output_process_fn),
+                                                create_script_fn(self, name, 'functional', output_process_fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
                                                 fn, f_args_variable, kwargs_variable,
                                                 check_types=check_types)
 
@@ -8271,8 +8331,8 @@ def post_add_test(test_name, skipTestIf, do_test):
         setattr(TestJitGenerated, test_name, do_test)
 
 
-for test in method_tests:
-    add_test(*test)
+for test in autograd_method_tests:
+    add_autograd_test(*test)
 
 for test in nn_functional_tests:
     add_nn_test(*test)

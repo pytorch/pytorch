@@ -59,10 +59,10 @@ static inline void pop(Stack& stack, Types&... args) {
   drop(stack, N);
 }
 template<typename... Types>
-static inline void push(Stack& stack, Types... args) {
+static inline void push(Stack& stack, Types&&... args) {
   constexpr size_t N = sizeof...(args);
   int result[N] = {
-    (stack.push_back(std::forward<Types>(args)), 0)...
+    (stack.emplace_back(std::forward<Types>(args)), 0)...
   };
   (void) result;
 }
@@ -73,7 +73,7 @@ static inline void push(Stack& stack, Types... args) {
 // pack takes the return values of aten functions pushes them onto the stack
 template<typename T>
 inline void pack(Stack & stack, T&& v) {
-  stack.push_back(IValue(std::move(v)));
+  stack.emplace_back(std::move(v));
 }
 
 template<std::size_t remaining, typename... Args>

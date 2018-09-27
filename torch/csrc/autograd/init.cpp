@@ -50,11 +50,6 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   });
   m.def("_pop_range", []() { torch::autograd::profiler::popRange(); });
 
-  /// TODO: Replace this ASAP with a better solution for deep autograd graphs!
-  m.def("_unsafe_set_delete_function_max_recursion_depth", [](size_t value) {
-    torch::autograd::deleteFunctionMaxRecursionDepth = value;
-  });
-
   Py_RETURN_TRUE;
 }
 

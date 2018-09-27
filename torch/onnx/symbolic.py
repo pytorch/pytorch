@@ -130,6 +130,15 @@ def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
 
+def _try_get_scalar_type(*args):
+    for arg in args:
+        try:
+            return arg.type().scalarType()
+        except RuntimeError:
+            pass
+    return None
+
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
@@ -241,7 +250,7 @@ def stack(g, tensor_list, dim):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = self.type().scalarType().lower()
+    ty = _try_get_scalar_type(self, other).lower()
     C = g.constant(0, [1], ty)
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
@@ -966,11 +975,22 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('v', 'i', 'i', 'v')
+@parse_args('v', 'i', 'v', 'v')
 def zeros(g, shape, scalar_type, layout, device):
     # NOTE: no way to set device in ONNX, so we ignore it
     return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
                 input_as_shape_i=1, value_f=0)
+
+
+def full(g, shape, value, scalar_type, layout, device):
+    const_value = _maybe_get_const(value, 't')
+    if _is_value(const_value):
+        tmp = zeros(shape, scalar_type, layout, device)
+        return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
+    else:
+        scalar_type = _get_const(scalar_type, 'i', 'dtype')
+        return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
+                    input_as_shape_i=1, value_f=const_value)
 
 
 def full_like(g, input, fill_value):

@@ -31,7 +31,7 @@ void LBFGS::add_grad(const torch::Tensor& step_size, const Tensor& update) {
     Tensor& pd = autograd::Variable(parameter).data();
     pd.add_(
         update.slice(0, offset, offset + numel, 1).view_as(pd),
-        step_size.toCFloat());
+        step_size.item<float>());
     offset += numel;
   }
 }
@@ -45,7 +45,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
   Tensor flat_grad = gather_flat_grad();
   Tensor abs_grad_sum = flat_grad.abs().sum();
 
-  if (abs_grad_sum.toCFloat() <= options.tolerance_grad_) {
+  if (abs_grad_sum.item<float>() <= options.tolerance_grad_) {
     return loss;
   }
 
@@ -65,7 +65,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       Tensor s = d.mul(t);
       Tensor ys = y.dot(s);
 
-      if (ys.toCFloat() > 1e-10) {
+      if (ys.item<float>() > 1e-10) {
         // updating memory
 
         if (old_dirs.size() == options.history_size_) {
@@ -140,14 +140,15 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       break;
     } else if (current_evals >= options.max_eval_) {
       break;
-    } else if (abs_grad_sum.toCFloat() <= options.tolerance_grad_) {
+    } else if (abs_grad_sum.item<float>() <= options.tolerance_grad_) {
       break;
-    } else if (gtd.toCFloat() > -options.tolerance_grad_) {
-      break;
-    } else if (d.mul(t).abs_().sum().toCFloat() <= options.tolerance_change_) {
+    } else if (gtd.item<float>() > -options.tolerance_grad_) {
       break;
     } else if (
-        std::abs(loss.toCFloat() - prev_loss.toCFloat()) <
+        d.mul(t).abs_().sum().item<float>() <= options.tolerance_change_) {
+      break;
+    } else if (
+        std::abs(loss.item<float>() - prev_loss.item<float>()) <
         options.tolerance_change_) {
       break;
     }

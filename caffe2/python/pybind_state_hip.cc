@@ -74,7 +74,7 @@ void addHIPObjectMethods(py::module& m) {
           [](const DLPackWrapper<HIPContext>& t) { return t.tensor->dims(); })
       .def(
           "_reshape",
-          [](DLPackWrapper<HIPContext>* t, std::vector<TIndex> dims) {
+          [](DLPackWrapper<HIPContext>* t, std::vector<int64_t> dims) {
             t->tensor->Resize(dims);
           });
 }

@@ -26,11 +26,11 @@ enum class DeviceType : int32_t {
   ONLY_FOR_TEST = 20901701, // This device type is only for test.
 };
 
-AT_CORE_API std::string DeviceTypeName(
+CAFFE2_API std::string DeviceTypeName(
     at::DeviceType d,
     bool lower_case = false);
 
-AT_CORE_API std::ostream& operator<<(std::ostream& stream, at::DeviceType type);
+CAFFE2_API std::ostream& operator<<(std::ostream& stream, at::DeviceType type);
 
 } // namespace at
 

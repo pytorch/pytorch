@@ -114,14 +114,7 @@ void PropagateRequiresGrad(Block * block) {
 
 } // anonymous namespace
 
-void PropagateRequiresGrad(std::shared_ptr<Graph>& graph, const ArgumentSpec & spec) {
-  auto inputs = graph->inputs();
-  JIT_ASSERT(spec.size() == inputs.size());
-  for (size_t i = 0; i < spec.size(); ++i) {
-    auto & arg = spec.at(i);
-    if (!arg.isTensor()) continue;
-    setRequiresGrad(inputs[i], arg.requires_grad());
-  }
+void PropagateRequiresGrad(std::shared_ptr<Graph>& graph) {
   PropagateRequiresGrad(graph->block());
 }
 

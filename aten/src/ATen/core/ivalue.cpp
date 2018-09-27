@@ -2,11 +2,22 @@
 #include <ATen/core/Formatting.h>
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
+  _(None) \
+  _(Tensor) \
+  _(Double) \
+  _(Int) \
+  _(Tuple) \
+  _(IntList) \
+  _(DoubleList) \
+  _(String) \
+  _(TensorList) \
+  _(Blob) \
+  _(GenericList)
 
 namespace torch { namespace jit {
 
-AT_API c10::intrusive_ptr<ConstantString> ConstantString::create(std::string str_) {
+CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+    std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
 
