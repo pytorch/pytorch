@@ -12,12 +12,6 @@ namespace at {
 /// A wrapper over a thread local TensorOptions instance.
 /// INVARIANT: all fields are NOT nullopt
 struct DefaultTensorOptions {
-  /// Returns the current thread local default options.
-  /// Defined in OptionsGuard.cpp because we can't use optional in headers, due
-  /// to Windows and other compilers.
-  /// TODO: The inability to use optional in headers is no longer true
-  CAFFE2_API static DefaultTensorOptions& get();
-
   DefaultTensorOptions() {}
   DefaultTensorOptions(const DefaultTensorOptions&) = default;
   DefaultTensorOptions& operator=(const DefaultTensorOptions&) = default;
@@ -55,23 +49,12 @@ struct DefaultTensorOptions {
   Layout layout_ = at::kStrided;
   bool requires_grad_ = false;
   bool is_variable_ = false;
-
-// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-// thread_local is not supported.  In that case, we don't provide
-// an OptionsGuard; and force you to pass around options manually.
-#if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-
-  /// This is an optional because of compiler bugs that mis-initialize static
-  /// thread local variables. The workaround is lazy initialization, i.e.
-  /// `DefaultTensorOptions::get()` will initialize the `options_` to a proper
-  /// value upon first invocation.
-  /// https://gcc.gnu.org/ml/gcc-bugs/2013-12/msg00026.html
-  static thread_local at::optional<DefaultTensorOptions> options_;
-
-#endif
 };
 
 #if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+
+/// Returns the current thread local default options.
+CAFFE2_API DefaultTensorOptions& getDefaultTensorOptions();
 
 /// RAII guard that stores the current default options upon construction, sets
 /// the current default options to the ones given to its constructor, and
@@ -82,13 +65,13 @@ struct DefaultTensorOptions {
 struct OptionsGuard {
   /// Stores the current default options and sets them to the given ones.
   explicit OptionsGuard(const TensorOptions& options)
-      : original_(DefaultTensorOptions::get()) { // copy
-    DefaultTensorOptions::get().apply(options);
+      : original_(getDefaultTensorOptions()) { // copy
+    getDefaultTensorOptions().apply(options);
   }
 
   /// Restores the original default options.
   ~OptionsGuard() {
-    DefaultTensorOptions::get() = original_;
+    getDefaultTensorOptions() = original_;
   }
 
  private:
@@ -98,6 +81,9 @@ struct OptionsGuard {
 };
 
 #else // AT_MOBILE
+
+// Return the global, immutable default tensor options
+CAFFE2_API const DefaultTensorOptions& getDefaultTensorOptions();
 
 template<typename T = void>
 struct OptionsGuard {
