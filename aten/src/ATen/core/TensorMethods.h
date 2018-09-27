@@ -902,6 +902,9 @@ inline Tensor Tensor::mvlgamma(int64_t p) const {
 inline Tensor & Tensor::mvlgamma_(int64_t p) {
     return type().mvlgamma_(*this, p);
 }
+inline Tensor Tensor::narrow_copy(int64_t dim, int64_t start, int64_t length) const {
+    return type().narrow_copy(*this, dim, start, length);
+}
 inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
     return type().narrow(*this, dim, start, length);
 }
@@ -934,6 +937,12 @@ inline Tensor Tensor::relu() const {
 }
 inline Tensor & Tensor::relu_() {
     return type().relu_(*this);
+}
+inline Tensor Tensor::prelu(const Tensor & weight) const {
+    return type().prelu(*this, weight);
+}
+inline std::tuple<Tensor,Tensor> Tensor::prelu_backward(const Tensor & grad_output, const Tensor & weight) const {
+    return type().prelu_backward(grad_output, *this, weight);
 }
 inline Tensor Tensor::hardshrink(Scalar lambd) const {
     return type().hardshrink(*this, lambd);
@@ -1235,16 +1244,16 @@ inline Device Tensor::device() const {
         " but found ",                           \
         at::toString(type().scalarType()));      \
     return static_cast<T*>(this->data_ptr());    \
-  }                                              \
-  inline T* Tensor::to##name##Data() const {     \
-    return data<T>();                            \
   }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_CAST)
 #undef DEFINE_CAST
 
-#define DEFINE_TO_C_TYPE(T,name,_) \
-inline T Tensor::toC##name () const { return _local_scalar().to##name (); }
+#define DEFINE_TO_C_TYPE(T, name, _)   \
+  template <>                          \
+  inline T Tensor::item() const {      \
+    return _local_scalar().to##name(); \
+  }
 
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO_C_TYPE)
 #undef DEFINE_TO_C_TYPE

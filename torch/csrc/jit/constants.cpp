@@ -16,6 +16,9 @@ Value* insertConstant(
     if(!ref.defined()) {
       throw constant_not_supported_error("undefined tensors cannot become constants");
     }
+    if (ref.is_variable()) {
+      ref = autograd::Variable(ref).data();
+    }
     n->output()->inferTypeFrom(ref); // note: before t_ because of std::move(ref)
     n->t_(attr::value, std::move(ref));
   } else if(val.isInt()) {

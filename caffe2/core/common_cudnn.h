@@ -170,7 +170,7 @@ class cudnnTypeWrapper<double> {
 };
 
 template <>
-class cudnnTypeWrapper<float16> {
+class cudnnTypeWrapper<at::Half> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_HALF;
   typedef const float ScalingParamType;
@@ -258,7 +258,7 @@ class cudnnTensorDescWrapper {
   cudnnTensorFormat_t format_;
   cudnnDataType_t type_;
   vector<int> dims_;
-  AT_DISABLE_COPY_AND_ASSIGN(cudnnTensorDescWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(cudnnTensorDescWrapper);
 };
 
 class cudnnFilterDescWrapper {
@@ -312,7 +312,7 @@ class cudnnFilterDescWrapper {
   StorageOrder order_;
   cudnnDataType_t type_;
   vector<int> dims_;
-  AT_DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(cudnnFilterDescWrapper);
 };
 
 

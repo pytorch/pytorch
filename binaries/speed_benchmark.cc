@@ -16,6 +16,7 @@
 
 #include <string>
 
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -102,7 +103,7 @@ int main(int argc, char** argv) {
       for (int i = 0; i < input_names.size(); ++i) {
         caffe2::BlobProto blob_proto;
         CAFFE_ENFORCE(caffe2::ReadProtoFromFile(input_files[i], &blob_proto));
-        workspace->CreateBlob(input_names[i])->Deserialize(blob_proto);
+        DeserializeBlob(blob_proto, workspace->CreateBlob(input_names[i]));
       }
     } else if (caffe2::FLAGS_input_dims.size() || caffe2::FLAGS_input_type.size()) {
       CAFFE_ENFORCE_GE(
@@ -136,7 +137,7 @@ int main(int argc, char** argv) {
         if (blob == nullptr) {
           blob = workspace->CreateBlob(input_names[i]);
         }
-        caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
+        caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
         CHECK_NOTNULL(tensor);
         tensor->Resize(input_dims);
         if (input_type_list[i] == "uint8_t") {
@@ -201,7 +202,7 @@ int main(int argc, char** argv) {
           workspace->HasBlob(name),
           "You requested a non-existing blob: ",
           name);
-      string serialized = workspace->GetBlob(name)->Serialize(name);
+      string serialized = SerializeBlob(*workspace->GetBlob(name), name);
       string output_filename = output_prefix + name;
       caffe2::WriteStringToFile(serialized, output_filename.c_str());
     }

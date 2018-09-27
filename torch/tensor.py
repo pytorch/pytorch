@@ -241,6 +241,10 @@ class Tensor(torch._C._TensorBase):
         r"""See :func: `torch.argsort`"""
         return torch.argsort(self, dim, descending)
 
+    def norm(self, p="fro", dim=None, keepdim=False):
+        r"""See :func: `torch.norm`"""
+        return torch.norm(self, p, dim, keepdim)
+
     def btrifact(self, info=None, pivot=True):
         r"""See :func:`torch.btrifact`
         """

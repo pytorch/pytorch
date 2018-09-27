@@ -77,7 +77,7 @@ void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c) {
 
 int GetGPUIDForPointer(const void* ptr);
 
-vector<TIndex> GetTensorInfo(
+vector<int64_t> GetTensorInfo(
     const void* c,
     size_t* capacity,
     DeviceOption* device) {
@@ -86,7 +86,7 @@ vector<TIndex> GetTensorInfo(
   CHECK(tc);
   CHECK(tc->unsafeGetTensorImpl());
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
-  *capacity = tc->capacity_nbytes();
+  *capacity = tc->storage().capacity();
   tc->ExtractDeviceOption(device);
   return tc->dims();
 }

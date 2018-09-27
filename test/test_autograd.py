@@ -299,6 +299,33 @@ class TestAutograd(TestCase):
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
+    def test_grad_nonleaf_register_hook(self):
+        # This checks an edge case for register_hook.
+        # We want to capture grad of a nonleaf tensor,
+        # but avoid segfault during backward of other nonleaf tensors
+        x = torch.randn(5, requires_grad=True)
+        x_list = x.unbind()
+
+        x0 = x_list[0]
+        hook_results = [None]
+
+        def hook(grad):
+            hook_results[0] = grad
+        x0.register_hook(hook)
+
+        x_list[0].backward()
+        self.assertEqual(hook_results[0], torch.tensor(1.))
+        expected_grad = torch.tensor([1., 0, 0, 0, 0])
+        self.assertEqual(x.grad, expected_grad)
+        self.assertIsNone(x_list[0].grad)
+
+        for i in range(1, 5, 1):
+            x_list[i].backward()
+            self.assertEqual(hook_results[0], None)
+            expected_grad[i] = 1.0
+            self.assertEqual(x.grad, expected_grad)
+            self.assertIsNone(x_list[i].grad)
+
     def test_sharded_grad(self):
         leaves = [torch.zeros(5, 5, requires_grad=True) for _ in range(10)]
         intermediates = [l * i + l * l for i, l in enumerate(leaves)]
@@ -2466,6 +2493,19 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_lstmcell_backward_only_one_output_grad(self):
+        # checks that undefined gradients doen't hamper the backward
+        # see #11872
+        dev = torch.device('cuda')
+        l = torch.nn.LSTMCell(2, 3).to(dev).double()
+        s = torch.randn(1, 2, device=dev, dtype=torch.double, requires_grad=True)
+        for i in range(2):
+            out = l(s)[i]
+            out.sum().backward()
+            self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
     def test_anomaly_detect_nan(self):
         size = 10
 
@@ -2997,16 +3037,28 @@ method_tests = [
     ('zero_', (), NO_ARGS, 'scalar'),
     ('logsumexp', (S, S), (1,)),
     ('logsumexp', (), (0,), 'scalar'),
-    ('norm', (S, S), (2,)),
+    ('norm', (S, S), (), 'default'),
+    ('norm', (S, S), (2,), '2'),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),
     ('norm', (S, S), (1,), '1'),
     ('norm', (S, S), (3,), '3'),
     ('norm', (S, S), (inf,), 'inf'),
+    ('norm', (S, S), ('fro',), 'fro_default'),
+    ('norm', (S, S), ('fro', [0, 1],), 'fro'),
+    ('norm', (S, S), ('nuc',), 'nuc'),
     ('norm', (S, S), (-1,), 'neg_1'),
+    ('norm', (S, S), (-2,), 'neg_2'),
     ('norm', (S, S), (-0.5,), 'neg_0_5'),
     ('norm', (S, S), (-1.5,), 'neg_1_5'),
-    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5'),
+    ('norm', (S, S), (-2, 1,), 'neg_2_2_dim', [1]),
+    ('norm', (S, S), (-1, 1,), 'neg_1_2_dim', [1]),
+    ('norm', (S, S), (0, 1,), '0_2_dim', [1]),
+    ('norm', (S, S), (1, 1,), '1_2_dim', [1]),
+    ('norm', (S, S), (2, 1,), '2_2_dim', [1]),
+    ('norm', (S, S), (3, 1,), '3_2_dim', [1]),
+    ('norm', (S, S), (inf, 1,), 'inf_2_dim'),
+    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5_default'),
     ('norm', (S, S, S), (2, 1), '2_dim', [1]),
     ('norm', (S, S, S), (3, 1), '3_dim', [1]),
     ('norm', torch.rand(S, S, S) + 5e-2, (1.5, 1), '1_5_dim', [1]),

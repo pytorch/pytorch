@@ -144,7 +144,7 @@ INPLACE_GUARD = CodeTemplate("""\
 jit::tracer::ensureUnique("${name}", ${mutable_input});
 """)
 
-ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${input}", ${input});""")
+ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
 if (tracer_state) {
@@ -152,6 +152,18 @@ if (tracer_state) {
   ${record_trace_outputs}
 }
 """)
+
+
+FACTORY_FUNCTION_NAMES = None
+
+
+def find_factory_functions(declarations):
+    global FACTORY_FUNCTION_NAMES
+    FACTORY_FUNCTION_NAMES = set()
+
+    for declaration in declarations:
+        if any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments']):
+            FACTORY_FUNCTION_NAMES.add(declaration['api_name'])
 
 
 def should_trace(declaration):
@@ -185,17 +197,30 @@ def record_trace_outputs(declaration):
 
 def format_trace(declaration):
     local = {}
+    local['trace_name'] = trace_name = uninplace_api_name(declaration['api_name'])
 
-    add_trace_inputs = []
-    for argument in declaration['arguments']:
-        add_trace_inputs.append(ADD_TRACE_INPUT.substitute(input=argument['name']))
-    local['add_trace_inputs'] = '\n'.join(add_trace_inputs)
-    local['inplace_guard'] = ''
+    # *_out functions take the result as a first argument, but since we're
+    # going to de-inplace the call, we need to remove it from the argument list
+    trace_inputs = declaration['arguments']
+    if declaration['name'].endswith('_out'):
+        trace_inputs = trace_inputs[1:]
+    trace_input_spec = [(i['name'], i['name']) for i in trace_inputs]
+
+    # factories are a bit special because their out-of-place overloads
+    # take an extra TensorOptions argument, which is missing in the _out function
+    has_factory_name = trace_name in FACTORY_FUNCTION_NAMES
+    is_out_overload = any(arg['name'] == 'result' for arg in declaration['arguments'])
+    if has_factory_name and is_out_overload:
+        trace_input_spec.append(('result', 'result.options()'))
+
+    local['add_trace_inputs'] = \
+        '\n'.join(ADD_TRACE_INPUT.substitute(name=name, input=value) for name, value in trace_input_spec)
+
     # Record inplace operations as out-of-place operations (e.g.,
     # not add_ but add)
     # TODO: Add a proper concept of side effects to the IR, and
     # properly record inplace operations.
-    local['trace_name'] = uninplace_api_name(declaration['api_name'])
+    local['inplace_guard'] = ''
     if local['trace_name'] != declaration['api_name']:
         local['inplace_guard'] = INPLACE_GUARD.substitute(name=declaration['api_name'],
                                                           mutable_input=declaration['arguments'][0]['name'])
@@ -214,6 +239,7 @@ def gen_variable_type(out, aten_declarations, template_path):
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
+    find_factory_functions(aten_declarations)
 
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')

@@ -55,7 +55,7 @@ class CuDNNDropoutOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnDropoutDescriptor_t dropout_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   float ratio_;
   bool is_test_;
@@ -113,7 +113,7 @@ class CuDNNDropoutGradientOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t data_desc_;
   cudnnDropoutDescriptor_t dropout_desc_;
 
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   Blob* scratch_blob_;
 
@@ -150,7 +150,7 @@ bool CuDNNDropoutOp::DoRunWithType() {
     // Reshape tensor descriptors if necessary
     if (X.dims() != cudnn_input_dims_ && !is_test_) {
       CAFFE_ENFORCE(scratch_blob_);
-      Tensor* states = scratch_blob_->GetMutableTensor(CUDA);
+      Tensor* states = BlobGetMutableTensor(scratch_blob_, CUDA);
       cudnn_input_dims_ = X.dims();
       CUDNN_ENFORCE(cudnnSetTensor4dDescriptor(
           data_desc_,
@@ -208,8 +208,8 @@ bool CuDNNDropoutOp::RunOnDevice() {
 
   if (X.IsType<float>()) {
     return DoRunWithType<float, float>();
-  } else if (X.IsType<float16>()) {
-    return DoRunWithType<float16, float>();
+  } else if (X.IsType<at::Half>()) {
+    return DoRunWithType<at::Half, float>();
   }
   return false;
 }
@@ -283,8 +283,8 @@ bool CuDNNDropoutGradientOp::RunOnDevice() {
 
   if (dY.IsType<float>()) {
     return DoRunWithType<float, float>();
-  } else if (dY.IsType<float16>()) {
-    return DoRunWithType<float16, float>();
+  } else if (dY.IsType<at::Half>()) {
+    return DoRunWithType<at::Half, float>();
   }
   return false;
 }

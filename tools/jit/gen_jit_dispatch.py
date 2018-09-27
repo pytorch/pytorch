@@ -351,7 +351,7 @@ def main():
                         help='path to Declarations.yaml')
     parser.add_argument('out', metavar='OUT',
                         help='path to output directory')
-    parser.add_argument('template-path', metavar='TEMPLATE_PATH',
+    parser.add_argument('template_path', metavar='TEMPLATE_PATH',
                         help='path to templates directory')
     args = parser.parse_args()
     gen_jit_dispatch(args.declarations, args.out, args.template_path)

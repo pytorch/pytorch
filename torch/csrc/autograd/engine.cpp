@@ -407,7 +407,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
       at::DeviceGuard guard(output);
-      if (output.defined() && output.ne(output).any().toCByte()) {
+      if (output.defined() && output.ne(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
         throw std::runtime_error(ss.str());

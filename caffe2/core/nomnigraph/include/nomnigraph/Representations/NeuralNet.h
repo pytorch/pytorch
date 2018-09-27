@@ -259,7 +259,7 @@ template <bool B, class T = void>
 using enable_if_t = typename std::enable_if<B, T>::type;
 
 template <typename T, typename U>
-struct CAFFE2_EXPORT inheritedFrom {
+struct C10_EXPORT inheritedFrom {
   static constexpr bool value =
       std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
 };
@@ -267,14 +267,15 @@ struct CAFFE2_EXPORT inheritedFrom {
 // This is just a way to fix issues when the isa<> implementation
 // can't automatically downcast.
 template <typename T, typename N, typename = void>
-struct CAFFE2_EXPORT is_impl {
+struct C10_EXPORT is_impl {
   inline static bool impl(N n) {
     return isa<T>(n->data());
   }
 };
 
 template <typename T, typename N>
-struct CAFFE2_EXPORT is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
+struct C10_EXPORT
+    is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetOperator>(n->data().get())) {
       return false;
@@ -285,7 +286,8 @@ struct CAFFE2_EXPORT is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperato
 };
 
 template <typename T, typename N>
-struct CAFFE2_EXPORT is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
+struct C10_EXPORT
+    is_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static bool impl(N n) {
     if (!isa<NeuralNetData>(n->data().get())) {
       return false;
@@ -303,14 +305,15 @@ inline bool is(N n) {
 // This is just a way to fix issues when the dyn_cast<> implementation
 // can't automatically downcast.
 template <typename T, typename N, typename = void>
-struct CAFFE2_EXPORT get_impl {
+struct C10_EXPORT get_impl {
   inline static T* impl(N n) {
     return dyn_cast<T>(n->data().get());
   }
 };
 
 template <typename T, typename N>
-struct CAFFE2_EXPORT get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
+struct C10_EXPORT
+    get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperator>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
@@ -322,7 +325,8 @@ struct CAFFE2_EXPORT get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetOperat
 };
 
 template <typename T, typename N>
-struct CAFFE2_EXPORT get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
+struct C10_EXPORT
+    get_impl<T, N, enable_if_t<inheritedFrom<T, NeuralNetData>::value>> {
   inline static T* impl(N n) {
     if (!is<T>(n)) {
       assert(0 && "Cannot get type from node");
@@ -422,7 +426,7 @@ CAFFE2_API std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
 CAFFE2_API void coalesceInsertedDataDependencies(repr::NNModule* m);
 
 template <NNGraph* G>
-struct CAFFE2_EXPORT NodeHelper {};
+struct C10_EXPORT NodeHelper {};
 
 struct NNNodeMatchCriteria {
   std::function<bool(NNGraph::NodeRef)> predicate;

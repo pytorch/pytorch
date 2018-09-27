@@ -143,7 +143,7 @@ class FullyConnectedOp final : public Operator<Context> {
   size_t axis_w_{1};
   // A local vector to cache the output shape so we don't need to recreate
   // a vector object every time we run Run().
-  vector<TIndex> Y_shape_cache_;
+  vector<int64_t> Y_shape_cache_;
   Tensor bias_multiplier_{Context::GetDeviceType()};
   ;
 

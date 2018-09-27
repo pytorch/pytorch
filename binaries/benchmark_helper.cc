@@ -163,7 +163,7 @@ void loadInput(
           CAFFE_THROW("Not support GPU on mobile.");
 #endif
         } else {
-          caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
+          caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
           CHECK_NOTNULL(tensor);
           tensor->Resize(input_dims);
           if (input_type_list[i] == "uint8_t") {
@@ -200,7 +200,7 @@ void fillInputBlob(
     int protos_size = tensor_kv.second.protos_size();
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
-    caffe2::TensorCPU* tensor = blob->GetMutableTensor(caffe2::CPU);
+    caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
       int total_size = tensor_proto->string_data_size();
       for (size_t i = 0; i < total_size; i++) {
@@ -298,12 +298,12 @@ void writeOutput(
 #endif
         } else {
           writeTextOutput<caffe2::CPUContext, caffe2::TensorCPU>(
-              workspace->GetBlob(name)->GetMutableTensor(caffe2::CPU),
+              BlobGetMutableTensor(workspace->GetBlob(name), caffe2::CPU),
               output_prefix,
               name);
         }
       } else {
-        string serialized = workspace->GetBlob(name)->Serialize(name);
+        string serialized = SerializeBlob(*workspace->GetBlob(name), name);
         string output_filename = output_prefix + name;
         caffe2::WriteStringToFile(serialized, output_filename.c_str());
       }

@@ -5,8 +5,8 @@
 #include <vector>
 #include <mutex>
 
-#include "caffe2/core/flags.h" // for TIndex
-#include "caffe2/core/tensor.h" // for TIndex
+#include "caffe2/core/flags.h" // for int64_t
+#include "caffe2/core/tensor.h" // for int64_t
 #include "caffe2/mkl/utils/mkl_dnn_cppwrapper.h"
 
 // A global boolean variable that controls the behavior when we call View() on
@@ -58,7 +58,7 @@ class PrimitiveWrapper {
 
  private:
   dnnPrimitive_t primitive_ = 0;
-  AT_DISABLE_COPY_AND_ASSIGN(PrimitiveWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(PrimitiveWrapper);
 };
 
 template <typename T>
@@ -138,7 +138,7 @@ class LayoutWrapper {
 
  private:
   dnnLayout_t layout_ = 0;
-  AT_DISABLE_COPY_AND_ASSIGN(LayoutWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(LayoutWrapper);
 };
 
 /**
@@ -270,7 +270,7 @@ class MKLMemory {
         "Reshape is not allowed for custom layouts. "
         "Convert to plain layout before invoking Reshape().");
 
-    TIndex new_size = 1;
+    int64_t new_size = 1;
     for (auto i = 0; i < dims.size(); ++i) {
       CAFFE_ENFORCE_GE_WITH_CALLER(dims[i], 0);
       new_size *= dims[i];
@@ -279,7 +279,7 @@ class MKLMemory {
         new_size == size_,
         "New size and old size are not equal. Reshape is not possible.");
 
-    vector<TIndex> new_dims(dims.size());
+    vector<int64_t> new_dims(dims.size());
     vector<size_t> size(dims.size());
     vector<size_t> strides(dims.size());
     for (int i = 0; i < dims.size(); ++i) {
@@ -456,7 +456,7 @@ class MKLMemory {
     return buffer_.get();
   }
 
-  inline const vector<TIndex>& dims() const {
+  inline const vector<int64_t>& dims() const {
     return dims_;
   }
 
@@ -470,7 +470,7 @@ class MKLMemory {
   /**
    * Returns the size (i.e., the number of items) in the buffer.
    */
-  inline TIndex size() const {
+  inline int64_t size() const {
     return size_;
   }
 
@@ -479,7 +479,7 @@ class MKLMemory {
    * must be between 0 (inclusive) and the number of dimensions, otherwise
    * this function will produce a fatal message.
    */
-  inline TIndex dim(const int i) const {
+  inline int64_t dim(const int i) const {
     return dims_.at(i);
   }
 
@@ -545,9 +545,9 @@ class MKLMemory {
   mutable std::mutex buffer_lock_;
   // The dimensions in the same order as Caffe2 does. This is used to
   // interface with C2.
-  vector<TIndex> dims_;
+  vector<int64_t> dims_;
   // Number of items in the buffer.
-  TIndex size_ = -1;
+  int64_t size_ = -1;
   // The user dnn layout.
   LayoutWrapper<T> user_layout_;
   // The internal dnn layout.
@@ -557,7 +557,7 @@ class MKLMemory {
   // The primitive to use to convert from internal layout to user layout
   PrimitiveWrapper<T> convert_out_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(MKLMemory);
+  C10_DISABLE_COPY_AND_ASSIGN(MKLMemory);
 };
 
 template <typename T>
@@ -575,7 +575,7 @@ class MKLWorkspace {
 
  private:
   void* buffer_;
-  AT_DISABLE_COPY_AND_ASSIGN(MKLWorkspace);
+  C10_DISABLE_COPY_AND_ASSIGN(MKLWorkspace);
 };
 
 } // namespace mkl

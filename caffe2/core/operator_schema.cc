@@ -331,7 +331,7 @@ int OpSchema::CalculateOutput(int num_input) const {
 }
 
 static void SparseLengthsFillerHelper(
-    const std::vector<std::vector<TIndex>>& shapes,
+    const std::vector<std::vector<int64_t>>& shapes,
     size_t value_index,
     size_t length_index,
     std::vector<TensorFiller>* fillers) {
@@ -341,7 +341,7 @@ static void SparseLengthsFillerHelper(
 }
 
 static void SparseSegmentsFillerHelper(
-    const std::vector<std::vector<TIndex>>& shapes,
+    const std::vector<std::vector<int64_t>>& shapes,
     size_t value_index,
     size_t segment_index,
     std::vector<TensorFiller>* fillers) {
@@ -364,7 +364,7 @@ OpSchema& OpSchema::ValueKeyLengthInputFillers(
     size_t key_index,
     size_t length_index) {
   filler_supplier_ = [this, value_index, key_index, length_index](
-                         const std::vector<std::vector<TIndex>>& shapes) {
+                         const std::vector<std::vector<int64_t>>& shapes) {
     auto fillers = SupplyDenseFillers(shapes);
     // fill in the length (value_index is used to get the correct shape)
     SparseLengthsFillerHelper(shapes, key_index, length_index, &fillers);
@@ -383,7 +383,7 @@ OpSchema& OpSchema::ValueLengthInputFillers(
     size_t value_index,
     size_t length_index) {
   filler_supplier_ = [this, value_index, length_index](
-                         const std::vector<std::vector<TIndex>>& shapes) {
+                         const std::vector<std::vector<int64_t>>& shapes) {
     auto fillers = SupplyDenseFillers(shapes);
     // fill in the length (value_index is used to get the correct shape)
     SparseLengthsFillerHelper(shapes, value_index, length_index, &fillers);
@@ -394,7 +394,7 @@ OpSchema& OpSchema::ValueLengthInputFillers(
 
 OpSchema& OpSchema::DisallowInputFillers() {
   filler_supplier_ =
-      [this](const std::vector<std::vector<TIndex>>& /* unused */) {
+      [this](const std::vector<std::vector<int64_t>>& /* unused */) {
         throw std::invalid_argument(type_ + " does not have input fillers");
         return std::vector<TensorFiller>();
       };
@@ -402,12 +402,12 @@ OpSchema& OpSchema::DisallowInputFillers() {
 }
 
 std::vector<TensorFiller> OpSchema::InputFillers(
-    const std::vector<std::vector<TIndex>>& shapes) const {
+    const std::vector<std::vector<int64_t>>& shapes) const {
   return filler_supplier_(shapes);
 }
 
 std::vector<TensorFiller> OpSchema::SupplyDenseFillers(
-    const std::vector<std::vector<TIndex>>& shapes) {
+    const std::vector<std::vector<int64_t>>& shapes) {
   std::vector<TensorFiller> fillers;
   for (const auto& shape : shapes) {
     fillers.emplace_back(shape);
@@ -415,7 +415,7 @@ std::vector<TensorFiller> OpSchema::SupplyDenseFillers(
   return fillers;
 }
 
-CAFFE2_EXPORT std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
+C10_EXPORT std::ostream& operator<<(std::ostream& out, const OpSchema& schema) {
   if (!schema.args().empty()) {
     out << "Arguments:" << std::endl;
     for (const auto& arg : schema.args()) {

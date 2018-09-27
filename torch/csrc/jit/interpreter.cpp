@@ -327,10 +327,10 @@ struct PreprocessGraph {
 
 };
 
-// previously the interpreter worked with at::Retainable values,
-// which are annoying to handle since 99% of values are at::Tensor anyway
-// instead we create a fake subclass of TensorImpl that can be subclassed
-// to hold arbitrary things
+// Sometimes we want to pass things that are not tensors.  Instead of
+// coming up with some "superclass" for tensor, which is annoying since
+// 99% of values are at::Tensor, we instead we create a fake subclass of
+// TensorImpl that can be subclassed to hold arbitrary things
 // Note: this is currently unused but will probably be useful in the future,
 // so we keep it around
 struct ContainerTensor : public at::TensorImpl {

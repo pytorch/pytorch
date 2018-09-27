@@ -115,7 +115,7 @@ struct Allocator {
   }
 };
 
-struct AT_CORE_API InefficientStdFunctionContext {
+struct CAFFE2_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(
       std::unique_ptr<void, std::function<void(void*)>>&& ptr)

@@ -1,9 +1,11 @@
 #pragma once
+
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 #include <cstddef>
 
 namespace torch { namespace jit {
-
-struct Graph;
 
 // insert GraphExecutor nodes that group together
 // subgraphs that are differentiable by the jit's autodiff passes
