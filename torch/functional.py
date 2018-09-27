@@ -439,6 +439,8 @@ def unique(input, sorted=False, return_inverse=False, dim=None):
             before returning as output.
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
+        dim (int): the dimension to apply unique. If ``None``, the unique of the
+            flattened input is returned. default: ``None``
 
     Returns:
         (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
