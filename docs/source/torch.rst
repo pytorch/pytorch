@@ -223,6 +223,7 @@ Reduction Ops
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: allclose
+.. autofunction:: argsort
 .. autofunction:: eq
 .. autofunction:: equal
 .. autofunction:: ge
@@ -256,6 +257,7 @@ Spectral Ops
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: bincount
+.. autofunction:: broadcast_tensors
 .. autofunction:: cross
 .. autofunction:: diag
 .. autofunction:: diagflat
@@ -270,8 +272,6 @@ Other Operations
 .. autofunction:: trace
 .. autofunction:: tril
 .. autofunction:: triu
-.. autofunction:: argsort
-.. autofunction:: broadcast_tensors
 
 
 BLAS and LAPACK Operations
