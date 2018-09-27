@@ -9,7 +9,7 @@
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/utils/auto_gil.h"
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <algorithm>
 #include <cstddef>
