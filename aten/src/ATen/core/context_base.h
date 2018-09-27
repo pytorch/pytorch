@@ -9,9 +9,9 @@
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Device.h>
 #include <ATen/core/Error.h>
-#include <ATen/core/Registry.h>
 #include <ATen/core/UniqueVoidPtr.h>
 #include <ATen/core/typeid.h>
+#include <c10/util/Registry.h>
 
 namespace caffe2 {
 class Event;
