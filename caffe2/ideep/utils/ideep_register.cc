@@ -27,7 +27,7 @@ REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(IDEEP, EventErrorMessageCPU);
 REGISTER_EVENT_SET_FINISHED_FUNCTION(IDEEP, EventSetFinishedCPU);
 REGISTER_EVENT_RESET_FUNCTION(IDEEP, EventResetCPU);
 
-BaseStaticContext* GetIDEEPStaticContext() {
+C10_EXPORT BaseStaticContext* GetIDEEPStaticContext() {
   static IDEEPStaticContext context;
   return &context;
 }
