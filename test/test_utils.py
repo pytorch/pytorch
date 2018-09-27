@@ -702,35 +702,23 @@ class TestONNXUtils(TestCase):
 
 
 class TestHub(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
+
     def test_load_from_github(self):
         hub_model = load_model(
-            'torchvision/models/resnet.py',  # git path
-            'resnet18',
-            git_repo='https://github.com/pytorch/vision.git',
-            checkpoint='https://download.pytorch.org/models/resnet18-5c106cde.pth')
-        vision_model = models.__dict__['resnet18'](pretrained=True)
-        self.assertEqual(vision_model.state_dict(), hub_model.state_dict())
+            'ailzhang/torchvision_hub',
+            'wrapper1')
+        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
-    def test_load_from_local_path(self):
-        # TODO: this is a hacky way to test local path.
-        hub_model = load_model(
-            '/private/home/ailzhang/vision/torchvision/models/resnet.py',  # local path
-            'resnet18',
-            checkpoint='https://download.pytorch.org/models/resnet18-5c106cde.pth')
-        vision_model = models.__dict__['resnet18'](pretrained=True)
-        self.assertEqual(vision_model.state_dict(), hub_model.state_dict())
-
-    @unittest.skipIf(not HAS_CUDA, "CUDA is not available")
-    def test_map_location(self):
-        # TODO: fix this: load_state_dict doesn't take map_location
-        hub_model = load_model(
-            'torchvision/models/resnet.py',  # git path
-            'resnet18',
-            map_location=lambda storage, loc: storage.cuda(0),
-            git_repo='https://github.com/pytorch/vision.git',
-            checkpoint='https://download.pytorch.org/models/resnet18-5c106cde.pth')
-        vision_model = models.__dict__['resnet18'](pretrained=True)
-        self.assertEqual(vision_model.state_dict(), hub_model.state_dict())
+    def test_load_multi_callables(self):
+        callables = ['wrapper1', 'wrapper2']
+        hub_models = load_model(
+            'ailzhang/torchvision_hub',
+            callables)
+        for model in hub_models:
+            self.assertEqual(self.resnet18_pretrained, model.state_dict())
 
 
 if __name__ == '__main__':
