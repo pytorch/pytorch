@@ -618,7 +618,7 @@ def script_method(fn):
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     rcb = createResolutionCallback(frames_up=2)
-    ast = get_jit_ast(fn, is_method=True)
+    ast = get_jit_ast(fn, is_method=True, frames_up=2)
     return ScriptMethodStub(rcb, ast, fn)
 
 
