@@ -12,6 +12,7 @@ import numpy as np
 
 dyndep.InitOpsLibrary("@/caffe2:csrc")
 
+import torch
 
 class TestATen2Op(hu.HypothesisTestCase):
 
