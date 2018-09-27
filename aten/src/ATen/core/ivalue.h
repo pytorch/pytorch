@@ -35,10 +35,11 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
 
 // non-mutable list
 template <typename Elem>
-struct C10_EXPORT ConstantList final : c10::intrusive_ptr_target {
+struct C10_EXPORT ConstantList : c10::intrusive_ptr_target {
  private:
   const std::vector<Elem> elements_;
  public:
+  typedef Elem ElemType;
   ConstantList(std::vector<Elem> elements_)
   : elements_(std::move(elements_)) {}
   static c10::intrusive_ptr<ConstantList<Elem>> create(std::vector<Elem> elements_) {
@@ -53,11 +54,17 @@ struct C10_EXPORT ConstantList final : c10::intrusive_ptr_target {
 };
 
 struct IValue;
-using Tuple = ConstantList<IValue>;
+struct C10_EXPORT Tuple : public ConstantList<IValue> {
+  using ConstantList<IValue>::ConstantList;
+  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
+    return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+};
 using IntList = ConstantList<int64_t>;
 using TensorList = ConstantList<at::Tensor>;
 using DoubleList = ConstantList<double>;
 using BoolList = ConstantList<bool>;
+using GenericList = ConstantList<IValue>;
 
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
@@ -66,11 +73,21 @@ using BoolList = ConstantList<bool>;
 // to mark whether that type is a subtype of c10::intrusive_ptr_target and needs
 // retain/release calls.
 
+#define TORCH_FORALL_TAGS(_) \
+  _(None) \
+  _(Tensor) \
+  _(Double) \
+  _(Int) \
+  _(Bool) \
+  _(Tuple) \
+  _(IntList) \
+  _(DoubleList) \
+  _(BoolList) \
+  _(String) \
+  _(TensorList) \
+  _(Blob) \
+  _(GenericList)
 
-#define TORCH_FORALL_TAGS(_)                                             \
-  _(None)                                                                \
-  _(Tensor) _(Double) _(Int) _(Bool) _(Tuple) _(IntList) _(DoubleList)   \
-  _(BoolList) _(String) _(TensorList) _(Blob)
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -219,6 +236,7 @@ struct CAFFE2_API IValue final {
   const std::vector<double>& toDoubleListRef() const;
   const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
+  const std::vector<IValue>& toGenericListRef() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ConstantString> v);
@@ -270,6 +288,19 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<TensorList> toTensorList() const & {
     AT_ASSERT(isTensorList());
     return toIntrusivePtr<TensorList>();
+  }
+
+  //GenericList
+  IValue(c10::intrusive_ptr<GenericList> v);
+  IValue(std::vector<IValue> v);
+  bool isGenericList() const { return Tag::GenericList == tag; }
+  c10::intrusive_ptr<GenericList> toGenericList() && {
+    AT_ASSERT(isGenericList());
+    return moveToIntrusivePtr<GenericList>();
+  }
+  c10::intrusive_ptr<GenericList> toGenericList() const & {
+    AT_ASSERT(isGenericList());
+    return toIntrusivePtr<GenericList>();
   }
 
   // None
@@ -389,12 +420,14 @@ DEFINE_TO(bool, toBool)
 DEFINE_TO(c10::intrusive_ptr<DoubleList>, toDoubleList)
 DEFINE_TO(c10::intrusive_ptr<IntList>, toIntList)
 DEFINE_TO(c10::intrusive_ptr<TensorList>, toTensorList)
+DEFINE_TO(c10::intrusive_ptr<GenericList>, toGenericList)
 DEFINE_TO(c10::intrusive_ptr<ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<bool>, toBoolListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
+DEFINE_TO(std::vector<IValue>, toGenericListRef)
 
 #undef DEFINE_TO
 
@@ -467,6 +500,14 @@ inline IValue::IValue(c10::intrusive_ptr<TensorList> v)
 inline IValue::IValue(std::vector<at::Tensor> v)
 : IValue(TensorList::create(std::move(v))) {}
 
+inline IValue::IValue(c10::intrusive_ptr<GenericList> v)
+: tag(Tag::GenericList), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(std::vector<IValue> v)
+: IValue(GenericList::create(std::move(v))) {}
+
+
 inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();
 }
@@ -481,6 +522,10 @@ inline const std::vector<at::Tensor>& IValue::toTensorListRef() const {
 
 inline const std::vector<bool>& IValue::toBoolListRef() const {
   return toBoolList()->elements();
+}
+
+inline const std::vector<IValue>& IValue::toGenericListRef() const {
+  return toGenericList()->elements();
 }
 
 

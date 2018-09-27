@@ -48,18 +48,18 @@ std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, Array
   auto fn = callee.graph();
 
   std::stringstream failure_messages;
-  auto all_inputs = tryMatchSchema(
+  auto matched_schema = tryMatchSchema(
     callee.getSchema(),
     loc, *graph(), args, kwargs, failure_messages, /*conv_tensors_to_nums*/true);
-  if(!all_inputs)
+  if(!matched_schema)
     throw ErrorReport(loc) << failure_messages.str();
 
   // parameters to callee method (which become parameters to _this_ method
   // if they were not already)
   for(at::Tensor* member : callee.member_inputs) {
-    all_inputs->push_back(get_or_add_parameter(member));
+    matched_schema->inputs.push_back(get_or_add_parameter(member));
   }
-  return inlineCallTo(*graph(), *callee.graph(), *all_inputs);
+  return inlineCallTo(*graph(), *callee.graph(), matched_schema->inputs);
 }
 
 void Method::ensure_defined() {
