@@ -95,8 +95,8 @@ class BroadcastOp final : public Operator<Context> {
     params.inputs.resize(InputSize() - 1);
     params.outputs.resize(OutputSize());
     for (auto i = 0; i < params.inputs.size(); i++) {
-      params.inputs[i] = Input(i + 1).template raw_data();
-      params.outputs[i] = Output(i)->template raw_mutable_data();
+      params.inputs[i] = Input(i + 1).raw_data();
+      params.outputs[i] = Output(i)->raw_mutable_data();
     }
     params.size = Output(0)->size();
     params.meta = Output(0)->meta();

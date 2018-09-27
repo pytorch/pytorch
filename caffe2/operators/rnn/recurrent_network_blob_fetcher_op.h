@@ -43,11 +43,10 @@ class RecurrentNetworkBlobFetcherOp final : public Operator<Context> {
             prefix_ + std::string("_") + blob_name + caffe2::to_string(i);
         blob_names_vector.push_back(newBlobName);
 
-        ws_->CreateBlob(newBlobName)
-            ->GetMutableTensor(CPU)
+        BlobGetMutableTensor(ws_->CreateBlob(newBlobName), CPU)
             ->ResizeLike(currentTensor);
         auto type = Context::GetDeviceType();
-        auto* newTensor = ws_->GetBlob(newBlobName)->GetMutableTensor(type);
+        auto* newTensor = BlobGetMutableTensor(ws_->GetBlob(newBlobName), type);
         newTensor->CopyFrom(currentTensor);
       }
     }

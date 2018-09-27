@@ -2,7 +2,7 @@
 
 namespace at {
 
-AT_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     ContextRegistry,
     at::DeviceType,
     at::BaseContext,

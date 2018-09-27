@@ -328,17 +328,19 @@ struct PinnedCPUAllocator final : public at::Allocator {
   ~PinnedCPUAllocator() override {}
   at::DataPtr allocate(size_t nbytes) const override {
     void* data;
+    at::DataPtr data_ptr;
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
     if (IsNUMAEnabled()) {
-      auto data_ptr = baseAllocator_.allocate(nbytes);
-      data = data_ptr.move_context().release();
+      data_ptr = baseAllocator_.allocate(nbytes);
+      data = data_ptr.get();
       CAFFE_ENFORCE(data);
       HIP_ENFORCE(hipHostRegister(data, nbytes, hipHostRegisterDefault));
     } else {
       HIP_ENFORCE(hipHostMalloc(&data, nbytes));
+      data_ptr = {data, data, &Delete, at::Device(CPU)};
     }
     memset(data, 0, nbytes);
-    return {data, data, &Delete, at::Device(CPU)};
+    return data_ptr;
   }
 
   at::DeleterFnPtr raw_deleter() const override {

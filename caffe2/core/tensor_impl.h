@@ -86,13 +86,16 @@ struct CAFFE2_API PlacementDeleteContext {
   PlacementDtor placement_dtor_;
   size_t size_;
   void* data_;
-  PlacementDeleteContext(Ctx&& ctx, PlacementDtor placement_dtor, size_t size)
-      : ctx_(std::move(ctx)),
+  PlacementDeleteContext(
+      at::DataPtr&& data_ptr,
+      PlacementDtor placement_dtor,
+      size_t size)
+      : ctx_(std::move(data_ptr.move_context())),
         placement_dtor_(placement_dtor),
         size_(size),
         data_(ctx_.get()) {}
   static at::DataPtr makeDataPtr(
-      Ctx&& prev_ctx,
+      at::DataPtr&& data_ptr,
       PlacementDtor placement_dtor,
       size_t size,
       at::Device device);
@@ -622,7 +625,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
             numel_ * storage_.itemsize()); // Removing this can get rid of
                                            // InefficientStdFunctionContext
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
-            std::move(data_ptr.move_context()),
+            std::move(data_ptr),
             dtor,
             size,
             at::Device(storage_.device_type())));

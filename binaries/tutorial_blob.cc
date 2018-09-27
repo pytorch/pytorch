@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
   LOG(INFO)
       << "Is the blob type float? "
       << myblob.IsType<float>();
-               
+
   const int& myint_const = myblob.Get<int>();
   LOG(INFO)
       << "The value of the int number stored in the blob is: "
@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
 
   std::string* pvec = new std::string();
   myblob.Reset(pvec); // no need to release pvec, myblob takes ownership.
-  
+
   LOG(INFO) << "Is the blob now of type string? "
             << myblob.IsType<std::string>();
 

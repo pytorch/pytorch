@@ -10,9 +10,9 @@
 #include <ATen/core/Allocator.h>
 #include <ATen/core/Device.h>
 #include <ATen/core/Error.h>
-#include <ATen/core/Registry.h>
 #include <ATen/core/UniqueVoidPtr.h>
 #include <ATen/core/typeid.h>
+#include <c10/util/Registry.h>
 
 namespace caffe2 {
 class Event;
@@ -27,7 +27,7 @@ class BaseContext;
    functions that are invoked statically before in Tensor class, e.g. New,
    We will merge this with Allocator later.
  */
-class AT_CORE_API BaseStaticContext {
+class CAFFE2_API BaseStaticContext {
  public:
   virtual ~BaseStaticContext() noexcept {}
 
@@ -52,7 +52,7 @@ class AT_CORE_API BaseStaticContext {
  * functions in the BaseContext class.
  * TODO: add docs after this is finalized.
  */
-class AT_CORE_API BaseContext {
+class CAFFE2_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 
@@ -182,7 +182,7 @@ class AT_CORE_API BaseContext {
 };
 
 // Context constructor registry
-AT_DECLARE_TYPED_REGISTRY(
+C10_DECLARE_TYPED_REGISTRY(
     ContextRegistry,
     at::DeviceType,
     at::BaseContext,
@@ -190,7 +190,7 @@ AT_DECLARE_TYPED_REGISTRY(
     at::Device);
 
 #define REGISTER_CONTEXT(type, ...) \
-  AT_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
 
 inline std::unique_ptr<at::BaseContext> CreateContext(
     const at::Device& device) {

@@ -9,7 +9,10 @@ LegacyTypeDispatch & globalLegacyTypeDispatch() {
   return singleton;
 }
 
-AT_DEFINE_REGISTRY(LegacyTypeInitRegistry, LegacyTypeInitInterface, LegacyTypeInitArgs)
+C10_DEFINE_REGISTRY(
+    LegacyTypeInitRegistry,
+    LegacyTypeInitInterface,
+    LegacyTypeInitArgs)
 
 const LegacyTypeInitInterface& getLegacyTypeInit() {
   static std::unique_ptr<LegacyTypeInitInterface> legacy_type_init;
