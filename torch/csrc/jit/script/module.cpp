@@ -37,8 +37,15 @@ const FunctionSchema& Method::getSchema() const {
   return *schema;
 }
 
-std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
-  JIT_ASSERT(!executor);
+at::optional<std::vector<Value*>> try_emit_call_to(
+    Graph& graph,
+    SourceRange loc,
+    Method& callee,
+    ArrayRef<NamedValue> args,
+    ArrayRef<NamedValue> kwargs,
+    std::stringstream& failure_messages,
+    Method* caller,
+    bool conv_tensors_to_nums) {
   try {
     callee.ensure_defined();
   } catch (RecursiveMethodCallError&) {
@@ -47,19 +54,38 @@ std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, Array
   }
   auto fn = callee.graph();
 
-  std::stringstream failure_messages;
   auto matched_schema = tryMatchSchema(
     callee.getSchema(),
-    loc, *graph(), args, kwargs, failure_messages, /*conv_tensors_to_nums*/true);
+    loc, graph, args, kwargs, failure_messages, conv_tensors_to_nums);
   if(!matched_schema)
-    throw ErrorReport(loc) << failure_messages.str();
+    return at::nullopt;
 
   // parameters to callee method (which become parameters to _this_ method
   // if they were not already)
-  for(at::Tensor* member : callee.member_inputs) {
-    matched_schema->inputs.push_back(get_or_add_parameter(member));
+  for(at::Tensor* member : callee.params()) {
+    if(!caller) {
+      throw ErrorReport(loc) << " attempting to call a method with parameters from a raw graph. File a bug report";
+    }
+    matched_schema->inputs.push_back(caller->get_or_add_parameter(member));
   }
-  return inlineCallTo(*graph(), *callee.graph(), matched_schema->inputs);
+  return inlineCallTo(graph, *callee.graph(), matched_schema->inputs);
+}
+
+std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
+  JIT_ASSERT(!executor);
+  std::stringstream failure_messages;
+  if (auto result = try_emit_call_to(
+          *graph(),
+          loc,
+          callee,
+          args,
+          kwargs,
+          failure_messages,
+          this,
+          /*conv_tensors_to_nums=*/true)) {
+    return *result;
+  }
+  throw ErrorReport(loc) << failure_messages.str();
 }
 
 void Method::ensure_defined() {
