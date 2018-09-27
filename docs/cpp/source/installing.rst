@@ -1,7 +1,7 @@
 Installing C++ Distributions of PyTorch
 =======================================
 
-We provide ready baked distributions of all headers, libraries and CMake
+We provide binary distributions of all headers, libraries and CMake
 configuration files required to depend on PyTorch. We call this distribution
 *LibTorch*, and you can download ZIP archives containing the latest LibTorch
 distribution on `our website <https://pytorch.org/get-started/locally/>`_. Below
