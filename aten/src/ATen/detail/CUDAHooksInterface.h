@@ -2,8 +2,9 @@
 
 #include <ATen/Allocator.h>
 #include <ATen/core/Generator.h>
-#include <ATen/core/Registry.h>
 #include <ATen/core/Error.h>
+
+#include "c10/util/Registry.h"
 
 #include <cstddef>
 #include <functional>
@@ -131,9 +132,9 @@ struct CAFFE2_API CUDAHooksInterface {
 // for the "..." in a variadic macro"
 struct CAFFE2_API CUDAHooksArgs {};
 
-AT_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+C10_DECLARE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs);
 #define REGISTER_CUDA_HOOKS(clsname) \
-  AT_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
+  C10_REGISTER_CLASS(CUDAHooksRegistry, clsname, clsname)
 
 namespace detail {
 CAFFE2_API const CUDAHooksInterface& getCUDAHooks();

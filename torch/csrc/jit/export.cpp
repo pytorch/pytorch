@@ -564,6 +564,8 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("GeneratorType");
   } else if (kind == TypeKind::StringType) {
     type_proto->set_denotation("StringType");
+  } else if (kind == TypeKind::VarType) {
+    type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
   } else {
     throw std::runtime_error("unexpected type kind");
   }

@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_ALLOCATOR_H_
 #define CAFFE2_CORE_ALLOCATOR_H_
 
+#include <cstring>
 #include <unordered_map>
 
 #include "caffe2/core/logging.h"

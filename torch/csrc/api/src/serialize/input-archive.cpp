@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/script/module.h>
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <memory>
 #include <string>
