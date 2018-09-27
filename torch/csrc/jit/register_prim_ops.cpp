@@ -69,7 +69,7 @@ RegisterOperators reg({
             at::Tensor a;
             pop(stack, a);
             at::DeviceGuard guard(a);
-            push(stack, a.toCLong() != 0);
+            push(stack, a.item<int64_t>() != 0);
             return 0;
           };
         }),
@@ -135,7 +135,7 @@ RegisterOperators reg({
             pop(stack, b);
             push(
                 stack,
-                autograd::make_variable(at::scalar_to_tensor(b ? 1 : 0)));
+                autograd::make_variable(at::scalar_to_tensor(b)));
             return 0;
           };
         }),
