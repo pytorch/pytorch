@@ -47,7 +47,8 @@ if has_gpu_support:
     NumCudaDevices = C.num_cuda_devices
     GetCUDAVersion = C.get_cuda_version
     GetCuDNNVersion = C.get_cudnn_version
-
+    NumGpuDevices = NumCudaDevices
+    
     def GetCudaPeerAccessPattern():
         return np.asarray(C.get_cuda_peer_access_pattern())
 
@@ -57,8 +58,22 @@ else:
     GetCuDNNVersion = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
     GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
-    GetDeviceProperties = lambda x: None # noqa
 
+if has_hip_support:
+    NumHipDevices = C.num_hip_devices
+    NumGpuDevices = NumHipDevices
+    
+    def GetHipPeerAccessPattern():
+        return np.asarray(C.get_hip_peer_access_pattern())
+
+    GetDeviceProperties = C.get_device_properties
+else:
+    NumHipDevices = lambda: 0 # noqa
+    GetHipPeerAccessPattern = lambda: np.array([]) # noqa
+
+if not has_gpu_support and not has_hip_support:
+    GetDeviceProperties = lambda x: None # noqa
+    
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
