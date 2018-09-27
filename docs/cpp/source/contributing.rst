@@ -1,9 +1,8 @@
 Contributing to PyTorch
 =======================
 
-If you would like to contribute to the PyTorch C++ API, refer to our
+If you would like to contribute to the PyTorch C++ API, refer to the
 `CONTRIBUTING.md
 <https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md>`_ document in
-the PyTorch respository for instructions on how to develop PyTorch from source
-and submit a proposal for your patch or feature. We will be happy to review it
-swiftly!
+the PyTorch repository.  It contains instructions on how to develop PyTorch from source
+and submit a proposal for your patch or feature. We will be happy to review it!
