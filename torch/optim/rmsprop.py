@@ -90,7 +90,7 @@ class RMSprop(Optimizer):
 
                 if group['weight_decay'] != 0:
                     if group['l2_reg']:
-                        grad = grad.add(group['weight_decay'], p.data)
+                        grad.add_(group['weight_decay'], p.data)
                     else:
                         p.data.add_(-group['weight_decay'], p.data)
 

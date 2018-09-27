@@ -77,7 +77,7 @@ class Adadelta(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0 and group['l2_reg']:
-                    grad = grad.add(group['weight_decay'], p.data)
+                    grad.add_(group['weight_decay'], p.data)
 
                 square_avg.mul_(rho).addcmul_(1 - rho, grad, grad)
                 std = square_avg.add(eps).sqrt_()
