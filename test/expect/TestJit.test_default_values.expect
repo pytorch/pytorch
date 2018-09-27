@@ -1,12 +1,19 @@
 graph(%x : Dynamic
       %a : Dynamic = 0.5
-      %b : Dynamic = 5
-      %c : Dynamic = 22) {
-  %4 : int = prim::Constant[value=1]()
-  %5 : Dynamic = aten::add(%x, %a, %4)
-  %6 : int = prim::Constant[value=1]()
-  %7 : Dynamic = aten::add(%5, %b, %6)
-  %8 : int = prim::Constant[value=1]()
-  %9 : Dynamic = aten::add(%7, %c, %8)
-  return (%9);
+[ Variable[CPUDoubleType]{} ]
+      %b : Dynamic = 10
+[ Variable[CPULongType]{} ]
+      %c : Dynamic = 20
+[ Variable[CPULongType]{} ]
+      %d : Dynamic = 50
+[ Variable[CPULongType]{} ]) {
+  %5 : int = prim::Constant[value=1]()
+  %6 : Dynamic = aten::add(%x, %a, %5)
+  %7 : int = prim::Constant[value=1]()
+  %8 : Dynamic = aten::add(%6, %b, %7)
+  %9 : int = prim::Constant[value=1]()
+  %10 : Dynamic = aten::add(%8, %c, %9)
+  %11 : int = prim::Constant[value=1]()
+  %12 : Dynamic = aten::add(%10, %d, %11)
+  return (%12);
 }

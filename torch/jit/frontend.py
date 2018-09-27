@@ -199,6 +199,19 @@ def build_param_list(ctx, py_args):
     return [build_param(ctx, arg, get_default_at(i)) for i, arg in enumerate(py_args.args)]
 
 
+def eval_default_arg(ctx, default, _frames_up=0):
+    if isinstance(default, ast.Num):
+        value = str(default.n)
+    else:
+        expr = compile(ast.Expression(default), '', 'eval')
+        frame = inspect.stack()[7 + _frames_up][0]
+        value = str(eval(expr, frame.f_locals, frame.f_globals))
+
+    r_default = ctx.make_range(
+        default.lineno, default.col_offset, default.col_offset + len(value))
+    return (r_default, value)
+
+
 def build_param(ctx, py_arg, default):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     #     In Python2 py_arg is a Name (Expr subclass)
@@ -210,8 +223,7 @@ def build_param(ctx, py_arg, default):
         annotation_expr = Var(Ident(r, 'Tensor'))
 
     if default:
-        value = str(default.n)
-        r_default = ctx.make_range(default.lineno, default.col_offset, default.col_offset + len(value))
+        r_default, value = eval_default_arg(ctx, default)
         return Param(annotation_expr, Ident(r, name), Const(r_default, value))
     else:
         return Param(annotation_expr, Ident(r, name))
