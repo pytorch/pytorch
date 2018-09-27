@@ -1,4 +1,4 @@
-#include "gloo/broadcast_ops.h"
+#include "caffe2/contrib/gloo/broadcast_ops.h"
 
 #include "caffe2/core/context_gpu.h"
 
