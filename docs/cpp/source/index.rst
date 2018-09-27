@@ -2,12 +2,7 @@ PyTorch C++ API
 ===============
 
 These pages provide documentation for the public portions of the PyTorch C++
-API. This API consists of a number of different components and building blocks,
-which can each be used independently, or equally well in combination with each
-other; some components sit side by side, and others yet build on top of one
-another. While the boundaries between these building blocks may sometimes be
-fuzzy, we normally partition the universe of PyTorch's C++ API into the
-following five slices of cake:
+API.  This API can roughly be divided into five parts:
 
 - **ATen**: The foundational tensor and mathematical operation library on which all else is built;
 - **Autograd**: Augments ATen with automatic differentiation;
@@ -15,23 +10,18 @@ following five slices of cake:
 - **TorchScript**: An interface to the TorchScript JIT compiler and interpreter;
 - **C++ Extensions**: A means of extending the Python API with custom C++ and CUDA routines.
 
-The following sections of this document provide a more detailed explanation of
-each item listed above. Together, these building blocks form a research and
-production ready pure C++ library for tensor computation and dynamic neural
+Together, these building blocks form a research and
+production ready C++ library for tensor computation and dynamic neural
 networks with strong emphasis on GPU acceleration as well as fast CPU
-performance. It is currently in use both in large and small scale, flexible yet
-high performance research environments, as well as bare metal production
-systems. We look forward to welcoming more users of the PyTorch C++ API.
+performance. It is currently in use at Facebook in research and
+production; we look forward to welcoming more users of the PyTorch C++ API.
 
 .. warning::
 
-  While we encourage you to try out and use these interfaces, a word of caution
-  is due: In the foreseeable future, the most stable and best supported
-  interface to PyTorch will remain our Python interface. The C++ API documented
-  here fundamentally forms the backend of this Python interface, and we reserve
-  the right to make significant (breaking) changes to this backend. As such,
-  you should regard all of these interfaces subject to change and officially in
-  "Beta".
+  At the moment, the C++ API should be considered "beta" stability; we may
+  make major breaking changes to the backend in order to improve the API,
+  or in service of providing the Python interface to PyTorch, which is our
+  most stable and best supported interface.
 
 ATen
 ----
@@ -88,7 +78,7 @@ C++ Frontend
 The PyTorch C++ frontend provides a high level, pure C++ modeling interface for
 neural network and general machine learning research and production use cases,
 largely following the Python API in design and provided functionality. The C++
-frontend includes the following constitutents:
+frontend includes the following:
 
 - An interface for defining machine learning models through a hierarchical module system (like ``torch.nn.Module``);
 - A "standard library" of pre-existing modules for the most common modeling purposes (e.g. convolutions, RNNs, batch normalization etc.);
@@ -131,24 +121,22 @@ TorchScript
 
 TorchScript a representation of a PyTorch model that can be understood,
 compiled and serialized by the TorchScript compiler. Fundamentally, TorchScript
-is a programming language in its own right. It is syntactically a subset of
-Python, but deviates semantically through its deep integration with PyTorch.
-The C++ interface to TorchScript encompasses three primary pieces of
+is a programming language in its own right. It is a subset of Python using
+the PyTorch API.  The C++ interface to TorchScript encompasses three primary pieces of
 functionality:
 
 - A mechanism for loading and executing serialized TorchScript models defined in Python;
 - An API for defining custom operators that extend the TorchScript standard library of operations;
 - Just-in-time compilation of TorchScript programs from C++.
 
-The first topic may be of great interest to you if you would like to define
+The first mechanism may be of great interest to you if you would like to define
 your models in Python as much as possible, but subsequently export them to C++
 for production environments and no-Python inference. You can find out more
 about this by following `this
 <https://pytorch.org/tutorials/advanced/cpp_export.html>`_ link. The second
-point concerns itself with scenarios in which you would like to extend
+API concerns itself with scenarios in which you would like to extend
 TorchScript with custom operators, which can similarly be serialized and
-invoked from C++ during inference. Lastly, in reference to the final bullet
-point, the `torch::jit::compile
+invoked from C++ during inference. Lastly, the `torch::jit::compile
 <https://pytorch.org/cppdocs/api/function_namespacetorch_1_1jit_1a176d99fd5bf0233119a5f49c07a1d01d.html#exhale-function-namespacetorch-1-1jit-1a176d99fd5bf0233119a5f49c07a1d01d>`_
 function may be used to access the TorchScript compiler directly from C++.
 
