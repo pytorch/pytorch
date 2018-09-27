@@ -412,7 +412,8 @@ class TestLRScheduler(TestCase):
     def setUp(self):
         self.net = SchedulerTestNet()
         self.opt = SGD(
-            [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5, 'weight_decay': 0.9, 'l2_reg': False}],
+            [{'params': self.net.conv1.parameters()},
+             {'params': self.net.conv2.parameters(), 'lr': 0.5, 'weight_decay': 0.9, 'l2_reg': False}],
             lr=0.05)
 
     def test_step_lr(self):

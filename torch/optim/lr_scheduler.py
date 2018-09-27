@@ -27,7 +27,8 @@ class _LRScheduler(object):
                     raise KeyError("param 'initial_weight_decay' is not specified "
                                    "in param_groups[{}] when resuming an optimizer".format(i))
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
-        self.base_weight_decays = list(map(lambda group: group.get('initial_weight_decay', None), optimizer.param_groups))
+        self.base_weight_decays = list(
+            map(lambda group: group.get('initial_weight_decay', None), optimizer.param_groups))
         self.step(last_epoch + 1)
         self.last_epoch = last_epoch
 
@@ -215,7 +216,8 @@ class MultiStepLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
     def get_weight_decay(self):
-        return [base_weight_decay * self.gamma ** bisect_right(self.milestones, self.last_epoch) if base_weight_decay else None
+        return [base_weight_decay * self.gamma ** bisect_right(self.milestones,
+                                                               self.last_epoch) if base_weight_decay else None
                 for base_weight_decay in self.base_weight_decays]
 
 
@@ -418,7 +420,7 @@ class ReduceLROnPlateau(object):
                     param_group['weight_decay'] = new_weight_decay
                     if self.verbose:
                         print('Epoch {:5d}: reducing weight decay factor'
-                            ' of group {} to {:.4e}.'.format(epoch, i, new_weight_decay))
+                              ' of group {} to {:.4e}.'.format(epoch, i, new_weight_decay))
 
     @property
     def in_cooldown(self):
