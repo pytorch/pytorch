@@ -585,7 +585,7 @@ def script(fn, optimize=True, _frames_up=0):
     if not _enabled:
         return fn
     rcb = createResolutionCallback(_frames_up + 1)
-    ast = get_jit_ast(fn, is_method=False)
+    ast = get_jit_ast(fn, is_method=False, frames_up=_frames_up + 1)
     graph = _jit_script_compile(ast, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)

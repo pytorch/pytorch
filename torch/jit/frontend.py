@@ -137,22 +137,23 @@ def _uses_true_division(fn):
             '_uses_true_division: expected function or method, got {}'.format(type(fn)))
 
 
-def get_jit_ast(fn, is_method):
+def get_jit_ast(fn, is_method, frames_up):
     source = dedent(inspect.getsource(fn))
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
+    ctx = SourceContext(source, inspect.stack()[frames_up + 1][0], _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, is_method)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, uses_true_division=True):
+    def __init__(self, source, frame, uses_true_division=True):
         super(SourceContext, self).__init__(source)
         self.uses_true_division = uses_true_division
+        self.frame = frame
 
 
 class Builder(object):
@@ -199,13 +200,12 @@ def build_param_list(ctx, py_args):
     return [build_param(ctx, arg, get_default_at(i)) for i, arg in enumerate(py_args.args)]
 
 
-def eval_default_arg(ctx, default, _frames_up=0):
+def eval_default_arg(ctx, default, _frames_up=1 if False else 0):
     if isinstance(default, ast.Num):
         value = str(default.n)
     else:
         expr = compile(ast.Expression(default), '', 'eval')
-        frame = inspect.stack()[7 + _frames_up][0]
-        value = str(eval(expr, frame.f_locals, frame.f_globals))
+        value = str(eval(expr, ctx.frame.f_locals, ctx.frame.f_globals))
 
     r_default = ctx.make_range(
         default.lineno, default.col_offset, default.col_offset + len(value))
