@@ -89,40 +89,41 @@ __global__ void CatArrayBatchedCopy(
        linearIndex < nElementsOutput;
        linearIndex += (IndexType)gridDim.x * blockDim.x) {
     if (pad) {
+      IndexType tid = linearIndex;
       IndexType inputOffset = 0;
       IndexType outputOffset = 0;
       bool inbound = true;
       for (int i = Dims - 1; i >= 1; --i) {
         IndexType inputDimSize = inputs[blockIdx.y].inputParam.tensorSize[i];
         IndexType curDimSize = i == concatDim ? inputDimSize : os.tensorSize[i];
-        IndexType nextDimIndex = linearIndex / curDimSize;
-        IndexType curDimIndex = linearIndex - curDimSize * nextDimIndex;
+        IndexType nextDimIndex = tid / curDimSize;
+        IndexType curDimIndex = tid - curDimSize * nextDimIndex;
         inbound = inbound && curDimIndex < inputDimSize;
         inputOffset +=
             curDimIndex * inputs[blockIdx.y].inputParam.tensorStride[i];
         outputOffset += curDimIndex * os.tensorStride[i];
-        linearIndex = nextDimIndex;
+        tid = nextDimIndex;
       }
-      inbound = inbound && linearIndex < inputs[blockIdx.y].inputParam.tensorSize[0];
-      inputOffset += linearIndex * inputs[blockIdx.y].inputParam.tensorStride[0];
-      outputOffset += linearIndex * os.tensorStride[0];
+      inbound = inbound && tid < inputs[blockIdx.y].inputParam.tensorSize[0];
+      inputOffset += tid * inputs[blockIdx.y].inputParam.tensorStride[0];
+      outputOffset += tid * os.tensorStride[0];
       if (inbound) {
         output[dataOffset + outputOffset] = data[inputOffset];
       } else {
         output[dataOffset + outputOffset] = pad_value;
       }
     }else{
+      IndexType tid = linearIndex;
       IndexType inputOffset = linearIndex;
       IndexType outputOffset = 0;
-      bool inbound = true;
       for (int i = Dims - 1; i >= 1; --i) {
         IndexType curDimSize = inputs[blockIdx.y].inputParam.tensorSize[i];;
-        IndexType nextDimIndex = linearIndex / curDimSize;
-        IndexType curDimIndex = linearIndex - curDimSize * nextDimIndex;
+        IndexType nextDimIndex = tid / curDimSize;
+        IndexType curDimIndex = tid - curDimSize * nextDimIndex;
         outputOffset += curDimIndex * os.tensorStride[i];
-        linearIndex = nextDimIndex;
+        tid = nextDimIndex;
       }
-      outputOffset += linearIndex * os.tensorStride[0];
+      outputOffset += tid * os.tensorStride[0];
       output[dataOffset + outputOffset] = data[inputOffset];
     }
   }
