@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 #include "c10/util/Registry.h"
 
 namespace at {
