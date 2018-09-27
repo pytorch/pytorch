@@ -445,33 +445,33 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.addInput(%4)
   // Result:  %3 = f(%1, %2, %4)
-  Value* addInput(Value * node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
+  Value* addInput(Value * value) {
+    JIT_ASSERT(graph_ == value->owningGraph());
     schema_ = nullptr;
-    node->uses_.emplace_back(this, inputs_.size());
-    inputs_.push_back(node);
-    return node;
+    value->uses_.emplace_back(this, inputs_.size());
+    inputs_.push_back(value);
+    return value;
   }
 
-  // Add 'node' as an input to 'this' at the specified position in the
-  // arguments. Returns the added node for ease of chaining.
-  Value* insertInput(size_t i, Value* node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
+  // Add 'value' as an input to 'this' at the specified position in the
+  // arguments. Returns the added value for ease of chaining.
+  Value* insertInput(size_t i, Value* value) {
+    JIT_ASSERT(graph_ == value->owningGraph());
     schema_ = nullptr;
     // First we update the offsets for all existing inputs that will reside
     // after the one we're inserting. Concretely, these are the inputs at
     // indices [i, # input). Since we're inserting one input before all of
-    // these inputs, increment their use offsets for this Node by 1
+    // these inputs, increment their use offsets for this value by 1
     for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
       // See Note [User node does not uniquely identify use]
       auto use = findUseForInput(use_itr);
       use->offset += 1;
     }
     // Insert the actual input at the specified index
-    inputs_.insert(inputs_.begin() + i, node);
+    inputs_.insert(inputs_.begin() + i, value);
     // Register the new use of the value we're inserted as an input.
-    node->uses_.emplace_back(this, i);
-    return node;
+    value->uses_.emplace_back(this, i);
+    return value;
   }
 
   // Replace the input of 'this' at position 'i' with
@@ -807,8 +807,8 @@ struct Block {
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
-  size_t registerOutput(Value * n) {
-    output_->addInput(n);
+  size_t registerOutput(Value * v) {
+    output_->addInput(v);
     return outputs().size() - 1;
   }
   size_t insertOutput(size_t i, Value* n) {
@@ -861,8 +861,6 @@ private:
   // having corner cases where the list is empty.
   Node * const output_;
   Node * const input_;
-  Node * const entry_world_;
-  Node * const exit_world_;
   Node * const owning_node_; // either the node that has this block or nullptr for root
 };
 
@@ -919,22 +917,6 @@ public:
   at::ArrayRef<const Value*> outputs() const {
     const auto & block = *block_;
     return block.outputs();
-  }
-  const Value * entryWorld() const {
-    return block_->entry_world_->output();
-  }
-  Value * entryWorld() {
-    return block_->entry_world_->output();
-  }
-  const Value * exitWorld() const {
-    return block_->exit_world_->input();
-  }
-  Value * exitWorld() {
-    return block_->exit_world_->input();
-  }
-  void setExitWorld(Value* exitToken) {
-    JIT_ASSERT(exitToken->type() == WorldType::get());
-    block_->exit_world_->replaceInput(0, exitToken);
   }
   graph_node_list nodes() {
     return block_->nodes();
@@ -1354,18 +1336,10 @@ inline Block::Block(Graph* graph_, Node* node_)
     : graph_(graph_),
       output_(initOutput(graph_->create(prim::Return, 0))),
       input_(graph_->create(prim::Param, 0)),
-      entry_world_(graph_->create(prim::EntryWorld, 1)),
-      exit_world_(graph_->create(prim::ExitWorld, 0)),
       owning_node_(node_) {
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   input_->owning_block_ = this;
-  entry_world_->owning_block_ = this;
-  exit_world_->owning_block_ = this;
-  entry_world_->output()
-      ->setType(WorldType::get())
-      ->setUniqueName("entry_world");
-  exit_world_->addInput(entry_world_->output());
 }
 
 inline void Block::destroy() {
@@ -1377,8 +1351,6 @@ inline void Block::destroy() {
       it != end; ++it) {
     it.destroyCurrent();
   }
-  exit_world_->destroy();
-  entry_world_->destroy();
   output_->destroy();
   input_->destroy();
   graph_->freeBlock(this);

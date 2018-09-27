@@ -549,131 +549,129 @@ static Value* materializeConstant(T val, Graph& graph,
   return new_constant;
 }
 
-at::optional<MatchedSchema> tryMatchSchemaImpl(
-  const FunctionSchema& schema,
-  const SourceRange& loc,
-  Graph& graph,
-  at::ArrayRef<NamedValue> args,
-  at::ArrayRef<NamedValue> kwargs,
-  std::ostream& failure_messages,
-  bool convert_tensors_to_nums) {
-    auto err = [&]() -> std::ostream& {
-      failure_messages << "\nfor operator " << schema << ":\n";
-      return failure_messages;
-    };
-    std::vector<NamedValue> modifiedArgs;
-
-    TypeEnv type_env;
-    std::vector<Value*> positional_inputs;
-    std::vector<bool> used_kwarg(kwargs.size(), false);
-
-    // if we finish the loop will we have consumed all arguments?
-    size_t used_args = 0;
-
-    for(size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
-      const auto& arg = schema.arguments[schema_i];
-      at::optional<NamedValue> v;
-      if(!arg.kwarg_only && schema_i < args.size()) {
-
-        // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
-        if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
-            !arg.N && // it must not be a broadcasting list like int[3], otherwise a single int is a valid input
-            (schema_i + 1 == schema.arguments.size() || schema.arguments[schema_i + 1].kwarg_only)) {  // must be the last position argument
-          auto actual_type = args[schema_i].value(graph)->type();
-          if (actual_type->kind() != TypeKind::ListType && !convertibleToList(actual_type, arg.type)) { // and the actual should not be a list already
-            auto elem_type = arg.type->expect<ListType>()->getElementType();
-            Value* list = tryCreateList(elem_type, graph, loc, args.slice(schema_i),
-              err, convert_tensors_to_nums, type_env);
-            if(!list)
-              return at::nullopt;
-            used_args = args.size();
-            positional_inputs.push_back(list);
-            continue;
-          }
-        }
-
-        v = args[schema_i];
-        used_args++;
-      } else if(auto idx = findInputWithName(arg.name, kwargs))  {
-        const NamedValue& nv = kwargs[*idx];
-        if(used_kwarg[*idx]) {
-          err() << "argument " << nv.name() << " specified twice in schema, submit a bug report!\n" << nv.locOr(loc);
-          return at::nullopt;
-        }
-        used_kwarg[*idx] = true;
-        v = nv;
-      } else if(arg.default_value) {
-        v = NamedValue(*arg.default_value);
-      } else {
-        err() << "argument " << schema.arguments[schema_i].name << " not provided.\n" << loc;
-        return at::nullopt;
-      }
-      Value * positional = tryMatchArgument(arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
-      if(!positional)
-        return at::nullopt;
-      positional_inputs.push_back(positional);
-    }
-
-    // check for unused positional arguments
-    if(used_args < args.size()) {
-      err() << "expected at most " << used_args << " arguments "
-      << "but found " << args.size() << " positional arguments.\n" << loc << "\n";
-      return at::nullopt;
-    }
-    // check for unused kwargs
-    for(size_t i = 0; i < kwargs.size(); ++i) {
-      const auto& nv = kwargs[i];
-      if (!used_kwarg[i]) {
-        if(!schema.argumentIndexWithName(nv.name())) {
-          err() << "keyword argument " << nv.name() << " unknown\n";
-        } else {
-          err() << "keyword argument " << nv.name() << " specified twice\n";
-        }
-        return at::nullopt;
-      }
-    }
-    auto return_types = fmap(schema.returns, [&](const Argument& r) {
-      return evalTypeVariables(r.type, type_env);
-    });
-    return MatchedSchema {std::move(positional_inputs), std::move(return_types) };
-}
-
-// Match against a potentially mutable schema.
-//
-// We need to treat mutable schemas differently because the IR explicitly
-// expresses effects by including a world token in mutable ops. Users do not
-// know about the world token, so we need to generate a dummy one and add
-// it to the inputs for schema matching.
-//
-// Example:
-//   append(int[] list, int el)
-// becomes
-//   append(World w, int[] list, int el)
-//
-// NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
-// necessary to enforce linearization on effectful ops.
 at::optional<MatchedSchema> tryMatchSchema(
     const FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> raw_args,
+    at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
     bool convert_tensors_to_nums) {
-  std::vector<NamedValue> modifiedInputs(inputs.begin(), inputs.end());
+  // Match against a potentially mutable schema.
+  //
+  // We need to treat mutable schemas differently because the IR explicitly
+  // expresses effects by including a world token in mutable ops. Users do not
+  // know about the world token, so we need to generate a dummy one and add
+  // it to the inputs for schema matching.
+  //
+  // Example:
+  //   append(int[] list, int el)
+  // becomes
+  //   append(World w, int[] list, int el)
+  //
+  // NOTE: The dummy world token has no meaning; the AnnotateEffects pass is
+  // necessary to enforce linearization on effectful ops.
+  std::vector<NamedValue> modifiedArgs(raw_args.begin(), raw_args.end());
   if (schema.is_mutable) {
     // Add a dummy world token to be matched against
     const auto worldToken = graph.insertDummyWorld();
-    modifiedInputs.insert(modifiedInputs.begin(), worldToken);
+    modifiedArgs.insert(modifiedArgs.begin(), worldToken);
   }
-  return tryMatchSchemaImpl(
-      schema,
-      loc,
-      graph,
-      modifiedInputs,
-      attributes,
-      failure_messages,
-      convert_tensors_to_nums);
+  auto err = [&]() -> std::ostream& {
+    failure_messages << "\nfor operator " << schema << ":\n";
+    return failure_messages;
+  };
+
+  TypeEnv type_env;
+  std::vector<Value*> positional_inputs;
+  std::vector<bool> used_kwarg(kwargs.size(), false);
+
+  // if we finish the loop will we have consumed all arguments?
+  size_t used_args = 0;
+
+  for (size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
+    const auto& arg = schema.arguments[schema_i];
+    at::optional<NamedValue> v;
+    if (!arg.kwarg_only && schema_i < modifiedArgs.size()) {
+      // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
+      if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
+          !arg.N && // it must not be a broadcasting list like int[3], otherwise
+                    // a single int is a valid input
+          (schema_i + 1 == schema.arguments.size() ||
+           schema.arguments[schema_i + 1]
+               .kwarg_only)) { // must be the last position argument
+        auto actual_type = modifiedArgs[schema_i].value(graph)->type();
+        if (actual_type->kind() != TypeKind::ListType &&
+            !convertibleToList(
+                actual_type,
+                arg.type)) { // and the actual should not be a list already
+          auto elem_type = arg.type->expect<ListType>()->getElementType();
+          Value* list = tryCreateList(
+              elem_type,
+              graph,
+              loc,
+              at::ArrayRef<NamedValue>(modifiedArgs).slice(schema_i),
+              err,
+              convert_tensors_to_nums,
+              type_env);
+          if (!list)
+            return at::nullopt;
+          used_args = modifiedArgs.size();
+          positional_inputs.push_back(list);
+          continue;
+        }
+      }
+
+      v = modifiedArgs[schema_i];
+      used_args++;
+    } else if (auto idx = findInputWithName(arg.name, kwargs)) {
+      const NamedValue& nv = kwargs[*idx];
+      if (used_kwarg[*idx]) {
+        err() << "argument " << nv.name()
+              << " specified twice in schema, submit a bug report!\n"
+              << nv.locOr(loc);
+        return at::nullopt;
+      }
+      used_kwarg[*idx] = true;
+      v = nv;
+    } else if (arg.default_value) {
+      v = NamedValue(*arg.default_value);
+    } else {
+      err() << "argument " << schema.arguments[schema_i].name
+            << " not provided.\n"
+            << loc;
+      return at::nullopt;
+    }
+    Value* positional = tryMatchArgument(
+        arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
+    if (!positional)
+      return at::nullopt;
+    positional_inputs.push_back(positional);
+  }
+
+  // check for unused positional arguments
+  if (used_args < modifiedArgs.size()) {
+    err() << "expected at most " << used_args << " arguments "
+          << "but found " << modifiedArgs.size() << " positional arguments.\n"
+          << loc << "\n";
+    return at::nullopt;
+  }
+  // check for unused kwargs
+  for (size_t i = 0; i < kwargs.size(); ++i) {
+    const auto& nv = kwargs[i];
+    if (!used_kwarg[i]) {
+      if (!schema.argumentIndexWithName(nv.name())) {
+        err() << "keyword argument " << nv.name() << " unknown\n";
+      } else {
+        err() << "keyword argument " << nv.name() << " specified twice\n";
+      }
+      return at::nullopt;
+    }
+  }
+  auto return_types = fmap(schema.returns, [&](const Argument& r) {
+    return evalTypeVariables(r.type, type_env);
+  });
+  return MatchedSchema{std::move(positional_inputs), std::move(return_types)};
 }
 
 static std::string prefixLine(const std::string& str, std::string prefix) {
@@ -695,10 +693,10 @@ static Value* emitBuiltinNode(
     const SourceRange& loc,
     Graph& graph,
     Symbol name) {
-  auto n = graph.insertNode(graph.create(name, matched_schema->inputs, 0))
+  auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
-  for(auto & ret : matched_schema->return_types) {
+  for(auto & ret : matched_schema.return_types) {
     n->addOutput()->setType(ret);
   }
 
@@ -740,7 +738,7 @@ Value* emitBuiltinCall(
           convert_tensors_to_nums);
 
       if (matched_schema) {
-        return emitBuiltinNode(matched_schema, loc, graph, name);
+        return emitBuiltinNode(*matched_schema, loc, graph, name);
       }
     }
   }
@@ -1861,29 +1859,14 @@ std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m,
   return nullptr;
 }
 
-std::vector<Value*> inlineCallTo(Graph& g, Graph& originalCallee, ArrayRef<Value*> inputs) {
-  auto callee = originalCallee.copy();
+std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
-  JIT_ASSERT(callee->inputs().size() == inputs.size());
+  JIT_ASSERT(callee.inputs().size() == inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
-    value_map[callee->inputs()[i]] = inputs[i];
+    value_map[callee.inputs()[i]] = inputs[i];
   }
-
-  // Inlined graphs need to expose their EntryWorld and ExitWorld nodes, so that
-  // the caller graph's world token can be threaded through the callee graph.
-  //
-  // The actual joining of the world token "threads" will be done in the
-  // AnnotateEffects pass.
-  //
-  // TODO(suo): a cleaner way to handle this might be to have inlined graphs
-  // be a special prim::Inlined node, so that we can clone the entire block's
-  // metadata and don't need to expose EntryWorld and ExitWorld like this.
-  auto* loadWorld = g.insertNode(g.create(prim::LoadWorld));
-  loadWorld->output()->setType(WorldType::get());
-  value_map[callee->entryWorld()] = loadWorld->output();
-
-  for (auto* node : callee->nodes()) {
+  for (auto* node : callee.nodes()) {
     auto* new_node =
         g.insertNode(g.createClone(node, value_map_func));
     for (size_t i = 0; i < node->outputs().size(); ++i) {
@@ -1891,11 +1874,8 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& originalCallee, ArrayRef<Value
     }
   }
 
-  auto* storeWorld = g.insertNode(g.create(prim::StoreWorld, 0));
-  storeWorld->addInput(value_map[callee->exitWorld()]);
-
   std::vector<Value*> outputs;
-  for (auto* output : callee->outputs()) {
+  for (auto* output : callee.outputs()) {
     outputs.push_back(value_map_func(output));
   }
   return outputs;

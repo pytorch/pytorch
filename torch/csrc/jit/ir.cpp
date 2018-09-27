@@ -250,10 +250,10 @@ void Node::lint() const {
   // Node subclass invariants
   IR_IF(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
-  IR_ELSEIF(EntryWorld)
+  IR_ELSEIF(LoadWorld)
     JIT_ASSERT(inputs_.size() == 0);
     JIT_ASSERT(outputs_.size() == 1);
-  IR_ELSEIF(ExitWorld)
+  IR_ELSEIF(StoreWorld)
     JIT_ASSERT(inputs_.size() == 1);
     JIT_ASSERT(outputs_.size() == 0);
   IR_ELSEIF(Return)
@@ -382,22 +382,15 @@ void Graph::lint() const {
         JIT_ASSERT(input->node()->kind_ == prim::Param);
       }
 
-      check_node(b->entry_world_);
-      JIT_ASSERT(b->entry_world_->kind() == prim::EntryWorld);
-
       for (auto n : b->nodes()) {
         JIT_ASSERT(n->kind_ != prim::Param);
         JIT_ASSERT(n->kind_ != prim::Return);
-        JIT_ASSERT(n->kind_ != prim::EntryWorld);
-        JIT_ASSERT(n->kind_ != prim::ExitWorld);
         JIT_ASSERT(n->kind_ != prim::DummyWorld);
         check_node(n);
       }
 
       JIT_ASSERT(b->output_->kind() == prim::Return);
       check_node(b->output_);
-      JIT_ASSERT(b->exit_world_->kind() == prim::ExitWorld);
-      check_node(b->exit_world_);
 
       // all_nodes
       // - inputs_, output_ and nodes_ are all included in all_nodes
@@ -406,8 +399,8 @@ void Graph::lint() const {
       // - only one return node???
 
       node_set nodes_set(ALL_OF(b->nodes()));
-      node_set inputs_set {b->input_, b->entry_world_};
-      node_set output_set {b->output_, b->exit_world_};
+      node_set inputs_set {b->input_};
+      node_set output_set {b->output_};
       // TODO: Make a more type safe std::includes wrapper which disallows use on
       // non-ordered containers
       JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
@@ -460,12 +453,6 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
     graph->setStage(std::max(graph->stage(), input->stage()));
   }
 
-  const auto worldToken = src->entry_world_->output();
-  local_map[worldToken] = this->entry_world_->output()
-                              ->copyMetadata(worldToken)
-                              ->setStage(worldToken->stage());
-  graph->setStage(std::max(graph->stage(), worldToken->stage()));
-
   for(auto node : src->nodes()) {
     auto new_node = this->appendNode(graph->createClone(node, env));
     new_node->setStage(node->stage());
@@ -481,8 +468,6 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   for(auto output : src->outputs()) {
     this->registerOutput(env(output));
   }
-
-  this->exit_world_->replaceInput(0, env(src->exit_world_->input()));
 }
 
 std::shared_ptr<Graph> Graph::copy() {

@@ -60,8 +60,6 @@ namespace torch { namespace jit {
   _(prim, NoneGenerator)           \
   _(aten, floordiv)                \
   _(prim, MemoryFence)             \
-  _(prim, EntryWorld)              \
-  _(prim, ExitWorld)               \
   _(prim, LoadWorld)               \
   _(prim, StoreWorld)              \
   _(prim, DummyWorld)              \

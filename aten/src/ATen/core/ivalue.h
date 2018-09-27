@@ -66,15 +66,15 @@ struct World {
 
 struct IValue;
 struct C10_EXPORT Tuple : public List<IValue> {
-  using ConstantList<IValue>::ConstantList;
+  using List<IValue>::List;
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
   }
 };
-using Tuple = List<IValue>;
 using IntList = List<int64_t>;
 using TensorList = List<at::Tensor>;
 using DoubleList = List<double>;
+using GenericList = List<IValue>;
 
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
@@ -155,6 +155,13 @@ struct CAFFE2_API IValue final {
     return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
   }
 
+  const IValue& toIValue() const {
+    return *this;
+  }
+  IValue& toIValue() {
+    return *this;
+  }
+
   IValue(caffe2::Blob blob) : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and
@@ -203,7 +210,7 @@ struct CAFFE2_API IValue final {
     payload.as_world = w;
   }
   bool isWorld() const { return Tag::World == tag; }
-   World toWorld() const {
+  World toWorld() const {
     AT_ASSERT(isWorld());
     return payload.as_world;
   }
@@ -424,6 +431,7 @@ DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 DEFINE_TO(std::vector<IValue>, toGenericListRef)
 DEFINE_TO(World, toWorld)
+DEFINE_TO(IValue, toIValue)
 
 #undef DEFINE_TO
 

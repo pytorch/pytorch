@@ -305,15 +305,6 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
 
   return FindLastUses(g).move_flags;
 }
-
-// Add an instruction that spawns the initial world token on the stack.
-void insertLoadWorld(Graph& graph) {
-  WithInsertPoint guard(*graph.nodes().begin());
-  auto loadWorld = graph.create(prim::LoadWorld);
-  loadWorld->output()->setType(WorldType::get());
-  graph.insertNode(loadWorld);
-  graph.entryWorld()->replaceAllUsesWith(loadWorld->output());
-}
 } //namespace
 
 // pre-processing that happens once per graph
@@ -323,8 +314,6 @@ struct PreprocessGraph {
     desugarTripCounts(graph->block());
     stage_input_types = flattenStages(*graph);
     dropUnused(graph->block());
-    // Manifest the initial world token in the graph
-    insertLoadWorld(*graph);
     // fill in move_flags by scanning blocks;
     move_flags = findLastUses(*graph);
     //TODO: desugar Loop trip counts, for now we drop trip counts

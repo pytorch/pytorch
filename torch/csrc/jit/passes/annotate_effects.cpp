@@ -33,11 +33,22 @@ namespace {
 class AnnotateEffectsImpl {
  public:
   void annotateEffects(Graph* g) {
+    if (!shouldAnnotate(g->block())) {
+      return;
+    }
+
     // Generate the first world token
-    auto curToken = g->entryWorld();
+    Value* curToken = nullptr;
+    {
+      WithInsertPoint guard(*g->nodes().begin());
+      auto loadWorld = g->insertNode(g->create(prim::LoadWorld, 1));
+      curToken = loadWorld->output()->setType(WorldType::get());
+    }
+
     auto lastToken = visitBlock(g->block(), curToken);
 
-    g->setExitWorld(lastToken);
+    auto storeWorld = g->insertNode(g->create(prim::StoreWorld, 0));
+    storeWorld->addInput(lastToken);
   }
 
  private:

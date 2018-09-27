@@ -1,6 +1,5 @@
 #include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch { namespace jit {
 
@@ -530,7 +529,6 @@ std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph){
   ToBatch to_batch;
   to_batch.toBatch(graph->block(), res_graph->block());
 
-  EliminateDeadCode(res_graph);
   return res_graph;
 }
 
