@@ -399,9 +399,17 @@ RegisterOperators reg({
               return 0;
             };
           } else {
-            std::stringstream ss;
-            ss << "unsupported list type: " << *lt->getElementType();
-            throw std::runtime_error(ss.str());
+            return [=](Stack& stack) {
+              const size_t stack_size = stack.size();
+              std::vector<IValue> vals;
+              vals.reserve(num_inputs);
+              for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
+                vals.push_back(std::move(stack[i]));
+              }
+              drop(stack, num_inputs);
+              push(stack, std::move(vals));
+              return 0;
+            };
           }
         }),
 });
@@ -506,11 +514,7 @@ Operation listEq(Node* node) {
     T a;
     T b;
     pop(stack, a, b);
-    if (a->elements() == b->elements()) {
-      push(stack, 1);
-    } else {
-      push(stack, 0);
-    }
+    push(stack, a->elements() == b->elements() ? 1 : 0);
     return 0;
   };
 }
@@ -604,31 +608,25 @@ Operation listSlice(Node* node) {
 }
 
 RegisterOperators reg2({
-    Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
-    Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
-    Operator("aten::select(Tensor[] a, int b) -> Tensor", listSelect<Shared<TensorList>>),
 
-    Operator("aten::len(int[] a) -> int", listLen<Shared<IntList>>),
-    Operator("aten::len(float[] a) -> int", listLen<Shared<DoubleList>>),
-    Operator("aten::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
+#define CREATE_LIST_OPS(decl_type, c_type) \
+    Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
+    Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
+    Operator("aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type "[]", listAdd<Shared<c_type>, c_type::ElemType>), \
+    Operator( \
+        "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
+        listSlice<Shared<c_type>, c_type::ElemType>),
+
+
+    CREATE_LIST_OPS("int", IntList)
+    CREATE_LIST_OPS("float", DoubleList)
+    CREATE_LIST_OPS("Tensor", TensorList)
+    CREATE_LIST_OPS("t", GenericList)
 
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
 
-    Operator("aten::add(int[] a, int[] b) -> int[]", listAdd<Shared<IntList>, int64_t>),
-    Operator("aten::add(float[] a, float[] b) -> float[]", listAdd<Shared<DoubleList>, double>),
-    Operator("aten::add(Tensor[] a, Tensor[] b) -> Tensor[]", listAdd<Shared<TensorList>, at::Tensor>),
-
-    Operator(
-        "aten::slice(int[] l, int start, int end=9223372036854775807, int step=1) -> int[]",
-        listSlice<Shared<IntList>, int64_t>),
-    Operator(
-        "aten::slice(float[] l, int start, int end=9223372036854775807, int step=1) -> float[]",
-        listSlice<Shared<DoubleList>, double>),
-    Operator(
-        "aten::slice(Tensor[] l, int start, int end=9223372036854775807, int step=1) -> Tensor[]",
-        listSlice<Shared<TensorList>, at::Tensor>),
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)

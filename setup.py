@@ -346,6 +346,7 @@ def build_libs(libs):
         build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    my_env["PYTORCH_BUILD_VERSION"] = version
     my_env["CMAKE_PREFIX_PATH"] = full_site_packages
     my_env["NUM_JOBS"] = str(NUM_JOBS)
     my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
@@ -1201,6 +1202,7 @@ if __name__ == '__main__':
                 'lib/include/caffe2/utils/*.h',
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
+                'lib/include/c10/util/*.h',
                 'lib/include/caffe2/core/*.h',
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',

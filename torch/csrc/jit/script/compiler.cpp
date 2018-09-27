@@ -449,7 +449,8 @@ Value* tryMatchArgument(
     const SourceRange& loc,
     const NamedValue& named_value,
     std::function<std::ostream&()> err,
-    bool convert_tensors_to_nums) {
+    bool convert_tensors_to_nums,
+    TypeEnv & type_env) {
   Value* value = named_value.value(graph);
 
   // some functions that take lists of integers for fixed size arrays
@@ -460,35 +461,44 @@ Value* tryMatchArgument(
     value = graph.insertNode(graph.createList(IntType::get(), repeated))->output();
   }
 
+  TypePtr concrete_type;
+  try {
+    concrete_type = matchTypeVariables(arg.type, value->type(), type_env);
+  } catch(TypeMatchError& e) {
+    err() << "could not match type " << value->type()->str() << " to "
+          << arg.type->str() << " in argument '" << arg.name << "': " << e.what() << "\n"
+          << named_value.locOr(loc);
+    return nullptr;
+  }
+
   // Allow homogeneous tuples to be casted implicitly to lists of appropriate types
-  if (convertibleToList(value->type(), arg.type) &&
+  if (convertibleToList(value->type(), concrete_type) &&
       value->type()->kind() == TypeKind::TupleType) {
     auto unpacked = createTupleUnpack(value);
-    auto elem_type = arg.type->expect<ListType>()->getElementType();
+    auto elem_type = concrete_type->expect<ListType>()->getElementType();
     value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
   }
 
   if (value->node()->kind() == prim::None){
-    if (arg.type->isSubtypeOf(NumberType::get()))
+    if (concrete_type->isSubtypeOf(NumberType::get()))
       value = graph.insertConstant(at::Scalar(NAN), loc);
-    else if (arg.type->isSubtypeOf(GeneratorType::get())) {
-      value = graph.insertNode(graph.createNoneGenerator())
-        ->output()->setType(GeneratorType::get());
+    else if (concrete_type->isSubtypeOf(GeneratorType::get())) {
+      value = graph.insertNode(graph.createNoneGenerator())->output();
     } else
       value = graph.insertNode(graph.createUndefined())->output();
   }
 
   //implicit conversion of tensors to scalars
-  if(convert_tensors_to_nums && arg.type->isSubtypeOf(NumberType::get())
+  if(convert_tensors_to_nums && concrete_type->isSubtypeOf(NumberType::get())
       && value->type()->isSubtypeOf(DynamicType::get())) {
-      auto n = graph.createImplicitTensorToNum(arg.type, value);
+      auto n = graph.createImplicitTensorToNum(concrete_type, value);
       value = graph.insertNode(n)
         ->setSourceLocation(std::make_shared<SourceRange>(loc))
         ->output();
   }
 
-  if(!value->type()->isSubtypeOf(arg.type)) {
-    err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
+  if(!value->type()->isSubtypeOf(concrete_type)) {
+    err() << "expected a value of type " << concrete_type->str() << " for argument '" << arg.name << "' but found "
           << value->type()->str() << "\n"
           << named_value.locOr(loc);
     return nullptr;
@@ -510,11 +520,12 @@ Value* tryCreateList(
     const SourceRange& loc,
     at::ArrayRef<NamedValue> varargs,
     std::function<std::ostream&()> err,
-    bool convert_tensor_to_num) {
-  Argument elem_arg("", elem_type);
+    bool convert_tensor_to_num,
+    TypeEnv & type_env) {
+  Argument elem_arg("<varargs>", elem_type);
   std::vector<Value*> list_ctor;
   for(const auto& a : varargs) {
-    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err, convert_tensor_to_num);
+    Value* av = tryMatchArgument(elem_arg, graph, loc, a, err, convert_tensor_to_num, type_env);
     if(!av)
       return nullptr;
     list_ctor.push_back(av);
@@ -537,7 +548,7 @@ static Value* materializeConstant(T val, Graph& graph,
   return new_constant;
 }
 
-at::optional<std::vector<Value*>> tryMatchSchema(
+at::optional<MatchedSchema> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
   Graph& graph,
@@ -550,6 +561,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       return failure_messages;
     };
 
+    TypeEnv type_env;
     std::vector<Value*> positional_inputs;
     std::vector<bool> used_kwarg(kwargs.size(), false);
 
@@ -564,16 +576,18 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
         if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
             !arg.N && // it must not be a broadcasting list like int[3], otherwise a single int is a valid input
-            (schema_i + 1 == schema.arguments.size() || schema.arguments[schema_i + 1].kwarg_only) &&  // must be the last position argument
-            !convertibleToList(args[schema_i].value(graph)->type(), arg.type)) { // and the actual should not be a list already
-          auto elem_type = arg.type->expect<ListType>()->getElementType();
-          Value* list = tryCreateList(elem_type, graph, loc, args.slice(schema_i),
-            err, convert_tensors_to_nums);
-          if(!list)
-            return at::nullopt;
-          used_args = args.size();
-          positional_inputs.push_back(list);
-          continue;
+            (schema_i + 1 == schema.arguments.size() || schema.arguments[schema_i + 1].kwarg_only)) {  // must be the last position argument
+          auto actual_type = args[schema_i].value(graph)->type();
+          if (actual_type->kind() != TypeKind::ListType && !convertibleToList(actual_type, arg.type)) { // and the actual should not be a list already
+            auto elem_type = arg.type->expect<ListType>()->getElementType();
+            Value* list = tryCreateList(elem_type, graph, loc, args.slice(schema_i),
+              err, convert_tensors_to_nums, type_env);
+            if(!list)
+              return at::nullopt;
+            used_args = args.size();
+            positional_inputs.push_back(list);
+            continue;
+          }
         }
 
         v = args[schema_i];
@@ -592,7 +606,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         err() << "argument " << schema.arguments[schema_i].name << " not provided.\n" << loc;
         return at::nullopt;
       }
-      Value * positional = tryMatchArgument(arg, graph, loc, *v, err, convert_tensors_to_nums);
+      Value * positional = tryMatchArgument(arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
       if(!positional)
         return at::nullopt;
       positional_inputs.push_back(positional);
@@ -616,7 +630,10 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         return at::nullopt;
       }
     }
-    return positional_inputs;
+    auto return_types = fmap(schema.returns, [&](const Argument& r) {
+      return evalTypeVariables(r.type, type_env);
+    });
+    return MatchedSchema {std::move(positional_inputs), std::move(return_types) };
 }
 
 
@@ -630,17 +647,17 @@ static Value* tryEmitBuiltin(
   at::ArrayRef<NamedValue> attributes,
   bool convert_tensors_to_nums) {
 
-  auto matched_inputs = tryMatchSchema(op->schema(), loc, graph, inputs, attributes,
+  auto matched_schema = tryMatchSchema(op->schema(), loc, graph, inputs, attributes,
     failure_messages, convert_tensors_to_nums);
-  if(!matched_inputs)
+  if(!matched_schema)
     return nullptr;
   // we successfully matched this schema, construct the node
 
-  auto n = graph.insertNode(graph.create(name, *matched_inputs, 0))
+  auto n = graph.insertNode(graph.create(name, matched_schema->inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
-  for(auto & ret : op->schema().returns) {
-    n->addOutput()->setType(ret.type);
+  for(auto & ret : matched_schema->return_types) {
+    n->addOutput()->setType(ret);
   }
 
   // assert that we did indeed create an op that has implementation
@@ -728,19 +745,6 @@ inline bool isSupportedListElementType(TypePtr type) {
       type->isSubtypeOf(NumberType::get());
 }
 
-// guard for List types we do not currently have operations for
-inline void ensureLegalType(const SourceRange& range, TypePtr ptr) {
-  if(TupleTypePtr tt = ptr->cast<TupleType>()) {
-    for(auto elem : tt->elements()) {
-      ensureLegalType(range, elem);
-    }
-  } else if(ListTypePtr lt = ptr->cast<ListType>()) {
-    if(!isSupportedListElementType(lt->getElementType())) {
-        throw ErrorReport(range) << "Lists can only contain numbers or Tensors, but found " << lt->getElementType()->str();
-    }
-  }
-}
-
 struct to_ir {
   to_ir(
       Def def,
@@ -791,7 +795,6 @@ struct to_ir {
       // Record the type for the schema and set the Type on the Value*
       arguments.push_back(schema.arguments.at(arg_annotation_idx++));
       new_input->setType(arguments.back().type);
-      ensureLegalType((*it).ident().range(), arguments.back().type);
     }
     // body
     auto stmts = def.statements();
@@ -1577,7 +1580,6 @@ private:
         }
         Value* result = graph->insertNode(graph->createList(elem_type, values))
             ->output();
-        ensureLegalType(tree->range(), result->type());
         return result;
       } break;
       case TK_TUPLE_LITERAL: {

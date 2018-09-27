@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
 #include "ATen/optional.h"
@@ -8,15 +7,15 @@
 
 using namespace at;
 
-CATCH_TEST_CASE( "optional in cuda files", "[cuda]" ) {
+// optional in cuda files
+TEST(OptionalTest, OptionalTestCUDA) {
   at::optional<int64_t> trivially_destructible;
   at::optional<std::vector<int64_t>> non_trivially_destructible;
-  CATCH_REQUIRE(!trivially_destructible.has_value());
-  CATCH_REQUIRE(!non_trivially_destructible.has_value());
+  ASSERT_FALSE(trivially_destructible.has_value());
+  ASSERT_FALSE(non_trivially_destructible.has_value());
 
   trivially_destructible = {5};
   non_trivially_destructible = std::vector<int64_t>{5, 10};
-  CATCH_REQUIRE(trivially_destructible.has_value());
-  CATCH_REQUIRE(non_trivially_destructible.has_value());
+  ASSERT_TRUE(trivially_destructible.has_value());
+  ASSERT_TRUE(non_trivially_destructible.has_value());
 }
-

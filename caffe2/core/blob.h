@@ -21,13 +21,13 @@ inline bool BlobIsTensorType(const Blob& blob, DeviceType device_type) {
     return false;
   }
   const Tensor* tensor = &blob.Get<Tensor>();
-  return tensor && tensor->GetDeviceType() == device_type;
+  return tensor && *tensor && tensor->GetDeviceType() == device_type;
 }
 
 inline Tensor* BlobGetMutableTensor(Blob* blob, DeviceType device_type) {
   if (blob->IsType<Tensor>()) {
     Tensor* tensor = blob->GetMutable<Tensor>();
-    if (tensor->GetDeviceType() == device_type) {
+    if (*tensor && tensor->GetDeviceType() == device_type) {
       return tensor;
     }
   }

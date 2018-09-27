@@ -350,8 +350,8 @@ _ScopeGuard<T> ScopeGuard(T f) {
         ##__VA_ARGS__);                                             \
   }
 
-#define CAFFE_DURATION(stats, field, ...)                \
-  if (auto g = detail::ScopeGuard([&](int64_t nanos) {   \
-        CAFFE_EVENT(stats, field, nanos, ##__VA_ARGS__); \
+#define CAFFE_DURATION(stats, field, ...)                        \
+  if (auto g = ::caffe2::detail::ScopeGuard([&](int64_t nanos) { \
+        CAFFE_EVENT(stats, field, nanos, ##__VA_ARGS__);         \
       }))
 } // namespace caffe2
