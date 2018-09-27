@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <iostream>
 #include <sstream>
 
 #include "caffe2/core/asan.h"

@@ -15,7 +15,7 @@
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
@@ -778,13 +778,13 @@ CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
 //     registry function.
 // (2) Then, one can call the operator registry function to further create the
 //     operators.
-typedef Registry<
+typedef c10::Registry<
     std::string,
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
     Workspace*>
     OperatorRegistry;
-typedef Registry<
+typedef c10::Registry<
     std::string,
     std::unique_ptr<OperatorBase>,
     const OperatorDef&,
@@ -806,7 +806,7 @@ struct CAFFE2_API DeviceTypeRegisterer {
 
 #define CAFFE_REGISTER_DEVICE_TYPE(type, registry_function) \
   namespace {                                               \
-  static DeviceTypeRegisterer CAFFE_ANONYMOUS_VARIABLE(     \
+  static DeviceTypeRegisterer C10_ANONYMOUS_VARIABLE(     \
       DeviceType)(type, &registry_function);                \
   }
 
@@ -817,43 +817,43 @@ struct CAFFE2_API DeviceTypeRegisterer {
 // not depend on specific cuda or cudnn libraries. This means that we will be
 // able to compile it even when there is no cuda available - we simply do not
 // link any cuda or cudnn operators.
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     CPUOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_CPU_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(CPUOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR(name, ...)                           \
   C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CPU##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
   }                                                                \
-  CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(CPUOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CPU_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(CPUOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_CPU_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(CPUOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_CUDA_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(CUDAOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR(name, ...)                           \
   C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();   \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_CUDA##name() { \
     CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
   }                                                                 \
-  CAFFE_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(CUDAOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_CUDA_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(CUDAOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(                                       \
+  C10_REGISTER_CLASS(                                       \
       CUDAOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 // Macros for cudnn since we use it often
@@ -861,24 +861,24 @@ CAFFE_DECLARE_REGISTRY(
   REGISTER_CUDA_OPERATOR_WITH_ENGINE(name, CUDNN, __VA_ARGS__)
 
 // Macros for HIP operators
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     HIPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_HIP_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(HIPOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR(name, ...)                           \
   C10_IMPORT void CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();  \
   static void CAFFE2_UNUSED CAFFE_ANONYMOUS_VARIABLE_HIP##name() { \
-    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                \
-  }                                                                \
-  CAFFE_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
+    CAFFE2_PLEASE_ADD_OPERATOR_SCHEMA_FOR_##name();                 \
+  }                                                                 \
+  C10_REGISTER_CLASS(HIPOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_HIP_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(HIPOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_HIP_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(                                       \
+  C10_REGISTER_CLASS(                                       \
       HIPOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 #define REGISTER_MIOPEN_OPERATOR(name, ...) \
