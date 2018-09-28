@@ -347,19 +347,30 @@ class CAFFE2_API Tensor final {
   }
 
   inline int64_t size_from_dim(int k) const {
-    return impl_.get()->size_from_dim(k);
+    return size_from_dim_(k, impl_->sizes());
   }
 
   inline int64_t size_to_dim(int k) const {
-    return impl_.get()->size_to_dim(k);
+    return size_to_dim_(k, impl_->sizes());
   }
 
   inline int64_t size_between_dim(int k, int l) const {
-    return impl_.get()->size_between_dim(k, l);
+    return size_between_dim_(k, l, impl_->sizes());
   }
 
+  /**
+   * Returns the 'canonical' version of a (usually)  user-specified axis,
+   * allowing for negative indexing (e.g., -1 for the last axis).
+   *
+   * @param axis_index the axis index.
+   *        If 0 <= index < dim(), return index.
+   *        If -ndim <= index <= -1, return (dim() - (-index)),
+   *        e.g., the last axis index (dim() - 1) if index == -1,
+   *        the second to last if index == -2, etc.
+   *        Dies on out of range index.
+   */
   inline int canonical_axis_index(int axis_index) const {
-    return impl_.get()->canonical_axis_index(axis_index);
+    return canonical_axis_index_(axis_index, impl_->dim());
   }
 
   inline int64_t stride(int64_t dim) const {
