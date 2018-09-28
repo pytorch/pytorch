@@ -124,7 +124,7 @@ TEST(NetTest, DISABLED_ChainingForDifferentDevices) {
           type: "NetTestDummy"
           device_option {
             device_type: 1
-            cuda_gpu_id: 1
+            device_id: 1
           }
         }
 )DOC";
