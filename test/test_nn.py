@@ -2609,6 +2609,7 @@ class TestNN(NNTestCase):
         self._test_batchnorm_simple_average()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_batchnorm_simple_average_cuda(self):
         self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
 
@@ -3960,6 +3961,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @skipIfRocm
     def test_variable_sequence_cuda(self, dtype=torch.float):
         self._test_variable_sequence("cuda", dtype)
 
@@ -4272,6 +4274,7 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
+    @skipIfRocm
     def test_rnn_retain_variables_cuda(self, dtype=torch.float):
         with torch.backends.cudnn.flags(enabled=False):
             self._test_rnn_retain_variables("cuda", dtype)
@@ -4830,6 +4833,7 @@ class TestNN(NNTestCase):
         self._test_batchnorm_update_stats()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_batchnorm_update_stats_cuda(self):
         self._test_batchnorm_update_stats("cuda", torch.float)
 
@@ -6682,7 +6686,7 @@ new_criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='2d',
-        test_cuda=(not TEST_WITH_ROCM)
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='NLLLoss',
