@@ -2378,12 +2378,20 @@ class TestDistributions(TestCase):
              (1, 2)),
             (StudentT(df=torch.tensor([1.]), scale=torch.tensor([[1.]])),
              (1, 1)),
+            (StudentT(df=1., loc=torch.zeros(5, 1), scale=torch.ones(3)),
+             (5, 3)),
         ]
 
         for dist, expected_size in valid_examples:
-            dist_sample_size = dist.sample().size()
-            self.assertEqual(dist_sample_size, expected_size,
-                             'actual size: {} != expected size: {}'.format(dist_sample_size, expected_size))
+            actual_size = dist.sample().size()
+            self.assertEqual(actual_size, expected_size,
+                             '{} actual size: {} != expected size: {}'.format(dist, actual_size, expected_size))
+
+            sample_shape = torch.Size((2,))
+            expected_size = sample_shape + expected_size
+            actual_size = dist.sample(sample_shape).size()
+            self.assertEqual(actual_size, expected_size,
+                             '{} actual size: {} != expected size: {}'.format(dist, actual_size, expected_size))
 
     def test_invalid_parameter_broadcasting(self):
         # invalid broadcasting cases; should throw error
