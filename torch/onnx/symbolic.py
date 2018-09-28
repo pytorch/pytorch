@@ -633,12 +633,12 @@ def lt(g, input, other):
 
 def ge(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", lt(g, _if_scalar_type_as(g, other, input), input))
+    return g.op("Not", lt(g, input, _if_scalar_type_as(g, other, input)))
 
 
 def le(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", gt(g, _if_scalar_type_as(g, other, input), input))
+    return g.op("Not", gt(g, input, _if_scalar_type_as(g, other, input)))
 
 
 @parse_args('v', 'i')
