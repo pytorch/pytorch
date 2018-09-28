@@ -272,8 +272,12 @@ class CAFFE2_API Tensor final {
     impl_.get()->ShareExternalPointer(std::move(data_ptr), data_type, capacity);
   }
 
+  /**
+   * Returns a const raw void* pointer of the underlying storage. mutable_data()
+   * or raw_mutable_data() must have been called prior to this function call.
+   */
   inline const void* raw_data() const {
-    return impl_.get()->raw_data();
+    return impl_->data();
   }
 
   template <typename T>
@@ -285,8 +289,22 @@ class CAFFE2_API Tensor final {
     return impl_.get()->raw_mutable_data(meta);
   }
 
+  /**
+   * Returns a mutable raw pointer of the underlying storage. This can only be
+   * used when you know for sure that the underlying storage of the tensor is
+   * already created via an earlier raw_mutable_data(meta) call or a
+   * mutable_data<T>() call.
+   *
+   * If the existing data does not match the desired type, it will be deleted
+   * and a new storage will be created.
+   */
   inline void* raw_mutable_data() const {
-    return impl_.get()->raw_mutable_data();
+    const auto& data_type = impl_->dtype();
+    CAFFE_ENFORCE_WITH_CALLER(
+        data_type.id() != caffe2::TypeIdentifier::uninitialized(),
+        "Calling raw_mutable_data() without meta, but the current meta is "
+        "of unknown type.");
+    return raw_mutable_data(data_type);
   }
 
   template <typename T>

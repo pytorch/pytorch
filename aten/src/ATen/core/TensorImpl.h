@@ -253,6 +253,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   inline void* data() const {
     AT_ASSERT(!is_variable());
+    CAFFE_ENFORCE_WITH_CALLER(storage_.data() || numel_ == 0);
     return static_cast<void*>(
         static_cast<char*>(storage_.data()) +
         data_type_.itemsize() * storage_offset_);
@@ -427,7 +428,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         CAFFE_ENFORCE(
             src.device_type() == ::at::DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
-        data_type_.copy()(src.raw_data(), raw_mutable_data(), size());
+        data_type_.copy()(src.data(), raw_mutable_data(data_type_), size());
       } else {
         // We'll need to use a non-CPU context to perform the copy if
         // one of the context is not CPU since only non-CPU context
@@ -435,20 +436,20 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         if (src.device_type() != ::at::DeviceType::CPU || device_type() == ::at::DeviceType::CPU) {
           if (!context) {
             src.CreateContext()->CopyBytesToDevice(
-                nbytes(), src.raw_data(), raw_mutable_data(), device_type());
+                nbytes(), src.data(), raw_mutable_data(data_type_), device_type());
           } else {
             CAFFE_ENFORCE(
                 context->device_type() == src.device_type(),
                 "Type for provided context does not match the type of source");
             context->CopyBytesToDevice(
-                nbytes(), src.raw_data(), raw_mutable_data(), device_type());
+                nbytes(), src.data(), raw_mutable_data(data_type_), device_type());
           }
         } else {
           // In case source context is CPU, and target context is non-CPU
           // We'll have to create a Context from target and perform the
           // copy using that context
           CreateContext()->CopyBytesFromCPU(
-              nbytes(), src.raw_data(), raw_mutable_data());
+              nbytes(), src.data(), raw_mutable_data(data_type_));
         }
       }
     }
@@ -682,15 +683,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * Returns a const raw void* pointer of the underlying storage. mutable_data()
-   * or raw_mutable_data() must have been called prior to this function call.
-   */
-  inline const void* raw_data() const {
-    CAFFE_ENFORCE_WITH_CALLER(storage_.data() || numel_ == 0);
-    return static_cast<void*>(static_cast<char*>(storage_.data()) + storage_offset_ * storage_.itemsize());
-  }
-
-  /**
    * Returns a mutable raw pointer of the underlying storage. Since we will need
    * to know the type of the data for allocation, a TypeMeta object is passed in
    * to specify the necessary information. This is conceptually equivalent of
@@ -769,23 +761,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       AT_ASSERT(storage_offset_ == 0); // because we just reallocated
       return storage_.data();
     }
-  }
-
-  /**
-   * Returns a mutable raw pointer of the underlying storage. This can only be
-   * used when you know for sure that the underlying storage of the tensor is
-   * already created via an earlier raw_mutable_data(meta) call or a
-   * mutable_data<T>() call.
-   *
-   * If the existing data does not match the desired type, it will be deleted
-   * and a new storage will be created.
-   */
-  inline void* raw_mutable_data() {
-    CAFFE_ENFORCE_WITH_CALLER(
-        data_type_.id() != caffe2::TypeIdentifier::uninitialized(),
-        "Calling raw_mutable_data() without meta, but the current meta is "
-        "of unknown type.");
-    return raw_mutable_data(data_type_);
   }
 
   /**
@@ -920,7 +895,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   void ExtractDeviceOption(caffe2::DeviceOption* device) const {
     auto* context = GetStaticContext();
     CHECK(context);
-    context->ExtractDeviceOption(device, raw_data());
+    context->ExtractDeviceOption(device, data());
   }
 
  protected:
