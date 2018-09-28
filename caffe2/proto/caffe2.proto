@@ -37,7 +37,6 @@ message TensorProto {
     INT64 = 10;    // int64_t
     FLOAT16 = 12;  // at::Half
     DOUBLE = 13;   // double
-    BFLOAT16 = 14; // bfloat16
 
     // Special data type, type information is stored in the special type field
     SPECIAL = 51;
@@ -49,6 +48,13 @@ message TensorProto {
   optional SpecialType special_type = 13;
 
   // Data storage
+  enum StorageType {
+    TYPED = 1;
+    RAW = 2;
+    EXTERNAL = 3;
+    ALIAS = 4;
+  }
+  optional StorageType storage_type = 14 [default = TYPED];
   // For float
   repeated float float_data = 3 [packed = true];
   // For int32, uint8, int8, uint16, int16, bool, and float16
@@ -64,11 +70,11 @@ message TensorProto {
   // For int64
   repeated int64 int64_data = 10 [packed = true];
   // For raw data
-  optional bytes raw_data = 14;
+  optional bytes raw_data = 15;
   // External data by file name
-  optional string external_data = 15;
+  optional string external_data = 16;
   // For argument, to share the content
-  optional string alias = 16;
+  optional string alias = 17;
 
   // Optionally, a name for the tensor.
   optional string name = 7;
@@ -87,13 +93,13 @@ message TensorProto {
     optional int64 chunk_id = 52;
   }
   optional Segment segment = 11;
-  optional string debug_info = 17;
+  optional string debug_info = 18;
 
   // For PyTorch serialized tensor.
-  optional bool require_gradient = 18;
-  optional bool is_buffer = 19;
+  optional bool require_gradient = 19;
+  optional bool is_buffer = 20;
 
-  repeated Argument annotations = 20;
+  repeated Argument annotations = 21;
 }
 
 message QTensorProto {
