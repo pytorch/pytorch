@@ -53,6 +53,13 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
 
 RegisterOperators reg({
     Operator(
+        prim::MemoryFence,
+        [](Node* node) {
+          return [](Stack& stack) {
+            return 0;
+          };
+        }),
+    Operator(
         prim::FusionGroup,
         [](Node* node) {
           auto handle = getFusionHandle(node);
@@ -201,6 +208,30 @@ RegisterOperators reg({
           auto N = node->inputs().size();
           return [=](Stack& stack) {
             drop(stack, N);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::LoadWorld,
+        [](Node* node) {
+          return [](Stack& stack) {
+            push(stack, World{0});
+            return 0;
+          };
+        }),
+    Operator(
+        prim::StoreWorld,
+        [](Node* node) {
+          return [](Stack& stack) {
+            drop(stack, 1);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::DummyWorld,
+        [](Node* node) {
+          return [](Stack& stack) {
+            AT_ERROR("Encountered a dummy world during graph execution.");
             return 0;
           };
         }),
@@ -479,6 +510,19 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
+template <typename TList, typename TElement>
+Operation listAppend(Node* node) {
+  return [](Stack& stack) {
+    TList a;
+    TElement el;
+    pop(stack, a, el);
+
+    a->elements().push_back(el);
+
+    return 0;
+  };
+}
+
 template <typename T>
 Operation listSelect(Node* node) {
   return [=](Stack& stack) {
@@ -615,7 +659,10 @@ RegisterOperators reg2({
     Operator("aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type "[]", listAdd<Shared<c_type>, c_type::ElemType>), \
     Operator( \
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
-        listSlice<Shared<c_type>, c_type::ElemType>),
+        listSlice<Shared<c_type>, c_type::ElemType>), \
+    Operator( \
+        "aten::append(World w, " decl_type "[] list, " decl_type " el) -> World", \
+        listAppend<Shared<c_type>, c_type::ElemType>), \
 
 
     CREATE_LIST_OPS("int", IntList)
@@ -623,10 +670,10 @@ RegisterOperators reg2({
     CREATE_LIST_OPS("Tensor", TensorList)
     CREATE_LIST_OPS("t", GenericList)
 
+
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
-
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)

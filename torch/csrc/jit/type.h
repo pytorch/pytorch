@@ -27,7 +27,8 @@ _(IntType) \
 _(NoneType) \
 _(StringType) \
 _(GeneratorType) \
-_(VarType)
+_(VarType) \
+_(WorldType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -368,6 +369,32 @@ private:
 
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
+};
+
+// This type is a token used to represent effectful computation in the IR.
+// See the AnnotateEffects pass for how it is used.
+struct WorldType;
+using WorldTypePtr = std::shared_ptr<WorldType>;
+struct TORCH_API WorldType : public Type {
+  template <typename... T>
+  static WorldTypePtr create(T&&... all) {
+    return WorldTypePtr(new WorldType(std::forward<T>(all)...));
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "world";
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *this == *rhs;
+  }
+  static const TypeKind Kind = TypeKind::WorldType;
+  // global singleton
+  static WorldTypePtr get();
+
+ private:
+  WorldType() : Type(TypeKind::WorldType) {}
 };
 
 struct ListType;
