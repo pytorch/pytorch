@@ -343,7 +343,7 @@ struct TORCH_API CompleteTensorType : public TensorType {
     return prod;
   }
   static TypePtr fromNumberType(TypePtr typ);
-  static TypePtr fromBoolType(TypePtr typ);
+  static TypePtr fromBoolType();
 
 private:
   CompleteTensorType(const at::Tensor& tensor)
@@ -735,11 +735,8 @@ inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
   AT_ERROR("unknown number type", typ->str());
 }
 
-inline TypePtr CompleteTensorType::fromBoolType(TypePtr type) {
-  if (type->isSubtypeOf(BoolType::get())) {
-    return CompleteTensorType::create(at::kLong, -1, {});
-  }
-  AT_ERROR("unknown bool type", type->str());
+inline TypePtr CompleteTensorType::fromBoolType() {
+  return CompleteTensorType::create(at::kLong, -1, {});
 }
 
 

@@ -1050,7 +1050,10 @@ public:
   Node* createBoolToTensor(Value* value) {
     auto typ = value->type();
     Node * result = create(prim::BoolToTensor, {value});
-    result->output()->setType(CompleteTensorType::fromBoolType(typ));
+    if (!typ->isSubtypeOf(BoolType::get())) {
+      AT_ERROR("Cannot create bool type from ", typ->str());
+    }
+    result->output()->setType(CompleteTensorType::fromBoolType());
     return result;
   }
   Node* createTensorToNum(const TypePtr& type, Value* value) {
