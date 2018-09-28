@@ -1033,6 +1033,7 @@ class TestSparse(TestCase):
                 for length in range(dim_sz - start):
                     yield [dim, start, length]
 
+    @skipIfRocm
     def test_narrow(self):
         shape = [3, 3, 4, 2]
         input, _, _ = self._gen_sparse(4, 19, shape)
