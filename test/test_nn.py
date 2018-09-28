@@ -6946,7 +6946,6 @@ def bce_with_logistic_no_reduce_test():
         check_gradgrad=False,
         pickle=False,
         decorator=skipIfRocm)
-        pickle=False,)
 
 
 def bce_with_logistic_no_reduce_scalar_test():
