@@ -66,19 +66,6 @@ class MIOPENConvOpBase : public ConvPoolOpBase<HIPContext> {
         dilation_h() == 1 && dilation_w() == 1,
         "MIOpen convolution does not support dilation for groups > 1.");
     }
-
-    MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
-        conv_desc_,
-        mode_,
-        pad_t(),
-        pad_l(),
-        stride_h(),
-        stride_w(),
-        dilation_h(),
-        dilation_w()));
-
-    MIOPEN_ENFORCE(miopenSetConvolutionGroupCount(
-        conv_desc_, group_));
   }
 
   ~MIOPENConvOpBase() {
