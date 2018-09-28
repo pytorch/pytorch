@@ -71,6 +71,10 @@ void Method::ensure_defined() {
   }
 }
 
+void Module::save(std::ostream& out) {
+  ExportModule(*this, out);
+}
+
 void Module::save(const std::string& filename) {
   ExportModule(*this, filename);
 }
