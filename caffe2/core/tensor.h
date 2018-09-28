@@ -120,7 +120,7 @@ class CAFFE2_API Tensor final {
   }
 
   DeviceType GetDeviceType() const {
-    return impl_.get()->GetDeviceType();
+    return impl_->device_type();
   }
 
   void CopyFrom(const Tensor& src, BaseContext* context = nullptr) const {
