@@ -542,6 +542,12 @@ BAD_EXAMPLES = [
             'scale': torch.tensor([1., -1.], requires_grad=True),
         },
     ]),
+    Example(MultivariateNormal, [
+        {
+            'loc': torch.tensor([1., 1.], requires_grad=True),
+            'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
+        },
+    ]),
     Example(Normal, [
         {
             'loc': torch.tensor([1., 1.], requires_grad=True),

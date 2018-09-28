@@ -1,5 +1,5 @@
 #include "caffe2/operators/lengths_reducer_fused_8bit_rowwise_ops.h"
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 
 namespace caffe2 {
 

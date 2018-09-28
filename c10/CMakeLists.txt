@@ -16,6 +16,9 @@ configure_file(
 # check with the core PyTorch developers as the dependendency will be
 # transitively passed on to all libraries dependent on PyTorch.
 file(GLOB_RECURSE C10_SRCS *.cpp)
+# exclude test files
+file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
+exclude(C10_SRCS "${C10_SRCS}" ${C10_ALL_TEST_FILES})
 file(GLOB_RECURSE C10_HEADERS *.h)
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 # If building shared library, set dllimport/dllexport proper.
@@ -30,6 +33,8 @@ target_include_directories(
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
     $<INSTALL_INTERFACE:include>)
+
+add_subdirectory(test)
 
 # ---[ Installation
 # Note: for now, we will put all export path into one single Caffe2Targets group
