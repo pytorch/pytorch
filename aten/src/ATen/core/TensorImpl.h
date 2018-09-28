@@ -365,6 +365,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
  public:
 
+  at::DeviceType device_type() const {
+    AT_ASSERT(!is_variable());
+    return storage_.device_type();
+  }
+
   /**
    * The static context of a tensor intuitively represents the device
    * type of a tensor; e.g., a CPU tensor is associated with the
@@ -373,8 +378,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * of a tensor.
    */
   at::BaseStaticContext* GetStaticContext() const {
-    auto device_type = GetDeviceType();
-    return ::caffe2::get_static_context(device_type);
+    return ::caffe2::get_static_context(device_type());
   }
 
   /* @brief
@@ -387,10 +391,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   std::unique_ptr<at::BaseContext> CreateContext() const {
     return GetStaticContext()->CreateContext();
-  }
-
-  at::DeviceType GetDeviceType() const {
-    return storage_.device_type();
   }
 
   /**
@@ -406,7 +406,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       CAFFE_ENFORCE_WITH_CALLER(
           src.is_contiguous(),
           "Right now only copy of contiguous source Tensor is supported.");
-      storage_ = at::Storage(GetDeviceType(), src.meta());
+      storage_ = at::Storage(device_type(), src.meta());
       data_type_ = src.meta();
     }
     if (src.size() == -1) {
@@ -422,26 +422,26 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (size() > 0) {
       if (data_type_.copy()) {
         CAFFE_ENFORCE(
-            GetDeviceType() == ::at::DeviceType::CPU,
+            device_type() == ::at::DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         CAFFE_ENFORCE(
-            src.GetDeviceType() == ::at::DeviceType::CPU,
+            src.device_type() == ::at::DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
         data_type_.copy()(src.raw_data(), raw_mutable_data(), size());
       } else {
         // We'll need to use a non-CPU context to perform the copy if
         // one of the context is not CPU since only non-CPU context
         // knows how to copy between CPU and that context
-        if (src.GetDeviceType() != ::at::DeviceType::CPU || GetDeviceType() == ::at::DeviceType::CPU) {
+        if (src.device_type() != ::at::DeviceType::CPU || device_type() == ::at::DeviceType::CPU) {
           if (!context) {
             src.CreateContext()->CopyBytesToDevice(
-                nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());
+                nbytes(), src.raw_data(), raw_mutable_data(), device_type());
           } else {
             CAFFE_ENFORCE(
-                context->device_type() == src.GetDeviceType(),
+                context->device_type() == src.device_type(),
                 "Type for provided context does not match the type of source");
             context->CopyBytesToDevice(
-                nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());
+                nbytes(), src.raw_data(), raw_mutable_data(), device_type());
           }
         } else {
           // In case source context is CPU, and target context is non-CPU
@@ -757,7 +757,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         "To share with a raw external pointer you need to pass in an "
         "initialized data_type(TypeMeta).");
     ShareExternalPointer(
-        at::DataPtr(src, src, d, GetDeviceType()), data_type, capacity);
+        at::DataPtr(src, src, d, device_type()), data_type, capacity);
   }
 
   void ShareExternalPointer(
