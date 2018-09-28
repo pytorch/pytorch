@@ -527,7 +527,7 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
                 (i + chunkBegin) * temp_blob.meta().itemsize(),
             1);
       }
-    }
+    } break;
     case TensorProto_DataType_SPECIAL: {
       CAFFE_THROW("SPECIAL Tensor is not handled yet.");
     } break;
