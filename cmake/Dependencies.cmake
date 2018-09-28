@@ -483,9 +483,7 @@ endif()
 
 # ---[ pybind11
 find_package(pybind11 CONFIG)
-if((DEFINED pybind11_DIR) AND pybind11_DIR)
-  get_target_property(pybind11_INCLUDE_DIRS pybind11::pybind11 INTERFACE_INCLUDE_DIRECTORIES)
-else()
+if(NOT pybind11_FOUND)
   find_package(pybind11)
 endif()
 
