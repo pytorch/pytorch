@@ -406,12 +406,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if ((void*)&src == (void*)this) {
       return;
     }
-    if (data_type_ != src.meta()) {
+    if (data_type_ != src.dtype()) {
       CAFFE_ENFORCE_WITH_CALLER(
           src.is_contiguous(),
           "Right now only copy of contiguous source Tensor is supported.");
-      storage_ = at::Storage(device_type(), src.meta());
-      data_type_ = src.meta();
+      storage_ = at::Storage(device_type(), src.dtype());
+      data_type_ = src.dtype();
     }
     if (src.numel() == -1) {
       sizes_.clear();
@@ -774,7 +774,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data() {
-    if ((numel_ == 0 || storage_.data()) && IsType<T>()) {
+    if ((numel_ == 0 || storage_.data()) && storage_.IsType<T>()) {
       return static_cast<T*>(storage_.data()) + storage_offset_;
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
@@ -793,55 +793,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // internal representation of dims().  That's BAD.  Let's get
     // people to stop using this.
     return sizes_;
-  }
-
-  /**
-   * Checks if the tensor content is of the given data type.
-   */
-  template <typename T>
-  inline bool IsType() const {
-    return storage_.IsType<T>();
-  }
-  /**
-   * Returns the TypeMeta object associated with the current data type.
-   */
-  inline const caffe2::TypeMeta& meta() const {
-    return data_type_;
-  }
-
-  /**
-   * Returns the i-th dimension of the tensor in int.
-   *
-   * This function returns an int value instead of int64_t, which depending on
-   * the typedef could be int64. If you want int64 dim values, make sure you
-   * call dim() instead.
-   */
-  inline int dim32(const int i) const {
-#ifndef NDEBUG
-    CAFFE_ENFORCE_LT_WITH_CALLER(i, static_cast<int>(sizes_.size()), "Exceeding ndim limit");
-    CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
-#endif
-    CAFFE_ENFORCE_LT_WITH_CALLER(sizes_[i], std::numeric_limits<int>::max());
-    return static_cast<int>(sizes_[i]);
-  }
-
-  /**
-   * Returns the i-th dimension of the tensor. Note that the passed in index
-   * must be between 0 (inclusive) and the number of dimensions, otherwise
-   * this function will produce a fatal message.
-   */
-  inline int64_t dim(const int i) const {
-#ifndef NDEBUG
-    CAFFE_ENFORCE_LT_WITH_CALLER(i, static_cast<int>(sizes_.size()), "Exceeding ndim limit");
-    CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
-#endif
-    return sizes_[i];
-  }
-
-  void ExtractDeviceOption(caffe2::DeviceOption* device) const {
-    auto* context = GetStaticContext();
-    CHECK(context);
-    context->ExtractDeviceOption(device, data());
   }
 
  protected:
