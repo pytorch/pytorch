@@ -449,6 +449,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
     }
 
     if (weight_changed) {
+      mio_weight_dims_ = Weight.dims();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
           mode_,
