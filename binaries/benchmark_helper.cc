@@ -207,12 +207,17 @@ void fillInputBlob(
         (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
       }
     } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
+      vector<int64_t> dims;
+      for (const int64_t d : tensor_proto->dims()) {
+        dims.push_back(d);
+      }
       // int total_size = tensor_proto->float_data_size();
-      caffe2::TensorCPU *tensor = new caffe2::TensorCPU();
+      caffe2::TensorCPU *tensor = new caffe2::TensorCPU(dims,
+          caffe2::DeviceType::CPU);
       serializer.Deserialize(*tensor_proto, tensor);
       blob->Reset(tensor);
     }
-    tensor = blob->GetMutableTensor(caffe2::CPU);
+    // tensor = blob->GetMutableTensor(caffe2::CPU);
     // caffe2::TensorPrinter printer("tensor", "./tensor.txt", 1000000);
     // printer.Print<float>(*tensor);
     // todo: for other types

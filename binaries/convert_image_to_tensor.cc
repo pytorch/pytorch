@@ -35,7 +35,7 @@ CAFFE2_DEFINE_bool(text_output, false, "Write the output in text format.");
 CAFFE2_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 CAFFE2_DEFINE_string(preprocess, "",
     "Options to specify the preprocess routines. The available options are "
-    "subtract128, normalize, mean, std. If multiple steps are provided, they "
+    "subtract128, normalize, mean, std, bgrtorgb. If multiple steps are provided, they "
     "are separated by comma (,) in sequence.");
 
 namespace caffe2 {
@@ -87,6 +87,7 @@ std::vector<float> convertToVector(cv::Mat& img) {
   std::vector<float> normalize(3, 1);
   std::vector<float> mean(3, 0);
   std::vector<float> std(3, 1);
+  bool bgrtorgb = false;
   assert(img.cols == caffe2::FLAGS_scale);
   assert(img.rows == caffe2::FLAGS_scale);
   vector<string> steps = caffe2::split(',', caffe2::FLAGS_preprocess);
@@ -102,9 +103,11 @@ std::vector<float> convertToVector(cv::Mat& img) {
       mean = {0.406, 0.456, 0.485};
     } else if (step == "std") {
       std = {0.225, 0.224, 0.229};
+    } else if (step == "bgrtorgb"){
+      bgrtorgb = true;
     } else {
       CAFFE_ENFORCE(false, "Unsupported preprocess step. "
-      "The supported steps are: subtract128, normalize,mean, std.");
+      "The supported steps are: subtract128, normalize,mean, std, swaprb.");
     }
   }
 
@@ -119,12 +122,15 @@ std::vector<float> convertToVector(cv::Mat& img) {
   } else {
     int i = 0;
     cv::MatIterator_<cv::Vec3b> it, end;
+    int b = bgrtorgb ? 2 : 0;
+    int g = 1;
+    int r = bgrtorgb ? 0 : 2;
     for( it = img.begin<cv::Vec3b>(), end = img.end<cv::Vec3b>(); it != end; ++it, i++) {
-      values[i] = (((*it)[0] / normalize[0] - mean[0]) / std[0]);
+      values[i] = (((*it)[b] / normalize[0] - mean[0]) / std[0]);
       int offset = caffe2::FLAGS_scale * caffe2::FLAGS_scale + i;
-      values[offset] = (((*it)[1] / normalize[1] - mean[1]) / std[1]);
+      values[offset] = (((*it)[g] / normalize[1] - mean[1]) / std[1]);
       offset = caffe2::FLAGS_scale * caffe2::FLAGS_scale + offset;
-      values[offset] = (((*it)[2] / normalize[2] - mean[2]) / std[2]);
+      values[offset] = (((*it)[r] / normalize[2] - mean[2]) / std[2]);
     }
   }
   return values;
@@ -148,7 +154,6 @@ std::vector<float> convertOneImage(std::string& filename) {
   DCHECK(resized_img.isContinuous());
   assert(resized_img.rows == resized_img.cols);
   assert(resized_img.rows == caffe2::FLAGS_scale);
-  imwrite("./debug.bmp", resized_img);
   std::vector<float> one_image_values = convertToVector(resized_img);
   return one_image_values;
 }
