@@ -354,6 +354,11 @@ std::vector<typename G::NodeRef> nodeIterator(G& g) {
   return out;
 }
 
+template <typename T>
+inline std::vector<NNGraph::NodeRef> filter(NNModule& nn) {
+  return nodeIterator<T>(nn.dataFlow);
+}
+
 template <typename T, typename G>
 std::vector<std::pair<T*, typename G::NodeRef>> dataIterator(G& g) {
   std::vector<std::pair<T*, typename G::NodeRef>> out;
