@@ -142,8 +142,25 @@ class CAFFE2_API Tensor final {
     impl_.get()->Extend(num, growthPct, context);
   }
 
+  /**
+   * @brief Shrinks the outer-most dimension to given size, keeping the data.
+   *
+   * This method guarantees that no re-allocations are carried out, which means
+   * that the extra capacity after the end of the shrunk tensor is maintained.
+   * Notably, this function does NOT respect caffe2_keep_on_shrink.
+   */
   void ShrinkTo(int64_t outer_dim) const {
-    impl_.get()->ShrinkTo(outer_dim);
+    CAFFE_ENFORCE_WITH_CALLER(
+        impl_->is_contiguous(),
+        "Right now ShrinkTo is only supported on contiguous Tensor.");
+    CAFFE_ENFORCE_WITH_CALLER(impl_->dim() >= 1, "Tensor must be at least 1D");
+    CAFFE_ENFORCE_WITH_CALLER(
+        outer_dim <= impl_->size(0),
+        "New outer dimension must be smaller than current.");
+    CAFFE_ENFORCE(
+        impl_->storage().unique(),
+        "Can't call ShrinkTo on shared storage, please call Resize instead.");
+    impl_.get()->set_size(0, outer_dim);
   }
 
   template <class T>

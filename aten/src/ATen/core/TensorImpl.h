@@ -504,32 +504,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * @brief Shrinks the outer-most dimension to given size, keeping the data.
-   *
-   * This method guarantees that no re-allocations are carried out, which means
-   * that the extra capacity after the end of the shrunk tensor is maintained.
-   * Notably, this function does NOT respect caffe2_keep_on_shrink.
-   */
-  void ShrinkTo(int64_t outer_dim) {
-    CAFFE_ENFORCE_WITH_CALLER(
-        is_contiguous_,
-        "Right now ShrinkTo is only supported on contiguous Tensor.");
-    CAFFE_ENFORCE_WITH_CALLER(sizes_.size() >= 1, "Tensor must be at least 1D");
-    CAFFE_ENFORCE_WITH_CALLER(
-        outer_dim <= sizes_[0],
-        "New outer dimension must be smaller than current.");
-    CAFFE_ENFORCE(
-        storage_.unique(),
-        "Can't call ShrinkTo on shared storage, please call Resize instead.");
-    sizes_[0] = outer_dim;
-    numel_ = std::accumulate(
-        sizes_.begin(),
-        sizes_.end(),
-        static_cast<int64_t>(1),
-        std::multiplies<int64_t>());
-  }
-
-  /**
    * @brief Reserve space for the underlying tensor.
    *
    * This must be called after Resize(), since we only specify the first
