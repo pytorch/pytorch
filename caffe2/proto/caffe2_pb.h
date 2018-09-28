@@ -86,26 +86,12 @@ inline CAFFE2_API caffe2::DeviceOption DeviceToOption(
   caffe2::DeviceOption option;
   auto type = device.type();
   option.set_device_type(TypeToProto(type));
-  // default value for index() is -1 and
-  // sets the gpu_id to -1 means we'll use the current gpu id when the function
-  // is being called, see context_gpu.cu for more info.
-  if (type == at::DeviceType::CUDA) {
-    option.set_cuda_gpu_id(device.index());
-  } else if (type == at::DeviceType::HIP) {
-    option.set_hip_gpu_id(device.index());
-  }
+  option.set_device_id(device.index());
   return option;
 }
 
 inline CAFFE2_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
-  at::Device device(ProtoToType(option.device_type()));
-  auto type = device.type();
-  if (type == at::DeviceType::CUDA) {
-    device.set_index(option.cuda_gpu_id());
-  } else if (type == at::DeviceType::HIP) {
-    device.set_index(option.hip_gpu_id());
-  }
-  return device;
+  return at::Device(ProtoToType(option.device_type()), option.device_id());
 }
 
 } // namespace caffe2
