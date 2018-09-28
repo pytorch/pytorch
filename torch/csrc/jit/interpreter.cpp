@@ -656,7 +656,14 @@ struct InterpreterStateImpl {
         try {
           auto & inst = instructions[pc];
           loadTensorsFromRegisters(inst.inputs, stack);
-          size_t new_pc = pc + 1 + inst.callback(stack);
+          size_t new_pc;
+          try {
+            new_pc = pc + 1 + inst.callback(stack);
+          } catch (detail::NewCoroutine nc) {
+            new_pc = pc + 1;
+          } catch (detail::Yield y) {
+            new_pc = pc + 1;
+          }
           for(int i = inst.outputs.size - 1; i >= 0; i--) {
             int reg = get(inst.outputs,i);
             registers[reg] = pop(stack);

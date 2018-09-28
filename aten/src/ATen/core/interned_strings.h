@@ -66,6 +66,8 @@ namespace torch { namespace jit {
   _(prim, LoadWorld)               \
   _(prim, StoreWorld)              \
   _(prim, DummyWorld)              \
+  _(prim, Fork)                    \
+  _(prim, Wait)                    \
   _(aten, append)                  \
   _(aten, __not__)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
@@ -275,5 +277,3 @@ namespace std {
     }
   };
 }
-
-

@@ -43,6 +43,7 @@ struct PrintValue : public SugaredValue {
     Method & m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
+    const std::vector<std::shared_ptr<SugaredValue>> &blocks,
     size_t n_binders) override {
       auto& g = *m.graph();
       if (!attributes.empty())
@@ -107,6 +108,7 @@ struct CastValue : public SugaredValue {
     Method & m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
+    const std::vector<std::shared_ptr<SugaredValue>> &blocks,
     size_t n_binders) override {
       if (!attributes.empty())
         throw ErrorReport(loc) << "casts do not accept any keyword arguments";
@@ -786,6 +788,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
     Method& m,
     at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
+    const std::vector<std::shared_ptr<SugaredValue>> &blocks,
     size_t n_binders) {
   std::vector<NamedValue> inputs;
   if (value)
@@ -793,6 +796,62 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
   return std::make_shared<SimpleValue>(emitBuiltinCall(
       loc, *m.graph(), symbol, inputs, attributes, true));
+}
+
+std::shared_ptr<SugaredValue> ForkValue::call(
+    SourceRange loc,
+    Method& m,
+    at::ArrayRef<NamedValue> inputs_,
+    at::ArrayRef<NamedValue> attributes,
+    const std::vector<std::shared_ptr<SugaredValue>> &blocks,
+    size_t n_binders) {
+  if (blocks.size() != 1) {
+    throw ErrorReport(loc) << "Expected a single ScriptModule as the first"
+                           << " argument to Fork()";
+  }
+  auto inputs = toValues(*m.graph(), inputs_);
+  if (inputs.size() != 1 || inputs.at(0)->type()->kind() != TypeKind::TupleType) {
+    throw ErrorReport(loc) << "Expected a single tuple argument to Fork()";
+  }
+  auto n = m.graph()->insertNode(m.graph()->create(prim::Fork, inputs, 1))
+                ->setSourceLocation(std::make_shared<SourceRange>(loc));
+  auto body_block = n->addBlock();
+
+  std::vector<NamedValue> block_inputs;
+  auto schema = blocks.at(0)->schema(loc, m);
+  for (auto &arg : schema.arguments) {
+    Value *v = body_block->addInput()->setType(arg.type);
+    block_inputs.emplace_back(v);
+  }
+  Value *node_output;
+  {
+    WithInsertPoint guard(body_block);
+    auto fn_sugared_output = blocks.at(0)->call(loc, m, block_inputs, {}, {}, 1);
+    auto fn_simple_output = fn_sugared_output->asValue(loc, m);
+    body_block->registerOutput(fn_simple_output);
+    node_output = n->output()->setType(FutureType::create(fn_simple_output->type()));
+  }
+  return std::make_shared<SimpleValue>(node_output);
+}
+
+std::shared_ptr<SugaredValue> WaitValue::call(
+    SourceRange loc,
+    Method& m,
+    at::ArrayRef<NamedValue> inputs_,
+    at::ArrayRef<NamedValue> attributes,
+    const std::vector<std::shared_ptr<SugaredValue>> &blocks,
+    size_t n_binders) {
+  if (inputs_.size() != 1) {
+    throw ErrorReport(loc) << "Expected a single argument of type Future to Wait()";
+  }
+  if (n_binders != 1) {
+    throw ErrorReport(loc) << "Too few values to unpack. Wait() expects a single return";
+  }
+  auto inputs = toValues(*m.graph(), inputs_);
+  auto n = m.graph()->insertNode(m.graph()->create(prim::Wait, inputs, 1))
+                    ->setSourceLocation(std::make_shared<SourceRange>(loc));
+  auto o = n->output()->setType(n->input()->type()->template cast<FutureType>()->getElementType());
+  return std::make_shared<SimpleValue>(o);
 }
 
 inline bool isSupportedListElementType(TypePtr type) {
@@ -1452,7 +1511,9 @@ private:
 
   std::vector<NamedValue> getNamedValues(
       TreeList trees,
-      bool maybe_unpack) {
+      bool maybe_unpack,
+      bool collect_blocks,
+      std::vector<std::shared_ptr<SugaredValue>>* blocks) {
     std::vector<NamedValue> values;
     for (const auto& tree : trees) {
       if(maybe_unpack && tree->kind() == TK_STARRED) {
@@ -1463,22 +1524,30 @@ private:
               tree->range(), entry->asValue(starred.range(), method)));
         }
       } else {
-        values.push_back(NamedValue(
-            tree->range(), emitExpr(Expr(tree))));
+        auto sugared_expr = emitSugaredExpr(Expr(tree), 1);
+        // TODO: non-sketchy check
+        if (collect_blocks && sugared_expr->kind() == "module") {
+          blocks->push_back(sugared_expr);
+        } else {
+          values.push_back(NamedValue(
+              tree->range(), sugared_expr->asValue(tree->range(), method)));
+        }
       }
     }
     return values;
   }
   std::vector<NamedValue> getNamedValues(
       List<Expr> trees,
-      bool maybe_unpack) {
-    return getNamedValues(trees.tree()->trees(), maybe_unpack);
+      bool maybe_unpack,
+      bool collect_blocks,
+      std::vector<std::shared_ptr<SugaredValue>>* blocks) {
+    return getNamedValues(trees.tree()->trees(), maybe_unpack, collect_blocks, blocks);
   }
 
   std::vector<Value*> getValues(
       TreeList trees,
       bool maybe_unpack) {
-    return toValues(*graph, getNamedValues(trees, maybe_unpack));
+    return toValues(*graph, getNamedValues(trees, maybe_unpack, false, nullptr));
   }
   std::vector<Value*> getValues(
       List<Expr> trees,
@@ -1487,7 +1556,7 @@ private:
   }
 
   // special rules apply when we directly call foo(a,b) when foo is an ident
-  std::shared_ptr<SugaredValue> emitApplyIdent(Ident ident, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
+  std::shared_ptr<SugaredValue> emitApplyIdent(Ident ident, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, const std::vector<std::shared_ptr<SugaredValue>> &blocks, size_t n_binders) {
     auto it = function_table.find(ident.name());
     if (it != function_table.end()) {
       return std::make_shared<SimpleValue>(packOutputs(*graph, method.emit_call_to(ident.range(), it->second, inputs, attributes)));
@@ -1496,13 +1565,13 @@ private:
       return std::make_shared<SimpleValue>(result);
     }
     // it wasn't known built in, so treat it like standard apply
-    return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, n_binders);
+    return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, blocks, n_binders);
   }
 
-  std::shared_ptr<SugaredValue> emitApplyExpr(Expr callee, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
+  std::shared_ptr<SugaredValue> emitApplyExpr(Expr callee, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, const std::vector<std::shared_ptr<SugaredValue>> &blocks, size_t n_binders) {
     // otherwise we evaluate the callee and then desugar it
     auto sv = emitSugaredExpr(callee, 1);
-    return sv->call(callee.range(), method, inputs, attributes, n_binders);
+    return sv->call(callee.range(), method, inputs, attributes, blocks, n_binders);
   }
 
   Value* emitExpr(Expr tree) {
@@ -1535,15 +1604,16 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        auto inputs = getNamedValues(apply.inputs(), true);
+        std::vector<std::shared_ptr<SugaredValue>> blocks;
+        auto inputs = getNamedValues(apply.inputs(), true, true, &blocks);
         auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
           return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
         });
         // the apply is directly an identifier 'foo'
         if(apply.callee().kind() == TK_VAR) {
-          return emitApplyIdent(Var(apply.callee()).name(), inputs, attributes, n_binders);
+          return emitApplyIdent(Var(apply.callee()).name(), inputs, attributes, blocks, n_binders);
         }
-        return emitApplyExpr(apply.callee(), inputs, attributes, n_binders);
+        return emitApplyExpr(apply.callee(), inputs, attributes, blocks, n_binders);
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
@@ -1570,7 +1640,7 @@ private:
       case TK_UNARY_MINUS: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
+        auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false, false, nullptr);
         return emitBuiltinCall(
                    tree->range(),
                    *method.graph(),

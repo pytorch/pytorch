@@ -466,6 +466,18 @@ RegisterOperators reg({
             };
           }
         }),
+    // TODO schema
+    Operator(prim::Fork, [](Node* stack) -> Operation {
+      return [=](Stack& stack) -> int {
+        throw detail::NewCoroutine();
+      };
+    }),
+    // TODO: type variable
+    Operator(prim::Wait, [](Node* stack) -> Operation {
+      return [=](Stack& stack) -> int {
+        throw detail::Yield();
+      };
+    }),
 });
 
 // define implementations for primitive number ops

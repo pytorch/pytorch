@@ -109,7 +109,12 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc,
+                                             Method & m,
+                                             at::ArrayRef<NamedValue> inputs_,
+                                             at::ArrayRef<NamedValue> attributes,
+                                             const std::vector<std::shared_ptr<SugaredValue>> &blocks,
+                                             size_t n_binders) override {
     auto inputs = toValues(*m.graph(), inputs_);
     auto schema = getSchema(inputs.size(), n_binders);
 
@@ -197,8 +202,16 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc,
+                                             Method & caller,
+                                             at::ArrayRef<NamedValue> inputs,
+                                             at::ArrayRef<NamedValue> attributes,
+                                             const std::vector<std::shared_ptr<SugaredValue>> &blocks,
+                                             size_t n_binders) override {
     return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
+  }
+  FunctionSchema schema(SourceRange loc, Method &caller) override {
+    return method.getSchema();
   }
 private:
   std::shared_ptr<Module> module;
@@ -240,8 +253,13 @@ struct ModuleValue : public SugaredValue {
   }
 
   // call module.forward
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc,
+                                             Method & caller,
+                                             at::ArrayRef<NamedValue> inputs,
+                                             at::ArrayRef<NamedValue> attributes,
+                                             const std::vector<std::shared_ptr<SugaredValue>> &blocks,
+                                             size_t n_binders) override {
+    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, blocks, n_binders);
   }
 
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override {
@@ -259,6 +277,10 @@ struct ModuleValue : public SugaredValue {
           /*is_submodule =*/true));
     }
     return result;
+  }
+
+  FunctionSchema schema(SourceRange loc, Method &caller) override {
+    return attr(loc, caller, "forward")->schema(loc, caller);
   }
 
  private:
@@ -315,6 +337,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
+  } else if (obj.is(py::module::import("torch.jit").attr("Fork"))) {
+    return std::make_shared<ForkValue>();
+  } else if (obj.is(py::module::import("torch.jit").attr("Wait"))) {
+    return std::make_shared<WaitValue>();
   }
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {

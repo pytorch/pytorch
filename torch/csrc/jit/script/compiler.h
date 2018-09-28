@@ -59,6 +59,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     // note: names for args will be 'argument 0', 'argument 1', etc..
     at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
+    const std::vector<std::shared_ptr<SugaredValue>> &blocks,
     size_t n_binders) {
 // n_binders is always set to the number of variables an expression is
 // syntactically bound to:
@@ -76,6 +77,10 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 // assignment logic will do that anyway.
 
     throw ErrorReport(loc) << "cannot call a " << kind();
+  }
+
+  virtual FunctionSchema schema(SourceRange loc, Method& caller) {
+    throw ErrorReport(loc) << kind() << " does not have a schema.";
   }
 
   virtual ~SugaredValue() = default;
@@ -119,6 +124,7 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
       Method& m,
       at::ArrayRef<NamedValue> attributes,
       at::ArrayRef<NamedValue> inputs,
+      const std::vector<std::shared_ptr<SugaredValue>> &blocks,
       size_t n_binders) override;
 };
 
@@ -134,6 +140,38 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
     return std::make_shared<BuiltinFunction>(Symbol::aten(field), at::nullopt);
   }
+};
+
+struct TORCH_API ForkValue : public SugaredValue {
+  ForkValue() {}
+
+  std::string kind() const override {
+    return "fork";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method& m,
+      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> inputs,
+      const std::vector<std::shared_ptr<SugaredValue>> &blocks,
+      size_t n_binders) override;
+};
+
+struct TORCH_API WaitValue : public SugaredValue {
+  WaitValue() {}
+
+  std::string kind() const override {
+    return "wait";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method& m,
+      at::ArrayRef<NamedValue> attributes,
+      at::ArrayRef<NamedValue> inputs,
+      const std::vector<std::shared_ptr<SugaredValue>> &blocks,
+      size_t n_binders) override;
 };
 
 using Resolver = std::function<std::shared_ptr<
