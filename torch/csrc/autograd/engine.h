@@ -50,9 +50,10 @@ struct TORCH_API Engine {
   void queue_callback(std::function<void()> callback);
 
   bool is_checkpoint_valid();
+  void set_force_parallel(bool should_force);
 
 protected:
-  void compute_dependencies(Function* root, GraphTask& task);
+  bool compute_dependencies(Function* root, GraphTask& task);
   void evaluate_function(FunctionTask& task);
   ReadyQueue& ready_queue(int device);
   void start_threads();
@@ -64,6 +65,7 @@ protected:
   std::vector<std::shared_ptr<ReadyQueue>> ready_queues;
   std::vector<std::function<void()>> final_callbacks;
   std::mutex post_callbacks_lock;
+  bool force_parallel = false;
 };
 
 // allow python_engine to override the default engine when it loads

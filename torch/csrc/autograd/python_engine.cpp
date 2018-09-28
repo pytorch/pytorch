@@ -211,6 +211,13 @@ PyObject* THPEngine_is_checkpoint_valid(PyObject *self) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPEngine_set_force_parallel(PyObject *self, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  engine.set_force_parallel(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   return type->tp_alloc(type, 0);
@@ -220,6 +227,7 @@ static struct PyMethodDef THPEngine_methods[] = {
   {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, nullptr},
   {(char*)"is_checkpoint_valid", (PyCFunction)THPEngine_is_checkpoint_valid, METH_NOARGS, nullptr},
+  {(char*)"set_force_parallel", (PyCFunction)THPEngine_set_force_parallel, METH_O, nullptr},
   {nullptr}
 };
 

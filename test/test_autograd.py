@@ -76,6 +76,11 @@ def graph_desc(fn):
 
 class TestAutograd(TestCase):
 
+    def setUp(self):
+        super(TestAutograd, self).setUp()
+        force_parallel = bool(hash(self.id()) % 2)
+        Variable._execution_engine.set_force_parallel(force_parallel)
+
     def _function_test(self, cls):
         x = torch.randn(5, 5, requires_grad=True)
         y = torch.randn(5, 5, requires_grad=True)

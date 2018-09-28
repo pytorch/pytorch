@@ -84,6 +84,9 @@ struct ReadyQueue {
   FunctionTask pop();
 };
 
+static thread_local int64_t use_local_queue = 0;
+static thread_local std::shared_ptr<ReadyQueue> local_queue;
+
 // Note [Reentrant backwards]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // To understand the reentrant backwards problem, we have to notice two
@@ -207,6 +210,11 @@ auto Engine::thread_init(int device) -> void {
   thread_main(nullptr);
 }
 
+
+auto Engine::set_force_parallel(bool should_force) -> void {
+  force_parallel = should_force;
+}
+
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
 // case:
 //
@@ -222,7 +230,7 @@ auto Engine::thread_init(int device) -> void {
 // It's all ok and is handled right now, but it should be accounted for
 // in case this code is to be changed.
 auto Engine::thread_main(GraphTask *graph_task) -> void {
-  auto queue = ready_queues[worker_device + 1];
+  auto queue = use_local_queue ? local_queue : ready_queues[worker_device + 1];
   // Why the test on graph_task->outstanding_tasks?  See
   // Note [Reentrant backwards]
   while (!graph_task || graph_task->outstanding_tasks > 0) {
@@ -392,6 +400,13 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     if (!fn_info.needed) return;
   }
 
+  // Worker threads are pinned to specific devices, so we need to set it only
+  // if we're using a user thread.
+  at::DeviceGuard device_guard;
+  if (use_local_queue) {
+    device_guard.set_index(task.inputs.device());
+  }
+
   auto outputs = call_function(task);
 
   auto& fn = *task.fn;
@@ -466,9 +481,33 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
   }
 }
 
-/* Computes the number of dependencies for each function which requires grad */
-auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
+/* Computes the number of dependencies for each function which requires grad,
+ * and checks if we should use the multithreaded path or not (returns true if yes).
+ */
+auto Engine::compute_dependencies(Function* root, GraphTask& task) -> bool {
   // Just to make sure that they will never be added to the queue again
+  static constexpr size_t kNumDevices = 17; // CPU + 16 GPUs to be safe
+  static constexpr int64_t kDeviceUseThreshold = 32;
+  std::array<int64_t, kNumDevices> device_uses; device_uses.fill(0);
+  bool device_overflow = false;
+  const auto count_device_use = [&](Function *fn) {
+    int64_t device = 0;
+    const size_t num_inputs = fn->num_inputs();
+    for (size_t i = 0; i < num_inputs; ++i) {
+      auto & imeta = fn->input_metadata(i);
+      if (imeta.is_valid()) {
+        // +1 because CPU is -1
+        device = imeta.device() + 1;
+        break;
+      }
+    }
+    if (device >= kNumDevices) {
+      device_overflow = true;
+      return;
+    }
+    device_uses[device]++;
+  };
+
   std::unordered_set<Function*> seen;
   std::vector<Function*> queue { root };
 
@@ -481,10 +520,23 @@ auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
         const bool was_inserted = seen.insert(next_ptr).second;
-        if (was_inserted) queue.push_back(next_ptr);
+        if (was_inserted) {
+          queue.push_back(next_ptr);
+          count_device_use(next_ptr);
+        }
       }
     }
   }
+
+  int64_t used_devices = 0;
+  for (int64_t num_uses : device_uses) {
+    if (num_uses > kDeviceUseThreshold) {
+      used_devices++;
+    }
+  }
+  // Use the parallel implementation if our code wasn't sufficient to check
+  // for the serial path, or if there are at least 2 heavily used devices.
+  return force_parallel || device_overflow || used_devices > 1;
 }
 
 struct ClearCallbacks {
@@ -501,6 +553,24 @@ struct ClearCallbacks {
 
   std::vector<std::function<void()>>& callbacks;
   std::mutex& callbacks_lock;
+};
+
+struct LocalBackwardGuard {
+  LocalBackwardGuard(bool run_parallel)
+    : run_parallel(run_parallel) {
+    if (!run_parallel) {
+      use_local_queue++;
+      local_queue = std::make_shared<ReadyQueue>();
+    }
+  }
+
+  ~LocalBackwardGuard() {
+    if (!run_parallel) {
+      use_local_queue--;
+    }
+  }
+
+  bool run_parallel;
 };
 
 auto Engine::execute(const edge_list& roots,
@@ -523,19 +593,24 @@ auto Engine::execute(const edge_list& roots,
 
   // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
-  compute_dependencies(graph_root.get(), graph_task);
+  LocalBackwardGuard local_guard { compute_dependencies(graph_root.get(), graph_task) };
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);
   }
   ready_queue(-1).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
-  // Not a worker
-  if (worker_device == NO_DEVICE) {
-    // Wait for all tasks to complete
+  if (!use_local_queue && worker_device == NO_DEVICE) {
+    // Not a worker, and we want to use the multithreaded execution.
+    // Wait for all tasks to complete.
     graph_task.not_done.wait(lock, [&graph_task]{
       return graph_task.outstanding_tasks.load() == 0;
     });
   } else {
+    // We will keep refreshing grad mode before we execute every function,
+    // so it looks unnecessary here, but the real purpose of this guard is
+    // to restore the previously set grad mode if we're using the user thread
+    // to run the backaward (i.e. use_local_queue is true).
+    AutoGradMode grad_guard { graph_task.grad_mode };
     // Get back to work while we wait for our new graph_task to
     // complete!
     // See Note [Reentrant backwards]
@@ -598,7 +673,7 @@ bool Engine::is_checkpoint_valid() {
 }
 
 auto Engine::ready_queue(int device) -> ReadyQueue& {
-  return *ready_queues.at(device + 1);
+  return use_local_queue ? *local_queue : *ready_queues.at(device + 1);
 }
 
 auto Engine::start_threads() -> void {
