@@ -10,6 +10,7 @@
 #include "torch/csrc/jit/passes/annotate_effects.h"
 #include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/erase_number_types.h"
@@ -413,6 +414,7 @@ private:
     //          constants, and constant propagation doesn't need shape information
     //          anyway, so it's better to run it first.
     ConstantPropagation(opt_graph);
+    ConstantPooling(opt_graph);
     PropagateInputShapes(*opt_graph);
     PropagateRequiresGrad(opt_graph);
 
@@ -571,6 +573,7 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
   // add valid expand nodes when the shapes are stable
   RemoveExpands(g);
   CanonicalizeOps(g);
+  ConstantPooling(g);
   EliminateDeadCode(g);
 }
 

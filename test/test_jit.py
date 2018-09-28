@@ -3075,6 +3075,30 @@ a")
         y2 = torch.sum(x, dim=0)
         self.assertEqual(y, y2)
 
+    def test_constant_pooling(self):
+        def func(x):
+            a = 1
+            b = 4
+            c = 0
+            d = "abc"
+            e = "bcd"
+            f = "abc"
+            if int(x):
+                c = b - a
+            else:
+                x = torch.rand(0)
+                if int(x):
+                    x = torch.rand(1)
+                print(d, e, f)
+            b = b - a
+            return a, b, c, x
+
+        self.checkScript(func, torch.tensor([1]))
+        graph = torch.jit.script(func).graph
+        self.run_pass('constant_propagation', graph)
+        self.run_pass('constant_pooling', graph)
+        self.assertExpectedGraph(graph)
+
     def test_literal(self):
         def func1(a, b):
             c = a, b
