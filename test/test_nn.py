@@ -3854,6 +3854,11 @@ class TestNN(NNTestCase):
         expected = torch.tensor([1, 4, 6, 2, 5, 3])
         self.assertEqual(packed.batch_sizes, [3, 2, 1])
         self.assertEqual(packed.data.data, expected)
+        
+        packed = rnn_utils.pack_sequence([a, b, c], batch_first=True)
+        expected = torch.tensor([1, 4, 6, 2, 5, 3])
+        self.assertEqual(packed.batch_sizes, [3, 2, 1])
+        self.assertEqual(packed.data.data, expected)
 
         # more dimensions
         maxlen = 9
