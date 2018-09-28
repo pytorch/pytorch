@@ -223,8 +223,8 @@ def main():
     # if their execution times are very different.
     cuda_prof_exec_time = cpu_time_total(autograd_prof_cuda)
     cpu_prof_exec_time = cpu_time_total(autograd_prof_cpu)
-    if cuda_prof_exec_time > 1e-6:
-        pct_diff = cuda_prof_exec_time - cpu_prof_exec_time / cuda_prof_exec_time
+    if cuda_prof_exec_time > 0.0:
+        pct_diff = (cuda_prof_exec_time - cpu_prof_exec_time) / cuda_prof_exec_time
         if abs(pct_diff) > 0.05:
             print_autograd_prof_summary(autograd_prof_cpu, 'CPU', autograd_prof_sortby, autograd_prof_topk)
     print_autograd_prof_summary(autograd_prof_cuda, 'CUDA', autograd_prof_sortby, autograd_prof_topk)
