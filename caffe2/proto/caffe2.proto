@@ -64,11 +64,11 @@ message TensorProto {
   // For int64
   repeated int64 int64_data = 10 [packed = true];
   // For raw data
-  optional bytes raw_data = 14 [packed = true];
+  optional bytes raw_data = 14;
   // External data by file name
   optional string external_data = 15;
   // For argument, to share the content
-  optional string alis = 16;
+  optional string alias = 16;
 
   // Optionally, a name for the tensor.
   optional string name = 7;
