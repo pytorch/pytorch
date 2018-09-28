@@ -312,20 +312,34 @@ class CAFFE2_API Tensor final {
     return impl_.get()->mutable_data<T>();
   }
 
+  /**
+   * Returns the number of dimensions of the data.
+   */
   inline int ndim() const {
-    return impl_.get()->ndim();
+    return impl_->dim();
   }
 
+  /**
+   * Returns the size (i.e. the number of items) of the tensor.
+   */
   inline int64_t size() const {
-    return impl_.get()->size();
+    return impl_->numel();
   }
 
+  /**
+   * Return the number of bytes each item takes in the tensor.
+   */
   inline size_t itemsize() const {
-    return impl_.get()->itemsize();
+    return impl_->storage().itemsize();
   }
 
+  /**
+   * Returns the total number of bytes of the storage.
+   *
+   * This is equivalent to calling size() * itemsize().
+   */
   inline size_t nbytes() const {
-    return impl_.get()->nbytes();
+    return impl_->numel() * itemsize();
   }
 
   inline const vector<int64_t>& dims() const {
