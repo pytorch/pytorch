@@ -9,7 +9,7 @@
 namespace caffe2 {
 
 class CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
-  UndefinedTensorImpl() : TensorImpl(at::Storage()){};
+  UndefinedTensorImpl() : TensorImpl(CPU){};
 
  public:
  // Without this, we get:
@@ -33,6 +33,8 @@ class CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
  * redirects API calls to TensorImpl;
  * Copying of Tensor results in sharing the same underlying implementation
  * object
+ *
+ * NB: See TensorImpl for documentation on these methods.
  */
 class CAFFE2_API Tensor final {
  protected:
@@ -286,7 +288,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->stride(dim);
   }
 
-  inline at::DimVector strides() {
+  inline at::IntList strides() {
     return impl_.get()->strides();
   }
 
