@@ -619,22 +619,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * A utility function to print the debug string for the tensor. Note that this
-   * is very slow since it involves quite some string operations, so do not use
-   * it in your performance-critical code.
-   */
-  std::string DebugString() const {
-    std::stringstream ss;
-    ss << "A Tensor of item size " << storage_.itemsize() << " and type "
-       << data_type_.name() << " and dimension (";
-    for (int d : sizes_) {
-      ss << d << ",";
-    }
-    ss << ").";
-    return ss.str();
-  }
-
-  /**
    * @brief Shares the data with another tensor.
    *
    * To share data between two tensors, the sizes of the two tensors must be
