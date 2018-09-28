@@ -222,6 +222,10 @@ target_compile_options(caffe2 INTERFACE "$<$<COMPILE_LANGUAGE:CXX>:-std=c++11>")
 endif()
 
 target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+# ONNX is linked statically and needs to be exported from this library
+# to be used externally. Make sure that references match the export.
+target_compile_options(caffe2 PRIVATE "-DONNX_BUILD_MAIN_LIB")
+
 if (MSVC AND NOT BUILD_SHARED_LIBS)
   # Note [Supporting both static and dynamic libraries on Window]
   # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -291,11 +295,7 @@ if (MSVC AND NOT BUILD_SHARED_LIBS)
   # as the latter is not respected by nvcc
   target_compile_definitions(caffe2 PUBLIC "AT_CORE_STATIC_WINDOWS=1")
 endif()
-if (MSVC AND BUILD_SHARED_LIBS)
-  # ONNX is linked statically and needs to be exported from this library
-  # to be used externally. Make sure that references match the export.
-  target_compile_options(caffe2 PRIVATE "-DONNX_BUILD_MAIN_LIB")
-endif()
+
 # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
 target_compile_options(caffe2 PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
