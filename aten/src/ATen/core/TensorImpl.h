@@ -268,6 +268,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   const caffe2::TypeMeta& dtype() const {
     return data_type_;
   }
+  size_t itemsize() const {
+    return data_type_.itemsize();
+  }
 
   virtual int64_t storage_offset() const {
     return storage_offset_;
@@ -410,7 +413,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       storage_ = at::Storage(device_type(), src.meta());
       data_type_ = src.meta();
     }
-    if (src.size() == -1) {
+    if (src.numel() == -1) {
       sizes_.clear();
       numel_ = -1;
       strides_.clear();
@@ -420,7 +423,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       return;
     }
     Resize(src.dims());
-    if (size() > 0) {
+    if (numel() > 0) {
       if (data_type_.copy()) {
         CAFFE_ENFORCE(
             device_type() == ::at::DeviceType::CPU,
@@ -428,7 +431,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         CAFFE_ENFORCE(
             src.device_type() == ::at::DeviceType::CPU,
             "In CopyFrom source and dest tensors must both be CPU for meta copy");
-        data_type_.copy()(src.data(), raw_mutable_data(data_type_), size());
+        data_type_.copy()(src.data(), raw_mutable_data(data_type_), numel());
       } else {
         // We'll need to use a non-CPU context to perform the copy if
         // one of the context is not CPU since only non-CPU context
@@ -436,20 +439,20 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         if (src.device_type() != ::at::DeviceType::CPU || device_type() == ::at::DeviceType::CPU) {
           if (!context) {
             src.CreateContext()->CopyBytesToDevice(
-                nbytes(), src.data(), raw_mutable_data(data_type_), device_type());
+                numel() * itemsize(), src.data(), raw_mutable_data(data_type_), device_type());
           } else {
             CAFFE_ENFORCE(
                 context->device_type() == src.device_type(),
                 "Type for provided context does not match the type of source");
             context->CopyBytesToDevice(
-                nbytes(), src.data(), raw_mutable_data(data_type_), device_type());
+                numel() * itemsize(), src.data(), raw_mutable_data(data_type_), device_type());
           }
         } else {
           // In case source context is CPU, and target context is non-CPU
           // We'll have to create a Context from target and perform the
           // copy using that context
           CreateContext()->CopyBytesFromCPU(
-              nbytes(), src.data(), raw_mutable_data(data_type_));
+              numel() * itemsize(), src.data(), raw_mutable_data(data_type_));
         }
       }
     }
@@ -782,34 +785,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }
 
-  /**
-   * Returns the number of dimensions of the data.
-   */
-  inline int ndim() const {
-    return sizes_.size();
-  }
-  /**
-   * Returns the size (i.e. the number of items) of the tensor.
-   */
-  inline int64_t size() const {
-    return numel_;
-  }
-  /**
-   * Return the number of bytes each item takes in the tensor.
-   */
-  inline size_t itemsize() const {
-    return storage_.itemsize();
-  }
-  /**
-   * Returns the total number of bytes of the storage.
-   *
-   * This is equivalent to calling size() * itemsize().
-   */
-  inline size_t nbytes() const {
-    return numel_ * itemsize();
-    ;
-  }
-
   // NB: This capacity may also include available space
   // in the storage BEFORE the tensor data, if storage_offset != 0
   inline size_t capacity_nbytes() const {
@@ -839,14 +814,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * allowing for negative indexing (e.g., -1 for the last axis).
    *
    * @param axis_index the axis index.
-   *        If 0 <= index < ndim(), return index.
-   *        If -ndim <= index <= -1, return (ndim() - (-index)),
-   *        e.g., the last axis index (ndim() - 1) if index == -1,
+   *        If 0 <= index < dim(), return index.
+   *        If -ndim <= index <= -1, return (dim() - (-index)),
+   *        e.g., the last axis index (dim() - 1) if index == -1,
    *        the second to last if index == -2, etc.
    *        Dies on out of range index.
    */
   inline int canonical_axis_index(int axis_index) const {
-    return canonical_axis_index_(axis_index, ndim());
+    return canonical_axis_index_(axis_index, dim());
   }
 
   /**
@@ -978,8 +953,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   inline void update_to_contiguous_strides() {
     strides_.resize(sizes_.size());
-    if (ndim() > 0) {
-      int last_idx = ndim() - 1;
+    if (dim() > 0) {
+      int last_idx = dim() - 1;
       strides_[last_idx] = 1;
       for (auto i = last_idx - 1; i >= 0; --i) {
         strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
