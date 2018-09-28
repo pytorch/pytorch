@@ -20,6 +20,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <ostream>
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -375,6 +376,8 @@ struct Module {
   IValue run_method(const std::string& method_name, Types&&... args) {
     return get_method(method_name)({IValue(std::forward<Types>(args))...});
   }
+
+  void save(std::ostream& out);
 
   void save(const std::string& filename);
 
