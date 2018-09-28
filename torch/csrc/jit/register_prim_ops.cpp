@@ -480,26 +480,6 @@ RegisterOperators reg({
 #define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, float)
 #define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, int)
 
-// define helpers for where aten is missing scalar overloads
-// note: it would be better to define these in a standard library as
-// script functions and have the compiler substitute them in
-// however, we need to add type annotations to the parser in order for us
-// to move them there.
-// e.g. s + t ==> t + s
-// e.g. s - d == -d + s
-
-#define DEFINE_ST_OP(aten_op, reverse_exp)                             \
-  Operator("aten::" #aten_op "(Scalar other, Tensor self) -> Tensor", [](Node* node) { \
-    return [=](Stack& stack) {                                         \
-      at::Scalar a;                                                    \
-      at::Tensor b;                                                    \
-      pop(stack, a, b);                                                \
-      at::DeviceGuard guard(b);                                        \
-      push(stack, reverse_exp);                                        \
-      return 0;                                                        \
-    };                                                                 \
-  }),
-
 // Convert an python index (which may be negative) into an index usable for a
 // C++ container
 int64_t normalizeIndex(int64_t idx, int64_t list_size) {
@@ -793,21 +773,5 @@ RegisterOperators reg2({
             return 0;
           };
         }),
-    // commutative
-    DEFINE_ST_OP(mul, at::mul(b, a))
-    DEFINE_ST_OP(add, at::add(b, a))
-    DEFINE_ST_OP(ne, at::ne(b, a))
-    DEFINE_ST_OP(eq, at::eq(b, a))
-
-    // comparisons, reverse the condition
-    DEFINE_ST_OP(lt, b > a)
-    DEFINE_ST_OP(le, b >= a)
-    DEFINE_ST_OP(gt, b < a)
-    DEFINE_ST_OP(ge, b <= a)
-
-    // rsub
-    DEFINE_ST_OP(sub, at::add(b.neg(), a))
-    // rdiv
-    DEFINE_ST_OP(div, at::mul(at::reciprocal(b), a))
 });
 }}} // torch::jit::anon
