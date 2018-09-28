@@ -173,8 +173,18 @@ class CAFFE2_API Tensor final {
     impl_.get()->Resize(dim_source...);
   }
 
+  /**
+   * Resize the tensor like the source tensor. Note that this is just a
+   * sugar wrapper that essentially calls Resize(src_tensor.dims()).
+   * This method respects caffe2_keep_on_shrink.
+   */
   inline void ResizeLike(const Tensor& src_tensor) const {
-    impl_.get()->ResizeLike(*src_tensor.impl_.get());
+    CAFFE_ENFORCE_WITH_CALLER(
+        src_tensor.is_contiguous(),
+        "Right now ResizeLike is only supported for contiguous Tensor.");
+    if (impl_ != src_tensor.impl_) {
+      impl_.get()->Resize(src_tensor.dims());
+    }
   }
 
   inline void Reshape(const vector<int64_t>& dims) const {
