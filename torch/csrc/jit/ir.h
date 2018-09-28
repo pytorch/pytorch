@@ -236,7 +236,7 @@ public:
 
   void replaceFirstUseWith(Value * newValue);
 
-  // Replaces all uses of this node with 'newValue'.
+  // Replaces all uses of this value with 'newValue'.
   //
   // Given:   %3 = f(%1, %2)
   //          %4 = g(%3)
@@ -318,6 +318,9 @@ public:
     return graph_;
   }
   Block * owningBlock() {
+    return owning_block_;
+  }
+  const Block * owningBlock() const {
     return owning_block_;
   }
   size_t stage() const {
@@ -442,33 +445,33 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.addInput(%4)
   // Result:  %3 = f(%1, %2, %4)
-  Value* addInput(Value * node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
+  Value* addInput(Value * value) {
+    JIT_ASSERT(graph_ == value->owningGraph());
     schema_ = nullptr;
-    node->uses_.emplace_back(this, inputs_.size());
-    inputs_.push_back(node);
-    return node;
+    value->uses_.emplace_back(this, inputs_.size());
+    inputs_.push_back(value);
+    return value;
   }
 
-  // Add 'node' as an input to 'this' at the specified position in the
-  // arguments. Returns the added node for ease of chaining.
-  Value* insertInput(size_t i, Value* node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
+  // Add 'value' as an input to 'this' at the specified position in the
+  // arguments. Returns the added value for ease of chaining.
+  Value* insertInput(size_t i, Value* value) {
+    JIT_ASSERT(graph_ == value->owningGraph());
     schema_ = nullptr;
     // First we update the offsets for all existing inputs that will reside
     // after the one we're inserting. Concretely, these are the inputs at
     // indices [i, # input). Since we're inserting one input before all of
-    // these inputs, increment their use offsets for this Node by 1
+    // these inputs, increment their use offsets for this value by 1
     for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
       // See Note [User node does not uniquely identify use]
       auto use = findUseForInput(use_itr);
       use->offset += 1;
     }
     // Insert the actual input at the specified index
-    inputs_.insert(inputs_.begin() + i, node);
+    inputs_.insert(inputs_.begin() + i, value);
     // Register the new use of the value we're inserted as an input.
-    node->uses_.emplace_back(this, i);
-    return node;
+    value->uses_.emplace_back(this, i);
+    return value;
   }
 
   // Replace the input of 'this' at position 'i' with
@@ -549,7 +552,7 @@ public:
     return {blocks_.data(), blocks_.size()};
   }
 
-  // Insert unattached 'this' node after 'n' in the topological order.
+  // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
   //
   // Given:   %3 = f(%1, %2)
@@ -804,8 +807,8 @@ struct Block {
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
-  size_t registerOutput(Value * n) {
-    output_->addInput(n);
+  size_t registerOutput(Value * v) {
+    output_->addInput(v);
     return outputs().size() - 1;
   }
   size_t insertOutput(size_t i, Value* n) {
@@ -1107,6 +1110,12 @@ public:
     return jit::insertConstant(*this, std::move(val), loc);
   }
 
+  Value* insertDummyWorld() {
+    auto node = create(prim::DummyWorld, 1);
+    node->output()->setType(WorldType::get());
+    return insertNode(node)->output();
+  }
+
   // schema-driven insert
   // this inserts a node into the graph with inputs determined from args and kwargs using Python
   // argument matching rules, and checks that the op matches a known schema
@@ -1323,11 +1332,11 @@ inline void Node::cloneFrom(Node * s) {
 	copyAttributes(*s);
 }
 
-inline Block::Block(Graph * graph_, Node * node_)
-: graph_(graph_)
-, output_(initOutput(graph_->create(prim::Return, 0)))
-, input_(graph_->create(prim::Param,0))
-, owning_node_(node_) {
+inline Block::Block(Graph* graph_, Node* node_)
+    : graph_(graph_),
+      output_(initOutput(graph_->create(prim::Return, 0))),
+      input_(graph_->create(prim::Param, 0)),
+      owning_node_(node_) {
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   input_->owning_block_ = this;
