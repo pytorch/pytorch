@@ -1973,11 +1973,19 @@ class TestJit(JitTestCase):
                 z = x
             return x, z
 
+        def python_fn(x):
+            return x + 10
+
+        @torch.jit.script
+        def python_op_name_test(y):
+            return python_fn(y)
+
         self.assertExpected(if_test.graph.pretty_print(), "if_test")
         self.assertExpected(if_one.graph.pretty_print(), "if_one")
         self.assertExpected(while_test.graph.pretty_print(), "while_test")
         self.assertExpected(while_if_test.graph.pretty_print(), "while_if_test")
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
+        self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
 
 
 class TestBatched(TestCase):
