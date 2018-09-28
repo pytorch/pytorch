@@ -543,13 +543,18 @@ class TestSparse(TestCase):
         x1, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
         x2, _, _ = self._gen_sparse(sparse_dims, nnz + 10, sizes)
         x1 = x1.to('cuda:0')
-        x2 = x2.to('cuda:1')
-        x1_device = x1.device
-        x1.copy_(x2)
-        self.assertEqual(x2.to('cuda:0').to_dense(), x1.to_dense())
-        self.assertEqual(x1_device, x1.device)
+
+        def test_cross_device(x1, x2):
+            x1_device = x1.device
+            x1.copy_(x2)
+            self.assertEqual(x2.to('cuda:0').to_dense(), x1.to_dense())
+            self.assertEqual(x1_device, x1.device)
+
+        test_cross_device(x1, x2.to('cuda:1'))  # test across gpu devices
+        test_cross_device(x1, x2.to('cpu'))  # test between cpu and gpu
 
         # test autograd
+        x2 = x2.to('cuda:1')
         x2.requires_grad_(True)
         x1.copy_(x2)
         y = x1 * 2
