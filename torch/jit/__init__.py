@@ -582,6 +582,20 @@ class CompilationUnit(object):
 
 
 def script(fn, optimize=True, _frames_up=0):
+    """Turns a regular Python function into a ``ScriptModule``.
+
+    This function is a helper for when you want to have a number of independent
+    functions, that you want to get parsed using script, and using syntax of
+    ``ScriptModule`` would be an overkill.
+
+    Arguments:
+        fn (callable): Function to parse
+        optimize (bool, optional): Toggle optimization of fn. Might be useful
+            for debugging. Default: True.
+
+    Returns:
+        a ``ScriptModule`` wrapping ``fn``.
+    """
     if not _enabled:
         return fn
     rcb = createResolutionCallback(_frames_up + 1)
@@ -603,6 +617,14 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_'
 
 
 def script_method(fn):
+    """Registers a method of ``ScriptModule`` for later parsing.
+
+    ``ScriptModule`` methods are regular Python functions by default. If you want
+    them to get optimized, you need to apply this decorator.
+
+    Arguments:
+        fn (callable): method to treat as script.
+    """
     if not _enabled:
         return fn
     # NOTE: we need to traverse two frames here because the meta-class frame

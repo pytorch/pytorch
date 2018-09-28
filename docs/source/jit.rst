@@ -19,7 +19,6 @@ for performance and multi-threading reasons.
 Creating Torch Script Code
 --------------------------
 
-
 .. autoclass:: ScriptModule
     :members:
 
@@ -42,6 +41,9 @@ Creating Torch Script Code
 
 .. autofunction:: trace
 
+.. autofunction:: script
+
+.. autofunction:: script_method
 
 Mixing Tracing and Scripting
 ----------------------------
