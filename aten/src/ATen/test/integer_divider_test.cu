@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include "gtest/gtest.h"
 
 // Test IntegerDivider: this tests *all* 32-bit pairs (a, b) where a % b is 0 or
 // (b-1), so it takes a few minutes to run.
@@ -20,24 +19,25 @@ struct TestCase {
   int steps;
 
   TestCase(Value dividend, int divisor_idx, int steps)
-    : dividend(dividend), divisor_idx(divisor_idx), steps(steps) { }
+      : dividend(dividend), divisor_idx(divisor_idx), steps(steps) {}
 };
 
-template<typename Value>
-__global__ void testIntDivider(const IntDivider<Value> *dividers,
-                               const TestCase<Value> *testCases,
-                               int numCases)
-{
+template <typename Value>
+__global__ void testIntDivider(
+    const IntDivider<Value>* dividers,
+    const TestCase<Value>* testCases,
+    int numCases) {
   int index = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int i = index; i < numCases; i += stride) {
-    const TestCase<Value> &tc = testCases[i];
+    const TestCase<Value>& tc = testCases[i];
     Value dividend = tc.dividend;
-    const IntDivider<Value> &divider = dividers[tc.divisor_idx];
+    const IntDivider<Value>& divider = dividers[tc.divisor_idx];
     Value divisor = divider.divisor;
 
     for (int j = 0; j < tc.steps; j++) {
-      if (sizeof(Value) == 4 && dividend > INT32_MAX) return;
+      if (sizeof(Value) == 4 && dividend > INT32_MAX)
+        return;
 
       DivMod<Value> qr = divider.divmod(dividend);
       assert(qr.div == dividend / divisor && qr.mod == dividend % divisor);
@@ -62,18 +62,22 @@ class IntDividerTester {
     cudaError_t err;
 
     err = cudaMalloc(&dividersBuf_, NUM_CASES * sizeof(IntDivider<Value>));
-    CATCH_REQUIRE(err == cudaSuccess);
+    bool isEQ = err == cudaSuccess;
+    EXPECT_TRUE(isEQ);
     err = cudaMalloc(&testCasesBuf_, NUM_CASES * sizeof(TestCase<Value>));
-    CATCH_REQUIRE(err == cudaSuccess);
+    isEQ = err == cudaSuccess;
+    EXPECT_TRUE(isEQ);
   }
 
   ~IntDividerTester() {
     cudaError_t err;
 
     err = cudaFree(dividersBuf_);
-    CATCH_REQUIRE(err == cudaSuccess);
+    bool isEQ = err == cudaSuccess;
+    EXPECT_TRUE(isEQ);
     err = cudaFree(testCasesBuf_);
-    CATCH_REQUIRE(err == cudaSuccess);
+    isEQ = err == cudaSuccess;
+    EXPECT_TRUE(isEQ);
   }
 
   void addTestCase(Value dividend, Value divisor, int steps) {
@@ -85,29 +89,39 @@ class IntDividerTester {
     testCases_.emplace_back(dividend, dividers_.size() - 1, steps);
 
     // Launch the test kernel if the buffer is full.
-    if (testCases_.size() == NUM_CASES) flush();
+    if (testCases_.size() == NUM_CASES)
+      flush();
   }
 
   void flush() {
     cudaError_t err;
+    bool isTrue;
+    if (testCases_.empty())
+      return;
 
-    if (testCases_.empty()) return;
-    CATCH_REQUIRE(!dividers_.empty());
+    ASSERT_FALSE(dividers_.empty());
 
-    CATCH_REQUIRE(dividers_.size() <= NUM_CASES);
-    CATCH_REQUIRE(testCases_.size() <= NUM_CASES);
-    err = cudaMemcpy(dividersBuf_, dividers_.data(),
-                     dividers_.size() * sizeof(IntDivider<Value>),
-                     cudaMemcpyHostToDevice);
-    CATCH_REQUIRE(err == cudaSuccess);
-    err = cudaMemcpy(testCasesBuf_, testCases_.data(),
-                     testCases_.size() * sizeof(TestCase<Value>),
-                     cudaMemcpyHostToDevice);
-    CATCH_REQUIRE(err == cudaSuccess);
+    isTrue = dividers_.size() <= NUM_CASES;
+    ASSERT_TRUE(isTrue);
+    isTrue = testCases_.size() <= NUM_CASES;
+    ASSERT_TRUE(isTrue);
+    err = cudaMemcpy(
+        dividersBuf_,
+        dividers_.data(),
+        dividers_.size() * sizeof(IntDivider<Value>),
+        cudaMemcpyHostToDevice);
+    isTrue = err == cudaSuccess;
+    ASSERT_TRUE(isTrue);
+    err = cudaMemcpy(
+        testCasesBuf_,
+        testCases_.data(),
+        testCases_.size() * sizeof(TestCase<Value>),
+        cudaMemcpyHostToDevice);
+    isTrue = err == cudaSuccess;
+    ASSERT_TRUE(isTrue);
 
     int numCases = testCases_.size();
-    testIntDivider<Value><<<512, 512>>>(
-      dividersBuf_, testCasesBuf_, numCases);
+    testIntDivider<Value><<<512, 512>>>(dividersBuf_, testCasesBuf_, numCases);
 
     dividers_.clear();
     testCases_.clear();
@@ -117,8 +131,8 @@ class IntDividerTester {
   vector<IntDivider<Value>> dividers_;
   vector<TestCase<Value>> testCases_;
 
-  IntDivider<Value> *dividersBuf_;
-  TestCase<Value> *testCasesBuf_;
+  IntDivider<Value>* dividersBuf_;
+  TestCase<Value>* testCasesBuf_;
 };
 
 static void testUint32Divider()
@@ -128,15 +142,18 @@ static void testUint32Divider()
   IntDividerTester<uint32_t> tester;
 
   for (uint64_t divisor = 1; divisor <= INT32_MAX; divisor++) {
-    if (divisor < 1000000 && divisor % 10000 == 0) fprintf(stderr, ".");
-    if (divisor % 10000000 == 0) fprintf(stderr, "-");
+    if (divisor < 1000000 && divisor % 10000 == 0)
+      fprintf(stderr, ".");
+    if (divisor % 10000000 == 0)
+      fprintf(stderr, "-");
 
     // In order to save time, we only test when the remainder is zero or
     // (divisor - 1).
     uint64_t dividend = 0;
     while (dividend <= INT32_MAX) {
       uint64_t steps = (INT32_MAX - dividend) / divisor + 1;
-      if (steps > MAX_STEPS) steps = MAX_STEPS;
+      if (steps > MAX_STEPS)
+        steps = MAX_STEPS;
 
       tester.addTestCase(dividend, divisor, steps);
       tester.addTestCase(dividend + divisor - 1, divisor, steps);
@@ -180,11 +197,11 @@ static void testUint64Divider()
   tester.flush();
 }
 
-CATCH_TEST_CASE( "CUDA integer divider", "[cuda]" ) {
-
+TEST(TestCUDAIntegerDivider, IntegerDivider) {
   testUint64Divider();
   testUint32Divider();
 
   cudaError_t err = cudaDeviceSynchronize();
-  CATCH_REQUIRE(err == cudaSuccess);
+  bool isTrue = err == cudaSuccess;
+  ASSERT_TRUE(isTrue);
 }

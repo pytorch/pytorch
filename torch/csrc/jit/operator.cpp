@@ -58,12 +58,19 @@ struct SchemaParser {
       {"float", FloatType::get() },
       {"int", IntType::get() },
       {"bool", IntType::get() }, // TODO: add separate bool type
+      {"World", WorldType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
     auto it = type_map.find(text);
-    if(it == type_map.end())
+    if(it == type_map.end()) {
+      if(text.size() > 0 && islower(text[0])) {
+        // lower case identifiers that are not otherwise valid types
+        // are treated as type variables
+        return VarType::create(text);
+      }
       throw ErrorReport(tok.range) << "unknown type specifier";
+    }
     return it->second;
   }
   void parseArgumentType(std::vector<Argument>& arguments) {
@@ -358,9 +365,16 @@ bool Operator::matches(const Node* node) const {
   if(actuals.size() < formals.size())
     return false;
 
+
+  TypeEnv type_env;
   for(size_t i = 0; i < formals.size(); ++i) {
-    // mismatched input type
-    if (!actuals[i]->type()->isSubtypeOf(formals[i].type)) {
+    try {
+      TypePtr formal = matchTypeVariables(formals[i].type, actuals[i]->type(), type_env);
+      // mismatched input type
+      if (!actuals[i]->type()->isSubtypeOf(formal)) {
+        return false;
+      }
+    } catch(TypeMatchError& err) {
       return false;
     }
   }

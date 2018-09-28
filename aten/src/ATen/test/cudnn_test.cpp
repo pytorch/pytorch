@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
 #include "ATen/cudnn/Descriptors.h"
@@ -9,7 +8,7 @@
 using namespace at;
 using namespace at::native;
 
-CATCH_TEST_CASE( "cudnn", "[cuda]" ) {
+TEST(CUDNNTest, CUDNNTestCUDA) {
   manual_seed(123, at::kCUDA);
 
 #if CUDNN_VERSION < 7000
@@ -17,9 +16,12 @@ CATCH_TEST_CASE( "cudnn", "[cuda]" ) {
   DropoutDescriptor desc1, desc2;
   desc1.initialize_rng(at::CUDA(kByte), handle, 0.5, 42);
   desc2.set(handle, 0.5, desc1.state);
-
-  CATCH_REQUIRE(desc1.desc()->dropout == desc2.desc()->dropout);
-  CATCH_REQUIRE(desc1.desc()->nstates == desc2.desc()->nstates);
-  CATCH_REQUIRE(desc1.desc()->states == desc2.desc()->states);
+  bool isEQ;
+  isEQ = (desc1.desc()->dropout == desc2.desc()->dropout);
+  ASSERT_TRUE(isEQ);
+  isEQ = (desc1.desc()->nstates == desc2.desc()->nstates);
+  ASSERT_TRUE(isEQ);
+  isEQ = (desc1.desc()->states == desc2.desc()->states);
+  ASSERT_TRUE(isEQ);
 #endif
 }

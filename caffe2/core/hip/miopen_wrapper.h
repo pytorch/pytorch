@@ -92,7 +92,7 @@ class MIOPENState
     hipStream_t stream_{nullptr};
     MIOPENWorkspace workspace_;
     size_t gpu_id_{0};
-    AT_DISABLE_COPY_AND_ASSIGN(MIOPENState);
+    C10_DISABLE_COPY_AND_ASSIGN(MIOPENState);
 };
 
 /**
@@ -157,7 +157,7 @@ class MIOPENWrapper
                    CAFFE2_COMPILE_TIME_MAX_HIP_GPUS>;
     static PerGPUMIOPENStates& miopen_states();
 
-    AT_DISABLE_COPY_AND_ASSIGN(MIOPENWrapper);
+    C10_DISABLE_COPY_AND_ASSIGN(MIOPENWrapper);
 };
 
 }; // namespace caffe2

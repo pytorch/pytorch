@@ -83,17 +83,17 @@ class TestScopes(test_util.TestCase):
         # explicitly setting a device
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
         op = core.CreateOperator("Relu", "x", "y", device_option=device_option)
         self.assertTrue(op.HasField('device_option'))
         self.assertEqual(op.device_option.device_type, caffe2_pb2.CUDA)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         with core.DeviceScope(device_option):
             # from device scope
             op = core.CreateOperator("Relu", "x", "y")
             self.assertTrue(op.HasField('device_option'))
             self.assertEqual(op.device_option.device_type, caffe2_pb2.CUDA)
-            self.assertEqual(op.device_option.cuda_gpu_id, 1)
+            self.assertEqual(op.device_option.device_id, 1)
             # from an overridden device option
             override_device = caffe2_pb2.DeviceOption()
             override_device.device_type = caffe2_pb2.CPU
@@ -109,13 +109,13 @@ class TestScopes(test_util.TestCase):
     def testNameAndDeviceScopeTogether(self):
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
         with core.DeviceScope(device_option):
             with core.NameScope("foo"):
                 op = core.CreateOperator("Relu", "x", "y")
                 self.assertTrue(op.HasField('device_option'))
                 self.assertEqual(op.device_option.device_type, caffe2_pb2.CUDA)
-                self.assertEqual(op.device_option.cuda_gpu_id, 1)
+                self.assertEqual(op.device_option.device_id, 1)
                 self.assertEqual(len(op.input), 1)
                 self.assertEqual(op.input[0], "foo/x")
                 self.assertEqual(len(op.output), 1)
@@ -255,7 +255,7 @@ class TestCreateOperator(test_util.TestCase):
     def testCreate(self):
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
         op = core.CreateOperator(
             "Ludicrous", "x", "y", name="ludicrous",
             control_input="z", device_option=device_option,
@@ -271,7 +271,7 @@ class TestCreateOperator(test_util.TestCase):
         self.assertEqual(op.control_input[0], "z")
         self.assertTrue(op.HasField('device_option'))
         self.assertEqual(op.device_option.device_type, caffe2_pb2.CUDA)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         self.assertTrue(len(op.arg), 3)
 
         # can't guarantee ordering of kwargs, so generate a set of args
@@ -574,7 +574,7 @@ class TestDeviceOption(test_util.TestCase):
         opt2 = caffe2_pb2.DeviceOption()
         opt1.device_type = 0
         self.assertTrue(core.device_option_equal(opt1, opt2))
-        opt1.cuda_gpu_id = 5
+        opt1.device_id = 5
         # opt1 still is on CPU, so the options should be equal
         self.assertTrue(core.device_option_equal(opt1, opt2))
         opt2.device_type = 0
@@ -649,7 +649,7 @@ class TestInferDevice(test_util.TestCase):
     def setUp(self):
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
         self.cuda_option = device_option
         self.cpu_option = caffe2_pb2.DeviceOption()
 
@@ -748,7 +748,7 @@ class TestInferDevice(test_util.TestCase):
         init_net = core.Net("init")
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
         weight = init_net.XavierFill([], 'fc_w', shape=[10, 100])
         bias = init_net.ConstantFill([], 'fc_b', shape=[10, ])
 
@@ -765,7 +765,7 @@ class TestInferDevice(test_util.TestCase):
         self.assertEqual(op.input[1], "fc_w_cuda_1")
         self.assertEqual(op.input[2], "fc_b_cuda_1")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         self.assertEqual(new_net._net.op[-2].type, "CopyCPUToGPU")
         self.assertEqual(new_net._net.op[0].type, "CopyCPUToGPU")
         self.assertNotEqual(blob_to_device["fc_w"], device_option)
@@ -775,7 +775,7 @@ class TestInferDevice(test_util.TestCase):
         init_net = core.Net("init")
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
         weight = init_net.XavierFill([], 'fc_w', shape=[10, 100])
         bias = init_net.ConstantFill([], 'fc_b', shape=[10, ])
         const = init_net.ConstantFill([], 'const', shape=[], value=1.)
@@ -791,12 +791,12 @@ class TestInferDevice(test_util.TestCase):
         op = nets[1]._net.op[0]
         self.assertEqual(op.type, "CopyCPUToGPU")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         self.assertEqual(op.output[0], "fc_w_cuda_1")
         op = nets[1]._net.op[1]
         self.assertEqual(op.type, "CopyCPUToGPU")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         self.assertEqual(op.output[0], "fc_b_cuda_1")
         op = nets[1]._net.op[2]
         self.assertEqual(op.type, "FC")
@@ -804,7 +804,7 @@ class TestInferDevice(test_util.TestCase):
         self.assertEqual(op.input[1], "fc_w_cuda_1")
         self.assertEqual(op.input[2], "fc_b_cuda_1")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         op = nets[1]._net.op[3]
         self.assertEqual(op.type, "Add")
         self.assertEqual(op.input[0], "fc1")
@@ -822,7 +822,7 @@ op {
   type: "CopyCPUToGPU"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -832,7 +832,7 @@ op {
   type: "CopyCPUToGPU"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -844,7 +844,7 @@ op {
   type: "FC"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -855,7 +855,7 @@ op {
   type: "Add"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 external_input: "data"
@@ -870,7 +870,7 @@ external_input: "const_cuda_1"
         init_net = core.Net("init")
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
 
         with core.DeviceScope(device_option):
             weight = init_net.XavierFill([], 'fc_w', shape=[10, 100])
@@ -887,7 +887,7 @@ external_input: "const_cuda_1"
         self.assertEqual(op.input[1], "fc_w")
         self.assertEqual(op.input[2], "fc_b")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         """
 For reference, net.Proto() should be like:
 name: ""
@@ -900,7 +900,7 @@ op {
   type: "FC"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 external_input: "data"
@@ -912,7 +912,7 @@ external_input: "fc_b"
         net = core.Net("test")
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
 
         with core.DeviceScope(device_option):
             net.Relu("data", "relu1")
@@ -920,10 +920,10 @@ external_input: "fc_b"
         with core.DeviceScope(device_option):
             net.Relu("data", "relu3")
         net.Relu("data", "relu4")
-        device_option.cuda_gpu_id = 0
+        device_option.device_id = 0
         with core.DeviceScope(device_option):
             net.Relu("data", "relu5")
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
         with core.DeviceScope(device_option):
             net.Relu("data", "relu6")
 
@@ -931,12 +931,12 @@ external_input: "fc_b"
         op = new_net._net.op[0]
         self.assertEqual(op.type, "CopyCPUToGPU")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         self.assertEqual(op.output[0], "data_cuda_1")
         op = new_net._net.op[1]
         self.assertEqual(op.type, "Relu")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         self.assertEqual(op.output[0], "relu1")
         op = new_net._net.op[2]
         self.assertEqual(op.type, "Relu")
@@ -945,7 +945,7 @@ external_input: "fc_b"
         op = new_net._net.op[3]
         self.assertEqual(op.type, "Relu")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         self.assertEqual(op.input[0], "data_cuda_1")
         self.assertEqual(op.output[0], "relu3")
         op = new_net._net.op[4]
@@ -955,18 +955,18 @@ external_input: "fc_b"
         op = new_net._net.op[5]
         self.assertEqual(op.type, "CopyCPUToGPU")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 0)
+        self.assertEqual(op.device_option.device_id, 0)
         self.assertEqual(op.output[0], "data_cuda_0")
         op = new_net._net.op[6]
         self.assertEqual(op.type, "Relu")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 0)
+        self.assertEqual(op.device_option.device_id, 0)
         self.assertEqual(op.input[0], "data_cuda_0")
         self.assertEqual(op.output[0], "relu5")
         op = new_net._net.op[7]
         self.assertEqual(op.type, "Relu")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         self.assertEqual(op.input[0], "data_cuda_1")
         self.assertEqual(op.output[0], "relu6")
         """
@@ -979,7 +979,7 @@ op {
   type: "CopyCPUToGPU"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -989,7 +989,7 @@ op {
   type: "Relu"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -1005,7 +1005,7 @@ op {
   type: "Relu"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -1021,7 +1021,7 @@ op {
   type: "CopyCPUToGPU"
   device_option {
     device_type: 1
-    cuda_gpu_id: 0
+    device_id: 0
   }
 }
 op {
@@ -1031,7 +1031,7 @@ op {
   type: "Relu"
   device_option {
     device_type: 1
-    cuda_gpu_id: 0
+    device_id: 0
   }
 }
 op {
@@ -1041,7 +1041,7 @@ op {
   type: "Relu"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 external_input: "data"
@@ -1060,7 +1060,7 @@ external_input: "data"
             cpu_device[i].node_name = 'node:' + str(i)
             gpu_device.append(caffe2_pb2.DeviceOption())
             gpu_device[i].device_type = caffe2_pb2.CUDA
-            gpu_device[i].cuda_gpu_id = 0
+            gpu_device[i].device_id = 0
             gpu_device[i].node_name = 'node:' + str(i)
         send_node = 'node:0'
         recv_node = 'node:1'
@@ -1100,12 +1100,12 @@ external_input: "data"
         op = init_net._net.op[2]
         self.assertEqual(op.type, "CopyGPUToCPU")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 0)
+        self.assertEqual(op.device_option.device_id, 0)
         self.assertEqual(op.output[0], "fc_w_cpu")
         op = init_net._net.op[3]
         self.assertEqual(op.type, "CopyGPUToCPU")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 0)
+        self.assertEqual(op.device_option.device_id, 0)
         self.assertEqual(op.output[0], "fc_b_cpu")
         op = init_net._net.op[4]
         self.assertEqual(op.type, placeholder_send)
@@ -1128,7 +1128,7 @@ external_input: "data"
         net = core.Net("test")
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
 
         net.Adagrad(['param', 'moment', 'grad', 'lr'], ['param', 'moment'])
         with core.DeviceScope(device_option):

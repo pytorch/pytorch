@@ -227,7 +227,6 @@ void initJITBindings(PyObject *module) {
         return createPyObjectForStack(std::move(stack));
       });
 
-
     py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
       .def("write_record", &PyTorchFileWriter::writeRecord)

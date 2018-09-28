@@ -6,7 +6,7 @@ CAFFE2_DEFINE_int(caffe2_threads_per_gpu, 1, "Number of CPU threads per GPU");
 
 namespace caffe2 {
 
-CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CUDA, GetAsyncNetGPUThreadPool);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, CUDA, GetAsyncNetGPUThreadPool);
 
 std::shared_ptr<TaskThreadPool>
 GetAsyncNetGPUThreadPool(int gpu_id, int pool_size, bool create_new) {
