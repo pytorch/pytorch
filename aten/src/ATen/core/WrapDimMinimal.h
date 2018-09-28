@@ -20,4 +20,10 @@ static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wr
   return dim;
 }
 
+// Wrap around axis_index if it is negative, s.t., -1 is the last dim
+// This is the "Caffe2" name
+static inline int canonical_axis_index_(int axis_index, int ndims) {
+  return maybe_wrap_dim(axis_index, ndims, false);
+}
+
 }
