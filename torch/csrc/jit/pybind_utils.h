@@ -86,7 +86,7 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   for(auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
-  return ConstantList<IValue>::create(std::move(elems));
+  return List<IValue>::create(std::move(elems));
 }
 
 inline IValue toIValue(py::handle obj, const TypePtr& type) {
@@ -140,6 +140,8 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
             return createGenericList(obj, elem_type);
         }
       }
+      case TypeKind::WorldType:
+        AT_ERROR("World arguments should not be passed in by users");
       case TypeKind::NumberType:
       case TypeKind::GeneratorType:
       case TypeKind::VarType:
