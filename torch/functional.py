@@ -650,26 +650,27 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
         input (Tensor): the input tensor
         p ({int, float, inf, -inf, 'fro', 'nuc'}): the order of norm
             The following norms can be calculated:
+
             =====  ============================  ==========================
             ord    matrix norm                   vector norm
             =====  ============================  ==========================
             None   Frobenius norm                2-norm
             'fro'  Frobenius norm                --
             'nuc'  nuclear norm                  --
-            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
+            Other  as vec norm when dim is None  :math:`\sqrt[ord]{\sum \abs{x}^{ord}}`
             =====  ============================  ==========================
         dim ({int, 2-tuple of ints, 2-list of ints}, optional): If it is an int,
-        vector norm will be calculated, if it is 2-tuple of ints, matrix norm
-        will be calculated. If the value is None, matrix norm will be calculated
-        when the input tensor only has two dimensions, vector norm will be
-        calculated when the input tensor only has one dimension. If the input
-        tensor has more than two dimensions, the vector norm will be applied to
-        last dimension.
+            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
+            will be calculated. If the value is None, matrix norm will be calculated
+            when the input tensor only has two dimensions, vector norm will be
+            calculated when the input tensor only has one dimension. If the input
+            tensor has more than two dimensions, the vector norm will be applied to
+            last dimension.
         keepdim (bool): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if attr:`dim`=``None`` and
+            retained or not. Ignored if :attr:`dim`=``None`` and
             :attr:`out`=``None``.
         out (Tensor, optional): the output tensor. Ignored if
-        attr:`dim`=``None`` and :attr:`out`=``None``.
+            :attr:`dim`=``None`` and :attr:`out`=``None``.
 
     Example::
         >>> import torch
