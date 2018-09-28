@@ -5,28 +5,11 @@
 #include "caffe2/core/tensor_impl.h"
 
 #include <ATen/core/intrusive_ptr.h>
+#include <ATen/core/UndefinedTensorImpl.h>
 
 namespace caffe2 {
 
-class CAFFE2_API UndefinedTensorImpl final : public TensorImpl {
-  UndefinedTensorImpl() : TensorImpl(CPU){};
-
- public:
- // Without this, we get:
- //  error: identifier "at::UndefinedTensor::_singleton" is undefined in device code
- // (ostensibly because the constexpr tricks MSVC into trying to compile this
- // function for device as well).
-#ifdef _WIN32
- static inline TensorImpl * singleton() {
-#else
- static constexpr inline TensorImpl * singleton() {
-#endif
-    return &singleton_;
-  }
-
- private:
-  static UndefinedTensorImpl singleton_;
-};
+using at::UndefinedTensorImpl;
 
 /**
  * @brief Tensor class holds a shared pointer to the implementation TensorImpl,
