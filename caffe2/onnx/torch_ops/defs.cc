@@ -15,8 +15,7 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     OpSchema()
         .SetDoc(dummy_test_only_ver1_doc)
         .Input(0, "input", "Input tensor", "T")
-        .Output(
-            0, "output", "Output tensor", "T")
+        .Output(0, "output", "Output tensor", "T")
         .TypeConstraint(
             "T",
             {"tensor(float16)", "tensor(float)", "tensor(double)"},

@@ -12,6 +12,6 @@ class PyTorchSchemasRegisterer {
         AI_ONNX_PYTORCH_DOMAIN_MAX_OPSET);
     RegisterPyTorchOperatorSetSchema();
   }
-    };
-    static PyTorchSchemasRegisterer registerer{};
+};
+static PyTorchSchemasRegisterer registerer{};
 } // namespace

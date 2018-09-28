@@ -10,7 +10,8 @@ class ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(PyTorch, 1, DUMMY_TEST_ONLY);
 class OpSet_PyTorch_ver1 {
  public:
   static void ForEachSchema(std::function<void(OpSchema&&)> fn) {
-    fn(GetOpSchema<ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(PyTorch, 1, DUMMY_TEST_ONLY)>());
+    fn(GetOpSchema<ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(
+           PyTorch, 1, DUMMY_TEST_ONLY)>());
   }
 };
 
@@ -18,4 +19,4 @@ inline void RegisterPyTorchOperatorSetSchema() {
   RegisterOpSetSchema<OpSet_PyTorch_ver1>();
 }
 
-}  // namespace ONNX_NAMESPACE
+} // namespace ONNX_NAMESPACE
