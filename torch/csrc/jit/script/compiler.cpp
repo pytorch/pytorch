@@ -1659,7 +1659,7 @@ private:
     if (c.isFloatingPoint())
       return materializeConstant(c.asFloatingPoint(), *graph, c.range(), fp_constants);
     else
-     return materializeConstant(c.asIntegral(), *graph, c.range(), integral_constants);
+      return materializeConstant(c.asIntegral(), *graph, c.range(), integral_constants);
   }
 
   Value* emitStringLiteral(const StringLiteral& c) {
@@ -1826,13 +1826,26 @@ private:
     JIT_ASSERT(subscript.subscript_exprs().size() == 1);
     auto* gatherable = emitExpr(subscript.value());
     auto gatherable_type = gatherable->type();
+    auto subscript_expr = subscript.subscript_exprs()[0]
 
     if (gatherable_type->kind() == TypeKind::TupleType) {
       auto unpacked = createTupleUnpack(gatherable);
-      auto elemtype = gatherable_type->elements()[0]; //TypePtr
+      // for the case like foo[3], we can always inference
+      // the type of the return value, so this is supported
+      // TODO: how about if subscript_expr is not a const,
+      // but a constexpr (something like 3+6)?
+      if (subscript_expr->kind() == TK_CONST) {
+        if (!subscript_expr->isIntegral())
+          throw std::runtime_error("Subscript must be integral");
+        return unpacked[subscript_expr->asIntegral()];
+      }
+      // for the case like foo[bar], since bar is known only at
+      // runtime, we an only infer type if foo is a homogeneous
+      // tuple
+      auto elemtype = gatherable_type->elements()[0];
       bool is_homogeneous = std::all_of(
-        tuple->elements().begin(),
-        tuple->elements().end(),
+        gatherable_type->elements().begin(),
+        gatherable_type->elements().end(),
         [&](const TypePtr& t) {
           return t->isSubtypeOf(elemtype);
         });
@@ -1843,7 +1856,7 @@ private:
 
     if (gatherable_type->kind() == TypeKind::ListType) {
       // if it's a list, emit a regular index selection op
-      auto* idx = emitExpr(subscript.subscript_exprs()[0]);
+      auto* idx = emitExpr(subscript_expr);
       return emitBuiltinCall(
                  loc, *graph, aten::select, {gatherable, idx}, {}, true);
     } else {
