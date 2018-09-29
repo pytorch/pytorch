@@ -29,6 +29,8 @@ class MKLContext : public BaseContext {
                                      : RandomNumberSeed()) {
     CAFFE_ENFORCE_EQ(option.device_type(), PROTO_MKLDNN);
   }
+  explicit MKLContext(const at::Device& device)
+      : MKLContext(DeviceToOption(device)) {}
 
   ~MKLContext() override {}
 
@@ -153,15 +155,6 @@ class MKLStaticContext : public BaseStaticContext {
  public:
   inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
     return GetCPUAllocator()->New(nbytes);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<MKLContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<MKLContext>(option);
   }
 
   DeviceType GetDeviceType() override {
