@@ -89,7 +89,7 @@ call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
 if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
 
 :: Install ninja
-if "%REBUILD%"=="" ( pip install ninja )
+:: if "%REBUILD%"=="" ( pip install ninja )
 
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
 
@@ -114,7 +114,7 @@ set CXX=sccache cl
 
 set DISTUTILS_USE_SDK=1
 
-set CMAKE_GENERATOR=Ninja
+set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 
 if not "%USE_CUDA%"=="1" (
   if "%REBUILD%"=="" (
