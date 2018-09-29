@@ -2801,10 +2801,26 @@ a")
         self.checkScript(func2, [x], optimize=True)
 
     def test_gather(self):
+        x = torch.rand(10, dtype=torch.float, requires_grad=True)
+
         def func(x):
             return x[0]
 
-        x = torch.rand(10, dtype=torch.float, requires_grad=True)
+        self.checkScript(func, [x], optimize=True)
+
+        def func(x, i:int):
+            return [x, x + 1, x + 2, x + 3][i]
+
+        self.checkScript(func, [x, 1], optimize=True)
+
+        def func(x, i:int):
+            return (x, x + 1, x + 2, x + 3)[i]
+
+        self.checkScript(func, [x, 1], optimize=True)
+
+        def func(x):
+            return (x, 1)[0]
+
         self.checkScript(func, [x], optimize=True)
 
     def test_random(self):

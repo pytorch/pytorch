@@ -1830,18 +1830,25 @@ private:
 
     if (gatherable_type->kind() == TypeKind::TupleType) {
       auto unpacked = createTupleUnpack(gatherable);
-      // for the case like foo[3], we can always inference
-      // the type of the return value, so this is supported
-      // TODO: how about if subscript_expr is not a const,
-      // but a constexpr (something like 3+6)?
+      // For the case like foo[3], we can always inference
+      // the type of the return value, so this is supported.
+      // TODO: how about constexpr (something like 3+6)? We
+      // should support this, but this requires a constant
+      // precomputing pass before compiling to graph.
       if (subscript_expr->kind() == TK_CONST) {
         if (!subscript_expr->isIntegral())
           throw std::runtime_error("Subscript must be integral");
-        return unpacked[subscript_expr->asIntegral()];
+        int64_t index = subscript_expr->asIntegral();
+        int64_t n = unpacked.size();
+        if (index >= n || index < -n)
+          throw std::runtime_error("Index out of range");
+        if (index < 0)
+          index += n;
+        return unpacked[index];
       }
-      // for the case like foo[bar], since bar is known only at
+      // For the case like foo[bar], since bar is unknown until at
       // runtime, we an only infer type if foo is a homogeneous
-      // tuple
+      // tuple. If this is the case, cast the tuple to a list first
       auto elemtype = gatherable_type->elements()[0];
       bool is_homogeneous = std::all_of(
         gatherable_type->elements().begin(),
