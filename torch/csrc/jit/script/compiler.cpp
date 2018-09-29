@@ -1825,14 +1825,29 @@ private:
     const auto& loc = subscript.range();
     JIT_ASSERT(subscript.subscript_exprs().size() == 1);
     auto* gatherable = emitExpr(subscript.value());
+    auto gatherable_type = gatherable->type();
 
-    if (gatherable->type()->kind() == TypeKind::ListType) {
+    if (gatherable_type->kind() == TypeKind::TupleType) {
+      auto unpacked = createTupleUnpack(gatherable);
+      auto elemtype = gatherable_type->elements()[0]; //TypePtr
+      bool is_homogeneous = std::all_of(
+        tuple->elements().begin(),
+        tuple->elements().end(),
+        [&](const TypePtr& t) {
+          return t->isSubtypeOf(elemtype);
+        });
+      if (!is_homogeneous)
+        throw std::runtime_error("Gathering non-homogeneous tuple is not supported");
+      gatherable = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+    }
+
+    if (gatherable_type->kind() == TypeKind::ListType) {
       // if it's a list, emit a regular index selection op
       auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
                  loc, *graph, aten::select, {gatherable, idx}, {}, true);
     } else {
-      JIT_ASSERT(gatherable->type()->isSubtypeOf(DynamicType::get()));
+      JIT_ASSERT(gatherable_type->isSubtypeOf(DynamicType::get()));
       return emitMultidimSlicing(loc, gatherable, subscript);
     }
   }
