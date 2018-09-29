@@ -923,7 +923,7 @@ if __name__ == '__main__':
 
     with open(output_predict_net, 'wb') as f:
         f.write(net.SerializeToString())
-    with open(output_predict_net + 'txt', 'w') as f:
+    with open(output_predict_net + '.txt', 'w') as f:
         f.write(str(net))
     with open(output_init_net, 'wb') as f:
         f.write(init_net.SerializeToString())
