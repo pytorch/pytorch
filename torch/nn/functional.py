@@ -2331,6 +2331,8 @@ Args:
 
 
 cosine_similarity = _add_docstr(torch.cosine_similarity, r"""
+cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
+
 Returns cosine similarity between x1 and x2, computed along dim.
 
 .. math ::
