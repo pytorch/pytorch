@@ -1290,29 +1290,14 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   }
 }
 
-void THTensor_(cat)(
-    THTensor* r_,
-    THTensor* ta,
-    THTensor* tb,
-    int dimension,
-    int pad,
-    scalar_t pad_value) {
+void THTensor_(cat)(THTensor* r_, THTensor* ta, THTensor* tb, int dimension, int pad, scalar_t pad_value) {
   THTensor* inputs[2];
   inputs[0] = ta;
   inputs[1] = tb;
   THTensor_(catArray)(r_, inputs, 2, dimension, pad, pad_value);
 }
 
-void THTensor_(check_shape_except_dim)(
-    THTensor* first,
-    THTensor* second,
-    int dimension,
-    bool pad);
-inline void THTensor_(check_shape_except_dim)(
-    THTensor* first,
-    THTensor* second,
-    int dimension,
-    bool pad) {
+inline void THTensor_(check_shape_except_dim)(THTensor* first, THTensor* second, int dimension, bool pad) {
   int first_dims = first->dim();
   int second_dims = second->dim();
   THArgCheck(
@@ -1342,13 +1327,7 @@ inline void THTensor_(check_shape_except_dim)(
   }
 }
 
-void THTensor_(catArray)(
-    THTensor* result,
-    THTensor** inputs,
-    int numInputs,
-    int dimension,
-    int pad,
-    scalar_t pad_value) {
+void THTensor_(catArray)(THTensor* result, THTensor** inputs, int numInputs, int dimension, int pad, scalar_t pad_value) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it
   // wasn't possible to cat empty tensors unless all the other tensors were
   // 1-dimensional, so we allowed these tensors to be "skipped".  We maintain

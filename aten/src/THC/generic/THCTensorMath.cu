@@ -53,31 +53,14 @@ THCTensor_(numel)(THCState *state, THCTensor *t)
   return THCTensor_(nElement)(state, t);
 }
 
-void THCTensor_(cat)(
-    THCState* state,
-    THCTensor* result,
-    THCTensor* ta,
-    THCTensor* tb,
-    int dimension,
-    int pad,
-    scalar_t pad_value) {
+void THCTensor_(cat)(THCState* state, THCTensor* result, THCTensor* ta, THCTensor* tb, int dimension, int pad, scalar_t pad_value) {
   THCTensor* inputs[2];
   inputs[0] = ta;
   inputs[1] = tb;
   THCTensor_(catArray)(state, result, inputs, 2, dimension, pad, pad_value);
 }
 
-void THCTensor_(check_shape_except_dim)(
-    THCState* state,
-    THCTensor* first,
-    THCTensor* second,
-    int dimension);
-inline void THCTensor_(check_shape_except_dim)(
-    THCState* state,
-    THCTensor* first,
-    THCTensor* second,
-    int dimension,
-    int pad) {
+inline void THCTensor_(check_shape_except_dim)(THCState* state, THCTensor* first, THCTensor* second, int dimension, int pad) {
   int first_dims = first->dim();
   int second_dims = second->dim();
   THArgCheck(
@@ -105,14 +88,7 @@ inline void THCTensor_(check_shape_except_dim)(
   }
 }
 
-void THCTensor_(catArray)(
-    THCState* state,
-    THCTensor* result,
-    THCTensor** inputs,
-    int numInputs,
-    int dimension,
-    int pad,
-    scalar_t pad_value) {
+void THCTensor_(catArray)(THCState* state, THCTensor* result, THCTensor** inputs, int numInputs, int dimension, int pad, scalar_t pad_value) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it
   // wasn't possible to cat empty tensors unless all the other tensors were
   // 1-dimensional, so we allowed these tensors to be "skipped".  We maintain
