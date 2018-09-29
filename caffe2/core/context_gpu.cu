@@ -57,6 +57,11 @@ CAFFE2_DEFINE_int(
     128,
     "The threshold in MB on how frequently to report memory changes");
 
+namespace at {
+
+REGISTER_CONTEXT(DeviceType::CUDA, caffe2::CUDAContext);
+} // namespace at
+
 namespace caffe2 {
 
 ThreadLocalCUDAObjects& CUDAContext::getCudaObjects() {
