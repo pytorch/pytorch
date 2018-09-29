@@ -59,10 +59,8 @@ CAFFE2_API void uncheckedSetCurrentCUDAStream(CUDAStream stream);
 CAFFE2_API Allocator* getCUDADeviceAllocator();
 
 /* Handles */
-#ifndef __HIP_PLATFORM_HCC__
 CAFFE2_API cusparseHandle_t getCurrentCUDASparseHandle();
 CAFFE2_API cublasHandle_t getCurrentCUDABlasHandle();
-#endif
 
 
 } // namespace cuda
