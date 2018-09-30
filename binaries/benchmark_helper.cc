@@ -81,8 +81,8 @@ void setOperatorEngine(caffe2::NetDef* net_def, const string& backend) {
                                                 : backend == "cuda"
                     ? "CUDA"
                     : backend == "dnnlowp" ? "DNNLOWP"
-                                           : backend == "dnnlowp_16"
-                            ? "DNNLOWP_16"
+                                           : backend == "dnnlowp_acc16"
+                            ? "DNNLOWP_ACC16"
                             : backend == "default" ? "" : "NONE";
     CAFFE_ENFORCE(engine != "NONE", "Backend is not supported");
     for (int i = 0; i < net_def->op_size(); i++) {
