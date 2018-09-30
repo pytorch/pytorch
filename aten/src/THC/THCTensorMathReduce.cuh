@@ -80,11 +80,7 @@ struct ReduceMin {
 template <typename T>
 struct ReduceMax {
   inline __device__ T operator()(T a, T b) const {
-#if defined(__HIP_PLATFORM_HCC__)
-    return (static_cast<int>(THCNumerics<T>::sub(a, b)) > 0 || THCNumerics<T>::isnan(a)) ? a : b;
-#else
     return (THCNumerics<T>::gt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
-#endif
   }
 };
 
