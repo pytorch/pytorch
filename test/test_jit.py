@@ -2808,12 +2808,14 @@ a")
 
         self.checkScript(func, [x], optimize=True)
 
-        def func(x, i:int):
+        def func(x, i):
+            # type: (Tensor, int) -> Tensor
             return [x, x + 1, x + 2, x + 3][i]
 
         self.checkScript(func, [x, 1], optimize=True)
 
-        def func(x, i:int):
+        def func(x, i):
+            # type: (Tensor, int) -> Tensor
             return (x, x + 1, x + 2, x + 3)[i]
 
         self.checkScript(func, [x, 1], optimize=True)
