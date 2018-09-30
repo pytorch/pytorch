@@ -1826,7 +1826,7 @@ private:
     JIT_ASSERT(subscript.subscript_exprs().size() == 1);
     auto* gatherable = emitExpr(subscript.value());
     auto gatherable_type = gatherable->type();
-    auto subscript_expr = subscript.subscript_exprs()[0]
+    const Expr &subscript_expr = subscript.subscript_exprs()[0];
 
     if (gatherable_type->kind() == TypeKind::TupleType) {
       auto unpacked = createTupleUnpack(gatherable);
@@ -1835,10 +1835,11 @@ private:
       // TODO: how about constexpr (something like 3+6)? We
       // should support this, but this requires a constant
       // precomputing pass before compiling to graph.
-      if (subscript_expr->kind() == TK_CONST) {
-        if (!subscript_expr->isIntegral())
+      if (subscript_expr.kind() == TK_CONST) {
+        const Const &subscript_const = dynamic_cast<const Const &>(subscript_expr);
+        if (!subscript_const.isIntegral())
           throw std::runtime_error("Subscript must be integral");
-        int64_t index = subscript_expr->asIntegral();
+        int64_t index = subscript_const.asIntegral();
         int64_t n = unpacked.size();
         if (index >= n || index < -n)
           throw std::runtime_error("Index out of range");
@@ -1849,16 +1850,16 @@ private:
       // For the case like foo[bar], since bar is unknown until at
       // runtime, we an only infer type if foo is a homogeneous
       // tuple. If this is the case, cast the tuple to a list first
-      auto elemtype = gatherable_type->elements()[0];
+      const auto &elements = gatherable_type->cast<TupleType>()->elements();
+      const auto &elemtype = elements[0];
       bool is_homogeneous = std::all_of(
-        gatherable_type->elements().begin(),
-        gatherable_type->elements().end(),
+        elements.begin(), elements.end(),
         [&](const TypePtr& t) {
           return t->isSubtypeOf(elemtype);
         });
       if (!is_homogeneous)
         throw std::runtime_error("Gathering non-homogeneous tuple is not supported");
-      gatherable = graph.insertNode(graph.createList(elem_type, unpacked))->output();
+      gatherable = graph->insertNode(graph->createList(elemtype, unpacked))->output();
     }
 
     if (gatherable_type->kind() == TypeKind::ListType) {

@@ -99,6 +99,7 @@ struct TreeView {
   int kind() const {
     return tree_->kind();
   }
+  virtual ~TreeView() {}
 
 protected:
   const TreeRef& subtree(size_t i) const {
