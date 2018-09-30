@@ -11,7 +11,7 @@
 #define _USE_MATH_DEFINES
 #include <ciso646>
 #endif
-#include <math.h>
+#include <cmath>
 #include <algorithm>
 #include <numeric>
 
