@@ -761,6 +761,24 @@ inline Tensor Tensor::rfft(int64_t signal_ndim, bool normalized, bool onesided) 
 inline Tensor Tensor::irfft(int64_t signal_ndim, bool normalized, bool onesided, IntList signal_sizes) const {
     return type().irfft(*this, signal_ndim, normalized, onesided, signal_sizes);
 }
+inline Tensor Tensor::i0() const {
+    return type().i0(*this);
+}
+inline Tensor & Tensor::i0_() {
+    return type().i0_(*this);
+}
+inline Tensor Tensor::i1() const {
+    return type().i1(*this);
+}
+inline Tensor & Tensor::i1_() {
+    return type().i1_(*this);
+}
+inline Tensor Tensor::iv(const Tensor & v) const {
+    return type().iv(v, *this);
+}
+inline Tensor & Tensor::iv_(const Tensor & v) {
+    return type().iv_(v, *this);
+}
 inline Tensor Tensor::index(TensorList indices) const {
     return type().index(*this, indices);
 }

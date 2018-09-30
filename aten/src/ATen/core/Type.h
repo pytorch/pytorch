@@ -447,6 +447,9 @@ struct AT_API Type {
   virtual Tensor ifft(const Tensor & self, int64_t signal_ndim, bool normalized) const = 0;
   virtual Tensor rfft(const Tensor & self, int64_t signal_ndim, bool normalized, bool onesided) const = 0;
   virtual Tensor irfft(const Tensor & self, int64_t signal_ndim, bool normalized, bool onesided, IntList signal_sizes) const = 0;
+  virtual Tensor i0(const Tensor & self) const = 0;
+  virtual Tensor i1(const Tensor & self) const = 0;
+  virtual Tensor iv(const Tensor & v, const Tensor & self) const = 0;
   virtual Tensor index(const Tensor & self, TensorList indices) const = 0;
   virtual Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) const = 0;
   virtual Tensor index_put(const Tensor & self, TensorList indices, const Tensor & values) const = 0;
