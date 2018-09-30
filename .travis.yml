@@ -29,3 +29,17 @@ matrix:
       - env: CPP_DOC_CHECK
         install: sudo apt-get install -y doxygen
         script: cd docs/cpp/source && ./check-doxygen.sh
+      - env: CLANG_TIDY
+        addons:
+          apt:
+            sources:
+              - ubuntu-toolchain-r-test
+              - llvm-toolchain-trusty-6.0
+            packages: clang-tidy-6.0
+        before_script:
+          - mkdir clang-tidy-build
+          - cd clang-tidy-build
+          - cmake -DBUILD_TORCH=ON ..
+          - cd ..
+        script: python tools/clang_tidy.py --verbose \
+          -c $(which clang-tidy-6.0) -d clang-tidy-build -p torch/csrc -r .
