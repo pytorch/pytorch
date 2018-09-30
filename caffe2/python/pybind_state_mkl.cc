@@ -23,6 +23,7 @@ template <typename T>
 class MKLMemoryFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
+#ifdef USE_NUMPY
     const MKLMemory<T>& src = blob.Get<MKLMemory<T>>();
     CAFFE_ENFORCE(src.buffer(), "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(TypeMeta::Make<T>());
@@ -40,6 +41,9 @@ class MKLMemoryFetcher : public BlobFetcherBase {
         PyArray_DATA(reinterpret_cast<PyArrayObject*>(result.ptr())));
     src.CopyTo(ptr);
     return result;
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 };
 
@@ -47,6 +51,7 @@ class MKLMemoryFeeder : public BlobFeederBase {
  public:
   void Feed(const DeviceOption&, PyArrayObject* original_array, Blob* blob)
       override {
+#ifdef USE_NUMPY
     PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
@@ -63,10 +68,14 @@ class MKLMemoryFeeder : public BlobFeederBase {
           PyArray_TYPE(array),
           ". Only float and double are supported by MKLDNN.");
     }
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 
   template <typename T>
   void FeedMKL(PyArrayObject* array, Blob* blob) {
+#ifdef USE_NUMPY
     // numpy requires long int as its dims.
     int ndim = PyArray_NDIM(array);
     npy_intp* npy_dims = PyArray_DIMS(array);
@@ -83,6 +92,9 @@ class MKLMemoryFeeder : public BlobFeederBase {
     }
     blob->GetMutable<MKLMemory<T>>()->CopyFrom(
         static_cast<const void*>(PyArray_DATA(array)));
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 };
 
