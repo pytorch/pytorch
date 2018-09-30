@@ -1836,7 +1836,7 @@ private:
       // should support this, but this requires a constant
       // precomputing pass before compiling to graph.
       if (subscript_expr.kind() == TK_CONST) {
-        const Const &subscript_const = dynamic_cast<const Const &>(subscript_expr);
+        Const subscript_const(subscript_expr);
         if (!subscript_const.isIntegral())
           throw std::runtime_error("Subscript must be integral");
         int64_t index = subscript_const.asIntegral();
@@ -1846,20 +1846,22 @@ private:
         if (index < 0)
           index += n;
         return unpacked[index];
+      } else {
+        // For the case like foo[bar], since bar is unknown until at
+        // runtime, we an only infer type if foo is a homogeneous
+        // tuple. If this is the case, cast the tuple to a list first
+        const auto &elements = gatherable_type->cast<TupleType>()->elements();
+        const auto &elemtype = elements[0];
+        bool is_homogeneous = std::all_of(
+          elements.begin(), elements.end(),
+          [&](const TypePtr& t) {
+            return t->isSubtypeOf(elemtype);
+          });
+        if (!is_homogeneous)
+          throw std::runtime_error("Gathering non-homogeneous tuple is not supported");
+        gatherable = graph->insertNode(graph->createList(elemtype, unpacked))->output();
+        gatherable_type = gatherable->type();
       }
-      // For the case like foo[bar], since bar is unknown until at
-      // runtime, we an only infer type if foo is a homogeneous
-      // tuple. If this is the case, cast the tuple to a list first
-      const auto &elements = gatherable_type->cast<TupleType>()->elements();
-      const auto &elemtype = elements[0];
-      bool is_homogeneous = std::all_of(
-        elements.begin(), elements.end(),
-        [&](const TypePtr& t) {
-          return t->isSubtypeOf(elemtype);
-        });
-      if (!is_homogeneous)
-        throw std::runtime_error("Gathering non-homogeneous tuple is not supported");
-      gatherable = graph->insertNode(graph->createList(elemtype, unpacked))->output();
     }
 
     if (gatherable_type->kind() == TypeKind::ListType) {

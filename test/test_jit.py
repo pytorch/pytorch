@@ -2823,6 +2823,21 @@ a")
 
         self.checkScript(func, [x], optimize=True)
 
+        with self.assertRaises(RuntimeError):
+            @torch.jit.script
+            def func(x):
+                return (x, 1)[2]
+
+        with self.assertRaises(RuntimeError):
+            @torch.jit.script
+            def func(x):
+                return (x, 1)[-3]
+
+        with self.assertRaises(RuntimeError):
+            @torch.jit.script
+            def func(x):
+                return (x, 1)[1.0]
+
     def test_random(self):
         @torch.jit.script
         def f(mean, std):
