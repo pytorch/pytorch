@@ -2068,8 +2068,8 @@
     SparseCPU: hspmm_sparse_cpu
     SparseCUDA: hspmm_sparse_cuda
 
-# This "raw copy" doesn't handle conversions NOR does it handle non-blocking.
-- func: raw_copy_sparse_(Tensor self, Tensor src) -> Tensor
+- func: copy_sparse_to_sparse_(Tensor self, Tensor src, bool non_blocking=false) -> Tensor
+  variants: function
   dispatch:
     SparseCPU: copy_sparse_
     SparseCUDA: copy_sparse_
