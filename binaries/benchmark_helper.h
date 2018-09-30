@@ -48,23 +48,26 @@ void writeTextOutput(
   CAFFE_ENFORCE(blob_proto.has_tensor());
   caffe2::TensorProto tensor_proto = blob_proto.tensor();
   int dims_size = tensor_proto.dims_size();
-  caffe2::TIndex last_dim_size = tensor_proto.dims(dims_size-1);
-  int loop_count = 1;
-  std::vector<std::string> lines;
-  for (int i = 0; i < dims_size - 1; i++) {
-    loop_count *= tensor_proto.dims(i);
+  // For NCHW or NHWC, print one line per CHW/HWC.
+  // If the output is one dimension, it means N==1,
+  // print everything to one line.
+  int loop_count = dims_size > 1 ? tensor_proto.dims(0) : 1;
+  caffe2::TIndex elem_dim_size =
+    dims_size > 1 ? tensor_proto.dims(1) : tensor_proto.dims(0);
+  for (int i = 2; i < dims_size; i++) {
+    elem_dim_size *= tensor_proto.dims(i);
   }
-
+  std::vector<std::string> lines;
   for (int i = 0; i < loop_count; i++) {
-    int start_idx = i * last_dim_size;
+    int start_idx = i * elem_dim_size;
     std::stringstream line;
     if (tensor_proto.data_type() == caffe2::TensorProto::FLOAT) {
       auto start = tensor_proto.float_data().begin() + start_idx;
-      auto end = start + last_dim_size;
+      auto end = start + elem_dim_size;
       copy(start, end, std::ostream_iterator<float>(line, ","));
     } else if (tensor_proto.data_type() == caffe2::TensorProto::INT32) {
       auto start = tensor_proto.int32_data().begin() + start_idx;
-      auto end = start + last_dim_size;
+      auto end = start + elem_dim_size;
       copy(start, end, std::ostream_iterator<int>(line, ","));
     } else {
       CAFFE_THROW("Unimplemented Blob type.");
