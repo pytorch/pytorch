@@ -56,7 +56,7 @@ Tensor cosine_similarity(const Tensor& x1, const Tensor& x2, int64_t dim, double
   Tensor w12 = at::sum(x1 * x2, dim);
   Tensor w1 = at::norm(x1, 2, dim);
   Tensor w2 = at::norm(x2, 2, dim);
-  return w12 / (w1 * w2).clamp_min(eps);
+  return w12.div_((w1 * w2).clamp_min_(eps));
 }
 
 }}  // namespace at::native
