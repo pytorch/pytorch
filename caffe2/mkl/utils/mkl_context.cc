@@ -3,10 +3,6 @@
 #include "mkl_context.h"
 #include "caffe2/core/event_cpu.h"
 
-namespace at {
-
-REGISTER_CONTEXT(DeviceType::MKLDNN, caffe2::MKLContext);
-} // namespace at
 namespace caffe2 {
 
 // MKL events are the same as CPU events
