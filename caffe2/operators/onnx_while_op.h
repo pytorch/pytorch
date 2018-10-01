@@ -260,7 +260,7 @@ class ONNXWhileOp final : public Operator<Context> {
     }
 
     void set_iteration(int64_t itr) {
-      iteration_var_->Resize(1);
+      iteration_var_->Resize();
       auto* iteration_var_ptr =
           iteration_var_->template mutable_data<int64_t>();
       *iteration_var_ptr = itr;
