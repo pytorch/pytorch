@@ -6,8 +6,6 @@ namespace caffe2 {
 
 CAFFE_DEFINE_KNOWN_TYPE(Tensor);
 
-UndefinedTensorImpl UndefinedTensorImpl::singleton_;
-
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,
     const std::string& file_name,

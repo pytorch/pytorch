@@ -19,7 +19,7 @@ CAFFE2_DEFINE_string(
 
 namespace caffe2 {
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     NetRegistry,
     NetBase,
     const std::shared_ptr<const NetDef>&,

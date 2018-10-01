@@ -33,16 +33,17 @@ struct CAFFE2_API ConstantString final : c10::intrusive_ptr_target {
       const ConstantString& v);
 };
 
-// non-mutable list
 template <typename Elem>
-struct C10_EXPORT ConstantList final : c10::intrusive_ptr_target {
+struct C10_EXPORT List : c10::intrusive_ptr_target {
  private:
-  const std::vector<Elem> elements_;
+  std::vector<Elem> elements_;
+
  public:
-  ConstantList(std::vector<Elem> elements_)
-  : elements_(std::move(elements_)) {}
-  static c10::intrusive_ptr<ConstantList<Elem>> create(std::vector<Elem> elements_) {
-    return c10::make_intrusive<ConstantList<Elem>>(std::move(elements_));
+  typedef Elem ElemType;
+
+  List(std::vector<Elem> elements_) : elements_(std::move(elements_)) {}
+  static c10::intrusive_ptr<List<Elem>> create(std::vector<Elem> elements_) {
+    return c10::make_intrusive<List<Elem>>(std::move(elements_));
   }
   const std::vector<Elem>& elements() const {
     return elements_;
@@ -50,13 +51,30 @@ struct C10_EXPORT ConstantList final : c10::intrusive_ptr_target {
   operator const std::vector<Elem>&() const {
     return elements();
   }
+
+  std::vector<Elem>& elements() {
+    return elements_;
+  }
+  operator std::vector<Elem>&() {
+    return elements();
+  }
+};
+
+struct World {
+  int64_t world_id;
 };
 
 struct IValue;
-using Tuple = ConstantList<IValue>;
-using IntList = ConstantList<int64_t>;
-using TensorList = ConstantList<at::Tensor>;
-using DoubleList = ConstantList<double>;
+struct C10_EXPORT Tuple : public List<IValue> {
+  using List<IValue>::List;
+  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
+    return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+};
+using IntList = List<int64_t>;
+using TensorList = List<at::Tensor>;
+using DoubleList = List<double>;
+using GenericList = List<IValue>;
 
 // IValue is the generic tagged union used by the interpreter to hold
 // all value types.
@@ -65,10 +83,19 @@ using DoubleList = ConstantList<double>;
 // to mark whether that type is a subtype of c10::intrusive_ptr_target and needs
 // retain/release calls.
 
-#define TORCH_FORALL_TAGS(_)                                             \
-  _(None)                                                                \
-  _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) \
-      _(TensorList) _(Blob)
+#define TORCH_FORALL_TAGS(_) \
+  _(None) \
+  _(Tensor) \
+  _(Double) \
+  _(Int) \
+  _(Tuple) \
+  _(IntList) \
+  _(DoubleList) \
+  _(String) \
+  _(TensorList) \
+  _(Blob) \
+  _(GenericList) \
+  _(World) \
 
 struct CAFFE2_API IValue final {
   IValue()
@@ -128,6 +155,13 @@ struct CAFFE2_API IValue final {
     return at::Tensor(toIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
   }
 
+  const IValue& toIValue() const {
+    return *this;
+  }
+  IValue& toIValue() {
+    return *this;
+  }
+
   IValue(caffe2::Blob blob) : tag(Tag::Blob), is_intrusive_ptr(true) {
     // TODO (after Tensor merge) If we pass in a Blob holding a Tensor, extract
     // and
@@ -170,6 +204,17 @@ struct CAFFE2_API IValue final {
     return payload.as_double;
   }
 
+  // World
+  IValue(World w)
+  : tag(Tag::World), is_intrusive_ptr(false) {
+    payload.as_world = w;
+  }
+  bool isWorld() const { return Tag::World == tag; }
+  World toWorld() const {
+    AT_ASSERT(isWorld());
+    return payload.as_world;
+  }
+
   // Int
   IValue(int64_t i)
   : tag(Tag::Int), is_intrusive_ptr(false) {
@@ -207,6 +252,7 @@ struct CAFFE2_API IValue final {
   const std::vector<int64_t>& toIntListRef() const;
   const std::vector<double>& toDoubleListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
+  const std::vector<IValue>& toGenericListRef() const;
 
   // ConstantString
   IValue(c10::intrusive_ptr<ConstantString> v);
@@ -245,6 +291,19 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<TensorList> toTensorList() const & {
     AT_ASSERT(isTensorList());
     return toIntrusivePtr<TensorList>();
+  }
+
+  //GenericList
+  IValue(c10::intrusive_ptr<GenericList> v);
+  IValue(std::vector<IValue> v);
+  bool isGenericList() const { return Tag::GenericList == tag; }
+  c10::intrusive_ptr<GenericList> toGenericList() && {
+    AT_ASSERT(isGenericList());
+    return moveToIntrusivePtr<GenericList>();
+  }
+  c10::intrusive_ptr<GenericList> toGenericList() const & {
+    AT_ASSERT(isGenericList());
+    return toIntrusivePtr<GenericList>();
   }
 
   // None
@@ -338,6 +397,7 @@ struct CAFFE2_API IValue final {
     int64_t as_int;
     double as_double;
     c10::intrusive_ptr_target* as_intrusive_ptr;
+    World as_world;
   } payload;
   Tag tag;
   bool is_intrusive_ptr;
@@ -362,12 +422,16 @@ DEFINE_TO(int64_t, toInt)
 DEFINE_TO(c10::intrusive_ptr<DoubleList>, toDoubleList)
 DEFINE_TO(c10::intrusive_ptr<IntList>, toIntList)
 DEFINE_TO(c10::intrusive_ptr<TensorList>, toTensorList)
+DEFINE_TO(c10::intrusive_ptr<GenericList>, toGenericList)
 DEFINE_TO(c10::intrusive_ptr<ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(bool, toInt)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
+DEFINE_TO(std::vector<IValue>, toGenericListRef)
+DEFINE_TO(World, toWorld)
+DEFINE_TO(IValue, toIValue)
 
 #undef DEFINE_TO
 
@@ -433,6 +497,14 @@ inline IValue::IValue(c10::intrusive_ptr<TensorList> v)
 inline IValue::IValue(std::vector<at::Tensor> v)
 : IValue(TensorList::create(std::move(v))) {}
 
+inline IValue::IValue(c10::intrusive_ptr<GenericList> v)
+: tag(Tag::GenericList), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(std::vector<IValue> v)
+: IValue(GenericList::create(std::move(v))) {}
+
+
 inline const std::vector<int64_t>& IValue::toIntListRef() const {
   return toIntList()->elements();
 }
@@ -443,6 +515,10 @@ inline const std::vector<double>& IValue::toDoubleListRef() const {
 
 inline const std::vector<at::Tensor>& IValue::toTensorListRef() const {
   return toTensorList()->elements();
+}
+
+inline const std::vector<IValue>& IValue::toGenericListRef() const {
+  return toGenericList()->elements();
 }
 
 

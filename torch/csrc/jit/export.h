@@ -4,6 +4,8 @@
 #include "torch/csrc/jit/script/module.h"
 #include "torch/csrc/onnx/onnx.h"
 
+#include <ostream>
+
 namespace torch { namespace jit {
 
 // This map is used to keep track of parameters that should be exported
@@ -33,6 +35,10 @@ TORCH_API std::string PrettyPrintExportedGraph(
     ::torch::onnx::OperatorExportTypes operator_export_type
       = ::torch::onnx::OperatorExportTypes::ONNX,
     bool google_printer = false);
+
+TORCH_API void ExportModule(
+    const script::Module& module,
+    std::ostream& out);
 
 TORCH_API void ExportModule(
     const script::Module& module,

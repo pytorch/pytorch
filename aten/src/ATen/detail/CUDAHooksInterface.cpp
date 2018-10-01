@@ -54,6 +54,6 @@ const CUDAHooksInterface& getCUDAHooks() {
 }
 } // namespace detail
 
-AT_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
+C10_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 
 } // namespace at

@@ -902,6 +902,9 @@ inline Tensor Tensor::mvlgamma(int64_t p) const {
 inline Tensor & Tensor::mvlgamma_(int64_t p) {
     return type().mvlgamma_(*this, p);
 }
+inline Tensor Tensor::narrow_copy(int64_t dim, int64_t start, int64_t length) const {
+    return type().narrow_copy(*this, dim, start, length);
+}
 inline Tensor Tensor::narrow(int64_t dim, int64_t start, int64_t length) const {
     return type().narrow(*this, dim, start, length);
 }

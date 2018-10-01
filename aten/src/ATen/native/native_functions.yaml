@@ -1174,6 +1174,14 @@
 - func: mvlgamma_(Tensor self, int64_t p) -> Tensor
   variants: method
 
+- func: narrow_copy(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
+  variants: method
+  dispatch:
+    CPU: narrow_copy_dense
+    CUDA: narrow_copy_dense
+    SparseCPU: narrow_copy_sparse
+    SparseCUDA: narrow_copy_sparse
+
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
   variants: function, method
 
@@ -2060,8 +2068,8 @@
     SparseCPU: hspmm_sparse_cpu
     SparseCUDA: hspmm_sparse_cuda
 
-# This "raw copy" doesn't handle conversions NOR does it handle non-blocking.
-- func: raw_copy_sparse_(Tensor self, Tensor src) -> Tensor
+- func: copy_sparse_to_sparse_(Tensor self, Tensor src, bool non_blocking=false) -> Tensor
+  variants: function
   dispatch:
     SparseCPU: copy_sparse_
     SparseCUDA: copy_sparse_
