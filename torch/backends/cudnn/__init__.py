@@ -51,10 +51,22 @@ def _libcudnn():
             lib.cudnnGetErrorString.restype = ctypes.c_char_p
             __cudnn_version = lib.cudnnGetVersion()
             compile_version = torch._C._cudnn_version()
-            # Check that cuDNN major and minor versions match
-            if (__cudnn_version // 100) != (compile_version // 100):
+            # cuDNN version is MAJOR*1000 + MINOR*100 + PATCH
+            runtime_major = __cudnn_version // 1000
+            runtime_minor = (__cudnn_version % 1000) // 100
+            compile_major = compile_version // 1000
+            compile_minor = (compile_version % 1000) // 100
+            # Different major versions are always incompatible
+            # Starting with cuDNN 7, minor versions are backwards-compatible
+            if runtime_major != compile_major:
+                cudnn_compatible = False
+            elif runtime_major < 7:
+                cudnn_compatible = runtime_minor == compile_minor
+            else:
+                cudnn_compatible = runtime_minor >= compile_minor
+            if not cudnn_compatible:
                 raise RuntimeError(
-                    'cuDNN version mismatch: PyTorch was compiled against {} '
+                    'cuDNN version incompatibility: PyTorch was compiled against {} '
                     'but linked against {}'.format(compile_version, __cudnn_version))
         else:
             lib = None
