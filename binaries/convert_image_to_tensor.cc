@@ -14,17 +14,16 @@
  * limitations under the License.
  */
 
-#include <fstream>
 #include <opencv2/opencv.hpp>
+#include <fstream>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
-#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
-
 
 CAFFE2_DEFINE_bool(color, true, "If set, load images in color.");
 CAFFE2_DEFINE_string(input_images, "", "Comma separated images");
@@ -33,7 +32,9 @@ CAFFE2_DEFINE_string(output_tensor, "", "The output tensor file in NCHW");
 CAFFE2_DEFINE_int(scale, 256, "Scale the shorter edge to the given value.");
 CAFFE2_DEFINE_bool(text_output, false, "Write the output in text format.");
 CAFFE2_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
-CAFFE2_DEFINE_string(preprocess, "",
+CAFFE2_DEFINE_string(
+    preprocess,
+    "",
     "Options to specify the preprocess routines. The available options are "
     "subtract128, normalize, mean, std, bgrtorgb. If multiple steps are provided, they "
     "are separated by comma (,) in sequence.");
@@ -103,11 +104,13 @@ std::vector<float> convertToVector(cv::Mat& img) {
       mean = {0.406, 0.456, 0.485};
     } else if (step == "std") {
       std = {0.225, 0.224, 0.229};
-    } else if (step == "bgrtorgb"){
+    } else if (step == "bgrtorgb") {
       bgrtorgb = true;
     } else {
-      CAFFE_ENFORCE(false, "Unsupported preprocess step. "
-      "The supported steps are: subtract128, normalize,mean, std, swaprb.");
+      CAFFE_ENFORCE(
+          false,
+          "Unsupported preprocess step. The supported steps are: subtract128, "
+          "normalize,mean, std, swaprb.");
     }
   }
 
@@ -117,15 +120,17 @@ std::vector<float> convertToVector(cv::Mat& img) {
   if (C == 1) {
     cv::MatIterator_<uchar> it, end;
     int idx = 0;
-    for( it = img.begin<uchar>(), end = img.end<uchar>(); it != end; ++it)
+    for(it = img.begin<uchar>(), end = img.end<uchar>(); it != end; ++it) {
       values[idx++] = (*it / normalize[0] - mean[0]) / std[0];
+    }
   } else {
     int i = 0;
     cv::MatIterator_<cv::Vec3b> it, end;
     int b = bgrtorgb ? 2 : 0;
     int g = 1;
     int r = bgrtorgb ? 0 : 2;
-    for( it = img.begin<cv::Vec3b>(), end = img.end<cv::Vec3b>(); it != end; ++it, i++) {
+    for(it = img.begin<cv::Vec3b>(), end = img.end<cv::Vec3b>(); it != end;
+        ++it, i++) {
       values[i] = (((*it)[b] / normalize[0] - mean[0]) / std[0]);
       int offset = caffe2::FLAGS_scale * caffe2::FLAGS_scale + i;
       values[offset] = (((*it)[g] / normalize[1] - mean[1]) / std[1]);
@@ -143,8 +148,7 @@ std::vector<float> convertOneImage(std::string& filename) {
   // Load image
   cv::Mat img = cv::imread(
       filename,
-      caffe2::FLAGS_color ? CV_LOAD_IMAGE_COLOR
-                          : CV_LOAD_IMAGE_GRAYSCALE);
+      caffe2::FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
 
   cv::Mat crop = cropToSquare(img);
 
@@ -165,7 +169,7 @@ void convertImages() {
   } else if (caffe2::FLAGS_input_image_file != "") {
     std::ifstream infile(caffe2::FLAGS_input_image_file);
     std::string line;
-    while(std::getline(infile, line)) {
+    while (std::getline(infile, line)) {
       vector<string> file_name = caffe2::split(',', line);
       string name;
       if (file_name.size() == 3) {
@@ -180,14 +184,13 @@ void convertImages() {
   }
   std::vector<std::vector<float>> values;
   int C = caffe2::FLAGS_color ? 3 : 1;
-  int image_size = C * caffe2::FLAGS_scale * caffe2::FLAGS_scale;
   for (int i = 0; i < file_names.size(); i++) {
     std::vector<float> one_image_values = convertOneImage(file_names[i]);
     values.push_back(one_image_values);
   }
 
   TensorProtos protos;
-  TensorProto *data;
+  TensorProto* data;
   data = protos.add_protos();
   data->set_data_type(TensorProto::FLOAT);
   data->add_dims(values.size());
@@ -195,7 +198,7 @@ void convertImages() {
   data->add_dims(caffe2::FLAGS_scale);
   data->add_dims(caffe2::FLAGS_scale);
 
-  for(int i = 0; i < values.size(); i++) {
+  for (int i = 0; i < values.size(); i++) {
     assert(values[i].size() == C * caffe2::FLAGS_scale * caffe2::FLAGS_scale);
     for (int j = 0; j < values[i].size(); j++) {
       data->add_float_data(values[i][j]);
