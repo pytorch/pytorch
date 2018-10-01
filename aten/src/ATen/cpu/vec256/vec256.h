@@ -1,10 +1,14 @@
 #pragma once
 
+#include <complex>
 #include "intrinsics.h"
 
 #include "vec256_base.h"
 #include "vec256_float.h"
 #include "vec256_double.h"
+#include "vec256_complex.h"
+// #include "vec256_complex_float.h"
+// #include "vec256_complex_double.h"
 #include "vec256_int.h"
 
 #include <algorithm>
