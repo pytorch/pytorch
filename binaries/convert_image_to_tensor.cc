@@ -120,7 +120,7 @@ std::vector<float> convertToVector(cv::Mat& img) {
   if (C == 1) {
     cv::MatIterator_<uchar> it, end;
     int idx = 0;
-    for(it = img.begin<uchar>(), end = img.end<uchar>(); it != end; ++it) {
+    for (it = img.begin<uchar>(), end = img.end<uchar>(); it != end; ++it) {
       values[idx++] = (*it / normalize[0] - mean[0]) / std[0];
     }
   } else {
@@ -129,7 +129,7 @@ std::vector<float> convertToVector(cv::Mat& img) {
     int b = bgrtorgb ? 2 : 0;
     int g = 1;
     int r = bgrtorgb ? 0 : 2;
-    for(it = img.begin<cv::Vec3b>(), end = img.end<cv::Vec3b>(); it != end;
+    for (it = img.begin<cv::Vec3b>(), end = img.end<cv::Vec3b>(); it != end;
         ++it, i++) {
       values[i] = (((*it)[b] / normalize[0] - mean[0]) / std[0]);
       int offset = caffe2::FLAGS_scale * caffe2::FLAGS_scale + i;

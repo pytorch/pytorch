@@ -200,8 +200,8 @@ void fillInputBlob(
     int protos_size = tensor_kv.second.protos_size();
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
-    caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
+      caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
       int total_size = tensor_proto->string_data_size();
       for (size_t i = 0; i < total_size; i++) {
         (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
@@ -217,9 +217,6 @@ void fillInputBlob(
       serializer.Deserialize(*tensor_proto, tensor);
       blob->Reset(tensor);
     }
-    // tensor = blob->GetMutableTensor(caffe2::CPU);
-    // caffe2::TensorPrinter printer("tensor", "./tensor.txt", 1000000);
-    // printer.Print<float>(*tensor);
     // todo: for other types
   }
 }

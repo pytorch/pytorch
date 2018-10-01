@@ -29,7 +29,6 @@ using std::shared_ptr;
 using std::string;
 using std::vector;
 
-
 template <typename ContextType, typename TensorType>
 void writeTextOutput(
     TensorType* tensor,
@@ -52,8 +51,8 @@ void writeTextOutput(
   // If the output is one dimension, it means N==1,
   // print everything to one line.
   int loop_count = dims_size > 1 ? tensor_proto.dims(0) : 1;
-  caffe2::TIndex elem_dim_size =
-    dims_size > 1 ? tensor_proto.dims(1) : tensor_proto.dims(0);
+  long long elem_dim_size =
+      dims_size > 1 ? tensor_proto.dims(1) : tensor_proto.dims(0);
   for (int i = 2; i < dims_size; i++) {
     elem_dim_size *= tensor_proto.dims(i);
   }
