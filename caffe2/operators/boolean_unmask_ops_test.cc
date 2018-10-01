@@ -16,7 +16,7 @@ static void AddScalarInput(
     Workspace* ws,
     bool isEmpty = false) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   if (!isEmpty) {
     tensor->Resize(vector<int64_t>{1});
     *(tensor->template mutable_data<DataT>()) = value;

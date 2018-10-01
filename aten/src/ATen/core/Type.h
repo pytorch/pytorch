@@ -33,7 +33,7 @@ class Context;
 struct Allocator;
 struct Generator;
 struct Storage;
-struct Tensor;
+class Tensor;
 
 static inline void noop_deleter(void*) {}
 
@@ -76,7 +76,7 @@ enum class TypeID {
   NumOptions
 };
 
-struct AT_API Type {
+struct CAFFE2_API Type {
   explicit Type(TensorTypeId type_id, bool is_variable, bool is_undefined)
       : type_id_(type_id), is_variable_(is_variable), is_undefined_(is_undefined) {}
 
@@ -364,8 +364,6 @@ struct AT_API Type {
   virtual Tensor & log_normal_(Tensor & self, double mean, double std, Generator * generator) const = 0;
   virtual Tensor & exponential_(Tensor & self, double lambd, Generator * generator) const = 0;
   virtual Tensor & geometric_(Tensor & self, double p, Generator * generator) const = 0;
-  virtual Tensor tensor(Storage storage, int64_t storageOffset, IntList size, IntList stride) const = 0;
-  virtual Tensor tensor(IntList size, IntList stride) const = 0;
   virtual Tensor abs(const Tensor & self) const = 0;
   virtual Tensor & abs_(Tensor & self) const = 0;
   virtual Tensor acos(const Tensor & self) const = 0;
@@ -497,6 +495,7 @@ struct AT_API Type {
   virtual Tensor mv(const Tensor & self, const Tensor & vec) const = 0;
   virtual Tensor mvlgamma(const Tensor & self, int64_t p) const = 0;
   virtual Tensor & mvlgamma_(Tensor & self, int64_t p) const = 0;
+  virtual Tensor narrow_copy(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
   virtual Tensor narrow(const Tensor & self, int64_t dim, int64_t start, int64_t length) const = 0;
   virtual Tensor permute(const Tensor & self, IntList dims) const = 0;
   virtual Tensor pin_memory(const Tensor & self) const = 0;
@@ -582,17 +581,6 @@ struct AT_API Type {
   virtual Tensor & sub_(Tensor & self, Scalar other, Scalar alpha) const = 0;
   virtual Tensor addmm(const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
   virtual Tensor & addmm_(Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha) const = 0;
-  virtual Tensor native_tensor() const = 0;
-  virtual Tensor native_tensor(IntList size) const = 0;
-  virtual Tensor tensor() const = 0;
-  virtual Tensor tensor(IntList size) const = 0;
-  virtual Tensor native_sparse_coo_tensor(IntList size) const = 0;
-  virtual Tensor native_sparse_coo_tensor(const Tensor & indices, const Tensor & values) const = 0;
-  virtual Tensor native_sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntList size) const = 0;
-  virtual Tensor sparse_coo_tensor(IntList size) const = 0;
-  virtual Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values) const = 0;
-  virtual Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntList size) const = 0;
-  virtual Tensor _native_sparse_coo_tensor_unsafe(const Tensor & indices, const Tensor & values, IntList size) const = 0;
   virtual Tensor & sparse_resize_(Tensor & self, IntList size, int64_t sparseDims, int64_t denseDims) const = 0;
   virtual Tensor & sparse_resize_and_clear_(Tensor & self, IntList size, int64_t sparseDims, int64_t denseDims) const = 0;
   virtual Tensor sparse_mask(const Tensor & self, SparseTensorRef mask) const = 0;
@@ -616,7 +604,6 @@ protected:
   TensorTypeId type_id_;
   bool is_variable_;
   bool is_undefined_;
-
 };
 
 } // namespace at

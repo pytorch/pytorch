@@ -45,7 +45,7 @@ std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
     auto pytuple = pyobj.cast<py::tuple>();
     out << "(";
     size_t i = 0;
-    for (auto& o : pytuple) {
+    for (const auto& o : pytuple) {
       if (i > 0) {
         out << ", ";
       }
@@ -455,6 +455,10 @@ void initPythonIRBindings(PyObject * module_) {
           return "StringType";
         case TypeKind::GeneratorType:
           return "GeneratorType";
+        case TypeKind::VarType:
+          return "VarType";
+        case TypeKind::WorldType:
+          return "WorldType";
         }
         // not reachable, but some compilers complain
         AT_ERROR("Unknown Type Kind");

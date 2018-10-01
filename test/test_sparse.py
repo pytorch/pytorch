@@ -1023,6 +1023,34 @@ class TestSparse(TestCase):
         test_shape([0, 3, 4], [3, 4, 5, 6], [0])
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
+    def _test_narrow(self, input, narrow_args):
+        expected = input.to_dense().narrow(*narrow_args)
+        self.assertEqual(expected, input.narrow_copy(*narrow_args).to_dense())
+
+    def _all_narrow_combs(self, shape):
+        for dim, dim_sz in enumerate(shape):
+            for start in range(dim_sz):
+                for length in range(dim_sz - start):
+                    yield [dim, start, length]
+
+    @skipIfRocm
+    def test_narrow(self):
+        shape = [3, 3, 4, 2]
+        input, _, _ = self._gen_sparse(4, 19, shape)
+        for narrow_args in self._all_narrow_combs(shape):
+            self._test_narrow(input, narrow_args)
+
+        self.assertRaises(RuntimeError, lambda: input.narrow_copy(-1, 0, 3))  # dim < 0
+        self.assertRaises(RuntimeError, lambda: input.narrow_copy(10, 0, 3))  # dim > input.dim()
+        self.assertRaises(RuntimeError, lambda: input.narrow_copy(0, shape[0] + 1, 3))  # start > size of dim
+        self.assertRaises(RuntimeError, lambda: input.narrow_copy(0, 2, shape[0]))  # start+length > size of dim
+
+        with_dense, _, _ = self._gen_sparse(2, 7, shape)
+        for narrow_args in self._all_narrow_combs(shape):
+            self._test_narrow(with_dense, narrow_args)
+
+        self.assertRaises(RuntimeError, lambda: with_dense.narrow_copy(10, 0, 3))  # dim > sparseDim + denseDim
+
     def _test_log1p_tensor(self, input, dense_tensor):
         expected_output = torch.tensor(dense_tensor).log1p_()
         self.assertEqual(expected_output, input.log1p().to_dense())
@@ -1410,6 +1438,7 @@ class TestSparse(TestCase):
         test_tensor(indices, values, False, True)  # An empty tensor's data_ptr is always equal to 0
 
     @cpu_only  # just run once, we test both cpu and cuda
+    @skipIfRocm
     def test_constructor_device_legacy(self):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
         v = torch.tensor([3., 4., 5.])
@@ -1556,6 +1585,7 @@ class TestSparse(TestCase):
             self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
                                     [1, 1], [1, 2, 0], [2, 2, 0])
 
+    @skipIfRocm
     def test_is_nonzero(self):
         self.assertTrue(torch.sparse_coo_tensor(([0],), 1., (1,)).is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0],), 0., (1,)).is_nonzero())

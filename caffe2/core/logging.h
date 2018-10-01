@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include <ATen/core/Error.h>
+#include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
 
 // CAFFE2_LOG_THRESHOLD is a compile time flag that would allow us to turn off
@@ -186,9 +187,8 @@ class CAFFE2_API EnforceFailMessage {
         "like `Equals`. Use CAFFE_ENFORCE for simple boolean checks.");
   }
 
-  /* implicit */ EnforceFailMessage(std::string&& msg) {
-    msg_ = new std::string(std::move(msg));
-  }
+  /* implicit */ EnforceFailMessage(std::string&& msg);
+
   inline bool bad() const {
     return msg_ != nullptr;
   }

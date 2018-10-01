@@ -135,7 +135,7 @@ message DeviceOption {
   // optional DeviceType device_type = 1 [ default = CPU ];
   optional int32 device_type = 1 [ default = 0 ]; // 0 is CPU.
   // [CUDA specific] the cuda gpu id.
-  optional int32 cuda_gpu_id = 2;
+  optional int32 device_id = 2;
   // [general] The random seed to start the device random number generator with.
   optional uint32 random_seed = 3;
   // [general] What node this op should execute on.

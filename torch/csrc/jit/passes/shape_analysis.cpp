@@ -557,10 +557,6 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::pow(Tensor self, Scalar exponent) -> Tensor",
     "aten::fmod(Tensor self, Scalar other) -> Tensor",
     "aten::remainder(Tensor self, Scalar other) -> Tensor",
-    "aten::add(Scalar other, Tensor self) -> Tensor",
-    "aten::sub(Scalar other, Tensor self) -> Tensor",
-    "aten::mul(Scalar other, Tensor self) -> Tensor",
-    "aten::div(Scalar other, Tensor self) -> Tensor",
     "aten::pow(Scalar base, Tensor self) -> Tensor",
     "aten::__and__(Tensor self, Scalar other) -> Tensor",
     "aten::__or__(Tensor self, Scalar other) -> Tensor",
@@ -1139,10 +1135,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
   } else if (node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
              node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
              node->matches("aten::mul(Tensor self, Scalar other) -> Tensor") ||
-             node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor") ||
-             node->matches("aten::add(Scalar other, Tensor self) -> Tensor") ||
-             node->matches("aten::sub(Scalar other, Tensor self) -> Tensor") ||
-             node->matches("aten::mul(Scalar other, Tensor self) -> Tensor")) {
+             node->matches("aten::pow(Tensor self, Scalar exponent) -> Tensor")) {
     node->output()->setType(tensor_types.at(0));
     return true;
   } else if (insert_expands && (
