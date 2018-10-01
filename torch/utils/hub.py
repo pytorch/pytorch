@@ -17,13 +17,13 @@ import torch.utils.model_zoo as model_zoo
 
 KEY_ENTRYPOINTS = 'entrypoints'
 KEY_DEPENDENCIES = 'dependencies'
-KEY_HELP = 'help'
+KEY_HELP = 'help_msg'
 KEY_MODULE = 'module'
 KEY_CHECKPOINT = 'checkpoint'
 MASTER_BRANCH = 'master'
 ENV_TORCH_HUB_DIR = 'TORCH_HUB_DIR'
 DEFAULT_TORCH_HUB_DIR = '~/.torch_hub'
-FUNC_GET_HUB_INFO = 'get_hub_info'
+# FUNC_GET_HUB_INFO = 'get_hub_info'
 HUB_INFO_KEYS = [KEY_ENTRYPOINTS, KEY_DEPENDENCIES, KEY_HELP]
 ENTRY_KEYS = [KEY_MODULE, KEY_CHECKPOINT]
 
@@ -43,7 +43,7 @@ def _download_url_to_file(url, filename):
         raise RuntimeError('Failed to download {}'.format(url))
 
 
-def _load_and_execute_func(module_name, func_name):
+def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
     # Import the module
     m = importlib.import_module(module_name)
     # Check if callable is defined in the module
@@ -54,20 +54,41 @@ def _load_and_execute_func(module_name, func_name):
     if not callable(func):
         raise RuntimeError('{} is not callable'.format(func))
     # Call the function
-    return func()
+    return func(*args, **kwargs)
 
+def _load_hub_info(module_name):
+    # Import the module
+    m = importlib.import_module(module_name)
+    for key in HUB_INFO_KEYS:
+        if key not in dir(m):
+            print(dir(m))
+            raise RuntimeError('{} are required attributes in hub.py'.format(', '.join(HUB_INFO_KEYS)))
+    return getattr(m, KEY_ENTRYPOINTS), getattr(m, KEY_DEPENDENCIES), getattr(m, KEY_HELP)
 
-def _load_single_model(func_name, hub_info, hub_dir):
-    if func_name not in hub_info[KEY_ENTRYPOINTS].keys():
+def check_type(value, T):
+    if not isinstance(value, T):
+        raise ValueError('Invalid type: {} should be an instance of {}'.format(value, T))
+    return value
+
+def _load_single_model(func_name, entrypoints, hub_dir, args, kwargs):
+    for e in entrypoints:
+        if e[0] == func_name:
+            entry = e
+            break
         raise RuntimeError('Callable {} not found in hub entrypoints'.format(func_name))
-    entry = hub_info[KEY_ENTRYPOINTS][func_name]
-    missing_keys = [k for k in ENTRY_KEYS if k not in entry.keys()]
-    if len(missing_keys):
-        raise ValueError('key {} is required in each entrypoint'.format(missing_keys))
-    module_name = entry[KEY_MODULE]
-    checkpoint = entry[KEY_CHECKPOINT]
 
-    model = _load_and_execute_func(module_name, func_name)
+    checkpoint = None
+    if len(e) < 2:
+        raise ValueError('Invalid entrypoint: func_name and module_name are required fields')
+    else:
+        module_name = check_type(e[1],str)
+
+    if len(e) > 2:
+        checkpoint = check_type(e[2], str)
+    if len(e) > 3:
+        raise ValueError('too many fields to unpack in entrypoint: we only accept func_name, module_name, checkpoint_url')
+
+    model = _load_and_execute_func(module_name, func_name, args, kwargs)
 
     if checkpoint is None:
         print('No pretrained weights provided. Proceeding with random initialized weights...')
@@ -76,7 +97,7 @@ def _load_single_model(func_name, hub_info, hub_dir):
     return model
 
 
-def load_model(github, model, hub_dir=None, cleanup=False):
+def load_model(github, model, hub_dir=None, cleanup=False, args=[], kwargs={}):
     r"""
     Load a model from a github repo, with pretrained weights.
 
@@ -136,17 +157,11 @@ def load_model(github, model, hub_dir=None, cleanup=False):
         raise RuntimeError('Failed to extract/rename the repo')
 
     # Parse the hub.py in repo to get hub information
-    hub_info = _load_and_execute_func(repo_name + '.hub', FUNC_GET_HUB_INFO)
-
-    # HUB_INFO_KEYS are required fields.
-    hub_info_keys = hub_info.keys()
-    missing_keys = [k for k in HUB_INFO_KEYS if k not in hub_info_keys]
-    if len(missing_keys):
-        raise RuntimeError('Keys {} are required in returned dict of load_hub_info'
-                           .format(' '.join(str(k) for k in missing_keys)))
+    # hub_info = _load_and_execute_func(repo_name + '.hub', FUNC_GET_HUB_INFO)
+    entrypoints, dependencies, help_msg = _load_hub_info(repo_name + '.hub')
 
     # Check dependent packages
-    missing_deps = [pkg for pkg in hub_info[KEY_DEPENDENCIES] if importlib.util.find_spec(pkg) is None]
+    missing_deps = [pkg for pkg in dependencies if importlib.util.find_spec(pkg) is None]
     if len(missing_deps):
         print('Package {} is required from repo author, but missing in your environment.'
               .format(', '.join(missing_deps)))
@@ -154,10 +169,12 @@ def load_model(github, model, hub_dir=None, cleanup=False):
     # Support loading multiple callables from the same repo at once.
     if isinstance(model, list):
         res = []
-        for func_name in model:
-            res.append(_load_single_model(func_name, hub_info, hub_dir))
+        if (args is not None and len(model) != len(args)) or (kwargs is not None and len(kwargs) != len(model)):
+            raise ValueError('If not None, args/kwargs should have the same lenght as model')
+        for func_name, arg, kwarg in zip(model, args, kwargs):
+            res.append(_load_single_model(func_name, entrypoints, hub_dir, arg, kwarg))
     elif isinstance(model, str):
-        res = _load_single_model(model, hub_info, hub_dir)
+        res = _load_single_model(model, entrypoints, hub_dir, args, kwargs)
     else:
         raise ValueError('Invalid input: model should be a string or a list of strings')
 

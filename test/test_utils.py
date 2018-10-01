@@ -712,6 +712,13 @@ class TestHub(TestCase):
             'wrapper1')
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
+    def test_load_with_args(self):
+        hub_model = load_model(
+            'ailzhang/torchvision_hub',
+            'wrapper1',
+            kwargs={'pretrained':True})
+        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
+
     def test_load_multi_callables(self):
         callables = ['wrapper1', 'wrapper2']
         hub_models = load_model(
