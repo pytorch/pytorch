@@ -1036,6 +1036,8 @@ The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
+.. include:: cuda_deterministic.rst
+
 Args:
     dim (int): dimension along which to index
     index (LongTensor): indices of :attr:`tensor` to select from
@@ -1948,6 +1950,8 @@ dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row along
 the specified dimension :attr:`dim` must be unique.
+
+.. include:: cuda_deterministic.rst
 
 Args:
     dim (int): the axis along which to index
