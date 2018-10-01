@@ -29,7 +29,7 @@ def _module_exists(name):
     if sys.version_info >= (3, 4):
         import importlib.util
         return importlib.util.find_spec(name) is not None
-    elif sys.version_info >= (3, 5):
+    elif sys.version_info >= (3, 3):
         # Special case for python3.3
         import importlib.find_loader
         return importlib.find_loader(name) is not None
