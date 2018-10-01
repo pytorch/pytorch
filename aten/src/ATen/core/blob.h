@@ -207,7 +207,7 @@ inline void swap(Blob& lhs, Blob& rhs) {
 }
 
 inline std::ostream& operator<<(std::ostream& out, const Blob& v) {
-  return out << "Blob";
+  return out << "Blob[" << v.TypeName() << "]";
 }
 
 } // namespace caffe2

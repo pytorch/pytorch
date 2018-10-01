@@ -39,10 +39,11 @@ def _inputs(draw):
     rows_num = draw(st.integers(1, 100))
     index_num = draw(st.integers(1, 10))
     batch_size = draw(st.integers(2, 10))
+    block_size = draw(st.integers(1, 2))
     return (
         draw(hnp.arrays(
             np.float32,
-            (batch_size, rows_num, 2),
+            (batch_size, rows_num, block_size),
             elements=st.floats(-10.0, 10.0),
         )),
         draw(hnp.arrays(

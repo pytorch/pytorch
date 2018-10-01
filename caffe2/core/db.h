@@ -3,8 +3,8 @@
 
 #include <mutex>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob_serialization.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
@@ -104,9 +104,9 @@ class CAFFE2_API DB {
 
 // Database classes are registered by their names so we can do optional
 // dependencies.
-CAFFE_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
+C10_DECLARE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 #define REGISTER_CAFFE2_DB(name, ...) \
-  CAFFE_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(Caffe2DBRegistry, name, __VA_ARGS__)
 
 /**
  * Returns a database object of the given database type, source and mode. The

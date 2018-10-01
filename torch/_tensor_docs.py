@@ -1453,6 +1453,17 @@ Example::
             [ 8,  9]])
 """)
 
+add_docstr_all('narrow_copy',
+               r"""
+narrow_copy(dimension, start, length) -> Tensor
+
+Same as :meth:`Tensor.narrow` except returning a copy rather
+than shared storage.  This is primarily for sparse tensors, which
+do not have a shared-storage narrow method.  Calling ```narrow_copy``
+with ```dimemsion > self._sparseDims()``` will return a copy with the
+relevant dense dimension narrowed, and ```self.shape``` updated accordingly.
+""")
+
 add_docstr_all('ndimension',
                r"""
 ndimension() -> int

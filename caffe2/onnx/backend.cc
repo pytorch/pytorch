@@ -65,7 +65,7 @@ caffe2::DeviceOption GetDeviceOption(const Device& onnx_device) {
       {DeviceType::CUDA, caffe2::DeviceType::CUDA}};
   caffe2::DeviceOption d;
   d.set_device_type(static_cast<int32_t>(m.at(onnx_device.type)));
-  d.set_cuda_gpu_id(onnx_device.device_id);
+  d.set_device_id(onnx_device.device_id);
   return d;
 }
 
