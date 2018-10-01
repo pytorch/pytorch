@@ -380,7 +380,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           # Install Anaconda if we need to
           if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
             rm -rf ${TMPDIR}/anaconda
-            curl -o ${TMPDIR}/anaconda.sh "https://repo.continuum.io/archive/Anaconda${ANACONDA_VERSION}-5.0.1-MacOSX-x86_64.sh"
+            curl -o ${TMPDIR}/anaconda.sh https://repo.continuum.io/miniconda/Miniconda${ANACONDA_VERSION}-latest-MacOSX-x86_64.sh
             /bin/bash ${TMPDIR}/anaconda.sh -b -p ${TMPDIR}/anaconda
             rm -f ${TMPDIR}/anaconda.sh
             export PATH="${TMPDIR}/anaconda/bin:${PATH}"
