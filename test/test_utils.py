@@ -708,21 +708,21 @@ class TestHub(TestCase):
 
     def test_load_from_github(self):
         hub_model = hub.load(
-            'ailzhang/torchvision_hub',
+            'ailzhang/vision:hub',
             'wrapper1')
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
     def test_load_with_args(self):
         hub_model = hub.load(
-            'ailzhang/torchvision_hub',
+            'ailzhang/vision:hub',
             'wrapper1',
-            kwargs={'pretrained':True})
+            kwargs={'pretrained': True})
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
     def test_load_multi_callables(self):
         callables = ['wrapper1', 'wrapper2']
         hub_models = hub.load(
-            'ailzhang/torchvision_hub',
+            'ailzhang/vision:hub',
             callables)
         for model in hub_models:
             self.assertEqual(self.resnet18_pretrained, model.state_dict())
@@ -730,7 +730,7 @@ class TestHub(TestCase):
     def test_hub_cache(self):
         hub_dir = os.path.expanduser('~/.torch_hub')
         hub_model = hub.load(
-            'ailzhang/torchvision_hub',
+            'ailzhang/vision:hub',
             'wrapper1',
             hub_dir=hub_dir,
             cache=True)

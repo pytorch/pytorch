@@ -1,6 +1,7 @@
 import importlib
 import os
 import shutil
+import site
 import sys
 import zipfile
 
@@ -19,6 +20,7 @@ KEY_MODULE = 'module'
 KEY_CHECKPOINT = 'checkpoint'
 MASTER_BRANCH = 'master'
 ENV_TORCH_HUB_DIR = 'TORCH_HUB_DIR'
+# DEFAULT_TORCH_HUB_DIR = site.getusersitepackages()
 DEFAULT_TORCH_HUB_DIR = '~/.torch_hub'
 # FUNC_GET_HUB_INFO = 'get_hub_info'
 HUB_INFO_KEYS = [KEY_ENTRYPOINTS, KEY_DEPENDENCIES, KEY_HELP]
@@ -36,11 +38,12 @@ def module_exists(name):
     else:
         # TODO: handle dotted module names?
         try:
-           import imp
-           imp.find_module(name)
+            import imp
+            imp.find_module(name)
         except Exception:
             return False
         return True
+
 
 def _git_archive_link(repo, branch):
     return 'https://github.com/' + repo + '/archive/' + branch + '.zip'
@@ -73,6 +76,7 @@ def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
     # Call the function
     return func(*args, **kwargs)
 
+
 def _load_hub_info(module_name):
     # Import the module
     m = importlib.import_module(module_name)
@@ -82,10 +86,12 @@ def _load_hub_info(module_name):
             raise RuntimeError('{} are required attributes in hub.py'.format(', '.join(HUB_INFO_KEYS)))
     return getattr(m, KEY_ENTRYPOINTS), getattr(m, KEY_DEPENDENCIES), getattr(m, KEY_HELP)
 
+
 def check_type(value, T):
     if not isinstance(value, T):
         raise ValueError('Invalid type: {} should be an instance of {}'.format(value, T))
     return value
+
 
 def _load_single_model(func_name, entrypoints, hub_dir, args, kwargs):
     for e in entrypoints:
@@ -98,12 +104,12 @@ def _load_single_model(func_name, entrypoints, hub_dir, args, kwargs):
     if len(e) < 2:
         raise ValueError('Invalid entrypoint: func_name and module_name are required fields')
     else:
-        module_name = check_type(e[1],str)
+        module_name = check_type(e[1], str)
 
     if len(e) > 2:
         checkpoint = check_type(e[2], str)
     if len(e) > 3:
-        raise ValueError('too many fields to unpack in entrypoint: we only accept func_name, module_name, checkpoint_url')
+        raise ValueError('Too many fields to unpack in entrypoint: only accept func_name, module_name, checkpoint_url')
 
     model = _load_and_execute_func(module_name, func_name, args, kwargs)
 
@@ -169,13 +175,13 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
         zipfile.ZipFile(cached_file).extractall(hub_dir)
         os.remove(cached_file)  # remove zip file
         shutil.move(extracted_repo, repo_dir)
-        sys.path.insert(0, hub_dir)  # Make Python interpreter aware of the repo
+        sys.path.insert(0, repo_dir)  # Make Python interpreter aware of the repo
     except Exception:
         raise RuntimeError('Failed to extract/rename the repo')
 
     # Parse the hub.py in repo to get hub information
     # hub_info = _load_and_execute_func(repo_name + '.hub', FUNC_GET_HUB_INFO)
-    entrypoints, dependencies, help_msg = _load_hub_info(repo_name + '.hub')
+    entrypoints, dependencies, help_msg = _load_hub_info('hub')
 
     # Check dependent packages
     missing_deps = [pkg for pkg in dependencies if not module_exists(pkg)]
