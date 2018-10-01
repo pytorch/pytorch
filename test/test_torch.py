@@ -3787,7 +3787,7 @@ class TestTorch(TestCase):
     def test_cat_empty_legacy(self):
         self._test_cat_empty_legacy(self)
 
-    def _test_cat_padding(self):
+    def test_cat_padding(self):
         x = torch.rand(13, 1, 3)
         y = torch.rand(17, 2, 2)
         z = torch.rand(19, 3, 1)
@@ -3803,9 +3803,6 @@ class TestTorch(TestCase):
         expect2[13:30, 0:2, 0:2] = y
         expect2[30:49, 0:3, 0:1] = z
         self.assertEqual(expect2, res1, 0)
-
-    def test_cat_padding(self):
-        self._test_cat_padding(self)
 
     @staticmethod
     def _test_cat_empty(self, use_cuda=False):
