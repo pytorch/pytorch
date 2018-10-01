@@ -587,10 +587,10 @@ def weak_script(fn):
     return fn
 
 
-def script(fn, optimize=True, _frames_up=0, is_weak=False):
+def script(fn, optimize=True, _frames_up=0, _is_weak=False):
     if not _enabled:
         return fn
-    if is_weak and fn in compiled_weak_fns:
+    if _is_weak and fn in compiled_weak_fns:
         return compiled_weak_fns[fn]
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
@@ -605,7 +605,7 @@ def script(fn, optimize=True, _frames_up=0, is_weak=False):
     # Forward docstrings
     mod.__doc__ = fn.__doc__
 
-    if is_weak:
+    if _is_weak:
         compiled_weak_fns[fn] = mod
     return mod
 
