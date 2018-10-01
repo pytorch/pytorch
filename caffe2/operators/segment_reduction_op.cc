@@ -52,6 +52,7 @@ REGISTER_CPU_OPERATOR(
     SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient,
     AbstractLengthsWithMainInputGradientOp<
         float,
+        float,
         int,
         CPUContext,
         WeightedSumReducerDef::template ReducerGradient<float, CPUContext>,
