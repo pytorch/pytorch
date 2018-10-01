@@ -1,10 +1,11 @@
+#ifndef C10_MACROS_MACROS_H_
+#define C10_MACROS_MACROS_H_
+
 /* Main entry for c10/macros.
  *
  * In your code, include c10/macros/Macros.h directly, instead of individual
  * files in this folder.
  */
-
-#pragma once
 
 // For build systems that do not directly depend on CMake and directly build
 // from the source directory (such as Buck), one may not have a cmake_macros.h
@@ -28,5 +29,4 @@
   classname(const classname&) = delete;        \
   classname& operator=(const classname&) = delete
 
-// Finally, file that provides legacy support for macros
-#include "c10/macros/Legacy.h"
+#endif // C10_MACROS_MACROS_H_

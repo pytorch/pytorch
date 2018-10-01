@@ -23,7 +23,8 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
-from test_autograd import method_tests, create_input, unpack_variables, \
+from test_autograd import method_tests as autograd_method_tests
+from test_autograd import create_input, unpack_variables, \
     exclude_tensor_method, non_differentiable, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
 import random
@@ -239,14 +240,10 @@ class JitTestCase(TestCase):
             imported = torch.jit.load(f.name)
         finally:
             os.unlink(f.name)
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            imported.save(f.name)
-            imported = torch.jit.load(f.name)
-        finally:
-            os.unlink(f.name)
-        return imported
+        buffer = io.BytesIO()
+        torch.jit.save(imported, buffer)
+        buffer.seek(0)
+        return torch.jit.load(buffer)
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
@@ -1223,13 +1220,18 @@ class TestJit(JitTestCase):
 
             def fn(x):
                 return x + torch.ones(2, 3, **kwargs)
-            input = torch.ones(2, 3, **kwargs)
+
+            input_kwargs = kwargs.copy()
+            if 'out' in input_kwargs:
+                del input_kwargs['out']
+            input = torch.ones(2, 3, **input_kwargs)
             self.checkTrace(fn, (input,), inputs_require_grads=inputs_require_grads)
             # check we recorded 'ones' and did not just record a constant
             tfn = torch.jit.trace(fn, input)
             self.assertTrue("ones" in str(tfn.graph))
         run()
         run(dtype=torch.int, inputs_require_grads=False)
+        run(out=torch.tensor([]))
         if RUN_CUDA:
             run(device="cuda:0")
         if RUN_CUDA_MULTI_GPU:
@@ -2224,7 +2226,7 @@ class TestBatched(TestCase):
 
         script_if = torch.jit.script(single_if)
         graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_if_else_with_scalar(self):
         def single_if(a, b):
@@ -2244,7 +2246,7 @@ class TestBatched(TestCase):
 
         script_if = torch.jit.script(single_if)
         graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_if_noelse(self):
         def single_if(a, b):
@@ -2262,7 +2264,7 @@ class TestBatched(TestCase):
 
         script_if = torch.jit.script(single_if)
         graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_if_noelse_with_scalar(self):
         def single_if(a, b):
@@ -2280,7 +2282,7 @@ class TestBatched(TestCase):
 
         script_if = torch.jit.script(single_if)
         graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_while(self):
         def single_while(a, b):
@@ -2299,7 +2301,7 @@ class TestBatched(TestCase):
 
         script_while = torch.jit.script(single_while)
         graph = torch.to_batch_graph(script_while.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_for(self):
         def single_for(x, y):
@@ -2317,7 +2319,7 @@ class TestBatched(TestCase):
 
         script_for = torch.jit.script(single_for)
         graph = torch.to_batch_graph(script_for.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_lstm(self):
         def LSTM(x_all, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
@@ -2639,18 +2641,23 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
-    def test_nested_list_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
-            @torch.jit.script
-            def foo(x):
-                # type: (Tuple[List[List[int]]]) -> int
-                return 4
+    def test_nested_list(self):
+        def foo(z):
+            # type: (Tuple[int, List[List[int]]]) -> int
+            x, y = z
+            return y[0][1]
+        self.checkScript(foo, ((1, [[1, 2], [3, 4]]),))
 
-    def test_nested_list_construct_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
+    def test_nested_list_construct(self):
+        def foo():
+            return [[4]] + [[4, 5]]
+        self.checkScript(foo, ())
+
+    def test_generic_list_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
             def foo(x):
-                return [[4]]
+                return [[x]] + [[1]]
 
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
@@ -2717,18 +2724,23 @@ a")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_clamp_fusion(self):
-        def func(a, b):
+        def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
+
+        def funcInf(a, b):
+            return torch.clamp(a + b, min=0, max=float('inf'))
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
-        s = self.checkScript(func, (a, b))
-        self.assertAllFused(s.graph_for(a, b))
+        funcs = (func2, funcInf)
+        for f in funcs:
+            s = self.checkScript(f, (a, b))
+            self.assertAllFused(s.graph_for(a, b))
 
-        c = s(a, b)
-        c.sum().backward()
-        self.assertAllFused(backward_graph(s))
+            c = s(a, b)
+            c.sum().backward()
+            self.assertAllFused(backward_graph(s))
 
     def test_mul(self):
         def func(a, b):
@@ -3441,6 +3453,80 @@ a")
             a = [0, 1, 2, 3, 4]
             return a[3:10] == [3, 4]
         self.checkScript(test_backward_slice, ())
+
+    def test_mutable_list(self):
+        def test_append():
+            a = [0, 1]
+            a.append(2)
+            a.append(3)
+            return a == [0, 1, 2, 3]
+        self.checkScript(test_append, ())
+
+        def test_append_2():
+            a = [0, 1]
+            a.append(2)
+            a = [1]
+            a.append(4)
+            return a == [1, 4]
+        self.checkScript(test_append_2, ())
+
+        def test_append_if():
+            a = [1]
+            if True:
+                a.append(4)
+            return a == [1, 4]
+        self.checkScript(test_append_if, ())
+
+        def test_append_if_else():
+            a = [1]
+            if False:
+                a.append(4)
+            else:
+                a.append(10)
+            return a == [1, 10]
+        self.checkScript(test_append_if_else, ())
+
+        def test_append_loop():
+            a = _construct_empty_int_list()
+            for i in range(5):
+                a.append(i)
+
+            return a == [0, 1, 2, 3, 4]
+        self.checkScript(test_append_loop, ())
+
+        def test_append_loop_if():
+            a = _construct_empty_int_list()
+            for i in range(5):
+                if i > 3:
+                    a.append(i)
+                else:
+                    a.append(0)
+
+            return a == [0, 0, 0, 0, 4]
+        self.checkScript(test_append_loop_if, ())
+
+        def test_nested_loop():
+            a = _construct_empty_int_list()
+            for i in range(2):
+                for j in range(2):
+                    a.append(i + j)
+
+            return a == [0, 1, 1, 2]
+        self.checkScript(test_append_loop_if, ())
+
+    def test_mutable_list_function_inline(self):
+        @torch.jit.script
+        def bar(y):
+            # type: (List[int]) -> List[int]
+            y.append(4)
+
+        @torch.jit.script
+        def foo():
+            x = [1, 2, 3]
+            bar(x)
+            return x
+
+        self.assertEqual(foo(), [1, 2, 3, 4])
 
     def test_func_call(self):
         script = '''
@@ -6485,7 +6571,7 @@ a")
 
         # Note: the neg op from script_fn1 should be properly inlined into the
         # graph of script_fn
-        self.assertExpected(str(script_fn.graph))
+        self.assertExpected(canonical(script_fn.graph))
 
     def test_call_script_mod_from_script_fn(self):
         class ScriptMod(torch.jit.ScriptModule):
@@ -6502,7 +6588,7 @@ a")
         def script_fn(x):
             return sm(x) + 1
 
-        self.assertExpected(str(script_fn.graph))
+        self.assertExpected(canonical(script_fn.graph))
 
     def test_call_python_fn_from_script_module(self):
         def python_fn(x):
@@ -6601,7 +6687,7 @@ a")
                 return script_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        self.assertExpected(str(sm.__getattr__('forward').graph))
+        self.assertExpected(canonical(sm.__getattr__('forward').graph))
 
     def test_call_script_mod_from_script_module(self):
         class ScriptMod1(torch.jit.ScriptModule):
@@ -6627,7 +6713,7 @@ a")
         # Note: the parameters from both modules should appear in the flattened
         # input list to the graph. The mm op from ScriptMod1 should be properly
         # inlined
-        self.assertExpected(str(sm.graph))
+        self.assertExpected(canonical(sm.graph))
 
     def test_module_with_params_called_fails(self):
         with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with parameters. Stateful "
@@ -7162,6 +7248,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_dcgan_models(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @skipIfRocm
     def test_dcgan_models_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_dcgan_models(self, device='cuda', check_export_import=False)
@@ -7284,11 +7371,13 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_mnist(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @skipIfRocm
     def test_mnist_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_mnist(self, device='cuda', check_export_import=False)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @skipIfRocm
     def test_mnist_training_leaks_no_memory_cuda(self):
         net = MnistNet().cuda()
         # MnistNet uses dropout, don't check its trace
@@ -7638,6 +7727,18 @@ class TestPytorchExportModes(JitTestCase):
 EXCLUDE_TRACED = {
     'test_split_dim',
     'test_split_dim_neg0',
+
+    # The following fail due to #12024.
+    # A prim::ListConstruct is involved and the indices get traced as DynamicType,
+    # which always require_grad. This causes a crash in autodiff.
+    'test___getitem___adv_index',
+    'test___getitem___adv_index_beg',
+    'test___getitem___adv_index_comb',
+    'test___getitem___adv_index_dup',
+    'test___getitem___adv_index_sub',
+    'test___getitem___adv_index_sub_2',
+    'test___getitem___adv_index_sub_3',
+    'test___getitem___adv_index_var',
 }
 
 EXCLUDE_TYPE_CHECK = {
@@ -7748,11 +7849,17 @@ def partial_apply_nontensors(fn, args, **kwargs):
 
 
 # create a trace function from input fn
-def create_traced_fn(self, fn):
+#
+# disable_autodiff_subgraph_inlining:
+#   Don't inline autodiff subgraphs so we can test autodiff
+def create_traced_fn(self, fn,
+                     disable_autodiff_subgraph_inlining=False):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(fn_tensors, inputs_tensors)
         self.assertExportImport(traced.graph, inputs_tensors)
+        if disable_autodiff_subgraph_inlining:
+            traced.debug_disable_autodiff_subgraph_inlining()
         output = traced(*inputs_tensors)
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)
         return output
@@ -7773,7 +7880,8 @@ def get_constant(x):
 # create a script function from (name, func_type, output_process_fn),
 # returns a function takes in (args, kwargs) and runs the compiled function and
 # then applies the post process fn to the outputs
-def create_script_fn(self, method_name, func_type, output_process_fn):
+def create_script_fn(self, method_name, func_type, output_process_fn,
+                     disable_autodiff_subgraph_inlining=False):
     def script_fn(*args, **kwargs):
         formals = []
         tensors = []
@@ -7804,6 +7912,8 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
         import math
 
         CU = torch.jit.CompilationUnit(script)
+        if disable_autodiff_subgraph_inlining:
+            CU.the_method.debug_disable_autodiff_subgraph_inlining()
         self.assertExportImport(CU.the_method.graph, tensors)
         output = output_process_fn(CU.the_method(*tensors))
         script_fn.last_graph = CU.the_method.graph_for(*tensors)
@@ -8141,7 +8251,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
 ])
 
 
-def add_test(
+def add_autograd_test(
         name,
         self_size,
         args,
@@ -8184,14 +8294,20 @@ def add_test(
                 check_types = test_name not in EXCLUDE_TYPE_CHECK
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
+                    # Test with disable_autodiff_subgraph_inlining, which forces the graph
+                    # to contain DifferentiableGraph nodes whenever possible. This allows us
+                    # to test autodiff; we assume that autograd is correct and use autodiff for backprop
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(self, fn),
+                        check_against_reference(self,
+                                                create_traced_fn(self, fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(self, name, 'method', output_process_fn),
+                                                create_script_fn(self, name, 'method', output_process_fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
                                                 fn, (self_variable,) + args_variable, kwargs_variable,
                                                 check_types=check_types)
 
@@ -8205,12 +8321,15 @@ def add_test(
                     f_args_tensor = (self_tensor,) + args_tensor
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(self, fn), fn,
-                                                f_args_variable, kwargs_variable, check_types=check_types)
+                        check_against_reference(self,
+                                                create_traced_fn(self, fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
+                                                fn, f_args_variable, kwargs_variable, check_types=check_types)
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
-                                                create_script_fn(self, name, 'functional', output_process_fn),
+                                                create_script_fn(self, name, 'functional', output_process_fn,
+                                                                 disable_autodiff_subgraph_inlining=True),
                                                 fn, f_args_variable, kwargs_variable,
                                                 check_types=check_types)
 
@@ -8265,8 +8384,8 @@ def post_add_test(test_name, skipTestIf, do_test):
         setattr(TestJitGenerated, test_name, do_test)
 
 
-for test in method_tests:
-    add_test(*test)
+for test in autograd_method_tests:
+    add_autograd_test(*test)
 
 for test in nn_functional_tests:
     add_nn_test(*test)

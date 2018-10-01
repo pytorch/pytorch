@@ -47,7 +47,8 @@ class TypeMeta;
  * use TypeIdentifier with custom types. This is for example used to store the
  * dtype of tensors.
  */
-class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
+class CAFFE2_API TypeIdentifier final
+    : public at::IdWrapper<TypeIdentifier, uint16_t> {
  public:
   static TypeIdentifier createTypeId();
 
@@ -90,8 +91,8 @@ AT_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
 
 namespace caffe2 {
 
-AT_CORE_API std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
-AT_CORE_API std::unordered_set<std::string>& gRegisteredTypeNames();
+CAFFE2_API std::unordered_map<TypeIdentifier, std::string>& gTypeNames();
+CAFFE2_API std::unordered_set<std::string>& gRegisteredTypeNames();
 
 inline const char* TypeIdentifier::name() const noexcept {
   auto it = gTypeNames().find(*this);
@@ -99,7 +100,7 @@ inline const char* TypeIdentifier::name() const noexcept {
   return it->second.c_str();
 }
 
-AT_CORE_API std::mutex& gTypeRegistrationMutex();
+CAFFE2_API std::mutex& gTypeRegistrationMutex();
 
 template <typename T>
 struct TypeNameRegisterer {
@@ -146,7 +147,7 @@ struct TypeNameRegisterer {
  * stores some additional data such as the item size and the name of the type
  * for run-time inspection.
  */
-class AT_CORE_API TypeMeta {
+class CAFFE2_API TypeMeta {
  public:
   using PlacementNew = void(void*, size_t);
   using TypedCopy = void(const void*, void*, size_t);
@@ -247,7 +248,7 @@ class AT_CORE_API TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  AT_CORE_API static TypeIdentifier Id();
+  CAFFE2_API static TypeIdentifier Id();
 
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
@@ -403,20 +404,16 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  *
  * NOTE: the macro needs to be invoked in ::caffe2 namespace
  */
-// Implementation note: in MSVC, we will need to prepend the AT_CORE_API
+// Implementation note: in MSVC, we will need to prepend the CAFFE2_API
 // keyword in order to get things compiled properly. in Linux, gcc seems to
 // create attribute ignored error for explicit template instantiations, see
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
-// TODO(jiayq): AT_CORE_API below is not correct, because we may use the
-// definition in third party dependent libraries. The proper way is to use
-// CAFFE2_EXPORT (which explicitly requires dllexport). Marking this as a
-// todo item when the unified build is finished.
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_EXPORT TypeIdentifier TypeMeta::Id<T>() {                       \
+  C10_EXPORT TypeIdentifier TypeMeta::Id<T>() {                           \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
@@ -438,10 +435,10 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  * for your own types to allocate dynamic ids for them.
  */
 #ifdef _MSC_VER
-#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)       \
-  template <>                                             \
-  inline AT_CORE_API TypeIdentifier TypeMeta::Id<T>() {   \
-    return TypeIdentifier(PreallocatedId);                \
+#define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T)    \
+  template <>                                          \
+  inline CAFFE2_API TypeIdentifier TypeMeta::Id<T>() { \
+    return TypeIdentifier(PreallocatedId);             \
   }
 #else // _MSC_VER
 #define CAFFE_DECLARE_KNOWN_TYPE(PreallocatedId, T) \
