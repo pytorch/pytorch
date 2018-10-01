@@ -23,6 +23,9 @@ if TEST_CUDA:
     TEST_CUDNN = TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
 
 
+IS_WINDOWS = sys.platform == 'win32'
+
+
 class TestCppExtension(common.TestCase):
     def setUp(self):
         if sys.platform != 'win32':
@@ -189,7 +192,7 @@ class TestCppExtension(common.TestCase):
         '''
 
         cpp_source2 = '''
-        #include <torch/torch.h>
+        #include <torch/extension.h>
         at::Tensor sin_add(at::Tensor x, at::Tensor y);
         PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           m.def("sin_add", &sin_add, "sin(x) + sin(y)");
@@ -265,7 +268,7 @@ class TestCppExtension(common.TestCase):
             cpp_sources=cpp_source,
             functions='tanh_add',
             extra_cflags=['-g\n\n', '-O0 -Wall'],
-            extra_include_paths=['       cpp_extensions\n', '../'],
+            extra_include_paths=['       cpp_extensions\n'],
             verbose=True)
 
         x = torch.zeros(100, dtype=torch.float32)
@@ -340,6 +343,50 @@ class TestCppExtension(common.TestCase):
 
         module = compile('int f() { return 789; }')
         self.assertEqual(module.f(), 789)
+
+    @unittest.skipIf(IS_WINDOWS, "C++ API not yet supported on Windows")
+    def test_cpp_api_extension(self):
+        here = os.path.abspath(__file__)
+        pytorch_root = os.path.dirname(os.path.dirname(here))
+        api_include = os.path.join(pytorch_root, 'torch', 'csrc', 'api', 'include')
+        module = torch.utils.cpp_extension.load(
+            name='cpp_api_extension',
+            sources='cpp_extensions/cpp_api_extension.cpp',
+            extra_include_paths=api_include,
+            extra_cflags=[] if IS_WINDOWS else ['-UTORCH_API_INCLUDE_EXTENSION_H'],
+            verbose=True)
+
+        net = module.Net(3, 5)
+
+        self.assertTrue(net.training)
+        net.eval()
+        self.assertFalse(net.training)
+        net.train()
+        self.assertTrue(net.training)
+        net.eval()
+
+        input = torch.randn(2, 3, dtype=torch.float32)
+        output = net.forward(input)
+        self.assertEqual(output, net.forward(input))
+        self.assertEqual(list(output.shape), [2, 5])
+
+        bias = net.get_bias()
+        self.assertEqual(list(bias.shape), [5])
+        net.set_bias(bias + 1)
+        self.assertEqual(net.get_bias(), bias + 1)
+        output2 = net.forward(input)
+
+        self.assertNotEqual(output + 1, output2)
+
+        self.assertEqual(len(net.parameters()), 4)
+
+        p = net.named_parameters()
+        self.assertEqual(type(p), dict)
+        self.assertEqual(len(p), 4)
+        self.assertIn('fc.weight', p)
+        self.assertIn('fc.bias', p)
+        self.assertIn('bn.weight', p)
+        self.assertIn('bn.bias', p)
 
 
 if __name__ == '__main__':

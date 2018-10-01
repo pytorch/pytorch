@@ -24,6 +24,15 @@
 #include "ATen/core/IdWrapper.h"
 #include "ATen/core/Macros.h"
 
+/*
+ * TypeIdentifier is a small type containing an id.
+ * Types must be registered using CAFFE_KNOWN_TYPE() for them to have a type id.
+ * If a type is registered, you can also create an object containing meta data
+ * like constructor, destructor, stringified name, ... about the type by calling
+ * TypeMeta::Make<T>. This returns a TypeMeta() object, which is basically just
+ * a pointer to the type information, so it's cheap to pass around.
+ */
+
 // TODO: This file is still in the caffe2 namespace, despite living
 // in the ATen directory.  This is because the macro
 // CAFFE_PREALLOCATED_KNOWN_TYPE defines a template specialization, which relies
@@ -46,7 +55,8 @@ namespace caffe2 {
  * use TypeIdentifier with custom types. This is for example used to store the
  * dtype of tensors.
  */
-class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, uint16_t> {
+class CAFFE2_API TypeIdentifier final
+    : public at::IdWrapper<TypeIdentifier, uint16_t> {
  public:
   static TypeIdentifier createTypeId();
 
@@ -68,7 +78,7 @@ class AT_CORE_API TypeIdentifier final : public at::IdWrapper<TypeIdentifier, ui
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  AT_CORE_API static TypeIdentifier Get();
+  CAFFE2_API static TypeIdentifier Get();
 
  private:
   constexpr explicit TypeIdentifier(uint16_t id) : IdWrapper(id) {}
@@ -99,6 +109,9 @@ namespace caffe2 {
 
 namespace detail {
 
+// This struct holds the actual type information. There will be
+// one allocated per type. TypeMeta objects will then point to the struct
+// instance for the type they're configured for.
 struct TypeMetaData final {
   using PlacementNew = void(void*, size_t);
   using TypedCopy = void(const void*, void*, size_t);
@@ -116,7 +129,7 @@ struct TypeMetaData final {
 // due to type erasure. E.g. somebody calling TypeMeta::copy() for
 // non-copyable type. Right now just throws exception but is implemented
 // in .cpp to manage dependencies
-AT_CORE_API void _ThrowRuntimeTypeLogicError(const std::string& msg);
+CAFFE2_API void _ThrowRuntimeTypeLogicError(const std::string& msg);
 
 /**
  * Placement new function for the type.
@@ -219,7 +232,7 @@ template <
     class T,
     c10::guts::enable_if_t<
         std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
-inline AT_CORE_API TypeMetaData createTypeMetaData() {
+inline CAFFE2_API TypeMetaData createTypeMetaData() {
   return TypeMetaData{sizeof(T),
                       nullptr,
                       nullptr,
@@ -231,7 +244,7 @@ template <
     class T,
     c10::guts::enable_if_t<!(
         std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr>
-inline AT_CORE_API TypeMetaData createTypeMetaData() {
+inline CAFFE2_API TypeMetaData createTypeMetaData() {
   return TypeMetaData{sizeof(T),
                       _PickCtor<T>(),
                       _PickCopy<T>(),
@@ -241,7 +254,7 @@ inline AT_CORE_API TypeMetaData createTypeMetaData() {
 }
 
 template <class T>
-AT_CORE_API const TypeMetaData* _TypeMetaData() noexcept;
+CAFFE2_API const TypeMetaData* _TypeMetaData() noexcept;
 } // namespace detail
 
 /**
@@ -250,7 +263,7 @@ AT_CORE_API const TypeMetaData* _TypeMetaData() noexcept;
  * stores some additional data such as the item size and the name of the type
  * for run-time inspection.
  */
-class AT_CORE_API TypeMeta {
+class CAFFE2_API TypeMeta {
  private:
   static constexpr detail::TypeMetaData uninitialized_ = {
       0,
@@ -382,30 +395,26 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
  *
  * NOTE: the macro needs to be invoked in ::caffe2 namespace
  */
-// Implementation note: in MSVC, we will need to prepend the AT_CORE_API
+// Implementation note: in MSVC, we will need to prepend the CAFFE2_API
 // keyword in order to get things compiled properly. in Linux, gcc seems to
 // create attribute ignored error for explicit template instantiations, see
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
-// TODO(jiayq): AT_CORE_API below is not correct, because we may use the
-// definition in third party dependent libraries. The proper way is to use
-// CAFFE2_EXPORT (which explicitly requires dllexport). Marking this as a
-// todo item when the unified build is finished.
 #ifdef _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                \
+  C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                    \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     return type_id;                                                       \
   }                                                                       \
   namespace detail {                                                      \
   template <>                                                             \
-  AT_CORE_EXPORT const char* __TypeName<T>() noexcept {                   \
+  C10_EXPORT const char* __TypeName<T>() noexcept {                       \
     return #T;                                                            \
   }                                                                       \
   template <>                                                             \
-  AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {        \
+  C10_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {            \
     static TypeMetaData singleton = createTypeMetaData<T>();              \
     return &singleton;                                                    \
   }                                                                       \
@@ -439,24 +448,24 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #ifdef _MSC_VER
 #define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)  \
   template <>                                                     \
-  inline AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() { \
+  inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {     \
     return TypeIdentifier(PreallocatedId);                        \
   }                                                               \
   namespace detail {                                              \
   template <>                                                     \
-  inline AT_CORE_EXPORT const char* __TypeName<T>() noexcept {    \
+  inline C10_EXPORT const char* __TypeName<T>() noexcept {        \
     return #T;                                                    \
   }                                                               \
   }
 #else // _MSC_VER
 #define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)  \
   template <>                                                     \
-  inline AT_CORE_EXPORT TypeIdentifier TypeIdentifier::Get<T>() { \
+  inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {     \
     return TypeIdentifier(PreallocatedId);                        \
   }                                                               \
   namespace detail {                                              \
   template <>                                                     \
-  inline AT_CORE_EXPORT const char* __TypeName<T>() noexcept {    \
+  inline C10_EXPORT const char* __TypeName<T>() noexcept {        \
     return #T;                                                    \
   }                                                               \
   }
@@ -465,7 +474,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                    \
   namespace detail {                                               \
   template <>                                                      \
-  AT_CORE_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept { \
+  C10_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {     \
     static TypeMetaData singleton = createTypeMetaData<T>();       \
     return &singleton;                                             \
   }                                                                \

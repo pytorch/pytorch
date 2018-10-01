@@ -20,6 +20,8 @@ import copy
 import numbers
 import collections
 import re
+if sys.version_info[0] > 2:
+    import pathlib
 
 
 def _parse_env(name, default, true_message, false_message):
@@ -58,19 +60,27 @@ def scope(scope_name):
             tracing_state.pop_scope()
 
 
-def load(filename):
+def load(f):
     r"""
-        Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.ScriptModule.save>`
+        Load a ``ScriptModule`` previously saved with :func:`save <torch.jit.save>`
 
         .. DANGER::
            All previously saved modules, no matter their device, are always loaded onto the CPU.
            This is different from :func:`torch.load`'s semantics and may change in the future.
 
         Arguments:
-            filename (string): the file to load
+            f: a file-like object (has to implement read, readline, tell, and seek),
+                or a string containing a file name
 
         Returns:
             A ``ScriptModule`` object.
+
+        Example:
+            >>> torch.jit.load('scriptmodule.pt')
+            # Load ScriptModule from io.BytesIO object
+            >>> with open('scriptmodule.pt', 'rb') as f:
+                    buffer = io.BytesIO(f.read())
+            >>> torch.jit.load(buffer)
     """
     m = ScriptModule()
 
@@ -82,8 +92,46 @@ def load(filename):
             curr = getattr(curr, name)
         return curr
 
-    torch._C.import_ir_module(module_lookup, filename)
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+        torch._C.import_ir_module(module_lookup, f)
+    else:
+        torch._C.import_ir_module_from_buffer(module_lookup, f.read())
     return m
+
+
+def save(m, f):
+    """
+        Saves a ScriptModule to a file.
+
+        Args:
+            m: a ScriptModule to save
+            f: a file-like object (has to implement write and flush) or a string
+               containing a file name
+
+        .. warning::
+            If you are using Python 2, torch.save does NOT support StringIO.StringIO
+            as a valid file-like object. This is because the write method should return
+            the number of bytes written; StringIO.write() does not do this.
+
+            Please use something like io.BytesIO instead.
+
+        Example:
+            >>> m = torch.jit.ScriptModule()
+            >>> # Save to file
+            >>> torch.jit.save(m, 'scriptmodule.pt')
+            >>> # Save to io.BytesIO buffer
+            >>> buffer = io.BytesIO()
+            >>> torch.jit.save(m, buffer)
+    """
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+        m.save(f)
+    else:
+        ret = m.save_to_buffer()
+        f.write(ret)
 
 
 def get_trace_graph(f, args=(), kwargs=None):
@@ -317,6 +365,8 @@ class TracingCheckError(Exception):
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
 def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
+    # Note: tracing is independent of optimizations, which consume the trace
+    executor_options['optimize'] = False
     for inputs in check_inputs:
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)

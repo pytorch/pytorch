@@ -13,10 +13,10 @@ namespace caffe2 {
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void EmbeddingLookup_int32_t_float_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int32_t* indices,
     const int* lengths,
@@ -318,7 +318,7 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
     int32_t dataInd = 0;
     for (int32_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -376,10 +376,10 @@ static void EmbeddingLookup_int32_t_float_float__avx2_fma(
   }
 }
 void EmbeddingLookup_int32_t_float_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int32_t* indices,
     const int* lengths,
@@ -401,10 +401,10 @@ void EmbeddingLookup_int32_t_float_float_false__avx2_fma(
       out);
 }
 void EmbeddingLookup_int32_t_float_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int32_t* indices,
     const int* lengths,
@@ -428,10 +428,10 @@ void EmbeddingLookup_int32_t_float_float_true__avx2_fma(
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void EmbeddingLookup_int64_t_float_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int64_t* indices,
     const int* lengths,
@@ -733,7 +733,7 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
     int64_t dataInd = 0;
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -791,10 +791,10 @@ static void EmbeddingLookup_int64_t_float_float__avx2_fma(
   }
 }
 void EmbeddingLookup_int64_t_float_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int64_t* indices,
     const int* lengths,
@@ -816,10 +816,10 @@ void EmbeddingLookup_int64_t_float_float_false__avx2_fma(
       out);
 }
 void EmbeddingLookup_int64_t_float_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const float* input,
     const int64_t* indices,
     const int* lengths,
@@ -843,10 +843,10 @@ void EmbeddingLookup_int64_t_float_float_true__avx2_fma(
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void EmbeddingLookup_int32_t_half_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const at::Half* input,
     const int32_t* indices,
     const int* lengths,
@@ -1268,7 +1268,7 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
     int32_t dataInd = 0;
     for (int32_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -1332,10 +1332,10 @@ static void EmbeddingLookup_int32_t_half_float__avx2_fma(
   }
 }
 void EmbeddingLookup_int32_t_half_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const at::Half* input,
     const int32_t* indices,
     const int* lengths,
@@ -1357,10 +1357,10 @@ void EmbeddingLookup_int32_t_half_float_false__avx2_fma(
       out);
 }
 void EmbeddingLookup_int32_t_half_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const at::Half* input,
     const int32_t* indices,
     const int* lengths,
@@ -1384,10 +1384,10 @@ void EmbeddingLookup_int32_t_half_float_true__avx2_fma(
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void EmbeddingLookup_int64_t_half_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const at::Half* input,
     const int64_t* indices,
     const int* lengths,
@@ -1809,7 +1809,7 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
     int64_t dataInd = 0;
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -1873,10 +1873,10 @@ static void EmbeddingLookup_int64_t_half_float__avx2_fma(
   }
 }
 void EmbeddingLookup_int64_t_half_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const at::Half* input,
     const int64_t* indices,
     const int* lengths,
@@ -1898,10 +1898,10 @@ void EmbeddingLookup_int64_t_half_float_false__avx2_fma(
       out);
 }
 void EmbeddingLookup_int64_t_half_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const at::Half* input,
     const int64_t* indices,
     const int* lengths,
@@ -1925,10 +1925,10 @@ void EmbeddingLookup_int64_t_half_float_true__avx2_fma(
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int32_t* indices,
     const int* lengths,
@@ -2366,7 +2366,7 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
     int32_t dataInd = 0;
     for (int32_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -2432,10 +2432,10 @@ static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
   }
 }
 void EmbeddingLookup_int32_t_uint8_t_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int32_t* indices,
     const int* lengths,
@@ -2457,10 +2457,10 @@ void EmbeddingLookup_int32_t_uint8_t_float_false__avx2_fma(
       out);
 }
 void EmbeddingLookup_int32_t_uint8_t_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int32_t* indices,
     const int* lengths,
@@ -2484,10 +2484,10 @@ void EmbeddingLookup_int32_t_uint8_t_float_true__avx2_fma(
 
 template <bool IS_WEIGHT_POSITIONAL>
 static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int64_t* indices,
     const int* lengths,
@@ -2925,7 +2925,7 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
     int64_t dataInd = 0;
     for (int64_t rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {
       float* op = &out[rangeIndex * block_size];
-      TIndex j = 0;
+      int64_t j = 0;
       for (; j + 8 <= block_size; j += 8) {
         _mm256_storeu_ps(op + j, _mm256_setzero_ps());
       }
@@ -2991,10 +2991,10 @@ static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
   }
 }
 void EmbeddingLookup_int64_t_uint8_t_float_false__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int64_t* indices,
     const int* lengths,
@@ -3016,10 +3016,10 @@ void EmbeddingLookup_int64_t_uint8_t_float_false__avx2_fma(
       out);
 }
 void EmbeddingLookup_int64_t_uint8_t_float_true__avx2_fma(
-    const TIndex block_size,
-    const TIndex output_size,
-    const TIndex index_size,
-    const TIndex data_size,
+    const int64_t block_size,
+    const int64_t output_size,
+    const int64_t index_size,
+    const int64_t data_size,
     const uint8_t* input,
     const int64_t* indices,
     const int* lengths,

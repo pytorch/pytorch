@@ -32,7 +32,7 @@ class SumReduceDimsOp final : public Operator<Context> {
         num_reduce_dims_ >= 0 && num_reduce_dims_ <= X.dims().size(),
         "For N-dim input tensor, support num_reduce_dims in range [0, N].");
 
-    vector<TIndex> output_shape;
+    vector<int64_t> output_shape;
     int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
     int end_index =
         FIRSTDIMS ? X.dims().size() : X.dims().size() - num_reduce_dims_;
@@ -109,13 +109,13 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
     // the shape of the input to the data tensor. This made the backward
     // computation incompatible with old models. To fix this, we check
     // the dimension and type of Input(1).
-    if (input_1.ndim() == 1 && input_1.template IsType<TIndex>()) {
+    if (input_1.ndim() == 1 && input_1.template IsType<int64_t>()) {
       // Input(1) is the shape of the input
       shape_.CopyFrom(input_1);
       // Copy first dims
-      vector<TIndex> output_shape(
-          shape_.template data<TIndex>(),
-          shape_.template data<TIndex>() + shape_.size());
+      vector<int64_t> output_shape(
+          shape_.template data<int64_t>(),
+          shape_.template data<int64_t>() + shape_.size());
       dX->Resize(output_shape);
     } else {
       // Input(1) is data tensor X
@@ -183,7 +183,7 @@ class MaxReduceDimsOp final : public Operator<Context> {
     const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)
                                : X.size_from_dim(X.ndim() - num_reduce_dims_);
 
-    vector<TIndex> output_shape;
+    vector<int64_t> output_shape;
     int start_index = FIRSTDIMS ? num_reduce_dims_ : 0;
     int end_index =
         FIRSTDIMS ? X.dims().size() : X.dims().size() - num_reduce_dims_;

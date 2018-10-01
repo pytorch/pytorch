@@ -47,7 +47,7 @@ namespace at {
 ///     at::zeros({2,2}, at::device({at::kCUDA, 1})); // place on device 1
 ///     at::zeros({2,2}, at::requires_grad());
 ///
-struct AT_API TensorOptions {
+struct CAFFE2_API TensorOptions {
   TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
 
   /// Constructs the `TensorOptions` with defaults taken from the thread local

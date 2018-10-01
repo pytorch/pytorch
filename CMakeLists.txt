@@ -5,11 +5,10 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
-set(CAFFE2_VERSION_MAJOR 0)
-set(CAFFE2_VERSION_MINOR 8)
-set(CAFFE2_VERSION_PATCH 2)
-set(CAFFE2_VERSION
-    "${CAFFE2_VERSION_MAJOR}.${CAFFE2_VERSION_MINOR}.${CAFFE2_VERSION_PATCH}")
+set(CMAKE_CXX_STANDARD 11)
+if (NOT MSVC)
+  set(CMAKE_C_STANDARD 11)
+endif()
 
 # One variable that determines whether the current cmake process is being run
 # with the main Caffe2 library. This is useful for building modules - if
@@ -134,6 +133,22 @@ if (ANDROID OR IOS)
   set(BUILD_ATEN_MOBILE ON)
 endif()
 
+# ---[ Utils
+# TODO: merge the following 3 files into cmake/public/utils.cmake.
+include(cmake/Utils.cmake)
+include(cmake/public/utils.cmake)
+
+# ---[ Version numbers for generated libraries
+set(TORCH_DEFAULT_VERSION "1.0.0")
+set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}" CACHE STRING "Torch build version")
+if (NOT TORCH_BUILD_VERSION)
+  # An empty string was specified so force version to the default
+  set(TORCH_BUILD_VERSION "${TORCH_DEFAULT_VERSION}"
+    CACHE STRING "Torch build version" FORCE)
+endif()
+caffe2_parse_version_str(TORCH ${TORCH_BUILD_VERSION})
+caffe2_parse_version_str(CAFFE2 ${TORCH_BUILD_VERSION})
+
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
@@ -159,11 +174,6 @@ include(cmake/MiscCheck.cmake)
 
 # External projects
 include(ExternalProject)
-
-# ---[ Utils
-# TODO: merge the following 3 files into cmake/public/utils.cmake.
-include(cmake/Utils.cmake)
-include(cmake/public/utils.cmake)
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
@@ -294,6 +304,7 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 include_directories(BEFORE ${PROJECT_SOURCE_DIR}/aten/src/)
 
 # ---[ Main build
+add_subdirectory(c10)
 add_subdirectory(caffe2)
 
 # --[ Documentation

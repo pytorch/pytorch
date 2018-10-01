@@ -647,6 +647,8 @@
 
 - func: empty_like(Tensor self, *, TensorOptions options) -> Tensor
 
+- func: empty_strided(IntList size, IntList stride, *, TensorOptions options={}) -> Tensor
+
 - func: erf(Tensor self) -> Tensor
   variants: function, method
 
@@ -1171,6 +1173,14 @@
 
 - func: mvlgamma_(Tensor self, int64_t p) -> Tensor
   variants: method
+
+- func: narrow_copy(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
+  variants: method
+  dispatch:
+    CPU: narrow_copy_dense
+    CUDA: narrow_copy_dense
+    SparseCPU: narrow_copy_sparse
+    SparseCUDA: narrow_copy_sparse
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
   variants: function, method
@@ -1887,11 +1897,13 @@
 
 
 - func: native_tensor(Type self_ty) -> Tensor
+  variants: []
   dispatch:
     SparseCPU: new_sparse
     SparseCUDA: new_sparse
 
 - func: native_tensor(Type self_ty, IntList size) -> Tensor
+  variants: []
   dispatch:
     SparseCPU: new_with_size_sparse
     SparseCUDA: new_with_size_sparse
@@ -1932,15 +1944,17 @@
     SparseCPU: new_with_tensor_and_size_sparse
     SparseCUDA: new_with_tensor_and_size_sparse
 
-- func: sparse_coo_tensor(Type dtype, IntList size) -> Tensor
-  variants: []
-
 - func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
-  variants: []
 
 - func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
-  variants: []
 
+# FIXME: would be nicer if TensorOptions was optional based; not adding default arguments for options given
+# the default would never make sense.
+- func: sparse_coo_tensor(IntList size, *, TensorOptions options) -> Tensor
+
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values, *, TensorOptions options) -> Tensor
+
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size, *, TensorOptions options) -> Tensor
 
 - func: _native_sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
   variants: []
@@ -2054,8 +2068,8 @@
     SparseCPU: hspmm_sparse_cpu
     SparseCUDA: hspmm_sparse_cuda
 
-# This "raw copy" doesn't handle conversions NOR does it handle non-blocking.
-- func: raw_copy_sparse_(Tensor self, Tensor src) -> Tensor
+- func: copy_sparse_to_sparse_(Tensor self, Tensor src, bool non_blocking=false) -> Tensor
+  variants: function
   dispatch:
     SparseCPU: copy_sparse_
     SparseCUDA: copy_sparse_

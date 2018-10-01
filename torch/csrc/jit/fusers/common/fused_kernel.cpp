@@ -24,6 +24,7 @@
 #include <sstream>
 #include <cstdint>
 #include <vector>
+#include <cmath>
 
 namespace torch { namespace jit {
 
@@ -221,7 +222,7 @@ void FusedKernel::launch(
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
-    outputs.push_back(ref_type.toScalarType(od.scalar_type).tensor());
+    outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type)));
   }
 
   launch_with_tensors(inputs, outputs);
@@ -235,9 +236,22 @@ static std::string scalarValue(int64_t v) {
   return std::to_string(v);
 }
 
+// Note: The NAN, NEG_INFINITY and POS_INFINITY strings map to device-specific
+// implementations of these special values. These macros are found in the 
+// resource strings for each device.
 static std::string scalarValue(double v) {
   std::ostringstream out;
-  out << std::scientific << v << "f";
+  if (std::isnan(v)) {
+    out << "NAN";
+  } else if (std::isinf(v)) {
+    if (v < 0) {
+      out << "NEG_INFINITY";
+    } else {
+      out << "POS_INFINITY";
+    }
+  } else {
+    out << std::scientific << v << "f";
+  }
   return out.str();
 }
 

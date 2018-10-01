@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include <ATen/core/Error.h>
+#include "caffe2/core/common.h"
 #include "caffe2/core/flags.h"
 
 // CAFFE2_LOG_THRESHOLD is a compile time flag that would allow us to turn off
@@ -145,7 +146,7 @@ using EnforceNotMet = at::Error;
  * functions to caffe2::enforce_detail namespace. For example:
  *
  *   namespace caffe2 { namespace enforce_detail {
- *   inline EnforceFailMessage IsVector(const vector<TIndex>& shape) {
+ *   inline EnforceFailMessage IsVector(const vector<int64_t>& shape) {
  *     if (shape.size() == 1) { return EnforceOK(); }
  *     return MakeString("Shape ", shape, " is not a vector");
  *   }
@@ -186,9 +187,8 @@ class CAFFE2_API EnforceFailMessage {
         "like `Equals`. Use CAFFE_ENFORCE for simple boolean checks.");
   }
 
-  /* implicit */ EnforceFailMessage(std::string&& msg) {
-    msg_ = new std::string(std::move(msg));
-  }
+  /* implicit */ EnforceFailMessage(std::string&& msg);
+
   inline bool bad() const {
     return msg_ != nullptr;
   }

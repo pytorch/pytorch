@@ -56,6 +56,9 @@ struct SymbolicVariable {
   SymbolicVariable operator*(const SymbolicVariable rhs) const {
     return create(aten::mul, {*this, rhs})[0].typeLike(*this);
   }
+  SymbolicVariable operator/(const SymbolicVariable rhs) const {
+    return create(aten::div, {*this, rhs})[0].typeLike(*this);
+  }
   SymbolicVariable operator*(at::Scalar rhs) const {
     if (isConstInt(rhs, 1))
       return *this;
@@ -169,6 +172,30 @@ struct SymbolicVariable {
     Value * output_list = g->insert(aten::broadcast_tensors, {input_list});
     Node * unpack = g->insertNode(g->create(prim::ListUnpack, {output_list}, inputs.size()));
     return fmap<SymbolicVariable>(unpack->outputs());
+  }
+  static SymbolicVariable zeros_like(const SymbolicVariable input) {
+    return create(t("zeros_like"), {input})[0];
+  }
+  SymbolicVariable cos() const {
+    return create(t("cos"), {*this})[0];
+  }
+  SymbolicVariable cosh() const {
+    return create(t("cosh"), {*this})[0];
+  }
+  SymbolicVariable pow(at::Scalar other) const {
+    return create(t("pow"), {*this, insertConstant(other)})[0];
+  }
+  SymbolicVariable rsqrt() const {
+    return create(t("rsqrt"), {*this})[0];
+  }
+  SymbolicVariable sign() const {
+    return create(t("sign"), {*this})[0];
+  }
+  SymbolicVariable sin() const {
+    return create(t("sin"), {*this})[0];
+  }
+  SymbolicVariable sinh() const {
+    return create(t("sinh"), {*this})[0];
   }
   SymbolicVariable sum() const {
     return create(t("sum"), {*this})[0];
