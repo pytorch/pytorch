@@ -34,7 +34,7 @@ class DLPackWrapper {
         "Unsupported device type: ",
         device_option.device_type());
     tensor_context.device_type = *device_type_ptr;
-    tensor_context.device_id = device_option.cuda_gpu_id();
+    tensor_context.device_id = device_option.device_id();
 
     if (tensor->size() <= 0) {
       tensor->Resize(0);
@@ -87,7 +87,7 @@ class DLPackWrapper {
     int dlpack_device_id = dlTensor->ctx.device_id;
     CAFFE_ENFORCE_EQ(
         dlpack_device_id,
-        device_option.cuda_gpu_id(),
+        device_option.device_id(),
         "Expected same device id for DLPack and C2 tensors");
 
     std::vector<int64_t> dims;

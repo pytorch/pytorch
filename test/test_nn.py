@@ -4202,6 +4202,7 @@ class TestNN(NNTestCase):
             test(input_shape, hidden_shape, mode)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
     def test_rnn_check_device(self):
         input_size = 3
         hidden_size = 5

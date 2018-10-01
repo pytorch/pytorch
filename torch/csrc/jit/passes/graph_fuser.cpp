@@ -208,16 +208,12 @@ struct GraphFuser {
           /*const=*/attr::alpha) ||
         node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
           /*const=*/{attr::other, attr::alpha}) ||
-        node->matches("aten::add(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
           /*const=*/attr::alpha) ||
         node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
           /*const=*/{attr::other, attr::alpha}) ||
-        node->matches("aten::sub(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::mul(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::div(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor", /*const=*/{attr::min, attr::max})) {
       auto inputs = tensorInputs(node);
       return haveSupportedType(inputs);
@@ -225,22 +221,16 @@ struct GraphFuser {
     else if (
         node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::lt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::lt(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::le(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::gt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::gt(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::ge(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
         node->matches("aten::eq(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::eq(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other) ||
         node->matches("aten::ne(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::ne(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::ne(Scalar other, Tensor self) -> Tensor", /*const=*/attr::other)) {
+        node->matches("aten::ne(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other)) {
       // comparison operators produce Byte type, and it's ok, check only inputs
       auto inputs = tensorInputs(node);
       return haveSupportedType(inputs);

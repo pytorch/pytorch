@@ -36,6 +36,7 @@ struct TORCH_API GraphExecutor {
   std::shared_ptr<Graph> graph() const;
   std::shared_ptr<Graph> graphFor(const Stack& inputs) const;
   GraphExecutorState getDebugState();
+  void debugDisableAutodiffSubgraphInlining();
 private:
   std::shared_ptr<GraphExecutorImpl> pImpl;
 };
