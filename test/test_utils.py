@@ -18,7 +18,7 @@ from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
-from torch.utils.hub import load_model
+import torch.utils.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
 from common import IS_WINDOWS, IS_PPC, skipIfRocm
@@ -707,15 +707,13 @@ class TestHub(TestCase):
         cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
 
     def test_load_from_github(self):
-        import pdb
-        pdb.set_trace()
-        hub_model = load_model(
+        hub_model = hub.load(
             'ailzhang/torchvision_hub',
             'wrapper1')
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
     def test_load_with_args(self):
-        hub_model = load_model(
+        hub_model = hub.load(
             'ailzhang/torchvision_hub',
             'wrapper1',
             kwargs={'pretrained':True})
@@ -723,7 +721,7 @@ class TestHub(TestCase):
 
     def test_load_multi_callables(self):
         callables = ['wrapper1', 'wrapper2']
-        hub_models = load_model(
+        hub_models = hub.load(
             'ailzhang/torchvision_hub',
             callables)
         for model in hub_models:
@@ -731,7 +729,7 @@ class TestHub(TestCase):
 
     def test_hub_cache(self):
         hub_dir = os.path.expanduser('~/.torch_hub')
-        hub_model = load_model(
+        hub_model = hub.load(
             'ailzhang/torchvision_hub',
             'wrapper1',
             hub_dir=hub_dir,

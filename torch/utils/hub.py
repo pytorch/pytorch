@@ -114,7 +114,7 @@ def _load_single_model(func_name, entrypoints, hub_dir, args, kwargs):
     return model
 
 
-def load_model(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
+def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
     r"""
     Load a model from a github repo, with pretrained weights.
 
