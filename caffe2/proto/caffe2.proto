@@ -15,23 +15,46 @@ package caffe2;
 message TensorProto {
   // The dimensions in the tensor.
   repeated int64 dims = 1;
+  // The strides of the tensor.
+  repeated int64 strides = 12;
+
+  // Data type
   enum DataType {
     UNDEFINED = 0;
-    FLOAT = 1;  // float
-    INT32 = 2;  // int
-    BYTE = 3;  // BYTE, when deserialized, is going to be restored as uint8.
-    STRING = 4;  // string
-    // Less-commonly used data types.
-    BOOL = 5;  // bool
-    UINT8 = 6;  // uint8_t
-    INT8 = 7;  // int8_t
-    UINT16 = 8;  // uint16_t
-    INT16 = 9;  // int16_t
-    INT64 = 10;  // int64_t
+
+    // Basic types
+    FLOAT = 1;     // float
+    INT32 = 2;     // int
+    BYTE = 3;      // byte, when deserialized, is going to be restored as uint8
+    STRING = 4;    // string
+
+    // Less-commonly used data types
+    BOOL = 5;      // bool
+    UINT8 = 6;     // uint8_t
+    INT8 = 7;      // int8_t
+    UINT16 = 8;    // uint16_t
+    INT16 = 9;     // int16_t
+    INT64 = 10;    // int64_t
     FLOAT16 = 12;  // at::Half
-    DOUBLE = 13;  // double
+    DOUBLE = 13;   // double
+
+    // Special data type, type information is stored in the special type field
+    SPECIAL = 51;
+    // Use TensorProto to specify the shape and type
+    NO_CONTENT = 52;
   }
   optional DataType data_type = 2 [default = FLOAT];
+  // if data_type is SPECIAL, use this field to express the type info
+  optional SpecialType special_type = 13;
+
+  // Data storage
+  enum StorageType {
+    TYPED = 1;
+    RAW = 2;
+    EXTERNAL = 3;
+    ALIAS = 4;
+  }
+  optional StorageType storage_type = 14 [default = TYPED];
   // For float
   repeated float float_data = 3 [packed = true];
   // For int32, uint8, int8, uint16, int16, bool, and float16
@@ -46,6 +69,13 @@ message TensorProto {
   repeated double double_data = 9 [packed = true];
   // For int64
   repeated int64 int64_data = 10 [packed = true];
+  // For raw data
+  optional bytes raw_data = 15;
+  // External data by file name
+  optional string external_data = 16;
+  // For argument, to share the content
+  optional string alias = 17;
+
   // Optionally, a name for the tensor.
   optional string name = 7;
 
@@ -53,13 +83,23 @@ message TensorProto {
   // it was serialized from. This is useful in cases like snapshotting a whole
   // workspace in a multi-GPU environment.
   optional DeviceOption device_detail = 8;
+
   // When loading from chunks this is going to indicate where to put data in the
   // full array. When not used full data have to be present
   message Segment {
     required int64 begin = 1;
     required int64 end = 2;
+    optional int64 chunk_num = 51;
+    optional int64 chunk_id = 52;
   }
   optional Segment segment = 11;
+  optional string debug_info = 18;
+
+  // For PyTorch serialized tensor.
+  optional bool require_gradient = 19;
+  optional bool is_buffer = 20;
+
+  repeated Argument annotations = 21;
 }
 
 message QTensorProto {
@@ -86,7 +126,11 @@ message TensorShape {
   repeated int32 unknown_dims = 3;
   optional bool unknown_shape = 4 [default = false];
   optional string name = 5;
+}
 
+// This is prepared for non-tensor types.
+message SpecialType {
+  optional string name = 1;
 }
 
 message TensorShapes {
@@ -97,13 +141,17 @@ message TensorShapes {
 // values, or repeated float, int and string arrays.
 message Argument {
   optional string name = 1;
+
   optional float f = 2;
   optional int64 i = 3;
   optional bytes s = 4;
+  optional TensorProto t = 10;
   optional NetDef n = 8;
+
   repeated float floats = 5;
   repeated int64 ints = 6;
   repeated bytes strings = 7;
+  repeated TensorProto tensors = 11;
   repeated NetDef nets = 9;
 }
 
@@ -152,7 +200,11 @@ message DeviceOption {
 // Operator Definition.
 message OperatorDef {
   repeated string input = 1; // the name of the input blobs
+  // the input name in the schema, for named inputs
+  repeated string mapped_inputs = 11;
   repeated string output = 2; // the name of output top blobs
+  // the outputname in the schema, for named outputs
+  repeated string mapped_outputs = 12;
   optional string name = 3; // the operator name. This is optional.
   // the operator type. This is needed to create the object from the operator
   // registry.
@@ -186,6 +238,16 @@ message OperatorDef {
   // This is an optional string with no assumed characteristics as
   // operators can be constructed in any language.
   optional string debug_info = 10;
+
+  // additional annotations
+  repeated Argument annotations = 13;
+
+  // for jit ir exporting
+  optional string aten_function = 14;
+
+  // for operator versioning
+  optional string domain = 15;
+  optional string op_version = 16;
 }
 
 // Network definition.
