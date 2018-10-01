@@ -13,7 +13,8 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case prim::Constant: {
         // remove primitive constants, replacing with tensor equivalent
         // ONNX does not support non-tensor constants
-        if(it->output()->type()->isSubtypeOf(NumberType::get()) || it->output()->type()->isSubtypeOf(BoolType::get())) {
+        if (it->output()->type()->isSubtypeOf(NumberType::get()) ||
+            it->output()->type()->isSubtypeOf(BoolType::get())) {
           auto s = *constant_as<at::Scalar>(it->output());
           WithInsertPoint guard(*it);
           Value* r = block->owningGraph()->insertConstant(scalar_to_tensor(s));
