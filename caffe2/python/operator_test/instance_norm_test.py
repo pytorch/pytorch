@@ -9,6 +9,7 @@ import hypothesis.strategies as st
 from caffe2.python import core, model_helper, brew
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python.test_util import IN_CIRCLECI
 
 import unittest
 import os
@@ -52,7 +53,7 @@ class TestInstanceNorm(serial.SerializedTestCase):
         for name, blob in zip(names, input_blobs):
             self.ws.create_blob(name).feed(blob, device_option=device_option)
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
+    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     @given(gc=hu.gcs['gc'],
            dc=hu.gcs['dc'],
            N=st.integers(2, 3),

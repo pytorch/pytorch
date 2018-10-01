@@ -8,6 +8,7 @@ from caffe2.python.model_helper import ModelHelper
 from caffe2.python.rnn.rnn_cell_test_util import sigmoid, tanh, _prepare_rnn
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.python.test_util import IN_CIRCLECI
 from caffe2.proto import caffe2_pb2
 
 from functools import partial
@@ -250,7 +251,7 @@ def _prepare_gru_unit_op(gc, n, d, outputs_with_grads,
 class GRUCellTest(serial.SerializedTestCase):
 
     # Test just for GRUUnitOp
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
+    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     @serial.given(
         seed=st.integers(0, 2**32 - 1),
         input_tensor=gru_unit_op_input(),
