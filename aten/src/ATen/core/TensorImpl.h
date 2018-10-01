@@ -10,6 +10,7 @@
 #include "ATen/core/LegacyTypeDispatch.h"
 #include "ATen/core/Backend.h"
 #include "ATen/core/context_base.h"
+#include "ATen/core/WrapDimMinimal.h"
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
@@ -87,16 +88,6 @@ inline int64_t size_between_dim_(int k, int l, IntList dims) {
     }
   }
   return r;
-}
-
-// Wrap around axis_index if it is negative, s.t., -1 is the last dim
-inline int canonical_axis_index_(int axis_index, int ndims) {
-  CAFFE_ENFORCE_GE(axis_index, -ndims);
-  CAFFE_ENFORCE_LT(axis_index, ndims);
-  if (axis_index < 0) {
-    return axis_index + ndims;
-  }
-  return axis_index;
 }
 
 /**

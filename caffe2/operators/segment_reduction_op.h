@@ -1616,6 +1616,7 @@ class AbstractLengthsGradientOp : public Operator<Context> {
 // Version of gradient that requires the main input and thus needs to receive
 // length, indices and other stuff
 template <
+    typename Tembedding,
     typename T,
     typename TLengths,
     class Context,
@@ -1689,8 +1690,7 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
     int64_t segmentBlockSize = segmentGradsInput.size_from_dim(1);
     T* dataGrads = dataGradsOutput->template mutable_data<T>();
 
-    const T* data = dataInput.template data<T>();
-
+    const Tembedding* data = dataInput.template data<Tembedding>();
     int64_t dataIndex = 0;
     for (int64_t rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
       ReducerGradient reducer(
@@ -1946,6 +1946,7 @@ segments, i.e. len(*LENGTHS*).
       AbstractLengthsGradientOp<T, SIndex, Context, ReducerGradient>;
   using WithMainInputBackwardOp = AbstractLengthsWithMainInputGradientOp<
       T,
+      T,
       SIndex,
       Context,
       ReducerGradient,
@@ -2048,6 +2049,7 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
       ReducerGradient,
       false /*GradientNeedIndices*/>;
   using WithMainInputBackwardOp = AbstractLengthsWithMainInputGradientOp<
+      T,
       T,
       SIndex,
       Context,

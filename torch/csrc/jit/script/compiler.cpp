@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/script/builtin_functions.h"
 
 #include "torch/csrc/jit/constants.h"
 
@@ -721,6 +722,8 @@ Value* emitBuiltinCall(
 
 
   const auto& variants = getAllOperatorsFor(name);
+  const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
+
   std::stringstream failure_messages;
   //first we try to match the schema without any conversion
   //if no schema matches then insert ImplicitTensorToNum
@@ -739,6 +742,19 @@ Value* emitBuiltinCall(
 
       if (matched_schema) {
         return emitBuiltinNode(*matched_schema, loc, graph, name);
+      }
+    }
+    for (Method* method : builtin_functions) {
+      if (auto result = try_emit_call_to(
+              graph,
+              loc,
+              *method,
+              inputs,
+              attributes,
+              failure_messages,
+              nullptr,
+              convert_tensors_to_nums)) {
+        return packOutputs(graph, *result);
       }
     }
   }
