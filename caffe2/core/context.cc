@@ -5,6 +5,10 @@
 #include <process.h>
 #endif
 
+namespace at {
+
+REGISTER_CONTEXT(DeviceType::CPU, caffe2::CPUContext);
+} // namespace at
 namespace caffe2 {
 
 uint32_t RandomNumberSeed() {

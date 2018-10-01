@@ -20,6 +20,8 @@ class IDEEPContext final : public BaseContext {
                                      : RandomNumberSeed()) {
     CAFFE_ENFORCE_EQ(option.device_type(), PROTO_IDEEP);
   }
+  explicit IDEEPContext(const at::Device& device)
+      : IDEEPContext(DeviceToOption(device)) {}
 
   ~IDEEPContext() noexcept override {}
 
@@ -176,15 +178,6 @@ class IDEEPStaticContext : public BaseStaticContext {
  public:
   inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
     return GetCPUAllocator()->New(nbytes);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<IDEEPContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<IDEEPContext>(option);
   }
 
   DeviceType GetDeviceType() override {
