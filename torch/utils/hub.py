@@ -16,30 +16,31 @@ import torch.utils.model_zoo as model_zoo
 KEY_ENTRYPOINTS = 'entrypoints'
 KEY_DEPENDENCIES = 'dependencies'
 KEY_HELP = 'help_msg'
-KEY_MODULE = 'module'
-KEY_CHECKPOINT = 'checkpoint'
 MASTER_BRANCH = 'master'
 ENV_TORCH_HUB_DIR = 'TORCH_HUB_DIR'
+# TODO: Discussion: default hub_dir
 # DEFAULT_TORCH_HUB_DIR = site.getusersitepackages()
 DEFAULT_TORCH_HUB_DIR = '~/.torch_hub'
-# FUNC_GET_HUB_INFO = 'get_hub_info'
 HUB_INFO_KEYS = [KEY_ENTRYPOINTS, KEY_DEPENDENCIES, KEY_HELP]
-ENTRY_KEYS = [KEY_MODULE, KEY_CHECKPOINT]
 READ_DATA_CHUNK = 8192
 
 
-def module_exists(name):
-    if sys.version_info >= (3, 5):
+def _module_exists(name):
+    if sys.version_info >= (3, 4):
         import importlib.util
         return importlib.util.find_spec(name) is not None
-    elif sys.version_info >= (3, 0):
-        # TODO: SourceFileLoader is new in 3.3.
-        raise RuntimeError('Invalid python version!')
+    elif sys.version_info >= (3, 5):
+        # Special case for python3.3
+        import importlib.find_loader
+        return importlib.find_loader(name) is not None
     else:
-        # TODO: handle dotted module names?
+        # NB: imp doesn't handle hierarchical module names (names contains dots).
+        #     We need to find each parent pkg manually
         try:
             import imp
-            imp.find_module(name)
+            modules = name.split('.')
+            for m in modules:
+                imp.find_module(m)
         except Exception:
             return False
         return True
@@ -87,7 +88,7 @@ def _load_hub_info(module_name):
     return getattr(m, KEY_ENTRYPOINTS), getattr(m, KEY_DEPENDENCIES), getattr(m, KEY_HELP)
 
 
-def check_type(value, T):
+def _check_type(value, T):
     if not isinstance(value, T):
         raise ValueError('Invalid type: {} should be an instance of {}'.format(value, T))
     return value
@@ -104,10 +105,10 @@ def _load_single_model(func_name, entrypoints, hub_dir, args, kwargs):
     if len(e) < 2:
         raise ValueError('Invalid entrypoint: func_name and module_name are required fields')
     else:
-        module_name = check_type(e[1], str)
+        module_name = _check_type(e[1], str)
 
     if len(e) > 2:
-        checkpoint = check_type(e[2], str)
+        checkpoint = _check_type(e[2], str)
     if len(e) > 3:
         raise ValueError('Too many fields to unpack in entrypoint: only accept func_name, module_name, checkpoint_url')
 
@@ -135,6 +136,8 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
             `~/.torch_hub` will be created and used as the fallback.
         cache: Optional, whether to delete the intermediate folder after loading the model.
             Default is `False`.
+        args: Optional, the corresponding args for callables in `model`.
+        kwargs: Optional, the corresponding kwargs for callables in `model`.
 
     Returns:
         a single model or a list of models with corresponding pretrained weights.
@@ -179,12 +182,11 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
     except Exception:
         raise RuntimeError('Failed to extract/rename the repo')
 
-    # Parse the hub.py in repo to get hub information
-    # hub_info = _load_and_execute_func(repo_name + '.hub', FUNC_GET_HUB_INFO)
-    entrypoints, dependencies, help_msg = _load_hub_info('hub')
+    # Parse the hub_info.py in repo to get hub information
+    entrypoints, dependencies, help_msg = _load_hub_info('hub_info')
 
     # Check dependent packages
-    missing_deps = [pkg for pkg in dependencies if not module_exists(pkg)]
+    missing_deps = [pkg for pkg in dependencies if not _module_exists(pkg)]
     if len(missing_deps):
         print('Package {} is required from repo author, but missing in your environment.'
               .format(', '.join(missing_deps)))

@@ -709,21 +709,17 @@ class TestHub(TestCase):
     def test_load_from_github(self):
         hub_model = hub.load(
             'ailzhang/vision:hub',
-            'wrapper1')
-        self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
-
-    def test_load_with_args(self):
-        hub_model = hub.load(
-            'ailzhang/vision:hub',
             'wrapper1',
             kwargs={'pretrained': True})
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
     def test_load_multi_callables(self):
         callables = ['wrapper1', 'wrapper2']
+        kwargs = [{'pretrained': True}, {'pretrained': True}]
         hub_models = hub.load(
             'ailzhang/vision:hub',
-            callables)
+            callables,
+            kwargs=kwargs)
         for model in hub_models:
             self.assertEqual(self.resnet18_pretrained, model.state_dict())
 
