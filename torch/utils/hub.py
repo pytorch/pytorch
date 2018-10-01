@@ -16,7 +16,7 @@ import torch
 import torch.utils.model_zoo as model_zoo
 
 KEY_ENTRYPOINTS = 'entrypoints'
-KEY_REQUIRED = 'required'
+KEY_DEPENDENCIES = 'dependencies'
 KEY_HELP = 'help'
 KEY_MODULE = 'module'
 KEY_CHECKPOINT = 'checkpoint'
@@ -24,7 +24,7 @@ MASTER_BRANCH = 'master'
 ENV_TORCH_HUB_DIR = 'TORCH_HUB_DIR'
 DEFAULT_TORCH_HUB_DIR = '~/.torch_hub'
 FUNC_GET_HUB_INFO = 'get_hub_info'
-HUB_INFO_KEYS = [KEY_ENTRYPOINTS, KEY_REQUIRED, KEY_HELP]
+HUB_INFO_KEYS = [KEY_ENTRYPOINTS, KEY_DEPENDENCIES, KEY_HELP]
 ENTRY_KEYS = [KEY_MODULE, KEY_CHECKPOINT]
 
 
@@ -146,7 +146,7 @@ def load_model(github, model, hub_dir=None, cleanup=False):
                            .format(' '.join(str(k) for k in missing_keys)))
 
     # Check dependent packages
-    missing_deps = [pkg for pkg in hub_info[KEY_REQUIRED] if importlib.util.find_spec(pkg) is None]
+    missing_deps = [pkg for pkg in hub_info[KEY_DEPENDENCIES] if importlib.util.find_spec(pkg) is None]
     if len(missing_deps):
         print('Package {} is required from repo author, but missing in your environment.'
               .format(', '.join(missing_deps)))
