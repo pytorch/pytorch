@@ -316,6 +316,10 @@ def _reduce_op_symbolic(onnx_op_name):
         else:
             # dim-reduce path
             dim, keepdim = _get_const(dim, 'i', 'dim'), _get_const(keepdim, 'i', 'keepdim')
+            dims = self.type().sizes()
+            if dim < 0:
+                dim = dim + len(dims)
+
             return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
     return symbolic
 
@@ -1253,11 +1257,6 @@ def _pack_padded_sequence(g, input, lengths, batch_first):
         input = g.op('Transpose', input, perm_i=[1, 0, 2])
     if not lengths.type().isSubtypeOf(torch._C.DynamicType.get()):
         raise RuntimeError("Lengths must be a Tensor for ONNX export")
-    # We know it's a TensorType so this check is now safe.
-    # It's really only necessary beacuse those operators expand to something that
-    # only works with int32 types in Caffe2...
-    if lengths.type().scalarType() != 'Int':
-        lengths = _cast_Int(g, lengths, False)
     return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
