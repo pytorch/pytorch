@@ -9,7 +9,7 @@
 namespace caffe2 {
 
 template <typename T, class Context>
-class CAFFE2_API LarsOp final : public Operator<Context> {
+class LarsOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LarsOp(const OperatorDef& operator_def, Workspace* ws)
@@ -29,7 +29,7 @@ class CAFFE2_API LarsOp final : public Operator<Context> {
     auto& trust = Input(3);
     auto& lr_max = Input(4);
     auto* lr_rescaled = Output(0);
-    lr_rescaled->Resize(vector<TIndex>{1});
+    lr_rescaled->Resize(vector<int64_t>{1});
 
     X_norm_tensor_.Resize(1);
     T* X_norm_ = X_norm_tensor_.template mutable_data<T>();
@@ -60,7 +60,7 @@ class CAFFE2_API LarsOp final : public Operator<Context> {
  private:
   // Compute the l2 norm of X_data and dX_data
   void ComputeNorms(
-      TIndex N,
+      int64_t N,
       const T* X_data,
       const T* dX_data,
       T* X_norm,

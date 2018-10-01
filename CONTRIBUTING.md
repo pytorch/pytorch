@@ -23,7 +23,7 @@ If you are not familiar with creating a Pull Request, here are some guides:
 
 To develop PyTorch on your machine, here are some tips:
 
-1. Uninstall all existing pytorch installs
+1. Uninstall all existing PyTorch installs:
 ```
 conda uninstall pytorch
 pip uninstall torch
@@ -104,6 +104,18 @@ PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/late
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
 
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+information on the documentation syntax. To build the documentation locally,
+`cd` into `docs/cpp` and then `make html`.
+
+We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp`.
 
 ## Managing multiple build trees
 
@@ -250,9 +262,9 @@ than Linux, which are worth keeping in mind when fixing these problems.
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
    `__declspec(dllimport)`.  We have codified this pattern into a set of macros
-   which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
-   shared library needs a unique macro name, because symbol visibility is on a per
-   shared library basis.)
+   which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
+   (Every separate shared library needs a unique macro name, because symbol visibility
+   is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
    The upshot is if you see an "unresolved external" error in your Windows build, this
    is probably because you forgot to mark a function with `*_API`.  However, there is

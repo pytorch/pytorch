@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from torch._six import inf
 from operator import mul
 from functools import reduce
+from collections import Iterable
 import math
 
 __all__ = [
@@ -16,8 +17,11 @@ __all__ = [
     'isfinite',
     'isinf',
     'isnan',
+    'norm',
+    'meshgrid',
     'split',
     'stft',
+    'tensordot',
     'unique',
 ]
 
@@ -49,7 +53,7 @@ def split(tensor, split_size_or_sections, dim=0):
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
     be split into equally sized chunks (if possible). Last chunk will be smaller if
-    the tensor size along the given dimension :attr:`dim= is not divisible by
+    the tensor size along the given dimension :attr:`dim` is not divisible by
     :attr:`split_size`.
 
     If :attr:`split_size_or_sections` is a list, then :attr:`tensor` will be split
@@ -277,6 +281,43 @@ def isinf(tensor):
     return tensor.abs() == inf
 
 
+def meshgrid(*tensors, **kwargs):
+    r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
+vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
+expanding the :math:`i`th input over dimensions defined by other inputs.
+
+
+    Args:
+        tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
+        treated as tensors of size :math:`(1,)` automatically
+
+    Returns:
+        seq (sequence of Tensors): If the input has :math:`k` tensors of size
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+    Example::
+
+        >>> x = torch.tensor([1, 2, 3])
+        >>> y = torch.tensor([4, 5, 6])
+        >>> grid_x, grid_y = torch.meshgrid(x, y)
+        >>> grid_x
+        tensor([[1, 1, 1],
+                [2, 2, 2],
+                [3, 3, 3]])
+        >>> grid_y
+        tensor([[4, 5, 6],
+                [4, 5, 6],
+                [4, 5, 6]])
+    """
+    if kwargs:
+        raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
+    if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
+        # the old interface of passing the operands as one list argument
+        tensors = tensors[0]
+    return torch._C._VariableFunctions.meshgrid(tensors)
+
+
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
     r"""Short-time Fourier transform (STFT).
@@ -286,8 +327,8 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 
     .. math::
         X[m, \omega] = \sum_{k = 0}^{\text{win\_length}}%
-                            window[k]\ input[m \times hop_length + k]\ %
-                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}},
+                            \text{window}[k]\ \text{input}[m \times \text{hop\_length} + k]\ %
+                            \exp\left(- j \frac{2 \pi \cdot \omega k}{\text{win\_length}}\right),
 
     where :math:`m` is the index of the sliding window, and :math:`\omega` is
     the frequency that :math:`0 \leq \omega < \text{n\_fft}`. When
@@ -344,7 +385,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         win_length (int): the size of window frame and STFT filter.
             Default: ``None``  (treated as equal to :attr:`n_fft`)
         window (Tensor, optional): the optional window function.
-            Default: ``None`` (treated as window of all :math:`1`s)
+            Default: ``None`` (treated as window of all :math:`1` s)
         center (bool, optional): whether to pad :attr:`input` on both sides so
             that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
             Default: ``True``
@@ -389,7 +430,7 @@ def isnan(tensor):
     return tensor != tensor
 
 
-def unique(input, sorted=False, return_inverse=False):
+def unique(input, sorted=False, return_inverse=False, dim=None):
     r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
 
     Arguments:
@@ -398,6 +439,8 @@ def unique(input, sorted=False, return_inverse=False):
             before returning as output.
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
+        dim (int): the dimension to apply unique. If ``None``, the unique of the
+            flattened input is returned. default: ``None``
 
     Returns:
         (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
@@ -431,11 +474,19 @@ def unique(input, sorted=False, return_inverse=False):
                 [ 1,  2]])
 
     """
-    output, inverse_indices = torch._unique(
-        input,
-        sorted=sorted,
-        return_inverse=return_inverse,
-    )
+    if dim is not None:
+        output, inverse_indices = torch._unique_dim(
+            input,
+            dim,
+            sorted=sorted,
+            return_inverse=return_inverse
+        )
+    else:
+        output, inverse_indices = torch._unique(
+            input,
+            sorted=sorted,
+            return_inverse=return_inverse,
+        )
     if return_inverse:
         return output, inverse_indices
     else:
@@ -443,7 +494,7 @@ def unique(input, sorted=False, return_inverse=False):
 
 
 def argmax(input, dim=None, keepdim=False):
-    """Returns the indices of the maximum values of a tensor across a dimension.
+    r"""Returns the indices of the maximum values of a tensor across a dimension.
 
     This is the second value returned by :meth:`torch.max`. See its
     documentation for the exact semantics of this method.
@@ -474,7 +525,7 @@ def argmax(input, dim=None, keepdim=False):
 
 
 def argmin(input, dim=None, keepdim=False):
-    """Returns the indices of the minimum values of a tensor across a dimension.
+    r"""Returns the indices of the minimum values of a tensor across a dimension.
 
     This is the second value returned by :meth:`torch.min`. See its
     documentation for the exact semantics of this method.
@@ -504,8 +555,63 @@ def argmin(input, dim=None, keepdim=False):
     return torch._argmin(input, dim, keepdim)
 
 
+def tensordot(a, b, dims=2):
+    r"""Returns a contraction of a and b over multiple dimensions.
+
+    :attr:`tensordot` implements a generalizes the matrix product.
+
+    Args:
+      a (Tensor): Left tensor to contract
+      b (Tensor): Right tensor to contract
+      dims (int or tuple of two lists of integers): number of dimensions to
+         contract or explicit lists of dimensions for :attr:`a` and
+         :attr:`b` respectively
+
+    When called with an integer argument :attr:`dims` = :math:`d`, and the number of
+    dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`, respectively,
+    it computes
+
+    .. math::
+        r_{i_0,...,i_{m-d}, i_d,...,i_n}
+          = \sum_{k_0,...,k_{d-1}} a_{i_0,...,i_{m-d},k_0,...,k_{d-1}} \times b_{k_0,...,k_{d-1}, i_d,...,i_n}.
+
+    When called with :attr:`dims` of the list form, the given dimensions will be contracted
+    in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
+    in these dimensions must match, but :attr:`tensordot` will deal with broadcasted
+    dimensions.
+
+    Examples::
+
+        >>> a = torch.arange(60.).reshape(3, 4, 5)
+        >>> b = torch.arange(24.).reshape(4, 3, 2)
+        >>> torch.tensordot(a, b, dims=([1, 0], [0, 1]))
+        tensor([[4400., 4730.],
+                [4532., 4874.],
+                [4664., 5018.],
+                [4796., 5162.],
+                [4928., 5306.]])
+
+        >>> a = torch.randn(3, 4, 5, device='cuda')
+        >>> b = torch.randn(4, 5, 6, device='cuda')
+        >>> c = torch.tensordot(a, b, dims=2).cpu()
+        tensor([[ 8.3504, -2.5436,  6.2922,  2.7556, -1.0732,  3.2741],
+                [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
+                [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
+
+    """
+    if isinstance(dims, (list, tuple)) or \
+       (isinstance(dims, torch.Tensor) and dims.numel() > 1):
+        dims_a, dims_b = dims
+    else:
+        if isinstance(dims, torch.Tensor):
+            dims = dims.item()
+        dims_a = list(range(-dims, 0))
+        dims_b = list(range(dims))
+    return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
+
+
 def argsort(input, dim=None, descending=False):
-    """Returns the indices that sort a tensor along a given dimension in ascending
+    r"""Returns the indices that sort a tensor along a given dimension in ascending
     order by value.
 
     This is the second value returned by :meth:`torch.sort`.  See its documentation
@@ -535,3 +641,84 @@ def argsort(input, dim=None, descending=False):
     if dim is None:
         return torch.sort(input, -1, descending)[1]
     return torch.sort(input, dim, descending)[1]
+
+
+def norm(input, p="fro", dim=None, keepdim=False, out=None):
+    r"""Returns the matrix norm or vector norm of a given tensor.
+
+    Args:
+        input (Tensor): the input tensor
+        p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
+            The following norms can be calculated:
+
+            =====  ============================  ==========================
+            ord    matrix norm                   vector norm
+            =====  ============================  ==========================
+            None   Frobenius norm                2-norm
+            'fro'  Frobenius norm                --
+            'nuc'  nuclear norm                  --
+            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
+            =====  ============================  ==========================
+
+        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
+            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
+            will be calculated. If the value is None, matrix norm will be calculated
+            when the input tensor only has two dimensions, vector norm will be
+            calculated when the input tensor only has one dimension. If the input
+            tensor has more than two dimensions, the vector norm will be applied to
+            last dimension.
+        keepdim (bool, optional): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if :attr:`dim` = ``None`` and
+            :attr:`out` = ``None``. Default: ``False``
+        out (Tensor, optional): the output tensor. Ignored if
+            :attr:`dim` = ``None`` and :attr:`out` = ``None``.
+
+    Example::
+
+        >>> import torch
+        >>> a = torch.arange(9, dtype= torch.float) - 4
+        >>> b = a.reshape((3, 3))
+        >>> torch.norm(a)
+        tensor(7.7460)
+        >>> torch.norm(b)
+        tensor(7.7460)
+        >>> torch.norm(a, float('inf'))
+        tensor(4.)
+        >>> torch.norm(b, float('inf'))
+        tensor([4., 3., 4.])
+        >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        >>> torch.norm(c, dim=0)
+        tensor([1.4142, 2.2361, 5.0000])
+        >>> torch.norm(c, dim=1)
+        tensor([3.7417, 4.2426])
+        >>> torch.norm(c, p=1, dim=1)
+        tensor([6., 6.])
+        >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
+        >>> torch.norm(d, dim=(1,2))
+        tensor([ 3.7417, 11.2250])
+        >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
+        (tensor(3.7417), tensor(11.2250))
+    """
+    ndim = input.dim()
+
+    # catch default case
+    if dim is None and out is None:
+        if p == "fro":
+            return torch._C._VariableFunctions.frobenius_norm(input)
+        elif p != "nuc":
+            return torch._C._VariableFunctions.norm(input, p)
+
+    if p == "fro":
+        if dim is None:
+            dim = tuple(range(ndim))
+        if out is None:
+            return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim)
+        return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim, out=out)
+    elif p == "nuc":
+        if out is None:
+            torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
+        return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+    else:
+        if out is None:
+            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
+    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)

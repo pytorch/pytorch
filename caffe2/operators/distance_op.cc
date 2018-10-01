@@ -237,7 +237,7 @@ vector<TensorShape> TensorInferenceForDotProduct(
     const vector<TensorShape>& in) {
   CAFFE_ENFORCE_GT(in.size(), 0);
 
-  vector<TIndex> dims(1);
+  vector<int64_t> dims(1);
   dims[0] = in[0].dims().size() > 0 ? in[0].dims(0) : 1;
   return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
 }
@@ -437,22 +437,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = 5*np.ones((1, 4))
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.ones((1, 4))
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```
@@ -645,22 +645,22 @@ op = core.CreateOperator(
     ["Z"]
 )
 
-# Create X
+// Create X
 X = np.random.randn(3, 3)
 print("X:\n",X)
 
-# Create Y
+// Create Y
 Y = np.random.randn(3, 3)
 print("Y:\n",Y)
 
-# Feed X & Y into workspace
+// Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
 workspace.FeedBlob("Y", Y.astype(np.float32))
 
-# Run op
+// Run op
 workspace.RunOperatorOnce(op)
 
-# Collect Output
+// Collect Output
 print("Z:\n", workspace.FetchBlob("Z"))
 
 ```

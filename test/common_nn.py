@@ -7,7 +7,7 @@ from itertools import product
 import torch
 import torch.cuda
 from torch.nn.functional import _Reduction
-from common import TestCase, to_gpu, freeze_rng_state, is_iterable
+from common import TestCase, to_gpu, freeze_rng_state, is_iterable, TEST_WITH_ROCM
 from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn
@@ -40,7 +40,8 @@ module_tests = [
         module_name='Linear',
         constructor_args=(10, 8),
         input_size=(4, 10),
-        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8)
+        reference_fn=lambda i, p: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Linear',
@@ -102,17 +103,20 @@ module_tests = [
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmax2d',
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, False)),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LogSoftmax',
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_(),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='LogSoftmax',
@@ -120,12 +124,14 @@ module_tests = [
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
         desc='multiparam',
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='ELU',
         constructor_args=(2.,),
         input_size=(3, 2, 5),
-        reference_fn=lambda x, _: torch.where(x >= 0, x, 2 * (x.exp() - 1))
+        reference_fn=lambda x, _: torch.where(x >= 0, x, 2 * (x.exp() - 1)),
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     # TODO: reference function
     dict(
@@ -198,6 +204,7 @@ module_tests = [
         input_size=(2, 3, 4),
         desc='1d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -211,6 +218,7 @@ module_tests = [
         input_size=(2, 3, 4, 5),
         desc='2d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='PReLU',
@@ -224,26 +232,31 @@ module_tests = [
         input_size=(2, 3, 4, 5, 6),
         desc='3d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softsign',
         input_size=(3, 2, 5),
         reference_fn=lambda i, _: i.div(1 + torch.abs(i)),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmin',
         constructor_args=(1,),
         input_size=(10, 20),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Softmin',
         constructor_args=(1,),
         input_size=(2, 3, 5, 10),
         desc='multidim',
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='Tanhshrink',
-        input_size=(2, 3, 4, 5)
+        input_size=(2, 3, 4, 5),
+        test_cuda=(not TEST_WITH_ROCM)
     ),
 ]
 
@@ -560,6 +573,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             kldivloss_reference(i, t, get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MSELoss',
@@ -576,6 +590,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
         check_gradgrad=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='BCELoss',
@@ -586,6 +601,7 @@ criterion_tests = [
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
         check_gradgrad=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CrossEntropyLoss',
@@ -606,6 +622,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             hingeembeddingloss_reference(i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -616,6 +633,7 @@ criterion_tests = [
             hingeembeddingloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MultiLabelMarginLoss',
@@ -642,6 +660,7 @@ criterion_tests = [
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         reference_fn=lambda i, t, m: -(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()).sum() / i.numel(),
         check_gradgrad=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MultiMarginLoss',
@@ -720,6 +739,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             cosineembeddingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='CosineEmbeddingLoss',
@@ -730,6 +750,7 @@ criterion_tests = [
             cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -738,6 +759,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             marginrankingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -748,6 +770,7 @@ criterion_tests = [
             marginrankingloss_reference(i[0], i[1], t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
         check_sum_reduction=True,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
 ]
 

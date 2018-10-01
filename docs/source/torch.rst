@@ -169,6 +169,7 @@ Pointwise Ops
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
+.. autofunction:: digamma
 .. autofunction:: erf
 .. autofunction:: erfc
 .. autofunction:: erfinv
@@ -221,6 +222,8 @@ Reduction Ops
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: allclose
+.. autofunction:: argsort
 .. autofunction:: eq
 .. autofunction:: equal
 .. autofunction:: ge
@@ -254,6 +257,7 @@ Spectral Ops
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: bincount
+.. autofunction:: broadcast_tensors
 .. autofunction:: cross
 .. autofunction:: diag
 .. autofunction:: diagflat
@@ -264,6 +268,7 @@ Other Operations
 .. autofunction:: histc
 .. autofunction:: meshgrid
 .. autofunction:: renorm
+.. autofunction:: tensordot
 .. autofunction:: trace
 .. autofunction:: tril
 .. autofunction:: triu
@@ -293,6 +298,7 @@ BLAS and LAPACK Operations
 .. autofunction:: logdet
 .. autofunction:: slogdet
 .. autofunction:: matmul
+.. autofunction:: matrix_power
 .. autofunction:: matrix_rank
 .. autofunction:: mm
 .. autofunction:: mv

@@ -18,8 +18,10 @@ class IDEEPContext final : public BaseContext {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), IDEEP);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_IDEEP);
   }
+  explicit IDEEPContext(const at::Device& device)
+      : IDEEPContext(DeviceToOption(device)) {}
 
   ~IDEEPContext() noexcept override {}
 
@@ -119,7 +121,7 @@ class IDEEPContext final : public BaseContext {
     return true;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return IDEEP;
   }
 
@@ -178,17 +180,13 @@ class IDEEPStaticContext : public BaseStaticContext {
     return GetCPUAllocator()->New(nbytes);
   }
 
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<IDEEPContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<IDEEPContext>(option);
-  }
-
   DeviceType GetDeviceType() override {
     return IDEEP;
+  }
+
+  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
+      override {
+    device->set_device_type(TypeToProto(GetDeviceType()));
   }
 };
 

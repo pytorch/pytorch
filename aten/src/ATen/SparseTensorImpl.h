@@ -1,11 +1,11 @@
 #pragma once
 
 #include "ATen/Tensor.h"
-#include "ATen/TensorImpl.h"
+#include "ATen/core/TensorImpl.h"
 #include "ATen/core/Error.h"
 
 namespace at {
-struct AT_API SparseTensorImpl : public TensorImpl {
+struct CAFFE2_API SparseTensorImpl : public TensorImpl {
   // Stored in COO format, indices + values.
 
   // INVARIANTS:
@@ -36,7 +36,7 @@ struct AT_API SparseTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseTensorImpl(at::TensorTypeId, at::ScalarType);
+  explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&);
 
   int64_t nnz() const { return values_.size(0); }
   int64_t sparseDims() const { return sparseDims_; }
@@ -157,11 +157,11 @@ public:
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
 
-    auto empty_indices = indices().type().tensor({sparseDims, 0});
+    auto empty_indices = at::empty({sparseDims, 0}, indices().options());
     std::vector<int64_t> values_size = {0};
     auto dense_size = sizes().slice(sparseDims);
     values_size.insert(values_size.end(), dense_size.begin(), dense_size.end());
-    auto empty_values = values().type().tensor(values_size);
+    auto empty_values = at::empty(values_size, values().options());
     set_indices_and_values_unsafe(empty_indices, empty_values);
     refresh_numel();
   }

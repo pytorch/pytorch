@@ -98,3 +98,21 @@ void runNetwork(
     const int,
     const int,
     const int);
+int benchmark(
+    int argc,
+    char* argv[],
+    const string& FLAGS_backend,
+    const string& FLAGS_init_net,
+    const string& FLAGS_input,
+    const string& FLAGS_input_dims,
+    const string& FLAGS_input_file,
+    const string& FLAGS_input_type,
+    int FLAGS_iter,
+    const string& FLAGS_net,
+    const string& FLAGS_output,
+    const string& FLAGS_output_folder,
+    bool FLAGS_run_individual,
+    int FLAGS_sleep_before_run,
+    bool FLAGS_text_output,
+    int FLAGS_warmup,
+    bool FLAGS_wipe_cache);

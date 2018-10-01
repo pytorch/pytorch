@@ -7,15 +7,15 @@ namespace caffe2 {
 
 namespace {
 __global__ void BooleanMaskCopyKernel(
-    const TIndex numOfOutput,
-    const TIndex numBytes,
-    const TIndex* indices,
+    const int64_t numOfOutput,
+    const int64_t numBytes,
+    const int64_t* indices,
     const uint8_t* src,
     uint8_t* dest) {
-  for (TIndex i = blockIdx.x; i < numOfOutput; i += gridDim.x) {
+  for (int64_t i = blockIdx.x; i < numOfOutput; i += gridDim.x) {
     const auto srcBase = indices[i] * numBytes;
     const auto destBase = i * numBytes;
-    for (TIndex j = threadIdx.x; j < numBytes; j += blockDim.x) {
+    for (int64_t j = threadIdx.x; j < numBytes; j += blockDim.x) {
       dest[destBase + j] = src[srcBase + j];
     }
   }
@@ -40,7 +40,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     const auto* maskData = mask.data<bool>();
     const auto outerSize = mask.dims()[0];
     indices_.Resize(outerSize);
-    auto* indicesData = indices_.mutable_data<TIndex>();
+    auto* indicesData = indices_.mutable_data<int64_t>();
 
     size_t numBytes = 0;
     cub::CountingInputIterator<int> itr(0);
@@ -50,16 +50,16 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
         itr,
         maskData,
         indicesData,
-        static_cast<TIndex*>(nullptr),
+        static_cast<int64_t*>(nullptr),
         outerSize,
         context_.cuda_stream());
 
-    auto numTIndex =
-        static_cast<TIndex>((numBytes + sizeof(TIndex) - 1) / sizeof(TIndex));
-    // allocate one more TIndex at the end of scratch for storing numOfOutput
-    scratch_.Resize(numTIndex + 1);
-    auto* scratchData = scratch_.mutable_data<TIndex>();
-    auto* numOfOutputData = scratchData + numTIndex;
+    auto numint64_t =
+        static_cast<int64_t>((numBytes + sizeof(int64_t) - 1) / sizeof(int64_t));
+    // allocate one more int64_t at the end of scratch for storing numOfOutput
+    scratch_.Resize(numint64_t + 1);
+    auto* scratchData = scratch_.mutable_data<int64_t>();
+    auto* numOfOutputData = scratchData + numint64_t;
 
     cub::DeviceSelect::Flagged(
         static_cast<void*>(scratchData),
@@ -72,11 +72,11 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
         context_.cuda_stream());
 
     // Copy numOfOutput from gpu to cpu
-    TIndex numOfOutput;
+    int64_t numOfOutput;
     context_.CopyToCPU(1, numOfOutputData, &numOfOutput);
 
     indices_.Resize(numOfOutput);
-    std::vector<TIndex> dims = src.dims();
+    std::vector<int64_t> dims = src.dims();
     dims[0] = numOfOutput;
     dest->Resize(dims);
     auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
@@ -84,12 +84,12 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     if (OutputSize() == 2) {
       auto* indicesOut = Output(1);
       indicesOut->Resize(numOfOutput);
-      indicesOut->template mutable_data<TIndex>();
+      indicesOut->template mutable_data<int64_t>();
     }
 
     if (numOfOutput > 0) {
       BooleanMaskCopyKernel<<<
-          min(numOfOutput, static_cast<TIndex>(CAFFE_MAXIMUM_NUM_BLOCKS)),
+          min(numOfOutput, static_cast<int64_t>(CAFFE_MAXIMUM_NUM_BLOCKS)),
           CAFFE_CUDA_NUM_THREADS,
           0,
           context_.cuda_stream()>>>(
@@ -290,7 +290,7 @@ lowerDiagMaskKernel(int N, int M, int B, const T* in, T fill_val, T* out) {
 
 template <>
 bool SequenceMaskOp<CUDAContext>::RunOnDevice() {
-    return DispatchHelper<TensorTypes<float16, float>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<at::Half, float>>::call(this, Input(0));
 }
 
 template <>

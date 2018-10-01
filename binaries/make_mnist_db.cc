@@ -24,7 +24,7 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/core/logging.h"
 
 CAFFE2_DEFINE_string(image_file, "", "The input image file name.");

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 #include <numeric>
 
 // Common code that we use regardless of whether we use glog or not.
@@ -12,6 +13,11 @@ CAFFE2_DEFINE_bool(caffe2_use_fatal_for_enforce, false,
                    "of throwing an exception.");
 
 namespace caffe2 {
+namespace enforce_detail {
+/* implicit */ EnforceFailMessage::EnforceFailMessage(std::string&& msg) {
+  msg_ = new std::string(std::move(msg));
+}
+} // namespace enforce_detail
 
 size_t ReplaceAll(string& s, const char* from, const char* to) {
   CAFFE_ENFORCE(from && *from);
@@ -52,21 +58,8 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
-static std::function<void(const OperatorDef&)> OperatorLogger =
-    [](const OperatorDef&) { return; };
-
-void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer) {
-  OperatorLogger = tracer;
-}
-
-std::function<void(const OperatorDef&)> GetOperatorLogger() {
-  return OperatorLogger;
-}
-
 }  // namespace caffe2
 
-
-#ifdef CAFFE2_USE_GOOGLE_GLOG
 
 #ifdef CAFFE2_USE_GFLAGS
 // When GLOG depends on GFLAGS, these variables are being defined in GLOG
@@ -78,7 +71,16 @@ DECLARE_int32(minloglevel);
 DECLARE_int32(v);
 // GLOG's logtostderr value
 DECLARE_bool(logtostderr);
+#elif !CAFFE2_MOBILE && !__APPLE__ && !defined(_WIN32)
+// Declare our own versions of the above flags so we don't error out
+// when they are passed into Caffe2.
+CAFFE2_DEFINE_int(minloglevel, 0, "Equivalent to glog minloglevel");
+CAFFE2_DEFINE_int(v, 0, "Equivalent to glog verbose");
+CAFFE2_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr");
 #endif // CAFFE2_USE_GFLAGS
+
+
+#ifdef CAFFE2_USE_GOOGLE_GLOG
 
 // Provide easy access to the above variables, regardless whether GLOG is
 // dependent on GFLAGS or not. Note that the namespace (fLI, fLB) is actually
@@ -236,6 +238,12 @@ MessageLogger::~MessageLogger() {
   if (severity_ >= FLAGS_caffe2_log_level) {
     // If not building on Android, log all output to std::cerr.
     std::cerr << stream_.str();
+    // Simulating the glog default behavior: if the severity is above INFO,
+    // we flush the stream so that the output appears immediately on std::cerr.
+    // This is expected in some of our tests.
+    if (severity_ > INFO) {
+      std::cerr << std::flush;
+    }
   }
 #endif  // ANDROID
   if (severity_ == FATAL) {

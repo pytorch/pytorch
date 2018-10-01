@@ -1,11 +1,6 @@
 cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
-if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  # ---[ Generate and install header and cpp files
-  include(../../../cmake/Codegen.cmake)
-endif()
-
 IF(NOT MSVC)
   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-qualifiers")
   SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-ignored-qualifiers")
@@ -163,6 +158,16 @@ if(NOT MSVC AND NOT EMSCRIPTEN)
   set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
   set(CMAKE_CXX_FLAGS)
 
+  # Bump up optimization level for sleef to -O1, since at -O0 the compiler
+  # excessively spills intermediate vector registers to the stack
+  # and makes things run impossibly slowly
+  set(OLD_CMAKE_C_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG})
+  IF(${CMAKE_C_FLAGS_DEBUG} MATCHES "-O0")
+    string(REGEX REPLACE "-O0" "-O1" CMAKE_C_FLAGS_DEBUG ${OLD_CMAKE_C_FLAGS_DEBUG})
+  ELSE()
+    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O1")
+  ENDIF()
+
   set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build sleef static" FORCE)
   set(BUILD_DFT OFF CACHE BOOL "Don't build sleef DFT lib" FORCE)
   set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
@@ -173,6 +178,7 @@ if(NOT MSVC AND NOT EMSCRIPTEN)
   link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS sleef)
 
+  set(CMAKE_C_FLAGS_DEBUG ${OLD_CMAKE_C_FLAGS_DEBUG})
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 
   # Set these back. TODO: Use SLEEF_ to pass these instead
@@ -352,34 +358,6 @@ if(NOT AT_LINK_STYLE STREQUAL "INTERFACE")
   endif()
 endif()
 
-if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  # Eventually replace this use of LOCATION with use of
-  # $<TARGET_FILE:ATen_cpu>, but generators only work in some cases
-  cmake_policy(SET CMP0026 OLD)
-  get_target_property(ATEN_CPU_OUTPUT_NAME ATen_cpu LOCATION)
-  get_filename_component(ATEN_CPU_OUTPUT_NAME ${ATEN_CPU_OUTPUT_NAME} NAME)
-  set(ATEN_LIBRARIES
-    "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_LIB_DIR}/${ATEN_CPU_OUTPUT_NAME}")
-  if(USE_CUDA OR USE_ROCM)
-    get_target_property(ATEN_CUDA_OUTPUT_NAME ATen_cuda LOCATION)
-    get_filename_component(ATEN_CUDA_OUTPUT_NAME ${ATEN_CUDA_OUTPUT_NAME} NAME)
-    list(APPEND ATEN_LIBRARIES
-      "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_LIB_DIR}/${ATEN_CUDA_OUTPUT_NAME}")
-  endif()
-
-  install(TARGETS ATen_cpu
-    RUNTIME DESTINATION "${AT_INSTALL_BIN_DIR}"
-    LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
-    ARCHIVE DESTINATION "${AT_INSTALL_LIB_DIR}")
-
-  if(USE_CUDA OR USE_ROCM)
-    install(TARGETS ATen_cuda
-      RUNTIME DESTINATION "${AT_INSTALL_BIN_DIR}"
-      LIBRARY DESTINATION "${AT_INSTALL_LIB_DIR}"
-      ARCHIVE DESTINATION "${AT_INSTALL_LIB_DIR}")
-  endif()
-endif()
-
 SET(ATEN_INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/${AT_INSTALL_INCLUDE_DIR}")
 CONFIGURE_FILE(ATenConfig.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake")
 INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
@@ -402,38 +380,6 @@ if(ATEN_NO_TEST)
   message("disable test because ATEN_NO_TEST is set")
 else()
   add_subdirectory(test)
-endif()
-
-if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  foreach(test_src ${ATen_CPU_TEST_SRCS})
-    get_filename_component(test_name ${test_src} NAME_WE)
-    add_executable(${test_name} "${test_src}")
-    target_include_directories(
-        ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
-    target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
-    target_include_directories(${test_name} SYSTEM PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
-    target_link_libraries(${test_name} ATen_cpu)
-    add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-    install(TARGETS ${test_name} DESTINATION test)
-  endforeach()
-
-  if(USE_CUDA OR USE_ROCM)
-    foreach(test_src ${ATen_CUDA_TEST_SRCS})
-      get_filename_component(test_name ${test_src} NAME_WE)
-      torch_cuda_based_add_executable(${test_name} "${test_src}")
-      target_include_directories(
-          ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
-      target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
-      target_include_directories(${test_name} SYSTEM PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
-      target_link_libraries(${test_name} -Wl,--no-as-needed ATen_cpu ATen_cuda)
-      add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
-      install(TARGETS ${test_name} DESTINATION test)
-    endforeach()
-  endif()
-
-  # Make sure these don't get built by parent
-  set(ATen_CPU_TEST_SRCS)
-  set(ATen_CUDA_TEST_SRCS)
 endif()
 
 # Pass source, includes, and libs to parent

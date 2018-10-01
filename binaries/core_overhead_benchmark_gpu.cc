@@ -139,7 +139,7 @@ BENCHMARK(BM_cudaStreamWaitEventThenStreamSynchronize);
 
 static void BM_CudaPointerAffinity(benchmark::State& state) {
   CAFFE2_SKIP_IF_NO_GPU;
-  Tensor tensor(vector<TIndex>{1, 2, 3, 4}, CUDA);
+  Tensor tensor(vector<int64_t>{1, 2, 3, 4}, CUDA);
   float* ptr = tensor.mutable_data<float>();
   while (state.KeepRunning()) {
     volatile int id = GetGPUIDForPointer(ptr);
@@ -167,7 +167,7 @@ static void BM_OperatorCreationCPU(benchmark::State& state) {
   OperatorDef def;
   Workspace ws;
   def.set_type("DummyEmpty");
-  def.mutable_device_option()->set_device_type(CPU);
+  def.mutable_device_option()->set_device_type(PROTO_CPU);
   while (state.KeepRunning()) {
     op = CreateOperator(def, &ws);
   }
@@ -180,7 +180,7 @@ static void BM_OperatorCreationCUDA(benchmark::State& state) {
   OperatorDef def;
   Workspace ws;
   def.set_type("DummyEmpty");
-  def.mutable_device_option()->set_device_type(CUDA);
+  def.mutable_device_option()->set_device_type(PROTO_CUDA);
   while (state.KeepRunning()) {
     op = CreateOperator(def, &ws);
   }

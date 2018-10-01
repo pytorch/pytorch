@@ -1,3 +1,4 @@
+#pragma once
 #include <memory>
 
 #include <ATen/core/Macros.h>
@@ -9,7 +10,7 @@ using DeleterFnPtr = void (*)(void*);
 namespace detail {
 
 // Does not delete anything
-AT_CORE_API void deleteNothing(void*);
+CAFFE2_API void deleteNothing(void*);
 
 // A detail::UniqueVoidPtr is an owning smart pointer like unique_ptr, but
 // with three major differences:

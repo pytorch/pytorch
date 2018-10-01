@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/passes/pretty_print.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -20,8 +21,6 @@ namespace torch { namespace jit {
 
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 constexpr Symbol PythonOp::Kind;
-
-constexpr int max_tensor_display_size = 10;
 
 void printValueRef(std::ostream & out, const Value * n) {
   out << "%" << n->uniqueName();
@@ -72,30 +71,6 @@ std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
   }
   return out;
 }
-template<typename T>
-void printPrimList(std::ostream & out, const std::vector<T> & items) {
-  out << "[";
-  int i = 0;
-  for(auto & item : items) {
-    if(i++ > 0)
-      out << ", ";
-    out << item;
-  }
-  out << "]";
-}
-
-std::string escapeString(std::string s) {
-  std::vector<char> search = {'\n', '\t', '\v'};
-  std::vector<std::string> replace = {"\\n", "\\t", "\\v"};
-  for (size_t i = 0; i < search.size(); i++) {
-    size_t pos = s.find(search[i]);
-    while(pos != std::string::npos) {
-      s.replace(pos, 1, replace[i]);
-      pos = s.find(search[i], pos + 1);
-    }
-  }
-  return s;
-}
 
 void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
@@ -110,62 +85,9 @@ void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=fa
     // don't want to print the qualifier since it should always
     // be attribute, but you might be able to track down a weird
     // bug by printing it out.
-    out << name.toUnqualString() <<"=";
-    switch(n->kindOf(name)) {
-      case AttributeKind::f:
-        out << n->f(name);
-        break;
-      case AttributeKind::fs:
-        printPrimList(out,n->fs(name));
-        break;
-      case AttributeKind::i:
-        out << n->i(name);
-        break;
-      case AttributeKind::is:
-        printPrimList(out,n->is(name));
-        break;
-      case AttributeKind::s:
-        out << escapeString(n->s(name));
-        break;
-      case AttributeKind::ss:
-        printPrimList(out,n->ss(name));
-        break;
-      case AttributeKind::t:
-        {
-          at::Tensor t = n->t(name);
-          // 1-elem tensors are usually boxed scalars, so print them like it
-          if (t.numel() == 1) {
-            auto scalar_tensor = t.view({})._local_scalar();
-            out << "{";
-            if (scalar_tensor.isFloatingPoint()) {
-              out << scalar_tensor.toDouble();
-            } else {
-              out << scalar_tensor.toLong();
-            }
-            out << "}";
-          } else if (t.numel() <= max_tensor_display_size) {
-            // TODO: This is awful code.  Also it doesn't work on Windows.
-            std::ostringstream tensor_ss;
-            tensor_ss << t;
-            std::string tensor_s{tensor_ss.str()};
-            // Remove newlines
-            std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
-            out << tensor_s;
-          } else {
-            out << "<Tensor>";
-          }
-          break;
-        }
-      case AttributeKind::ts:
-        out << "[<Tensors>]";
-        break;
-      case AttributeKind::g:
-        out << "<Graph>";
-        break;
-      case AttributeKind::gs:
-        out << "[<Graphs>]";
-        break;
-    }
+    out << name.toUnqualString() << "=";
+
+    n->printValue(out, name);
   }
   out << "]";
 }
@@ -186,7 +108,7 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   IR_ELSE()
     if(n->hasAttribute(attr::Subgraph) && groups) {
       out << n->kind().toQualString() << "_" << groups->size();
-      if (n->numAttributes() > 1) {
+      if (n->numAttributes() > 1 && n->kind() != prim::DifferentiableGraph) {
         printAttributes(out, n, /*ignore_subgraph=*/true);
       }
       groups->push_back(n);
@@ -249,6 +171,15 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
   }
   */
   return out;
+}
+
+std::ostream& Graph::prettyPrint(std::ostream & out) {
+  PrettyPrint(out, *this);
+  return out;
+}
+
+void Graph::dumpPretty() {
+  PrettyPrint(std::cout, *this);
 }
 
 static void checkSameDevice(const Node* node) {
@@ -317,23 +248,27 @@ void Node::lint() const {
   }
 
   // Node subclass invariants
-  // - Return uses is zero
-  // - Param inputs is zero
-  // - Select inputs is one
-  // - Python operator cconv is correct
-
   IR_IF(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
+  IR_ELSEIF(LoadWorld)
+    JIT_ASSERT(inputs_.size() == 0);
+    JIT_ASSERT(outputs_.size() == 1);
+  IR_ELSEIF(StoreWorld)
+    JIT_ASSERT(inputs_.size() == 1);
+    JIT_ASSERT(outputs_.size() == 0);
   IR_ELSEIF(Return)
+    // Return uses is zero
     JIT_ASSERT(outputs().size() == 0);
   IR_ELSEIF(Param)
+    // Param inputs is zero
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIFM_CONST(PythonOp)
+    // Python operator cconv is correct
     size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
-      if (c == 's') {
+      if (c == 'c') {
         n_scalars++;
-      } else if (c == 't') {
+      } else if (c == 'd') {
         n_tensors++;
       } else {
         JIT_ASSERT(0);
@@ -450,6 +385,7 @@ void Graph::lint() const {
       for (auto n : b->nodes()) {
         JIT_ASSERT(n->kind_ != prim::Param);
         JIT_ASSERT(n->kind_ != prim::Return);
+        JIT_ASSERT(n->kind_ != prim::DummyWorld);
         check_node(n);
       }
 
@@ -516,6 +452,7 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
     local_map[input] = this->addInput()->copyMetadata(input)->setStage(input->stage());
     graph->setStage(std::max(graph->stage(), input->stage()));
   }
+
   for(auto node : src->nodes()) {
     auto new_node = this->appendNode(graph->createClone(node, env));
     new_node->setStage(node->stage());
@@ -535,8 +472,9 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
 
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
-  auto env = [](Value *) -> Value* {
-    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
+  auto env = [](Value* v) -> Value* {
+    AT_ERROR(
+        "Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -604,7 +542,7 @@ Value* Node::namedInput(Symbol name) const {
   return input(findArgument(schema(), name));
 }
 
-bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) const {
   if (!sig(signature_literal).matches(this)) return false;
   for (Symbol s : const_inputs) {
     if (!is_constant(s)) return false;
@@ -618,6 +556,52 @@ void Node::dump() const {
 
 void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema();
+}
+
+namespace {
+
+const OperatorSet& nondeterminstic_aten_ops() {
+  static OperatorSet nondeterministic_ops = {
+    "aten::dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
+    "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
+    "aten::bernoulli(Tensor self, float p, *, Generator generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
+    "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
+    "aten::poisson(Tensor self, Generator generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::rand_like(Tensor self) -> Tensor",
+    "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint(int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint(int low, int high, int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int high) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high) -> Tensor",
+    "aten::randint_like(Tensor self, int high, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randn(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randn_like(Tensor self) -> Tensor",
+    "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
+    "aten::randperm(int n, *, int dtype, int layout, int[] device) -> Tensor"
+  };
+  return nondeterministic_ops;
+}
+
+}  // namespace
+
+bool Node::isNondeterministic() const {
+  if (nondeterminstic_aten_ops().find(this) == nullptr) {
+    return false;
+  }
+  // Dropout with train = False is deterministic
+  if (matches("aten::dropout(Tensor input, float p, int train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
+    return false;
+  }
+  return true;
 }
 
 inline const SourceRange& fakeRange() {

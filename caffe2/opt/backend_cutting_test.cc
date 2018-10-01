@@ -83,9 +83,9 @@ TEST(BackendCuttingTest, line) {
   EXPECT_EQ(3, net_opt.op_size());
 }
 
-//  X0 -> CopyIn -> MyConv -\
+//  X0 -> CopyIn -> MyConv -|
 //                           > Concat -> CopyOut -> Y
-//  N2 -> MyConv -> MyRelu -/
+//  N2 -> MyConv -> MyRelu -|
 TEST(BackendCuttingTest, convergedPaths) {
   caffe2::NetDef net;
   net.add_external_input("X0");
@@ -118,8 +118,8 @@ TEST(BackendCuttingTest, convergedPaths) {
 };
 
 //                -> Random -> Relu -> MyConv4
-//              /                             \
-// N0 -> MyConv -> MyRelu -> MyConv2 ---------- > Concat -> CopyOut -> Y
+//                |                           |
+// N0 -> MyConv -> MyRelu -> MyConv2 ----------> Concat -> CopyOut -> Y
 TEST(BackendCuttingTest, skipPath) {
   caffe2::NetDef net;
   net.add_external_input("N0");

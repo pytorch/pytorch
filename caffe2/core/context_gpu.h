@@ -12,7 +12,7 @@
 #include "caffe2/core/numa.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 // Since we are using the macro CAFFE2_USE_CUDNN, we will need to include this
 // file after common.h is included.
@@ -33,7 +33,7 @@ enum class CudaMemoryPoolType {
  *
  * The memory pool is set up during caffe2's global initialization time.
  */
-CAFFE2_API CudaMemoryPoolType GetCudaMemoryPoolType();
+CAFFE2_CUDA_API CudaMemoryPoolType GetCudaMemoryPoolType();
 
 /**
  * A struct to host thread-local cuda objects.
@@ -44,7 +44,7 @@ CAFFE2_API CudaMemoryPoolType GetCudaMemoryPoolType();
  * and deallocating these objects at the thread scope. This class is solely
  * used inside CUDAContext and should not be used externally.
  */
-class CAFFE2_API ThreadLocalCUDAObjects {
+class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   friend class CUDAContext;
 
  private:
@@ -135,13 +135,15 @@ class CAFFE2_API ThreadLocalCUDAObjects {
 #endif // CAFFE2_USE_CUDNN
 };
 
-CAFFE2_API BaseStaticContext* GetCUDAStaticContext();
+CAFFE2_CUDA_API BaseStaticContext* GetCUDAStaticContext();
 
-class CAFFE2_API CUDAContext final : public BaseContext {
+class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
  public:
   // The default cuda context constructor.
   explicit CUDAContext(const int gpu_id = -1);
   explicit CUDAContext(const DeviceOption& option);
+  explicit CUDAContext(const at::Device& device)
+      : CUDAContext(DeviceToOption(device)) {}
 
   ~CUDAContext() override {
     if (curand_generator_) {
@@ -175,7 +177,7 @@ class CAFFE2_API CUDAContext final : public BaseContext {
   }
 
   void FinishDeviceComputation() override {
-    cudaStreamSynchronize(cuda_objects_.GetStream(gpu_id_, stream_id_));
+    cudaStreamSynchronize(getCudaObjects().GetStream(gpu_id_, stream_id_));
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
       CAFFE_THROW("Encountered CUDA error: ", cudaGetErrorString(error));
@@ -195,16 +197,16 @@ class CAFFE2_API CUDAContext final : public BaseContext {
   }
 
   static cudaStream_t cuda_stream(int gpu_id, int stream_id) {
-    return cuda_objects_.GetStream(gpu_id, stream_id);
+    return getCudaObjects().GetStream(gpu_id, stream_id);
   }
 
   cublasHandle_t cublas_handle() {
-    return cuda_objects_.GetHandle(gpu_id_, stream_id_);
+    return getCudaObjects().GetHandle(gpu_id_, stream_id_);
   }
 
 #ifdef CAFFE2_USE_CUDNN
   cudnnHandle_t cudnn_handle() {
-    return cuda_objects_.GetCudnnHandle(gpu_id_, stream_id_);
+    return getCudaObjects().GetCudnnHandle(gpu_id_, stream_id_);
   }
 #endif // CAFFE2_USE_CUDNN
 
@@ -242,7 +244,7 @@ class CAFFE2_API CUDAContext final : public BaseContext {
         src,
         nbytes,
         cudaMemcpyDefault,
-        cuda_objects_.GetStream(gpu_id_, stream_id_)));
+        getCudaObjects().GetStream(gpu_id_, stream_id_)));
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
@@ -285,7 +287,7 @@ class CAFFE2_API CUDAContext final : public BaseContext {
     return cudaStreamQuery(stream) == cudaSuccess;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return CUDA;
   }
 
@@ -302,7 +304,7 @@ class CAFFE2_API CUDAContext final : public BaseContext {
   int stream_id_ = 0;
   int random_seed_;
   curandGenerator_t curand_generator_{nullptr};
-  static thread_local ThreadLocalCUDAObjects cuda_objects_;
+  static ThreadLocalCUDAObjects& getCudaObjects();
 };
 
 // For the CPU context, we also allow a (probably expensive) function
@@ -332,7 +334,7 @@ inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  */
-struct CAFFE2_API PinnedCPUAllocator final : CPUAllocator {
+struct CAFFE2_CUDA_API PinnedCPUAllocator final : CPUAllocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
   std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
@@ -381,29 +383,16 @@ struct CAFFE2_API PinnedCPUAllocator final : CPUAllocator {
   DefaultCPUAllocator baseAllocator_;
 };
 
-class CAFFE2_API CUDAStaticContext final : public BaseStaticContext {
+class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
  public:
   std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<CUDAContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<CUDAContext>(option);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(int gpu_id = -1) {
-    return caffe2::make_unique<CUDAContext>(gpu_id);
-  }
 
   DeviceType GetDeviceType() override {
     return CUDA;
   }
 
   void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(GetDeviceType());
+    device->set_device_type(TypeToProto(GetDeviceType()));
     device->set_cuda_gpu_id(GetGPUIDForPointer(data));
   }
 

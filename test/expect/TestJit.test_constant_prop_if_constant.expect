@@ -1,33 +1,31 @@
 graph(%a : Dynamic
       %b : Dynamic) {
-  %c0.1 : int = prim::Constant[value=1]()
-  %c1.1 : int = prim::Constant[value=1]()
-  %4 : int = prim::TensorToNum(%a)
-  %c0.5 : int, %c1 : int = prim::If(%4)
+  %c2.1 : int = prim::Constant[value=1]()
+  %3 : int = prim::TensorToNum(%a)
+  %c0.4 : int, %c1 : int = prim::If(%3)
     block0() {
-      %7 : int = prim::TensorToNum(%b)
-      %c0.4 : int = prim::If(%7)
+      %6 : int = prim::TensorToNum(%b)
+      %c0.3 : int = prim::If(%6)
         block0() {
-          %9 : int = prim::Constant[value=2]()
-          -> (%9)
+          %8 : int = prim::Constant[value=2]()
+          -> (%8)
         }
         block1() {
-          -> (%c0.1)
+          -> (%c2.1)
         }
-      -> (%c0.4, %c1.1)
+      -> (%c0.3, %c2.1)
     }
     block1() {
-      %10 : int = prim::Constant[value=2]()
-      -> (%c0.1, %10)
+      %9 : int = prim::Constant[value=2]()
+      -> (%c2.1, %9)
     }
-  %11 : int = prim::Constant[value=1]()
-  %c0.6 : int = aten::add(%c0.5, %11)
-  %13 : int = prim::Constant[value=5]()
+  %c0.5 : int = aten::add(%c0.4, %c2.1)
+  %11 : int = prim::Constant[value=5]()
+  %12 : int = prim::Constant[value=1]()
+  %13 : Dynamic = aten::add(%a, %c0.5, %12)
   %14 : int = prim::Constant[value=1]()
-  %15 : Dynamic = aten::add(%a, %c0.6, %14)
+  %15 : Dynamic = aten::add(%13, %c1, %14)
   %16 : int = prim::Constant[value=1]()
-  %17 : Dynamic = aten::add(%15, %c1, %16)
-  %18 : int = prim::Constant[value=1]()
-  %19 : Dynamic = aten::add(%17, %13, %18)
-  return (%19);
+  %17 : Dynamic = aten::add(%15, %11, %16)
+  return (%17);
 }

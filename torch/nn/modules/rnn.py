@@ -270,7 +270,8 @@ class RNN(RNNBase):
           for details.
         - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial hidden state for each element in the batch.
-          Defaults to zero if not provided.
+          Defaults to zero if not provided. If the RNN is bidirectional,
+          num_directions should be 2, else it should be 1.
 
     Outputs: output, h_n
         - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor
@@ -347,10 +348,15 @@ class LSTM(RNNBase):
 
     where :math:`h_t` is the hidden state at time `t`, :math:`c_t` is the cell
     state at time `t`, :math:`x_t` is the input at time `t`, :math:`h_{(t-1)}`
-    is the hidden state of the previous layer at time `t-1` or the initial hidden
+    is the hidden state of the layer at time `t-1` or the initial hidden
     state at time `0`, and :math:`i_t`, :math:`f_t`, :math:`g_t`,
     :math:`o_t` are the input, forget, cell, and output gates, respectively.
     :math:`\sigma` is the sigmoid function.
+
+    In a multilayer LSTM, the input :math:`i^{(l)}_t` of the :math:`l` -th layer
+    (:math:`l >= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
+    dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)_t}` is a Bernoulli random
+    variable which is :math:`0` with probability :attr:`dropout`.
 
     Args:
         input_size: The number of expected features in the input `x`
@@ -376,6 +382,7 @@ class LSTM(RNNBase):
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
         - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial hidden state for each element in the batch.
+          If the RNN is bidirectional, num_directions should be 2, else it should be 1.
         - **c_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial cell state for each element in the batch.
 
@@ -443,10 +450,15 @@ class GRU(RNNBase):
         \end{array}
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the input
-    at time `t`, :math:`h_{(t-1)}` is the hidden state of the previous layer
+    at time `t`, :math:`h_{(t-1)}` is the hidden state of the layer
     at time `t-1` or the initial hidden state at time `0`, and :math:`r_t`,
     :math:`z_t`, :math:`n_t` are the reset, update, and new gates, respectively.
     :math:`\sigma` is the sigmoid function.
+
+    In a multilayer GRU, the input :math:`i^{(l)}_t` of the :math:`l` -th layer
+    (:math:`l >= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
+    dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)_t}` is a Bernoulli random
+    variable which is :math:`0` with probability :attr:`dropout`.
 
     Args:
         input_size: The number of expected features in the input `x`
@@ -471,7 +483,8 @@ class GRU(RNNBase):
           for details.
         - **h_0** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
           containing the initial hidden state for each element in the batch.
-          Defaults to zero if not provided.
+          Defaults to zero if not provided. If the RNN is bidirectional,
+          num_directions should be 2, else it should be 1.
 
     Outputs: output, h_n
         - **output** of shape `(seq_len, batch, num_directions * hidden_size)`: tensor

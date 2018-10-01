@@ -15,7 +15,7 @@ void BlobToTensorDescriptor(
   // Memory type
   // We only allow weights to be CPU tensor for now
   CAFFE_ENFORCE(
-      blob->template IsType<Tensor>(CPU),
+      BlobIsTensorType(*blob, CPU),
       "Initialization blob ",
       name,
       " needs to be TensorCPU");
@@ -90,7 +90,7 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
 
   for (unsigned i = 0U; i < OutputSize(); ++i) {
     auto* output_tensor = Output(i);
-    std::vector<TIndex> tensor_dims;
+    std::vector<int64_t> tensor_dims;
     SetOutputShape(i, &tensor_dims);
     output_tensor->Resize(tensor_dims);
     auto& tensor_descriptor = output_desc_.at(i);

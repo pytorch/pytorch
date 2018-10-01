@@ -16,8 +16,8 @@ template <>
 bool WeightedSumOp<CUDAContext>::RunOnDevice() {
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float>();
-  } else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<float16>();
+  } else if (Input(0).IsType<at::Half>()) {
+    return DoRunWithType<at::Half>();
   } else {
     CAFFE_THROW("Unsupported inputs");
   }
@@ -28,35 +28,13 @@ template <>
 bool SumOp<CUDAContext>::RunOnDevice() {
   if (Input(0).IsType<float>()) {
     return DoRunWithType<float, float>();
-  } else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<float16, float16>();
+  } else if (Input(0).IsType<at::Half>()) {
+    return DoRunWithType<at::Half, at::Half>();
   } else {
     CAFFE_THROW("Unsupported inputs");
   }
   return false;
 }
-
-template <>
-class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
-    : public Operator<CUDAContext> {
- public:
-  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CUDAContext>(operator_def, ws) {}
-  USE_OPERATOR_FUNCTIONS(CUDAContext);
-
-  bool RunOnDevice() override {
-    auto& input = Input(0);
-    auto* output = OperatorBase::Output<Tensor>(0, CUDA);
-    CUDAContext context(GetGPUIDForPointer(Input(1).raw_data()));
-    output->ResizeLike(input);
-    context.template CopyItems<CUDAContext, CUDAContext>(
-        input.meta(),
-        input.size(),
-        input.raw_data(),
-        output->raw_mutable_data(input.meta()));
-    return true;
-  }
-};
 
 REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Flatten, FlattenOp<CUDAContext>);
@@ -65,27 +43,6 @@ REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(Sum, SumOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
-
-// From CPU, copy it to whatever the current context
-REGISTER_CUDA_OPERATOR(
-    CopyFromCPUInput,
-    CopyOp<CUDAContext, CUDAContext, CPUContext>);
-
-// CopyGPUToCPU and CopyCPUToGPU should both be carried out in a cuda context,
-// since gpu code will be involved.
-REGISTER_CUDA_OPERATOR(
-    CopyGPUToCPU,
-    CopyOp<CUDAContext, CPUContext, CUDAContext>);
-REGISTER_CUDA_OPERATOR(
-    CopyCPUToGPU,
-    CopyOp<CUDAContext, CUDAContext, CPUContext>);
-// If we only specify Copy, we assume that it is a gpu to gpu copy - maybe
-// involving different GPUs.
-REGISTER_CUDA_OPERATOR(Copy, CopyOp<CUDAContext, CUDAContext, CUDAContext>);
-
-REGISTER_CUDA_OPERATOR(
-    CopyOnDeviceLike,
-    CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>);
 
 REGISTER_CUDA_OPERATOR(UnsafeCoalesce, UnsafeCoalesceOp<CUDAContext>);
 
@@ -289,14 +246,14 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
 template <typename T_INDEX>
 __global__ void AxpySliceKernel(
     const float* weight0,
-    const TIndex N,
-    const TIndex B,
-    const TIndex slice_size,
+    const int64_t N,
+    const int64_t B,
+    const int64_t slice_size,
     const float** alpha,
     const float** X,
     const T_INDEX* Indices,
     float* Y,
-    const TIndex M) {
+    const int64_t M) {
   // This implementation requires that the first weight is 1.0
   CUDA_KERNEL_ASSERT(weight0[0] == 1.0);
   for (int i = blockIdx.x; i < N; i += gridDim.x) {
@@ -331,17 +288,17 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
   CAFFE_ENFORCE_EQ(weight0.size(), 1);
 
-  TIndex M = X0.size();
-  TIndex N = X0.dim(0);
-  TIndex K = indices.size();
-  TIndex block_size = M / N;
+  int64_t M = X0.size();
+  int64_t N = X0.dim(0);
+  int64_t K = indices.size();
+  int64_t block_size = M / N;
 
   float* data = output->template mutable_data<float>();
 
   // In order to have all device pointers of x_i (and weight_i similarly)
   // consecutively in device memory, copy pointers to a host vector and then
   // copy back into a device array.
-  const TIndex B = (InputSize() - 3) / 2;
+  const int64_t B = (InputSize() - 3) / 2;
   x_data_host_.Resize(B);
   weights_host_.Resize(B);
   x_data_device_.Resize(B);
@@ -363,7 +320,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
       B, weights_host, weights_device);
 
   AxpySliceKernel<<<
-      std::min<TIndex>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
+      std::min<int64_t>(K, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
@@ -391,15 +348,15 @@ __global__ void scatter_assign_kernel(
     T* data,
     const Index* idxs,
     const T* slicesData,
-    TIndex N,
-    TIndex K,
-    TIndex block_size) {
-  for (TIndex i = blockIdx.x; i < K; i += gridDim.x) {
+    int64_t N,
+    int64_t K,
+    int64_t block_size) {
+  for (int64_t i = blockIdx.x; i < K; i += gridDim.x) {
     Index idx = idxs[i];
     CUDA_KERNEL_ASSERT(0 <= idx && idx < N);
     const T* src = slicesData + block_size * i;
     T* dest = data + block_size * idx;
-    for (TIndex j = threadIdx.x; j < block_size; j += blockDim.x) {
+    for (int64_t j = threadIdx.x; j < block_size; j += blockDim.x) {
       dest[j] = src[j];
     }
   }
@@ -413,11 +370,11 @@ void ScatterAssignOp<CUDAContext>::DoScatterAssign(
     T* data,
     const Index* idxs,
     const T* slicesData,
-    TIndex N,
-    TIndex K,
-    TIndex block_size) {
+    int64_t N,
+    int64_t K,
+    int64_t block_size) {
   scatter_assign_kernel<<<
-      std::min(K, static_cast<TIndex>(CAFFE_MAXIMUM_NUM_BLOCKS)),
+      std::min(K, static_cast<int64_t>(CAFFE_MAXIMUM_NUM_BLOCKS)),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(data, idxs, slicesData, N, K, block_size);

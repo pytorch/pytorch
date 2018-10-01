@@ -13,8 +13,8 @@
 #include <c10d/ProcessGroupMPI.hpp>
 #endif
 
-#include <c10d/TCPStore.hpp>
 #include <c10d/PrefixStore.hpp>
+#include <c10d/TCPStore.hpp>
 #include <gloo/transport/tcp/device.h>
 #include <pybind11/chrono.h>
 
@@ -34,7 +34,7 @@ using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
   auto c10d_module =
-      THPObjectPtr(PyImport_ImportModule("torch.distributed.c10d"));
+      THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
     throw python_error();
   }
@@ -97,8 +97,22 @@ PyObject* c10d_init(PyObject* _unused) {
               &::c10d::Store::add,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "set_timeout",
+              &::c10d::Store::setTimeout,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "wait",
-              &::c10d::Store::wait,
+              [](::c10d::Store& store, const std::vector<std::string>& keys) {
+                store.wait(keys);
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "wait",
+              [](::c10d::Store& store,
+                 const std::vector<std::string>& keys,
+                 const std::chrono::milliseconds& timeout) {
+                store.wait(keys, timeout);
+              },
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
@@ -244,7 +258,8 @@ PyObject* c10d_init(PyObject* _unused) {
               "recv_anysource",
               [](::c10d::ProcessGroup& pg,
                  std::vector<at::Tensor>& input,
-                 at::Tensor& srcRankTensor) {
+                 at::Tensor& srcRankTensor,
+                 int tag) {
                 if (srcRankTensor.type().scalarType() != at::kInt) {
                   throw std::runtime_error(
                       "source rank tensor needs to be "
@@ -256,10 +271,11 @@ PyObject* c10d_init(PyObject* _unused) {
                       "contain only one element");
                 }
                 return pg.recvAnysource(
-                    input, static_cast<int*>(srcRankTensor.data_ptr()));
+                    input, static_cast<int*>(srcRankTensor.data_ptr()), tag);
               },
               py::arg("tensors"),
               py::arg("src_rank"),
+              py::arg("tag"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
@@ -270,6 +286,11 @@ PyObject* c10d_init(PyObject* _unused) {
           .def(
               "barrier",
               &::c10d::ProcessGroup::barrier,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "group_ranks",
+              &::c10d::ProcessGroup::getGroupRank,
               py::call_guard<py::gil_scoped_release>());
 
   auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
@@ -341,13 +362,14 @@ PyObject* c10d_init(PyObject* _unused) {
 #ifdef USE_C10D_MPI
   shared_ptr_class_<::c10d::ProcessGroupMPI>(
       module, "ProcessGroupMPI", processGroup)
-      .def(py::init(
-          []() { return ::c10d::ProcessGroupMPI::createProcessGroupMPI(); }));
+      .def(py::init([](std::vector<int> ranks) {
+        return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
+      }));
 #endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
-      .def("isCompleted", &::c10d::ProcessGroup::Work::isCompleted)
-      .def("isSuccess", &::c10d::ProcessGroup::Work::isSuccess)
+      .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+      .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
       .def("exception", &::c10d::ProcessGroup::Work::exception)
       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
       .def(
@@ -355,7 +377,25 @@ PyObject* c10d_init(PyObject* _unused) {
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_dist_broadcast_coalesced", &::c10d::distBroadcastCoalesced);
+#ifdef USE_CUDA
+  module.def(
+      "_dist_broadcast_coalesced",
+      &::c10d::distBroadcastCoalesced,
+      py::arg("tensors"),
+      py::arg("buffer_size"),
+      py::arg("process_group"),
+      py::call_guard<py::gil_scoped_release>());
+  module.def(
+      "_sync_params",
+      &::c10d::syncParams,
+      py::arg("process_group"),
+      py::arg("parameter_data"),
+      py::arg("buffer_data"),
+      py::arg("devices"),
+      py::arg("broadcast_bucket_size"),
+      py::arg("broadcast_buffers"),
+      py::call_guard<py::gil_scoped_release>());
+#endif
 
   Py_RETURN_TRUE;
 }

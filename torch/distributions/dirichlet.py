@@ -54,9 +54,19 @@ class Dirichlet(ExponentialFamily):
     has_rsample = True
 
     def __init__(self, concentration, validate_args=None):
-        self.concentration, = broadcast_all(concentration)
+        if concentration.dim() < 1:
+            raise ValueError("`concentration` parameter must be at least one-dimensional.")
+        self.concentration = concentration
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
         super(Dirichlet, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Dirichlet, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.concentration = self.concentration.expand(batch_shape + self.event_shape)
+        super(Dirichlet, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     def rsample(self, sample_shape=()):
         shape = self._extended_shape(sample_shape)

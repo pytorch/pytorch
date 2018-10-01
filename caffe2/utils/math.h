@@ -262,6 +262,15 @@ CAFFE2_API void Moments(
     T* variance,
     Context* context);
 
+// Computes inv_std from variance.
+template <typename T, class Context>
+CAFFE2_API void InvStd(
+    const int N,
+    const T epsilon,
+    const T* var,
+    T* inv_std,
+    Context* context);
+
 // Adds batch sub-tensors elementwise to output. Stripe is the stripe length
 // and N is the number of elements to add (size of Y).
 template <typename T, class Context>
@@ -422,6 +431,12 @@ CAFFE2_API void RandUniformUnique(
     const T* avoid,
     Context* context);
 
+// Generate n values from synthetic data distribution,
+// define by unique accesses and stack distances
+template <typename T, class Context>
+CAFFE2_API void
+RandSyntheticData(const size_t n, const T a, const T b, T* r, Context* context);
+
 template <typename T, class Context>
 CAFFE2_API void
 RandGaussian(const size_t n, const T mean, const T std, T* r, Context* context);
@@ -490,13 +505,22 @@ template <typename T, class Context>
 CAFFE2_API void
 Axpy(const int N, const float* alpha, const T* x, T* y, Context* context);
 
-template <typename T, class Context>
+template <typename TCoeff, typename TData, class Context>
 CAFFE2_API void Axpby(
     const int N,
-    const float alpha,
-    const T* x,
-    const T b,
-    T* y,
+    const TCoeff alpha,
+    const TData* x,
+    const TCoeff b,
+    TData* y,
+    Context* context);
+
+template <typename TCoeff, typename TData, class Context>
+CAFFE2_API void Axpby(
+    const int N,
+    const TCoeff* alpha,
+    const TData* x,
+    const TCoeff* b,
+    TData* y,
     Context* context);
 
 // groups must be 1 for GPU
@@ -626,6 +650,17 @@ CAFFE2_API void CopyMatrix(
 
 template <typename T, class Context>
 CAFFE2_API void CopyVector(const int N, const T* A, T* B, Context* context);
+
+template <typename T, class Context, StorageOrder kOrder>
+CAFFE2_API void AffineChannel(
+    const int N,
+    const int C,
+    const int HxW,
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y,
+    Context* context);
 
 // Calculates ceil(a / b). User must be careful to ensure that there
 // is no overflow or underflow in the calculation.

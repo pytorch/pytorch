@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/serialize/archive.h>
 
 #include <ATen/ATen.h>
 
@@ -23,12 +24,14 @@ Tensor LBFGS::gather_flat_grad() {
   return at::cat(views);
 }
 
-void LBFGS::add_grad(const torch::Scalar& step_size, const Tensor& update) {
+void LBFGS::add_grad(const torch::Tensor& step_size, const Tensor& update) {
   int64_t offset = 0;
   for (auto& parameter : parameters_) {
     int64_t numel = parameter.numel();
     Tensor& pd = autograd::Variable(parameter).data();
-    pd.add_(update.slice(0, offset, offset + numel, 1).view_as(pd), step_size);
+    pd.add_(
+        update.slice(0, offset, offset + numel, 1).view_as(pd),
+        step_size.item<float>());
     offset += numel;
   }
 }
@@ -42,7 +45,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
   Tensor flat_grad = gather_flat_grad();
   Tensor abs_grad_sum = flat_grad.abs().sum();
 
-  if (abs_grad_sum.toCFloat() <= options.tolerance_grad_) {
+  if (abs_grad_sum.item<float>() <= options.tolerance_grad_) {
     return loss;
   }
 
@@ -62,7 +65,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       Tensor s = d.mul(t);
       Tensor ys = y.dot(s);
 
-      if (ys.toCFloat() > 1e-10) {
+      if (ys.item<float>() > 1e-10) {
         // updating memory
 
         if (old_dirs.size() == options.history_size_) {
@@ -88,7 +91,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       Tensor q = flat_grad.neg();
       for (int64_t i = num_old - 1; i >= 0; i--) {
         al.at(i) = old_stps.at(i).dot(q) * ro.at(i);
-        q.add_(old_dirs.at(i), -al.at(i)._local_scalar());
+        q.add_(old_dirs.at(i), -at::_local_scalar(al.at(i)));
       }
 
       // Multiply by initial Hessian
@@ -98,7 +101,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
 
       for (int64_t i = 0; i < num_old; i++) {
         Tensor be_i = old_dirs.at(i).dot(r) * ro.at(i);
-        r.add_(old_stps.at(i), (al.at(i) - be_i)._local_scalar());
+        r.add_(old_stps.at(i), at::_local_scalar(al.at(i) - be_i));
       }
       prev_flat_grad.copy_(flat_grad);
     }
@@ -109,9 +112,9 @@ torch::Tensor LBFGS::step(LossClosure closure) {
 
     // reset initial guess for step size
     if (n_iter == 1) {
-      t =  (at::min(ONE, ONE / abs_grad_sum) * options.learning_rate_)._local_scalar();
+      t = torch::min(ONE, ONE / abs_grad_sum) * options.learning_rate_;
     } else {
-      t = options.learning_rate_;
+      t = at::tensor(options.learning_rate_, torch::kFloat32);
     }
 
     Tensor gtd = flat_grad.dot(d);
@@ -137,21 +140,28 @@ torch::Tensor LBFGS::step(LossClosure closure) {
       break;
     } else if (current_evals >= options.max_eval_) {
       break;
-    } else if (abs_grad_sum.toCFloat() <= options.tolerance_grad_) {
+    } else if (abs_grad_sum.item<float>() <= options.tolerance_grad_) {
       break;
-    } else if (gtd.toCFloat() > -options.tolerance_grad_) {
-      break;
-    } else if (
-        d.mul(t).abs_().sum().toCFloat() <=
-        options.tolerance_change_) {
+    } else if (gtd.item<float>() > -options.tolerance_grad_) {
       break;
     } else if (
-        std::abs(loss.toCFloat() - prev_loss.toFloat()) <
+        d.mul(t).abs_().sum().item<float>() <= options.tolerance_change_) {
+      break;
+    } else if (
+        std::abs(loss.item<float>() - prev_loss.item<float>()) <
         options.tolerance_change_) {
       break;
     }
   }
   return orig_loss;
+}
+
+void LBFGS::save(serialize::OutputArchive& archive) const {
+  serialize(*this, archive);
+}
+
+void LBFGS::load(serialize::InputArchive& archive) {
+  serialize(*this, archive);
 }
 } // namespace optim
 } // namespace torch

@@ -38,7 +38,8 @@ class Multinomial(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities
     """
-    arg_constraints = {'logits': constraints.real}  # Let logits be the canonical parameterization.
+    arg_constraints = {'probs': constraints.simplex,
+                       'logits': constraints.real}
 
     @property
     def mean(self):
@@ -56,6 +57,15 @@ class Multinomial(Distribution):
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
         super(Multinomial, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+
+    def expand(self, batch_shape, _instance=None):
+        new = self._get_checked_instance(Multinomial, _instance)
+        batch_shape = torch.Size(batch_shape)
+        new.total_count = self.total_count
+        new._categorical = self._categorical.expand(batch_shape)
+        super(Multinomial, new).__init__(batch_shape, self.event_shape, validate_args=False)
+        new._validate_args = self._validate_args
+        return new
 
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)

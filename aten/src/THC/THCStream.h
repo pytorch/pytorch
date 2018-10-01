@@ -6,20 +6,20 @@
 /*
 * Note: legacy API.
 *
-* Stream usage should be done through ATen/Context.h.
+* Stream usage should be done through ATen/cuda/CUDAContext.h.
 */
 typedef struct CUDAStreamInternals THCStream;
 
 // Stream creation
 THC_API THCStream* THCStream_defaultStream(int device);
-THC_API THCStream* THCStream_new(int flags);
-THC_API THCStream* THCStream_newWithPriority(int flags, int priority);
+THC_API THCStream* THCStream_new();
 
 // Getters
 THC_API cudaStream_t THCStream_stream(THCStream*);
 THC_API int THCStream_device(THCStream*);
 
-// Memory management
+// Memory management 
+// Note: these are no-ops, streams are no longer refcounted
 THC_API void THCStream_retain(THCStream*);
 THC_API void THCStream_free(THCStream*);
 

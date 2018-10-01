@@ -6,6 +6,7 @@
 #include "torch/csrc/autograd/python_function.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/tensor/python_tensor.h"
+#include "torch/csrc/jit/tracer.h"
 
 using namespace at;
 
@@ -45,7 +46,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
-    auto var = torch::tensors::get_default_tensor_type().tensor();
+    auto var = at::empty({0}, torch::tensors::get_default_tensor_type().options());
     tensor = static_cast<Variable&>(var).data();
   } else if (THPVariable_Check(data)) {
     tensor = ((THPVariable*)data)->cdata.data();
@@ -65,6 +66,12 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
 
   if (name) {
     var.set_name(name);
+  }
+
+  if (jit::tracer::isTracing() && data && data != Py_None && THPVariable_Check(data)) {
+    if (auto *v = jit::tracer::getValueTrace(((THPVariable*)data)->cdata)) {
+      jit::tracer::setValueTrace(var, v);
+    }
   }
 
   return THPVariable_Wrap(std::move(var));

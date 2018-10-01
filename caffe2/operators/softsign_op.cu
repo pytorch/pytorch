@@ -22,10 +22,11 @@ inline __device__ float typed_abs(float x) {
   return fabsf(x);
 }
 
-template <>
-inline __device__ double typed_abs(double x) {
-  return fabs(x);
-}
+// Avoid compiler warning. <double> specification currently not used.
+// template <>
+// inline __device__ double typed_abs(double x) {
+//   return fabs(x);
+// }
 
 template <typename T>
 __global__ void SoftsignCUDAKernel(const int N, const T* X, T* Y) {

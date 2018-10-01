@@ -6,7 +6,6 @@
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/assertions.h"
-#include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/ivalue.h"
@@ -33,7 +32,7 @@ namespace torch { namespace jit {
 // to what the instructions will look like.
 // In particular we:
 // * (TODO) desugar Loop trip counts into c = 0, c += 1 instructions in the loop
-// * flatten stages so that each stage starts with a load from the stack
+// * flatten stages so that each stage starts with a load to registers
 //   and ends with a store to the stack
 // *. computes move_flags (see Outputs), and inserts
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
@@ -72,8 +71,6 @@ Value* createTripCountConjunctiveCondition(
           ->output()->setType(IntType::get());
   return new_cond;
 }
-
-} // namespace
 
 // this currently just _removes_ the trip count inputs and checks they are
 // unused. In the future they will be desugared into normal arithmetic to
@@ -143,9 +140,9 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
   auto it = graph.nodes().begin();
   for(size_t i = 0; i <= graph.stage(); i++) {
     stage_input_types.emplace_back();
-    auto store = graph.create(prim::Store, 0)->insertBefore(*it);
+    auto load = graph.create(prim::Load, 0)->insertBefore(*it);
     while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
-      auto nv = store->addOutput();
+      auto nv = load->addOutput();
       auto old_node = graph.inputs()[input_pos];
       nv->setType(old_node->type());
       stage_input_types[i].push_back(old_node->type());
@@ -154,9 +151,9 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
     }
     while(it != graph.nodes().end() && it->stage() == i)
       ++it;
-    auto load = graph.create(prim::Load, 0)->insertBefore(*it);
+    auto store = graph.create(prim::Store, 0)->insertBefore(*it);
     while(output_pos < graph.outputs().size() && graph.outputs()[output_pos]->stage() == i) {
-      load->addInput(graph.outputs()[output_pos]);
+      store->addInput(graph.outputs()[output_pos]);
       output_pos++;
     }
   }
@@ -308,6 +305,7 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
 
   return FindLastUses(g).move_flags;
 }
+} //namespace
 
 // pre-processing that happens once per graph
 struct PreprocessGraph {
@@ -328,16 +326,16 @@ struct PreprocessGraph {
 
 };
 
-// previously the interpreter worked with at::Retainable values,
-// which are annoying to handle since 99% of values are at::Tensor anyway
-// instead we create a fake subclass of TensorImpl that can be subclassed
-// to hold arbitrary things
+// Sometimes we want to pass things that are not tensors.  Instead of
+// coming up with some "superclass" for tensor, which is annoying since
+// 99% of values are at::Tensor, we instead we create a fake subclass of
+// TensorImpl that can be subclassed to hold arbitrary things
 // Note: this is currently unused but will probably be useful in the future,
 // so we keep it around
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(at::UndefinedTensorId(), at::ScalarType::Undefined, /* is_variable */ false) {}
+  : TensorImpl(at::UndefinedTensorId(), caffe2::TypeMeta(), nullptr, /* is_variable */ false) {}
 
   virtual ~ContainerTensor() = default;
   virtual at::IntList sizes() const override {
@@ -504,10 +502,10 @@ struct CodeImpl {
           insertInstruction(node);
         } break;
       }
-      // each stage ends with a load instruction
+      // each stage ends with a store instruction
       // we record where these instructions occur, and use them to
       // exit the interpreter
-      if(node->kind() == prim::Load) {
+      if(node->kind() == prim::Store) {
         stage_end.push_back(instructions.size());
       }
     }
@@ -515,7 +513,7 @@ struct CodeImpl {
 
   size_t insertInstruction(Node * n) {
     auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
-    instructions[inst].callback = getInterpreterOperation(n);
+    instructions[inst].callback = getOperation(n);
     return inst;
   }
   size_t insertInstruction(Symbol sym,
@@ -603,27 +601,16 @@ struct CodeImpl {
     return r;
   }
 
-  // Returns a function implementing functionality of a given node,
-  // or nullptr if it's a no-op for autograd.
-  Operation getInterpreterOperation(jit::Node* node) {
-    if(node->kind() != prim::GraphExecutor) {
-      return getOperation(node);
+  const std::vector<GraphExecutor*>& grad_executors() {
+    if (!grad_executors_) {
+      grad_executors_.emplace();
+      for (Instruction & instr : instructions) {
+        if (auto executor = detail::getGradExecutor(instr.callback)) {
+          grad_executors_->push_back(executor);
+        }
+      }
     }
-    // recursive graph executors cannot be Operators because they
-    // have to register themselves with the interpreter so that
-    // we can provide useful debugging information
-
-    auto executor = std::make_shared<GraphExecutor>(node->g(attr::Subgraph));
-    graph_executors.emplace_back(executor.get());
-    return [=](Stack& stack) mutable {
-      autograd::profiler::RecordFunction record("GraphExecutor");
-      executor->run(stack);
-      return 0;
-    };
-  }
-
-  const std::vector<GraphExecutor*>& executors() {
-    return graph_executors;
+    return *grad_executors_;
   }
 
   void dumpInstruction(std::ostream & out, size_t pc) const {
@@ -664,7 +651,7 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
-  std::vector<GraphExecutor*> graph_executors; // for debugging
+  at::optional<std::vector<GraphExecutor*>> grad_executors_;
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
@@ -706,7 +693,7 @@ struct InterpreterStateImpl {
           for(int i = inst.outputs.size - 1; i >= 0; i--) {
             int reg = get(inst.outputs,i);
             registers[reg] = pop(stack);
-            // std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
+            // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
           }
           pc = new_pc;
         } catch(std::exception & e) {
@@ -771,8 +758,8 @@ Code::Code(std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
 Code::~Code() = default;
 
-const std::vector<GraphExecutor*>& Code::executors() {
-  return pImpl->executors();
+const std::vector<GraphExecutor*>& Code::grad_executors() {
+  return pImpl->grad_executors();
 }
 
 InterpreterState::InterpreterState(const Code & code)

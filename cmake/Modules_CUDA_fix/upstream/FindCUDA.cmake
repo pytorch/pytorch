@@ -105,6 +105,8 @@
 #      the host compiler is constructed with one or more visual studio macros
 #      such as $(VCInstallDir), that expands out to the path when
 #      the command is run from within VS.
+#      If the CUDAHOSTCXX environment variable is set it will
+#      be used as the default.
 #
 #   CUDA_NVCC_FLAGS
 #   CUDA_NVCC_FLAGS_<CONFIG>
@@ -531,7 +533,9 @@ option(CUDA_HOST_COMPILATION_CPP "Generated file extension" ON)
 # Extra user settable flags
 cmake_initialize_per_config_variable(CUDA_NVCC_FLAGS "Semi-colon delimit multiple arguments.")
 
-if(CMAKE_GENERATOR MATCHES "Visual Studio")
+if(DEFINED ENV{CUDAHOSTCXX})
+  set(CUDA_HOST_COMPILER "$ENV{CUDAHOSTCXX}" CACHE FILEPATH "Host side compiler used by NVCC")
+elseif(CMAKE_GENERATOR MATCHES "Visual Studio")
   set(_CUDA_MSVC_HOST_COMPILER "$(VCInstallDir)Tools/MSVC/$(VCToolsVersion)/bin/Host$(Platform)/$(PlatformTarget)")
   if(MSVC_VERSION LESS 1910)
    set(_CUDA_MSVC_HOST_COMPILER "$(VCInstallDir)bin")
@@ -561,12 +565,10 @@ else()
       set(c_compiler_realpath "")
     endif()
     set(CUDA_HOST_COMPILER "${c_compiler_realpath}" CACHE FILEPATH "Host side compiler used by NVCC")
-  elseif(MSVC AND ("${CMAKE_C_COMPILER}" MATCHES "clcache" OR "${CMAKE_C_COMPILER}" MATCHES "sccache"))
-    # NVCC does not think it will work if it is passed clcache.exe as the host
-    # compiler, which means that builds with CC=cl.exe won't work.  Best to just
-    # feed it whatever the actual cl.exe is as the host compiler.
-    #
-    # FYI: clcache works as the match, but clcache.exe does NOT.
+  elseif(MSVC AND "${CMAKE_C_COMPILER}" MATCHES "clcache|sccache")
+    # NVCC does not think it will work if it is passed clcache.exe or sccache.exe
+    # as the host compiler, which means that builds with CC=cl.exe won't work.
+    # Best to just feed it whatever the actual cl.exe is as the host compiler.
     set(CUDA_HOST_COMPILER "cl.exe" CACHE FILEPATH "Host side compiler used by NVCC")
   else()
     set(CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}"
@@ -575,7 +577,7 @@ else()
 endif()
 
 # Propagate the host flags to the host compiler via -Xcompiler
-option(CUDA_PROPAGATE_HOST_FLAGS "Propage C/CXX_FLAGS and friends to the host compiler via -Xcompile" ON)
+option(CUDA_PROPAGATE_HOST_FLAGS "Propagate C/CXX_FLAGS and friends to the host compiler via -Xcompile" ON)
 
 # Blacklisted flags to prevent propagation
 set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST  "" CACHE STRING "Blacklisted flags to prevent propagation")
@@ -981,7 +983,8 @@ if(NOT CUDA_VERSION VERSION_LESS "3.2")
     find_cuda_helper_libs(nvcuvid)
   endif()
 endif()
-if(CUDA_VERSION VERSION_GREATER "5.0")
+if(CUDA_VERSION VERSION_GREATER "5.0" AND CUDA_VERSION VERSION_LESS "9.2")
+  # In CUDA 9.2 cublas_device was deprecated
   find_cuda_helper_libs(cublas_device)
 endif()
 
@@ -1413,7 +1416,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
   else()
     set(CUDA_HOST_SHARED_FLAGS)
   endif()
-
+  
   macro(_filter_blacklisted_host_flags CUDA_FLAGS)
     string(REGEX REPLACE "[ \t]+" ";" ${CUDA_FLAGS} "${${CUDA_FLAGS}}")
     foreach(_blacklisted ${CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST})
@@ -1790,7 +1793,7 @@ function(CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS output_file cuda_target options
       add_custom_command(
         OUTPUT ${output_file}
         DEPENDS ${object_files}
-        COMMAND ${CUDA_NVCC_EXECUTABLE} ${nvcc_flags} -dlink ${object_files} ${CUDA_cublas_device_LIBRARY} -o ${output_file}
+        COMMAND ${CUDA_NVCC_EXECUTABLE} ${nvcc_flags} -dlink ${object_files} -o ${output_file}
         ${flags}
         COMMENT "Building NVCC intermediate link file ${output_file_relative_path}"
         COMMAND_EXPAND_LISTS
@@ -1803,7 +1806,7 @@ function(CUDA_LINK_SEPARABLE_COMPILATION_OBJECTS output_file cuda_target options
         PRE_LINK
         COMMAND ${CMAKE_COMMAND} -E echo "Building NVCC intermediate link file ${output_file_relative_path}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${output_file_dir}"
-        COMMAND ${CUDA_NVCC_EXECUTABLE} ${nvcc_flags} ${flags} -dlink ${object_files} ${CUDA_cublas_device_LIBRARY} -o "${output_file}"
+        COMMAND ${CUDA_NVCC_EXECUTABLE} ${nvcc_flags} ${flags} -dlink ${object_files} -o "${output_file}"
         COMMAND_EXPAND_LISTS
         ${_verbatim}
         )

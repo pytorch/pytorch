@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
+#include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/net_dag.h"
 #include "caffe2/core/net_simple.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/scope_guard.h"
 
 namespace caffe2 {
@@ -151,6 +151,9 @@ TEST(ObserverTest, TestDAGNetBase) {
   EXPECT_EQ(1212, count_after - count_before);
 }
 
+#if 0
+// This test intermittently segfaults,
+// see https://github.com/pytorch/pytorch/issues/9137
 TEST(ObserverTest, TestMultipleNetBase) {
   Workspace ws;
   ws.CreateBlob("in");
@@ -176,4 +179,5 @@ TEST(ObserverTest, TestMultipleNetBase) {
 
   EXPECT_EQ(net.get()->NumObservers(), prev_num);
 }
+#endif
 } // namespace caffe2

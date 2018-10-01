@@ -132,10 +132,10 @@ const char* metaSpec = R"DOC(
 )DOC";
 
 std::unique_ptr<Blob> randomTensor(
-    const std::vector<TIndex>& dims,
+    const std::vector<int64_t>& dims,
     CPUContext* ctx) {
   auto blob = make_unique<Blob>();
-  auto* t = blob->GetMutableTensor(CPU);
+  auto* t = BlobGetMutableTensor(blob.get(), CPU);
   t->Resize(dims);
   math::RandUniform<float, CPUContext>(
       t->size(), -1.0, 1.0, t->template mutable_data<float>(), ctx);
@@ -180,7 +180,7 @@ TEST_F(PredictorTest, SimpleBatchSized) {
   auto inputData = randomTensor({1, 4}, ctx_.get());
   Predictor::TensorList input;
   input.emplace_back(CPU);
-  auto tensor = inputData->GetMutableTensor(CPU);
+  auto tensor = BlobGetMutableTensor(inputData.get(), CPU);
   input.back().ResizeLike(*tensor);
   input.back().ShareData(*tensor);
   Predictor::TensorList output;
@@ -196,7 +196,7 @@ TEST_F(PredictorTest, SimpleBatchSizedMapInput) {
   auto inputData = randomTensor({1, 4}, ctx_.get());
   Predictor::TensorMap input;
   auto iter = input.emplace("data", Tensor(CPU));
-  auto tensor = inputData->GetMutableTensor(CPU);
+  auto tensor = BlobGetMutableTensor(inputData.get(), CPU);
   iter.first->second.ResizeLike(*tensor);
   iter.first->second.ShareData(*tensor);
 
@@ -209,33 +209,4 @@ TEST_F(PredictorTest, SimpleBatchSizedMapInput) {
   EXPECT_NEAR(output.front().data<float>()[4], 0.1209, 1E-4);
 }
 
-class PredictorMetaNetDefTest : public testing::Test {
- public:
-  void SetUp() override {
-    DeviceOption op;
-    op.set_random_seed(1701);
-    ctx_ = caffe2::make_unique<CPUContext>(op);
-    p_ = caffe2::make_unique<Predictor>(
-        makePredictorConfig(parseMetaNetDef(metaSpec)));
-  }
-
-  std::unique_ptr<CPUContext> ctx_;
-  std::unique_ptr<Predictor> p_;
-};
-
-TEST_F(PredictorMetaNetDefTest, SimpleMetaNetDefInitializer) {
-  auto inputData = randomTensor({1, 4}, ctx_.get());
-  Predictor::TensorMap input;
-  auto iter = input.emplace("data", Tensor(CPU));
-  auto tensor = inputData->GetMutableTensor(CPU);
-  iter.first->second.ResizeLike(*tensor);
-  iter.first->second.ShareData(*tensor);
-  Predictor::TensorList output;
-  (*p_)(input, &output);
-  EXPECT_EQ(output.size(), 1);
-  EXPECT_EQ(output.front().dims().size(), 2);
-  EXPECT_EQ(output.front().dim(0), 1);
-  EXPECT_EQ(output.front().dim(1), 10);
-  EXPECT_NEAR(output.front().data<float>()[4], 0.1209, 1E-4);
-}
 } // namespace caffe2

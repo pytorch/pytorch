@@ -125,7 +125,7 @@ bool UpsampleNearestOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
 
-  vector<TIndex> out_shape;
+  vector<int64_t> out_shape;
   for (int i = 0; i < X.ndim(); ++i) {
     out_shape.push_back(X.dim32(i));
   }

@@ -20,9 +20,8 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
 static void check_cat_no_zero_dim(TensorList tensors) {
   for(size_t i = 0; i < tensors.size(); ++i) {
     auto& t = tensors[i];
-    if (t.dim() == 0) {
-      AT_ERROR("zero-dimensional tensor (at position ", i, ") cannot be concatenated");
-    }
+    AT_CHECK(t.dim() > 0,
+             "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
   }
 }
 
@@ -39,12 +38,11 @@ Tensor cat(TensorList tensors, int64_t dim) {
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
-  if (self.dim() == 0) {
-    AT_ERROR("chunk expects at least a 1-dimensional tensor");
-  }
-  if (chunks <= 0) {
-    AT_ERROR("chunk expects `chunks` to be greater than 0, got: ", chunks);
-  }
+  AT_CHECK(self.dim() > 0,
+           "chunk expects at least a 1-dimensional tensor");
+  AT_CHECK(chunks > 0,
+           "chunk expects `chunks` to be greater than 0, got: ", chunks);
+
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
 
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
@@ -117,14 +115,11 @@ Tensor expand(const Tensor& self, IntList size, bool implicit) {
   // distinguish between expands inserted by broadcasts and those explicitly
   // requested by the user, because it is legal to remove implicit expands
   // from the graph, but not legal to remove the explicit ones.
-  if (size.size() < (size_t)self.dim()) {
-    std::ostringstream ss;
-    ss << "expand(" << self.type() << "{" << self.sizes() << "}, size=" << size
-       << "): the number of sizes provided (" << size.size() << ") "
-       << "must be greater or equal to the number of dimensions in the tensor ("
-       << self.dim() << ")";
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(size.size() >= (size_t)self.dim(),
+           "expand(", self.type(), "{", self.sizes(), "}, size=", size,
+           "): the number of sizes provided (", size.size(), ") ",
+           "must be greater or equal to the number of dimensions in the tensor (",
+           self.dim(), ")");
 
   std::vector<int64_t> expandedSizes;
   std::vector<int64_t> expandedStrides;
@@ -138,7 +133,7 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
-  return self.type().tensor().set_(self.storage(), storage_offset, size, stride);
+  return at::empty({0}, self.options()).set_(self.storage(), storage_offset, size, stride);
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
@@ -153,23 +148,60 @@ Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
   return at::as_strided_(self, size, stride, self.storage_offset());
 }
 
+Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+  int64_t allDim = self.dim();
+  int64_t end = start+length;
+  AT_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  AT_CHECK(dim >= 0 && dim < allDim, 
+    "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
+  AT_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
+    "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
+  LongTensor indices = self._indices();
+  int64_t sparseDims = self._sparseDims();
+  
+  std::vector<int64_t> newSizes = self.sizes().vec();
+  newSizes[dim]=length;
+  
+  Tensor newValues;
+  LongTensor newIndices;
+  if(dim < sparseDims){
+    Tensor mask = (indices[dim] >= start).__and__((indices[dim] < end));
+    newIndices = indices.masked_select(mask).view({sparseDims, -1});
+    newIndices[dim].add_(-start);
+    Tensor nzIndices = mask.nonzero().view(-1);
+    newValues = self._values().index_select(0, nzIndices);
+  }else{
+    /* This means we are narrowing on a dense dim, which is in effect just a
+        regular narrow on _values() */
+    newIndices = indices;
+    int64_t ddim = dim - sparseDims + 1;
+    newValues = self._values().narrow_copy(ddim, start, length);
+  }
+
+  SparseTensor newTensor = at::sparse_coo_tensor(newIndices, newValues, newSizes, self.type().options());
+  _get_sparse_impl(newTensor)->set_coalesced(self.is_coalesced());
+  return newTensor;
+}
+
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+    return self.narrow(dim, start, length).clone();
+}
+
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
   if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
     start = maybe_wrap_dim(start, cur_size);
   }
-  if (length < 0 || start > cur_size - length) {
-    AT_ERROR("start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
-  }
+  AT_CHECK(length >= 0 && start <= cur_size - length,
+           "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice(self, dim, start, start + length, 1);
 }
 
 Tensor permute(const Tensor& self, IntList dims) {
   auto nDims = self.dim();
-  if (dims.size() != (size_t)nDims) {
-    AT_ERROR("number of dims don't match in permute");
-  }
+  AT_CHECK(dims.size() == (size_t)nDims,
+           "number of dims don't match in permute");
   auto oldSizes = self.sizes();
   auto oldStrides = self.strides();
   std::vector<int64_t> newSizes(nDims);
@@ -177,9 +209,8 @@ Tensor permute(const Tensor& self, IntList dims) {
   std::vector<bool> seen(nDims);
   for (int64_t i = 0; i < nDims; i++) {
     auto dim = maybe_wrap_dim(dims[i], nDims);
-    if (seen[dim]) {
-      AT_ERROR("repeated dim in permute");
-    }
+    AT_CHECK(!seen[dim],
+             "repeated dim in permute");
     seen[dim] = true;
     newSizes[i] = oldSizes[dim];
     newStrides[i] = oldStrides[dim];
@@ -188,9 +219,8 @@ Tensor permute(const Tensor& self, IntList dims) {
 }
 
 Tensor repeat(const Tensor& self, IntList repeats) {
-  if (repeats.size() < (size_t)self.dim()) {
-    AT_ERROR("Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
-  }
+  AT_CHECK(repeats.size() >= (size_t)self.dim(),
+           "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
 
   // Add new leading dimensions to the tensor if the
   // number of target dimensions is larger than the
@@ -205,8 +235,8 @@ Tensor repeat(const Tensor& self, IntList repeats) {
 
   Tensor xtensor = self.expand(padded_size);
 
-  Tensor result = self.type().tensor(target_size);
-  Tensor urtensor = result.type().alias(result);
+  Tensor result = at::empty(target_size, self.options());
+  Tensor urtensor = at::alias(result);
   for (int64_t i = 0; i < xtensor.dim(); ++i) {
     // can't unfold with step 0, so make sure step is at least 1
     // (it doesn't matter what it is in that case, because the size is 0).
@@ -238,12 +268,9 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   AT_CHECK(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
-  if (index < -size || index >= size) {
-    std::stringstream ss;
-    ss << "select(): index " << index << " out of range for tensor of size ";
-    ss << self.sizes() << " at dimension " << dim;
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(index >= -size && index < size,
+           "select(): index ", index, " out of range for tensor of size ",
+           self.sizes(), " at dimension ", dim);
   if (index < 0) {
     index += size;
   }
@@ -261,10 +288,8 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   dim = maybe_wrap_dim(dim, ndim);
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
-  if (step <= 0) {
-    // TODO: support negative strides
-    throw std::runtime_error("slice step must be positive");
-  }
+  // TODO: support negative strides
+  AT_CHECK(step > 0, "slice step must be positive");
   if (start < 0) {
     start += sizes[dim];
   }
@@ -322,22 +347,15 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntList split_sizes, in
 
   for (i = 0; i < num_splits; ++i) {
     auto length = split_sizes[i];
-    if (length < 0) {
-      std::ostringstream ss;
-      ss << "split_with_sizes expects split_sizes have only non-negative "
-         << "entries, but got split_sizes=" << split_sizes;
-      throw std::runtime_error(ss.str());
-    }
+    AT_CHECK(length >= 0,
+             "split_with_sizes expects split_sizes have only non-negative ",
+             "entries, but got split_sizes=", split_sizes);
     splits[i] = self.narrow(dim, start_idx, length);
     start_idx += length;
   }
-  if (start_idx != dim_size) {
-    std::ostringstream ss;
-    ss << "split_with_sizes expects split_sizes to sum exactly to "
-       << dim_size << " (input tensor's size at dimension " << dim << "), "
-       << "but got split_sizes=" << split_sizes;
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(start_idx == dim_size,
+           "split_with_sizes expects split_sizes to sum exactly to ", dim_size,
+           " (input tensor's size at dimension ", dim, "), ", "but got split_sizes=", split_sizes);
   return splits;
 }
 
@@ -350,28 +368,24 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
 }
 
 Tensor stack(TensorList tensors, int64_t dim) {
-  if (tensors.size() == 0) {
-    throw std::runtime_error("stack expects a non-empty TensorList");
-  }
+  AT_CHECK(tensors.size() > 0,
+           "stack expects a non-empty TensorList");
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
   return at::cat(get_stack_inputs(tensors, dim), dim);
 }
 
 Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
-  if (tensors.size() == 0) {
-    throw std::runtime_error("stack expects a non-empty TensorList");
-  }
+  AT_CHECK(tensors.size() > 0,
+           "stack expects a non-empty TensorList");
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
   return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
 }
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   int64_t nsparseDims = self._sparseDims();
-  if (dim0 >= nsparseDims || dim1 >= nsparseDims) {
-    AT_ERROR(
-        "sparse transpose: transposed dimensions must be sparse ",
-        "Got sparseDims: ", nsparseDims, ", d0: ", dim0, ", d1: ", dim1);
-  }
+  AT_CHECK(dim0 < nsparseDims && dim1 < nsparseDims,
+           "sparse transpose: transposed dimensions must be sparse ",
+           "Got sparseDims: ", nsparseDims, ", d0: ", dim0, ", d1: ", dim1);
 
   if (self._indices().numel() == 0 && self._values().numel() == 0) {
     auto sizes = self.sizes().vec();
@@ -442,10 +456,9 @@ static void check_t(const Tensor& self, const char *fn) {
   if (self.is_sparse()) {
     int64_t sparseDims = self._sparseDims();
     int64_t denseDims = self._denseDims();
-    if (!(sparseDims == 2 && denseDims == 0)) {
-      AT_ERROR(fn, " expects a tensor with 2 sparse and 0 dense dimensions, but got ",
-               sparseDims, " sparse and ", denseDims, " dense dimensions");
-    }
+    AT_CHECK(sparseDims == 2 && denseDims == 0,
+             fn, " expects a tensor with 2 sparse and 0 dense dimensions, but got ",
+             sparseDims, " sparse and ", denseDims, " dense dimensions");
   } else if (self.dim() != 2) {
     AT_ERROR(fn, " expects a 2D tensor, but self is ", self.dim(), "D");
   }
@@ -621,6 +634,10 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
     default:
       AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
     }
+  }
+  for(int64_t i = 0; i < size - 1; i++){
+      AT_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
+      AT_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
   }
   std::vector<Tensor> grids;
   for(int64_t i = 0; i < size; i++) {

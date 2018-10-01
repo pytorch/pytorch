@@ -27,8 +27,10 @@ class MKLContext : public BaseContext {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), MKLDNN);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_MKLDNN);
   }
+  explicit MKLContext(const at::Device& device)
+      : MKLContext(DeviceToOption(device)) {}
 
   ~MKLContext() override {}
 
@@ -127,7 +129,7 @@ class MKLContext : public BaseContext {
     return true;
   }
 
-  DeviceType GetDevicetype() const override {
+  DeviceType device_type() const override {
     return MKLDNN;
   }
 
@@ -155,17 +157,13 @@ class MKLStaticContext : public BaseStaticContext {
     return GetCPUAllocator()->New(nbytes);
   }
 
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<MKLContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<MKLContext>(option);
-  }
-
   DeviceType GetDeviceType() override {
     return MKLDNN;
+  }
+
+  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
+      override {
+    device->set_device_type(TypeToProto(GetDeviceType()));
   }
 };
 

@@ -525,11 +525,10 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
 }
 
 std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph){
-  // std::cout<<graph->toString()<<std::endl;
   std::shared_ptr<Graph> res_graph = std::make_shared<Graph>(graph->scope_root());
   ToBatch to_batch;
   to_batch.toBatch(graph->block(), res_graph->block());
-  // std::cout<<res_graph->toString()<<std::endl;
+
   return res_graph;
 }
 

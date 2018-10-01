@@ -310,19 +310,19 @@ if (USE_MKL AND USE_MKLML)
   set(CAFFE2_USE_MKL 1)
 endif()
 
-if (USE_MKL AND USE_IDEEP) 
+if (USE_MKL AND USE_IDEEP)
   set(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   set(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
   find_path(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
-  find_path(MKLDNN_INCLUDE_DIR mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
-  if (NOT MKLDNN_INCLUDE_DIR)
+  find_path(MKLDNN_INCLUDE_DIR_HACK mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
+  if (NOT MKLDNN_INCLUDE_DIR_HACK)
     execute_process(COMMAND git submodule update --init mkl-dnn WORKING_DIRECTORY ${IDEEP_ROOT})
-    find_path(MKLDNN_INCLUDE_DIR mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
+    find_path(MKLDNN_INCLUDE_DIR_HACK mkldnn.hpp mkldnn.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
   endif()
-  
-  if (MKLDNN_INCLUDE_DIR)
-    list(APPEND IDEEP_INCLUDE_DIR ${MKLDNN_INCLUDE_DIR})
-    list(APPEND __ideep_looked_for MKLDNN_INCLUDE_DIR)
+
+  if (MKLDNN_INCLUDE_DIR_HACK)
+    list(APPEND IDEEP_INCLUDE_DIR ${MKLDNN_INCLUDE_DIR_HACK})
+    list(APPEND __ideep_looked_for MKLDNN_INCLUDE_DIR_HACK)
     # to avoid adding conflicting submodels
     set(ORIG_WITH_TEST ${WITH_TEST})
     set(WITH_TEST OFF)
@@ -379,7 +379,7 @@ if (USE_MKL AND USE_IDEEP)
     endif()
 
     caffe_clear_vars(__ideep_looked_for __mklml_inner_libs)
-  endif() # MKLDNN_INCLUDE_DIR
+  endif() # MKLDNN_INCLUDE_DIR_HACK
 endif() # USE_IDEEP
 
 # Do nothing if MKL_FOUND was set before!

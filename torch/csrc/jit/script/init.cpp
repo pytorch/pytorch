@@ -24,6 +24,8 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <pybind11/functional.h>
+
 
 namespace torch {
 namespace jit {
@@ -69,18 +71,15 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // introspection.
     size_t actual_n_args = n_args;
     if (!signature.is_none()) {
-      std::vector<TypePtr> arg_types, ret_types;
-      std::tie(arg_types, ret_types) = py::cast<std::pair<std::vector<TypePtr>, std::vector<TypePtr>>>(signature);
+      std::vector<TypePtr> arg_types;
+      TypePtr ret_type;
+      std::tie(arg_types, ret_type) = py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
       args.reserve(arg_types.size());
       size_t idx = 0; // Fake argument names by putting in the index
       for (auto &arg_type : arg_types) {
         args.push_back(Argument(std::to_string(idx++), std::move(arg_type), {}, {}, false));
       }
-      rets.reserve(ret_types.size());
-      idx = 0;
-      for (auto &ret_type : ret_types) {
-        rets.push_back(Argument(std::to_string(idx++), std::move(ret_type), {}, {}, false));
-      }
+      rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
     } else {
       // Create a default signature using what information we have
 
@@ -99,10 +98,12 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       for (size_t i=0; i < actual_n_args; ++i) {
         args.push_back(Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
       }
-      rets.reserve(n_binders);
-      for (size_t i = 0; i < n_binders; ++i) {
-        rets.push_back(Argument(std::to_string(i), DynamicType::get(), {}, {}, false));
+      TypePtr ret_type = DynamicType::get();
+      if(n_binders != 1) {
+        std::vector<TypePtr> tuple_values(n_binders, ret_type);
+        ret_type = TupleType::create(std::move(tuple_values));
       }
+      rets.push_back(Argument("0", ret_type, {}, {}, false));
     }
     return FunctionSchema("", std::move(args), std::move(rets));
   }
@@ -113,38 +114,26 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     auto schema = getSchema(inputs.size(), n_binders);
 
     std::stringstream failure_messages;
-    at::optional<std::vector<Value*>> all_inputs =
+    at::optional<MatchedSchema> matched_schema =
       tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
-    if (!all_inputs)
+    if (!matched_schema)
       throw ErrorReport(loc) << failure_messages.str();
 
     // Release the function object so we can wrap it in a PythonOp
     py::object func = self;
-    std::string cconv(inputs.size(), 't');
+    std::string cconv(inputs.size(), 'd');
     Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
       THPObjectPtr(func.release().ptr()), cconv, {}));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
-    for(auto &i : *all_inputs)
+    for(auto &i : matched_schema->inputs)
       new_node->addInput(i);
 
-    // This is really dumb, but relaxing the constraints on return types would
-    // require us to change the implementation of PythonOps in the interpreter.
-    // Note that this effectively makes the return type of Tuple[Tensor] and Tensor
-    // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
-    // to do it.
-    for (auto & ret_arg : schema.returns) {
-      if (!ret_arg.type->isSubtypeOf(DynamicType::get())) {
-        throw ErrorReport(loc) << "Python functions can currently only return Tensors";
-      }
-    }
-
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < schema.returns.size(); ++i)
-      outputs.push_back(new_node->addOutput());
+    for(auto & ret_arg : matched_schema->return_types) {
+      outputs.push_back(new_node->addOutput()->setType(ret_arg));
+    }
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
-
-  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
 
   virtual std::string kind() const override {
     std::stringstream ss;
@@ -165,42 +154,6 @@ protected:
   py::object self;
 };
 
-// A Python value respresenting a custom op namespace object, like
-// `torch.ops.my_namespace`. When accessing an attribute, it is assumed that it
-// is the function under that custom op namespace we want to call, and a
-// `BuiltinFunction` value is returned for it.
-struct VISIBILITY_HIDDEN CustomOpNamespaceValue : public PythonValue {
-  explicit CustomOpNamespaceValue(py::object obj)
-      : PythonValue(std::move(obj)) {}
-
-  std::shared_ptr<SugaredValue> attr(
-      SourceRange loc,
-      Method& m,
-      const std::string& field) override {
-    py::object member = getattr(loc, field);
-    const auto op_namespace = py::cast<std::string>(self.attr("name"));
-    // The symbol name is the op namespace + the op (function) name, which is
-    // being accessed as the `field` here.
-    auto symbol = Symbol::fromQualString(op_namespace + "::" + field);
-    return std::make_shared<BuiltinFunction>(
-        std::move(symbol), at::nullopt);
-  }
-};
-
-// The `torch.ops` value. All it does is create `CustomOpNamespaceValue`
-// objects when accessing attributes under it, e.g. `torch.ops.my_namespace`.
-struct VISIBILITY_HIDDEN CustomOpsValue : public PythonValue {
-  explicit CustomOpsValue(py::object obj) : PythonValue(std::move(obj)) {}
-
-  std::shared_ptr<SugaredValue> attr(
-      SourceRange loc,
-      Method& m,
-      const std::string& field) override {
-    py::object member = getattr(loc, field);
-    return std::make_shared<CustomOpNamespaceValue>(member);
-  }
-};
-
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
   explicit PythonModuleValue(py::object mod) : PythonValue(mod) {}
 
@@ -209,37 +162,16 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
       Method& m,
       const std::string& field) override {
     py::object member = getattr(loc, field);
-    return toSugaredValue(member, m, loc);
+    // note: is_constant = true because we consider that global properties
+    // on modules like math.pi or torch.float to be constants
+    // eventhough it is possible, though rare, for someone to mutate them
+    return toSugaredValue(member, m, loc, /*is_constant=*/true);
   }
 };
-
-struct VISIBILITY_HIDDEN BuiltinPythonModuleValue : public PythonModuleValue {
-  explicit BuiltinPythonModuleValue(py::object mod) : PythonModuleValue(mod) {}
-  std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-    // We support calling functions and using type/layout/device constants
-    // on the torch builtin modules
-    py::object member = getattr(loc, field);
-    if (py::isinstance<py::function>(member)) {
-      return std::make_shared<BuiltinFunction>(
-          Symbol::aten(field), at::nullopt);
-    } else if (field == "ops") {
-      return std::make_shared<CustomOpsValue>(member);
-    }
-    return toSugaredValue(member, m, loc, /*is_constant =*/true);
-  }
-};
-
-bool isBuiltinModule(py::object obj) {
-  // XXX: these can't be static, or they will be destructed after the Python interpreter
-  // exits and that generally sounds like a bad idea
-  py::object torch = py::module::import("torch");
-  py::object functional = py::module::import("torch.nn.functional");
-  return obj.is(torch) || obj.is(functional);
-}
 
 struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   explicit ConstantPythonTupleValue(py::object tup) : PythonValue(tup) {}
-  std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     result.reserve(tup.size());
@@ -249,15 +181,6 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
     return result;
   }
 };
-
-std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, const std::string& field) {
-  // We generally don't want to allow traversing arbitrary Python objects, but we
-  // make an exception for traversing modules because we want to be access
-  // torch, torch.nn.functional, and the functions they expose.
-  py::object member = getattr(loc, field);
-
-  return toSugaredValue(member, m, loc);
-}
 
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
@@ -321,10 +244,10 @@ struct ModuleValue : public SugaredValue {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override {
     py::object py_module = py::cast(module);
     if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
-      return SugaredValue::asTuple(loc, m);
+      return SugaredValue::asTuple(loc, m, size_hint);
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(py::handle module : py_module) {
       py::object obj = py::reinterpret_borrow<py::object>(module);
@@ -391,11 +314,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
     return std::make_shared<ModuleValue>(mod);
   } else if (py::isinstance<py::module>(obj)) {
-    if (isBuiltinModule(obj)) {
-      return std::make_shared<BuiltinPythonModuleValue>(obj);
-    } else {
-      return std::make_shared<PythonModuleValue>(obj);
-    }
+    return std::make_shared<PythonModuleValue>(obj);
+  }
+  py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
+  if (!builtin_name.is_none()) {
+    return std::make_shared<BuiltinFunction>(
+        Symbol::fromQualString(py::str(builtin_name)), at::nullopt);
   }
   return std::make_shared<PythonValue>(obj);
 }
@@ -447,10 +371,13 @@ void initJitScriptBindings(PyObject* module) {
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
-      .def("save", &Module::save)
-      .def("_load", [](const std::shared_ptr<script::Module> module,
-                       const std::string& filename) {
-        ImportIRModule(module, filename);
+      .def("save", [](std::shared_ptr<Module> m, const std::string& filename) {
+          m->save(filename);
+      })
+      .def("save_to_buffer", [](std::shared_ptr<Module> m) {
+          std::ostringstream buf;
+          m->save(buf);
+          return py::bytes(buf.str());
       })
       .def("_set_optimized", &Module::set_optimized)
       .def(
@@ -567,6 +494,12 @@ void initJitScriptBindings(PyObject* module) {
         }
         throw std::runtime_error("Attempted to call get_debug_state on a Module without a compiled forward()");
       })
+      .def("debug_disable_autodiff_subgraph_inlining", [](Module& self) {
+        if (self.find_method("forward")) {
+          Method & m = self.get_method("forward");
+          m.debugDisableAutodiffSubgraphInlining();
+        }
+      })
       .def("forward", [](Module& self, py::args args, py::kwargs kwargs) {
         // We implement this in C++ to avoid incurring the pybind11 dispatch
         // overhead twice: once to call into the method lookup for "forward"
@@ -595,6 +528,7 @@ void initJitScriptBindings(PyObject* module) {
       auto schema = extractSchemaFromDef(def, is_method);
       self.setSchema(schema);
     })
+    .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("pretty_print_schema", &Method::pretty_print_schema);
 
   m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
@@ -607,7 +541,13 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
-
+  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename) {
+    import_ir_module(module_lookup, filename);
+  });
+  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup, const std::string& buffer) {
+    std::istringstream in(buffer);
+    import_ir_module(module_lookup, in);
+  });
 }
 
 } // namespace script

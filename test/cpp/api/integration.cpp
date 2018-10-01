@@ -1,4 +1,4 @@
-#include <catch.hpp>
+#include <gtest/gtest.h>
 
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/conv.h>
@@ -10,13 +10,12 @@
 #include <torch/tensor.h>
 #include <torch/utils.h>
 
-#include <test/cpp/api/util.h>
+#include <test/cpp/api/support.h>
 
 using namespace torch::nn;
 using namespace torch::test;
 
 #include <cmath>
-#include <iostream>
 #include <random>
 
 class CartPole {
@@ -64,10 +63,10 @@ class CartPole {
   }
 
   void step(int action) {
-    auto x = state[0].toCFloat();
-    auto x_dot = state[1].toCFloat();
-    auto theta = state[2].toCFloat();
-    auto theta_dot = state[3].toCFloat();
+    auto x = state[0].item<float>();
+    auto x_dot = state[1].item<float>();
+    auto theta = state[2].item<float>();
+    auto theta_dot = state[3].item<float>();
 
     auto force = (action == 1) ? force_mag : -force_mag;
     auto costheta = std::cos(theta);
@@ -111,8 +110,6 @@ bool test_mnist(
     M&& model,
     F&& forward_op,
     O&& optimizer) {
-  std::cout << "Training MNIST for " << num_epochs
-            << " epochs, rest your eyes for a bit!\n";
   struct MNIST_Reader {
     FILE* fp_;
 
@@ -225,15 +222,13 @@ bool test_mnist(
   torch::NoGradGuard guard;
   auto result = std::get<1>(forward_op(tedata).max(1));
   torch::Tensor correct = (result == telabel).toType(torch::kFloat32);
-  std::cout << "Num correct: " << correct.sum().toCFloat() << " out of "
-            << telabel.size(0) << std::endl;
-  return correct.sum().toCFloat() > telabel.size(0) * 0.8;
+  return correct.sum().item<float>() > telabel.size(0) * 0.8;
 }
 
-TEST_CASE("integration/cartpole") {
+struct IntegrationTest : torch::test::SeedingFixture {};
+
+TEST_F(IntegrationTest, CartPole) {
   torch::manual_seed(0);
-  std::cerr << "Training episodic policy gradient with a critic for up to 3000"
-               " episodes, rest your eyes for a bit!\n";
   auto model = std::make_shared<SimpleContainer>();
   auto linear = model->add(Linear(4, 128), "linear");
   auto policyHead = model->add(Linear(128, 2), "policy");
@@ -256,7 +251,7 @@ TEST_CASE("integration/cartpole") {
     auto out = forward(state);
     auto probs = torch::Tensor(std::get<0>(out));
     auto value = torch::Tensor(std::get<1>(out));
-    auto action = probs.multinomial(1)[0].toCInt();
+    auto action = probs.multinomial(1)[0].item<int32_t>();
     // Compute the log prob of a multinomial distribution.
     // This should probably be actually implemented in autogradpp...
     auto p = probs / probs.sum(-1, true);
@@ -279,10 +274,10 @@ TEST_CASE("integration/cartpole") {
     std::vector<torch::Tensor> policy_loss;
     std::vector<torch::Tensor> value_loss;
     for (auto i = 0U; i < saved_log_probs.size(); i++) {
-      auto r = rewards[i] - saved_values[i].toCFloat();
+      auto r = rewards[i] - saved_values[i].item<float>();
       policy_loss.push_back(-r * saved_log_probs[i]);
-      value_loss.push_back(torch::smooth_l1_loss(
-          saved_values[i], torch::ones(1) * rewards[i]));
+      value_loss.push_back(
+          torch::smooth_l1_loss(saved_values[i], torch::ones(1) * rewards[i]));
     }
 
     auto loss =
@@ -326,17 +321,17 @@ TEST_CASE("integration/cartpole") {
     if (running_reward > 150) {
       break;
     }
-    REQUIRE(episode < 3000);
+    ASSERT_LT(episode, 3000);
   }
 }
 
-TEST_CASE("integration/mnist", "[cuda]") {
+TEST_F(IntegrationTest, MNIST_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto drop = Dropout(0.3);
-  auto drop2d = Dropout2d(0.3);
+  auto drop2d = FeatureDropout(0.3);
   auto linear1 = model->add(Linear(320, 50), "linear1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
@@ -357,7 +352,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
   auto optimizer = torch::optim::SGD(
       model->parameters(), torch::optim::SGDOptions(1e-2).momentum(0.5));
 
-  REQUIRE(test_mnist(
+  ASSERT_TRUE(test_mnist(
       32, // batch_size
       3, // num_epochs
       true, // useGPU
@@ -366,16 +361,14 @@ TEST_CASE("integration/mnist", "[cuda]") {
       optimizer));
 }
 
-TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
+TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
-  auto batchnorm2d =
-      model->add(BatchNorm(BatchNormOptions(10).stateful(true)), "batchnorm2d");
+  auto batchnorm2d = model->add(BatchNorm(10), "batchnorm2d");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto linear1 = model->add(Linear(320, 50), "linear1");
-  auto batchnorm1 =
-      model->add(BatchNorm(BatchNormOptions(50).stateful(true)), "batchnorm1");
+  auto batchnorm1 = model->add(BatchNorm(50), "batchnorm1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
@@ -395,7 +388,7 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto optimizer = torch::optim::SGD(
       model->parameters(), torch::optim::SGDOptions(1e-2).momentum(0.5));
 
-  REQUIRE(test_mnist(
+  ASSERT_TRUE(test_mnist(
       32, // batch_size
       3, // num_epochs
       true, // useGPU

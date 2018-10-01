@@ -50,8 +50,8 @@ inline void _alias_into_sparse(const SparseTensor& self, const LongTensor& indic
 
 // Take indices and values and makes a (data) copy of them to put into the sparse
 // indices/values.  This used to be called THSTensor_(_set)
-inline void _copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values) {
-  _alias_into_sparse(self, indices.clone(), values.clone());
+inline void _copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values, bool non_blocking) {
+  _alias_into_sparse(self, self._indices().type().copy(indices, non_blocking), self._values().type().copy(values, non_blocking));
 }
 
 // Does NOT make copies of indices/values
@@ -108,16 +108,9 @@ inline LongTensor _newFlattenedIndices(const SparseTensor& self, bool forceClone
 // TODO: Expose this for real in ATen, some day?
 // NB: Doesn't preserve data.
 inline Tensor _new_values_with_size_of(const Tensor& values, int64_t nnz) {
-  if (values.numel() == 0) { // values tensor uninitialized
-    // TODO: This logic looks bogus; if we have an uninitialized
-    // values tensor, why should we believe that denseDims == 0?
-    // That's the assumption this code makes.
-    return values.type().tensor({nnz});
-  } else {
-    std::vector<int64_t> size = values.sizes().vec();
-    size[0] = nnz;
-    return values.type().tensor(size);
-  }
+  std::vector<int64_t> size = values.sizes().vec();
+  size[0] = nnz;
+  return at::empty(size, values.options());
 }
 
 

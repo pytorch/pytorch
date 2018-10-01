@@ -50,6 +50,11 @@ CAFFE2_DEFINE_int(caffe2_gpu_memory_report_interval_mb,
                   128,
                   "The threshold in MB on how frequently to report memory changes");
 
+namespace at {
+
+REGISTER_CONTEXT(DeviceType::HIP, caffe2::HIPContext);
+} // namespace at
+
 namespace caffe2 {
 
 thread_local ThreadLocalHIPObjects HIPContext::hip_objects_;
@@ -263,7 +268,7 @@ HIPContext::HIPContext(const DeviceOption& option)
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
   static Caffe2HipInitializerHelper g_hip_initializer_;
-  DCHECK_EQ(option.device_type(), HIP);
+  DCHECK_EQ(option.device_type(), PROTO_HIP);
 }
 
 // shared mutex to lock out alloc / free during NCCL launches
@@ -408,13 +413,12 @@ void HIPStaticContext::Delete(void* ptr) {
         g_hip_device_affiliation.erase(it);
         break;
     }
-    case HipMemoryPoolType::THC: 
-    {
-        HIP_ENFORCE(g_thc_allocator->Free(ptr));
-        if (FLAGS_caffe2_gpu_memory_tracking) {
-          g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
-        }
-        break;
+    case HipMemoryPoolType::THC: {
+      HIP_ENFORCE(g_thc_allocator->Free(ptr));
+      if (FLAGS_caffe2_gpu_memory_tracking) {
+        g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
+      }
+      break;
     }
     }
 }

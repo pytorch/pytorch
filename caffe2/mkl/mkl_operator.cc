@@ -1,5 +1,5 @@
 #include "caffe2/core/operator.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_mkl_memonger_in_use,
@@ -9,7 +9,7 @@ CAFFE2_DEFINE_bool(
 
 namespace caffe2 {
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     MKLOperatorRegistry,
     OperatorBase,
     const OperatorDef&,

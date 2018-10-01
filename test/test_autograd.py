@@ -14,8 +14,12 @@ from torch._six import inf, nan
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
-from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
-    suppress_warnings, skipIfRocm
+from common import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
+                    suppress_warnings, skipIfRocm,
+                    prod_single_zero, random_square_matrix_of_rank,
+                    random_symmetric_matrix, random_symmetric_psd_matrix,
+                    random_symmetric_pd_matrix, make_nonzero_det,
+                    random_fullrank_matrix_distinct_singular_value)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -294,6 +298,33 @@ class TestAutograd(TestCase):
         self.assertEqual(grad_b.data, go * 2)
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
+
+    def test_grad_nonleaf_register_hook(self):
+        # This checks an edge case for register_hook.
+        # We want to capture grad of a nonleaf tensor,
+        # but avoid segfault during backward of other nonleaf tensors
+        x = torch.randn(5, requires_grad=True)
+        x_list = x.unbind()
+
+        x0 = x_list[0]
+        hook_results = [None]
+
+        def hook(grad):
+            hook_results[0] = grad
+        x0.register_hook(hook)
+
+        x_list[0].backward()
+        self.assertEqual(hook_results[0], torch.tensor(1.))
+        expected_grad = torch.tensor([1., 0, 0, 0, 0])
+        self.assertEqual(x.grad, expected_grad)
+        self.assertIsNone(x_list[0].grad)
+
+        for i in range(1, 5, 1):
+            x_list[i].backward()
+            self.assertEqual(hook_results[0], None)
+            expected_grad[i] = 1.0
+            self.assertEqual(x.grad, expected_grad)
+            self.assertIsNone(x_list[i].grad)
 
     def test_sharded_grad(self):
         leaves = [torch.zeros(5, 5, requires_grad=True) for _ in range(10)]
@@ -724,6 +755,12 @@ class TestAutograd(TestCase):
         self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
         self.assertIsNone(z.grad_fn)
 
+        # test nested decorator and with-statement on no_grad
+        with torch.no_grad():
+            self.assertFalse(torch.is_grad_enabled())
+            w = adder(x, y)
+            self.assertFalse(torch.is_grad_enabled())
+
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""
         x = torch.ones(5, 5, requires_grad=True)
@@ -996,8 +1033,6 @@ class TestAutograd(TestCase):
 
     def test_grad_assignment(self):
         x = torch.randn(5, 5)
-        a = torch.randn(2, 2)  # size mismatch
-        b = Variable(torch.randn(5, 5).long())  # type mismatch
 
         with self.assertRaises(RuntimeError):
             x.grad = torch.randn(2, 2)
@@ -1010,6 +1045,8 @@ class TestAutograd(TestCase):
             raise unittest.SkipTest("CUDA not available")
         with self.assertRaises(RuntimeError):
             x.grad = Variable(torch.randn(5, 5).cuda())
+        x = x.cuda().half()
+        x.grad = torch.zeros_like(x)  # would raise an error unless sparse type is properly handled
 
         if torch.cuda.device_count() < 2:
             raise unittest.SkipTest("At least 2 CUDA devices needed")
@@ -1368,6 +1405,36 @@ class TestAutograd(TestCase):
         expected_grad = torch.zeros(10, 10)
         expected_grad[:2] = grad_output
         self.assertEqual(x.grad.data, expected_grad)
+
+    @skipIfRocm
+    def test_ctc_loss(self):
+        batch_size = 64
+        num_labels = 101
+        target_length = 15
+        gradcheck_input_size = 10
+
+        # device, input_length
+        tests = [('cpu', 150)]
+        if torch.cuda.is_available():
+            tests += [('cuda', 50),
+                      ('cuda', 150)]
+
+        for device, input_length in tests:
+            targets = torch.randint(1, num_labels, (batch_size, target_length),
+                                    device=device, dtype=torch.long)
+            x = torch.randn(gradcheck_input_size, device=device, requires_grad=True)
+            tile_factors = torch.randn(input_length * batch_size * num_labels // gradcheck_input_size + 1,
+                                       device=device)
+            input_lengths = [input_length for _ in range(batch_size)]
+            target_lengths = [target_length for _ in range(batch_size)]
+
+            def ctc_after_softmax(x):
+                x_full = ((x[:, None] * tile_factors[None, :]).view(-1)[:input_length * batch_size * num_labels]
+                          .view(input_length, batch_size, num_labels))
+                log_probs = torch.log_softmax(x_full, 2)
+                return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+
+            gradcheck(ctc_after_softmax, [x])
 
     def test_gc_in_destructor(self):
         """
@@ -2427,6 +2494,19 @@ class TestAutograd(TestCase):
         out.sum().backward()
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @skipIfRocm
+    def test_lstmcell_backward_only_one_output_grad(self):
+        # checks that undefined gradients doen't hamper the backward
+        # see #11872
+        dev = torch.device('cuda')
+        l = torch.nn.LSTMCell(2, 3).to(dev).double()
+        s = torch.randn(1, 2, device=dev, dtype=torch.double, requires_grad=True)
+        for i in range(2):
+            out = l(s)[i]
+            out.sum().backward()
+            self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
+
     def test_anomaly_detect_nan(self):
         size = 10
 
@@ -2473,6 +2553,47 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'backward without computing eigenvectors'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
+    def test_no_grad_copy(self):
+        # create autograd function that saves grad pointer as class static
+        class MyFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
+
+            @staticmethod
+            def backward(ctx, grad):
+                MyFunc.static_grad_ptr = grad.data_ptr()
+                return grad, grad
+
+        class NonContGradFunc(Function):
+            @staticmethod
+            def forward(ctx, inp1):
+                ctx.size = inp1.size()
+                return torch.tensor([1.])
+
+            @staticmethod
+            def backward(ctx, grad):
+                return torch.ones(1).expand(ctx.size)
+
+        a = torch.randn(5, 6, requires_grad=True)
+        b = torch.randn(5, 6, requires_grad=True)
+        # non-contiguous grad should be copied
+        NonContGradFunc.apply(MyFunc.apply(a, b)).backward()
+        self.assertFalse(a.grad.data_ptr() == MyFunc.static_grad_ptr)
+        self.assertFalse(b.grad.data_ptr() == MyFunc.static_grad_ptr)
+        # test case that should trigger no copy for one of a,b
+        a.grad = b.grad = None
+        MyFunc.apply(a, b)[1][0].backward()
+        p_g = MyFunc.static_grad_ptr
+        p_a = a.grad.data_ptr()
+        p_b = b.grad.data_ptr()
+        # check a,b uses different grad buffer
+        self.assertFalse(p_a == p_b)
+        # check one of them is using the computed buffer
+        self.assertTrue(p_a == p_g or p_b == p_g)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -2517,60 +2638,6 @@ def prod_zeros(dim_size, dim_select):
     result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
     result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
     return result
-
-
-def prod_single_zero(dim_size):
-    result = torch.randn(dim_size, dim_size)
-    result[0, 1] = 0
-    return result
-
-
-def random_square_matrix_of_rank(l, rank):
-    assert rank <= l
-    A = torch.randn(l, l)
-    u, s, v = A.svd()
-    for i in range(l):
-        if i >= rank:
-            s[i] = 0
-        elif s[i] == 0:
-            s[i] = 1
-    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
-
-
-def random_symmetric_matrix(l):
-    A = torch.randn(l, l)
-    for i in range(l):
-        for j in range(i):
-            A[i, j] = A[j, i]
-    return A
-
-
-def random_symmetric_psd_matrix(l):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1))
-
-
-def random_symmetric_pd_matrix(l, eps=1e-5):
-    A = torch.randn(l, l)
-    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
-
-
-def make_nonzero_det(A, sign=None, min_singular_value=0.1):
-    u, s, v = A.svd()
-    s[s < min_singular_value] = min_singular_value
-    A = u.mm(torch.diag(s)).mm(v.t())
-    det = A.det().item()
-    if sign is not None:
-        if (det < 0) ^ (sign < 0):
-            A[0, :].neg_()
-    return A
-
-
-def random_fullrank_matrix_distinct_singular_value(l):
-    A = torch.randn(l, l)
-    u, _, v = A.svd()
-    s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
-    return u.mm(torch.diag(s)).mm(v.t())
 
 
 def uniform_scalar(offset=0, requires_grad=False):
@@ -2935,6 +3002,14 @@ method_tests = [
     ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d"),
     ('matmul', (S, S, M, M), ((M,),), "4d_1d"),
     ('matmul', (M,), ((S, S, M, S),), "1d_4d"),
+    ('matrix_power', (S, S), [2], "n=2"),
+    ('matrix_power', (S, S, S), [3], "n=3"),
+    ('matrix_power', (S, S, S), [1], "n=1"),
+    ('matrix_power', (S, S, S), [0], "n=0"),
+    ('matrix_power', lambda: random_fullrank_matrix_distinct_singular_value(S), [-1], "n=-1",
+     NO_ARGS, [skipIfNoLapack]),
+    ('matrix_power', lambda: random_fullrank_matrix_distinct_singular_value(S), [-3], "n=-3",
+     NO_ARGS, [skipIfNoLapack]),
     ('addcmul', (S, S), ((S, S), (S, S))),
     ('addcmul', (S, S), ((S, 1), (1, S)), 'broadcast_rhs'),
     ('addcmul', (1,), ((S, S, 1), (1, S)), 'broadcast_all'),
@@ -2963,16 +3038,28 @@ method_tests = [
     ('zero_', (), NO_ARGS, 'scalar'),
     ('logsumexp', (S, S), (1,)),
     ('logsumexp', (), (0,), 'scalar'),
-    ('norm', (S, S), (2,)),
+    ('norm', (S, S), (), 'default'),
+    ('norm', (S, S), (2,), '2'),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),
     ('norm', (S, S), (1,), '1'),
     ('norm', (S, S), (3,), '3'),
     ('norm', (S, S), (inf,), 'inf'),
+    ('norm', (S, S), ('fro',), 'fro_default'),
+    ('norm', (S, S), ('fro', [0, 1],), 'fro'),
+    ('norm', (S, S), ('nuc',), 'nuc'),
     ('norm', (S, S), (-1,), 'neg_1'),
+    ('norm', (S, S), (-2,), 'neg_2'),
     ('norm', (S, S), (-0.5,), 'neg_0_5'),
     ('norm', (S, S), (-1.5,), 'neg_1_5'),
-    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5'),
+    ('norm', (S, S), (-2, 1,), 'neg_2_2_dim', [1]),
+    ('norm', (S, S), (-1, 1,), 'neg_1_2_dim', [1]),
+    ('norm', (S, S), (0, 1,), '0_2_dim', [1]),
+    ('norm', (S, S), (1, 1,), '1_2_dim', [1]),
+    ('norm', (S, S), (2, 1,), '2_2_dim', [1]),
+    ('norm', (S, S), (3, 1,), '3_2_dim', [1]),
+    ('norm', (S, S), (inf, 1,), 'inf_2_dim'),
+    ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5_default'),
     ('norm', (S, S, S), (2, 1), '2_dim', [1]),
     ('norm', (S, S, S), (3, 1), '3_dim', [1]),
     ('norm', torch.rand(S, S, S) + 5e-2, (1.5, 1), '1_5_dim', [1]),
@@ -3096,11 +3183,15 @@ method_tests = [
      'tall_all', NO_ARGS, [skipIfNoLapack], lambda usv: (usv[0][:, :(S - 2)], usv[1], usv[2])),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS,
      'large', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
-    ('gesv', (S, S, S), ((S, S, S),), 'batched', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('gesv', (2, 3, S, S), ((2, 3, S, S),), 'batched_dims', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('gesv', (2, 2, S, S), ((1, S, S),), 'batched_broadcast_A', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
-    ('gesv', (1, S, S), ((2, 2, S, S),), 'batched_broadcast_b', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (S, S), (random_fullrank_matrix_distinct_singular_value(S),), '', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S),),
+     'batched', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 3),),
+     'batched_dims', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (2, 2, S, S), (random_fullrank_matrix_distinct_singular_value(S, 1),),
+     'batched_broadcast_A', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+    ('gesv', (1, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 2),),
+     'batched_broadcast_b', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t torch.tensor(1)

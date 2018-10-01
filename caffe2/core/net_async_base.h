@@ -1,15 +1,15 @@
 #ifndef CAFFE2_CORE_NET_ASYNC_BASE_H_
 #define CAFFE2_CORE_NET_ASYNC_BASE_H_
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/net_async_base.h"
 #include "caffe2/core/net_dag_utils.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/thread_pool.h"
 
@@ -100,7 +100,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
       PoolsMap;
   PoolsMap cpu_pools_;
   PoolsMap gpu_pools_;
-  static thread_local std::vector<int> stream_counters_;
+  static std::vector<int>& getStreamCounters();
   int num_workers_;
 
   // Exception/error handling
@@ -125,7 +125,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   bool use_per_net_pools_;
   bool is_blocking_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
+  C10_DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
   void storeExceptionPtr();
@@ -139,12 +139,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   friend class tracing::Tracer;
 };
 
-CAFFE_DECLARE_SHARED_REGISTRY(
-    ThreadPoolRegistry,
-    TaskThreadPool,
-    int,
-    int,
-    bool);
+C10_DECLARE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int, bool);
 
 class AsyncNetExecutorHelper : public ExecutorHelper {
  public:

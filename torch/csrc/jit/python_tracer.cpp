@@ -24,17 +24,13 @@ namespace torch { namespace jit { namespace tracer {
 std::string getPythonInterpreterStackTrace() {
   std::stringstream stack_trace;
   AutoGIL gil;
-  PyThreadState *tstate = PyThreadState_GET();
-  if (NULL != tstate && NULL != tstate->frame) {
-    PyFrameObject *frame = tstate->frame;
-
-    while (NULL != frame) {
-      int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-      std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
-      std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-      stack_trace << filename << "(" << line << "): " << funcname << "\n";
-      frame = frame->f_back;
-    }
+  PyFrameObject *frame = PyEval_GetFrame();
+  while (nullptr != frame) {
+    int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
+    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+    stack_trace << filename << "(" << line << "): " << funcname << "\n";
+    frame = frame->f_back;
   }
   return stack_trace.str();
 }
@@ -52,7 +48,11 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
       py_inputs[i] = py::cast(enter_info.second[i]);
     }
     auto out = func(*py_inputs);
-    if(!PyTuple_Check(out.ptr())) {
+    if (out.ptr() == Py_None) {
+      AT_ERROR("The traced function didn't return any values! Side-effects are not "
+               "captured in traces, so it would be a no-op.");
+    }
+    if (!PyTuple_Check(out.ptr())) {
       out = py::make_tuple(out);
     }
     tracer::exit(toStack(out));
@@ -95,6 +95,12 @@ void pythonRecordSourceLocation(Node* n) {
   n->setSourceLocation(sl);
 }
 
+void pythonWarn(const std::string& reason) {
+  AutoGIL gil;
+  auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
+  PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);
+}
+
 void initPythonTracerBindings(PyObject* module) {
   setRecordSourceLocation(pythonRecordSourceLocation);
 
@@ -124,6 +130,9 @@ void initPythonTracerBindings(PyObject* module) {
       return s.graph;
     });
 
+  m.def("_tracer_warn_use_python", []() {
+    tracer::setWarn(pythonWarn);
+  });
   m.def("_tracer_enter", [](py::args trace_inputs) {
     return tracer::enter(toStack(trace_inputs));
   });
@@ -135,6 +144,9 @@ void initPythonTracerBindings(PyObject* module) {
   });
   m.def("_get_tracing_state", []() {
     return getTracingState();
+  });
+  m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
+    return setTracingState(state);
   });
   m.def("_get_value_trace", [](const Variable& var) {
     return getValueTrace(var);

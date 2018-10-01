@@ -143,7 +143,14 @@
   batch1: grad.bmm(batch2.transpose(1, 2)) * alpha
   batch2: batch1.transpose(1, 2).bmm(grad) * alpha
 
-- name: bernoulli(Tensor self, double p, Generator generator)
+- name: bernoulli(Tensor self, Generator generator)
+  self: zeros_like(grad)
+
+- name: bernoulli_(Tensor self, Tensor p, Generator generator)
+  self: zeros_like(grad)
+  p: zeros_like(p)
+
+- name: bernoulli_(Tensor self, double p, Generator generator)
   self: zeros_like(grad)
 
 - name: bmm(Tensor self, Tensor mat2)
@@ -283,7 +290,7 @@
   self: grad
 
 - name: gather(Tensor self, int64_t dim, Tensor index)
-  self: at::zeros(self.sizes(), grad.type()).scatter_add_(dim, index, grad)
+  self: at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad)
 
 - name: ge_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -346,7 +353,7 @@
   value: grad.index_select(dim, index).sum()
 
 - name: index_select(Tensor self, int64_t dim, Tensor index)
-  self: at::zeros(self.sizes(), grad.type()).index_add_(dim, index, grad)
+  self: at::zeros(self.sizes(), grad.options()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
   self: -at::mm(result.t(), at::mm(grad, result.t()))
@@ -499,18 +506,26 @@
 - name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim)
   self: norm_backward(grad, self, p, result, dim, keepdim)
 
+- name: _pdist_forward(Tensor self, double p)
+  self: _pdist_backward(grad, self, p, result)
+
+- name: _pdist_backward(Tensor grad, Tensor self, double p, Tensor pdist)
+  grad: not_implemented("_pdist_backward")
+  self: not_implemented("_pdist_backward")
+  pdist: not_implemented("_pdist_backward")
+
 - name: normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
 
 - name: normal(Tensor mean, double std, Generator generator)
-  mean: at::zeros(mean.sizes(), grad.type())
+  mean: at::zeros(mean.sizes(), grad.options())
 
 - name: normal(double mean, Tensor std, Generator generator)
-  std: at::zeros(std.sizes(), grad.type())
+  std: at::zeros(std.sizes(), grad.options())
 
 - name: normal(Tensor mean, Tensor std, Generator generator)
-  mean: at::zeros(mean.sizes(), grad.type())
-  std: at::zeros(std.sizes(), grad.type())
+  mean: at::zeros(mean.sizes(), grad.options())
+  std: at::zeros(std.sizes(), grad.options())
 
 - name: orgqr(Tensor self, Tensor input2)
   self: not_implemented("orgqr")
@@ -754,15 +769,21 @@
   self: where(condition, grad, zeros_like(grad))
   other: where(condition, zeros_like(grad), grad)
 
+# weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
+# to be running backward with create_graph=True, fall back to a backward function that uses
+# differentiable ops.
+- name: _weight_norm_cuda_interface(Tensor v, Tensor g, int64_t dim)
+  v, g: "GradMode::is_enabled() ? _weight_norm_differentiable_backward(grad.contiguous(), v, g, result1, dim) : _weight_norm_cuda_interface_backward(grad.contiguous(), v, g, result1, dim)"
+
 - name: zero_(Tensor self)
   self: zeros_like(grad)
 
-- name: _sparse_mask(Tensor self, SparseTensorRef mask)
-  self: not_implemented("_sparse_mask")
-  mask: not_implemented("_sparse_mask")
+- name: sparse_mask(Tensor self, SparseTensorRef mask)
+  self: not_implemented("sparse_mask")
+  mask: not_implemented("sparse_mask")
 
 - name: _standard_gamma(Tensor self, Generator generator)
-  self: grad * self._standard_gamma_grad(result)
+  self: grad * _standard_gamma_grad(self, result)
 
 - name: _standard_gamma_grad(Tensor self, Tensor output)
   self: not_implemented("_standard_gamma_grad")
@@ -845,8 +866,11 @@
 - name: log_softmax(Tensor self, int64_t dim)
   self: log_softmax_backward_data(grad, result, dim, self)
 
-- name: prelu_forward(Tensor self, Tensor weight)
-  self, weight: prelu_backward(grad, self, weight, grad_input_mask)
+- name: prelu(Tensor self, Tensor weight)
+  self, weight: prelu_backward(grad, self, weight)
+
+- name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight)
+  grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight)
 
 - name: rrelu_with_noise_forward(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_with_noise_backward(grad, self, noise, lower, upper, training)
@@ -1073,9 +1097,6 @@
   grad_output: nll_loss2d(grad, target, weight, reduction, ignore_index)
   self: zeros_like(grad)
 
-- name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight, std::array<bool,2> output_mask)
-  grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight, grad_input_mask)
-
 - name: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training)
   grad_output: rrelu_with_noise_backward(grad, self, noise, lower, upper, training)
   self: zeros_like(grad)
@@ -1251,3 +1272,7 @@
 
 - name: _thnn_fused_gru_cell(Tensor input_gates, Tensor hidden_gates, Tensor hx, Tensor input_bias, Tensor hidden_bias)
   input_gates, hidden_gates, hx, input_bias, hidden_bias: _thnn_fused_gru_cell_backward(grad, result1, input_bias.defined())
+
+# PackedSequence helpers
+- name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first)
+  input: _pack_padded_sequence_backward(grad, input.sizes(), result1, batch_first)

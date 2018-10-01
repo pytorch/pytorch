@@ -17,6 +17,8 @@ import unittest
 import warnings
 import random
 import contextlib
+import socket
+from collections import OrderedDict
 from functools import wraps
 from itertools import product
 from copy import deepcopy
@@ -111,12 +113,10 @@ def skipIfRocm(fn):
 def skipIfNoLapack(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        try:
+        if not torch._C.has_lapack:
+            raise unittest.SkipTest('PyTorch compiled without Lapack')
+        else:
             fn(*args, **kwargs)
-        except Exception as e:
-            if 'Lapack library not found' in repr(e):
-                raise unittest.SkipTest('Compiled without Lapack')
-            raise
     return wrapper
 
 
@@ -126,14 +126,6 @@ def skipCUDAMemoryLeakCheckIf(condition):
             fn._do_cuda_memory_leak_check = not condition
         return fn
     return dec
-
-
-def get_cuda_memory_usage():
-    # we don't need CUDA synchronize because the statistics are not tracked at
-    # actual freeing, but at when marking the block as free.
-    num_devices = torch.cuda.device_count()
-    gc.collect()
-    return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
 
 
 def suppress_warnings(fn):
@@ -215,6 +207,38 @@ def is_iterable(obj):
         return False
 
 
+class CudaMemoryLeakCheck():
+    def __init__(self, testcase, name=None):
+        self.name = testcase.id() if name is None else name
+        self.testcase = testcase
+
+        # initialize context & RNG to prevent false positive detections
+        # when the test is the first to initialize those
+        from common_cuda import initialize_cuda_context_rng
+        initialize_cuda_context_rng()
+
+    @staticmethod
+    def get_cuda_memory_usage():
+        # we don't need CUDA synchronize because the statistics are not tracked at
+        # actual freeing, but at when marking the block as free.
+        num_devices = torch.cuda.device_count()
+        gc.collect()
+        return tuple(torch.cuda.memory_allocated(i) for i in range(num_devices))
+
+    def __enter__(self):
+        self.befores = self.get_cuda_memory_usage()
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # Don't check for leaks if an exception was thrown
+        if exec_type is not None:
+            return
+        afters = self.get_cuda_memory_usage()
+        for i, (before, after) in enumerate(zip(self.befores, afters)):
+            self.testcase.assertEqual(
+                before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
+                    self.name, after - before, i))
+
+
 class TestCase(unittest.TestCase):
     precision = 1e-5
     maxDiff = None
@@ -232,11 +256,11 @@ class TestCase(unittest.TestCase):
             from common_cuda import TEST_CUDA
             fullname = self.id().lower()  # class_name.method_name
             if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
-                # initialize context & RNG to prevent false positive detections
-                # when the test is the first to initialize those
-                from common_cuda import initialize_cuda_context_rng
-                initialize_cuda_context_rng()
                 setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
+
+    def assertLeaksNoCudaTensors(self, name=None):
+        name = self.id() if name is None else name
+        return CudaMemoryLeakCheck(self, name)
 
     def wrap_with_cuda_memory_check(self, method):
         # Assumes that `method` is the tested function in `self`.
@@ -247,12 +271,8 @@ class TestCase(unittest.TestCase):
         #       call in try-finally and always do the check.
         @wraps(method)
         def wrapper(self, *args, **kwargs):
-            befores = get_cuda_memory_usage()
-            method(*args, **kwargs)
-            afters = get_cuda_memory_usage()
-            for i, (before, after) in enumerate(zip(befores, afters)):
-                self.assertEqual(before, after, '{} leaked {} bytes CUDA memory on device {}'.format(
-                                 self.id(), after - before, i))
+            with self.assertLeaksNoCudaTensors():
+                method(*args, **kwargs)
         return types.MethodType(wrapper, self)
 
     def setUp(self):
@@ -330,6 +350,13 @@ class TestCase(unittest.TestCase):
                     self.assertTrue(torch.equal(nan_mask, b != b), message)
                     diff = a - b
                     diff[nan_mask] = 0
+                    # inf check if allow_inf=True
+                    if allow_inf:
+                        inf_mask = (a == float("inf")) | (a == float("-inf"))
+                        self.assertTrue(torch.equal(inf_mask,
+                                                    (b == float("inf")) | (b == float("-inf"))),
+                                        message)
+                        diff[inf_mask] = 0
                     # TODO: implement abs on CharTensor
                     if diff.is_signed() and 'CharTensor' not in diff.type():
                         diff = diff.abs()
@@ -347,6 +374,13 @@ class TestCase(unittest.TestCase):
             super(TestCase, self).assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
             super(TestCase, self).assertEqual(x, y, message)
+        elif isinstance(x, dict) and isinstance(y, dict):
+            if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
+                self.assertEqual(x.items(), y.items())
+            else:
+                self.assertEqual(set(x.keys()), set(y.keys()))
+                key_list = list(x.keys())
+                self.assertEqual([x[k] for k in key_list], [y[k] for k in key_list])
         elif is_iterable(x) and is_iterable(y):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
@@ -475,13 +509,16 @@ class TestCase(unittest.TestCase):
         expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      munged_id)
+
+        subname_output = ""
         if subname:
             expected_file += "-" + subname
+            subname_output = " ({})".format(subname)
         expected_file += ".expect"
         expected = None
 
         def accept_output(update_type):
-            print("Accepting {} for {}:\n\n{}".format(update_type, munged_id, s))
+            print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
             with open(expected_file, 'w') as f:
                 f.write(s)
 
@@ -495,9 +532,9 @@ class TestCase(unittest.TestCase):
                 return accept_output("output")
             else:
                 raise RuntimeError(
-                    ("I got this output for {}:\n\n{}\n\n"
+                    ("I got this output for {}{}:\n\n{}\n\n"
                      "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
+                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id))
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -547,3 +584,77 @@ def download_file(url, binary=True):
         msg = "could not download test file '{}'".format(url)
         warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg)
+
+
+def find_free_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(('localhost', 0))
+    sockname = sock.getsockname()
+    sock.close()
+    return sockname[1]
+
+
+# Methods for matrix generation
+# Used in test_autograd.py and test_torch.py
+def prod_single_zero(dim_size):
+    result = torch.randn(dim_size, dim_size)
+    result[0, 1] = 0
+    return result
+
+
+def random_square_matrix_of_rank(l, rank):
+    assert rank <= l
+    A = torch.randn(l, l)
+    u, s, v = A.svd()
+    for i in range(l):
+        if i >= rank:
+            s[i] = 0
+        elif s[i] == 0:
+            s[i] = 1
+    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+
+
+def random_symmetric_matrix(l):
+    A = torch.randn(l, l)
+    for i in range(l):
+        for j in range(i):
+            A[i, j] = A[j, i]
+    return A
+
+
+def random_symmetric_psd_matrix(l):
+    A = torch.randn(l, l)
+    return A.mm(A.transpose(0, 1))
+
+
+def random_symmetric_pd_matrix(l, eps=1e-5):
+    A = torch.randn(l, l)
+    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
+
+
+def make_nonzero_det(A, sign=None, min_singular_value=0.1):
+    u, s, v = A.svd()
+    s[s < min_singular_value] = min_singular_value
+    A = u.mm(torch.diag(s)).mm(v.t())
+    det = A.det().item()
+    if sign is not None:
+        if (det < 0) ^ (sign < 0):
+            A[0, :].neg_()
+    return A
+
+
+def random_fullrank_matrix_distinct_singular_value(l, *batches):
+    if len(batches) == 0:
+        A = torch.randn(l, l)
+        u, _, v = A.svd()
+        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+        return u.mm(torch.diag(s)).mm(v.t())
+    else:
+        all_matrices = []
+        for _ in range(0, torch.prod(torch.as_tensor(batches)).item()):
+            A = torch.randn(l, l)
+            u, _, v = A.svd()
+            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+            all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
+        return torch.stack(all_matrices).reshape(*(batches + (l, l)))
