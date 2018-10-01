@@ -24,21 +24,21 @@ class DeformConvOpBase : public ConvPoolOpBase<Context> {
   void DeformableIm2col(
       const T* data_im,
       const T* data_offset,
-      const std::vector<int64_t>& im_shape,
-      const std::vector<int64_t>& col_shape,
+      at::IntList im_shape,
+      at::IntList col_shape,
       T* data_col);
   void DeformableCol2im(
       const T* data_col,
       const T* data_offset,
-      const std::vector<int64_t>& im_shape,
-      const std::vector<int64_t>& col_shape,
+      at::IntList im_shape,
+      at::IntList col_shape,
       T* grad_im);
   void DeformableCol2imCoord(
       const T* data_col,
       const T* data_im,
       const T* data_offset,
-      const std::vector<int64_t>& im_shape,
-      const std::vector<int64_t>& col_shape,
+      at::IntList im_shape,
+      at::IntList col_shape,
       T* grad_offset);
 
  protected:

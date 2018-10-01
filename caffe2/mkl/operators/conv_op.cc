@@ -37,7 +37,7 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
       math::Set<T, CPUContext>(
           M, 0.0, cpu_zero_bias.template mutable_data<float>(), &ctx);
 
-      zero_bias_.reset(new MKLMemory<T>(std::vector<int64_t>{M}));
+      zero_bias_.reset(new MKLMemory<T>(at::IntList{M}));
       zero_bias_->CopyFrom(cpu_zero_bias);
     }
     const auto& bias = InputSize() == 2
@@ -130,11 +130,11 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
     if (group_ > 1) {
       // Explicitly reformat the buffer.
       MKLMemory<float> group_filter(
-          std::vector<int64_t>{int64_t(group_),
-                              int64_t(filter.dim32(0) / group_),
-                              int64_t(filter.dim32(1)),
-                              int64_t(filter.dim32(2)),
-                              int64_t(filter.dim32(3))},
+          at::IntList{int64_t(group_),
+                      int64_t(filter.dim32(0) / group_),
+                      int64_t(filter.dim32(1)),
+                      int64_t(filter.dim32(2)),
+                      int64_t(filter.dim32(3))},
           nullptr,
           dnnResourceFilter,
           /*share_memory_if_possible=*/true);
