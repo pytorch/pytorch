@@ -4925,7 +4925,6 @@ a")
             bar()
 
     def test_tuples(self):
-        @torch.jit.script
         def foo(i):
             a = (i + 4, i * 2)
             c = a
@@ -4937,10 +4936,12 @@ a")
             while False:
                 t0, t1 = c
                 c = (t1, t0)
-            return t0
+            x = (1,)
+            y = 1,
+            return t0, x, y
 
         v = torch.rand(10, 3)
-        self.assertEqual(v * 9, foo(v))
+        self.checkScript(foo, (v,))
 
         with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Tensor, Tensor\)"):
             @torch.jit.script
