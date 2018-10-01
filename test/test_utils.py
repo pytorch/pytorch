@@ -707,6 +707,8 @@ class TestHub(TestCase):
         cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
 
     def test_load_from_github(self):
+        import pdb
+        pdb.set_trace()
         hub_model = load_model(
             'ailzhang/torchvision_hub',
             'wrapper1')

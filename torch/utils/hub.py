@@ -4,13 +4,10 @@ import shutil
 import sys
 import zipfile
 
-try:
-    from requests import get as urlopen
-except ImportError:
-    if sys.version_info[0] == 2:
-        from urllib2 import urlopen  # noqa f811
-    else:
-        from urllib.request import urlopen
+if sys.version_info[0] == 2:
+    from urllib2 import urlopen  # noqa f811
+else:
+    from urllib.request import urlopen
 
 import torch
 import torch.utils.model_zoo as model_zoo
@@ -26,7 +23,24 @@ DEFAULT_TORCH_HUB_DIR = '~/.torch_hub'
 # FUNC_GET_HUB_INFO = 'get_hub_info'
 HUB_INFO_KEYS = [KEY_ENTRYPOINTS, KEY_DEPENDENCIES, KEY_HELP]
 ENTRY_KEYS = [KEY_MODULE, KEY_CHECKPOINT]
+READ_DATA_CHUNK = 8192
 
+
+def module_exists(name):
+    if sys.version_info >= (3, 5):
+        import importlib.util
+        return importlib.util.find_spec(name) is not None
+    elif sys.version_info >= (3, 0):
+        # TODO: SourceFileLoader is new in 3.3.
+        raise RuntimeError('Invalid python version!')
+    else:
+        # TODO: handle dotted module names?
+        try:
+           import imp
+           imp.find_module(name)
+        except Exception:
+            return False
+        return True
 
 def _git_archive_link(repo, branch):
     return 'https://github.com/' + repo + '/archive/' + branch + '.zip'
@@ -35,9 +49,12 @@ def _git_archive_link(repo, branch):
 def _download_url_to_file(url, filename):
     print('Downloading: \"{}\" to {}'.format(url, filename))
     try:
-        response = urlopen(url, stream=True)
+        response = urlopen(url)
         with open(filename, 'wb') as f:
-            for data in response.iter_content():
+            while True:
+                data = response.read(READ_DATA_CHUNK)
+                if len(data) == 0:
+                    break
                 f.write(data)
     except Exception:
         raise RuntimeError('Failed to download {}'.format(url))
@@ -161,7 +178,7 @@ def load_model(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
     entrypoints, dependencies, help_msg = _load_hub_info(repo_name + '.hub')
 
     # Check dependent packages
-    missing_deps = [pkg for pkg in dependencies if importlib.util.find_spec(pkg) is None]
+    missing_deps = [pkg for pkg in dependencies if not module_exists(pkg)]
     if len(missing_deps):
         print('Package {} is required from repo author, but missing in your environment.'
               .format(', '.join(missing_deps)))
@@ -169,8 +186,8 @@ def load_model(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
     # Support loading multiple callables from the same repo at once.
     if isinstance(model, list):
         res = []
-        if (args is not None and len(model) != len(args)) or (kwargs is not None and len(kwargs) != len(model)):
-            raise ValueError('If not None, args/kwargs should have the same lenght as model')
+        if (len(args) and len(model) != len(args)) or (len(kwargs) and len(kwargs) != len(model)):
+            raise ValueError('If not empty, args/kwargs should have the same length as model')
         for func_name, arg, kwarg in zip(model, args, kwargs):
             res.append(_load_single_model(func_name, entrypoints, hub_dir, arg, kwarg))
     elif isinstance(model, str):
