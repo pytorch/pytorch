@@ -265,4 +265,6 @@ bool operator!=(at::ArrayRef<T> a1, std::vector<T> a2) {
   return !a1.equals(at::ArrayRef<T>(a2));
 }
 
+using IntList = ArrayRef<int64_t>;
+
 } // namespace at

@@ -189,7 +189,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
 }
 
 class Tensor;
-typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;
 
 inline std::ostream& operator<<(
