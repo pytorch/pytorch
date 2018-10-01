@@ -349,7 +349,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * This requires the total size of the tensor to remains constant.
    */
   inline void Reshape(const std::vector<int64_t>& dims) {
-    TIndex new_size = 1;
+    int64_t new_size = 1;
     for (auto d : dims) {
       CAFFE_ENFORCE_GE_WITH_CALLER(d, 0);
       new_size *= d;
@@ -772,7 +772,7 @@ class CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
  protected:
   using DimVector = std::vector<int64_t>;
   DimVector dims_; // sizes_
-  TIndex numel_ = -1; // numel_
+  int64_t numel_ = -1; // numel_
   // we decide to keep reserved_ and it will
   // live in Tensor after the split
   // The logic is that if Extend() or ReserveSpace() were ever called,
