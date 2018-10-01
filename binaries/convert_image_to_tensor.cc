@@ -130,7 +130,7 @@ std::vector<float> convertToVector(cv::Mat& img) {
     int g = 1;
     int r = bgrtorgb ? 0 : 2;
     for (it = img.begin<cv::Vec3b>(), end = img.end<cv::Vec3b>(); it != end;
-        ++it, i++) {
+         ++it, i++) {
       values[i] = (((*it)[b] / normalize[0] - mean[0]) / std[0]);
       int offset = caffe2::FLAGS_scale * caffe2::FLAGS_scale + i;
       values[offset] = (((*it)[g] / normalize[1] - mean[1]) / std[1]);
