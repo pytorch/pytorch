@@ -55,6 +55,10 @@ bool TensorImpl::compute_contiguous() const {
   bool is_contiguous = true;
   if (is_empty())
     return is_contiguous;
+  if (strides_.empty()) {
+    // Special case for Caffe2 tensors which don't have strides set.
+    return true;
+  }
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
     if (size(d) != 1) {
