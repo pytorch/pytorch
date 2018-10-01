@@ -45,9 +45,9 @@ IntList TensorImpl::sizes() const {
 }
 
 IntList TensorImpl::strides() const {
-  AT_ASSERT(strides_.size() == sizes_.size(),
-            "Caffe2 tensors don't (yet) have meaningful strides and cannot "
-            "be used in PyTorch.");
+  AT_ASSERTM(strides_.size() == sizes_.size(),
+             "Caffe2 tensors don't (yet) have meaningful strides and cannot "
+             "be used in PyTorch.");
   return strides_;
 }
 
