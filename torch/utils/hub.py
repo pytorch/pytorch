@@ -97,7 +97,7 @@ def _load_single_model(func_name, entrypoints, hub_dir, args, kwargs):
     return model
 
 
-def load_model(github, model, hub_dir=None, cleanup=False, args=[], kwargs={}):
+def load_model(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
     r"""
     Load a model from a github repo, with pretrained weights.
 
@@ -110,7 +110,7 @@ def load_model(github, model, hub_dir=None, cleanup=False, args=[], kwargs={}):
         hub_dir: Optional, local dir to save the intermediate model & checkpoint files.
             If this argument is not specified, env variable `TORCH_HUB_DIR` will be searched first,
             `~/.torch_hub` will be created and used as the fallback.
-        cleanup: Optional, whether to delete the intermediate folder after loading the model.
+        cache: Optional, whether to delete the intermediate folder after loading the model.
             Default is `False`.
 
     Returns:
@@ -179,7 +179,7 @@ def load_model(github, model, hub_dir=None, cleanup=False, args=[], kwargs={}):
         raise ValueError('Invalid input: model should be a string or a list of strings')
 
     # Clean up downloaded files and hub_dir
-    if cleanup:
+    if not cache:
         shutil.rmtree(hub_dir)
 
     return res

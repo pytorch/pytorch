@@ -727,15 +727,15 @@ class TestHub(TestCase):
         for model in hub_models:
             self.assertEqual(self.resnet18_pretrained, model.state_dict())
 
-    def test_hub_cleanup(self):
+    def test_hub_cache(self):
         hub_dir = os.path.expanduser('~/.torch_hub')
         hub_model = load_model(
             'ailzhang/torchvision_hub',
             'wrapper1',
             hub_dir=hub_dir,
-            cleanup=True)
+            cache=True)
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
-        self.assertFalse(os.path.exists(hub_dir))
+        self.assertTrue(os.path.exists(hub_dir))
 
 
 if __name__ == '__main__':
