@@ -300,7 +300,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
         auto & var = THPVariable_Unpack(obj);
         jit::tracer::ArgumentStash::stashIntListElem(
             signature.params[i].name, size, idx, var);
-        res[idx] = var.toCLong();
+        res[idx] = var.item<int64_t>();
         continue;
       } else {
         res[idx] = THPUtils_unpackIndex(obj);

@@ -12,7 +12,7 @@ CAFFE2_DECLARE_string(caffe_test_root);
 namespace caffe2 {
 
 static void AddConstInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const float value,
     const string& name,
     Workspace* ws) {
@@ -20,7 +20,7 @@ static void AddConstInput(
   option.set_device_type(PROTO_CUDA);
   CUDAContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CUDA);
+  auto* tensor = BlobGetMutableTensor(blob, CUDA);
   tensor->Resize(shape);
   math::Set<float, CUDAContext>(
       tensor->size(), value, tensor->template mutable_data<float>(), &context);
@@ -39,7 +39,7 @@ TEST(ReshapeOpGPUTest, testReshapeWithScalar) {
   def.add_output("OldShape");
   def.add_arg()->CopyFrom(MakeArgument("shape", vector<int64_t>{1}));
   def.mutable_device_option()->set_device_type(PROTO_CUDA);
-  AddConstInput(vector<TIndex>(), 3.14, "X", &ws);
+  AddConstInput(vector<int64_t>(), 3.14, "X", &ws);
   // execute the op
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
   EXPECT_TRUE(op->Run());

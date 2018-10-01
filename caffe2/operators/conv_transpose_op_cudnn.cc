@@ -64,8 +64,8 @@ class CudnnConvTransposeOpBase : public ConvTransposeUnpoolBase<CUDAContext> {
   }
 
  protected:
-  vector<TIndex> cudnn_input_dims_;
-  vector<TIndex> cudnn_filter_dims_;
+  vector<int64_t> cudnn_input_dims_;
+  vector<int64_t> cudnn_filter_dims_;
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t bottom_desc_;

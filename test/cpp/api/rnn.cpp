@@ -56,7 +56,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     loss.backward();
     optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.item<float>() * 0.01;
     if (epoch > max_epoch) {
       return false;
     }
@@ -81,7 +81,7 @@ void check_lstm_sizes(RNNOutput output) {
   ASSERT_EQ(output.state.size(3), 64); // 64 hidden dims
 
   // Something is in the hiddens
-  ASSERT_GT(output.state.norm().toCFloat(), 0);
+  ASSERT_GT(output.state.norm().item<float>(), 0);
 }
 
 struct RNNTest : torch::test::SeedingFixture {};
@@ -103,7 +103,7 @@ TEST_F(RNNTest, CheckOutputSizes) {
   torch::Tensor diff = next.state - output.state;
 
   // Hiddens changed
-  ASSERT_GT(diff.abs().sum().toCFloat(), 1e-3);
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
 TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
@@ -137,7 +137,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
                    0.6620, 0.7860, 0.6501, 0.7741, 0.7889, 0.9003,
                    0.7769, 0.8905, 0.7635, 0.8794, 0.7484, 0.8666};
   for (size_t i = 0; i < 3 * 4 * 2; i++) {
-    ASSERT_LT(std::abs(flat[i].toCFloat() - c_out[i]), 1e-3);
+    ASSERT_LT(std::abs(flat[i].item<float>() - c_out[i]), 1e-3);
   }
 
   ASSERT_EQ(out.state.ndimension(), 4); // (hx, cx) x layers x B x 2
@@ -163,7 +163,7 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
                    1.0931,
                    1.4911};
   for (size_t i = 0; i < 16; i++) {
-    ASSERT_LT(std::abs(flat[i].toCFloat() - h_out[i]), 1e-3);
+    ASSERT_LT(std::abs(flat[i].item<float>() - h_out[i]), 1e-3);
   }
 }
 
@@ -206,7 +206,7 @@ TEST_F(RNNTest, Sizes_CUDA) {
   torch::Tensor diff = next.state - output.state;
 
   // Hiddens changed
-  ASSERT_GT(diff.abs().sum().toCFloat(), 1e-3);
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
 TEST_F(RNNTest, EndToEndLSTM_CUDA) {

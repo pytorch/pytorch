@@ -172,6 +172,7 @@ goto:eof
   cd build
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
+                  -DTORCH_BUILD_VERSION="%PYTORCH_BUILD_VERSION%" ^
                   -DBUILD_TORCH="%BUILD_TORCH%" ^
                   -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
                   -DNO_API=ON ^

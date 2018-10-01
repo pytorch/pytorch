@@ -155,7 +155,7 @@ void TreeWalker::advance() {
   cursor_.it.advance(lengths_, cursor_.offsets, sizes_, limits_, 1);
 }
 
-std::vector<TIndex> TreeWalker::fieldDim(int fieldId) const {
+std::vector<int64_t> TreeWalker::fieldDim(int fieldId) const {
   auto tensorDim = input(fieldId).dims();
   tensorDim[0] = sizes_[lengthIdx(fieldId)];
   return tensorDim;
@@ -355,7 +355,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     auto numTensors = OutputSize();
 
     // Precomputer the output sizes to avoid resizing
-    std::vector<std::vector<TIndex>> outputDims(numTensors);
+    std::vector<std::vector<int64_t>> outputDims(numTensors);
     std::vector<const TypeMeta*> metas(numTensors);
 
     CAFFE_ENFORCE(
@@ -414,7 +414,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
 
  private:
   void getShapeAndMetaFromInput(
-      std::vector<std::vector<TIndex>>& outputDims,
+      std::vector<std::vector<int64_t>>& outputDims,
       std::vector<const TypeMeta*>& metas) {
     const auto* inputs = Input(0).template data<SharedTensorVectorPtr>();
 
@@ -434,7 +434,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
   }
 
   void getShapeAndMetaFromPrototypeBlobs(
-      std::vector<std::vector<TIndex>>& outputDims,
+      std::vector<std::vector<int64_t>>& outputDims,
       std::vector<const TypeMeta*>& metas) {
     const auto numTensors = fields_.size();
     CAFFE_ENFORCE_EQ(numTensors, InputSize() - 1);
@@ -501,7 +501,7 @@ class ReadNextBatchOp : public Operator<CPUContext> {
       }
     }
     // gather data
-    std::vector<TIndex> outDim;
+    std::vector<int64_t> outDim;
     for (int i = 0; i < cursor->it.fields().size(); ++i) {
       auto lengthIdx = cursor->it.fields()[i].lengthFieldId + 1;
       auto size = sizes[lengthIdx];
@@ -676,7 +676,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
     auto idxvec = idxblob.template data<int64_t>();
     auto& offsetdim = offsetsmat.dims();
     // gather data
-    std::vector<TIndex> outDim;
+    std::vector<int64_t> outDim;
     int64_t idx;
     {
       std::lock_guard<std::mutex> lock(cursor->mutex_);
@@ -883,7 +883,7 @@ class ConcatTensorVectorOp final : public Operator<Context> {
     auto* tensor = Output(TENSOR);
     CAFFE_ENFORCE(!tensorVector->empty());
 
-    vector<TIndex> outputDims(tensorVector->at(0).dims());
+    vector<int64_t> outputDims(tensorVector->at(0).dims());
     CAFFE_ENFORCE(outputDims.size() > 0);
     for (int i = 1; i < tensorVector->size(); i++) {
       // the tensor shapes are the same except for the first dimension
@@ -895,7 +895,7 @@ class ConcatTensorVectorOp final : public Operator<Context> {
     }
 
     tensor->Resize(outputDims);
-    TIndex offset = 0;
+    int64_t offset = 0;
     auto* dst = (char*)tensor->raw_mutable_data(tensorVector->at(0).meta());
 
     for (const auto& t : *tensorVector) {
@@ -1428,7 +1428,7 @@ class TreeCursorSerializer : public BlobSerializerBase {
     // serialize offsets as a tensor
     if (cursor->offsets.size() > 0) {
       Blob offsets_blob;
-      auto* offsets = offsets_blob.GetMutableTensor(CPU);
+      auto* offsets = BlobGetMutableTensor(&offsets_blob, CPU);
       offsets->Resize(cursor->offsets.size());
       std::copy(
           cursor->offsets.begin(),

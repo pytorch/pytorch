@@ -158,7 +158,7 @@ bool SoftmaxFocalLossOp<float, CUDAContext>::RunOnDevice() {
 
   losses_.Resize(N * A * H * W);
   P->Resize(N * D * H * W);
-  avg_loss->Resize(vector<TIndex>());
+  avg_loss->Resize(vector<int64_t>());
   math::Set<float, CUDAContext>(
       avg_loss->size(), 0.f, avg_loss->mutable_data<float>(), &context_);
   math::Set<float, CUDAContext>(

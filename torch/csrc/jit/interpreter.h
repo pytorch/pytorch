@@ -6,7 +6,7 @@
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 namespace at {
-  struct Tensor;
+  class Tensor;
 }
 namespace torch { namespace jit {
 

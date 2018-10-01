@@ -75,7 +75,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
 					      algo, ctc_loss_desc.desc(), &workspace_size));
 
 
-  Tensor workspace = log_probs->type().toScalarType(kByte).tensor(workspace_size); // new way of doing this with empty?
+  Tensor workspace = at::empty(workspace_size, log_probs->options().dtype(kByte));
   Tensor costs = at::empty({log_probs->size(1)}, log_probs->options());
 
   AT_CUDNN_CHECK(cudnnCTCLoss(handle, probs_desc.desc(), probs.data_ptr(),

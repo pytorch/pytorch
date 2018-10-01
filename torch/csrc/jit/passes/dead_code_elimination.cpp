@@ -13,12 +13,13 @@ bool hasSideEffects(Node * node, bool_memo_type& memo) {
   auto it = memo.find(node);
   if (it != memo.end())
     return it->second;
-  bool has_side_effects = node->kind() == prim::Print ||
-    std::any_of(node->blocks().begin(), node->blocks().end(),
-                [&](Block *b) {
-                  return std::any_of(b->nodes().begin(), b->nodes().end(),
-                                    [&](Node *n) { return hasSideEffects(n, memo); });
-                });
+  bool has_side_effects =
+      node->kind() == prim::Print || node->kind() == prim::StoreWorld ||
+      std::any_of(node->blocks().begin(), node->blocks().end(), [&](Block* b) {
+        return std::any_of(b->nodes().begin(), b->nodes().end(), [&](Node* n) {
+          return hasSideEffects(n, memo);
+        });
+      });
   memo.emplace(node, has_side_effects);
   return has_side_effects;
 }

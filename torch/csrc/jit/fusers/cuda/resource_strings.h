@@ -18,6 +18,10 @@ typedef long long int int64_t;
 ${HalfHeader}
 ${RandHeader}
 
+#define NAN __int_as_float(0x7fffffff)
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define NEG_INFINITY __int_as_float(0xff800000)
+
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {

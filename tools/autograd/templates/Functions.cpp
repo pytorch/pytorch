@@ -219,7 +219,7 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
 
   Tensor zero_mask = (input == 0);
   Tensor slice_zero_count = zero_mask.sum(dim, true);
-  int64_t total_zeros = slice_zero_count.sum().toCLong();
+  int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
     return (grad * result) / input;
   } else {
@@ -321,7 +321,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   }
 
   // Simple case with nonzero elements in the input
-  if ((input != 0).all().toCByte()) {
+  if ((input != 0).all().item<uint8_t>()) {
     Tensor result = at::cumprod(input, dim);
     return sum_scan_exclusive(result * grad, dim) / input;
   }
@@ -1600,7 +1600,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
 // Invertible case is derived from Jacobi's formula, and also can be found at:
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
-  auto det_val = det.toCDouble();
+  auto det_val = det.item<double>();
   if (det_val != 0 /* invertible */) {
     return grad * det * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
@@ -1612,7 +1612,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
-  auto logdet_val = logdet.toCDouble();
+  auto logdet_val = logdet.item<double>();
   if (logdet_val != -INFINITY /* det != 0, invertible */) {
     return grad * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {
@@ -1628,7 +1628,7 @@ Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
   AT_ASSERTM(!grads[0].defined(), "slogdet's sign output should never have gradient");
-  auto signdet_val = signdet.toCDouble();
+  auto signdet_val = signdet.item<double>();
   if (signdet_val != 0 /* det != 0, invertible */) {
     return grads[1] * self.inverse().t();
   } else /* otherwise det = \prod(sigma) = 0, use svd */ {

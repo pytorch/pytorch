@@ -19,7 +19,7 @@ void PeepholeOptimize(Block * block) {
     auto* node = *it;
 
     for (Block * sub_block : node->blocks()) {
-        PeepholeOptimize(sub_block);
+      PeepholeOptimize(sub_block);
     }
 
     // XXX: remember that if you want to simplify an expression by combining multiple nodes
@@ -41,8 +41,8 @@ void PeepholeOptimize(Block * block) {
       }
     } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
       // x.type_as(y) == x iff x.type() == y.type()
-      auto self_type = node->input(0)->type()->cast<CompleteTensorType>();
-      auto other_type = node->input(1)->type()->cast<CompleteTensorType>();
+      auto self_type = node->input(0)->type()->cast<TensorType>();
+      auto other_type = node->input(1)->type()->cast<TensorType>();
       if (self_type && other_type &&
           self_type->scalarType() == other_type->scalarType() &&
           self_type->device() == other_type->device()) {
@@ -99,6 +99,20 @@ void PeepholeOptimize(Block * block) {
             node->output()->replaceAllUsesWith(addmm_value);
           }
         }
+      }
+    // TODO: this doesn't work with Scalar-Tensor ops! We should canonicalize those
+    } else if (node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*with_const=*/attr::other) ||
+               node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*with_const=*/attr::other)) {
+      // x * 1 == x / 1 == x
+      if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
+        node->output()->replaceAllUsesWith(node->input(0));
+      }
+    } else if (node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor", /*with_const=*/{attr::alpha, attr::other}) ||
+               node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor", /*with_const=*/{attr::alpha, attr::other})) {
+      // x + 0 == x - 0 == x
+      if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
+          node->get<at::Scalar>(attr::other)->toDouble() == 0) {
+        node->output()->replaceAllUsesWith(node->input(0));
       }
     } else if(node->kind() == prim::TensorToNum || node->kind() == prim::ImplicitTensorToNum) {
       Node* input_node = node->input()->node();

@@ -139,7 +139,7 @@ void TensorSerializer::SerializeWithChunkSize(
   // Serialize whole vector. If vector is empty, it's shape still needs to be
   // serialized in empty proto
   for (size_t chunkBegin = 0;
-       chunkBegin < std::max(tensor.size(), static_cast<TIndex>(1));
+       chunkBegin < std::max(tensor.size(), static_cast<int64_t>(1));
        chunkBegin += chunk_size) {
     VLOG(2) << "Starting a chunk at " << chunkBegin;
 #ifndef __ANDROID__
@@ -322,13 +322,13 @@ void TensorSerializer::StoreDeviceDetail(
   input.ExtractDeviceOption(proto->mutable_device_detail());
 }
 // The actual serialization registry objects.
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
     TypeIdentifier,
     BlobSerializerBase,
     std::unique_ptr);
 
-CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
+C10_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
 void DeserializeBlob(const string& content, Blob* result) {
   BlobProto blob_proto;
@@ -363,7 +363,8 @@ void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
   auto tensor_proto = blob_proto.tensor();
   Deserialize(
       tensor_proto,
-      blob->GetMutableTensor(
+      BlobGetMutableTensor(
+          blob,
           static_cast<DeviceType>(tensor_proto.device_detail().device_type())));
 }
 
@@ -374,8 +375,8 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
       tensor->GetStaticContext()->CreateContext(proto.device_detail());
   auto context = uniq_ptr.get();
   context->SwitchToDevice(0);
-  vector<TIndex> dims;
-  for (const TIndex d : proto.dims()) {
+  vector<int64_t> dims;
+  for (const int64_t d : proto.dims()) {
     dims.push_back(d);
   }
   tensor->Resize(dims);

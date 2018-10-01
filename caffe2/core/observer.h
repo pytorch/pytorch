@@ -51,7 +51,7 @@ class Observable {
 
   virtual ~Observable() = default;
 
-  AT_DISABLE_COPY_AND_ASSIGN(Observable);
+  C10_DISABLE_COPY_AND_ASSIGN(Observable);
 
   using Observer = ObserverBase<T>;
 
