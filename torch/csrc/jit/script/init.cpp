@@ -114,9 +114,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     auto schema = getSchema(inputs.size(), n_binders);
 
     std::stringstream failure_messages;
-    at::optional<std::vector<Value*>> all_inputs =
+    at::optional<MatchedSchema> matched_schema =
       tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
-    if (!all_inputs)
+    if (!matched_schema)
       throw ErrorReport(loc) << failure_messages.str();
 
     // Release the function object so we can wrap it in a PythonOp
@@ -125,12 +125,12 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
       THPObjectPtr(func.release().ptr()), cconv, {}));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
-    for(auto &i : *all_inputs)
+    for(auto &i : matched_schema->inputs)
       new_node->addInput(i);
 
     std::vector<Value*> outputs;
-    for(auto & ret_arg : schema.returns) {
-      outputs.push_back(new_node->addOutput()->setType(ret_arg.type));
+    for(auto & ret_arg : matched_schema->return_types) {
+      outputs.push_back(new_node->addOutput()->setType(ret_arg));
     }
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
@@ -371,7 +371,14 @@ void initJitScriptBindings(PyObject* module) {
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
-      .def("save", &Module::save)
+      .def("save", [](std::shared_ptr<Module> m, const std::string& filename) {
+          m->save(filename);
+      })
+      .def("save_to_buffer", [](std::shared_ptr<Module> m) {
+          std::ostringstream buf;
+          m->save(buf);
+          return py::bytes(buf.str());
+      })
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
@@ -534,7 +541,13 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
-  m.def("import_ir_module", import_ir_module);
+  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename) {
+    import_ir_module(module_lookup, filename);
+  });
+  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup, const std::string& buffer) {
+    std::istringstream in(buffer);
+    import_ir_module(module_lookup, in);
+  });
 }
 
 } // namespace script

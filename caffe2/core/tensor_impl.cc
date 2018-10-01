@@ -1,5 +1,4 @@
 #include "caffe2/core/tensor_impl.h"
-
 #include "caffe2/core/flags.h"
 
 CAFFE2_DEFINE_bool(

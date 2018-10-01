@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 #include <numeric>
 
 // Common code that we use regardless of whether we use glog or not.
@@ -12,6 +13,11 @@ CAFFE2_DEFINE_bool(caffe2_use_fatal_for_enforce, false,
                    "of throwing an exception.");
 
 namespace caffe2 {
+namespace enforce_detail {
+/* implicit */ EnforceFailMessage::EnforceFailMessage(std::string&& msg) {
+  msg_ = new std::string(std::move(msg));
+}
+} // namespace enforce_detail
 
 size_t ReplaceAll(string& s, const char* from, const char* to) {
   CAFFE_ENFORCE(from && *from);

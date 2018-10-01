@@ -196,7 +196,7 @@ void TensorSerializer::Serialize(
   const TensorProto::DataType data_type = TypeMetaToDataType(input.meta());
   proto.set_data_type(data_type);
   StoreDeviceDetail(input, &proto);
-  auto uniq_ptr = input.GetStaticContext()->CreateContext();
+  auto uniq_ptr = CreateContext(input.GetDevice());
   // A lot of copypaste is error prone. Should we create a macro for this?
   switch (data_type) {
     case TensorProto_DataType_FLOAT:
@@ -322,13 +322,13 @@ void TensorSerializer::StoreDeviceDetail(
   input.ExtractDeviceOption(proto->mutable_device_detail());
 }
 // The actual serialization registry objects.
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
     TypeIdentifier,
     BlobSerializerBase,
     std::unique_ptr);
 
-CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
+C10_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
 void DeserializeBlob(const string& content, Blob* result) {
   BlobProto blob_proto;
@@ -371,8 +371,7 @@ void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
 void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
   // We create a local context for deserializing. Since Caffe2 contexts are
   // usually lightweight, this should not involve too much overhead.
-  auto uniq_ptr =
-      tensor->GetStaticContext()->CreateContext(proto.device_detail());
+  auto uniq_ptr = CreateContext(OptionToDevice(proto.device_detail()));
   auto context = uniq_ptr.get();
   context->SwitchToDevice(0);
   vector<int64_t> dims;

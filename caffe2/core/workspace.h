@@ -11,8 +11,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/signal_handler.h"

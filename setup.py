@@ -1202,6 +1202,8 @@ if __name__ == '__main__':
                 'lib/include/caffe2/utils/*.h',
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
+                'lib/include/c10/util/*.h',
+                'lib/include/caffe2/core/*.h',
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',

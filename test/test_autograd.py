@@ -1406,6 +1406,7 @@ class TestAutograd(TestCase):
         expected_grad[:2] = grad_output
         self.assertEqual(x.grad.data, expected_grad)
 
+    @skipIfRocm
     def test_ctc_loss(self):
         batch_size = 64
         num_labels = 101

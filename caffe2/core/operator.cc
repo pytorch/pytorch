@@ -316,31 +316,32 @@ std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
   return &g_device_type_registry;
 }
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CPUOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     HIPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
-    const OperatorDef&, const vector<GradientWrapper>&);
+    const OperatorDef&,
+    const vector<GradientWrapper>&);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
@@ -648,7 +649,7 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
           &blob_device);
 
       if (blob_device.device_type() == PROTO_CUDA &&
-          blob_device.cuda_gpu_id() != op_device.cuda_gpu_id()) {
+          blob_device.device_id() != op_device.device_id()) {
         mismatches[blob_name] = std::make_pair(op_device, blob_device);
       } else if (
           blob_device.device_type() == PROTO_HIP &&
