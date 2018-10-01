@@ -85,9 +85,9 @@ int64_t TensorImpl::size(int64_t d) const {
 }
 
 int64_t TensorImpl::stride(int64_t d) const {
-  AT_ASSERT(strides_.size() == sizes_.size(),
-            "Caffe2 tensors don't (yet) have meaningful strides and cannot "
-            "be used in PyTorch.");
+  AT_ASSERTM(strides_.size() == sizes_.size(),
+             "Caffe2 tensors don't (yet) have meaningful strides and cannot "
+             "be used in PyTorch.");
   d = at::maybe_wrap_dim(d, dim(), false);
   return strides_[d];
 }
