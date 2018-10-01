@@ -8,28 +8,35 @@ import subprocess
 import sys
 
 
-DEFAULT_FILE_PATTERN = r".*\.[ch](pp)?"
+DEFAULT_FILE_PATTERN = r".*\.c(c|pp)?"
 
 # @@ -start,count +start,count @@
 CHUNK_PATTERN = r"^@@\s+-\d+,\d+\s+\+(\d+)(?:,(\d+))?\s+@@"
 
 
-def run_shell_command(arguments, process_name=None):
+def run_shell_command(arguments, process_name=None, verbose=False):
     """Executes a shell command."""
     assert len(arguments) > 0
     try:
-        output = subprocess.check_output(arguments, stderr=subprocess.STDOUT)
-    except OSError:
-        _, e, _ = sys.exc_info()
+        if verbose:
+            output = subprocess.check_output(arguments, stderr=subprocess.STDOUT)
+        else:
+            with open(os.devnull, "wb") as devnull:
+                output = subprocess.check_output(arguments, stderr=devnull)
+    except:  # noqa E722
         process_name = process_name or arguments[0]
-        raise RuntimeError("Error executing {}: {}".format(process_name, e))
+        _, error, _ = sys.exc_info()
+        message = "Error executing '{}'".format(process_name)
+        if hasattr(error, "output") and error.output:
+            message += ": {}".format(error.output.decode())
+        raise RuntimeError(message)
     else:
         return output.decode()
 
 
 def normalize_directory_path(path):
     """Normalizes a directory path."""
-    return path.rstrip('/')
+    return path.rstrip("/")
 
 
 def transform_globs_into_regexes(globs):
@@ -66,7 +73,9 @@ def filter_files(files, file_patterns, verbose):
                 has_match = True
         if not has_match and verbose:
             message = "{} does not match any ".format(file)
-            message += "file pattern in {{{}}}".format(', '.join(map(str, file_patterns)))
+            message += "file pattern in {{{}}}".format(
+                ", ".join(map(str, file_patterns))
+            )
             print(message)
     return filtered
 
@@ -81,7 +90,9 @@ def remove_recursive_files(files, paths, verbose):
         else:
             if verbose:
 
-                message = "{} ({}) does not match any ".format(file, os.path.dirname(file))
+                message = "{} ({}) does not match any ".format(
+                    file, os.path.dirname(file)
+                )
                 message += "non-recursive path in {{{}}}".format(", ".join(paths))
                 print(message)
 
@@ -139,19 +150,19 @@ def run_clang_tidy(options, line_filters, files):
         command = [re.sub(r"^([{[].*[]}])$", r"'\1'", arg) for arg in command]
         return " ".join(command)
 
-    return run_shell_command(command)
+    return run_shell_command(command, verbose=options.verbose)
 
 
 def parse_options():
     parser = argparse.ArgumentParser(description="Run Clang-Tidy (on your Git changes)")
     parser.add_argument(
-        "-c",
+        "-e",
         "--clang-tidy-exe",
         default="clang-tidy",
         help="Path to clang-tidy executable",
     )
     parser.add_argument(
-        "-e",
+        "-a",
         "--extra-args",
         nargs="+",
         default=[],
@@ -172,12 +183,14 @@ def parse_options():
         help="File patterns as regular expressions",
     )
     parser.add_argument(
-        "-d",
+        "-c",
         "--compile-commands-dir",
         default=".",
         help="Path to the folder containing compile_commands.json",
     )
-    parser.add_argument("-r", "--revision", help="Git revision to get changes from")
+    parser.add_argument(
+        "-d", "--diff", help="Git revision to diff against to get changes"
+    )
     parser.add_argument(
         "-p",
         "--paths",
@@ -211,8 +224,8 @@ def parse_options():
 def main():
     options = parse_options()
     paths = list(map(normalize_directory_path, options.paths))
-    if options.revision:
-        files = get_changed_files(options.revision, paths, options.verbose)
+    if options.diff:
+        files = get_changed_files(options.diff, paths, options.verbose)
     else:
         files = get_all_files(paths)
     if options.no_recursive:
@@ -226,14 +239,19 @@ def main():
         sys.exit()
 
     line_filters = []
-    if options.revision:
+    if options.diff:
         for filename in files:
-            changed_lines = get_changed_lines(
-                options.revision, filename, options.verbose
-            )
+            changed_lines = get_changed_lines(options.diff, filename, options.verbose)
             line_filters.append(changed_lines)
 
-    print(run_clang_tidy(options, line_filters, files))
+    try:
+        print(run_clang_tidy(options, line_filters, files))
+    except RuntimeError:
+        _, error, _ = sys.exc_info()
+        if options.verbose:
+            raise
+        print(error)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
