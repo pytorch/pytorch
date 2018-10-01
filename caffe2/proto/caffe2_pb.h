@@ -1,5 +1,5 @@
 #pragma once
-#include <ATen/core/DeviceType.h>
+#include <ATen/core/Device.h>
 #include <ATen/core/Error.h>
 #include <caffe2/proto/caffe2.pb.h>
 
@@ -47,6 +47,10 @@ inline CAFFE2_API DeviceType ProtoToType(const caffe2::DeviceTypeProto p) {
   }
 }
 
+inline CAFFE2_API DeviceType ProtoToType(int p) {
+  return ProtoToType(static_cast<caffe2::DeviceTypeProto>(p));
+}
+
 inline CAFFE2_API DeviceTypeProto TypeToProto(const DeviceType& t) {
   switch (t) {
     case DeviceType::CPU:
@@ -75,6 +79,19 @@ inline CAFFE2_API DeviceTypeProto TypeToProto(const DeviceType& t) {
           "device type, did you forget to update the ProtoToType() and TypeToProto"
           "function to reflect such recent changes?");
   }
+}
+
+inline CAFFE2_API caffe2::DeviceOption DeviceToOption(
+    const at::Device& device) {
+  caffe2::DeviceOption option;
+  auto type = device.type();
+  option.set_device_type(TypeToProto(type));
+  option.set_device_id(device.index());
+  return option;
+}
+
+inline CAFFE2_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
+  return at::Device(ProtoToType(option.device_type()), option.device_id());
 }
 
 } // namespace caffe2

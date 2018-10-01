@@ -365,6 +365,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return storage_.device_type();
   }
 
+  at::Device GetDevice() const {
+    return storage_.device();
+  }
+
   /**
    * The static context of a tensor intuitively represents the device
    * type of a tensor; e.g., a CPU tensor is associated with the
@@ -374,18 +378,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   at::BaseStaticContext* GetStaticContext() const {
     return ::caffe2::get_static_context(device_type());
-  }
-
-  /* @brief
-   * Create a context that has the same device_type
-   * as the tensor.
-   * Note that this doesn't support passing in argument
-   * TODO(jerryzh): move this to a global registry
-   * that can create context for us, and then eliminate
-   * this method.
-   */
-  std::unique_ptr<at::BaseContext> CreateContext() const {
-    return GetStaticContext()->CreateContext();
   }
 
   /**
@@ -429,8 +421,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // knows how to copy between CPU and that context
         if (src.device_type() != ::at::DeviceType::CPU || device_type() == ::at::DeviceType::CPU) {
           if (!context) {
-            src.CreateContext()->CopyBytesToDevice(
-                numel() * itemsize(), src.data(), raw_mutable_data(data_type_), device_type());
+            CreateContext(src.GetDevice())
+                ->CopyBytesToDevice(
+                    numel() * itemsize(),
+                    src.data(),
+                    raw_mutable_data(data_type_),
+                    device_type());
           } else {
             CAFFE_ENFORCE(
                 context->device_type() == src.device_type(),
@@ -442,8 +438,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
           // In case source context is CPU, and target context is non-CPU
           // We'll have to create a Context from target and perform the
           // copy using that context
-          CreateContext()->CopyBytesFromCPU(
-              numel() * itemsize(), src.data(), raw_mutable_data(data_type_));
+          CreateContext(GetDevice())
+              ->CopyBytesFromCPU(
+                  numel() * itemsize(),
+                  src.data(),
+                  raw_mutable_data(data_type_));
         }
       }
     }
