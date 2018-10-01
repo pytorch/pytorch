@@ -26,20 +26,11 @@ void printValueRef(std::ostream & out, const Value * n) {
   out << "%" << n->uniqueName();
 }
 
+// NB: This overload will become ambiguous with the one Caffe2 provides in its
+// logging, if they ever intersect.
 template <typename T>
 std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
   out << at::ArrayRef<T>{nodes};
-  return out;
-}
-
-template <typename T>
-std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
-  size_t i = 0;
-  for(auto n : nodes) {
-    if(i++ > 0)
-      out << ", ";
-    printValueRef(out, n);
-  }
   return out;
 }
 
