@@ -282,13 +282,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   virtual void set_size(int64_t dim, int64_t new_size) {
-    sizes_[dim] = new_size;
+    sizes_.at(dim) = new_size;
     refresh_numel();
     refresh_contiguous();
   }
 
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    strides_[dim] = new_stride;
+    strides_.at(dim) = new_stride;
     refresh_numel();
     refresh_contiguous();
   }
@@ -864,14 +864,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   inline void update_to_contiguous_strides() {
-    strides_.resize(sizes_.size());
-    if (dim() > 0) {
-      int last_idx = dim() - 1;
-      strides_[last_idx] = 1;
-      for (auto i = last_idx - 1; i >= 0; --i) {
-        strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
-      }
-    }
+    strides_.resize(0);
     is_contiguous_ = true;
   }
 
