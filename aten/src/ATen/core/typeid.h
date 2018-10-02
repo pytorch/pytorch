@@ -17,8 +17,8 @@
 
 #include <exception>
 
+#include "c10/util/C++17.h"
 #include "ATen/core/Backtrace.h"
-#include "ATen/core/C++17.h"
 #include "ATen/core/Error.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/IdWrapper.h"

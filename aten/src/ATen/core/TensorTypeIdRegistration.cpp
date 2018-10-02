@@ -1,5 +1,5 @@
+#include <c10/util/C++17.h>
 #include <ATen/core/TensorTypeIdRegistration.h>
-#include <ATen/core/C++17.h>
 #include <ATen/core/Error.h>
 
 namespace at {

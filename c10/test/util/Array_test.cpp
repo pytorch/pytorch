@@ -1,4 +1,4 @@
-#include "caffe2/utils/Array.h"
+#include <c10/util/Array.h>
 #include <gtest/gtest.h>
 
 using c10::guts::array;
