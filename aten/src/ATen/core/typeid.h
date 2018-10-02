@@ -18,6 +18,7 @@
 #include <exception>
 
 #include "c10/util/C++17.h"
+#include "c10/util/Metaprogramming.h"
 #include "ATen/core/Backtrace.h"
 #include "ATen/core/Error.h"
 #include "ATen/core/Half.h"
@@ -149,32 +150,18 @@ inline void _CtorNotDefault(void* /*ptr*/, size_t /*n*/) {
       " is not default-constructible.");
 }
 
-template<
-    typename T,
-    c10::guts::enable_if_t<
-        std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
-inline constexpr TypeMetaData::PlacementNew* _PickCtor() {
-  return nullptr;
-}
-
-template <
-    typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        std::is_default_constructible<T>::value
-    >* = nullptr>
-inline constexpr TypeMetaData::PlacementNew* _PickCtor() {
-  return &_Ctor<T>;
-}
-
-template <
-    typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        !std::is_default_constructible<T>::value
-    >* = nullptr>
-inline constexpr TypeMetaData::PlacementNew* _PickCtor() {
-  return &_CtorNotDefault<T>;
+template<class T>
+inline constexpr TypeMetaData::PlacementNew* _PickCtor() noexcept {
+  using c10::guts::if_constexpr;
+  return if_constexpr<std::is_fundamental<T>::value || std::is_pointer<T>::value>(
+     /* then */ [](auto _) { return nullptr; },
+     /* else */ [](auto _) {
+         return if_constexpr<std::is_default_constructible<T>::value>(
+           /* then */ [](auto _) { return &_Ctor<T>; },
+           /* else */ [](auto _) { return &_CtorNotDefault<T>; }
+         );
+       }
+  );
 }
 
 /**
@@ -199,32 +186,18 @@ inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
       " does not allow assignment.");
 }
 
-template<
-    typename T,
-    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
-    >
-inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
-  return nullptr;
-}
-
-template <
-    typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        std::is_copy_assignable<T>::value
-    >* = nullptr>
-inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
-  return &_Copy<T>;
-}
-
-template <
-    typename T,
-    c10::guts::enable_if_t<
-        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-        !std::is_copy_assignable<T>::value
-    >* = nullptr>
-inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
-  return &_CopyNotAllowed<T>;
+template<class T>
+inline constexpr TypeMetaData::TypedCopy* _PickCopy() noexcept {
+  using c10::guts::if_constexpr;
+  return if_constexpr<std::is_fundamental<T>::value || std::is_pointer<T>::value>(
+     /* then */ [](auto _) { return nullptr; },
+     /* else */ [](auto _) {
+         return if_constexpr<std::is_copy_assignable<T>::value>(
+           /* then */ [](auto _) { return &_Copy<T>; },
+           /* else */ [](auto _) { return &_CopyNotAllowed<T>; }
+         );
+       }
+  );
 }
 
 /**
@@ -238,20 +211,13 @@ inline void _Dtor(void* ptr, size_t n) {
   }
 }
 
-template<
-    typename T,
-    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
-    >
-inline constexpr TypeMetaData::TypedDestructor* _PickDtor() {
-  return nullptr;
-}
-
-template<
-    typename T,
-    c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr
-    >
-inline constexpr TypeMetaData::TypedDestructor* _PickDtor() {
-  return &_Dtor<T>;
+template<class T>
+inline constexpr TypeMetaData::TypedDestructor* _PickDtor() noexcept {
+  using c10::guts::if_constexpr;
+  return if_constexpr<std::is_fundamental<T>::value || std::is_pointer<T>::value>(
+    /* then */ [](auto _) { return nullptr; },
+    /* else */ [](auto _) { return &_Dtor<T>; }
+  );
 }
 
 template <class T>
