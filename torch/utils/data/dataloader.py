@@ -571,17 +571,10 @@ class _DataLoaderIter(object):
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
             self.done_event.set()
-            for q in self.index_queues:
-                q.put(None)
-                # Indicate that no more data will be put on this queue by the
-                # current process.
-                q.close()
-                # Join the background thread. Can only be called after close().
-                # This makes sure that the `None` is sent.
-                q.join_thread()
-            for w in self.workers:
-                w.join()
             if hasattr(self, 'pin_memory_thread'):
+                # This writes to `worker_result_queue` so it must be done first
+                # before exiting worker, which may corrupt data in
+                # `worker_result_queue`.
                 # Use hasattr in case error happens before we set the attribute.
                 self.worker_result_queue.put(None)
                 self.worker_result_queue.close()
@@ -594,6 +587,16 @@ class _DataLoaderIter(object):
                     self.data_queue.get()
                     self.data_queue.task_done()
                 self.data_queue.join()
+            for q in self.index_queues:
+                q.put(None)
+                # Indicate that no more data will be put on this queue by the
+                # current process.
+                q.close()
+                # Join the background thread. Can only be called after close().
+                # This makes sure that the `None` is sent.
+                q.join_thread()
+            for w in self.workers:
+                w.join()
 
     def __del__(self):
         if self.num_workers > 0:
