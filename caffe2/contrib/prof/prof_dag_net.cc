@@ -33,9 +33,9 @@ void ProfDAGNet::ValidateOpTensorDevices() {
       had_mismatches = true;
       LOG(INFO) << "== PERFORMANCE WARNING == \n"
                 << " Operator " << node.operator_->debug_def().type()
-                << " expects GPU " << mismatch.second.first.device_id()
+                << " expects GPU " << mismatch.second.first.cuda_gpu_id()
                 << " but tensor [" << mismatch.first << "] is on GPU "
-                << mismatch.second.second.device_id();
+                << mismatch.second.second.cuda_gpu_id();
     }
   }
   if (!had_mismatches) {
