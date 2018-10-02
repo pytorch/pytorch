@@ -313,7 +313,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (old_dim != sizes_.size()) {
       strides_.reset(new int64_t[sizes_.size()]);
     }
-    for (int64_t i = 0; i < sizes_.size(); i++) {
+    for (size_t i = 0; i < sizes_.size(); i++) {
       strides_[i] = new_stride[i];
     }
     refresh_numel();
