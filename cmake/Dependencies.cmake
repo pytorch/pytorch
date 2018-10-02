@@ -136,11 +136,7 @@ list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 # ---[ gflags
 if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
-  if (TARGET gflags)
-    set(CAFFE2_USE_GFLAGS 1)
-    include_directories(SYSTEM ${GFLAGS_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS gflags)
-  else()
+  if (NOT TARGET gflags)
     message(WARNING
         "gflags is not found. Caffe2 will build without gflags support but "
         "it is strongly recommended that you install gflags. Suppress this "

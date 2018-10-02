@@ -16,7 +16,7 @@
 #include "ATen/core/ATenCoreTest.h"
 #include "ATen/core/ArrayRef.h"
 
-CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
+C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {
 
@@ -187,7 +187,7 @@ class CAFFE2_API CPUStaticContext : public BaseStaticContext {
  public:
   std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
     auto data_and_deleter = GetCPUAllocator()->New(nbytes);
-    if (FLAGS_caffe2_report_cpu_memory_usage) {
+    if (c10::FLAGS_caffe2_report_cpu_memory_usage) {
       reporter_.New(data_and_deleter.first, nbytes);
       data_and_deleter.second = ReportAndDelete;
     }

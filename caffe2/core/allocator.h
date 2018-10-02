@@ -7,8 +7,8 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/numa.h"
 
-CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
-CAFFE2_DECLARE_bool(caffe2_cpu_allocator_do_zero_fill);
+C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
+C10_DECLARE_bool(caffe2_cpu_allocator_do_zero_fill);
 
 namespace caffe2 {
 
@@ -57,7 +57,7 @@ struct CAFFE2_API DefaultCPUAllocator final : CPUAllocator {
     CAFFE_ENFORCE(data);
     // move data to a thread's NUMA node
     NUMAMove(data, nbytes, GetCurrentNUMANode());
-    if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
+    if (c10::FLAGS_caffe2_cpu_allocator_do_zero_fill) {
       memset(data, 0, nbytes);
     }
     return {data, Delete};
