@@ -5208,9 +5208,10 @@ Args:
 
 Example::
 
-    >>> torch.empty((2,3), dtype=torch.int64)
-    tensor([[ 9.4064e+13,  2.8000e+01,  9.3493e+13],
-            [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
+    >>> x = torch.randn(2, 3, dtype=torch.double, device=torch.device('cuda'))
+    >>> torch.empty_like(x)
+    tensor([[0., 0., 0.],
+            [0., 0., 0.]], device='cuda:0', dtype=torch.float64)
 """.format(**factory_like_common_args))
 
 add_docstr(torch.full,
