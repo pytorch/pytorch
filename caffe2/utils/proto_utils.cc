@@ -2,6 +2,8 @@
 
 #include <ATen/core/DeviceType.h>
 
+#include <regex>
+
 #include <fcntl.h>
 #include <cerrno>
 #include <fstream>
@@ -149,7 +151,8 @@ using ::google::protobuf::Message;
 
 namespace TextFormat {
 C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
-  return ::google::protobuf::TextFormat::ParseFromString(spec, proto);
+  return ::google::protobuf::TextFormat::ParseFromString(
+      std::regex_replace(spec, std::regex("cuda_gpu_id"), "device_id"), proto);
 }
 } // namespace TextFormat
 
