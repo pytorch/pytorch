@@ -66,6 +66,8 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   int getParentCount(int child_id);
   bool testAndSetScheduled(int task_id);
   int numOps(int task_id) const;
+  const OperatorBase* firstTaskOp(int task_id) const;
+  const OperatorBase* lastTaskOp(int task_id) const;
 
   void asyncWait(
       int task_id,

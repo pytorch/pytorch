@@ -285,6 +285,16 @@ int AsyncNetBase::numOps(int task_id) const {
   return chains_[task_id].size();
 }
 
+const OperatorBase* AsyncNetBase::firstTaskOp(int task_id) const {
+  auto op_id = chains_[task_id].front();
+  return operator_nodes_[op_id].operator_.get();
+}
+
+const OperatorBase* AsyncNetBase::lastTaskOp(int task_id) const {
+  auto op_id = chains_[task_id].back();
+  return operator_nodes_[op_id].operator_.get();
+}
+
 void AsyncNetBase::asyncWait(
     int task_id,
     int stream_id,
