@@ -530,6 +530,8 @@ class _DataLoaderIter(object):
         else:
             batch = self.data_queue.get()
         if self.pin_memory:
+            # In this case, `self.data_queue` is a `queue.Queue`, which needs us
+            # calling `.task_done()`.
             self.data_queue.task_done()
         return batch
 
@@ -628,6 +630,8 @@ class _DataLoaderIter(object):
                 # `pin_memory_thread`)
                 while not self.data_queue.empty():
                     self.data_queue.get()
+                    # In this case, `self.data_queue` is a `queue.Queue`, which
+                    # needs us calling `.task_done()`.
                     self.data_queue.task_done()
                 self.data_queue.join()
 
