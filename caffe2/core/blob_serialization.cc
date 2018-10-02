@@ -309,12 +309,6 @@ void TensorSerializer::Serialize(
         proto.add_string_data(SerializeBlob(temp_blob, ""));
       }
     } break;
-    case TensorProto_DataType_SPECIAL: {
-      CAFFE_THROW("SPECIAL Tensor is not handled yet.");
-    } break;
-    case TensorProto_DataType_NO_CONTENT: {
-      CAFFE_THROW("NO_CONTENT Tensor should not be serialized.");
-    } break;
       // Note: we intentially do not provide "default:" so if any new data types
       // are added, the compiler should warn the user to add the case here.
   }
@@ -526,14 +520,7 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
                 (i + chunkBegin) * temp_blob.meta().itemsize(),
             1);
       }
-    } break;
-    case TensorProto_DataType_SPECIAL: {
-      CAFFE_THROW("SPECIAL Tensor is not handled yet.");
-    } break;
-    case TensorProto_DataType_NO_CONTENT: {
-      CAFFE_THROW("NO_CONTENT Tensor should not be deserialized.");
-    } break;
-      // Note: we intentially do not provide "default:" so if any new data types
+    }
   }
   context->FinishDeviceComputation();
 }
