@@ -93,6 +93,9 @@ else:
 
 
 def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
+    # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
+    # logic of this function.
+
     try:
         global _use_shared_memory
         _use_shared_memory = True
@@ -119,14 +122,11 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
                 r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
             except queue.Empty:
                 continue
-            # If `done_event` is set, keep getting until we reach `None` (i.e.,
-            # meaning last element).
-            # See NOTE [ Shutdown Data Loader Workers ] below for details.
             if r is None:
                 assert done_event.is_set()
                 break
-            # elif done_event.is_set():
-            #     break
+            elif done_event.is_set():
+                break
             idx, batch_indices = r
             try:
                 samples = collate_fn([dataset[i] for i in batch_indices])
@@ -145,6 +145,8 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
     torch.cuda.set_device(device_id)
 
+    # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
+    # logic of this function.
     while not done_event.is_set():
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
@@ -152,12 +154,13 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
             continue
         except Exception:
             if done_event.is_set():
+                # Weird things can happen when shutting down, e.g., fd being
+                # closed when tensors are shared via fds.
                 break
             raise
-        # When `in_queue` gives a `None`, we know that 1 worker has ended. When
-        # we see all `num_workers` `None`s, exit this thread.
-        # See NOTE [ Shutdown Data Loader Workers ] below for details.
         if r is None:
+            break
+        elif done_event.is_set():
             break
         elif isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
@@ -277,22 +280,23 @@ class _DataLoaderIter(object):
     #
     # Our data model looks like this (queues are indicated with curly brackets):
     #
-    #              main process                                ||
-    #                   |                                      ||
-    #             {index_queue}                                ||
-    #                   |                                      ||
-    #            worker processes                              ||     DATA
-    #                   |                                      ||
-    #          {worker_result_queue}                           ||     FLOW
-    #                   |                                      ||
-    #    pin_memory_thread of main process                     ||   DIRECTION
-    #                   |                                      ||
-    #             {data_queue}                                 ||
-    #                   |                                      ||
-    #              data output                                 \/
+    #                main process                              ||
+    #                     |                                    ||
+    #               {index_queue}                              ||
+    #                     |                                    ||
+    #              worker processes                            ||     DATA
+    #                     |                                    ||
+    #            {worker_result_queue}                         ||     FLOW
+    #                     |                                    ||
+    #      pin_memory_thread of main process                   ||   DIRECTION
+    #                     |                                    ||
+    #               {data_queue}                               ||
+    #                     |                                    ||
+    #                data output                               \/
     #
     # P.S. `worker_result_queue` and `pin_memory_thread` part may be omitted if
     #      `pin_memory=False`.
+    #
     #
     #
     # Terminating multiprocessing logic requires very careful design. In
@@ -311,10 +315,10 @@ class _DataLoaderIter(object):
     #
     #   2. The iterator exits the workers when the problem ends
     #
-    #      We set all workers and pin_memory_thread to have daemon=True. Doing
-    #      so means that when the program ends, it shuts the workers down with a
-    #      SIGTERM. pin_memory_thread will exit too, but by a different
-    #      mechanic.
+    #      We set all workers and `pin_memory_thread` to have `daemon=True`.
+    #      Doing so means that when the program ends, it shuts the workers down
+    #      with a SIGTERM. `pin_memory_thread` will exit too, but by a different
+    #      mechanism.
     #
     #      You may ask, why don't we just not set the workers as daemonic, and
     #      gracefully exit using the same logic as we have in `__del__` when the
@@ -333,9 +337,10 @@ class _DataLoaderIter(object):
     #      In `_exit_function`, Python joins all non-daemonic subprocesses of
     #      this process (which is a subprocess of a Python process itself), and
     #      sends SIGTERM to the daemonic ones. Therefore, if a DataLoader is
-    #      used in a subprocess, and an error is raised containing frames that
-    #      references the DataLoaderIter (Python exception traces keeps object
-    #      in relevant frames alive), workers will be joined `_exit_function`
+    #      used in a subprocess (i.e., used in `user_provided_function` above),
+    #      and an error is raised containing frames that references the
+    #      DataLoaderIter (Python exception traces keeps local objects in
+    #      relevant frames alive), workers will be joined in `_exit_function`
     #      before the `__del__` is called (which starts the shutdown logic). And
     #      unfortunately the DataLoaderIter process will hang. E.g., such errors
     #      can be timeout, or arbitrary error if users hold a reference to an
@@ -343,14 +348,14 @@ class _DataLoaderIter(object):
     #
     #      For context, `_exit_function` is also registered as an `atexit` call.
     #      So I really don't understand the need to do this in a finally block
-    #      The code dates back to 2008 and there is not comment on the original
+    #      The code dates back to 2008 and there is no comment on the original
     #      PEP 371 or patch https://bugs.python.org/issue3050 (containing both
     #      the finally block and the `atexit` registration) that explains this.
     #
     #      Another choice is to just shutdown workers with logic in 1 above
     #      whenever we see an error in `next`. This isn't ideal because
-    #        1. It prevents users from using try-catch to resume data loading.
-    #        2. It doesn't prevent hanging if users have references to the
+    #        a. It prevents users from using try-catch to resume data loading.
+    #        b. It doesn't prevent hanging if users have references to the
     #           iterator.
     #
     #   3. All processes exit if any of them die unexpectedly (e.g., SIGKILL).
@@ -361,34 +366,41 @@ class _DataLoaderIter(object):
     #      must ensure that each process will exit even the process that should
     #      send/receive data to/from it were killed, i.e.,
     #
-    #        + A process won't hang when putting into a queue;
+    #        a. A process won't hang when putting into a queue;
     #
-    #          We use `mp.Queue` which has a separate background thread to put
-    #          objects. The background thread is usually automatically joined
-    #          when the process exits.
+    #           We use `mp.Queue` which has a separate background thread to put
+    #           objects. The background thread is usually automatically joined
+    #           when the process exits.
     #
-    #          However, in case that the receiver has ended abruptly, the join
-    #          will hang forever. Therefore,
-    #            a. for workers that send data to main process, we use
-    #               `data_queue.cancel_join_thread()` to prevent this automatic
-    #               join. Note that this may leave corrupted data in the queue,
-    #               but we don't want those data anyways once we are stopping
-    #               the workers.
-    #            b. for main process that sends indices to workers, when
-    #               cleaning up the workers, we guard the final `worker.join()`
-    #               with a timeout and worker status check, and call
-    #               `index_queue.cancel.join_thread()` afterwards in case that
-    #               the worker died before reading and the queue is full.
+    #           However, in case that the receiver has ended abruptly, the join
+    #           will hang forever. Therefore,
+    #             i.  for workers that send data to main process, we use
+    #                 `data_queue.cancel_join_thread()` to prevent this
+    #                 automatic join. Note that this may leave corrupted data in
+    #                 the queue, but we don't want those data anyways once we
+    #                 are stopping the workers.
+    #             ii. for main process that sends indices to workers, when
+    #                 cleaning up the workers, we guard the final
+    #                 `worker.join()` with a timeout and worker status check,
+    #                 and call `index_queue.cancel_join_thread()` afterwards in
+    #                 case that the worker died before reading and the queue is
+    #                 full.
     #
-    #        + A process won't hang when getting from a queue.
+    #        b. A process won't hang when getting from a queue.
     #
-    #          Even with carefully designed data dependencies (i.e., a `put()`
-    #          always corresponding to a `get()`), hanging on `get()` can still
-    #          happen when data in queue is corrupted (e.g., due to
-    #          `cancel_join_thread` or unexpected exit). Therefore, we need to
-    #          guard all the `.get()` calls with timeouts, and check the status
-    #          of the sender when timeout happens. E.g., in the workers, the
-    #          `ManagerWatchdog` class is used to check main process status.
+    #           Even with carefully designed data dependencies (i.e., a `put()`
+    #           always corresponding to a `get()`), hanging on `get()` can still
+    #           happen when data in queue is corrupted (e.g., due to
+    #           `cancel_join_thread` or unexpected exit).
+    #
+    #           For child exit, we register SIGCHLD handler on main process,
+    #           and checks if any of the workers fail in the (Python) handler.
+    #           See DataLoader.cpp.
+    #
+    #           For other `.get()` calls, we guard them with timeouts, and check
+    #           the status of the sender when timeout happens. E.g., in the
+    #           workers, the `ManagerWatchdog` class is used to check main
+    #           process status.
     #
     #
     # Now let's get back to 1:
@@ -398,51 +410,41 @@ class _DataLoaderIter(object):
     # To achieve this, we implement the following logic in the DataLoaderIter's
     # `__del__` (compatible with the other designs above):
     #
-    # It is important to terminate threads/processes in the order of data flow.
-    # If we terminate a consumer of a queue before the sender, the sender may be
-    # stuck in `.put()`. You may say that we can use the `cancel_join_thread`
-    # method on `multiprocessing.Queue` in sender so it won't try to join the
-    # putting thread when it exits. However, this
-    #     1. requires a separate mechanism to signal the termination to the
-    #        sender;
-    #     2. may leave corrupted data in the queue, so the consumer may get
-    #        stuck in `get()` until timeout happens (see 3 above), and thus
-    #        slows down shutdown.
+    # Note: Certain timeout+status check mechanisms on  `join()` and `get()`
+    #       that are already discussed above are omitted for simplicity.
     #
-    # Therefore, when shutdown happens, following the data flow, we
-    #  1. [main process]
-    #     i.   Set `done_event` (shared with workers and `pin_memory_thread`)
-    #     ii.  Put `None` in each `index_queue` to signal the workers.
-    # Join the putting threads
-    #          of these queues to ensure that the `None` are sent over to
-    #          workers.
-    #     iii. Join the `pin_memory_thread`. (i.e., block until after step
-    #          3 below)
-    #     iv.  Join the workers. (i.e., block until after step 2 below)
+    #  [main process]
+    #     a. Set `done_event` (shared with workers and `pin_memory_thread`)
+    #     b. Put `None` in  `worker_result_queue`, and join the putting thread
+    #        of `worker_result_queue` to ensure that it is put.
+    #     c. For each worker,
+    #          i.   put `None` in its `index_queue` to signal shutting down;
+    #          ii.  join the worker;
+    #          iii. `index_queue.cancel_join_thread()` in case that the worker
+    #               exited without reading and the queue is full.
+    #        This **must** be after (b) because it may leave corrupted data in
+    #        `worker_result_queue` (see 3/a/i above).
+    #     d. Join the `pin_memory_thread`.
+    #     e. To prevent hanging of the putting thread of `data_queue` used by
+    #        `pin_memory_thread`, keep getting from `data_queue` until it is
+    #        empty. Note that `data_queue.empty` is accurate now since the
+    #        putter `pin_memory_thread` has ended.
     #
-    #  2. [each worker process]
-    #     In `index_queue.get()` ,
-    #       + if failes with timeout,
-    #         check main process status via `ManagerWatchdog`,
-    #           - if main process is dead, simply exit
-    #           - otherwise, go to next `get()`.
-    #       + if gets `None`, put `(None, worker_id)` to `worker_result_queue`.
+    #  [each worker process]
+    #     In `index_queue.get()` of the worker loop, if it returns `None` or
+    #     `done_event.is_set()`, exit the loop and the process.
     #
-    #  3. [pin_memory_thread]
-    #     i.  Call `cancel_join_thread()` on the output queue because we
-    #         don't want to wait for putting and only
-    #     ii. Upon seeing the 1st `None` from `worker_result_queue`, keep
-    #         getting from it until seeing all `num_workers` number of
-    #         `None`s.
+    #  [pin_memory_thread]
+    #     If `worker_result_queue.get()` in the loop returns `None`or
+    #     `done_event.is_set()`, exit the loop and the thread.
     #
-    # NB: If we don't have `pin_memory_thread`, then the the step 3 above
-    #     is instead done in [main process], and must be done before step
-    #     1/iv so that workers won't be waiting for `.put(None)`.
+    # NB: If `pin_memory=False`, there is no `pin_memory_thread` and steps (b),
+    #     (d) and (e) in [main process] can be omitted
     #
-    # NB: `done_event` isn't strictly needed. E.g., in step 2 above we can
-    #     just check for `None` from `index_queue`, but it allows us to skip
-    #     wasting resources processing indices already in `index_queue` if
-    #     we are already shutting down.
+    # NB: `done_event` isn't strictly needed for worker exit. E.g., we can just
+    #     check for `None` from `index_queue`, but it allows us to skip wasting
+    #     resources processing indices already in `index_queue` if we are
+    #     already shutting down.
 
     def __init__(self, loader):
         self.dataset = loader.dataset
@@ -589,9 +591,11 @@ class _DataLoaderIter(object):
         raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
+        # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on
+        # the logic of this function.
         if not self.shutdown:
             self.shutdown = True
-            # removes pids from the C side data structure first so worker
+            # Removes pids from the C side data structure first so worker
             # termination afterwards won't trigger false positive error report.
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))

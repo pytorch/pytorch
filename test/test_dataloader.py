@@ -686,7 +686,7 @@ class TestDataLoader(TestCase):
                     if not all(exit_status):
                         self.fail('subprocess (pid(s) {}) not terminated'.format(
                             ', '.join(p for p, exited in zip(pids, exit_status) if not exited)))
-                    p.join(JOIN_TIMEOUT)
+                    p.join(JOIN_TIMEOUT + MP_STATUS_CHECK_INTERVAL)
                     self.assertFalse(p.is_alive(), 'loader process not terminated')
                     if exit_method is None:
                         self.assertEqual(p.exitcode, 0)
