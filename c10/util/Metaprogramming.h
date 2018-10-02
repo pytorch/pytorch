@@ -156,4 +156,64 @@ template<class ResultType, template <class> class Condition, class Mapper, class
   return detail::filter_map_<ResultType, num_results>::template call<Condition, Mapper, Args...>(mapper, guts::make_index_sequence<num_results>(), std::forward<Args>(args)...);
 }
 
+
+/*
+* Get something like c++17 if constexpr in earlier c++ versions.
+*
+* Usage:
+*   template <class T>
+*   int func(T t) {
+*     return if_constexpr<std::is_same<T, MyClass1>::value>(
+*       [&](auto _) { return _(t).value; }, // this code is invalid for T == MyClass2
+*       [&](auto _) { return _(t).val; }    // this code is invalid for T == MyClass1
+*     );
+*   }
+* Note: The _ argument passed in is the identity function, i.e. it does nothing.
+*       It is used to force the compiler to delay type checking, because the compiler
+*       doesn't know what kind of _ is passed in. Without it, the compiler would fail
+*       when you try to access t.value but the member doesn't exist.
+*/
+
+namespace details {
+
+struct _identity final {
+  template <class T>
+  using type = T;
+
+  template <class T>
+  decltype(auto) operator()(T&& arg) {
+    return std::forward<T>(arg);
+  }
+};
+
+template <bool Condition>
+struct _if_constexpr;
+
+template <>
+struct _if_constexpr<true> final {
+template <class ThenCallback, class ElseCallback>
+static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+  // The _identity instance passed in can be used to delay evaluation of an expression,
+  // because the compiler can't know that it's just the identity we're passing in.
+  return thenCallback(_identity());
+}
+};
+
+template <>
+struct _if_constexpr<false> final {
+template <class ThenCallback, class ElseCallback>
+static decltype(auto) call(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+  // The _identity instance passed in can be used to delay evaluation of an expression,
+  // because the compiler can't know that it's just the identity we're passing in.
+  return elseCallback(_identity());
+}
+};
+} // namespace details
+
+template <bool Condition, class ThenCallback, class ElseCallback>
+decltype(auto) if_constexpr(ThenCallback&& thenCallback, ElseCallback&& elseCallback) {
+return details::_if_constexpr<Condition>::call(std::forward<ThenCallback>(thenCallback),
+                                               std::forward<ElseCallback>(elseCallback));
+}
+
 }}

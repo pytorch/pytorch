@@ -214,4 +214,58 @@ namespace test_filter_map {
     }
 }
 
+namespace if_constexpr_test {
+
+TEST(MetaprogrammingTest, ifConstexpr_whenIsTrue_thenReturnsTrueCase) {
+  EXPECT_EQ(4, if_constexpr<true>([](auto) { return 4; }, [](auto) { return 5; }));
+}
+
+TEST(MetaprogrammingTest, ifConstexpr_whenIsFalse_thenReturnsFalseCase) {
+  EXPECT_EQ(5, if_constexpr<false>([](auto) { return 4; }, [](auto) { return 5; }));
+}
+
+struct MovableOnly final {
+  int value;
+
+  MovableOnly(int v) : value(v) {}
+  MovableOnly(MovableOnly&&) = default;
+  MovableOnly(const MovableOnly&) = delete;
+  MovableOnly& operator=(MovableOnly&&) = default;
+  MovableOnly& operator=(const MovableOnly&) = delete;
+};
+
+TEST(MetaprogrammingTest, ifConstexpr_worksWithMovableOnlyTypes) {
+  EXPECT_EQ(
+      4,
+      if_constexpr<true>([](auto) { return MovableOnly(4); }, [](auto) { return MovableOnly(5); })
+          .value);
+  EXPECT_EQ(
+      5,
+      if_constexpr<false>([](auto) { return MovableOnly(4); }, [](auto) { return MovableOnly(5); })
+          .value);
+}
+
+struct MyClass1 {
+  int value;
+};
+
+struct MyClass2 {
+  int val;
+};
+
+template <class T>
+int func(T t) {
+  return if_constexpr<std::is_same<T, MyClass1>::value>(
+      [&](auto _) { return _(t).value; }, // this code is invalid for T == MyClass2
+      [&](auto _) { return _(t).val; }    // this code is invalid for T == MyClass1
+  );
+}
+
+TEST(MetaprogrammingTest, ifConstexpr_otherCaseCanHaveInvalidCode) {
+  EXPECT_EQ(8, func(MyClass1{.value = 8}));
+  EXPECT_EQ(4, func(MyClass2{.val = 4}));
+}
+
+}
+
 }
