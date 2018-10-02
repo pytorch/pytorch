@@ -439,7 +439,11 @@ class TestDataLoader(TestCase):
 
     @skipIfRocm
     def test_timeout(self):
-        for target in (_test_timeout, _test_timeout_pin_memory):
+        if TEST_CUDA and not NO_MULTIPROCESSING_SPAWN:
+            targets = (_test_timeout, _test_timeout_pin_memory)
+        else:
+            targets = (_test_timeout,)
+        for target in targets:
             p = ErrorTrackingProcess(target=target)
             p.start()
             p.join(JOIN_TIMEOUT)
