@@ -4,7 +4,7 @@ Installing C++ Distributions of PyTorch
 We provide binary distributions of all headers, libraries and CMake
 configuration files required to depend on PyTorch. We call this distribution
 *LibTorch*, and you can download ZIP archives containing the latest LibTorch
-distribution on `our website <https://gist.github.com/goldsborough/fc3d94917f0405a9da7ec2899710eb9f>`_. Below
+distribution on `our website <https://pytorch.org/get-started/locally/>`_. Below
 is a small example of writing a minimal application that depends on LibTorch
 and uses the `at::Tensor` class which comes with the PyTorch C++ API.
 
