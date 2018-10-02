@@ -78,6 +78,7 @@ class CAFFE2_API CPUContext final : public BaseContext {
 
   inline void FinishDeviceComputation() override {}
 
+  // MA: Dymitro suggested moving this out...
   inline rand_gen_type& RandGenerator() {
     if (!random_generator_.get()) {
       random_generator_.reset(new rand_gen_type(random_seed_));
