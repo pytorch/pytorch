@@ -190,7 +190,7 @@ void fillInputBlob(
   if (tensor_protos_map.empty()) {
     return;
   }
-
+  static caffe2::TensorDeserializer serializer;
   for (auto& tensor_kv : tensor_protos_map) {
     caffe2::Blob* blob = workspace->GetBlob(tensor_kv.first);
     if (blob == nullptr) {
@@ -200,17 +200,22 @@ void fillInputBlob(
     int protos_size = tensor_kv.second.protos_size();
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
-    caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
+      caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
       int total_size = tensor_proto->string_data_size();
       for (size_t i = 0; i < total_size; i++) {
         (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
       }
     } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
-      int total_size = tensor_proto->float_data_size();
-      for (size_t i = 0; i < total_size; i++) {
-        (tensor->mutable_data<float>())[i] = tensor_proto->float_data(i);
+      vector<int64_t> dims;
+      for (const int64_t d : tensor_proto->dims()) {
+        dims.push_back(d);
       }
+      // int total_size = tensor_proto->float_data_size();
+      caffe2::TensorCPU* tensor =
+          new caffe2::TensorCPU(dims, caffe2::DeviceType::CPU);
+      serializer.Deserialize(*tensor_proto, tensor);
+      blob->Reset(tensor);
     }
     // todo: for other types
   }
