@@ -1825,7 +1825,8 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     bool training,
     double eps,
     const Tensor & save_mean,
-    const Tensor & save_std,
+    const Tensor & save_invstd_or_var,
+    bool save_iov_is_invstd, // true for cudnn, false for native, only mattes if training=true
     std::array<bool,3> output_mask) {
 
   bool affine = gamma.defined();
@@ -1851,7 +1852,9 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
   auto mu = unsqueeze_dim1(training ? save_mean : running_mean, input);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(training ? save_std : running_var.add(Scalar(eps)).pow(-0.5), input);
+  // cudnn saves the invstd, but native batch norm does not for numerical stability (see native_batch_norm for more commentary)
+  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(training ? (save_iov_is_invstd ? save_invstd_or_var : save_invstd_or_var.add(Scalar(eps)).pow(-0.5))
+					   : running_var.add(Scalar(eps)).pow(-0.5), input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 

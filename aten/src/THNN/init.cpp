@@ -142,9 +142,6 @@
 #include "generic/FeatureLPPooling.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/BatchNormalization.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/unfold.c"
 #include "THGenerateFloatTypes.h"
 

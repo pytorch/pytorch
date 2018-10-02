@@ -41,8 +41,8 @@ public:
   }
   AT_HOST_DEVICE int64_t stride(int64_t i) const { return strides_[i]; }
   AT_HOST_DEVICE int64_t size(int64_t i) const { return sizes_[i]; }
-  AT_HOST_DEVICE T *data() { return data_; }
-  AT_HOST_DEVICE const T *data() const { return data_; }
+  AT_HOST_DEVICE PtrType data() { return data_; }
+  AT_HOST_DEVICE const PtrType data() const { return data_; }
 protected:
   PtrType data_;
   const int64_t* sizes_;
@@ -80,6 +80,9 @@ public:
   AT_HOST_DEVICE T & operator[](int64_t i) {
     return this->data_[this->strides_[0]*i];
   }
+  AT_HOST_DEVICE const T & operator[](int64_t i) const {
+    return this->data_[this->strides_[0]*i];
+  }
 };
 
 
@@ -103,6 +106,8 @@ public:
   }
   AT_HOST_DEVICE int64_t stride(int64_t i) const { return strides_[i]; }
   AT_HOST_DEVICE int64_t size(int64_t i) const { return sizes_[i]; }
+  AT_HOST_DEVICE PtrType data() { return data_; }
+  AT_HOST_DEVICE const PtrType data() const { return data_; }
 protected:
   PtrType data_;
   int64_t sizes_[N];
@@ -124,8 +129,8 @@ public:
   }
 
   AT_DEVICE const TensorAccessor<T,N-1> operator[](int64_t i) const {
-    int64_t* new_sizes = this->sizes_+1;
-    int64_t* new_strides = this->strides_+1;
+    const int64_t* new_sizes = this->sizes_+1;
+    const int64_t* new_strides = this->strides_+1;
     return TensorAccessor<T,N-1>(this->data_ + this->strides_[0]*i, new_sizes, new_strides);
   }
 };
