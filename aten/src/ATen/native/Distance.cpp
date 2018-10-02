@@ -14,9 +14,12 @@ Tensor pairwise_distance(const Tensor& x1, const Tensor& x2, double p, double ep
 }
 
 // This is to guarantee that the contiguous memory is passed to the backward pass
+// TODO This currently enforces that the entire array is contiguous, but the
+// batches don't really have to be for efficiency sake, meaning there may be a
+// better way to only force the last two dimensions as contiguous.
 Tensor pdist(const Tensor& self, const double p) {
-  AT_CHECK(self.dim() == 2,
-      "pdist only supports 2D tensors, got: ", self.dim(), "D");
+  AT_CHECK(self.dim() >= 2,
+      "pdist only supports at least 2D tensors, got: ", self.dim(), "D");
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "pdist only supports floating-point dtypes");
   AT_CHECK(p >= 0, "pdist only supports non-negative p values");
   return at::_pdist_forward(self.contiguous(), p);
@@ -26,17 +29,23 @@ Tensor _pdist_forward(const Tensor& self, const double p) {
   AT_CHECK(self.is_contiguous(), "_pdist_forward requires contiguous input");
   auto device = self.type().device_type();
   AT_CHECK(device == kCPU || device == kCUDA, "_pdist_forward only supports CPU and CUDA devices, got: ", device);
-  Tensor result = at::empty({0}, self.options());
-  if (self.size(0) <= 1) {
-    result.resize_({0});
-  } else {
-    int64_t n = self.size(0);
-    int64_t c = n * (n - 1) / 2;
-    result.resize_({c});
-    if (self.size(1) == 0) {
+
+  const auto batches = self.sizes().slice(0, self.dim() - 2);
+  int64_t b = at::tensor(batches).prod().item<int64_t>();
+  int64_t n = self.size(-2);
+  int64_t m = self.size(-1);
+  int64_t c = n * (n - 1) / 2;
+
+  std::vector<int64_t> result_sizes(batches.begin(), batches.end());
+  result_sizes.push_back(c);
+  Tensor result = at::empty(result_sizes, self.options());
+
+  if (n > 1) {
+    if (m == 0) {
       result.fill_(0);
     } else {
-      pdist_forward_stub(device, result, self, p);
+      Tensor result_view = result.view({b, c});
+      pdist_forward_stub(device, result_view, self.view({b, n, m}), p);
     }
   }
   return result;
@@ -48,7 +57,14 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
   auto device = self.type().device_type();
   AT_CHECK(device == kCPU || device == kCUDA, "_pdist_backward only supports CPU and CUDA devices, got: ", device);
   Tensor result = at::empty_like(self);
-  pdist_backward_stub(device, result, grad, self, p, pdist);
+
+  int64_t b = at::tensor(self.sizes().slice(0, self.dim() - 2)).prod().item<int64_t>();
+  int64_t n = self.size(-2);
+  int64_t m = self.size(-1);
+  int64_t c = pdist.size(-1);
+
+  Tensor result_view = result.view({b, n, m});
+  pdist_backward_stub(device, result_view, grad.contiguous().view({b, c}), self.view({b, n, m}), p, pdist.view({b, c}));
   return result;
 }
 
