@@ -11,6 +11,7 @@ import re
 import sys
 import threading
 import traceback
+import atexit
 import os
 import time
 from torch._six import string_classes, int_classes, FileNotFoundError
@@ -26,10 +27,20 @@ else:
     import queue
 
 
+# NOTE [ Python Traceback Reference Cycle Problem ]
+#
+# When using sys.exc_info(), it is important to **not** store the exc_info[2],
+# which is the traceback, because otherwise you will run into the traceback
+# reference cycle problem, i.e., the traceback holding reference to the frame,
+# and the frame (which holds reference to all the object in its temporary scope)
+# holding reference the traceback.
+
+
 class ExceptionWrapper(object):
     r"""Wraps an exception plus traceback to communicate across threads"""
-
     def __init__(self, exc_info):
+        # It is important that we don't store exc_info, see
+        # NOTE [ Python Traceback Reference Cycle Problem ]
         self.exc_type = exc_info[0]
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
@@ -37,7 +48,9 @@ class ExceptionWrapper(object):
 _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
 
-MANAGER_STATUS_CHECK_INTERVAL = 5.0
+MP_STATUS_CHECK_INTERVAL = 5.0
+r"""Interval (in seconds) to check status of other process to avoid hanging in
+    multiprocessing data loading"""
 
 if IS_WINDOWS:
     # On Windows, the parent ID of the worker process remains unchanged when the manager process
@@ -60,16 +73,23 @@ if IS_WINDOWS:
             if not self.manager_handle:
                 raise ctypes.WinError(ctypes.get_last_error())
 
+            self.manager_dead = False
+
         def is_alive(self):
-            # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
-            return self.kernel32.WaitForSingleObject(self.manager_handle, 0) != 0
+            if not self.manager_dead:
+                # Value obtained from https://msdn.microsoft.com/en-us/library/windows/desktop/ms687032.aspx
+                self.manager_dead = self.kernel32.WaitForSingleObject(self.manager_handle, 0) == 0
+            return not self.manager_dead
 else:
     class ManagerWatchdog(object):
         def __init__(self):
             self.manager_pid = os.getppid()
+            self.manager_dead = False
 
         def is_alive(self):
-            return os.getppid() == self.manager_pid
+            if not self.manager_dead:
+                self.manager_dead = os.getppid() != self.manager_pid
+            return not self.manager_dead
 
 
 def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed, init_fn, worker_id):
@@ -87,33 +107,32 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
         random.seed(seed)
         torch.manual_seed(seed)
 
+        data_queue.cancel_join_thread()
+
         if init_fn is not None:
             init_fn(worker_id)
 
         watchdog = ManagerWatchdog()
 
-        while True:
+        while watchdog.is_alive():
             try:
-                r = index_queue.get(timeout=MANAGER_STATUS_CHECK_INTERVAL)
+                r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
             except queue.Empty:
-                if watchdog.is_alive() and not done_event.is_set():
-                    continue
-                else:
-                    break
+                continue
             # If `done_event` is set, keep getting until we reach `None` (i.e.,
             # meaning last element).
             # See NOTE [ Shutdown Data Loader Workers ] below for details.
-            if done_event.is_set():
-                if r is None:
-                    break
-                continue
-            else:
-                # Can only get `None` if `done_event` is set.
-                assert r is not None
+            if r is None:
+                assert done_event.is_set()
+                break
+            # elif done_event.is_set():
+            #     break
             idx, batch_indices = r
             try:
                 samples = collate_fn([dataset[i] for i in batch_indices])
             except Exception:
+                # It is important that we don't store exc_info in a variable,
+                # see NOTE [ Python Traceback Reference Cycle Problem ]
                 data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
             else:
                 data_queue.put((idx, samples))
@@ -121,38 +140,35 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass
-    # Pass over a `None` when this worker exits.
-    data_queue.put(None)
 
 
-def _pin_memory_loop(in_queue, out_queue, pin_memory, device_id, num_workers):
-    if pin_memory:
-        torch.cuda.set_device(device_id)
+def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
+    torch.cuda.set_device(device_id)
 
-    active_workers = num_workers
-
-    while active_workers > 0:
+    while not done_event.is_set():
         try:
-            r = in_queue.get()
+            r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+        except queue.Empty:
+            continue
         except Exception:
+            if done_event.is_set():
+                break
             raise
         # When `in_queue` gives a `None`, we know that 1 worker has ended. When
         # we see all `num_workers` `None`s, exit this thread.
         # See NOTE [ Shutdown Data Loader Workers ] below for details.
         if r is None:
-            active_workers -= 1
-            continue
-        if isinstance(r[1], ExceptionWrapper):
+            break
+        elif isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
-            continue
-        idx, batch = r
-        try:
-            if pin_memory:
-                batch = pin_memory_batch(batch)
-        except Exception:
-            out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
-            out_queue.put((idx, batch))
+            idx, batch = r
+            try:
+                batch = pin_memory_batch(batch)
+            except Exception:
+                out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+            else:
+                out_queue.put((idx, batch))
 
 numpy_type_map = {
     'float64': torch.DoubleTensor,
@@ -237,6 +253,8 @@ def _set_SIGCHLD_handler():
         return
     previous_handler = signal.getsignal(signal.SIGCHLD)
     if not callable(previous_handler):
+        # This doesn't catch SIGDFL default handler, but SIGCHLD default handler
+        # is no-op.
         previous_handler = None
 
     def handler(signum, frame):
@@ -253,6 +271,153 @@ def _set_SIGCHLD_handler():
 class _DataLoaderIter(object):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
 
+    # NOTE [ Data Loader Multiprocessing Shutdown Logic ]
+    #
+    # Terminating multiprocessing logic requires very careful design. In
+    # particular, we need to make sure that
+    #
+    #   1. The iterator gracefully exits the workers when its last reference is
+    #      gone.
+    #
+    #      In this case, the workers should be gracefully exited because the
+    #      main process may still need to continue to run, and we want cleaning
+    #      up code in the workers to be executed (e.g., releasing GPU memory).
+    #      Naturally, we implement the shutdown logic in `__del__` of
+    #      DataLoaderIterator. We delay the discussion on the logic in this case
+    #      until after talking about the other three requirements.
+    #
+    #   2. The iterator exits the workers when the problem ends
+    #
+    #      We set all workers and pin_memory_thread to have daemon=True. Doing
+    #      so means that when the program ends, it shuts the workers down with a
+    #      SIGTERM. pin_memory_thread will exit too, but by a different
+    #      mechanic.
+    #
+    #      You may ask, why don't we just not set the workers as daemonic, and
+    #      gracefully exit using the same logic as we have in `__del__` when the
+    #      iterator gets deleted (see 1 above)? The answer requires a bit
+    #      understanding of Python multiprocessing design. As of Python 3.7, for
+    #      reasons I have yet to understand, in a subprocess, Python runs the
+    #      given function (e.g., the `target` argument passed to a `mp.Process`)
+    #      using this pattern (unrelated code removed for clarity):
+    #
+    #          # These are run the sub-process
+    #          try:
+    #              user_provided_function()
+    #          finally:
+    #              mp.util._exit_function()
+    #
+    #      In `_exit_function`, Python joins all non-daemonic subprocesses of
+    #      this process (which is a subprocess of a Python process itself), and
+    #      sends SIGTERM to the daemonic ones. Therefore, if a DataLoader is
+    #      used in a subprocess, and an error is raised containing frames that
+    #      references the DataLoaderIter (Python exception traces keeps object
+    #      in relevant frames alive), workers will be joined `_exit_function`
+    #      before the `__del__` is called (which starts the shutdown logic). And
+    #      unfortunately the DataLoaderIter process will hang. E.g., such errors
+    #      can be timeout, or arbitrary error if users hold a reference to an
+    #      iterator.
+    #
+    #      For context, `_exit_function` is also registered as an `atexit` call.
+    #      So I really don't understand the need to do this in a finally block
+    #      The code dates back to 2008 and there is not comment on the original
+    #      PEP 371 or patch https://bugs.python.org/issue3050 (containing both
+    #      the finally block and the `atexit` registration) that explains this.
+    #
+    #      Another choice is to just shutdown workers with logic in 1 above
+    #      whenever we see an error in `next`. This isn't ideal because
+    #         1. It prevents users from using try-catch to resume data loading.
+    #         2. It doesn't prevent hanging if users have references to the
+    #            iterator.
+    #
+    #   3. A process won't be hanging when putting into a queue.
+    #
+    #      We use `mp.Queue` which has a separate background thread to put
+    #      objects. The caveat is that when a process dies due to SIGTERM,
+    #      SIGKILL, etc. (e.g., when a daemonic process's parent extis), it may
+    #      still leave corrupted data in the queue, because the putting thread
+    #      isn't joined. See next section for solution.
+    #
+    #   4. A process won't be hanging when getting from a queue.
+    #
+    #      Since data in queue can be corrupted (see above), we need to guard
+    #      all the `.get()` calls with timeouts, and check the status of the
+    #      sender when timeout happens. E.g., the `ManagerWatchdog` class is
+    #      used in workers to check main process status.
+    #
+    #
+    # Now let's get back to 1:
+    #    how we gracefully exit the workers when the last reference to the
+    #    iteartor is gone.
+    #
+    # We propose the following design (compatible) with the other decisions we
+    # made above.
+    #
+    # Our data model looks like this (queues are indicated with curly brackets):
+    #
+    #              main process                                ||
+    #                   |                                      ||
+    #             {index_queue}                                ||
+    #                   |                                      ||
+    #            worker processes                              ||     DATA
+    #                   |                                      ||
+    #          {worker_result_queue}                           ||     FLOW
+    #                   |                                      ||
+    #    pin_memory_thread of main process                     ||   DIRECTION
+    #                   |                                      ||
+    #             {data_queue}                                 ||
+    #                   |                                      ||
+    #              data output                                 \/
+    #
+    # P.S. `worker_result_queue` and `pin_memory_thread` part may be omitted
+    #      if `pin_memory=False`.
+    #
+    # It is important to terminate threads/processes in the order of data flow.
+    # If we terminate a consumer of a queue before the sender, the sender may be
+    # stuck in `.put()`. You may say that we can use the `cancel_join_thread`
+    # method on `multiprocessing.Queue` in sender so it won't try to join the
+    # putting thread when it exits. However, this
+    #     1. requires a separate mechanism to signal the termination to the
+    #        sender;
+    #     2. may leave corrupted data in the queue, so the consumer may get
+    #        stuck in `get()` until timeout happens (see 3 above), and thus
+    #        slows down shutdown.
+    #
+    # Therefore, when shutdown happens, following the data flow, we
+    #  1. [main process]
+    #     i.   Set `done_event` (shared with workers and `pin_memory_thread`)
+    #     ii.  Put `None` in each `index_queue` to signal the workers.
+    # Join the putting threads
+    #          of these queues to ensure that the `None` are sent over to
+    #          workers.
+    #     iii. Join the `pin_memory_thread`. (i.e., block until after step
+    #          3 below)
+    #     iv.  Join the workers. (i.e., block until after step 2 below)
+    #
+    #  2. [each worker process]
+    #     In `index_queue.get()` ,
+    #       + if failes with timeout,
+    #         check main process status via `ManagerWatchdog`,
+    #           - if main process is dead, simply exit
+    #           - otherwise, go to next `get()`.
+    #       + if gets `None`, put `(None, worker_id)` to `worker_result_queue`.
+    #
+    #  3. [pin_memory_thread]
+    #     i.  Call `cancel_join_thread()` on the output queue because we
+    #         don't want to wait for putting and only
+    #     ii. Upon seeing the 1st `None` from `worker_result_queue`, keep
+    #         getting from it until seeing all `num_workers` number of
+    #         `None`s.
+    #
+    # NB: If we don't have `pin_memory_thread`, then the the step 3 above
+    #     is instead done in [main process], and must be done before step
+    #     1/iv so that workers won't be waiting for `.put(None)`.
+    #
+    # NB: `done_event` isn't strictly needed. E.g., in step 2 above we can
+    #     just check for `None` from `index_queue`, but it allows us to skip
+    #     wasting resources processing indices already in `index_queue` if
+    #     we are already shutting down.
+
     def __init__(self, loader):
         self.dataset = loader.dataset
         self.collate_fn = loader.collate_fn
@@ -268,7 +433,7 @@ class _DataLoaderIter(object):
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
             self.worker_queue_idx = 0
-            self.worker_result_queue = multiprocessing.Queue()
+            self.worker_result_queue = multiprocessing.JoinableQueue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False
@@ -287,12 +452,17 @@ class _DataLoaderIter(object):
                           self.worker_result_queue, self.done_event,
                           self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
-                w.daemon = True  # ensure that the worker exits on process exit
-                # Process.start() actually take some time as it needs to start a
-                # process and pass the arguments over via a pipe. Therefore, we
-                # only add a worker to self.workers list after it started, so
-                # that we do not call .join() if program dies before it starts,
-                # and __del__ tries to join it but will get:
+                # NB: Do **not** set w.daemon=True. Otherwise during cleaning up
+                #     Python may terminate the workers before they send the last
+                #     `None`s over and signaling termination to either
+                #     pin_memory_thread or main process.
+                #
+                w.daemon = True
+                # NB: Process.start() actually take some time as it needs to
+                #     start a process and pass the arguments over via a pipe.
+                #     Therefore, we only add a worker to self.workers list after
+                #     it started, so that we do not call .join() if program dies
+                #     before it starts, and __del__ tries to join but will get:
                 #     AssertionError: can only join a started process.
                 w.start()
                 self.index_queues.append(index_queue)
@@ -302,8 +472,8 @@ class _DataLoaderIter(object):
                 self.data_queue = queue.Queue()
                 pin_memory_thread = threading.Thread(
                     target=_pin_memory_loop,
-                    args=(self.worker_result_queue, self.data_queue, self.pin_memory,
-                          torch.cuda.current_device(), self.num_workers))
+                    args=(self.worker_result_queue, self.data_queue,
+                          torch.cuda.current_device(), self.done_event))
                 pin_memory_thread.daemon = True
                 pin_memory_thread.start()
                 # Similar to workers (see comment above), we only register
@@ -326,11 +496,14 @@ class _DataLoaderIter(object):
     def _get_batch(self):
         if self.timeout > 0:
             try:
-                return self.data_queue.get(timeout=self.timeout)
+                batch = self.data_queue.get(timeout=self.timeout)
             except queue.Empty:
                 raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
         else:
-            return self.data_queue.get()
+            batch = self.data_queue.get()
+        if self.pin_memory:
+            self.data_queue.task_done()
+        return batch
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
@@ -390,67 +563,6 @@ class _DataLoaderIter(object):
         raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
-        # NOTE [ Shutdown Data Loader Workers ]
-        # Terminating multiprocessing logic requires very careful design. In
-        # particular, we need to make sure that
-        #   1. A process won't be hanging when putting into a queue.
-        #   2. A process won't be hanging when getting from a queue.
-        #
-        # Our data model looks like, data flowing from top to bottom (queues are
-        # indicated with curly brackets):
-        #
-        #              main process
-        #                   |
-        #             {index_queue}
-        #                   |
-        #            worker processes
-        #                   |
-        #          {worker_result_queue}
-        #                   |
-        #    pin_memory_thread of main process
-        #                   |
-        #             {data_queue}
-        #                   |
-        #              data output
-        #
-        # P.S. `worker_result_queue` and `pin_memory_thread` part may be omitted
-        #      if `pin_memory=False`.
-        #
-        # It is important to terminate threads/processes in the order of data
-        # flow. If we terminate a consumer of a queue before the sender, the
-        # sender may be stuck in `.put`. You may say that we can use the
-        # `cancel_join_thread` method on `multiprocessing.Queue` in sender so
-        # it won't try to join the putting thread when it exits. However, this
-        #  1. requires a separate mechanism to signal the termination to the
-        #     sender.
-        #  2. may leave corrupted data in the sender, so the consumer may get
-        #     stuck in `get` that data without noticing our termination signal.
-        #
-        # Therefore, we
-        #  1. [main process]
-        #       i.   Set `done_event`
-        #       ii.  Put `None` in each `index_queue`. Join the putting threads
-        #            of these queues.
-        #       iii. Join the `pin_memory_thread`. (i.e., block until after step
-        #            3 below)
-        #       iv.  Join the workers. (i.e., block until after step 2 below)
-        #
-        #  2. [each worker process]
-        #     If `done_event` is set, keep getting from `index_queue` until
-        #     reach `None`, then put `None` into `worker_result_queue`
-        #
-        #  3. [pin_memory_thread]
-        #     Upon seeing the 1st `None` from `worker_result_queue`, keep
-        #     getting from it until seeing all `num_workers` number of  `None`s.
-        #
-        # NB: If we don't have `pin_memory_thread`, then the the step 3 above
-        #     is instead done in [main process], and must be done before step
-        #     1/iv so that workers won't be waiting for `.put(None)`.
-        #
-        # NB: `done_event` isn't strictly needed. E.g., in step 2 above we can
-        #     just check for `None` from `index_queue`, but it allows us to skip
-        #     wasting resources processing indices already in `index_queue` if
-        #     we are already shutting down.
         if not self.shutdown:
             self.shutdown = True
             # removes pids from the C side data structure first so worker
@@ -465,16 +577,23 @@ class _DataLoaderIter(object):
                 # current process.
                 q.close()
                 # Join the background thread. Can only be called after close().
+                # This makes sure that the `None` is sent.
                 q.join_thread()
-            if hasattr(self, 'pin_memory_thread'):
-                self.pin_memory_thread.join()
-            else:
-                active_workers = self.num_workers
-                while active_workers > 0:
-                    if self.worker_result_queue.get() is None:
-                        active_workers -= 1
             for w in self.workers:
                 w.join()
+            if hasattr(self, 'pin_memory_thread'):
+                # Use hasattr in case error happens before we set the attribute.
+                self.worker_result_queue.put(None)
+                self.worker_result_queue.close()
+                self.worker_result_queue.join_thread()
+                # join pin_memory_thread first
+                self.pin_memory_thread.join()
+                # join the putting thread of `data_queue` (previously used by
+                # `pin_memory_thread`)
+                while not self.data_queue.empty():
+                    self.data_queue.get()
+                    self.data_queue.task_done()
+                self.data_queue.join()
 
     def __del__(self):
         if self.num_workers > 0:
