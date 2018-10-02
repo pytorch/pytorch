@@ -20,7 +20,6 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/tensor_int8.h"
 #ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
 #endif
@@ -138,18 +137,14 @@ int main(int argc, char** argv) {
         if (blob == nullptr) {
           blob = workspace->CreateBlob(input_names[i]);
         }
+        caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
+        CHECK_NOTNULL(tensor);
+        tensor->Resize(input_dims);
         if (input_type_list[i] == "uint8_t") {
-          caffe2::int8::Int8TensorCPU* tensor =
-              blob->GetMutable<caffe2::int8::Int8TensorCPU>();
-          CHECK_NOTNULL(tensor);
-          tensor->t.Resize(input_dims);
-          tensor->t.mutable_data<uint8_t>();
+          tensor->mutable_data<uint8_t>();
         } else if (input_type_list[i] == "float") {
-          caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
-          CHECK_NOTNULL(tensor);
-          tensor->Resize(input_dims);
           tensor->mutable_data<float>();
-        } else {
+        }  else {
           CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
         }
       }
