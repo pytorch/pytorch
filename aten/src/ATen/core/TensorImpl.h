@@ -851,9 +851,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     is_contiguous_ = true;
   }
 
-protected:
-  at::Storage storage_;
+public:
+  at::Storage storage_; // TODO: Fix visibility on me
 
+protected:
   std::vector<int64_t> sizes_;
   std::unique_ptr<int64_t[]> strides_; // this saves two words
 
