@@ -148,7 +148,7 @@ class TensorFetcher : public BlobFetcherBase {
     }
 
     if (result.copied) {
-      auto context = CreateContext(tensor.GetDeviceType());
+      auto context = tensor.GetStaticContext()->CreateContext();
       context->CopyBytesToCPU(tensor.nbytes(), tensor.raw_data(), outPtr);
       context->FinishDeviceComputation();
     }
