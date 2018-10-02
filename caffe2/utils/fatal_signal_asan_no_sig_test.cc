@@ -58,7 +58,7 @@ bool forkAndPipe(
     }
 
     ssize_t bytesRead;
-    while ((bytesRead = read(stderrPipe[0], buffer.data(), bufferSize)) > 0) {
+    while ((bytesRead = read(stderrPipe[0], static_cast<void*>(buffer.data()), bufferSize)) > 0) {
       const std::string tmp(buffer.data(), bytesRead);
       std::cout << tmp;
       stderrBuffer += tmp;
