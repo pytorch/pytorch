@@ -35,7 +35,7 @@
 
 // TODO: This file is still in the caffe2 namespace, despite living
 // in the ATen directory.  This is because the macro
-// CAFFE_PREALLOCATED_KNOWN_TYPE defines a template specialization, which relies
+// CAFFE_KNOWN_TYPE defines a template specialization, which relies
 // on the namespace of TypeMeta matching the namespace where the macro is
 // called.  This requires us to fix all of the call-sites, which I want to do
 // later.  So the namespace is not fixed at the moment.
@@ -149,19 +149,31 @@ inline void _CtorNotDefault(void* /*ptr*/, size_t /*n*/) {
       " is not default-constructible.");
 }
 
+template<
+    typename T,
+    c10::guts::enable_if_t<
+        std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
+inline constexpr TypeMetaData::PlacementNew* _PickCtor() {
+  return nullptr;
+}
+
 template <
     typename T,
-    typename std::enable_if<std::is_default_constructible<T>::value>::type* =
-        nullptr>
-inline TypeMetaData::PlacementNew* _PickCtor() {
+    c10::guts::enable_if_t<
+        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
+        std::is_default_constructible<T>::value
+    >* = nullptr>
+inline constexpr TypeMetaData::PlacementNew* _PickCtor() {
   return &_Ctor<T>;
 }
 
 template <
     typename T,
-    typename std::enable_if<!std::is_default_constructible<T>::value>::type* =
-        nullptr>
-inline TypeMetaData::PlacementNew* _PickCtor() {
+    c10::guts::enable_if_t<
+        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
+        !std::is_default_constructible<T>::value
+    >* = nullptr>
+inline constexpr TypeMetaData::PlacementNew* _PickCtor() {
   return &_CtorNotDefault<T>;
 }
 
@@ -187,18 +199,31 @@ inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
       " does not allow assignment.");
 }
 
+template<
+    typename T,
+    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
+    >
+inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
+  return nullptr;
+}
+
 template <
     typename T,
-    typename std::enable_if<std::is_copy_assignable<T>::value>::type* = nullptr>
-inline TypeMetaData::TypedCopy* _PickCopy() {
+    c10::guts::enable_if_t<
+        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
+        std::is_copy_assignable<T>::value
+    >* = nullptr>
+inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
   return &_Copy<T>;
 }
 
 template <
     typename T,
-    typename std::enable_if<!std::is_copy_assignable<T>::value>::type* =
-        nullptr>
-inline TypeMetaData::TypedCopy* _PickCopy() {
+    c10::guts::enable_if_t<
+        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
+        !std::is_copy_assignable<T>::value
+    >* = nullptr>
+inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
   return &_CopyNotAllowed<T>;
 }
 
@@ -213,6 +238,22 @@ inline void _Dtor(void* ptr, size_t n) {
   }
 }
 
+template<
+    typename T,
+    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
+    >
+inline constexpr TypeMetaData::TypedDestructor* _PickDtor() {
+  return nullptr;
+}
+
+template<
+    typename T,
+    c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr
+    >
+inline constexpr TypeMetaData::TypedDestructor* _PickDtor() {
+  return &_Dtor<T>;
+}
+
 template <class T>
 const char* __TypeName() noexcept;
 
@@ -220,7 +261,7 @@ template <class T>
 const char* _TypeName() noexcept {
   static const char* literal_name = __TypeName<T>();
 #ifdef __GXX_RTTI
-  (void)(literal_name); // suppress unused warning
+  std::ignore = literal_name; // suppress unused warning
   static const std::string name = at::demangle(typeid(T).name());
   return name.c_str();
 #else
@@ -228,30 +269,23 @@ const char* _TypeName() noexcept {
 #endif
 }
 
-template <
-    class T,
-    c10::guts::enable_if_t<
-        std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
-inline CAFFE2_API TypeMetaData createTypeMetaData() {
-  return TypeMetaData{sizeof(T),
-                      nullptr,
-                      nullptr,
-                      nullptr,
-                      TypeIdentifier::Get<T>(),
-                      _TypeName<T>()};
-}
-template <
-    class T,
-    c10::guts::enable_if_t<!(
-        std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr>
-inline CAFFE2_API TypeMetaData createTypeMetaData() {
-  return TypeMetaData{sizeof(T),
-                      _PickCtor<T>(),
-                      _PickCopy<T>(),
-                      _Dtor<T>,
-                      TypeIdentifier::Get<T>(),
-                      _TypeName<T>()};
-}
+template <class T>
+struct _typeMetaDataInstance final {
+public:
+  CAFFE2_API static TypeMetaData instance;
+
+private:
+  static TypeMetaData _make() {
+    return {
+      sizeof(T),
+      _PickCtor<T>(),
+      _PickCopy<T>(),
+      _PickDtor<T>(),
+      TypeIdentifier::Get<T>(),
+      _TypeName<T>()
+    };
+  }
+};
 
 template <class T>
 CAFFE2_API const TypeMetaData* _TypeMetaData() noexcept;
@@ -368,7 +402,17 @@ class CAFFE2_API TypeMeta {
    */
   template <typename T>
   static TypeMeta Make() {
-    return TypeMeta(detail::_TypeMetaData<T>());
+    // The instance pointed to is declared here, but defined in a .cpp file.
+    // We need to silence the compiler warning about using an undefined
+    // variable template. '-Wpragmas' and '-Wunknown-warning-option' has to be
+    // disabled for compilers that don't know '-Wundefined-var-template' and
+    // would error at our attempt to disable it.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wundefined-var-template"
+    return TypeMeta(&detail::_typeMetaDataInstance<T>::instance);
+#pragma GCC diagnostic pop
   }
 
  private:
@@ -413,11 +457,9 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   C10_EXPORT const char* __TypeName<T>() noexcept {                       \
     return #T;                                                            \
   }                                                                       \
-  template <>                                                             \
-  C10_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {            \
-    static TypeMetaData singleton = createTypeMetaData<T>();              \
-    return &singleton;                                                    \
-  }                                                                       \
+  template<>                                                              \
+  C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =            \
+      _typeMetaDataInstance<T>::_make();                                  \
   }
 #else // _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                                               \
@@ -431,11 +473,9 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   const char* __TypeName<T>() noexcept {                                  \
     return #T;                                                            \
   }                                                                       \
-  template <>                                                             \
-  const TypeMetaData* _TypeMetaData<T>() noexcept {                       \
-    static TypeMetaData singleton = createTypeMetaData<T>();              \
-    return &singleton;                                                    \
-  }                                                                       \
+  template<>                                                              \
+  C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =            \
+      _typeMetaDataInstance<T>::_make();                                  \
   }
 #endif
 
@@ -473,11 +513,9 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                    \
   namespace detail {                                               \
-  template <>                                                      \
-  C10_EXPORT const TypeMetaData* _TypeMetaData<T>() noexcept {     \
-    static TypeMetaData singleton = createTypeMetaData<T>();       \
-    return &singleton;                                             \
-  }                                                                \
+    template<>                                                     \
+    C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =   \
+        _typeMetaDataInstance<T>::_make();                         \
   }
 
 class Tensor;
