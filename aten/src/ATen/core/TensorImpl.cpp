@@ -46,7 +46,7 @@ IntList TensorImpl::sizes() const {
 }
 
 IntList TensorImpl::strides() const {
-  AT_ASSERTM(!strides_,
+  AT_ASSERTM(strides_,
              "Caffe2 tensors don't (yet) have meaningful strides and cannot "
              "be used in PyTorch.");
   return IntList{strides_.get(), sizes_.size()};
@@ -90,7 +90,7 @@ int64_t TensorImpl::size(int64_t d) const {
 }
 
 int64_t TensorImpl::stride(int64_t d) const {
-  AT_ASSERTM(!strides_,
+  AT_ASSERTM(strides_,
              "Caffe2 tensors don't (yet) have meaningful strides and cannot "
              "be used in PyTorch.");
   d = at::maybe_wrap_dim(d, dim(), false);
