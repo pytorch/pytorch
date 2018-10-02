@@ -131,48 +131,15 @@ with_proxy git clone https://github.com/pytorch/pytorch --recursive
 cd "$onnx_root/onnx"
 with_proxy python setup.py develop
 
-# Build PyTorch
+# Build PyTorch and Caffe2
 cd "$onnx_root/pytorch"
 with_proxy pip install -r "requirements.txt"
-with_proxy python setup.py build develop
+with_proxy python setup.py build_deps develop
 
-# Build Caffe2
-set +e
-
+# Sanity checks and useful info
 cd "$onnx_root"
 with_proxy wget https://raw.githubusercontent.com/pytorch/pytorch/master/scripts/fbcode-dev-setup/onnx_c2_sanity_check.sh -O "$sanity_script"
 chmod u+x "$sanity_script"
-
-cd "$onnx_root/pytorch"
-with_proxy python setup_caffe2.py develop
-caffe2_exit_code=$?
-caffe2_ok=true
-if [ $caffe2_exit_code != 0 ]; then
-  caffe2_ok=false
-fi
-if ! $caffe2_ok; then
-  # Possible failure reasons when building Caffe2
-  ninja_path=$(which ninja)
-  if [[ ! -z "$ninja_path" ]]; then
-    echo "${RED}Warning: ninja is installed at $ninja_path, which may cause Caffe2 building issue!!!${NC}"
-    echo "${RED}Please try to remove the ninja at ${ninja_path}.${NC}"
-  fi
-  echo "${RED}We are almost there, only building Caffe2 fails. We can fix this problem seperately.${NC}"
-  echo "###### Please run the following command before development/fixing the problem: ######"
-  echo "${CYAN}source $onnx_init_file${NC}"
-  echo "#####################################################################################"
-  echo "########## Please run the following command to install Caffe2 seperately:  ##########"
-  echo "${CYAN}cd $onnx_root/pytorch; python setup_caffe2.py develop${NC}"
-  echo "#####################################################################################"
-  echo "########### Please run the following command to check your installation:  ###########"
-  echo "${CYAN}$sanity_script${NC}"
-  echo "#####################################################################################"
-  exit 1
-fi
-
-set -e
-
-# Sanity checks and useful info
 $sanity_script
 
 echo "Congrats, you are ready to rock!!"
