@@ -270,8 +270,17 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual void resize_dim(int64_t ndim) {
     // NB: This is *truly* a resize; calling code (e.g., squeeze)
     // assumes that old values are preserved
+    auto old_dim = sizes_.size();
     sizes_.resize(ndim);
-    strides_.reset(new int64_t[ndim]);
+    auto new_strides = c10::guts::make_unique<int64_t[]>(ndim);
+    for (size_t i = 0; i < std::min(old_dim, static_cast<size_t>(ndim)); i++) {
+      new_strides[i] = strides_[i];
+    }
+    for (size_t i = old_dim; i < static_cast<size_t>(ndim); i++) {
+      // If ndim < old_dim, this loop never executes
+      new_strides[i] = 0;
+    }
+    strides_ = std::move(new_strides);
     refresh_numel();
     refresh_contiguous();
   }
