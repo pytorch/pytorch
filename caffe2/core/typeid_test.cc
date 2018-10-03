@@ -104,13 +104,13 @@ namespace {
 
 TEST(TypeMetaTest, CtorDtorAndCopy) {
   TypeMeta fundamental_meta = TypeMeta::Make<int>();
-  EXPECT_EQ(fundamental_meta.ctor(), nullptr);
-  EXPECT_EQ(fundamental_meta.dtor(), nullptr);
+  EXPECT_EQ(fundamental_meta.placementNew(), nullptr);
+  EXPECT_EQ(fundamental_meta.placementDelete(), nullptr);
   EXPECT_EQ(fundamental_meta.copy(), nullptr);
 
   TypeMeta meta_a = TypeMeta::Make<ClassAllowAssignment>();
-  EXPECT_TRUE(meta_a.ctor() != nullptr);
-  EXPECT_TRUE(meta_a.dtor() != nullptr);
+  EXPECT_TRUE(meta_a.placementNew() != nullptr);
+  EXPECT_TRUE(meta_a.placementDelete() != nullptr);
   EXPECT_TRUE(meta_a.copy() != nullptr);
   ClassAllowAssignment src;
   src.x = 10;
@@ -121,8 +121,8 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
 
   TypeMeta meta_b = TypeMeta::Make<ClassNoAssignment>();
 
-  EXPECT_TRUE(meta_b.ctor() != nullptr);
-  EXPECT_TRUE(meta_b.dtor() != nullptr);
+  EXPECT_TRUE(meta_b.placementNew() != nullptr);
+  EXPECT_TRUE(meta_b.placementDelete() != nullptr);
 #ifndef __clang__
   // gtest seems to have some problem with function pointers and
   // clang right now... Disabling it.

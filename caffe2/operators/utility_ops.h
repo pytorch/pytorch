@@ -1154,7 +1154,7 @@ class UnsafeCoalesceOp final : public Operator<Context> {
     size_t coalesced_size = 0;
     for (int i = 0; i < InputSize(); ++i) {
       CAFFE_ENFORCE(
-          !Input(i).meta().ctor(),
+          !Input(i).meta().placementNew(),
           "Must only coalesce fundamental types, error at input: ",
           i);
     }
