@@ -17,6 +17,7 @@
 
 #include <exception>
 
+#include "caffe2/core/macros.h"
 #include "c10/util/C++17.h"
 #include "c10/util/Metaprogramming.h"
 #include "ATen/core/Backtrace.h"
@@ -154,11 +155,11 @@ template<class T>
 inline constexpr TypeMetaData::PlacementNew* _PickCtor() noexcept {
   using c10::guts::if_constexpr;
   return if_constexpr<std::is_fundamental<T>::value || std::is_pointer<T>::value>(
-     /* then */ [](auto _) { return nullptr; },
-     /* else */ [](auto _) {
+     /* then */ [](auto) { return nullptr; },
+     /* else */ [](auto) {
          return if_constexpr<std::is_default_constructible<T>::value>(
-           /* then */ [](auto _) { return &_Ctor<T>; },
-           /* else */ [](auto _) { return &_CtorNotDefault<T>; }
+           /* then */ [](auto) { return &_Ctor<T>; },
+           /* else */ [](auto) { return &_CtorNotDefault<T>; }
          );
        }
   );
@@ -190,11 +191,11 @@ template<class T>
 inline constexpr TypeMetaData::TypedCopy* _PickCopy() noexcept {
   using c10::guts::if_constexpr;
   return if_constexpr<std::is_fundamental<T>::value || std::is_pointer<T>::value>(
-     /* then */ [](auto _) { return nullptr; },
-     /* else */ [](auto _) {
+     /* then */ [](auto) { return nullptr; },
+     /* else */ [](auto) {
          return if_constexpr<std::is_copy_assignable<T>::value>(
-           /* then */ [](auto _) { return &_Copy<T>; },
-           /* else */ [](auto _) { return &_CopyNotAllowed<T>; }
+           /* then */ [](auto) { return &_Copy<T>; },
+           /* else */ [](auto) { return &_CopyNotAllowed<T>; }
          );
        }
   );
@@ -215,8 +216,8 @@ template<class T>
 inline constexpr TypeMetaData::TypedDestructor* _PickDtor() noexcept {
   using c10::guts::if_constexpr;
   return if_constexpr<std::is_fundamental<T>::value || std::is_pointer<T>::value>(
-    /* then */ [](auto _) { return nullptr; },
-    /* else */ [](auto _) { return &_Dtor<T>; }
+    /* then */ [](auto) { return nullptr; },
+    /* else */ [](auto) { return &_Dtor<T>; }
   );
 }
 
