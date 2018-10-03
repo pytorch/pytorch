@@ -3039,7 +3039,7 @@ CAFFE2_CUDA_EXPORT void CopyMatrix<CUDAContext>(
     void* B,
     const int ldb,
     CUDAContext* context,
-    TypeMeta::TypedCopy copy) {
+    TypeMeta::Copy copy) {
   CAFFE_ENFORCE(!copy, "Copy constructor is not supported in CUDA context");
   cudaMemcpy2DAsync(
       B,

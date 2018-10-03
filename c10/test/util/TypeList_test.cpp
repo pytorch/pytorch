@@ -1,4 +1,4 @@
-#include "caffe2/utils/TypeList.h"
+#include <c10/util/TypeList.h>
 #include <gtest/gtest.h>
 #include <memory>
 
