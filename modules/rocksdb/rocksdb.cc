@@ -67,7 +67,7 @@ class RocksDBTransaction : public Transaction {
   rocksdb::DB* db_;
   std::unique_ptr<rocksdb::WriteBatch> batch_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(RocksDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(RocksDBTransaction);
 };
 
 class RocksDB : public DB {

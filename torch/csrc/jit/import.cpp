@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 #include <string>
+#include <fstream>
 
 namespace torch { namespace jit {
 
@@ -181,7 +182,7 @@ void DecoderBase::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
 class ModuleDecoder : DecoderBase {
  public:
   ModuleDecoder(ModuleLookup module_lookup,
-                const std::string& filename);
+                std::istream& in);
 
  private:
   virtual std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto) override;
@@ -205,7 +206,7 @@ class ModuleDecoder : DecoderBase {
       ModuleLookup module_lookup,
       const std::string fullname);
 
-  PyTorchFileReader file_reader_;
+  PyTorchStreamReader stream_reader_;
   std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
   std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
@@ -260,8 +261,12 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     return NoneType::get();
   } else if (kind == "GeneratorType") {
     return GeneratorType::get();
-  }else if (kind == "StringType") {
+  } else if (kind == "WorldType") {
+    return WorldType::get();
+  } else if (kind == "StringType") {
     return StringType::get();
+  } else if (kind.find("TypeVar:") == 0) {
+    return VarType::create(kind.substr(strlen("TypeVar:")));
   } else {
     throw std::runtime_error("unexpected string for type kind");
   }
@@ -315,7 +320,7 @@ at::Tensor ModuleDecoder::buildTensorCommon(
   if (storage_it == storage_map_.end()) {
     at::DataPtr storage_ptr;
     int64_t size;
-    std::tie(storage_ptr, size) = file_reader_.getRecordWithKey(record_number);
+    std::tie(storage_ptr, size) = stream_reader_.getRecordWithKey(record_number);
     auto storage = std::make_shared<at::Storage>(
       at::CPU(type).typeMeta(),
       std::move(storage_ptr),
@@ -349,10 +354,10 @@ std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFull
 
 ModuleDecoder::ModuleDecoder(
     ModuleLookup module_lookup,
-    const std::string &filename) :
-    file_reader_(filename) {
+    std::istream& in) :
+    stream_reader_(in) {
   auto model_proto = onnx::ModelProto();
-  auto record = file_reader_.getLastRecord();
+  auto record = stream_reader_.getLastRecord();
   model_proto.ParsePartialFromArray(std::get<0>(record).get(), std::get<1>(record));
   auto graph_proto = model_proto.graph();
 
@@ -393,11 +398,19 @@ ModuleDecoder::ModuleDecoder(
 
 void import_ir_module(
     ModuleLookup module_lookup,
-    const std::string& filename) {
-  ModuleDecoder(module_lookup, filename);
+    std::istream& in) {
+  ModuleDecoder(module_lookup, in);
 }
 
-std::shared_ptr<script::Module> load(const std::string& filename) {
+void import_ir_module(
+    ModuleLookup module_lookup,
+    const std::string& filename) {
+  std::ifstream in(filename, std::ios_base::binary);
+
+  ModuleDecoder(module_lookup, in);
+}
+
+std::shared_ptr<script::Module> load(std::istream& in) {
   auto module = std::make_shared<script::Module>();
 
   auto module_lookup = [&](const std::vector<std::string>& qualified_name) {
@@ -410,7 +423,17 @@ std::shared_ptr<script::Module> load(const std::string& filename) {
     }
     return curr;
   };
-  ModuleDecoder(module_lookup, filename);
+
+  ModuleDecoder(module_lookup, in);
+
+  return module;
+}
+
+std::shared_ptr<script::Module> load(const std::string& filename) {
+  std::ifstream in(filename, std::ios_base::binary);
+
+  auto module = load(in);
+
   return module;
 }
 

@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_ALLOCATOR_H_
 #define CAFFE2_CORE_ALLOCATOR_H_
 
+#include <cstring>
 #include <unordered_map>
 
 #include <ATen/core/Allocator.h>
@@ -60,7 +61,6 @@ struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
     if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
       memset(data, 0, nbytes);
     }
-    LOG(INFO) << "allocated data: " << data;
     if (FLAGS_caffe2_report_cpu_memory_usage) {
       reporter_.New(data, nbytes);
       return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
@@ -74,7 +74,6 @@ struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
   }
 #else
   static void Delete(void* data) {
-    LOG(INFO) << "destructed " << data;
     free(data);
   }
 #endif

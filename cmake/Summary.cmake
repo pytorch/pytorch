@@ -17,6 +17,8 @@ function (caffe2_print_configuration_summary)
   message(STATUS "  CMAKE_INSTALL_PREFIX  : ${CMAKE_INSTALL_PREFIX}")
   message(STATUS "")
 
+  message(STATUS "  TORCH_VERSION         : ${TORCH_VERSION}")
+  message(STATUS "  CAFFE2_VERSION        : ${CAFFE2_VERSION}")
   message(STATUS "  BUILD_ATEN_MOBILE     : ${BUILD_ATEN_MOBILE}")
   message(STATUS "  BUILD_BINARY          : ${BUILD_BINARY}")
   message(STATUS "  BUILD_CUSTOM_PROTOBUF : ${BUILD_CUSTOM_PROTOBUF}")

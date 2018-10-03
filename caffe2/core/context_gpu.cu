@@ -424,10 +424,6 @@ at::Allocator* GetCUDAAllocator() {
   return g_cuda_allocator.get();
 }
 
-void SetCUDAAllocator(at::Allocator* alloc) {
-  g_cuda_allocator.reset(alloc);
-}
-
 BaseStaticContext* GetCUDAStaticContext() {
   static CUDAStaticContext context;
   return &context;

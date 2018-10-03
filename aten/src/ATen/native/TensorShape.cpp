@@ -148,6 +148,45 @@ Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
   return at::as_strided_(self, size, stride, self.storage_offset());
 }
 
+Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+  int64_t allDim = self.dim();
+  int64_t end = start+length;
+  AT_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  AT_CHECK(dim >= 0 && dim < allDim, 
+    "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
+  AT_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
+    "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
+  LongTensor indices = self._indices();
+  int64_t sparseDims = self._sparseDims();
+  
+  std::vector<int64_t> newSizes = self.sizes().vec();
+  newSizes[dim]=length;
+  
+  Tensor newValues;
+  LongTensor newIndices;
+  if(dim < sparseDims){
+    Tensor mask = (indices[dim] >= start).__and__((indices[dim] < end));
+    newIndices = indices.masked_select(mask).view({sparseDims, -1});
+    newIndices[dim].add_(-start);
+    Tensor nzIndices = mask.nonzero().view(-1);
+    newValues = self._values().index_select(0, nzIndices);
+  }else{
+    /* This means we are narrowing on a dense dim, which is in effect just a
+        regular narrow on _values() */
+    newIndices = indices;
+    int64_t ddim = dim - sparseDims + 1;
+    newValues = self._values().narrow_copy(ddim, start, length);
+  }
+
+  SparseTensor newTensor = at::sparse_coo_tensor(newIndices, newValues, newSizes, self.type().options());
+  _get_sparse_impl(newTensor)->set_coalesced(self.is_coalesced());
+  return newTensor;
+}
+
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+    return self.narrow(dim, start, length).clone();
+}
+
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);

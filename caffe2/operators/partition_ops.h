@@ -221,7 +221,7 @@ class PartitionOp : public PartitionOpBase {
     return true;
   }
 
-  AT_DISABLE_COPY_AND_ASSIGN(PartitionOp);
+  C10_DISABLE_COPY_AND_ASSIGN(PartitionOp);
 };
 
 class LengthsPartitionOp : public PartitionOpBase {
@@ -302,7 +302,7 @@ class LengthsPartitionOp : public PartitionOpBase {
     return true;
   }
 
-  AT_DISABLE_COPY_AND_ASSIGN(LengthsPartitionOp);
+  C10_DISABLE_COPY_AND_ASSIGN(LengthsPartitionOp);
 
   vector<int32_t*> out_length_;
 };

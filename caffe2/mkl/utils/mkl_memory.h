@@ -58,7 +58,7 @@ class PrimitiveWrapper {
 
  private:
   dnnPrimitive_t primitive_ = 0;
-  AT_DISABLE_COPY_AND_ASSIGN(PrimitiveWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(PrimitiveWrapper);
 };
 
 template <typename T>
@@ -138,7 +138,7 @@ class LayoutWrapper {
 
  private:
   dnnLayout_t layout_ = 0;
-  AT_DISABLE_COPY_AND_ASSIGN(LayoutWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(LayoutWrapper);
 };
 
 /**
@@ -148,7 +148,7 @@ class LayoutWrapper {
  * Most of the MKLMemory functions are not thread safe.
  */
 template <typename T>
-class MKLMemory {
+class C10_EXPORT MKLMemory {
  public:
   // Initializes an empty MKLMemory.
   MKLMemory() {}
@@ -460,7 +460,7 @@ class MKLMemory {
     return dims_;
   }
 
-  inline const int ndim() const { return dims_.size(); }
+  inline int ndim() const { return dims_.size(); }
 
   inline int dim32(const int i) const {
     CAFFE_ENFORCE_LT(dims_.at(i), std::numeric_limits<int>::max());
@@ -557,7 +557,7 @@ class MKLMemory {
   // The primitive to use to convert from internal layout to user layout
   PrimitiveWrapper<T> convert_out_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(MKLMemory);
+  C10_DISABLE_COPY_AND_ASSIGN(MKLMemory);
 };
 
 template <typename T>
@@ -575,7 +575,7 @@ class MKLWorkspace {
 
  private:
   void* buffer_;
-  AT_DISABLE_COPY_AND_ASSIGN(MKLWorkspace);
+  C10_DISABLE_COPY_AND_ASSIGN(MKLWorkspace);
 };
 
 } // namespace mkl

@@ -439,10 +439,6 @@ at::Allocator* GetHIPAllocator() {
   return g_hip_allocator.get();
 }
 
-void SetHIPAllocator(at::Allocator* alloc) {
-  g_hip_allocator.reset(alloc);
-}
-
 BaseStaticContext* GetHIPStaticContext() {
   static HIPStaticContext context;
   return &context;

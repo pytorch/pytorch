@@ -5,7 +5,6 @@ project(custom_ops)
 find_package(Torch REQUIRED)
 
 add_library(custom_ops SHARED op.cpp)
-target_compile_features(custom_ops PUBLIC cxx_range_for)
 target_link_libraries(custom_ops ${TORCH_LIBRARIES})
 
 add_executable(test_custom_ops test_custom_ops.cpp)

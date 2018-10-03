@@ -1,5 +1,5 @@
 #include "caffe2/operators/fused_rowwise_random_quantization_ops.h"
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
