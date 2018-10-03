@@ -371,27 +371,7 @@ class _DataLoaderIter(object):
     #      must ensure that each process will exit even the process that should
     #      send/receive data to/from it were killed, i.e.,
     #
-    #        a. A process won't hang when putting into a queue;
-    #
-    #           We use `mp.Queue` which has a separate background thread to put
-    #           objects. The background thread is usually automatically joined
-    #           when the process exits.
-    #
-    #           However, in case that the receiver has ended abruptly, the join
-    #           will hang forever. Therefore,
-    #             i.  for workers that send data to main process, we use
-    #                 `data_queue.cancel_join_thread()` to prevent this
-    #                 automatic join. Note that this may leave corrupted data in
-    #                 the queue, but we don't want those data anyways once we
-    #                 are stopping the workers.
-    #             ii. for main process that sends indices to workers, when
-    #                 cleaning up the workers, we guard the final
-    #                 `worker.join()` with a timeout and worker status check,
-    #                 and call `index_queue.cancel_join_thread()` afterwards in
-    #                 case that the worker died before reading and the queue is
-    #                 full.
-    #
-    #        b. A process won't hang when getting from a queue.
+    #        a. A process won't hang when getting from a queue.
     #
     #           Even with carefully designed data dependencies (i.e., a `put()`
     #           always corresponding to a `get()`), hanging on `get()` can still
@@ -407,44 +387,62 @@ class _DataLoaderIter(object):
     #           workers, the `ManagerWatchdog` class is used to check main
     #           process status.
     #
+    #        b. A process won't hang when putting into a queue;
+    #
+    #           We use `mp.Queue` which has a separate background thread to put
+    #           objects. The background thread is usually automatically joined
+    #           when the process exits.
+    #
+    #           However, in case that the receiver has ended abruptly, the join
+    #           will hang forever. Therefore,
+    #             i.  for workers that send data to main process, we use
+    #                 `data_queue.cancel_join_thread()` to prevent this
+    #                 automatic join. Note that this may leave corrupted data in
+    #                 the queue, but we don't want those data anyways once we
+    #                 are stopping the workers.
+    #             ii. for main process that sends indices to workers, if workers
+    #                 exit unexpectedly, the SIGCHLD handler registered in (a)
+    #                 above will interrupt the main process, and should cause
+    #                 cleaning-up. The putting thread of `index_queue` will then
+    #                 fail with SIGPIPE when closed (`.close()` is alawys called
+    #                 before joining).
+    #
     #
     # Now let's get back to 1:
     #   how we gracefully exit the workers when the last reference to the
     #   iteartor is gone.
     #
-    # To achieve this, we implement the following logic in the DataLoaderIter's
-    # `__del__` (compatible with the other designs above):
+    # To achieve this, we implement the following logic along with the design
+    # choices mentioned above:
     #
-    # Note: Certain timeout+status check mechanisms on  `join()` and `get()`
-    #       that are already discussed above are omitted for simplicity.
+    # [pin_memory_thread] and [worker processes]
+    #   When getting from queues,
+    #     if get a `None`, exit.
+    #     if get anything else or time out, check `done_event`,
+    #        if set, keep getting until see the `None`, then exit.
+    #        otherwise, process the data.
     #
-    #  [main process]
-    #     a. Exit `pin_memory_thread`
-    #          i.   Put `None` in `worker_result_queue`, and join the putting
-    #               thread of `worker_result_queue` to ensure that it is sent.
-    #          ii.  Set `pin_memory_done_event`.
-    #               The thread may exit any point after this is set. We do (i)
-    #               before this to ensure that the putting thread won't
-    #               hang/error due to the receiving thread being dead.
-    #          iii. Join the `pin_memory_thread`.
+    # [main process]
+    #   In the DataLoader Iter's `__del__`
+    #     a. Set `done_event` (shared with `pin_memory_thread` and workers).
     #
-    #     b. Exit the workers.
-    #        For similar reasons as above,
-    #          i.   Put `None` in each worker's `index_queue`, and join the
-    #               queues' putting threads.
-    #          ii.  Set `done_event`.
-    #          iii. Join the workers with timeout and status check.
+    #        Note: from here on, the workers & `pin_memory_thread` may exit at
+    #              any time after they receive `None`.
     #
-    #  [each worker process]
-    #     In `index_queue.get()` of the worker loop, if it returns `None` or
-    #     `done_event.is_set()`, exit the loop and the process.
+    #     b. Exit `pin_memory_thread`
+    #          i.  Put `None` in `worker_result_queue`.
+    #          ii. Join the `pin_memory_thread`.
     #
-    #  [pin_memory_thread]
-    #     If `worker_result_queue.get()` in the loop returns `None`or
-    #     `done_event.is_set()`, exit the loop and the thread.
+    #     c. Exit the workers.
+    #          i.  Put `None` in each worker's `index_queue`.
+    #          ii. Join the workers.
     #
-    # NB: If `pin_memory=False`, there is no `pin_memory_thread` and steps (b),
-    #     (d) and (e) in [main process] can be omitted
+    #        Note: this has to be after (b) because it may leave corrupted data
+    #              in `worker_result_queue`, which `pin_memory_thread` reads
+    #              from.
+    #
+    #   Note: If `pin_memory=False`, there is no `pin_memory_thread` and (b)
+    #         can be omitted
     #
     # NB: `done_event`s isn't strictly needed. E.g., we can just check for
     #     `None` from `index_queue`, but it allows us to skip wasting resources
@@ -616,21 +614,18 @@ class _DataLoaderIter(object):
             if hasattr(self, 'pin_memory_thread'):
                 # Use hasattr in case error happens before we set the attribute.
                 self.worker_result_queue.put(None)
+                # Indicate that no more data will be put on this queue by the
+                # current process.
                 self.worker_result_queue.close()
-                self.worker_result_queue.join_thread()
                 self.pin_memory_thread.join()
 
             # Exit workers now.
             for q in self.index_queues:
-                # This must be before setting `done_event`. Otherwise, the
-                # workers may already exited and the putting thread will
-                # complain.
                 q.put(None)
                 # Indicate that no more data will be put on this queue by the
                 # current process.
                 q.close()
-            for q, w in zip(self.index_queues, self.workers):
-                q.join_thread()
+            for w in self.workers:
                 w.join()
 
     def __del__(self):
