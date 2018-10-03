@@ -17,6 +17,7 @@
 
 #include <exception>
 
+#include "caffe2/core/macros.h"
 #include "ATen/core/Backtrace.h"
 #include "ATen/core/C++17.h"
 #include "ATen/core/Error.h"
