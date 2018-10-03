@@ -16,7 +16,7 @@ namespace torch { namespace jit {
 // Since the nodes are visited in topological order, one pass is enough.
 void EliminateCommonSubexpression(Block * block,
                                   std::function<Node*(Node*)> parent_lookup_fn) {
-  std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
+  std::unordered_set<Node*, HashNode, EqualNode> subexprs;
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++ it) {
     auto node = *it;
     if (node->kind() == prim::PythonOp

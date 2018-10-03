@@ -10,7 +10,7 @@ namespace {
 
 //Very similar to the common subexpression elimination pass
 //Move all constants to the beginning of the graph, and deduplicate
-void ConstantPooling(Block * block, std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE>& constants) {
+void ConstantPooling(Block * block, std::unordered_set<Node*, HashNode, EqualNode>& constants) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto node = *it;
     // node may be moved to a different block so advance iterator now
@@ -29,7 +29,7 @@ void ConstantPooling(Block * block, std::unordered_set<Node*, HashNodeCSE, Equal
 
     auto first_node = node->owningGraph()->block()->nodes().front();
     if (node != first_node)
-      node->moveAfter(first_node);
+      node->moveBefore(first_node);
 
     // Check whether the same constant already exists.
     auto subit = constants.insert(node);
@@ -46,7 +46,7 @@ void ConstantPooling(Block * block, std::unordered_set<Node*, HashNodeCSE, Equal
 
 
 void ConstantPooling(const std::shared_ptr<Graph>& graph) {
-  std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> constants;
+  std::unordered_set<Node*, HashNode, EqualNode> constants;
   ConstantPooling(graph->block(), constants);
 }
 

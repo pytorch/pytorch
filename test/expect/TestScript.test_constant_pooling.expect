@@ -1,22 +1,24 @@
-graph(%x.1 : Dynamic) {
+graph(%cond : Dynamic) {
   %c.1 : int = prim::Constant[value=0]()
   %2 : int[] = prim::Constant[value=[1]]()
   %3 : int[] = prim::Constant[value=[0, -1]]()
   %4 : int = prim::Constant[value=6]()
   %5 : int[] = prim::Constant[value=[0]]()
   %6 : int = prim::Constant[value=3]()
+  %7 : Float(2) = prim::Constant[value= 4  4 [ CPUFloatType{2} ]]()
+  %8 : Float(2) = prim::Constant[value= 1  1 [ CPUFloatType{2} ]]()
   %e : string = prim::Constant[value="bcd"]()
   %d : string = prim::Constant[value="abc"]()
   %a : int = prim::Constant[value=1]()
-  %10 : int = prim::TensorToNum(%x.1)
-  %c : int, %x : Dynamic = prim::If(%10)
+  %12 : int = prim::TensorToNum(%cond)
+  %c : int, %x : Dynamic = prim::If(%12)
     block0() {
-      -> (%6, %x.1)
+      -> (%6, %8)
     }
     block1() {
       %x.2 : Dynamic = aten::rand(%5, %4, %c.1, %3)
-      %14 : int = prim::TensorToNum(%x.2)
-      %x.4 : Dynamic = prim::If(%14)
+      %16 : int = prim::TensorToNum(%cond)
+      %x.4 : Dynamic = prim::If(%16)
         block0() {
           %x.3 : Dynamic = aten::rand(%2, %4, %c.1, %3)
           -> (%x.3)
@@ -24,7 +26,7 @@ graph(%x.1 : Dynamic) {
         block1() {
           -> (%x.2)
         }
-       = prim::Print(%d, %e, %d)
+       = prim::Print(%d, %e, %d, %x.4, %7, %8)
       -> (%c.1, %x.4)
     }
   return (%a, %6, %c, %x);

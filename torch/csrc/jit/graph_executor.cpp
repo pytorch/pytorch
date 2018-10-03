@@ -573,7 +573,6 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
   // add valid expand nodes when the shapes are stable
   RemoveExpands(g);
   CanonicalizeOps(g);
-  ConstantPooling(g);
   EliminateDeadCode(g);
 }
 

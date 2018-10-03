@@ -4,11 +4,11 @@
 
 namespace torch { namespace jit {
 
-struct HashNodeCSE {
+struct HashNode {
   size_t operator()(const Node* k) const;
 };
 
-struct EqualNodeCSE {
+struct EqualNode {
   bool operator()(const Node* lhs, const Node* rhs) const;
 };
 

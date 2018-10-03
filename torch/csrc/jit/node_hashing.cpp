@@ -26,8 +26,7 @@ bool tensorListEqual(const std::vector<at::Tensor>& lhs, const std::vector<at::T
 
 // Check whether two nodes have the same attributes in CSE.
 // This function may be too conservative for general use.
-// Do NOT support t/ts/g/gs attributes.
-// If t/ts are supported, CONSTANT node comparison may need to consider device.
+// Do NOT support g/gs attributes.
 bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
   JIT_ASSERT(lhs != nullptr);
   JIT_ASSERT(rhs != nullptr);
@@ -78,14 +77,14 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 } // anonymous namespace
 
 
-size_t HashNodeCSE::operator()(const Node* k) const {
+size_t HashNode::operator()(const Node* k) const {
   JIT_ASSERT(k != nullptr);
   return get_hash(k->kind(),
                   fmap(k->outputs(), [](const Value *v) { return v->type()->kind(); }),
                   fmap(k->inputs(), [](const Value *v) { return v->unique(); }));
 };
 
-bool EqualNodeCSE::operator()(const Node* lhs, const Node* rhs) const {
+bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   if (lhs == nullptr && rhs == nullptr) return true;
   if (lhs == nullptr || rhs == nullptr) return false;
 

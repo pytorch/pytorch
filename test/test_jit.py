@@ -3076,20 +3076,23 @@ a")
         self.assertEqual(y, y2)
 
     def test_constant_pooling(self):
-        def func(x):
+        def func(cond):
             a = 1
             b = 4
             c = 0
             d = "abc"
             e = "bcd"
             f = "abc"
-            if int(x):
+            x = torch.ones([2])
+            y = x * 4
+            z = torch.ones([2])
+            if int(cond):
                 c = b - a
             else:
                 x = torch.rand(0)
-                if int(x):
+                if int(cond):
                     x = torch.rand(1)
-                print(d, e, f)
+                print(d, e, f, x, y, z)
             b = b - a
             return a, b, c, x
 
