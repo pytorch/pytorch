@@ -4925,7 +4925,6 @@ a")
             bar()
 
     def test_tuples(self):
-        @torch.jit.script
         def foo(i):
             a = (i + 4, i * 2)
             c = a
@@ -4937,10 +4936,12 @@ a")
             while False:
                 t0, t1 = c
                 c = (t1, t0)
-            return t0
+            x = (1,)
+            y = 1,
+            return t0, x, y
 
         v = torch.rand(10, 3)
-        self.assertEqual(v * 9, foo(v))
+        self.checkScript(foo, (v,))
 
         with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Tensor, Tensor\)"):
             @torch.jit.script
@@ -7248,6 +7249,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_dcgan_models(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @skipIfRocm
     def test_dcgan_models_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_dcgan_models(self, device='cuda', check_export_import=False)
@@ -7370,11 +7372,13 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         self._test_mnist(self, device='cpu')
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @skipIfRocm
     def test_mnist_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_mnist(self, device='cuda', check_export_import=False)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @skipIfRocm
     def test_mnist_training_leaks_no_memory_cuda(self):
         net = MnistNet().cuda()
         # MnistNet uses dropout, don't check its trace

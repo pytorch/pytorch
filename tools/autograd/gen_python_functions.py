@@ -28,7 +28,8 @@ SKIP_PYTHON_BINDINGS = [
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
     'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice', 'randint(_out)?',
     '_local_scalar', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to'
+    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
+    'copy_sparse_to_sparse_'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature

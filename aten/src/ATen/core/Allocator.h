@@ -44,7 +44,7 @@ class DataPtr {
     return ptr_.release_context();
   }
   std::unique_ptr<void, DeleterFnPtr>&& move_context() {
-    return std::move(ptr_.move_context());
+    return ptr_.move_context();
   }
   operator bool() const {
     return static_cast<bool>(ptr_);
