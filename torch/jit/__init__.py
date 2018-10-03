@@ -583,15 +583,23 @@ class CompilationUnit(object):
 
 
 def weak_script(fn):
-    fn._jit_is_weak_script = True
+    compiled_weak_fns[fn] = "pending";
     return fn
 
 
-def script(fn, optimize=True, _frames_up=0, _is_weak=False):
+def _try_compile_weak_script(fn):
+    v = compiled_weak_fns.get(fn)
+    if v is None:
+        return None
+    if v == "pending":
+        v = torch.jit.script(fn)
+        compiled_weak_fns[fn] = v
+    return v
+
+
+def script(fn, optimize=True, _frames_up=0):
     if not _enabled:
         return fn
-    if _is_weak and fn in compiled_weak_fns:
-        return compiled_weak_fns[fn]
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
     graph = _jit_script_compile(ast, rcb)
@@ -605,8 +613,6 @@ def script(fn, optimize=True, _frames_up=0, _is_weak=False):
     # Forward docstrings
     mod.__doc__ = fn.__doc__
 
-    if _is_weak:
-        compiled_weak_fns[fn] = mod
     return mod
 
 
