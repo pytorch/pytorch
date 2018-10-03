@@ -146,7 +146,6 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
         pass
 
 
-
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
     torch.cuda.set_device(device_id)
 
