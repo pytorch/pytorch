@@ -414,7 +414,6 @@ private:
     //          constants, and constant propagation doesn't need shape information
     //          anyway, so it's better to run it first.
     ConstantPropagation(opt_graph);
-    ConstantPooling(opt_graph);
     PropagateInputShapes(*opt_graph);
     PropagateRequiresGrad(opt_graph);
 
@@ -446,6 +445,7 @@ private:
   void runOptimization(std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
+    ConstantPooling(graph);
     UnrollLoops(graph);
     PeepholeOptimize(graph);
     CheckInplace(graph);
