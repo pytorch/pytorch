@@ -159,7 +159,7 @@ void eliminateNopTranspose(Block *b) {
     }
     if (n->kind() == onnx::Transpose) {
       if (isNopTranspose(n->is(attr::perm))) {
-        n->replaceAllUsesWith(n->input()->node());
+        n->output()->replaceAllUsesWith(n->input());
         it.destroyCurrent();
         continue;
       }

@@ -187,9 +187,8 @@ class CAFFE2_API EnforceFailMessage {
         "like `Equals`. Use CAFFE_ENFORCE for simple boolean checks.");
   }
 
-  /* implicit */ EnforceFailMessage(std::string&& msg) {
-    msg_ = new std::string(std::move(msg));
-  }
+  /* implicit */ EnforceFailMessage(std::string&& msg);
+
   inline bool bad() const {
     return msg_ != nullptr;
   }

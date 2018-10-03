@@ -66,6 +66,8 @@ CREATE_SUBDIRS         = NO
 FULL_PATH_NAMES        = YES
 # Nested folders will be ignored without this.
 RECURSIVE              = YES
+# Blacklist certain file patterns from the INPUT section.
+EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h
 ################################################################################
 # Output formats for Doxygen to create.                                        #
 ################################################################################
@@ -102,7 +104,7 @@ EXTRACT_ALL            = YES
 EXTRACT_PACKAGE        = YES
 EXTRACT_STATIC         = YES
 CASE_SENSE_NAMES       = NO
-EXCLUDE_SYMBOLS        = c10::* caffe2::* cereal* DL* TH* cudnn*
+EXCLUDE_SYMBOLS        = c10::* caffe2::* cereal* DL* TH* cudnn* std::*
 ################################################################################
 # Docstring control / customization.                                           #
 ################################################################################

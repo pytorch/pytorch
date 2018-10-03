@@ -27,6 +27,8 @@ _(IntType) \
 _(NoneType) \
 _(StringType) \
 _(GeneratorType) \
+_(VarType) \
+_(WorldType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -133,6 +135,9 @@ public:
     return r;
   }
   virtual ~Type() = default;
+  virtual bool hasFreeVariables() const {
+    return false;
+  }
 };
 
 inline bool operator!=(const Type & lhs, const Type & rhs) {
@@ -366,6 +371,32 @@ private:
   std::vector<int64_t> strides_;
 };
 
+// This type is a token used to represent effectful computation in the IR.
+// See the AnnotateEffects pass for how it is used.
+struct WorldType;
+using WorldTypePtr = std::shared_ptr<WorldType>;
+struct TORCH_API WorldType : public Type {
+  template <typename... T>
+  static WorldTypePtr create(T&&... all) {
+    return WorldTypePtr(new WorldType(std::forward<T>(all)...));
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "world";
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *this == *rhs;
+  }
+  static const TypeKind Kind = TypeKind::WorldType;
+  // global singleton
+  static WorldTypePtr get();
+
+ private:
+  WorldType() : Type(TypeKind::WorldType) {}
+};
+
 struct ListType;
 using ListTypePtr = std::shared_ptr<ListType>;
 
@@ -400,6 +431,9 @@ struct TORCH_API ListType : public Type {
   TypePtr getElementType() const {
     return elem;
   }
+  bool hasFreeVariables() const override {
+    return has_free_variables_;
+  }
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
@@ -408,8 +442,11 @@ struct TORCH_API ListType : public Type {
   static const TypeKind Kind = TypeKind::ListType;
 private:
   ListType(TypePtr elem)
-  : Type(TypeKind::ListType), elem(std::move(elem)) {}
+  : Type(TypeKind::ListType)
+  , elem(std::move(elem))
+  , has_free_variables_(getElementType()->hasFreeVariables()) {}
   TypePtr elem;
+  bool has_free_variables_;
 };
 
 struct TupleType;
@@ -461,12 +498,20 @@ struct TORCH_API TupleType : public Type {
     ss << "]";
     return ss.str();
   }
+  bool hasFreeVariables() const override {
+    return has_free_variables_;
+  }
 
   static const TypeKind Kind = TypeKind::TupleType;
 private:
   TupleType(std::vector<TypePtr> elements_)
   : Type(TypeKind::TupleType)
-  , elements_(std::move(elements_)) {}
+  , elements_(std::move(elements_)) {
+    has_free_variables_ =
+        std::any_of(elements_.begin(), elements_.end(), [](TypePtr v) {
+          return v->hasFreeVariables();
+        });
+  }
 
   bool compare(const Type& rhs, std::function<bool(const TypePtr, const TypePtr)> fn) const {
     if(rhs.kind() != kind())
@@ -482,6 +527,7 @@ private:
     return true;
   }
   std::vector<TypePtr> elements_;
+  bool has_free_variables_;
 };
 
 struct NumberType;
@@ -631,6 +677,34 @@ private:
 };
 
 
+// a type variable, used in FunctionSchema
+struct VarType;
+using VarTypePtr = std::shared_ptr<VarType>;
+struct VarType : public Type {
+  static constexpr bool is_singleton = false;
+  template<typename ... T>
+  static VarTypePtr create(std::string name_) {
+    return VarTypePtr(new VarType(std::move(name_)));
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return name();
+  }
+  static const TypeKind Kind = TypeKind::VarType;
+  const std::string& name() const {
+    return name_;
+  }
+  bool hasFreeVariables() const override {
+    return true;
+  }
+private:
+  VarType(std::string name_)
+  : Type(TypeKind::VarType), name_(name_) {}
+  std::string name_;
+};
+
 TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 // what is the type, ignoring extra size/shape information?
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
@@ -688,5 +762,18 @@ template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::o
 template<> inline TypePtr getTypePtr<std::vector<int64_t>>() { return ListType::ofInts(); }
 
 TORCH_API TypePtr inferTypeFrom(const IValue& value);
+
+struct TORCH_API TypeMatchError : public std::exception {
+  TypeMatchError(std::string msg_)
+  : msg_(std::move(msg_)) {}
+  const char * what() const noexcept override {
+    return msg_.c_str();
+  }
+private:
+  std::string msg_;
+};
+using TypeEnv = std::unordered_map<std::string, TypePtr>;
+TORCH_API TypePtr matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv & type_env);
+TORCH_API TypePtr evalTypeVariables(TypePtr type, TypeEnv & type_env);
 
 }} // namespace torch::jit

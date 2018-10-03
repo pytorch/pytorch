@@ -2,7 +2,7 @@
 
 namespace at {
 
-AT_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     ContextRegistry,
     at::DeviceType,
     at::BaseContext,
@@ -28,22 +28,6 @@ BaseStaticContext* get_static_context(at::DeviceType t) {
   auto* ptr = GetStaticContexts()[t];
   AT_ASSERTM(ptr, "StaticContext for ", t, " is not registered yet.");
   return ptr;
-}
-
-// AT_DEFINE_OBJECT_PTR_REGISTRY(
-//     AllocatorRegistry,
-//     at::DeviceType,
-//     at::Allocator*
-// );
-
-AllocatorGetterMap& GetAllocatorGetterMap() {
-  static AllocatorGetterMap alloc_getter_map;
-  return alloc_getter_map;
-}
-
-void SetAllocatorGetter(at::DeviceType t, AllocatorGetter alloc_getter) {
-  auto& alloc_getter_map = GetAllocatorGetterMap();
-  alloc_getter_map[t] = alloc_getter;
 }
 
 } // namespace caffe2

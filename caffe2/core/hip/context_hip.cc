@@ -429,17 +429,7 @@ struct DefaultHIPAllocator final : public at::Allocator {
   }
 };
 
-static std::unique_ptr<at::Allocator> g_hip_allocator(
-    new DefaultHIPAllocator());
-at::Allocator* GetHIPAllocator() {
-  return g_hip_allocator.get();
-}
-
-void SetHIPAllocator(at::Allocator* alloc) {
-  g_hip_allocator.reset(alloc);
-}
-
-REGISTER_ALLOCATOR(HIP, GetHIPAllocator());
+REGISTER_ALLOCATOR(HIP, new DefaultHIPAllocator());
 
 BaseStaticContext* GetHIPStaticContext() {
   static HIPStaticContext context;

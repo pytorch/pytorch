@@ -413,17 +413,11 @@ struct DefaultCUDAAllocator final : public at::Allocator {
   }
 };
 
-static std::unique_ptr<at::Allocator> g_cuda_allocator(
-    new DefaultCUDAAllocator());
 at::Allocator* GetCUDAAllocator() {
-  return g_cuda_allocator.get();
+  return GetAllocator(CUDA);
 }
 
-void SetCUDAAllocator(at::Allocator* alloc) {
-  g_cuda_allocator.reset(alloc);
-}
-
-REGISTER_ALLOCATOR_GETTER(CUDA, GetCUDAAllocator);
+REGISTER_ALLOCATOR(CUDA, new DefaultCUDAAllocator());
 
 BaseStaticContext* GetCUDAStaticContext() {
   static CUDAStaticContext context;

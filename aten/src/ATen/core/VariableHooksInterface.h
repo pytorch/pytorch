@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/core/Registry.h>
-#include <ATen/core/ScalarType.h>
 #include <ATen/core/Backend.h>
+#include <ATen/core/ScalarType.h>
+#include "c10/util/Registry.h"
 
 namespace at {
   class LegacyTypeDispatch;
@@ -39,8 +39,12 @@ struct CAFFE2_API VariableHooksInterface {
 // for the "..." in a variadic macro"
 struct CAFFE2_API VariableHooksArgs {};
 
-AT_DECLARE_REGISTRY(VariableHooksRegistry, VariableHooksInterface, VariableHooksArgs)
-#define REGISTER_VARIABLE_HOOKS(clsname) AT_REGISTER_CLASS(VariableHooksRegistry, clsname, clsname)
+C10_DECLARE_REGISTRY(
+    VariableHooksRegistry,
+    VariableHooksInterface,
+    VariableHooksArgs);
+#define REGISTER_VARIABLE_HOOKS(clsname) \
+  C10_REGISTER_CLASS(VariableHooksRegistry, clsname, clsname)
 
 namespace detail {
 CAFFE2_API const VariableHooksInterface& getVariableHooks();

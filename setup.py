@@ -58,7 +58,7 @@
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
-#   USE_LMBD
+#   USE_LMDB
 #     enables use of LMDB for storage
 #
 #   BUILD_BINARY
@@ -86,6 +86,9 @@
 #   CUDA_PATH (Windows)
 #     specify where CUDA is installed; usually /usr/local/cuda or
 #     /usr/local/cuda-x.y
+#   CUDAHOSTCXX
+#     specify a different compiler than the system one to use as the CUDA
+#     host compiler for nvcc.
 #
 #   CUDNN_LIB_DIR
 #   CUDNN_INCLUDE_DIR
@@ -346,6 +349,7 @@ def build_libs(libs):
         build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    my_env["PYTORCH_BUILD_VERSION"] = version
     my_env["CMAKE_PREFIX_PATH"] = full_site_packages
     my_env["NUM_JOBS"] = str(NUM_JOBS)
     my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
@@ -1201,6 +1205,8 @@ if __name__ == '__main__':
                 'lib/include/caffe2/utils/*.h',
                 'lib/include/c10/*.h',
                 'lib/include/c10/macros/*.h',
+                'lib/include/c10/util/*.h',
+                'lib/include/caffe2/core/*.h',
                 'lib/include/torch/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/api/include/torch/*.h',

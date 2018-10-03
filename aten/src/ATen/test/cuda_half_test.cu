@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
 #include "ATen/cuda/NumericLimits.cuh"
@@ -12,7 +11,6 @@
 using namespace at;
 
 __device__ void test(){
-  
   // test half construction and implicit conversions in device
   assert(Half(3) == Half(3.0f));
   assert(static_cast<Half>(3.0f) == Half(3.0f));
@@ -24,7 +22,7 @@ __device__ void test(){
   __half c = a - Half(b);
   assert(static_cast<Half>(c) == Half(1.0));
 
-  // asserting if the  functions used on 
+  // asserting if the  functions used on
   // half types give almost equivalent results when using
   //  functions on double.
   // The purpose of these asserts are to test the device side
@@ -61,17 +59,18 @@ __device__ void test(){
   assert(::abs(::abs(Half(-3.0)) - ::abs(-3.0f)) <= threshold);
   assert(::abs(::round(Half(2.3)) - ::round(2.3f)) <= threshold);
   assert(::abs(::pow(Half(2.0), Half(10.0)) - ::pow(2.0f, 10.0f)) <= threshold);
-  assert(::abs(::atan2(Half(7.0), Half(0.0)) - ::atan2(7.0f, 0.0f)) <= threshold);
+  assert(
+      ::abs(::atan2(Half(7.0), Half(0.0)) - ::atan2(7.0f, 0.0f)) <= threshold);
   // note: can't use  namespace on isnan and isinf in device code
-  #ifdef _MSC_VER
-    // Windows requires this explicit conversion. The reason is unclear
-    // related issue with clang: https://reviews.llvm.org/D37906
-    assert(::abs(::isnan((float)Half(0.0)) - ::isnan(0.0f)) <= threshold);
-    assert(::abs(::isinf((float)Half(0.0)) - ::isinf(0.0f)) <= threshold);
-  #else
-    assert(::abs(::isnan(Half(0.0)) - ::isnan(0.0f)) <= threshold);
-    assert(::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
-  #endif
+#ifdef _MSC_VER
+  // Windows requires this explicit conversion. The reason is unclear
+  // related issue with clang: https://reviews.llvm.org/D37906
+  assert(::abs(::isnan((float)Half(0.0)) - ::isnan(0.0f)) <= threshold);
+  assert(::abs(::isinf((float)Half(0.0)) - ::isinf(0.0f)) <= threshold);
+#else
+  assert(::abs(::isnan(Half(0.0)) - ::isnan(0.0f)) <= threshold);
+  assert(::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
+#endif
 }
 
 __global__ void kernel(){
@@ -79,12 +78,13 @@ __global__ void kernel(){
 }
 
 void launch_function(){
-  kernel<<<1,1>>>();
+  kernel<<<1, 1>>>();
 }
 
-CATCH_TEST_CASE( "half common math functions tests in device", "[cuda]" ) {
+// half common math functions tests in device
+TEST(HalfCuda, HalfCuda) {
   launch_function();
   cudaError_t err = cudaDeviceSynchronize();
-  CATCH_REQUIRE(err == cudaSuccess);
+  bool isEQ = err == cudaSuccess;
+  ASSERT_TRUE(isEQ);
 }
-

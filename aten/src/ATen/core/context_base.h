@@ -8,11 +8,11 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Allocator.h>
-#include <ATen/core/Device.h>
+//#include <ATen/core/Device.h>
 #include <ATen/core/Error.h>
-#include <ATen/core/Registry.h>
-#include <ATen/core/UniqueVoidPtr.h>
+//#include <ATen/core/UniqueVoidPtr.h>
 #include <ATen/core/typeid.h>
+#include <c10/util/Registry.h>
 
 namespace caffe2 {
 class Event;
@@ -27,7 +27,7 @@ class BaseContext;
    functions that are invoked statically before in Tensor class, e.g. New,
    We will merge this with Allocator later.
  */
-class AT_CORE_API BaseStaticContext {
+class CAFFE2_API BaseStaticContext {
  public:
   virtual ~BaseStaticContext() noexcept {}
 
@@ -50,7 +50,7 @@ class AT_CORE_API BaseStaticContext {
  * functions in the BaseContext class.
  * TODO: add docs after this is finalized.
  */
-class AT_CORE_API BaseContext {
+class CAFFE2_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 
@@ -180,7 +180,7 @@ class AT_CORE_API BaseContext {
 };
 
 // Context constructor registry
-AT_DECLARE_TYPED_REGISTRY(
+C10_DECLARE_TYPED_REGISTRY(
     ContextRegistry,
     at::DeviceType,
     at::BaseContext,
@@ -188,7 +188,7 @@ AT_DECLARE_TYPED_REGISTRY(
     at::Device);
 
 #define REGISTER_CONTEXT(type, ...) \
-  AT_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
 
 inline std::unique_ptr<at::BaseContext> CreateContext(
     const at::Device& device) {
@@ -218,39 +218,5 @@ struct StaticContextFunctionRegisterer {
   namespace {                                                        \
   static StaticContextFunctionRegisterer<t> g_static_context_##d(f); \
   }
-
-// AT_DECLARE_OBJECT_PTR_REGISTRY(
-//     AllocatorRegistry,
-//     at::DeviceType,
-//     at::Allocator*
-// );
-
-// #define REGISTER_ALLOCATOR(key, alloc)
-//   AT_REGISTER_TYPED_CREATOR(AllocatorRegistry, key, alloc)
-
-using AllocatorGetter = at::Allocator* (*)(void);
-using AllocatorGetterMap = std::unordered_map<at::DeviceType, AllocatorGetter>;
-CAFFE2_API AllocatorGetterMap& GetAllocatorGetterMap();
-CAFFE2_API void SetAllocatorGetter(
-    at::DeviceType t,
-    AllocatorGetter alloc_getter);
-template <at::DeviceType t>
-struct AllocatorGetterRegisterer {
-  explicit AllocatorGetterRegisterer(AllocatorGetter alloc_getter) {
-    SetAllocatorGetter(t, alloc_getter);
-  }
-};
-
-#define REGISTER_ALLOCATOR_GETTER(t, f)                   \
-  namespace {                                             \
-  static AllocatorGetterRegisterer<t> g_allocator_##d(f); \
-  }
-
-inline at::Allocator* GetAllocator(at::DeviceType t) {
-  auto alloc_getter = GetAllocatorGetterMap()[t];
-  AT_ASSERTM(
-      alloc_getter, "Allocator Getter for ", t, " is not registered yet.");
-  return alloc_getter();
-}
 
 } // namespace caffe2

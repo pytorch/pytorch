@@ -63,7 +63,7 @@ class MKLContext : public BaseContext {
   }
 
   inline static at::DataPtr New(size_t nbytes) {
-    return GetCPUAllocator()->allocate(nbytes);
+    return GetAllocator(CPU)->allocate(nbytes);
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {

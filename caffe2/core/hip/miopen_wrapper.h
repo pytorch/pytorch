@@ -26,8 +26,7 @@ struct MIOPENWorkspace
         if(nbytes_ < nbytes)
         {
             reset();
-            auto data_ptr = HIPContext::New(nbytes);
-            data_ = {data_ptr.move_context().release(), data_ptr.get_deleter()};
+            data_ = HIPContext::New(nbytes);
             nbytes_               = nbytes;
         }
         CAFFE_ENFORCE_GE(nbytes_, nbytes);
@@ -36,13 +35,12 @@ struct MIOPENWorkspace
 
     void reset()
     {
-        data_   = nullptr;
-        nbytes_ = 0;
+      data_.clear();
+      nbytes_ = 0;
     }
 
     private:
-     // TODO: change to at::DataPtr
-     std::unique_ptr<void, MemoryDeleter> data_{nullptr, NoDelete};
+     at::DataPtr data_;
      size_t nbytes_{0};
 };
 
@@ -93,7 +91,7 @@ class MIOPENState
     hipStream_t stream_{nullptr};
     MIOPENWorkspace workspace_;
     size_t gpu_id_{0};
-    AT_DISABLE_COPY_AND_ASSIGN(MIOPENState);
+    C10_DISABLE_COPY_AND_ASSIGN(MIOPENState);
 };
 
 /**
@@ -158,7 +156,7 @@ class MIOPENWrapper
                    CAFFE2_COMPILE_TIME_MAX_HIP_GPUS>;
     static PerGPUMIOPENStates& miopen_states();
 
-    AT_DISABLE_COPY_AND_ASSIGN(MIOPENWrapper);
+    C10_DISABLE_COPY_AND_ASSIGN(MIOPENWrapper);
 };
 
 }; // namespace caffe2

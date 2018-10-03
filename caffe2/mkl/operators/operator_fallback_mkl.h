@@ -66,10 +66,10 @@ class MKLFallbackOp final : public Operator<MKLContext> {
     for (int i = 0; i < InputSize(); ++i) {
       if (OperatorBase::InputIsType<MKLMemory<float>>(i)) {
         OperatorBase::Input<MKLMemory<float>>(i).CopyTo(
-            local_input_blobs_[i]->GetMutableTensor(CPU));
+            BlobGetMutableTensor(local_input_blobs_[i], CPU));
       } else if (OperatorBase::InputIsType<MKLMemory<double>>(i)) {
         OperatorBase::Input<MKLMemory<double>>(i).CopyTo(
-            local_input_blobs_[i]->GetMutableTensor(CPU));
+            BlobGetMutableTensor(local_input_blobs_[i], CPU));
       } else {
         VLOG(1) << "Input " << i << " is not MKLMemory. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually
@@ -93,7 +93,7 @@ class MKLFallbackOp final : public Operator<MKLContext> {
         continue;
       }
       CAFFE_ENFORCE(
-          local_output_blobs_[i]->IsTensorType(CPU),
+          BlobIsTensorType(*local_output_blobs_[i], CPU),
           "MKL fallback op currently does not support non-TensorCPU "
           "output type who needs copying.");
       const auto& src = local_output_blobs_[i]->template Get<TensorCPU>();

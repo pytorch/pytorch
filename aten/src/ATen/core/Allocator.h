@@ -44,7 +44,7 @@ class DataPtr {
     return ptr_.release_context();
   }
   std::unique_ptr<void, DeleterFnPtr>&& move_context() {
-    return std::move(ptr_.move_context());
+    return ptr_.move_context();
   }
   operator bool() const {
     return static_cast<bool>(ptr_);
@@ -121,7 +121,7 @@ struct Allocator {
   }
 };
 
-struct AT_CORE_API InefficientStdFunctionContext {
+struct CAFFE2_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(
       std::unique_ptr<void, std::function<void(void*)>>&& ptr)
@@ -133,3 +133,38 @@ struct AT_CORE_API InefficientStdFunctionContext {
 };
 
 } // namespace at
+
+namespace caffe2 {
+
+// using AllocatorArray = std::array<
+//     std::unique_ptr<at::Allocator>,
+//     static_cast<int>(at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>;
+CAFFE2_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
+at::Allocator* GetAllocator(const at::DeviceType& t);
+
+template <at::DeviceType t>
+struct AllocatorRegisterer {
+  explicit AllocatorRegisterer(at::Allocator* alloc) {
+    SetAllocator(t, alloc);
+  }
+};
+
+#define REGISTER_ALLOCATOR(t, f)                    \
+  namespace {                                       \
+  static AllocatorRegisterer<t> g_allocator_##d(f); \
+  }
+
+std::mutex& GetAllocatorArrayMutex();
+// AllocatorArray& GetAllocatorArray();
+extern std::unique_ptr<at::Allocator> allocator_array[static_cast<int>(
+    at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+
+inline at::Allocator* GetAllocator(const at::DeviceType& t) {
+  // auto& array = GetAllocatorArray();
+  auto& uniq_ptr = allocator_array[static_cast<int>(t)];
+  auto* alloc = uniq_ptr.get();
+  AT_ASSERTM(alloc, "Allocator for ", t, " is not set.");
+  return alloc;
+}
+
+} // namespace caffe2
