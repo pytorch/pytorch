@@ -58,7 +58,7 @@
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
-#   USE_LMBD
+#   USE_LMDB
 #     enables use of LMDB for storage
 #
 #   BUILD_BINARY
