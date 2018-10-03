@@ -260,6 +260,9 @@ void runNetwork(
   for (int i = 0; i < iter; ++i) {
     caffe2::ObserverConfig::initSampleRate(1, 1, 1, 0, warmup);
     fillInputBlob(workspace, tensor_protos_map, i);
+    if (wipe_cache) {
+      caffe2::wipe_cache();
+    }
     CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
     if (wipe_cache) {
       caffe2::wipe_cache();
@@ -267,9 +270,6 @@ void runNetwork(
     if (run_individual) {
       caffe2::ObserverConfig::initSampleRate(1, 1, 1, 1, warmup);
       CAFFE_ENFORCE(net->Run(), "Main run ", i, " with operator has failed.");
-      if (wipe_cache) {
-        caffe2::wipe_cache();
-      }
     }
   }
 }
