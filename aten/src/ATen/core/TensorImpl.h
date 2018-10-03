@@ -778,8 +778,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         data_type_.ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
-        auto data_ptr = GetStaticContext()->New(numel_ * storage_.itemsize());
-        storage_.set_data_ptr(std::move(data_ptr));
+        storage_.set_data_ptr(
+            GetStaticContext()->New(numel_ * storage_.itemsize()));
       }
       storage_.set_numel(numel_);
       AT_ASSERT(storage_offset_ == 0); // because we just reallocated
