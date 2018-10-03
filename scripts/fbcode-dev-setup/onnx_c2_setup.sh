@@ -20,9 +20,10 @@ alias with_proxy="HTTPS_PROXY=http://fwdproxy.any:8080 HTTP_PROXY=http://fwdprox
 RED='\033[0;31m'
 CYAN='\033[0;36m'
 NC='\033[0m'
-onnx_root="$HOME/onnx-dev"   # I think hardcoding the onnx root dir is fine, just like fbsource
+onnx_root="$HOME/local/onnx-dev"   # I think hardcoding the onnx root dir is fine, just like fbsource
+onnx_root_link="$HOME/onnx-dev"
 venv="$onnx_root/onnxvenv"
-onnx_init_file="$onnx_root/.onnx_env_init"
+onnx_init_file="$onnx_root_link/.onnx_env_init"
 ccache_root="$onnx_root/ccache"
 ccache_script="$(pwd)/ccache_install.sh"
 sanity_script="$onnx_root/sanity.sh"
@@ -67,6 +68,11 @@ if [ -e "$onnx_root" ]; then
   mv --backup=t -T "$onnx_root" "${onnx_root}.old.$timestamp"
 fi
 mkdir -p "$onnx_root"
+if [ -e "$onnx_root_link"]; then
+  timestamp=$(date "+%Y.%m.%d-%H.%M.%S")
+  mv --backup=t -T "$onnx_root_link" "${onnx_root_link}.old.$timestamp"
+fi
+ln -s "$onnx_root" "$onnx_root_link"
 
 # Set the name of virtualenv instance
 with_proxy virtualenv "$venv"
