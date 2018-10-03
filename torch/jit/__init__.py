@@ -612,7 +612,6 @@ def script(fn, optimize=True, _frames_up=0):
     mod.__getattr__('forward').forward_schema(ast, False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
-
     return mod
 
 
