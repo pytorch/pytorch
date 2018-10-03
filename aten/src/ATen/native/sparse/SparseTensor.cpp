@@ -204,7 +204,7 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
 
 SparseTensor clone_sparse(const SparseTensor& self) {
   SparseTensor other = new_with_dims_and_size_sparse(self.type(), self._sparseDims(), self._denseDims(), self.sizes());
-  _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values());
+  _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values(), true);
   _get_sparse_impl(other)->set_coalesced(self.is_coalesced());
   return other;
 }
@@ -243,11 +243,11 @@ Tensor sparse_to_dense(const SparseTensor& self) {
   return dst.add_(self);
 }
 
-SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src) {
+SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non_blocking) {
   if (isSameTensor(self, src)) return self;
   _get_sparse_impl(self)->resize_(src._sparseDims(), src._denseDims(), src.sizes());
   // NB: This seems to copy the underlying full indices/values buffer
-  _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values());
+  _copy_into_sparse(self, _get_sparse_impl(src)->indices(), _get_sparse_impl(src)->values(), non_blocking);
   _get_sparse_impl(self)->set_coalesced(src.is_coalesced());
   return self;
 }

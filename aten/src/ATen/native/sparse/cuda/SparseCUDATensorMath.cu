@@ -348,7 +348,7 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   AT_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
 
   if (src._nnz() == 0) {
-    return raw_copy_sparse_(r_, t);
+    return copy_sparse_to_sparse_(r_, t);
   }
   if (t._nnz() == 0) {
     return mul_out_sparse_scalar(r_, src, value);

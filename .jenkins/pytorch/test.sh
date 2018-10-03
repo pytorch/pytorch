@@ -102,6 +102,7 @@ test_aten() {
       SUDO=sudo
     fi
 
+    ${SUDO} ln -s "$TORCH_LIB_PATH"/libc10* build/bin
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
 

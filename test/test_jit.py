@@ -240,14 +240,10 @@ class JitTestCase(TestCase):
             imported = torch.jit.load(f.name)
         finally:
             os.unlink(f.name)
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            imported.save(f.name)
-            imported = torch.jit.load(f.name)
-        finally:
-            os.unlink(f.name)
-        return imported
+        buffer = io.BytesIO()
+        torch.jit.save(imported, buffer)
+        buffer.seek(0)
+        return torch.jit.load(buffer)
 
     def assertGraphContains(self, graph, kind):
         self.assertTrue(any(n.kind() == kind for n in graph.nodes()))
@@ -2230,7 +2226,7 @@ class TestBatched(TestCase):
 
         script_if = torch.jit.script(single_if)
         graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_if_else_with_scalar(self):
         def single_if(a, b):
@@ -2250,7 +2246,7 @@ class TestBatched(TestCase):
 
         script_if = torch.jit.script(single_if)
         graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_if_noelse(self):
         def single_if(a, b):
@@ -2268,7 +2264,7 @@ class TestBatched(TestCase):
 
         script_if = torch.jit.script(single_if)
         graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_if_noelse_with_scalar(self):
         def single_if(a, b):
@@ -2286,7 +2282,7 @@ class TestBatched(TestCase):
 
         script_if = torch.jit.script(single_if)
         graph = torch.to_batch_graph(script_if.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_while(self):
         def single_while(a, b):
@@ -2305,7 +2301,7 @@ class TestBatched(TestCase):
 
         script_while = torch.jit.script(single_while)
         graph = torch.to_batch_graph(script_while.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_for(self):
         def single_for(x, y):
@@ -2323,7 +2319,7 @@ class TestBatched(TestCase):
 
         script_for = torch.jit.script(single_for)
         graph = torch.to_batch_graph(script_for.graph)
-        self.assertExpected(str(graph))
+        self.assertExpected(canonical(graph))
 
     def test_lstm(self):
         def LSTM(x_all, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
@@ -2645,18 +2641,23 @@ class TestScript(JitTestCase):
             return torch.ones(x), x
         self.checkScript(stuff3, ([3, 2],))
 
-    def test_nested_list_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
-            @torch.jit.script
-            def foo(x):
-                # type: (Tuple[List[List[int]]]) -> int
-                return 4
+    def test_nested_list(self):
+        def foo(z):
+            # type: (Tuple[int, List[List[int]]]) -> int
+            x, y = z
+            return y[0][1]
+        self.checkScript(foo, ((1, [[1, 2], [3, 4]]),))
 
-    def test_nested_list_construct_error(self):
-        with self.assertRaisesRegex(RuntimeError, "Lists can only contain"):
+    def test_nested_list_construct(self):
+        def foo():
+            return [[4]] + [[4, 5]]
+        self.checkScript(foo, ())
+
+    def test_generic_list_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
             def foo(x):
-                return [[4]]
+                return [[x]] + [[1]]
 
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
@@ -2723,18 +2724,23 @@ a")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_clamp_fusion(self):
-        def func(a, b):
+        def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
+
+        def funcInf(a, b):
+            return torch.clamp(a + b, min=0, max=float('inf'))
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
-        s = self.checkScript(func, (a, b))
-        self.assertAllFused(s.graph_for(a, b))
+        funcs = (func2, funcInf)
+        for f in funcs:
+            s = self.checkScript(f, (a, b))
+            self.assertAllFused(s.graph_for(a, b))
 
-        c = s(a, b)
-        c.sum().backward()
-        self.assertAllFused(backward_graph(s))
+            c = s(a, b)
+            c.sum().backward()
+            self.assertAllFused(backward_graph(s))
 
     def test_mul(self):
         def func(a, b):
@@ -3447,6 +3453,80 @@ a")
             a = [0, 1, 2, 3, 4]
             return a[3:10] == [3, 4]
         self.checkScript(test_backward_slice, ())
+
+    def test_mutable_list(self):
+        def test_append():
+            a = [0, 1]
+            a.append(2)
+            a.append(3)
+            return a == [0, 1, 2, 3]
+        self.checkScript(test_append, ())
+
+        def test_append_2():
+            a = [0, 1]
+            a.append(2)
+            a = [1]
+            a.append(4)
+            return a == [1, 4]
+        self.checkScript(test_append_2, ())
+
+        def test_append_if():
+            a = [1]
+            if True:
+                a.append(4)
+            return a == [1, 4]
+        self.checkScript(test_append_if, ())
+
+        def test_append_if_else():
+            a = [1]
+            if False:
+                a.append(4)
+            else:
+                a.append(10)
+            return a == [1, 10]
+        self.checkScript(test_append_if_else, ())
+
+        def test_append_loop():
+            a = _construct_empty_int_list()
+            for i in range(5):
+                a.append(i)
+
+            return a == [0, 1, 2, 3, 4]
+        self.checkScript(test_append_loop, ())
+
+        def test_append_loop_if():
+            a = _construct_empty_int_list()
+            for i in range(5):
+                if i > 3:
+                    a.append(i)
+                else:
+                    a.append(0)
+
+            return a == [0, 0, 0, 0, 4]
+        self.checkScript(test_append_loop_if, ())
+
+        def test_nested_loop():
+            a = _construct_empty_int_list()
+            for i in range(2):
+                for j in range(2):
+                    a.append(i + j)
+
+            return a == [0, 1, 1, 2]
+        self.checkScript(test_append_loop_if, ())
+
+    def test_mutable_list_function_inline(self):
+        @torch.jit.script
+        def bar(y):
+            # type: (List[int]) -> List[int]
+            y.append(4)
+
+        @torch.jit.script
+        def foo():
+            x = [1, 2, 3]
+            bar(x)
+            return x
+
+        self.assertEqual(foo(), [1, 2, 3, 4])
 
     def test_func_call(self):
         script = '''
@@ -4845,7 +4925,6 @@ a")
             bar()
 
     def test_tuples(self):
-        @torch.jit.script
         def foo(i):
             a = (i + 4, i * 2)
             c = a
@@ -4857,10 +4936,12 @@ a")
             while False:
                 t0, t1 = c
                 c = (t1, t0)
-            return t0
+            x = (1,)
+            y = 1,
+            return t0, x, y
 
         v = torch.rand(10, 3)
-        self.assertEqual(v * 9, foo(v))
+        self.checkScript(foo, (v,))
 
         with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Tensor, Tensor\)"):
             @torch.jit.script
@@ -6491,7 +6572,7 @@ a")
 
         # Note: the neg op from script_fn1 should be properly inlined into the
         # graph of script_fn
-        self.assertExpected(str(script_fn.graph))
+        self.assertExpected(canonical(script_fn.graph))
 
     def test_call_script_mod_from_script_fn(self):
         class ScriptMod(torch.jit.ScriptModule):
@@ -6508,7 +6589,7 @@ a")
         def script_fn(x):
             return sm(x) + 1
 
-        self.assertExpected(str(script_fn.graph))
+        self.assertExpected(canonical(script_fn.graph))
 
     def test_call_python_fn_from_script_module(self):
         def python_fn(x):
@@ -6607,7 +6688,7 @@ a")
                 return script_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        self.assertExpected(str(sm.__getattr__('forward').graph))
+        self.assertExpected(canonical(sm.__getattr__('forward').graph))
 
     def test_call_script_mod_from_script_module(self):
         class ScriptMod1(torch.jit.ScriptModule):
@@ -6633,7 +6714,7 @@ a")
         # Note: the parameters from both modules should appear in the flattened
         # input list to the graph. The mm op from ScriptMod1 should be properly
         # inlined
-        self.assertExpected(str(sm.graph))
+        self.assertExpected(canonical(sm.graph))
 
     def test_module_with_params_called_fails(self):
         with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with parameters. Stateful "

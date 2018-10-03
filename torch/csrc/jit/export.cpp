@@ -15,6 +15,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <fstream>
 
 namespace torch { namespace jit {
 
@@ -425,7 +426,7 @@ void GraphEncoder::EncodeTensor(
 class ModuleEncoder: public EncoderBase {
  public:
   ModuleEncoder(const script::Module &module,
-                const std::string &filename);
+                std::ostream& out);
 
  private:
   void EncodeModule(onnx::GraphProto *graph_proto, const script::Module &module);
@@ -448,7 +449,7 @@ class ModuleEncoder: public EncoderBase {
 
   virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
                             const at::Tensor &tensor,
-                            const at::optional<std::string> external_ref) override;
+                            const at::optional<std::string> external_ref = {}) override;
 
   virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
                                            const Value* n) override;
@@ -462,7 +463,7 @@ class ModuleEncoder: public EncoderBase {
                       const TypePtr& type,
                       const std::string& name);
 
-  PyTorchFileWriter file_writer_;
+  PyTorchStreamWriter stream_writer_;
   // Used to deduplicate tensor storages
   std::unordered_map<const void*, uint64_t> storage_dedup_map_;
 
@@ -475,9 +476,9 @@ class ModuleEncoder: public EncoderBase {
 
 ModuleEncoder::ModuleEncoder(
     const script::Module &module,
-    const std::string &filename)
+    std::ostream& out)
     : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      file_writer_(filename) {
+      stream_writer_(out) {
   model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto_.mutable_graph(), module);
 }
@@ -564,6 +565,10 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("GeneratorType");
   } else if (kind == TypeKind::StringType) {
     type_proto->set_denotation("StringType");
+  } else if (kind == TypeKind::VarType) {
+    type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
+  } else if (kind == TypeKind::WorldType) {
+    type_proto->set_denotation("WorldType");
   } else {
     throw std::runtime_error("unexpected type kind");
   }
@@ -582,7 +587,7 @@ void ModuleEncoder::EncodeModule(
   EncodeParameters(graph_proto, module, "");
   EncodeMethods(graph_proto, module, "");
   auto str = model_proto_.SerializeAsString();
-  file_writer_.writeRecord(str.data(), str.size());
+  stream_writer_.writeRecord(str.data(), str.size());
 }
 
 void ModuleEncoder::EncodeParameters(
@@ -670,7 +675,7 @@ void ModuleEncoder::EncodeMethod(
 void ModuleEncoder::EncodeTensor(
     onnx::TensorProto *tensor_proto,
     const at::Tensor &tensor,
-    const at::optional<std::string> external_ref = {}) {
+    const at::optional<std::string> external_ref) {
   auto storage_ptr = tensor.storage().unsafeGetStorageImpl();
   auto dedup_it = storage_dedup_map_.find(storage_ptr);
   if (dedup_it != storage_dedup_map_.end()) {
@@ -689,7 +694,7 @@ void ModuleEncoder::EncodeTensor(
         .cpu();
     }
 
-    auto record_number = file_writer_.writeRecord(
+    auto record_number = stream_writer_.writeRecord(
       static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.storage().size());
     tensor_proto->add_int64_data(record_number);
     storage_dedup_map_[storage_ptr] = record_number;
@@ -915,8 +920,14 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
                          graph_encoder.get_raw_data_export_map());
 }
 
+void ExportModule(const script::Module& module, std::ostream& out) {
+  ModuleEncoder(module, out);
+}
+
 void ExportModule(const script::Module& module, const std::string &filename) {
-  ModuleEncoder(module, filename);
+  std::ofstream out(filename, std::ios_base::binary);
+
+  ExportModule(module, out);
 }
 
 }}

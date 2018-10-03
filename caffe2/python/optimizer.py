@@ -22,6 +22,8 @@ _LEARNING_RATE_INJECTION = "lr_injection"
 AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
 _optimizer_instance_count = defaultdict(int)
 
+FP16_ENGINES = ["SIMD_Q_FP16", "SIMD_Q_STOC_FP16", "SIMD_Q_STOC_MKL_FP16"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -586,7 +588,7 @@ class AdagradOptimizer(Optimizer):
                     value=0.0
                 )
         else:
-            if self.engine == "SIMD_Q_FP16" or self.engine == "SIMD_Q_STOC_FP16":
+            if self.engine in FP16_ENGINES:
                 shapes, types = workspace.InferShapesAndTypes([param_init_net])
                 assert str(param) in shapes, shapes
                 shape = shapes[str(param)]

@@ -439,6 +439,8 @@ def unique(input, sorted=False, return_inverse=False, dim=None):
             before returning as output.
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
+        dim (int): the dimension to apply unique. If ``None``, the unique of the
+            flattened input is returned. default: ``None``
 
     Returns:
         (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
@@ -646,8 +648,9 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
 
     Args:
         input (Tensor): the input tensor
-        p ({int, float, inf, -inf, 'fro', 'nuc'}): the order of norm
+        p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
+
             =====  ============================  ==========================
             ord    matrix norm                   vector norm
             =====  ============================  ==========================
@@ -656,20 +659,22 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
             'nuc'  nuclear norm                  --
             Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
             =====  ============================  ==========================
-        dim ({int, 2-tuple of ints, 2-list of ints}, optional): If it is an int,
-        vector norm will be calculated, if it is 2-tuple of ints, matrix norm
-        will be calculated. If the value is None, matrix norm will be calculated
-        when the input tensor only has two dimensions, vector norm will be
-        calculated when the input tensor only has one dimension. If the input
-        tensor has more than two dimensions, the vector norm will be applied to
-        last dimension.
-        keepdim (bool): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if attr:`dim`=``None`` and
-            :attr:`out`=``None``.
+
+        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
+            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
+            will be calculated. If the value is None, matrix norm will be calculated
+            when the input tensor only has two dimensions, vector norm will be
+            calculated when the input tensor only has one dimension. If the input
+            tensor has more than two dimensions, the vector norm will be applied to
+            last dimension.
+        keepdim (bool, optional): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if :attr:`dim` = ``None`` and
+            :attr:`out` = ``None``. Default: ``False``
         out (Tensor, optional): the output tensor. Ignored if
-        attr:`dim`=``None`` and :attr:`out`=``None``.
+            :attr:`dim` = ``None`` and :attr:`out` = ``None``.
 
     Example::
+
         >>> import torch
         >>> a = torch.arange(9, dtype= torch.float) - 4
         >>> b = a.reshape((3, 3))

@@ -802,7 +802,10 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (CAFFE2_LINK_LOCAL_PROTOBUF)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
+  # Add op schemas in "ai.onnx.pytorch" domain
+  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
+
   include_directories(${ONNX_INCLUDE_DIRS})
   add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   # In mobile build we care about code size, and so we need drop
