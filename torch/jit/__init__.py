@@ -365,6 +365,8 @@ class TracingCheckError(Exception):
 # Check the traced module against a set of user-provided validation inputs
 @torch.no_grad()
 def _check_trace(check_inputs, func, executor_options, module, check_tolerance):
+    # Note: tracing is independent of optimizations, which consume the trace
+    executor_options['optimize'] = False
     for inputs in check_inputs:
         if isinstance(inputs, torch.Tensor):
             inputs = (inputs,)

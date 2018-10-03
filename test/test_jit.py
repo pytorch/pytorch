@@ -2724,18 +2724,23 @@ a")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @skipIfRocm
     def test_clamp_fusion(self):
-        def func(a, b):
+        def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
+
+        def funcInf(a, b):
+            return torch.clamp(a + b, min=0, max=float('inf'))
 
         a = torch.randn(4, 4, dtype=torch.float, device='cuda', requires_grad=True)
         b = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
-        s = self.checkScript(func, (a, b))
-        self.assertAllFused(s.graph_for(a, b))
+        funcs = (func2, funcInf)
+        for f in funcs:
+            s = self.checkScript(f, (a, b))
+            self.assertAllFused(s.graph_for(a, b))
 
-        c = s(a, b)
-        c.sum().backward()
-        self.assertAllFused(backward_graph(s))
+            c = s(a, b)
+            c.sum().backward()
+            self.assertAllFused(backward_graph(s))
 
     def test_mul(self):
         def func(a, b):
@@ -4920,7 +4925,6 @@ a")
             bar()
 
     def test_tuples(self):
-        @torch.jit.script
         def foo(i):
             a = (i + 4, i * 2)
             c = a
@@ -4932,10 +4936,12 @@ a")
             while False:
                 t0, t1 = c
                 c = (t1, t0)
-            return t0
+            x = (1,)
+            y = 1,
+            return t0, x, y
 
         v = torch.rand(10, 3)
-        self.assertEqual(v * 9, foo(v))
+        self.checkScript(foo, (v,))
 
         with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Tensor, Tensor\)"):
             @torch.jit.script

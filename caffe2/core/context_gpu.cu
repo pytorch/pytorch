@@ -57,6 +57,11 @@ CAFFE2_DEFINE_int(
     128,
     "The threshold in MB on how frequently to report memory changes");
 
+namespace at {
+
+REGISTER_CONTEXT(DeviceType::CUDA, caffe2::CUDAContext);
+} // namespace at
+
 namespace caffe2 {
 
 ThreadLocalCUDAObjects& CUDAContext::getCudaObjects() {
@@ -251,7 +256,7 @@ CUDAContext::CUDAContext(const int gpu_id)
 
 CUDAContext::CUDAContext(const DeviceOption& option)
     : gpu_id_(
-          option.has_device_id() ? RectifyGPUID(option.device_id())
+          option.has_cuda_gpu_id() ? RectifyGPUID(option.cuda_gpu_id())
                                    : CaffeCudaGetDevice()),
       random_seed_(
           option.has_random_seed() ? option.random_seed()
