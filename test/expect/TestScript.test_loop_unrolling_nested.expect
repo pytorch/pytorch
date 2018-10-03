@@ -1,11 +1,11 @@
 graph(%x : Dynamic) {
   %1 : int = prim::Constant[value=10]()
   %y.1 : int = prim::Constant[value=0]()
-  %3 : int = prim::Constant[value=1]()
+  %3 : bool = prim::Constant[value=1]()
   %y : int = prim::Loop(%1, %3, %y.1)
     block0(%i : int, %6 : int) {
       %7 : int = prim::TensorToNum(%x)
-      %8 : int = prim::Constant[value=1]()
+      %8 : bool = prim::Constant[value=1]()
       %9 : int = prim::Constant[value=0]()
       %10 : int = prim::Constant[value=8]()
       %11 : int = aten::floordiv(%7, %10)
@@ -36,7 +36,7 @@ graph(%x : Dynamic) {
           %39 : int = prim::Constant[value=1]()
           %40 : int = aten::add(%37, %39)
           %y.12 : int = aten::add(%y.11, %40)
-          %42 : int = prim::Constant[value=1]()
+          %42 : bool = prim::Constant[value=1]()
           %43 : int = prim::Constant[value=1]()
           %44 : int = aten::add(%40, %43)
           -> (%42, %44, %y.12)
@@ -44,12 +44,12 @@ graph(%x : Dynamic) {
       %45 : Dynamic, %y.3 : int = prim::Loop(%14, %8, %15, %y.4)
         block0(%j : int, %48 : int, %49 : int) {
           %y.5 : int = aten::add(%49, %48)
-          %51 : int = prim::Constant[value=1]()
+          %51 : bool = prim::Constant[value=1]()
           %52 : int = prim::Constant[value=1]()
           %53 : int = aten::add(%48, %52)
           -> (%51, %53, %y.5)
         }
-      %54 : int = prim::Constant[value=1]()
+      %54 : bool = prim::Constant[value=1]()
       -> (%54, %y.3)
     }
   return (%y);
