@@ -373,7 +373,7 @@ class TestConvolution(serial.SerializedTestCase):
            force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
            force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
            force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
-           **hu.gcs)
+           **hu.gcs_no_hip)     # MIOPEN doesn't support 3D conv yet
     def test_3d_convolution_cudnn_nchw(self, op_type, batch_size, stride, size,
                                        kernel, dilation, pad, use_bias,
                                        force_algo_fwd, force_algo_dgrad,
