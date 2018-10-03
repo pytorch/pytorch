@@ -1,66 +1,46 @@
-#include "caffe2/core/flags.h"
+#include "c10/util/Flags.h"
+#include "c10/macros/Macros.h"
 
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <string>
 
-#include "caffe2/core/logging.h"
+#ifndef C10_USE_GFLAGS
 
-namespace caffe2 {
+namespace c10 {
 
-#ifdef CAFFE2_USE_GFLAGS
+using std::string;
 
-C10_EXPORT void SetUsageMessage(const string& str) {
-  if (UsageMessage() != nullptr) {
-    // Usage message has already been set, so we will simply return.
-    return;
-  }
-  gflags::SetUsageMessage(str);
-}
-
-C10_EXPORT const char* UsageMessage() {
-  return gflags::ProgramUsage();
-}
-
-C10_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
-  if (*pargc == 0) return true;
-  return gflags::ParseCommandLineFlags(pargc, pargv, true);
-}
-
-C10_EXPORT bool CommandLineFlagsHasBeenParsed() {
-  // There is no way we query gflags right now, so we will simply return true.
-  return true;
-}
-
-#else  // CAFFE2_USE_GFLAGS
-
-C10_DEFINE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
+C10_DEFINE_REGISTRY(C10FlagsRegistry, C10FlagParser, const string&);
 
 namespace {
 static bool gCommandLineFlagsParsed = false;
-// Since caffe flags is going to be loaded before caffe logging, we would
+// Since flags is going to be loaded before logging, we would
 // need to have a stringstream to hold the messages instead of directly
 // using caffe logging.
 std::stringstream& GlobalInitStream() {
   static std::stringstream ss;
   return ss;
 }
-static string gUsageMessage = "(Usage message not set.)";
-}
+static const char* gUsageMessage = "(Usage message not set.)";
+} // namespace
 
 C10_EXPORT void SetUsageMessage(const string& str) {
-  gUsageMessage = str;
-}
-C10_EXPORT const char* UsageMessage() {
-  return gUsageMessage.c_str();
+  static string usage_message_safe_copy = str;
+  gUsageMessage = usage_message_safe_copy.c_str();
 }
 
-C10_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
-  if (*pargc == 0) return true;
+C10_EXPORT const char* UsageMessage() {
+  return gUsageMessage;
+}
+
+C10_EXPORT bool ParseCommandLineFlags(int* pargc, char*** pargv) {
+  if (*pargc == 0)
+    return true;
   char** argv = *pargv;
   bool success = true;
-  GlobalInitStream() << "Parsing commandline arguments for caffe2."
-                     << std::endl;
+  GlobalInitStream() << "Parsing commandline arguments for c10." << std::endl;
   // write_head is the location we write the unused arguments to.
   int write_head = 1;
   for (int i = 1; i < *pargc; ++i) {
@@ -70,7 +50,7 @@ C10_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
       // Print the help message, and quit.
       std::cout << UsageMessage() << std::endl;
       std::cout << "Arguments: " << std::endl;
-      for (const auto& help_msg : Caffe2FlagsRegistry()->HelpMessage()) {
+      for (const auto& help_msg : C10FlagsRegistry()->HelpMessage()) {
         std::cout << "    " << help_msg.first << ": " << help_msg.second
                   << std::endl;
       }
@@ -79,7 +59,7 @@ C10_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
     // If the arg does not start with "--", we will ignore it.
     if (arg[0] != '-' || arg[1] != '-') {
       GlobalInitStream()
-          << "Caffe2 flag: commandline argument does not match --name=var "
+          << "C10 flag: commandline argument does not match --name=var "
              "or --name format: "
           << arg << ". Ignoring this argument." << std::endl;
       argv[write_head++] = argv[i];
@@ -96,8 +76,9 @@ C10_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
       ++i;
       if (i == *pargc) {
         GlobalInitStream()
-            << "Caffe2 flag: reached the last commandline argument, but "
-               "I am expecting a value for " << arg;
+            << "C10 flag: reached the last commandline argument, but "
+               "I am expecting a value for "
+            << arg;
         success = false;
         break;
       }
@@ -109,17 +90,16 @@ C10_EXPORT bool ParseCaffeCommandLineFlags(int* pargc, char*** pargv) {
       value = arg.substr(prefix_idx + 1, string::npos);
     }
     // If the flag is not registered, we will ignore it.
-    if (!Caffe2FlagsRegistry()->Has(key)) {
-      GlobalInitStream() << "Caffe2 flag: unrecognized commandline argument: "
+    if (!C10FlagsRegistry()->Has(key)) {
+      GlobalInitStream() << "C10 flag: unrecognized commandline argument: "
                          << arg << std::endl;
       success = false;
       break;
     }
-    std::unique_ptr<Caffe2FlagParser> parser(
-        Caffe2FlagsRegistry()->Create(key, value));
+    std::unique_ptr<C10FlagParser> parser(
+        C10FlagsRegistry()->Create(key, value));
     if (!parser->success()) {
-      GlobalInitStream() << "Caffe2 flag: illegal argument: "
-                         << arg << std::endl;
+      GlobalInitStream() << "C10 flag: illegal argument: " << arg << std::endl;
       success = false;
       break;
     }
@@ -144,7 +124,7 @@ C10_EXPORT bool CommandLineFlagsHasBeenParsed() {
 }
 
 template <>
-C10_EXPORT bool Caffe2FlagParser::Parse<string>(
+C10_EXPORT bool C10FlagParser::Parse<string>(
     const string& content,
     string* value) {
   *value = content;
@@ -152,21 +132,19 @@ C10_EXPORT bool Caffe2FlagParser::Parse<string>(
 }
 
 template <>
-C10_EXPORT bool Caffe2FlagParser::Parse<int>(
-    const string& content,
-    int* value) {
+C10_EXPORT bool C10FlagParser::Parse<int>(const string& content, int* value) {
   try {
     *value = std::atoi(content.c_str());
     return true;
-  } catch(...) {
-    GlobalInitStream() << "Caffe2 flag error: Cannot convert argument to int: "
+  } catch (...) {
+    GlobalInitStream() << "C10 flag error: Cannot convert argument to int: "
                        << content << std::endl;
     return false;
   }
 }
 
 template <>
-C10_EXPORT bool Caffe2FlagParser::Parse<int64_t>(
+C10_EXPORT bool C10FlagParser::Parse<int64_t>(
     const string& content,
     int64_t* value) {
   try {
@@ -179,43 +157,41 @@ C10_EXPORT bool Caffe2FlagParser::Parse<int64_t>(
 #endif
     return true;
   } catch (...) {
-    GlobalInitStream() << "Caffe2 flag error: Cannot convert argument to int: "
+    GlobalInitStream() << "C10 flag error: Cannot convert argument to int: "
                        << content << std::endl;
     return false;
   }
 }
 
 template <>
-C10_EXPORT bool Caffe2FlagParser::Parse<double>(
+C10_EXPORT bool C10FlagParser::Parse<double>(
     const string& content,
     double* value) {
   try {
     *value = std::atof(content.c_str());
     return true;
-  } catch(...) {
-    GlobalInitStream()
-        << "Caffe2 flag error: Cannot convert argument to double: "
-        << content << std::endl;
+  } catch (...) {
+    GlobalInitStream() << "C10 flag error: Cannot convert argument to double: "
+                       << content << std::endl;
     return false;
   }
 }
 
 template <>
-C10_EXPORT bool Caffe2FlagParser::Parse<bool>(
-    const string& content,
-    bool* value) {
+C10_EXPORT bool C10FlagParser::Parse<bool>(const string& content, bool* value) {
   if (content == "false" || content == "False" || content == "FALSE" ||
       content == "0") {
     *value = false;
     return true;
-  } else if (content == "true" || content == "True" || content == "TRUE" ||
+  } else if (
+      content == "true" || content == "True" || content == "TRUE" ||
       content == "1") {
     *value = true;
     return true;
   } else {
     GlobalInitStream()
-        << "Caffe2 flag error: Cannot convert argument to bool: "
-        << content << std::endl
+        << "C10 flag error: Cannot convert argument to bool: " << content
+        << std::endl
         << "Note that if you are passing in a bool flag, you need to "
            "explicitly specify it, like --arg=True or --arg True. Otherwise, "
            "the next argument may be inadvertently used as the argument, "
@@ -225,6 +201,6 @@ C10_EXPORT bool Caffe2FlagParser::Parse<bool>(
   }
 }
 
-#endif  // CAFFE2_USE_GFLAGS
+} // namespace c10
 
-}  // namespace caffe2
+#endif // C10_USE_GFLAGS
