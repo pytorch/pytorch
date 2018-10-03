@@ -105,9 +105,10 @@ using PlacementDtor = void (*)(void*, size_t);
  * A Context that will call extra placement deleter during
  * deconstruction.
  *
- * Context is the owner of the data pointer, so we'll
- * move the context from original DataPtr in order to
- * transfer the ownership
+ * Accept a already constructed DataPtr and store it as member
+ * during destruction, we'll call extra deleter on the underlying
+ * data pointer before the DataPtr is destructed.
+ * `data_ptr_` owns the memory.
  */
 struct CAFFE2_API PlacementDeleteContext {
   at::DataPtr data_ptr_;
