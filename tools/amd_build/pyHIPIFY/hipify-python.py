@@ -32,7 +32,6 @@ import shutil
 import sys
 import os
 import yaml
-import ast
 
 from functools import reduce
 from enum import Enum
