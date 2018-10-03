@@ -14,7 +14,7 @@ supported in ROCm/HIP yet.
 """
 
 # List of math functions that should be replaced inside device code only.
-MATH_TRANSPILATIONS = [
+MATH_TRANSPILATIONS = collections.OrderedDict([
     ("std::max", ("::max")),
     ("std::min", ("::min")),
     ("std::ceil", ("::ceil")),
@@ -25,11 +25,9 @@ MATH_TRANSPILATIONS = [
     ("std::fabs", ("::fabs")),
     ("std::fmod", ("::fmod")),
     ("std::remainder", ("::remainder")),
-]
+])
 
-MATH_TRANSPILATIONS = collections.OrderedDict(MATH_TRANSPILATIONS)
-
-CUDA_TYPE_NAME_MAP = [
+CUDA_TYPE_NAME_MAP = collections.OrderedDict([
     ("CUresult", ("hipError_t", CONV_TYPE, API_DRIVER)),
     ("cudaError_t", ("hipError_t", CONV_TYPE, API_RUNTIME)),
     ("CUDA_ARRAY3D_DESCRIPTOR", ("HIP_ARRAY3D_DESCRIPTOR", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
@@ -240,11 +238,9 @@ CUDA_TYPE_NAME_MAP = [
     ("curandStateXORWOW_t", ("hiprandStateXORWOW_t", CONV_TYPE, API_RAND)),
     ("curandState_t", ("hiprandState_t", CONV_TYPE, API_RAND)),
     ("curandState", ("hiprandState_t", CONV_TYPE, API_RAND)),
-]
+])
 
-CUDA_TYPE_NAME_MAP = collections.OrderedDict(CUDA_TYPE_NAME_MAP)
-
-CUDA_INCLUDE_MAP = [
+CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cuda.h", ("hip/hip_runtime.h", CONV_INCLUDE_CUDA_MAIN_H, API_DRIVER)),
     ("cuda_runtime.h", ("hip/hip_runtime.h", CONV_INCLUDE_CUDA_MAIN_H, API_RUNTIME)),
     ("cuda_runtime_api.h", ("hip/hip_runtime_api.h", CONV_INCLUDE, API_RUNTIME)),
@@ -278,11 +274,9 @@ CUDA_INCLUDE_MAP = [
     ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("#include <nvfunctional>", ("", CONV_INCLUDE, API_RAND, HIP_UNSUPPORTED)),
-]
+])
 
-CUDA_INCLUDE_MAP = collections.OrderedDict(CUDA_INCLUDE_MAP)
-
-CUDA_IDENTIFIER_MAP = [
+CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("__CUDACC__", ("__HIPCC__", CONV_DEF, API_RUNTIME)),
     ("CUDA_ERROR_INVALID_CONTEXT", ("hipErrorInvalidContext", CONV_TYPE, API_DRIVER)),
     ("CUDA_ERROR_CONTEXT_ALREADY_CURRENT", ("hipErrorContextAlreadyCurrent", CONV_TYPE, API_DRIVER)),
@@ -2172,11 +2166,9 @@ CUDA_IDENTIFIER_MAP = [
     ("cufftDestroy", ("hipfftDestroy", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetVersion", ("hipfftGetVersion", CONV_MATH_FUNC, API_FFT)),
     ("cufftGetProperty", ("hipfftGetProperty", CONV_MATH_FUNC, API_FFT, HIP_UNSUPPORTED)),
-]
+])
 
-CUDA_IDENTIFIER_MAP = collections.OrderedDict(CUDA_IDENTIFIER_MAP)
-
-CUDA_SPARSE_MAP = [
+CUDA_SPARSE_MAP = collections.OrderedDict([
     ("cusparseStatus_t", ("hipsparseStatus_t", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseHandle_t", ("hipsparseHandle_t", CONV_MATH_FUNC, API_SPARSE)),
     ("cusparseOperation_t", ("hipsparseOperation_t", CONV_TYPE, API_SPARSE)),
@@ -2191,19 +2183,15 @@ CUDA_SPARSE_MAP = [
     ("CUSPARSE_STATUS_INTERNAL_ERROR", ("HIPSPARSE_STATUS_INTERNAL_ERROR", CONV_NUMERIC_LITERAL, API_SPARSE)),
     ("CUSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED", ("HIPSPARSE_STATUS_MATRIX_TYPE_NOT_SUPPORTED", CONV_NUMERIC_LITERAL, API_SPARSE)),
     ("CUSPARSE_STATUS_ARCH_MISMATCH", ("HIPSPARSE_STATUS_ARCH_MISMATCH", CONV_NUMERIC_LITERAL, API_SPARSE)),
-]
+])
 
-CUDA_SPARSE_MAP = collections.OrderedDict(CUDA_SPARSE_MAP)
-
-PYTORCH_SPECIFIC_MAPPINGS = [
+PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("cudaHostAllocator", ("hipHostAllocator", API_PYTORCH)),
     ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
     ("define MAX_NUM_BLOCKS 200", ("define MAX_NUM_BLOCKS 64", API_PYTORCH)),
-]
+])
 
-PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(PYTORCH_SPECIFIC_MAPPINGS)
-
-CAFFE2_SPECIFIC_MAPPINGS = [
+CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CUDA" ,("HIP", API_CAFFE2)),
     ("Cuda" ,("Hip", API_CAFFE2)),
     ("cuda_" ,("hip_", API_CAFFE2)),
@@ -2230,9 +2218,7 @@ CAFFE2_SPECIFIC_MAPPINGS = [
     ("curand_generator" , ("hiprand_generator", API_CAFFE2)),
     ("cuda_gpu_id" , ("hip_gpu_id", API_CAFFE2)),
     ("CaffeCudaGetDevice" , ("CaffeHipGetDevice", API_CAFFE2)),
-]
-
-CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(CAFFE2_SPECIFIC_MAPPINGS)
+])
 
 CUDA_TO_HIP_MAPPINGS = [CUDA_IDENTIFIER_MAP, CUDA_TYPE_NAME_MAP,
                         CUDA_INCLUDE_MAP, CUDA_SPARSE_MAP, PYTORCH_SPECIFIC_MAPPINGS, CAFFE2_SPECIFIC_MAPPINGS]
