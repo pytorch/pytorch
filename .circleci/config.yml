@@ -85,6 +85,9 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         if [ -d "../cpp-build" ]; then
           cp -r ../cpp-build ${PYTORCH_CI_ENV_DIR}/cpp-build
         fi
+        if [ -d "../custom-op-build" ]; then
+          cp -r ../custom-op-build ${PYTORCH_CI_ENV_DIR}/custom-op-build
+        fi
   - persist_to_workspace:
       root: /var/lib/jenkins/pytorch-ci-env
       paths:
@@ -154,6 +157,9 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch"
         if [ -d "/opt/workspace/cpp-build" ]; then
           docker cp "/opt/workspace/cpp-build" "$id:/var/lib/jenkins/cpp-build"
+        fi
+        if [ -d "/opt/workspace/custom-op-build" ]; then
+          docker cp "/opt/workspace/custom-op-build" "$id:/var/lib/jenkins/custom-op-build"
         fi
         if [ -n "${MULTI_GPU}" ]; then
           (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch && cd workspace && .jenkins/pytorch/multigpu-test.sh') | docker exec -u jenkins -i "$id" bash
@@ -916,10 +922,10 @@ workflows:
       # - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
       #     requires:
       #       - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      # - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      # - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
-      #     requires:
-      #       - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
+          requires:
+            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
       # - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
       # - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
       #     requires:
