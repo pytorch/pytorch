@@ -380,11 +380,6 @@ class HIPStaticContext final : public BaseStaticContext {
     return HIP;
   }
 
-  void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-    device->set_hip_gpu_id(GetGPUIDForPointer(data));
-  }
-
 };
 
 typedef Tensor TensorHIP;

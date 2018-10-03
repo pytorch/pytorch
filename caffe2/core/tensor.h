@@ -421,12 +421,6 @@ class CAFFE2_API Tensor final {
     return impl_->size(i);
   }
 
-  inline void ExtractDeviceOption(DeviceOption* device) const {
-    auto* context = GetStaticContext();
-    CHECK(context);
-    context->ExtractDeviceOption(device, impl_->data());
-  }
-
   const Storage& storage() {
     return impl_->storage();
   }

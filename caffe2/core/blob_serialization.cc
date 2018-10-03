@@ -319,7 +319,7 @@ int GetGPUIDForPointer(const void* ptr);
 void TensorSerializer::StoreDeviceDetail(
     const Tensor& input,
     TensorProto* proto) {
-  input.ExtractDeviceOption(proto->mutable_device_detail());
+  ExtractDeviceOption(proto->mutable_device_detail(), input.GetDevice());
 }
 // The actual serialization registry objects.
 C10_DEFINE_TYPED_REGISTRY(

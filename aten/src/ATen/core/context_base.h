@@ -32,14 +32,6 @@ class CAFFE2_API BaseStaticContext {
   virtual ~BaseStaticContext() noexcept {}
 
   virtual DeviceType GetDeviceType() = 0;
-
-  /*
-   * @brief: Sets the DeviceOption for argument `device` based on the
-   * current context and the a data pointer
-   */
-  virtual void ExtractDeviceOption(
-      caffe2::DeviceOption* device,
-      const void* /*data*/) = 0;
 };
 
 /**
