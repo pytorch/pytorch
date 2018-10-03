@@ -28,7 +28,7 @@ class PrettyPrintPass {
   std::unordered_map<const Value*, std::string> value_names_;
 
   // Nodes that were skipped to be printed later
-  std::unordered_set<const Node*> unresolved_nodes_;
+  std::unordered_set<const Node*> skipped_nodes_;
 
   template <class T>
   void zipWith(
@@ -141,7 +141,8 @@ class PrettyPrintPass {
         });
 
     // Print condition initial assignment
-    printAssignment(out, body_block->inputs()[0], node->inputs()[1], level);
+    printAssignment(
+        out, body_block->inputs()[0], node->inputs()[1], level);
 
     // Loop header
     indent(out, level);
@@ -182,8 +183,7 @@ class PrettyPrintPass {
   std::ostream& printNode(
       std::ostream& out,
       const Node* node,
-      const size_t level,
-      bool is_resolving) {
+      const size_t level) {
     switch (node->kind()) {
       case prim::Return:
         break;
@@ -196,15 +196,17 @@ class PrettyPrintPass {
         printIf(out, node, level);
         break;
       default:
-        if (!is_resolving && nodeOnlyOutputReturns(node)) {
+        if (nodeOnlyOutputReturns(node)) {
           // This node is assigned to a temp which is then used by prim::Return,
           // so just print this node there
-          unresolved_nodes_.insert(node);
+          skipped_nodes_.insert(node);
           return out;
         }
+
+        // printAssignment(out, node, level);
         indent(out, level);
         // Print outputs
-        if (!is_resolving && node->outputs().size() > 0) {
+        if (node->outputs().size() > 0) {
           auto delim = "";
           for (const auto* output_value : node->outputs()) {
             out << delim;
@@ -214,21 +216,26 @@ class PrettyPrintPass {
           out << " = ";
         }
 
-        IR_IFM_CONST(node, PythonOp)
-          out << "^" << value->name();
-          value->writeScalars(out);
-        IR_ELSE()
-          out << node->kind().toQualString();
-        IR_END()
+        printRHS(out, node, level);
 
-        // Print instruction parameters
-        printValueList(out, node->inputs());
-
-        if (!is_resolving) {
-          out << "\n";
-        }
+        out << "\n";
     }
 
+    return out;
+  }
+
+  std::ostream& printRHS(std::ostream& out,
+  const Node* node,
+  const size_t level) {
+    IR_IFM_CONST(node, PythonOp)
+    out << "^" << value->name();
+    value->writeScalars(out);
+    IR_ELSE()
+    out << node->kind().toQualString();
+    IR_END()
+
+    // Print instruction parameters
+    printValueList(out, node->inputs());
     return out;
   }
 
@@ -255,10 +262,10 @@ class PrettyPrintPass {
       const Block* root,
       const size_t level) {
     for (const auto* node : root->nodes()) {
-      printNode(out, node, level, /*is_resolving=*/false);
+      printNode(out, node, level);
     }
 
-    printNode(out, root->return_node(), level, /*is_resolving=*/false);
+    printNode(out, root->return_node(), level);
 
     return out;
   }
@@ -288,11 +295,11 @@ class PrettyPrintPass {
       return out;
     }
 
-    auto is_unresolved = unresolved_nodes_.count(node) > 0;
+    auto is_unresolved = skipped_nodes_.count(node) > 0;
     if (is_unresolved) {
-      unresolved_nodes_.erase(node);
+      skipped_nodes_.erase(node);
       // Node is unresolved (wasn't printed when visited earlier, so print now)
-      printNode(out, node, /*level=*/0, /*is_resolving=*/true);
+      printRHS(out, node, /*level=*/0);
       return out;
     }
 
