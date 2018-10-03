@@ -3086,12 +3086,12 @@ a")
             x = torch.ones([2])
             y = x * 4
             z = torch.ones([2])
-            if int(cond):
+            if bool(cond):
                 c = b - a
             else:
-                x = torch.rand(0)
-                if int(cond):
-                    x = torch.rand(1)
+                y = torch.rand(0)
+                if bool(cond):
+                    y = torch.rand(1)
                 print(d, e, f, x, y, z)
             b = b - a
             return a, b, c, x
