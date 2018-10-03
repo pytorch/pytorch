@@ -122,10 +122,7 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
                 r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
             except queue.Empty:
                 continue
-            if r is None:
-                assert done_event.is_set()
-                break
-            elif done_event.is_set():
+            if r is None or done_event.is_set():
                 break
             idx, batch_indices = r
             try:
@@ -158,9 +155,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
                 # closed when tensors are shared via fds.
                 break
             raise
-        if r is None:
-            break
-        elif done_event.is_set():
+        if r is None or done_event.is_set():
             break
         elif isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
@@ -414,21 +409,21 @@ class _DataLoaderIter(object):
     #       that are already discussed above are omitted for simplicity.
     #
     #  [main process]
-    #     a. Set `done_event` (shared with workers and `pin_memory_thread`)
-    #     b. Put `None` in  `worker_result_queue`, and join the putting thread
-    #        of `worker_result_queue` to ensure that it is put.
-    #     c. For each worker,
-    #          i.   put `None` in its `index_queue` to signal shutting down;
-    #          ii.  join the worker;
-    #          iii. `index_queue.cancel_join_thread()` in case that the worker
-    #               exited without reading and the queue is full.
-    #        This **must** be after (b) because it may leave corrupted data in
-    #        `worker_result_queue` (see 3/a/i above).
-    #     d. Join the `pin_memory_thread`.
-    #     e. To prevent hanging of the putting thread of `data_queue` used by
-    #        `pin_memory_thread`, keep getting from `data_queue` until it is
-    #        empty. Note that `data_queue.empty` is accurate now since the
-    #        putter `pin_memory_thread` has ended.
+    #     a. Exit `pin_memory_thread`
+    #          i.   Put `None` in `worker_result_queue`, and join the putting
+    #               thread of `worker_result_queue` to ensure that it is sent.
+    #          ii.  Set `pin_memory_done_event`.
+    #               The thread may exit any point after this is set. We do (i)
+    #               before this to ensure that the putting thread won't
+    #               hang/error due to the receiving thread being dead.
+    #          iii. Join the `pin_memory_thread`.
+    #
+    #     b. Exit the workers.
+    #        For similar reasons as above,
+    #          i.   Put `None` in each worker's `index_queue`, and join the
+    #               queues' putting threads.
+    #          ii.  Set `done_event`.
+    #          iii. Join the workers with timeout and status check.
     #
     #  [each worker process]
     #     In `index_queue.get()` of the worker loop, if it returns `None` or
@@ -441,10 +436,10 @@ class _DataLoaderIter(object):
     # NB: If `pin_memory=False`, there is no `pin_memory_thread` and steps (b),
     #     (d) and (e) in [main process] can be omitted
     #
-    # NB: `done_event` isn't strictly needed for worker exit. E.g., we can just
-    #     check for `None` from `index_queue`, but it allows us to skip wasting
-    #     resources processing indices already in `index_queue` if we are
-    #     already shutting down.
+    # NB: `done_event`s isn't strictly needed. E.g., we can just check for
+    #     `None` from `index_queue`, but it allows us to skip wasting resources
+    #     processing indices already in `index_queue` if we are already shutting
+    #     down.
 
     def __init__(self, loader):
         self.dataset = loader.dataset
@@ -498,10 +493,11 @@ class _DataLoaderIter(object):
 
             if self.pin_memory:
                 self.data_queue = queue.Queue()
+                self.pin_memory_done_event = multiprocessing.Event()
                 pin_memory_thread = threading.Thread(
                     target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue,
-                          torch.cuda.current_device(), self.done_event))
+                          torch.cuda.current_device(), self.pin_memory_done_event))
                 pin_memory_thread.daemon = True
                 pin_memory_thread.start()
                 # Similar to workers (see comment above), we only register
@@ -602,38 +598,32 @@ class _DataLoaderIter(object):
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
-            self.done_event.set()
+
+            # Exit `pin_memory_thread` first because exiting workers may leave
+            # corrupted data in `worker_result_queue` which `pin_memory_thread`
+            # reads from.
             if hasattr(self, 'pin_memory_thread'):
                 # Use hasattr in case error happens before we set the attribute.
-                #
-                # This writes to `worker_result_queue` so it must be done first
-                # before exiting worker, which may corrupt data in
-                # `worker_result_queue`. And we make sure that `None` is indeed
-                # sent using `worker_result_queue.join_thread()`.
                 self.worker_result_queue.put(None)
                 self.worker_result_queue.close()
                 self.worker_result_queue.join_thread()
-            for q, w in zip(self.index_queues, self.workers):
+                self.pin_memory_done_event.set()
+                self.pin_memory_thread.join()
+
+            # Exit workers now.
+            for q in self.index_queues:
+                # This must be before setting `done_event`. Otherwise, the
+                # workers may already exited and the putting thread will
+                # complain.
                 q.put(None)
                 # Indicate that no more data will be put on this queue by the
                 # current process.
                 q.close()
+                q.join_thread()
+            self.done_event.set()
+            for w in self.workers:
                 while w.is_alive():
                     w.join(timeout=MP_STATUS_CHECK_INTERVAL)
-                # In case that `w` exited without reading and the queue is full.
-                q.cancel_join_thread()
-            if hasattr(self, 'pin_memory_thread'):
-                # Use hasattr in case error happens before we set the attribute.
-                # join pin_memory_thread first
-                self.pin_memory_thread.join()
-                # join the putting thread of `data_queue` (previously used by
-                # `pin_memory_thread`)
-                while not self.data_queue.empty():
-                    self.data_queue.get()
-                    # In this case, `self.data_queue` is a `queue.Queue`, which
-                    # needs us calling `.task_done()`.
-                    self.data_queue.task_done()
-                self.data_queue.join()
 
     def __del__(self):
         if self.num_workers > 0:
