@@ -122,8 +122,15 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
                 r = index_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
             except queue.Empty:
                 continue
-            if r is None or done_event.is_set():
-                break
+            if r is None:
+                # Received the final signal
+                assert done_event.is_set()
+                return
+            elif done_event.is_set():
+                # Done event is set. But I haven't received the final .signal
+                # (None) yet. We keep continuing until get it. Skips the
+                # processing steps.
+                continue
             idx, batch_indices = r
             try:
                 samples = collate_fn([dataset[i] for i in batch_indices])
@@ -137,6 +144,7 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
     except KeyboardInterrupt:
         # Main process will raise KeyboardInterrupt anyways.
         pass
+
 
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
@@ -155,8 +163,11 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
                 # closed when tensors are shared via fds.
                 break
             raise
-        if r is None or done_event.is_set():
-            break
+        if r is None:
+            assert done_event.is_set()
+            return
+        elif done_event.is_set():
+            continue
         elif isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
         else:
@@ -291,7 +302,6 @@ class _DataLoaderIter(object):
     #
     # P.S. `worker_result_queue` and `pin_memory_thread` part may be omitted if
     #      `pin_memory=False`.
-    #
     #
     #
     # Terminating multiprocessing logic requires very careful design. In
@@ -493,11 +503,10 @@ class _DataLoaderIter(object):
 
             if self.pin_memory:
                 self.data_queue = queue.Queue()
-                self.pin_memory_done_event = multiprocessing.Event()
                 pin_memory_thread = threading.Thread(
                     target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue,
-                          torch.cuda.current_device(), self.pin_memory_done_event))
+                          torch.cuda.current_device(), self.done_event))
                 pin_memory_thread.daemon = True
                 pin_memory_thread.start()
                 # Similar to workers (see comment above), we only register
@@ -599,6 +608,8 @@ class _DataLoaderIter(object):
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
 
+            self.done_event.set()
+
             # Exit `pin_memory_thread` first because exiting workers may leave
             # corrupted data in `worker_result_queue` which `pin_memory_thread`
             # reads from.
@@ -607,7 +618,6 @@ class _DataLoaderIter(object):
                 self.worker_result_queue.put(None)
                 self.worker_result_queue.close()
                 self.worker_result_queue.join_thread()
-                self.pin_memory_done_event.set()
                 self.pin_memory_thread.join()
 
             # Exit workers now.
@@ -619,11 +629,9 @@ class _DataLoaderIter(object):
                 # Indicate that no more data will be put on this queue by the
                 # current process.
                 q.close()
+            for q, w in zip(self.index_queues, self.workers):
                 q.join_thread()
-            self.done_event.set()
-            for w in self.workers:
-                while w.is_alive():
-                    w.join(timeout=MP_STATUS_CHECK_INTERVAL)
+                w.join()
 
     def __del__(self):
         if self.num_workers > 0:
