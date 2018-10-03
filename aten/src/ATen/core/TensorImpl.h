@@ -3,13 +3,13 @@
 #include <atomic>
 #include <memory>
 
-#include "ATen/core/Storage.h"
-#include "ATen/core/optional.h"
-#include "ATen/core/TensorTypeId.h"
-#include "ATen/core/TensorTypeIdRegistration.h"
-#include "ATen/core/LegacyTypeDispatch.h"
-#include "ATen/core/Backend.h"
-#include "ATen/core/context_base.h"
+#include <ATen/core/Backend.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/Storage.h>
+#include <ATen/core/TensorTypeId.h>
+#include <ATen/core/TensorTypeIdRegistration.h>
+#include <ATen/core/context_base.h>
+#include <ATen/core/optional.h>
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
