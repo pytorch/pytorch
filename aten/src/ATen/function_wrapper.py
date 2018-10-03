@@ -107,16 +107,10 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${type_method_formal
 # NB: As far as ezyang can tell, we don't *have* to codegen this,
 # because we will inherit it from the TYPE_METHOD_DEFINITION_CONCRETE in
 # the superclass.  But it doesn't seem to be harmful.
-#
-# TODO: self_ty is a hack to make things work for native methods which need to
-# take a dtype, but also need to dispatch differently for different types.
-# Eliminate it at some point.
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${type_method_formals}) const {
     ${device_guard_declaration}
-    const auto& self_ty = *this;
-    (void)self_ty;
-    ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${actuals});
+    ${return_call} at::native::${native_type_method_dispatch}(/* actuals */ ${type_derived_call_actuals});
 }
 """)
 TYPE_DERIVED_DEFINITION_NATIVE_MISSING = CodeTemplate("""\
@@ -1574,8 +1568,15 @@ def create_derived(backend_type_env, declarations):
                         TYPE_DERIVED_DEFINITION_NATIVE_MISSING.substitute(env))
                 else:
                     option['native_type_method_dispatch'] = native_dispatch
+                    type_derived_call_actuals = []
+                    for actual, arg in zip(option['actuals'], option['arguments']):
+                        if arg.get('is_type_dispatched', False):
+                            type_derived_call_actuals.append('*this')
+                        else:
+                            type_derived_call_actuals.append(actual)
                     type_object_definitions.append(
-                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
+                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(
+                            env, type_derived_call_actuals=type_derived_call_actuals))
 
     for declaration in declarations:
         for option in declaration['options']:

@@ -46,6 +46,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "float";
   } else if(t.kind() == TypeKind::IntType) {
     out << "int";
+  } else if(t.kind() == TypeKind::BoolType) {
+    out << "bool";
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
@@ -57,6 +59,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "Generator";
   } else if(t.kind() == TypeKind::VarType) {
     out << t.expect<VarType>()->name();
+  } else if(t.kind() == TypeKind::WorldType) {
+    out << "World";
   } else {
     AT_ERROR("unknown type kind");
   }
@@ -83,12 +87,20 @@ FloatTypePtr FloatType::get() {
   static auto value = FloatType::create();
   return value;
 }
+BoolTypePtr BoolType::get() {
+  static auto value = BoolType::create();
+  return value;
+}
 NoneTypePtr NoneType::get() {
   static auto value = NoneType::create();
   return value;
 }
 GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
+  return value;
+}
+WorldTypePtr WorldType::get() {
+  static auto value = WorldType::create();
   return value;
 }
 StringTypePtr StringType::get() {
@@ -107,6 +119,10 @@ ListTypePtr ListType::ofFloats() {
   static auto value = ListType::create(FloatType::get());
   return value;
 }
+ListTypePtr ListType::ofBools() {
+  static auto value = ListType::create(BoolType::get());
+  return value;
+}
 
 TypePtr inferTypeFrom(const IValue& value) {
   if (value.isTensor()) {
@@ -115,12 +131,16 @@ TypePtr inferTypeFrom(const IValue& value) {
     return FloatType::get();
   } else if (value.isInt()) {
     return IntType::get();
+  } else if (value.isBool()) {
+    return BoolType::get();
   } else if (value.isString()) {
     return StringType::get();
   } else if (value.isIntList()) {
     return ListType::ofInts();
   } else if (value.isTensorList()) {
     return ListType::ofTensors();
+  } else if (value.isBoolList()) {
+    return ListType::ofBools();
   } else if (value.isDoubleList()) {
     return ListType::ofFloats();
   } else if (value.isTuple()) {

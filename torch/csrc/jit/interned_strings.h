@@ -46,9 +46,11 @@ namespace torch { namespace jit {
   _(prim, TupleUnpack)             \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
+  _(prim, BoolToTensor)            \
   _(prim, NumToTensor)             \
   _(prim, TensorToNum)             \
   _(prim, ImplicitTensorToNum)     \
+  _(prim, TensorToBool)            \
   _(prim, IntToFloat)              \
   _(prim, FloatToInt)              \
   _(prim, StringToFloat)           \
@@ -59,6 +61,11 @@ namespace torch { namespace jit {
   _(prim, ConstantChunk)           \
   _(prim, NoneGenerator)           \
   _(aten, floordiv)                \
+  _(prim, MemoryFence)             \
+  _(prim, LoadWorld)               \
+  _(prim, StoreWorld)              \
+  _(prim, DummyWorld)              \
+  _(aten, append)                  \
   _(aten, __not__)                 \
   FORALL_ATEN_BASE_SYMBOLS(_)      \
   _(onnx, Add)                     \

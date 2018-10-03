@@ -6,13 +6,16 @@
   _(Tensor) \
   _(Double) \
   _(Int) \
+  _(Bool) \
   _(Tuple) \
   _(IntList) \
   _(DoubleList) \
+  _(BoolList) \
   _(String) \
   _(TensorList) \
   _(Blob) \
-  _(GenericList)
+  _(GenericList) \
+  _(World) \
 
 namespace torch { namespace jit {
 
@@ -24,7 +27,7 @@ CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
 namespace {
 
 template<typename Elem>
-std::ostream& printList(std::ostream & out, const ConstantList<Elem> &v,
+std::ostream& printList(std::ostream & out, const List<Elem> &v,
   const std::string start, const std::string delim, const std::string finish) {
   out << start;
   for(size_t i = 0; i < v.elements().size(); ++i) {
@@ -48,13 +51,13 @@ std::ostream& operator<<(std::ostream & out, const ConstantString & v) {
 }
 
 template<typename Elem>
-std::ostream& operator<<(std::ostream & out, const ConstantList<Elem> & v) {
+std::ostream& operator<<(std::ostream & out, const List<Elem> & v) {
   return printList<Elem>(out, v, "[", ", ", "]");
 }
 
 // tuple case
 template<>
-std::ostream& operator<<(std::ostream & out, const ConstantList<IValue> & v) {
+std::ostream& operator<<(std::ostream & out, const List<IValue> & v) {
   return printList<IValue>(out, v, "(", ", ", ")");
 }
 

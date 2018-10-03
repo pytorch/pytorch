@@ -17,6 +17,8 @@ std::unordered_set<Symbol> skip_list = {
   prim::Loop, //TODO: handle Loop
   prim::Print,
   prim::PythonOp, //may have side effects
+  prim::LoadWorld,
+  prim::StoreWorld,
   //all the rand functions from native_functions.yaml
   aten::rand,
   aten::rand_like,
