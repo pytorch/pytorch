@@ -1,5 +1,5 @@
 graph(%x : Double(*, *)) {
-  %1 : int = prim::Constant[value=1]()
+  %1 : bool = prim::Constant[value=1]()
   %c : Dynamic[] = prim::If(%1)
     block0() {
       %c.1 : Dynamic[] = prim::ListConstruct(%x, %x)
