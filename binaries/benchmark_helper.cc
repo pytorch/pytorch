@@ -28,6 +28,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/tensor_int8.h"
 #include "caffe2/utils/bench_utils.h"
 #include "caffe2/utils/string_utils.h"
 #include "observers/net_observer_reporter_print.h"
@@ -163,12 +164,16 @@ void loadInput(
           CAFFE_THROW("Not support GPU on mobile.");
 #endif
         } else {
-          caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
-          CHECK_NOTNULL(tensor);
-          tensor->Resize(input_dims);
           if (input_type_list[i] == "uint8_t") {
-            tensor->mutable_data<uint8_t>();
+            caffe2::int8::Int8TensorCPU* tensor =
+                blob->GetMutable<caffe2::int8::Int8TensorCPU>();
+            CHECK_NOTNULL(tensor);
+            tensor->t.Resize(input_dims);
+            tensor->t.mutable_data<uint8_t>();
           } else if (input_type_list[i] == "float") {
+            caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
+            CHECK_NOTNULL(tensor);
+            tensor->Resize(input_dims);
             tensor->mutable_data<float>();
           } else {
             CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
