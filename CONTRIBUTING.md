@@ -376,7 +376,7 @@ have more checks than older versions. In our CI, we run clang-tidy-6.0.
    uncommitted changes). Changes are picked up based on a `git diff` with the
    given revision:
   ```sh
-  $ python tools/clang_tidy.py -d /path/to/build/ -p torch/csrc -r HEAD~1
+  $ python tools/clang_tidy.py -d build -p torch/csrc -r HEAD~1
   ```
 
 Above, it is assumed you are in the PyTorch root folder. `path/to/build` should

@@ -37,4 +37,4 @@ matrix:
               - ubuntu-toolchain-r-test
               - llvm-toolchain-trusty-6.0
             packages: clang-tidy-6.0
-        script: tools/run-clang-tidy-in-ci.sh "$(which clang-tidy-6.0)"
+        script: tools/run-clang-tidy-in-ci.sh -e "$(which clang-tidy-6.0)"

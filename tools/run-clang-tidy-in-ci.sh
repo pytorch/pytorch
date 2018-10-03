@@ -28,9 +28,4 @@ if [[ ! -d build ]]; then
 fi
 
 # Run Clang-Tidy
-time python tools/clang_tidy.py     \
-  --clang-tidy-exe ${1:-clang-tidy} \
-  --verbose                         \
-  --compile-commands-dir build      \
-  --paths torch/csrc                \
-  --diff HEAD~1
+time python tools/clang_tidy.py -vp torch/csrc -d HEAD~1 "$@"
