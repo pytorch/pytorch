@@ -5,6 +5,7 @@ import os
 import ctypes
 import signal
 import torch
+import gc
 import time
 import traceback
 import unittest
@@ -317,22 +318,22 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
         else:
             os.kill(os.getpid(), signal.SIGKILL)
 
-    # Use more than 1 epoch because it is interesting to test the natural
-    # exiting case where the iterator depletes.
-    for epoch in range(2):
-        for i, _ in enumerate(it):
-            if epoch == 0:
-                if i == 0:
-                    if not hold_iter_reference:
-                        del it
-                    setup_event.set()
-                elif i == 2:
-                    if exit_method == 'main_error':
-                        raise RuntimeError('Error')
-                    elif exit_method == 'main_kill':
-                        kill_pid(os.getpid())
-                    elif exit_method == 'worker_kill':
-                        kill_pid(worker_pids[0])
+    for i, _ in enumerate(it):
+        if i == 0:
+            if not hold_iter_reference:
+                del it
+            setup_event.set()
+        elif i == 2:
+            if exit_method == 'main_error':
+                raise RuntimeError('Error')
+            elif exit_method == 'main_kill':
+                kill_pid(os.getpid())
+            elif exit_method == 'worker_kill':
+                kill_pid(worker_pids[0])
+
+    # tries to trigger the __del__ clean-up rather than the exit of daemonic
+    # children.
+    gc.collect()
 
 
 # test custom init function
