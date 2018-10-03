@@ -144,6 +144,7 @@ def _optimize_graph(graph, operator_export_type):
     # onnx only supports tensors, but 1 / 2 = 0.5 and tensor(1) / tensor(2) = 0
     torch._C._jit_pass_prepare_division_for_onnx(graph)
     # onnx only supports tensors, so we turn all out number types into tensors
+    torch._C._jit_pass_remove_expands(graph)
     torch._C._jit_pass_erase_number_types(graph)
     # onnx does not support tuples, so try to remove them
     torch._C._jit_pass_lower_all_tuples(graph)

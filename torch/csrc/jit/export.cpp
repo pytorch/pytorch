@@ -69,6 +69,21 @@ void validateBlock(Block *b, onnx_torch::OperatorExportTypes operator_export_typ
             node->output(i)->replaceAllUsesWith(new_node->output(i));
           }
           new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
+          auto size_node = new_node->input(1)->node();
+          auto implicit_node = new_node->input(2)->node();
+          std::vector<long> sizes;
+          auto sizes_val = size_node->t(attr::value).accessor<long, 1>();
+          for (int i = 0; i < size_node->t(attr::value).numel(); ++ i) {
+            sizes.push_back(sizes_val[i]);
+          }
+          new_node->is_(attr::size, sizes);
+
+          auto implicit_val = implicit_node->t(attr::value);
+          new_node->i_(attr::implicit, implicit_val.item<int64_t>());
+
+          new_node->removeInput(1);
+          new_node->removeInput(1);
+
         } else {
           FAIL_EXPORT(
               "Could not export a broadcasted operation; ONNX likely does not support this form of broadcasting.\n\nBroadcast occurred at:\n" +
