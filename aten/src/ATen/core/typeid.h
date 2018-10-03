@@ -115,14 +115,18 @@ namespace detail {
 // one allocated per type. TypeMeta objects will then point to the struct
 // instance for the type they're configured for.
 struct TypeMetaData final {
+  using New = void*();
   using PlacementNew = void(void*, size_t);
   using Copy = void(const void*, void*, size_t);
   using PlacementDelete = void(void*, size_t);
+  using Delete = void(void*);
 
   size_t itemsize_;
+  New* new_;
   PlacementNew* placementNew_;
   Copy* copy_;
   PlacementDelete* placementDelete_;
+  Delete* delete_;
   TypeIdentifier id_;
   const char* name_;
 };
@@ -131,7 +135,7 @@ struct TypeMetaData final {
 // due to type erasure. E.g. somebody calling TypeMeta::copy() for
 // non-copyable type. Right now just throws exception but is implemented
 // in .cpp to manage dependencies
-CAFFE2_API void _ThrowRuntimeTypeLogicError(const std::string& msg);
+[[noreturn]] CAFFE2_API void _ThrowRuntimeTypeLogicError(const std::string& msg);
 
 /**
  * Placement new function for the type.
@@ -162,6 +166,27 @@ inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() noexcept {
            /* else */ [](auto) { return &_PlacementNewNotDefault<T>; }
          );
        }
+  );
+}
+
+template <typename T>
+inline void* _New() {
+  return new T;
+}
+
+template <typename T>
+inline void* _NewNotDefault() {
+  _ThrowRuntimeTypeLogicError(
+      "Type " + std::string(at::demangle_type<T>()) +
+      " is not default-constructible.");
+}
+
+template<class T>
+inline constexpr TypeMetaData::New* _PickNew() noexcept {
+  using c10::guts::if_constexpr;
+  return if_constexpr<std::is_default_constructible<T>::value>(
+    /* then */ [](auto) { return &_New<T>; },
+    /* else */ [](auto) { return &_NewNotDefault<T>; }
   );
 }
 
@@ -221,6 +246,17 @@ inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() noexcept 
   );
 }
 
+template <typename T>
+inline void _Delete(void* ptr) {
+  T* typed_ptr = static_cast<T*>(ptr);
+  delete typed_ptr;
+}
+
+template<class T>
+inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
+  return &_Delete<T>;
+}
+
 template <class T>
 const char* __TypeName() noexcept;
 
@@ -248,9 +284,11 @@ private:
   static TypeMetaData _make() {
     return {
       sizeof(T),
+      _PickNew<T>(),
       _PickPlacementNew<T>(),
       _PickCopy<T>(),
       _PickPlacementDelete<T>(),
+      _PickDelete<T>(),
       TypeIdentifier::Get<T>(),
       _TypeName<T>()
     };
@@ -272,13 +310,17 @@ class CAFFE2_API TypeMeta {
       nullptr,
       nullptr,
       nullptr,
+      nullptr,
+      nullptr,
       TypeIdentifier::uninitialized(),
       "nullptr (uninitialized)"};
 
  public:
+  using New = detail::TypeMetaData::New;
   using PlacementNew = detail::TypeMetaData::PlacementNew;
   using Copy = detail::TypeMetaData::Copy;
   using PlacementDelete = detail::TypeMetaData::PlacementDelete;
+  using Delete = detail::TypeMetaData::Delete;
 
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
@@ -316,6 +358,9 @@ class CAFFE2_API TypeMeta {
   constexpr size_t itemsize() const noexcept {
     return data_->itemsize_;
   }
+  constexpr New* newFn() const noexcept {
+    return data_->new_;
+  }
   /**
    * Returns the placement new function pointer for individual items.
    */
@@ -333,6 +378,9 @@ class CAFFE2_API TypeMeta {
    */
   constexpr PlacementDelete* placementDelete() const noexcept {
     return data_->placementDelete_;
+  }
+  constexpr Delete* deleteFn() const noexcept {
+    return data_->delete_;
   }
   /**
    * Returns a printable name for the type.
