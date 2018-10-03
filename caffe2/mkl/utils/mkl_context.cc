@@ -23,11 +23,4 @@ REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(MKLDNN, EventErrorMessageCPU);
 REGISTER_EVENT_SET_FINISHED_FUNCTION(MKLDNN, EventSetFinishedCPU);
 REGISTER_EVENT_RESET_FUNCTION(MKLDNN, EventResetCPU);
 
-BaseStaticContext* GetMKLStaticContext() {
-  static MKLStaticContext context;
-  return &context;
-}
-
-REGISTER_STATIC_CONTEXT(MKLDNN, GetMKLStaticContext());
-
 } // namespace caffe2

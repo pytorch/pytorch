@@ -419,11 +419,4 @@ at::Allocator* GetCUDAAllocator() {
 
 REGISTER_ALLOCATOR(CUDA, new DefaultCUDAAllocator());
 
-BaseStaticContext* GetCUDAStaticContext() {
-  static CUDAStaticContext context;
-  return &context;
-}
-
-REGISTER_STATIC_CONTEXT(CUDA, GetCUDAStaticContext());
-
 }  // namespace caffe2

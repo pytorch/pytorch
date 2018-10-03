@@ -412,17 +412,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * The static context of a tensor intuitively represents the device
-   * type of a tensor; e.g., a CPU tensor is associated with the
-   * GetCPUStaticContext().  This method replaces the former Context template
-   * parameter which was previously used to identify the device type
-   * of a tensor.
-   */
-  at::BaseStaticContext* GetStaticContext() const {
-    return ::caffe2::get_static_context(device_type());
-  }
-
-  /**
    * @brief Copies the data from a source tensor, with a contex provided to
    * carry out the underlying memcpy operation.  This method respects
    * caffe2_keep_on_shrink.

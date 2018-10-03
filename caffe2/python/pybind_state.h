@@ -100,7 +100,7 @@ class TensorFetcher : public BlobFetcherBase {
   // Checks whether the data with type `meta` needs to be copied in the context
   // of `tensor`
   bool NeedsCopy(const Tensor* tensor, const TypeMeta& meta) const {
-    return tensor->GetStaticContext() != GetCPUStaticContext() ||
+    return tensor->GetDeviceType() != CPU ||
         CaffeToNumpyType(meta) == NPY_OBJECT;
   }
 
