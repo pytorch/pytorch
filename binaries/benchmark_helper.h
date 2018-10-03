@@ -34,37 +34,52 @@ void writeTextOutput(
     TensorType* tensor,
     const string& output_prefix,
     const string& name) {
-  string output_name = output_prefix + "/" + name + ".txt";
+  string filename = name;
+  std::replace(filename.begin(), filename.end(), '/', '_');
+  string output_name = output_prefix + "/" + filename + ".txt";
   caffe2::TensorSerializer ser;
   caffe2::BlobProto blob_proto;
+
   ser.Serialize(
       *tensor, output_name, blob_proto.mutable_tensor(), 0, tensor->size());
   blob_proto.set_name(output_name);
   blob_proto.set_type("Tensor");
   CAFFE_ENFORCE(blob_proto.has_tensor());
   caffe2::TensorProto tensor_proto = blob_proto.tensor();
-  vector<float> data;
-  switch (tensor_proto.data_type()) {
-    case caffe2::TensorProto::FLOAT: {
-      std::copy(
-          tensor_proto.float_data().begin(),
-          tensor_proto.float_data().end(),
-          std::back_inserter(data));
-      break;
-    }
-    case caffe2::TensorProto::INT32: {
-      std::copy(
-          tensor_proto.int32_data().begin(),
-          tensor_proto.int32_data().end(),
-          std::back_inserter(data));
-      break;
-    }
-    default:
-      CAFFE_THROW("Unimplemented Blob type.");
+  int dims_size = tensor_proto.dims_size();
+  // For NCHW or NHWC, print one line per CHW/HWC.
+  // If the output is one dimension, it means N==1,
+  // print everything to one line.
+  int loop_count = dims_size > 1 ? tensor_proto.dims(0) : 1;
+  long long elem_dim_size =
+      dims_size > 1 ? tensor_proto.dims(1) : tensor_proto.dims(0);
+  for (int i = 2; i < dims_size; i++) {
+    elem_dim_size *= tensor_proto.dims(i);
   }
+  std::vector<std::string> lines;
+  for (int i = 0; i < loop_count; i++) {
+    int start_idx = i * elem_dim_size;
+    std::stringstream line;
+    if (tensor_proto.data_type() == caffe2::TensorProto::FLOAT) {
+      auto start = tensor_proto.float_data().begin() + start_idx;
+      auto end = start + elem_dim_size;
+      copy(start, end, std::ostream_iterator<float>(line, ","));
+    } else if (tensor_proto.data_type() == caffe2::TensorProto::INT32) {
+      auto start = tensor_proto.int32_data().begin() + start_idx;
+      auto end = start + elem_dim_size;
+      copy(start, end, std::ostream_iterator<int>(line, ","));
+    } else {
+      CAFFE_THROW("Unimplemented Blob type.");
+    }
+    // remove the last ,
+    string str = line.str();
+    str.pop_back();
+    lines.push_back(str);
+  }
+
   std::ofstream output_file(output_name);
-  std::ostream_iterator<float> output_iterator(output_file, "\n");
-  std::copy(data.begin(), data.end(), output_iterator);
+  std::ostream_iterator<std::string> output_iterator(output_file, "\n");
+  std::copy(lines.begin(), lines.end(), output_iterator);
 }
 
 void observerConfig();
