@@ -237,7 +237,7 @@ const char* _TypeName() noexcept {
 }
 
 template <class T>
-class _typeMetaDataInstance final {
+class CAFFE2_API _typeMetaDataInstance final {
 public:
   CAFFE2_API static TypeMetaData instance;
 
@@ -257,8 +257,6 @@ private:
   }
 };
 
-template <class T>
-CAFFE2_API const TypeMetaData* _TypeMetaData() noexcept;
 } // namespace detail
 
 /**
@@ -428,7 +426,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     return #T;                                                            \
   }                                                                       \
   template<>                                                              \
-  C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =            \
+  TypeMetaData _typeMetaDataInstance<T>::instance =                       \
       _typeMetaDataInstance<T>::_make();                                  \
   }
 #else // _MSC_VER
