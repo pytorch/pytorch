@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/C++17.h>
-#include "caffe2/utils/TypeTraits.h"
+#include <c10/util/C++17.h>
+#include <c10/util/TypeTraits.h>
 
 namespace c10 { namespace guts { namespace typelist {
 

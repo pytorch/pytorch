@@ -2,7 +2,7 @@
 
 #include "caffe2/core/dispatch/LeftRight.h"
 #include "caffe2/core/dispatch/OpSchema.h"
-#include "caffe2/utils/Metaprogramming.h"
+#include <c10/util/Metaprogramming.h>
 #include "caffe2/utils/flat_hash_map/flat_hash_map.h"
 
 #include <array>
