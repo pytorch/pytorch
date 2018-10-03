@@ -187,11 +187,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   void free_() {
     if (has_ownership_) {
       AT_ASSERTM(pointer_ != nullptr, "Can't have ownership of nullptr");
-      // meta_.dtor() == nullptr for primitive types
-      if (nullptr != meta_.dtor()) {
-        (*meta_.dtor())(pointer_, 1); // call destructor
-      }
-      ::operator delete(pointer_); // and free the memory
+      (*meta_.deleteFn())(pointer_);
     }
   }
 

@@ -2,8 +2,8 @@
 
 #include "caffe2/core/dispatch/DispatchKey.h"
 #include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/utils/Array.h"
-#include "caffe2/utils/Metaprogramming.h"
+#include <c10/util/Array.h>
+#include <c10/util/Metaprogramming.h>
 
 namespace caffe2 {
 class Tensor;

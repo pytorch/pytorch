@@ -1,5 +1,5 @@
 #include "caffe2/core/dispatch/OpSchema.h"
-#include "caffe2/utils/Array.h"
+#include <c10/util/Array.h>
 
 using namespace c10;
 using namespace caffe2;

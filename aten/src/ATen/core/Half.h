@@ -10,7 +10,7 @@
 /// intrinsics directly on the Half type from device code.
 
 #include <ATen/core/Macros.h>
-#include <ATen/core/C++17.h>
+#include <c10/util/C++17.h>
 
 #include <cmath>
 #include <cstdint>

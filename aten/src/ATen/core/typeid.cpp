@@ -10,27 +10,15 @@
 using std::string;
 
 namespace caffe2 {
-
-std::unordered_map<TypeIdentifier, string>& gTypeNames() {
-  static std::unordered_map<TypeIdentifier, string> g_type_names;
-  return g_type_names;
-}
-
-std::unordered_set<string>& gRegisteredTypeNames() {
-  static std::unordered_set<string> g_registered_type_names;
-  return g_registered_type_names;
-}
-
-std::mutex& gTypeRegistrationMutex() {
-  static std::mutex g_type_registration_mutex;
-  return g_type_registration_mutex;
-}
-
-void TypeMeta::_ThrowRuntimeTypeLogicError(const std::string& msg) {
+namespace detail {
+C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
   AT_ERROR(msg);
 }
+} // namespace detail
+
+constexpr detail::TypeMetaData TypeMeta::uninitialized_;
 
 TypeIdentifier TypeIdentifier::createTypeId() {
   static std::atomic<TypeIdentifier::underlying_type> counter(
@@ -44,44 +32,35 @@ TypeIdentifier TypeIdentifier::createTypeId() {
   return TypeIdentifier(new_value);
 }
 
-CAFFE_DEFINE_KNOWN_TYPE(float);
-CAFFE_DEFINE_KNOWN_TYPE(int);
-CAFFE_DEFINE_KNOWN_TYPE(std::string);
-CAFFE_DEFINE_KNOWN_TYPE(bool);
-CAFFE_DEFINE_KNOWN_TYPE(uint8_t);
-CAFFE_DEFINE_KNOWN_TYPE(int8_t);
-CAFFE_DEFINE_KNOWN_TYPE(uint16_t);
-CAFFE_DEFINE_KNOWN_TYPE(int16_t);
-CAFFE_DEFINE_KNOWN_TYPE(int64_t);
-CAFFE_DEFINE_KNOWN_TYPE(double);
-CAFFE_DEFINE_KNOWN_TYPE(char);
-CAFFE_DEFINE_KNOWN_TYPE(at::Half);
-CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::mutex>);
-CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>);
-CAFFE_DEFINE_KNOWN_TYPE(std::vector<int32_t>);
-CAFFE_DEFINE_KNOWN_TYPE(std::vector<int64_t>);
-CAFFE_DEFINE_KNOWN_TYPE(std::vector<unsigned long>);
-CAFFE_DEFINE_KNOWN_TYPE(bool*);
-CAFFE_DEFINE_KNOWN_TYPE(char*);
-CAFFE_DEFINE_KNOWN_TYPE(int*);
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(uint8_t)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(int8_t)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(int16_t)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(int)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(int64_t)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(at::Half)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(float)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(double)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(at::ComplexHalf)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(std::complex<float>)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(std::complex<double>)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(std::string)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(bool)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(uint16_t)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(char)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(std::unique_ptr<std::mutex>)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(std::vector<int32_t>)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(std::vector<int64_t>)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(std::vector<unsigned long>)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(bool*)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(char*)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(int*)
 
 #ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
-CAFFE_DEFINE_KNOWN_TYPE(long);
-CAFFE_DEFINE_KNOWN_TYPE(std::vector<long>);
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(long)
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(std::vector<long>)
 #endif // CAFFE2_UNIQUE_LONG_TYPEMETA
 
-CAFFE_DEFINE_KNOWN_TYPE(_CaffeHighestPreallocatedTypeId);
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(_CaffeHighestPreallocatedTypeId)
 
-namespace {
-// This single registerer exists solely for us to be able to name a TypeMeta
-// for unintializied blob. You should not use this struct yourself - it is
-// intended to be only instantiated once here.
-struct UninitializedTypeNameRegisterer {
-  UninitializedTypeNameRegisterer() {
-    gTypeNames()[TypeIdentifier::uninitialized()] = "nullptr (uninitialized)";
-  }
-};
-static UninitializedTypeNameRegisterer g_uninitialized_type_name_registerer;
-
-} // namespace
 } // namespace caffe2

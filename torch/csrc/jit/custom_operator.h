@@ -6,8 +6,8 @@
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <caffe2/utils/Metaprogramming.h>
-#include <caffe2/utils/TypeList.h>
+#include <c10/util/Metaprogramming.h>
+#include <c10/util/TypeList.h>
 
 namespace torch { namespace jit {
 namespace detail {
