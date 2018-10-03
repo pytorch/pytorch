@@ -35,8 +35,8 @@ struct MIOPENWorkspace
 
     void reset()
     {
-        data_   = nullptr;
-        nbytes_ = 0;
+      data_.clear();
+      nbytes_ = 0;
     }
 
     private:
