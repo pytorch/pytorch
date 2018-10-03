@@ -275,7 +275,7 @@ const char* _TypeName() noexcept {
 template <class T>
 class CAFFE2_API _typeMetaDataInstance final {
 public:
-  CAFFE2_API static TypeMetaData instance;
+  static TypeMetaData instance;
 
   _typeMetaDataInstance() = delete; // no instances
 
