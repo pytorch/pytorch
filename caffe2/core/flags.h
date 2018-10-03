@@ -20,7 +20,8 @@
 #ifndef CAFFE2_CORE_FLAGS_H_
 #define CAFFE2_CORE_FLAGS_H_
 
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
+#include "caffe2/core/common.h"
 
 namespace caffe2 {
 /**
@@ -142,7 +143,7 @@ class CAFFE2_API Caffe2FlagParser {
   bool success_;
 };
 
-CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
+C10_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 
 }  // namespace caffe2
 

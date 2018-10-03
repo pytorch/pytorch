@@ -35,6 +35,17 @@ void AsyncSchedulingNet::Wait() {
   }
 }
 
+bool AsyncSchedulingNet::isInlineTask(int parent_id, int child_id) const {
+  if (!use_dfs_scheduling_) {
+    return false;
+  }
+  const auto* last_parent_op = lastTaskOp(parent_id);
+  const auto* first_child_op = firstTaskOp(child_id);
+  // check that we do not cross device boundary
+  return IsSameDevice(
+      last_parent_op->device_option(), first_child_op->device_option());
+}
+
 void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
   if (!testAndSetScheduled(task_id)) {
     return;
@@ -63,7 +74,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
             canSchedule(child_id)) {
           // if DFS scheduling is enabled, run children inline,
           // ignore DFS scheduling in callbacks
-          schedule(child_id, use_dfs_scheduling_);
+          schedule(child_id, isInlineTask(task_id, child_id));
         } else {
           bool parent_failed = false;
           bool parent_needs_polling = false;
@@ -102,7 +113,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
           if (parent_failed) {
             // one of parents failed, set failure flag and wrap up execution
             success_ = false;
-            schedule(child_id, use_dfs_scheduling_);
+            schedule(child_id, isInlineTask(task_id, child_id));
           } else if (parent_needs_polling) {
             // some parents are blocking us from scheduling a child and don't
             // support callbacks, using polling
@@ -119,7 +130,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
             }
           } else {
             // we're ready to schedule a child
-            schedule(child_id, use_dfs_scheduling_);
+            schedule(child_id, isInlineTask(task_id, child_id));
           }
         }
       }

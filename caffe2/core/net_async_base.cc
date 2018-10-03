@@ -119,7 +119,7 @@ bool AsyncNetBase::RunAsync() {
   return DoRunAsync();
 }
 
-TaskThreadPool* AsyncNetBase::pool_getter(
+TaskThreadPool* AsyncNetBase::poolGetter(
     PoolsMap& pools,
     int device_type,
     int device_id,
@@ -136,7 +136,7 @@ TaskThreadPool* AsyncNetBase::pool_getter(
 
 TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (use_single_pool_) {
-    return pool_getter(cpu_pools_, PROTO_CPU, -1, num_workers_);
+    return poolGetter(cpu_pools_, PROTO_CPU, -1, num_workers_);
   }
   static const std::unordered_set<int> cpu_types{
       PROTO_CPU,
@@ -155,13 +155,13 @@ TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
         FLAGS_caffe2_net_async_max_numa_nodes,
         "Invalid NUMA node id: ",
         numa_node_id);
-    return pool_getter(cpu_pools_, PROTO_CPU, numa_node_id, num_workers_);
+    return poolGetter(cpu_pools_, PROTO_CPU, numa_node_id, num_workers_);
   } else if (device_option.device_type() == PROTO_CUDA) {
     auto gpu_id = device_option.cuda_gpu_id();
     CAFFE_ENFORCE(
         gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
         "Invalid GPU id: " + caffe2::to_string(gpu_id));
-    return pool_getter(gpu_pools_, PROTO_CUDA, gpu_id, num_workers_);
+    return poolGetter(gpu_pools_, PROTO_CUDA, gpu_id, num_workers_);
   } else {
     CAFFE_THROW(
         "Unsupported device type " +
@@ -281,8 +281,18 @@ bool AsyncNetBase::testAndSetScheduled(int task_id) {
   return !task_op_node.scheduled_.test_and_set();
 }
 
-int AsyncNetBase::num_ops(int task_id) const {
+int AsyncNetBase::numOps(int task_id) const {
   return chains_[task_id].size();
+}
+
+const OperatorBase* AsyncNetBase::firstTaskOp(int task_id) const {
+  auto op_id = chains_[task_id].front();
+  return operator_nodes_[op_id].operator_.get();
+}
+
+const OperatorBase* AsyncNetBase::lastTaskOp(int task_id) const {
+  auto op_id = chains_[task_id].back();
+  return operator_nodes_[op_id].operator_.get();
 }
 
 void AsyncNetBase::asyncWait(
@@ -408,14 +418,9 @@ void AsyncNetBase::finalizeEvents() {
 
 AsyncNetBase::~AsyncNetBase() {}
 
-CAFFE_DEFINE_SHARED_REGISTRY(
-    ThreadPoolRegistry,
-    TaskThreadPool,
-    int,
-    int,
-    bool);
+C10_DEFINE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int, bool);
 
-CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
 
 /* static */
 std::shared_ptr<TaskThreadPool>

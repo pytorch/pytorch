@@ -1,5 +1,4 @@
-#define CATCH_CONFIG_MAIN
-#include "catch_utils.hpp"
+#include "gtest/gtest.h"
 
 #include "ATen/ATen.h"
 #include "ATen/CPUApplyUtils.h"
@@ -108,32 +107,38 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
   });
 }
 
-CATCH_TEST_CASE("apply utils test 2-dim small contiguous", "[cpu]") {
+// apply utils test 2-dim small contiguous
+TEST(ApplyUtilsTest, Contiguous2D) {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {2, 1}, -1, -1);
 }
 
-CATCH_TEST_CASE("apply utils test 2-dim small", "[cpu]") {
+// apply utils test 2-dim small
+TEST(ApplyUtilsTest, Small2D) {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {2, 1});
 }
 
-CATCH_TEST_CASE("apply utils test 2-dim", "[cpu]") {
+// apply utils test 2-dim
+TEST(ApplyUtilsTest, _2D) {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {20, 10});
 }
 
-CATCH_TEST_CASE("apply utils test 3-dim", "[cpu]") {
+// apply utils test 3-dim
+TEST(ApplyUtilsTest, _3D) {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {3, 4, 2});
 }
 
-CATCH_TEST_CASE("apply utils test 3-dim medium", "[cpu]") {
+// apply utils test 3-dim medium
+TEST(ApplyUtilsTest, Medium3D) {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {3, 40, 2});
 }
 
-CATCH_TEST_CASE("apply utils test 10-dim", "[cpu]") {
+// apply utils test 10-dim
+TEST(ApplyUtilsTest, _10D) {
   manual_seed(123, at::kCPU);
   test(CPU(kDouble), {3, 4, 2, 5, 2, 1, 3, 4, 2, 3});
 }

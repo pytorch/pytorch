@@ -9,20 +9,13 @@
 
 namespace at {
 
-/// A wrapper over a thread local TensorOptions instance.
-/// INVARIANT: all fields are NOT nullopt
+/// Like TensorOptions, but all fields are guaranteed to be filled.
 struct DefaultTensorOptions {
-  DefaultTensorOptions() {}
-  DefaultTensorOptions(const DefaultTensorOptions&) = default;
-  DefaultTensorOptions& operator=(const DefaultTensorOptions&) = default;
-  DefaultTensorOptions(DefaultTensorOptions&&) = default;
-  DefaultTensorOptions& operator=(DefaultTensorOptions&&) = default;
-
-  ScalarType dtype()    const { return dtype_; }
-  Device device()       const { return device_; }
-  Layout layout()       const { return layout_; }
-  bool requires_grad()  const { return requires_grad_; }
-  bool is_variable()    const { return is_variable_; }
+  ScalarType dtype()    const noexcept { return dtype_; }
+  Device device()       const noexcept { return device_; }
+  Layout layout()       const noexcept { return layout_; }
+  bool requires_grad()  const noexcept { return requires_grad_; }
+  bool is_variable()    const noexcept { return is_variable_; }
 
   DefaultTensorOptions& apply(const TensorOptions& options) {
     if (options.dtype_opt().has_value()) {

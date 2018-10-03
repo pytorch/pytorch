@@ -124,6 +124,7 @@ struct CAFFE2_API TensorOptions {
     return *this;
   }
 
+  /// Sets the `is_variable` property on the `TensorOptions`.
   TensorOptions& is_variable(bool is_variable) {
     is_variable_ = is_variable;
     return *this;
@@ -132,6 +133,8 @@ struct CAFFE2_API TensorOptions {
   /// Returns the device of the `TensorOptions`.
   Device device() const noexcept;
 
+  /// Returns the device of the `TensorOptions`, or `nullopt` if
+  /// device is not specified.
   optional<Device> device_opt() const noexcept { return device_; }
 
   /// Returns the device index of the `TensorOptions`.
@@ -142,21 +145,29 @@ struct CAFFE2_API TensorOptions {
   /// Returns the dtype of the `TensorOptions`.
   ScalarType dtype() const noexcept;
 
+  /// Returns the dtype of the `TensorOptions`, or `nullopt` if
+  /// device is not specified.
   optional<ScalarType> dtype_opt() const noexcept { return dtype_; }
 
   /// Returns the layout of the `TensorOptions`.
   Layout layout() const noexcept;
 
+  /// Returns the layout of the `TensorOptions`, or `nullopt` if
+  /// layout is not specified.
   optional<Layout> layout_opt() const noexcept { return layout_; }
 
   /// Returns the `requires_grad` property of the `TensorOptions`.
   bool requires_grad() const noexcept;
 
+  /// Returns the `requires_grad` property of the `TensorOptions`, or `nullopt`
+  /// if `requires_grad` is not specified.
   optional<bool> requires_grad_opt() const noexcept { return requires_grad_; }
 
   /// Returns the `is_variable` property of the `TensorOptions`.
   bool is_variable() const noexcept;
 
+  /// Returns the `is_variable` property of the `TensorOptions`, or
+  /// `nullopt` if `is_variable` is not specified.
   optional<bool> is_variable_opt() const noexcept { return is_variable_; }
 
   // Resolves the ATen backend specified by the current construction axes.

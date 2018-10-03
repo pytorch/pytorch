@@ -633,12 +633,12 @@ def lt(g, input, other):
 
 def ge(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", lt(g, _if_scalar_type_as(g, other, input), input))
+    return g.op("Not", lt(g, input, _if_scalar_type_as(g, other, input)))
 
 
 def le(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", gt(g, _if_scalar_type_as(g, other, input), input))
+    return g.op("Not", gt(g, input, _if_scalar_type_as(g, other, input)))
 
 
 @parse_args('v', 'i')
@@ -975,11 +975,22 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('v', 'i', 'i', 'v')
+@parse_args('v', 'i', 'v', 'v')
 def zeros(g, shape, scalar_type, layout, device):
     # NOTE: no way to set device in ONNX, so we ignore it
     return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
                 input_as_shape_i=1, value_f=0)
+
+
+def full(g, shape, value, scalar_type, layout, device):
+    const_value = _maybe_get_const(value, 't')
+    if _is_value(const_value):
+        tmp = zeros(shape, scalar_type, layout, device)
+        return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
+    else:
+        scalar_type = _get_const(scalar_type, 'i', 'dtype')
+        return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
+                    input_as_shape_i=1, value_f=const_value)
 
 
 def full_like(g, input, fill_value):

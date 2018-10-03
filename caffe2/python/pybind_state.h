@@ -60,24 +60,24 @@ class BlobFeederBase {
   Feed(const DeviceOption& option, PyArrayObject* array, Blob* blob) = 0;
 };
 
-C10_EXPORT CAFFE_DECLARE_TYPED_REGISTRY(
+C10_DECLARE_TYPED_REGISTRY(
     BlobFetcherRegistry,
     TypeIdentifier,
     BlobFetcherBase,
     std::unique_ptr);
 #define REGISTER_BLOB_FETCHER(id, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(BlobFetcherRegistry, id, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(BlobFetcherRegistry, id, __VA_ARGS__)
 inline unique_ptr<BlobFetcherBase> CreateFetcher(TypeIdentifier id) {
   return BlobFetcherRegistry()->Create(id);
 }
 
-CAFFE_DECLARE_TYPED_REGISTRY(
+C10_DECLARE_TYPED_REGISTRY(
     BlobFeederRegistry,
     DeviceType,
     BlobFeederBase,
     std::unique_ptr);
 #define REGISTER_BLOB_FEEDER(device_type, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(BlobFeederRegistry, device_type, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(BlobFeederRegistry, device_type, __VA_ARGS__)
 inline unique_ptr<BlobFeederBase> CreateFeeder(int device_type) {
   return BlobFeederRegistry()->Create(
       caffe2::ProtoToType(static_cast<DeviceTypeProto>(device_type)));
@@ -148,7 +148,7 @@ class TensorFetcher : public BlobFetcherBase {
     }
 
     if (result.copied) {
-      auto context = tensor.GetStaticContext()->CreateContext();
+      auto context = CreateContext(tensor.GetDeviceType());
       context->CopyBytesToCPU(tensor.nbytes(), tensor.raw_data(), outPtr);
       context->FinishDeviceComputation();
     }

@@ -9,26 +9,24 @@ namespace at {
 // an OptionsGuard; and force you to pass around options manually.
 #if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
-/// This is an optional because of compiler bugs that mis-initialize static
-/// thread local variables. The workaround is lazy initialization, i.e.
-/// `getDefaultTensorOptions()` will initialize the `options_` to a proper
-/// value upon first invocation.
-/// https://gcc.gnu.org/ml/gcc-bugs/2013-12/msg00026.html
-static thread_local at::optional<DefaultTensorOptions> options_;
-
 DefaultTensorOptions& getDefaultTensorOptions() {
-  if (!options_) {
-    options_.emplace();
+  /// This is an optional because of compiler bugs that mis-initialize static
+  /// thread local variables. The workaround is lazy initialization, i.e.
+  /// `getDefaultTensorOptions()` will initialize the `options` to a proper
+  /// value upon first invocation.
+  /// https://gcc.gnu.org/ml/gcc-bugs/2013-12/msg00026.html
+  static thread_local at::optional<DefaultTensorOptions> options;
+  if (!options) {
+    options.emplace();
   }
-  return *options_;
+  return *options;
 }
 
 #else
 
-static DefaultTensorOptions options_;
-
 const DefaultTensorOptions& getDefaultTensorOptions() {
-  return options_;
+  static DefaultTensorOptions options;
+  return options;
 }
 
 #endif
