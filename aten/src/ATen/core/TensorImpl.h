@@ -227,11 +227,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual Tensor& grad();
   virtual const Tensor& grad() const;
 
-  // TODO: make these protected
-  // Note: storage->size() may be greater than the recorded size
-  // of a tensor
-  at::Storage storage_;
-
   template <typename T>
   inline T * data() const {
     AT_ASSERT(!is_variable());
@@ -284,8 +279,17 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual void resize_dim(int64_t ndim) {
     // NB: This is *truly* a resize; calling code (e.g., squeeze)
     // assumes that old values are preserved
+    auto old_dim = sizes_.size();
     sizes_.resize(ndim);
-    strides_.resize(ndim);
+    auto new_strides = c10::guts::make_unique<int64_t[]>(ndim);
+    for (size_t i = 0; i < std::min(old_dim, static_cast<size_t>(ndim)); i++) {
+      new_strides[i] = strides_[i];
+    }
+    for (size_t i = old_dim; i < static_cast<size_t>(ndim); i++) {
+      // If ndim < old_dim, this loop never executes
+      new_strides[i] = 0;
+    }
+    strides_ = std::move(new_strides);
     refresh_numel();
     refresh_contiguous();
   }
@@ -297,7 +301,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    strides_.at(dim) = new_stride;
+    AT_ASSERTM(strides_, "Caffe2 tensors don't have meaningful strides and "
+                         "cannot be used in PyTorch");
+    strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
   }
@@ -320,8 +326,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         ") must match dimensionality of strides (",
         new_stride.size(),
         ")");
+    auto old_dim = sizes_.size();
     sizes_ = new_size.vec();
-    strides_ = new_stride.vec();
+    if (old_dim != sizes_.size()) {
+      strides_.reset(new int64_t[sizes_.size()]);
+    }
+    for (size_t i = 0; i < sizes_.size(); i++) {
+      strides_[i] = new_stride[i];
+    }
     refresh_numel();
     refresh_contiguous();
   }
@@ -332,13 +344,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_variable() const { return is_variable_; };
 
  private:
-  int64_t storage_offset_ = 0;
-  std::vector<int64_t> sizes_;
-  std::vector<int64_t> strides_;
-
-  bool is_contiguous_ = true;
-  int64_t numel_ = -1;
-
   int64_t compute_numel() const {
     int64_t n = 1;
     for (auto s : sizes()) {
@@ -357,12 +362,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     AT_ASSERT(!is_variable());
     is_contiguous_ = compute_contiguous();
   }
-  TensorTypeId type_id_;
-  // INVARIANT: When storage is non-null, this type meta must
-  // agree with the type meta in storage
-  caffe2::TypeMeta data_type_;
-  bool is_variable_ = false;
-  bool is_wrapped_number_ = false;
 
  private:
   TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable);
@@ -408,7 +407,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (src.numel() == -1) {
       sizes_.clear();
       numel_ = -1;
-      strides_.clear();
+      strides_.reset();
       is_contiguous_ = true;
       storage_.reset();
       data_type_ = caffe2::TypeMeta();
@@ -794,13 +793,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_;
   }
 
- protected:
-  // we decide to keep reserved_ and it will
-  // live in Tensor after the split
-  // The logic is that if Extend() or ReserveSpace() were ever called,
-  // then subsequent Resize()s will not free up Storage.
-  bool reserved_ = false;
-
  private:
   template <
       typename T,
@@ -873,9 +865,35 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   inline void update_to_contiguous_strides() {
-    strides_.resize(0);
+    strides_.reset();
     is_contiguous_ = true;
   }
+
+public:
+  at::Storage storage_; // TODO: Fix visibility on me
+
+protected:
+  std::vector<int64_t> sizes_;
+  std::unique_ptr<int64_t[]> strides_; // this saves two words
+
+  int64_t storage_offset_ = 0;
+  int64_t numel_ = -1;
+
+  // INVARIANT: When storage is non-null, this type meta must
+  // agree with the type meta in storage
+  caffe2::TypeMeta data_type_;
+
+  // You get to have eight byte-size fields here, before you
+  // should pack this into a bitfield.
+  TensorTypeId type_id_;
+  bool is_contiguous_ = true;
+  bool is_variable_ = false;
+  bool is_wrapped_number_ = false;
+  // we decide to keep reserved_ and it will
+  // live in Tensor after the split
+  // The logic is that if Extend() or ReserveSpace() were ever called,
+  // then subsequent Resize()s will not free up Storage.
+  bool reserved_ = false;
 
 };
 } // namespace at
