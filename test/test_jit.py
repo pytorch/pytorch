@@ -2012,7 +2012,6 @@ class TestJit(JitTestCase):
             bool_fn(torch.ones(1), torch.tensor(1), torch.tensor(True)),
             torch.ones(1))
 
-
     def test_default_values_module(self):
         class Test(torch.jit.ScriptModule):
             def __init__(self):
