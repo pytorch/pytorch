@@ -118,6 +118,19 @@ struct TypeMetaData final {
   using TypedCopy = void(const void*, void*, size_t);
   using TypedDestructor = void(void*, size_t);
 
+  TypeMetaData() = delete;
+  constexpr TypeMetaData(
+    size_t itemsize,
+    PlacementNew* ctor,
+    TypedCopy* copy,
+    TypedDestructor* dtor,
+    TypeIdentifier id,
+    const char* name) noexcept
+  : itemsize_(itemsize), ctor_(ctor), copy_(copy), dtor_(dtor), id_(id), name_(name) {}
+  static constexpr TypeMetaData uninitialized() noexcept {
+    return TypeMetaData(0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)");
+  }
+
   size_t itemsize_;
   PlacementNew* ctor_;
   TypedCopy* copy_;
@@ -301,13 +314,7 @@ private:
  */
 class CAFFE2_API TypeMeta {
  private:
-  static constexpr detail::TypeMetaData uninitialized_ = {
-      0,
-      nullptr,
-      nullptr,
-      nullptr,
-      TypeIdentifier::uninitialized(),
-      "nullptr (uninitialized)"};
+  static constexpr detail::TypeMetaData uninitialized_ = detail::TypeMetaData::uninitialized();
 
  public:
   using PlacementNew = detail::TypeMetaData::PlacementNew;
@@ -403,7 +410,7 @@ class CAFFE2_API TypeMeta {
    * Returns a TypeMeta object that corresponds to the typename T.
    */
   template <typename T>
-  static constexpr TypeMeta Make() {
+  static TypeMeta Make() {
     // The instance pointed to is declared here, but defined in a .cpp file.
     // We need to silence the compiler warning about using an undefined
     // variable template. '-Wpragmas' and '-Wunknown-warning-option' has to be
@@ -476,7 +483,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     return #T;                                                            \
   }                                                                       \
   template<>                                                              \
-  C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =            \
+  TypeMetaData _typeMetaDataInstance<T>::instance =                       \
       _typeMetaDataInstance<T>::_make();                                  \
   }
 #endif // defined(_MSC_VER) || defined(__clang__)
