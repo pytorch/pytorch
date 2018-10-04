@@ -3,17 +3,18 @@
 #include <atomic>
 #include <memory>
 
-#include "ATen/core/Storage.h"
-#include "ATen/core/optional.h"
-#include "ATen/core/TensorTypeId.h"
-#include "ATen/core/TensorTypeIdRegistration.h"
-#include "ATen/core/LegacyTypeDispatch.h"
-#include "ATen/core/Backend.h"
-#include "ATen/core/context_base.h"
+#include <ATen/core/Backend.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/Storage.h>
+#include <ATen/core/TensorTypeId.h>
+#include <ATen/core/TensorTypeIdRegistration.h>
+#include <ATen/core/context_base.h>
+#include <ATen/core/optional.h>
+
+#include "c10/util/Flags.h"
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
-#include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -23,14 +24,13 @@
 // This parameter is respected "upper-case" methods which call Resize()
 // (e.g., CopyFrom, ResizeLike); it is NOT respected by Tensor::resize_
 // or ShrinkTo, both of which guarantee to never to free memory.
-CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
+C10_DECLARE_bool(caffe2_keep_on_shrink);
 
 // Since we can have high variance in blob memory allocated across different
 // inputs in the same run, we will shrink the blob only if the memory gain
 // is larger than this flag in bytes.  This only applies to functions which
 // respect caffe2_keep_on_shrink.
-CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
-
+C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace caffe2 {
 
@@ -98,6 +98,39 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
   }
   return axis_index;
 }
+
+using PlacementDtor = void (*)(void*, size_t);
+
+/*
+ * A Context that will call extra placement deleter during
+ * deconstruction.
+ *
+ * Accept a already constructed DataPtr and store it as member
+ * during destruction, we'll call extra deleter on the underlying
+ * data pointer before the DataPtr is destructed.
+ * `data_ptr_` owns the memory.
+ */
+struct CAFFE2_API PlacementDeleteContext {
+  at::DataPtr data_ptr_;
+  PlacementDtor placement_dtor_;
+  size_t size_;
+  PlacementDeleteContext(
+      at::DataPtr&& data_ptr,
+      PlacementDtor placement_dtor,
+      size_t size)
+      : data_ptr_(std::move(data_ptr)),
+        placement_dtor_(placement_dtor),
+        size_(size) {}
+  static at::DataPtr makeDataPtr(
+      at::DataPtr&& data_ptr,
+      PlacementDtor placement_dtor,
+      size_t size,
+      at::Device device);
+  ~PlacementDeleteContext() {
+    placement_dtor_(data_ptr_.get(), size_);
+    // original memory will be freed when data_ptr_ is destructed
+  }
+};
 
 /**
  * The low-level representation of a tensor, which contains a storage
@@ -571,10 +604,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // is smaller than new size
         reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize();
       } else {
-        reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize() ||
-            !caffe2::FLAGS_caffe2_keep_on_shrink ||
-            storage_.capacity() - (storage_offset_ + numel_) * storage_.itemsize() >
-                static_cast<size_t>(caffe2::FLAGS_caffe2_max_keep_on_shrink_memory);
+        reset_tensor = storage_.capacity() <
+                (storage_offset_ + numel_) * storage_.itemsize() ||
+            !c10::FLAGS_caffe2_keep_on_shrink ||
+            storage_.capacity() -
+                    (storage_offset_ + numel_) * storage_.itemsize() >
+                static_cast<size_t>(
+                    c10::FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
       if (reset_tensor && !is_init) {
@@ -734,29 +770,19 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.dtor();
-        void* ptr;
-        at::DeleterFnPtr deleter;
-        auto ptr_and_deleter = GetStaticContext()->New(
+        auto data_ptr = GetStaticContext()->New(
             numel_ * storage_.itemsize()); // Removing this can get rid of
                                            // InefficientStdFunctionContext
-        ptr = ptr_and_deleter.first;
-        deleter = ptr_and_deleter.second;
-        storage_.set_data_ptr(at::InefficientStdFunctionContext::makeDataPtr(
-            ptr,
-            [size, dtor, deleter](void* local_ptr) -> void {
-              dtor(local_ptr, size);
-              deleter(local_ptr);
-            },
+        storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
+            std::move(data_ptr),
+            dtor,
+            size,
             at::Device(storage_.device_type())));
         data_type_.ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
-        auto ptr_and_deleter =
-            GetStaticContext()->New(numel_ * storage_.itemsize());
-        storage_.set_data_ptr(at::InefficientStdFunctionContext::makeDataPtr(
-            ptr_and_deleter.first,
-            ptr_and_deleter.second,
-            at::Device(storage_.device_type())));
+        storage_.set_data_ptr(
+            GetStaticContext()->New(numel_ * storage_.itemsize()));
       }
       storage_.set_numel(numel_);
       AT_ASSERT(storage_offset_ == 0); // because we just reallocated

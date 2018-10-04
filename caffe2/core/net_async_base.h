@@ -13,15 +13,15 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/thread_pool.h"
 
-CAFFE2_DECLARE_int(caffe2_streams_per_gpu);
-CAFFE2_DECLARE_bool(caffe2_net_async_finish_chain);
-CAFFE2_DECLARE_bool(caffe2_net_async_always_schedule_child);
-CAFFE2_DECLARE_int(caffe2_net_async_max_gpus);
-CAFFE2_DECLARE_int(caffe2_net_async_max_numa_nodes);
-CAFFE2_DECLARE_int(caffe2_net_async_cpu_pool_size);
-CAFFE2_DECLARE_bool(caffe2_net_async_check_stream_status);
-CAFFE2_DECLARE_bool(caffe2_net_async_use_single_pool);
-CAFFE2_DECLARE_bool(caffe2_net_async_use_per_net_pools);
+C10_DECLARE_int(caffe2_streams_per_gpu);
+C10_DECLARE_bool(caffe2_net_async_finish_chain);
+C10_DECLARE_bool(caffe2_net_async_always_schedule_child);
+C10_DECLARE_int(caffe2_net_async_max_gpus);
+C10_DECLARE_int(caffe2_net_async_max_numa_nodes);
+C10_DECLARE_int(caffe2_net_async_cpu_pool_size);
+C10_DECLARE_bool(caffe2_net_async_check_stream_status);
+C10_DECLARE_bool(caffe2_net_async_use_single_pool);
+C10_DECLARE_bool(caffe2_net_async_use_per_net_pools);
 
 namespace caffe2 {
 

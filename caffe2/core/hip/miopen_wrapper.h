@@ -26,8 +26,7 @@ struct MIOPENWorkspace
         if(nbytes_ < nbytes)
         {
             reset();
-            auto data_and_deleter = HIPContext::New(nbytes);
-            data_                 = {data_and_deleter.first, data_and_deleter.second};
+            data_ = HIPContext::New(nbytes);
             nbytes_               = nbytes;
         }
         CAFFE_ENFORCE_GE(nbytes_, nbytes);
@@ -36,13 +35,13 @@ struct MIOPENWorkspace
 
     void reset()
     {
-        data_   = nullptr;
-        nbytes_ = 0;
+      data_.clear();
+      nbytes_ = 0;
     }
 
     private:
-    std::unique_ptr<void, MemoryDeleter> data_{nullptr, NoDelete};
-    size_t nbytes_{0};
+     at::DataPtr data_;
+     size_t nbytes_{0};
 };
 
 // MIOPENState is the owner of the MIOPENWorkspace, and serializes all

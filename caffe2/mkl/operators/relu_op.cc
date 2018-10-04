@@ -19,7 +19,7 @@ class MKLReluOp : public MKLOperator<T> {
 
     bool dims_changed;
     CHECK_INPUT_DIMS(X, dims_changed);
-    if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
+    if (dims_changed || c10::FLAGS_caffe2_mkl_memonger_in_use) {
       // First run or changed input size, will need to recreate environment
       primitive_.Reset(dnnReLUCreateForward<T>, nullptr, X.layout(), 0.f);
       if (&X != Y) {
@@ -36,7 +36,7 @@ class MKLReluOp : public MKLOperator<T> {
     resources_[dnnResourceDst] = buffer_.buffer();
     ExecutePrimitive();
     buffer_.CopyTo(Y, primitive_, dnnResourceDst);
-    if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+    if (c10::FLAGS_caffe2_mkl_memonger_in_use && !shared) {
       buffer_.Reset();
     }
     return true;
