@@ -78,7 +78,7 @@ def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
     return func(*args, **kwargs)
 
 
-def _load_hub_info(module_name):
+def _load_hubconf(module_name):
     # Import the module
     m = importlib.import_module(module_name)
     for key in HUB_INFO_KEYS:
@@ -95,10 +95,12 @@ def _check_type(value, T):
 
 
 def _load_single_model(func_name, entrypoints, hub_dir, args, kwargs):
+    entry = None
     for e in entrypoints:
         if e[0] == func_name:
             entry = e
             break
+    if entry is None:
         raise RuntimeError('Callable {} not found in hub entrypoints'.format(func_name))
 
     checkpoint = None
@@ -182,8 +184,8 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
     except Exception:
         raise RuntimeError('Failed to extract/rename the repo')
 
-    # Parse the hub_info.py in repo to get hub information
-    entrypoints, dependencies, help_msg = _load_hub_info('hub_info')
+    # Parse the hubconf.py in repo to get hub information
+    entrypoints, dependencies, help_msg = _load_hubconf('hubconf')
 
     # Check dependent packages
     missing_deps = [pkg for pkg in dependencies if not _module_exists(pkg)]
