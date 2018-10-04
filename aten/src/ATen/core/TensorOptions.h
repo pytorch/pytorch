@@ -17,7 +17,7 @@ namespace at {
 // Hopefully the out-of-line function call is not costing us too much: all this
 // function does is return a memory address, so it shouldn't be costing
 // us too much optimizer juice.
-CAFFE2_API DefaultTensorOptions& getDefaultTensorOptions();
+CAFFE2_API const DefaultTensorOptions& getDefaultTensorOptions();
 
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
