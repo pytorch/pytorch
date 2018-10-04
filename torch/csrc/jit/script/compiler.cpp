@@ -843,12 +843,18 @@ struct to_ir {
     size_t arg_annotation_idx = 0;
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
+      auto& argument = schema.arguments.at(arg_annotation_idx++);
       // Add the input to the graph
-      Value *new_input = graph->addInput(name);
+      Value *new_input = nullptr;
+      if (argument.default_value) {
+        new_input = graph->addParamInput(*argument.default_value, name);
+      } else {
+        new_input = graph->addInput(name);
+      }
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
-      arguments.push_back(schema.arguments.at(arg_annotation_idx++));
+      arguments.push_back(argument);
       new_input->setType(arguments.back().type);
     }
     // body
@@ -1991,9 +1997,24 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
-    auto arg = Argument(decl_arg.ident().name(), parseTypeFromExpr(decl_arg.type()),
-                        /*N =*/at::nullopt, /*default_value =*/at::nullopt,
-                        /*kwarg_only =*/false);
+    at::optional<IValue> default_value = at::nullopt;
+    if (decl_arg.has_default()) {
+      // If the Param has a default value, convert it to an IValue
+      Const default_const = decl_arg.default_value();
+      if (default_const.isFloatingPoint()) {
+        default_value = IValue(autograd::make_variable(
+            at::scalar_to_tensor(default_const.asFloatingPoint())));
+      } else {
+        default_value = IValue(autograd::make_variable(
+            at::scalar_to_tensor(default_const.asIntegral())));
+      }
+    }
+    auto arg = Argument(
+        decl_arg.ident().name(),
+        parseTypeFromExpr(decl_arg.type()),
+        /*N =*/at::nullopt,
+        /*default_value =*/default_value,
+        /*kwarg_only =*/false);
     retval.push_back(arg);
   }
   return retval;

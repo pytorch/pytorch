@@ -43,6 +43,7 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
   return out;
 }
 
+
 struct const_value_list_with_types {
   const ArrayRef<const Value*> values;
   bool use_newlines;
@@ -68,6 +69,15 @@ std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
     printValueRef(out, n);
     out << " : ";
     out << *n->type();
+
+    // Print default value if one exists
+    const ParamValue* pv = dynamic_cast<const ParamValue*>(n);
+    if (pv != nullptr) {
+      if (pv->default_value()) {
+        out << " = " << *pv->default_value();
+      }
+    }
+
   }
   return out;
 }

@@ -137,22 +137,23 @@ def _uses_true_division(fn):
             '_uses_true_division: expected function or method, got {}'.format(type(fn)))
 
 
-def get_jit_ast(fn, is_method):
+def get_jit_ast(fn, is_method, frames_up=0):
     source = dedent(inspect.getsource(fn))
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
     type_line = torch.jit.annotations.get_type_line(source)
-    ctx = SourceContext(source, _uses_true_division(fn))
+    ctx = SourceContext(source, inspect.stack()[frames_up + 1][0], _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, is_method)
 
 
 # Thin wrapper around SourceRangeFactory to store extra metadata
 # about the function-to-be-compiled.
 class SourceContext(SourceRangeFactory):
-    def __init__(self, source, uses_true_division=True):
+    def __init__(self, source, frame, uses_true_division=True):
         super(SourceContext, self).__init__(source)
         self.uses_true_division = uses_true_division
+        self.frame = frame
 
 
 class Builder(object):
@@ -182,19 +183,36 @@ def build_def(ctx, py_def, type_line, is_method):
                build_stmts(ctx, body))
 
 
-_vararg_kwarg_err = ("Compiled functions can't take variable number of arguments, "
-                     "have default values for arguments, nor keyword-only arguments")
+_vararg_kwarg_err = ("Compiled functions can't take variable number of"
+                     " arguments or have keyword-only arguments")
 
 
 def build_param_list(ctx, py_args):
-    if py_args.vararg is not None or py_args.kwarg is not None or py_args.defaults:
+    num_no_default = len(py_args.args) - len(py_args.defaults)
+
+    def get_default_at(i):
+        return py_args.defaults[i - num_no_default] if i >= num_no_default else None
+
+    if py_args.vararg is not None or py_args.kwarg is not None:
         raise ValueError(_vararg_kwarg_err)
-    if not PY2 and (py_args.kw_defaults or py_args.kwonlyargs):
+    if not PY2 and py_args.kwonlyargs:
         raise ValueError(_vararg_kwarg_err)
-    return [build_param(ctx, arg) for arg in py_args.args]
+    return [build_param(ctx, arg, get_default_at(i)) for i, arg in enumerate(py_args.args)]
 
 
-def build_param(ctx, py_arg):
+def eval_default_arg(ctx, default, _frames_up=1 if False else 0):
+    if isinstance(default, ast.Num):
+        value = str(default.n)
+    else:
+        expr = compile(ast.Expression(default), '', 'eval')
+        value = str(eval(expr, ctx.frame.f_locals, ctx.frame.f_globals))
+
+    r_default = ctx.make_range(
+        default.lineno, default.col_offset, default.col_offset + len(value))
+    return (r_default, value)
+
+
+def build_param(ctx, py_arg, default):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     #     In Python2 py_arg is a Name (Expr subclass)
     name = py_arg.id if PY2 else py_arg.arg
@@ -203,7 +221,12 @@ def build_param(ctx, py_arg):
         annotation_expr = build_expr(ctx, py_arg.annotation)
     else:
         annotation_expr = Var(Ident(r, 'Tensor'))
-    return Param(annotation_expr, Ident(r, name))
+
+    if default:
+        r_default, value = eval_default_arg(ctx, default)
+        return Param(annotation_expr, Ident(r, name), Const(r_default, value))
+    else:
+        return Param(annotation_expr, Ident(r, name))
 
 
 class StmtBuilder(Builder):

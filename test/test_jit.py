@@ -1974,6 +1974,19 @@ class TestJit(JitTestCase):
         self.assertExpected(while_if_test.graph.pretty_print(), "while_if_test")
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
 
+    def test_default_values(self):
+        outer_var = 20
+        outer_var2 = 30
+
+        @torch.jit.script
+        def fn(x, a=0.5, b=10, c=outer_var, d=outer_var + outer_var2):
+            return x + a + b + c + d
+
+        self.assertExpectedGraph(fn.graph)
+        self.assertEqual(
+            fn(torch.ones(1)),
+            torch.ones(1) + 0.5 + 10 + 20 + (20 + 30))
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
