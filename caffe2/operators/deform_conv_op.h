@@ -6,7 +6,7 @@
 #include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
-CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
+C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -61,7 +61,7 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
       : DeformConvOpBase<T, Context>(operator_def, ws) {
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
-    if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+    if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
       createSharedBuffer<Context>(ws_);
     }
   }

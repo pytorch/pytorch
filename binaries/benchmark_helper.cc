@@ -28,6 +28,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/tensor_int8.h"
 #include "caffe2/utils/bench_utils.h"
 #include "caffe2/utils/string_utils.h"
 #include "observers/net_observer_reporter_print.h"
@@ -81,8 +82,8 @@ void setOperatorEngine(caffe2::NetDef* net_def, const string& backend) {
                                                 : backend == "cuda"
                     ? "CUDA"
                     : backend == "dnnlowp" ? "DNNLOWP"
-                                           : backend == "dnnlowp_16"
-                            ? "DNNLOWP_16"
+                                           : backend == "dnnlowp_acc16"
+                            ? "DNNLOWP_ACC16"
                             : backend == "default" ? "" : "NONE";
     CAFFE_ENFORCE(engine != "NONE", "Backend is not supported");
     for (int i = 0; i < net_def->op_size(); i++) {
@@ -163,12 +164,16 @@ void loadInput(
           CAFFE_THROW("Not support GPU on mobile.");
 #endif
         } else {
-          caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
-          CHECK_NOTNULL(tensor);
-          tensor->Resize(input_dims);
           if (input_type_list[i] == "uint8_t") {
-            tensor->mutable_data<uint8_t>();
+            caffe2::int8::Int8TensorCPU* tensor =
+                blob->GetMutable<caffe2::int8::Int8TensorCPU>();
+            CHECK_NOTNULL(tensor);
+            tensor->t.Resize(input_dims);
+            tensor->t.mutable_data<uint8_t>();
           } else if (input_type_list[i] == "float") {
+            caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
+            CHECK_NOTNULL(tensor);
+            tensor->Resize(input_dims);
             tensor->mutable_data<float>();
           } else {
             CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
@@ -190,7 +195,7 @@ void fillInputBlob(
   if (tensor_protos_map.empty()) {
     return;
   }
-
+  static caffe2::TensorDeserializer serializer;
   for (auto& tensor_kv : tensor_protos_map) {
     caffe2::Blob* blob = workspace->GetBlob(tensor_kv.first);
     if (blob == nullptr) {
@@ -200,17 +205,22 @@ void fillInputBlob(
     int protos_size = tensor_kv.second.protos_size();
     caffe2::TensorProto* tensor_proto =
         tensor_kv.second.mutable_protos(iteration % protos_size);
-    caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
+      caffe2::TensorCPU* tensor = BlobGetMutableTensor(blob, caffe2::CPU);
       int total_size = tensor_proto->string_data_size();
       for (size_t i = 0; i < total_size; i++) {
         (tensor->mutable_data<string>())[i] = tensor_proto->string_data(i);
       }
     } else if (tensor_proto->data_type() == caffe2::TensorProto::FLOAT) {
-      int total_size = tensor_proto->float_data_size();
-      for (size_t i = 0; i < total_size; i++) {
-        (tensor->mutable_data<float>())[i] = tensor_proto->float_data(i);
+      vector<int64_t> dims;
+      for (const int64_t d : tensor_proto->dims()) {
+        dims.push_back(d);
       }
+      // int total_size = tensor_proto->float_data_size();
+      caffe2::TensorCPU* tensor =
+          new caffe2::TensorCPU(dims, caffe2::DeviceType::CPU);
+      serializer.Deserialize(*tensor_proto, tensor);
+      blob->Reset(tensor);
     }
     // todo: for other types
   }
@@ -255,6 +265,9 @@ void runNetwork(
   for (int i = 0; i < iter; ++i) {
     caffe2::ObserverConfig::initSampleRate(1, 1, 1, 0, warmup);
     fillInputBlob(workspace, tensor_protos_map, i);
+    if (wipe_cache) {
+      caffe2::wipe_cache();
+    }
     CAFFE_ENFORCE(net->Run(), "Main run ", i, " has failed.");
     if (wipe_cache) {
       caffe2::wipe_cache();
@@ -262,9 +275,6 @@ void runNetwork(
     if (run_individual) {
       caffe2::ObserverConfig::initSampleRate(1, 1, 1, 1, warmup);
       CAFFE_ENFORCE(net->Run(), "Main run ", i, " with operator has failed.");
-      if (wipe_cache) {
-        caffe2::wipe_cache();
-      }
     }
   }
 }
@@ -335,15 +345,18 @@ int benchmark(
     // file does not exist
     std::ifstream net_file(FLAGS_net);
     CAFFE_ENFORCE(net_file.good());
+    net_file.close();
 
     std::ifstream init_net_file(FLAGS_init_net);
     CAFFE_ENFORCE(init_net_file.good());
+    init_net_file.close();
 
     if (FLAGS_input_file.size() > 0) {
       vector<string> input_files = caffe2::split(',', FLAGS_input_file);
       for (auto input_file : input_files) {
         std::ifstream ifile(input_file);
         CAFFE_ENFORCE(ifile.good());
+        ifile.close();
       }
     }
   }

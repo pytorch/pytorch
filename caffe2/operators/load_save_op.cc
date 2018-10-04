@@ -5,6 +5,7 @@ namespace caffe2 {
 template <>
 void LoadOp<CPUContext>::SetCurrentDevice(BlobProto* proto) {
   if (proto->has_tensor()) {
+    proto->mutable_tensor()->clear_device_detail();
     proto->mutable_tensor()->mutable_device_detail()->set_device_type(
         PROTO_CPU);
   }

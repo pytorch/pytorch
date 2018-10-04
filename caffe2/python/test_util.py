@@ -30,6 +30,10 @@ def randBlobsFloat32(names, *dims, **kwargs):
         randBlobFloat32(name, *dims, **kwargs)
 
 
+def numOps(net):
+    return len(net.Proto().op)
+
+
 def str_compare(a, b, encoding="utf8"):
     if isinstance(a, bytes):
         a = a.decode(encoding)

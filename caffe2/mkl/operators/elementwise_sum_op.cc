@@ -27,7 +27,7 @@ class MKLSumOp final : public MKLOperator<T> {
     MKLMemory<T>* Y = Output(0);
     bool dims_changed;
     CHECK_INPUT_DIMS(X0, dims_changed);
-    if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
+    if (dims_changed || c10::FLAGS_caffe2_mkl_memonger_in_use) {
       primitive_.Reset(
           dnnSumCreate<T>,
           nullptr,
@@ -56,7 +56,7 @@ class MKLSumOp final : public MKLOperator<T> {
     resources_[dnnResourceDst] = buffer_.buffer();
     MKLDNN_SAFE_CALL(mkl::dnnExecute<T>(primitive_, resources_));
     buffer_.CopyTo(Y, primitive_, dnnResourceDst);
-    if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+    if (c10::FLAGS_caffe2_mkl_memonger_in_use && !shared) {
       buffer_.Reset();
     }
     return true;

@@ -6,7 +6,7 @@
 #include "caffe2/mobile/contrib/ios/mpscnn/mpscnn.h"
 #endif
 
-CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
+C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 Caffe2IOSPredictor* Caffe2IOSPredictor::NewCaffe2IOSPredictor(const caffe2::NetDef& init_net,
                                                               const caffe2::NetDef& predict_net,
@@ -49,7 +49,7 @@ Caffe2IOSPredictor::Caffe2IOSPredictor(const caffe2::NetDef& init_net,
 }
 
 void Caffe2IOSPredictor::run(const Tensor& inData, Tensor& outData, std::string& errorMessage) {
-  caffe2::FLAGS_caffe2_force_shared_col_buffer = true;
+  c10::FLAGS_caffe2_force_shared_col_buffer = true;
   caffe2::Tensor input(caffe2::CPU);
   input.Resize(inData.dims);
   input.ShareExternalPointer(inData.data);

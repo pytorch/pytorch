@@ -648,7 +648,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
 
     Args:
         input (Tensor): the input tensor
-        p (int, float, inf, -inf, 'fro', 'nuc'): the order of norm
+        p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
             The following norms can be calculated:
 
             =====  ============================  ==========================
@@ -667,13 +667,14 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
             calculated when the input tensor only has one dimension. If the input
             tensor has more than two dimensions, the vector norm will be applied to
             last dimension.
-        keepdim (bool): whether the output tensors have :attr:`dim`
+        keepdim (bool, optional): whether the output tensors have :attr:`dim`
             retained or not. Ignored if :attr:`dim` = ``None`` and
-            :attr:`out` = ``None``.
+            :attr:`out` = ``None``. Default: ``False``
         out (Tensor, optional): the output tensor. Ignored if
             :attr:`dim` = ``None`` and :attr:`out` = ``None``.
 
     Example::
+
         >>> import torch
         >>> a = torch.arange(9, dtype= torch.float) - 4
         >>> b = a.reshape((3, 3))

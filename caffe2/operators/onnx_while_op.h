@@ -27,8 +27,15 @@ class ONNXWhileOp final : public Operator<Context> {
       CAFFE_ENFORCE(!save_scopes_, "Cannot save scopes when disable_scopes=True");
     }
     body_net_def_ = this->template GetSingleArgument<NetDef>("body", NetDef());
+    static int64_t counter = -1;
     if (!body_net_def_.has_name()) {
-      body_net_def_.set_name("loop_net");
+      if (counter == -1) {
+        ++counter;
+        body_net_def_.set_name("loop_net");
+      } else {
+        ++counter;
+        body_net_def_.set_name("loop_net." + caffe2::to_string(counter));
+      }
     }
   }
 
@@ -50,7 +57,6 @@ class ONNXWhileOp final : public Operator<Context> {
     // and setup a local scope for the first iteration
     ws_stack_.clear();
     auto loop_ws = !disable_scopes_ ? ws_stack_.pushForwardWorkspace(parent_ws_).get() : parent_ws_;
-    scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_);
 
     constexpr int64_t num_inputs_before_lcds = 2;
     // First input is the maximumt trip count. Second input is the condition
@@ -64,6 +70,8 @@ class ONNXWhileOp final : public Operator<Context> {
     }
     int64_t max_trip_count = *Input(0).template data<int64_t>();
     const bool first_iter_condition = *Input(1).template data<CondVarType>();
+
+    scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_, num_loop_carried_deps);
 
     // Body graph has 1+N+K outputs: recalculated condition variable, N
     // loop-carried dependencies, and K scan_outputs
@@ -133,7 +141,7 @@ class ONNXWhileOp final : public Operator<Context> {
         cur_output_condition = scope_->template output_condition<CondVarType>();
         if (save_scopes_) {
           loop_ws = ws_stack_.pushForwardWorkspace(parent_ws_).get();
-          scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_);
+          scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_, num_loop_carried_deps);
         }
 
         // Copy forward loop-carried dependencies
@@ -185,16 +193,9 @@ class ONNXWhileOp final : public Operator<Context> {
       }
     }
 
-    if (scope_->iteration() > 0) {
-      // Copy out final loop-carried dependencies
-      for (int i = 0; i < num_loop_carried_deps; ++i) {
-        Output(i)->CopyFrom(*scope_->lcd_tensor(i));
-      }
-    } else {
-      // Copy out final loop-carried dependencies
-      for (int i = 0; i < num_loop_carried_deps; ++i) {
-        Output(i)->CopyFrom(Input(i + num_inputs_before_lcds));
-      }
+    // Copy out final loop-carried dependencies
+    for (int i = 0; i < num_loop_carried_deps; ++i) {
+      Output(i)->CopyFrom(*scope_->lcd_tensor(i));
     }
 
     return true;
@@ -205,13 +206,13 @@ class ONNXWhileOp final : public Operator<Context> {
    public:
     LocalScope(
         Workspace *loop_ws,
-        const NetDef& body_net_def) : loop_ws_(loop_ws) {
+        const NetDef& body_net_def, size_t num_lcds) : loop_ws_(loop_ws){
       CAFFE_ENFORCE(loop_ws_,
           "Failed to initialize local loop workspace");
 
       // Create loop-carried deps in Workspace
       lcd_tensors_.clear();
-      for (int i = 2; i < body_net_def.external_input_size(); ++i) {
+      for (int i = 2; i < num_lcds + 2; ++i) {
         Blob* b = loop_ws_->CreateBlob(body_net_def.external_input(i));
         Tensor* t = BlobGetMutableTensor(b, Context::GetDeviceType());
         lcd_tensors_.push_back(t);
@@ -259,7 +260,7 @@ class ONNXWhileOp final : public Operator<Context> {
     }
 
     void set_iteration(int64_t itr) {
-      iteration_var_->Resize(1);
+      iteration_var_->Resize();
       auto* iteration_var_ptr =
           iteration_var_->template mutable_data<int64_t>();
       *iteration_var_ptr = itr;
