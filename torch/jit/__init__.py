@@ -45,6 +45,7 @@ _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 compiled_weak_fns = weakref.WeakKeyDictionary()
+COMPILATION_PENDING = object()
 
 
 @contextlib.contextmanager
@@ -583,7 +584,7 @@ class CompilationUnit(object):
 
 
 def weak_script(fn):
-    compiled_weak_fns[fn] = "pending";
+    compiled_weak_fns[fn] = COMPILATION_PENDING
     return fn
 
 
@@ -591,7 +592,7 @@ def _try_compile_weak_script(fn):
     v = compiled_weak_fns.get(fn)
     if v is None:
         return None
-    if v == "pending":
+    if v == COMPILATION_PENDING:
         v = torch.jit.script(fn)
         compiled_weak_fns[fn] = v
     return v
