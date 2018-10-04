@@ -447,7 +447,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__clang__)
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
   C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                    \
@@ -463,7 +463,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   TypeMetaData _typeMetaDataInstance<T>::instance =                       \
       _typeMetaDataInstance<T>::_make();                                  \
   }
-#else // _MSC_VER
+#else // defined(_MSC_VER) || defined(__clang__)
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
   TypeIdentifier TypeIdentifier::Get<T>() {                               \
@@ -479,7 +479,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =            \
       _typeMetaDataInstance<T>::_make();                                  \
   }
-#endif
+#endif // defined(_MSC_VER) || defined(__clang__)
 
 /**
  * CAFFE_PREALLOCATED_KNOWN_TYPE is used
@@ -554,10 +554,14 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(22, bool*)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(23, char*)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(24, int*)
 
-#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+// For some of the compilers, long is definied separately from int32_t and
+// int64_t. As a result we will need to actually define them separately.
+// It is recommended that one does NOT use long - use int32_t and int64_t
+// explicitly. Explicit long type annotation may go away in the future.
+#if defined(_MSC_VER) || defined(__APPLE__) || defined(__ANDROID__)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, long)
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(26, std::vector<long>)
-#endif // CAFFE2_UNIQUE_LONG_TYPEMETA
+#endif
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

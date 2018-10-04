@@ -1455,14 +1455,7 @@ class TreeCursorSerializer : public BlobSerializerBase {
 class TreeCursorDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override {
-    // deserialize the offsets
-    TensorDeserializer deser;
-    Blob offset_blob;
-    deser.Deserialize(proto, &offset_blob);
-    auto& offsets = offset_blob.template Get<Tensor>();
-    auto* offsets_ptr = offsets.data<TOffset>();
-
-    // deserialize the field names
+    // Deserialize the field names
     std::vector<std::string> fieldNames;
     std::istringstream is(proto.content());
     std::string field;
@@ -1476,8 +1469,21 @@ class TreeCursorDeserializer : public BlobDeserializerBase {
     TreeIterator it(fieldNames);
 
     auto* base = blob->template GetMutable<std::unique_ptr<TreeCursor>>();
+    CAFFE_ENFORCE(base != nullptr, "TreeCursor doesn't exist.");
     (*base).reset(new TreeCursor(it));
-    (*base)->offsets.assign(offsets_ptr, offsets_ptr + offsets.size());
+
+    // Deserialize the offset vector when it is not empty. The proto.tensor()
+    // function will return a TensorProto associated with offset vector. The
+    // offset vector contains fields of type int64_t, and we verify it is not
+    // empty before calling the deserializer.
+    if (proto.tensor().int64_data().size() > 0) {
+      TensorDeserializer deser;
+      Blob offset_blob;
+      deser.Deserialize(proto, &offset_blob);
+      auto& offsets = offset_blob.template Get<Tensor>();
+      auto* offsets_ptr = offsets.data<TOffset>();
+      (*base)->offsets.assign(offsets_ptr, offsets_ptr + offsets.size());
+    }
   }
 };
 
