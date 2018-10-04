@@ -265,6 +265,24 @@ struct ModuleValue : public SugaredValue {
   std::shared_ptr<Module> module;
 };
 
+
+IValue getScalarAsTensor(py::object obj) {
+  at::Tensor tensor;
+  if (py::isinstance<py::bool_>(obj)) {
+    tensor = at::scalar_to_tensor(py::cast<bool>(obj));
+  } else if (py::isinstance<py::int_>(obj)) {
+    tensor = at::scalar_to_tensor(py::cast<int64_t>(obj));
+  } else if (py::isinstance<py::float_>(obj)) {
+    tensor = at::scalar_to_tensor(py::cast<float>(obj));
+  } else if (obj.is(py::none())) {
+    return IValue();
+  } else {
+    AT_ERROR("Unknown python object type");
+  }
+  return autograd::make_variable(tensor);
+}
+
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
@@ -371,6 +389,32 @@ Resolver pythonResolver(ResolutionCallback rcb) {
     }
     return toSugaredValue(obj, m, loc);
   };
+}
+
+FunctionSchema getSchemaWithDefaults(
+    std::unordered_map<std::string, py::object>& default_args,
+    FunctionSchema schema) {
+  std::vector<Argument> new_args;
+  for (auto& arg : schema.arguments) {
+    auto it = default_args.find(arg.name);
+    if (it != default_args.end()) {
+      new_args.push_back(Argument(
+          arg.name,
+          arg.type,
+          arg.N,
+          getScalarAsTensor(it->second),
+          arg.kwarg_only));
+    } else {
+      new_args.push_back(arg);
+    }
+  }
+
+  return FunctionSchema(
+      schema.name,
+      new_args,
+      schema.returns,
+      schema.is_vararg,
+      schema.is_varret);
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -534,9 +578,10 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args, py::kwargs kwargs) {
       return self.graph_for(createStackForSchema(self.getSchema(), std::move(args), std::move(kwargs)));
     })
-    .def("forward_schema", [](Method &self, Def &def, bool is_method) {
+    .def("forward_schema", [](Method &self, Def &def, py::object defaults, bool is_method) {
       auto schema = extractSchemaFromDef(def, is_method);
-      self.setSchema(schema);
+      auto args = py::cast<std::unordered_map<std::string, py::object>>(defaults);
+      self.setSchema(getSchemaWithDefaults(args, schema));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("pretty_print_schema", &Method::pretty_print_schema);

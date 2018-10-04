@@ -182,12 +182,11 @@ def build_def(ctx, py_def, type_line, is_method):
                build_stmts(ctx, body))
 
 
-_vararg_kwarg_err = ("Compiled functions can't take variable number of arguments, "
-                     "have default values for arguments, nor keyword-only arguments")
-
+_vararg_kwarg_err = ("Compiled functions can't take variable number of arguments "
+                     "or keyword-only arguments")
 
 def build_param_list(ctx, py_args):
-    if py_args.vararg is not None or py_args.kwarg is not None or py_args.defaults:
+    if py_args.vararg is not None or py_args.kwarg is not None:
         raise ValueError(_vararg_kwarg_err)
     if not PY2 and (py_args.kw_defaults or py_args.kwonlyargs):
         raise ValueError(_vararg_kwarg_err)

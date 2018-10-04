@@ -636,6 +636,7 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
+<<<<<<< HEAD
 def weak_script(fn, _frames_up=0):
     compiled_weak_fns[fn] = {
         "status": COMPILATION_PENDING,
@@ -659,6 +660,15 @@ def _try_compile_weak_script(fn):
         return entry["compiled_fn"]
 
 
+def get_default_args(func):
+    signature = inspect.signature(func)
+    return {
+        k: v.default
+        for k, v in signature.parameters.items()
+        if v.default is not inspect.Parameter.empty
+    }
+
+
 def script(fn, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return fn
@@ -672,7 +682,7 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
     # 2) Throwing everything away except for the graph 3) Creating a new
     # ScriptModule and dumping that graph in 4) Re-populating the schema
     # because it was lost doing the previous
-    mod.__getattr__('forward').forward_schema(ast, False)
+    mod.__getattr__('forward').forward_schema(ast, get_default_args(fn), False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod

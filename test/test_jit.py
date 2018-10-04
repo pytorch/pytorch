@@ -1982,6 +1982,48 @@ class TestJit(JitTestCase):
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
         self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
 
+    def test_default_values_function(self):
+        outer_var = 20
+        outer_var2 = 30
+
+        @torch.jit.script
+        def simple_fn(x, a=0.5, b=10, c=outer_var + outer_var2):
+            return x + a + b + c
+
+        self.assertExpectedGraph(simple_fn.graph, "simple")
+        self.assertEqual(
+            simple_fn(torch.ones(1)),
+            torch.ones(1) + 0.5 + 10 + (20 + 30))
+        self.assertEqual(
+            simple_fn(torch.ones(1), torch.tensor(1), torch.tensor(3), torch.tensor(4)),
+            torch.ones(1) + 1 + 3 + 4)
+
+        @torch.jit.script
+        def bool_fn(x, a=9, flag=False):
+            if bool(flag):
+                result = x
+            else:
+                result = x + a
+            return result
+
+        self.assertExpectedGraph(bool_fn.graph, "bool")
+        self.assertEqual(bool_fn(torch.ones(1)), torch.ones(1) + 9)
+        self.assertEqual(
+            bool_fn(torch.ones(1), torch.tensor(1), torch.tensor(True)),
+            torch.ones(1))
+
+
+    def test_default_values_module(self):
+        class Test(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Test, self).__init__()
+
+            def forward(self, input, other=4):
+                return input + other
+
+        t = Test()
+        self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
