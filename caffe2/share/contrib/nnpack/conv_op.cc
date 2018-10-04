@@ -13,7 +13,7 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-CAFFE2_DEFINE_bool(caffe2_profile_nnpack, false, "");
+C10_DEFINE_bool(caffe2_profile_nnpack, false, "");
 namespace caffe2 {
 
 void initNNPACK() {
@@ -321,7 +321,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             activation_,
             nullptr /* activation parameter */,
             pool,
-            FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
+            c10::FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
         if (status == nnp_status_insufficient_buffer) {
           /* Query required workspace size, increase buffer, and try again */
           status = nnp_convolution_inference(
@@ -375,7 +375,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
                 activation_,
                 nullptr /* activation parameter */,
                 pool,
-                FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
+                c10::FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
           }
         }
 
@@ -383,7 +383,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
         CAFFE_ENFORCE(
             nnp_status_success == status,
             "NNPACK convolution computation returned error");
-        if (FLAGS_caffe2_profile_nnpack) {
+        if (c10::FLAGS_caffe2_profile_nnpack) {
           char buffer[1024];
           const double gmacs =
               double(

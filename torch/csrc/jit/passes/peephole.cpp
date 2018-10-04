@@ -24,7 +24,7 @@ void PeepholeOptimize(Block * block) {
 
     // XXX: remember that if you want to simplify an expression by combining multiple nodes
     // into a different one, then you need to check that they all belong to the given block
-    if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor",
+    if (node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
         /*with_const=*/attr::size)) {
       // x.expand(x.size()) == x
       if (auto input_type = node->namedInput(attr::self)->type()->cast<CompleteTensorType>()) {

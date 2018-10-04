@@ -13,11 +13,13 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-CAFFE2_DEFINE_int(
-    caffe2_nnpack_num_threads, 1,
+C10_DEFINE_int(
+    caffe2_nnpack_num_threads,
+    1,
     "The number of nnpack pthreadpool threads.");
-CAFFE2_DEFINE_bool(
-    caffe2_nnpack_use_mkl_num_threads, true,
+C10_DEFINE_bool(
+    caffe2_nnpack_use_mkl_num_threads,
+    true,
     "If MKL is built, this sets nnpack to use the same number of threads as "
     "MKL does. This overrides caffe2_nnpack_num_threads if set.");
 
@@ -74,8 +76,8 @@ pthreadpool_t nnpack_threadpool() {
     enum nnp_status nnpack_status = nnp_initialize();
     CAFFE_ENFORCE(
         nnpack_status == nnp_status_success, "NNPack is not supported here!");
-    int num_threads = FLAGS_caffe2_nnpack_num_threads;
-    if (FLAGS_caffe2_nnpack_use_mkl_num_threads) {
+    int num_threads = c10::FLAGS_caffe2_nnpack_num_threads;
+    if (c10::FLAGS_caffe2_nnpack_use_mkl_num_threads) {
 #ifdef CAFFE2_USE_MKL
       num_threads = mkl_get_max_threads();
 #else
