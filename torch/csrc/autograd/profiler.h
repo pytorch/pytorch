@@ -22,7 +22,7 @@
 #include <cuda_runtime.h>
 #endif
 #ifndef _WIN32
-#include <time.h>
+#include <ctime>
 #endif
 
 namespace torch { namespace autograd {
