@@ -19,8 +19,8 @@
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_string(init_net, "", "The given path to the init protobuffer.");
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(init_net, "", "The given path to the init protobuffer.");
+C10_DEFINE_string(
     predict_net,
     "",
     "The given path to the predict protobuffer.");
@@ -28,15 +28,15 @@ CAFFE2_DEFINE_string(
 namespace caffe2 {
 
 void run() {
-  if (FLAGS_init_net.empty()) {
+  if (c10::FLAGS_init_net.empty()) {
     LOG(FATAL) << "No init net specified. Use --init_net=/path/to/net.";
   }
-  if (FLAGS_predict_net.empty()) {
+  if (c10::FLAGS_predict_net.empty()) {
     LOG(FATAL) << "No predict net specified. Use --predict_net=/path/to/net.";
   }
   caffe2::NetDef init_net, predict_net;
-  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_init_net, &init_net));
-  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_predict_net, &predict_net));
+  CAFFE_ENFORCE(ReadProtoFromFile(c10::FLAGS_init_net, &init_net));
+  CAFFE_ENFORCE(ReadProtoFromFile(c10::FLAGS_predict_net, &predict_net));
   // Can be large due to constant fills
   VLOG(1) << "Init net: " << ProtoDebugString(init_net);
   LOG(INFO) << "Predict net: " << ProtoDebugString(predict_net);
