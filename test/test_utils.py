@@ -544,6 +544,7 @@ class TestONNXUtils(TestCase):
 
 class TestHub(TestCase):
     @classmethod
+    @skipIfNoTorchVision
     def setUpClass(cls):
         cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
 
