@@ -6577,6 +6577,7 @@ class TestTorch(TestCase):
             self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     # functions that operate over a dimension but don't reduce.
+    @skipIfRocm
     def test_dim_function_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
