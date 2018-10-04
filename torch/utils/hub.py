@@ -69,7 +69,10 @@ def _download_url_to_file(url, filename):
 
 def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
     # Import the module
-    m = importlib.import_module(module_name)
+    try:
+        m = importlib.import_module(module_name)
+    except Exception:
+        raise RuntimeError('Cannot load module {}'.format(module_name))
     # Check if callable is defined in the module
     if func_name not in dir(m):
         raise RuntimeError('Cannot find callable {} in module {}'.format(func_name, module_name))
@@ -83,7 +86,10 @@ def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
 
 def _load_hubconf(module_name):
     # Import the module
-    m = importlib.import_module(module_name)
+    try:
+        m = importlib.import_module(module_name)
+    except Exception:
+        raise RuntimeError('Cannot load module {}'.format(module))
     for key in HUB_INFO_KEYS:
         if key not in dir(m):
             print(dir(m))
