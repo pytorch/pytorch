@@ -65,7 +65,8 @@ CAFFE_DEFINE_KNOWN_TYPE(bool*);
 CAFFE_DEFINE_KNOWN_TYPE(char*);
 CAFFE_DEFINE_KNOWN_TYPE(int*);
 
-#if false
+// see typeid.h for details.
+#if defined(_MSC_VER) || defined(__APPLE__) || defined(__ANDROID__)
 CAFFE_DEFINE_KNOWN_TYPE(long);
 CAFFE_DEFINE_KNOWN_TYPE(std::vector<long>);
 #endif
