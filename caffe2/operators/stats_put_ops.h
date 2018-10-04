@@ -47,7 +47,7 @@ struct TemplatePutOp : public Operator<CPUContext> {
 
  private:
   const std::string given_name_;
-  const long magnitude_expand_;
+  const int64_t magnitude_expand_;
   T stat_;
 };
 } // namespace caffe2
