@@ -656,13 +656,13 @@ def _try_compile_weak_script(fn):
         return entry["compiled_fn"]
 
 
-def script(fn, optimize=True, _frames_up=0, rcb=None):
+def script(fn, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return fn
-    if rcb is None:
-        rcb = createResolutionCallback(_frames_up + 1)
+    if _rcb is None:
+        _rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
-    graph = _jit_script_compile(ast, rcb)
+    graph = _jit_script_compile(ast, _rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
     # TODO: refactor everything so we're not 1) creating a ScriptModule
