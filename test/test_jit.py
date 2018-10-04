@@ -7177,6 +7177,17 @@ a")
 
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
 
+    def test_python_op_exception(self):
+        def python_op(x):
+            raise Exception("bad!")
+
+        @torch.jit.script
+        def fn(x):
+            return python_op(x)
+
+        with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
+            fn(torch.tensor(4))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
