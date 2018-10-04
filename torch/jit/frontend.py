@@ -7,9 +7,9 @@ import string
 from textwrap import dedent
 from functools import partial
 from collections import namedtuple
+from torch._six import PY2
 from torch._C._jit_tree_views import *
 
-PY2 = sys.version_info[0] == 2
 _reserved_prefix = '__jit'
 _reserved_names = {'print'}
 _identifier_chars = set(string.ascii_lowercase + string.ascii_uppercase + string.digits)
@@ -185,6 +185,7 @@ def build_def(ctx, py_def, type_line, is_method):
 _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments "
                      "or keyword-only arguments")
 
+
 def build_param_list(ctx, py_args):
     if py_args.vararg is not None or py_args.kwarg is not None:
         raise ValueError(_vararg_kwarg_err)
@@ -203,6 +204,19 @@ def build_param(ctx, py_arg):
     else:
         annotation_expr = Var(Ident(r, 'Tensor'))
     return Param(annotation_expr, Ident(r, name))
+
+
+def get_default_args(fn):
+    if PY2:
+        argspec = inspect.getargspec(fn)
+        return dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults))
+    else:
+        signature = inspect.signature(fn)
+        return {
+            k: v.default
+            for k, v in signature.parameters.items()
+            if v.default is not inspect.Parameter.empty
+        }
 
 
 class StmtBuilder(Builder):

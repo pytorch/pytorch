@@ -2,7 +2,7 @@ import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
-from torch.jit.frontend import get_jit_ast
+from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass, PY2
 import torch.testing
@@ -657,19 +657,6 @@ def _try_compile_weak_script(fn):
         return compiled_fn
     else:
         return entry["compiled_fn"]
-
-
-def get_default_args(fn):
-    if PY2:
-        argspec = inspect.getargspec(fn)
-        return dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults))
-    else:
-        signature = inspect.signature(fn)
-        return {
-            k: v.default
-            for k, v in signature.parameters.items()
-            if v.default is not inspect.Parameter.empty
-        }
 
 
 def script(fn, optimize=True, _frames_up=0, _rcb=None):
