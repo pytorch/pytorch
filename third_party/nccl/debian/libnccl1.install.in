@@ -1,0 +1,2 @@
+lib/libnccl.so.${nccl:Major} /usr/lib/x86_64-linux-gnu
+lib/libnccl.so.${nccl:Major}.${nccl:Minor}.${nccl:Patch} /usr/lib/x86_64-linux-gnu

@@ -1,0 +1,28 @@
+Source: nccl
+Section: libs
+Maintainer: cudatools <cudatools@nvidia.com>
+Priority: optional
+Build-depends: debhelper(>=9)
+Standards-Version: 3.9.5
+
+Package: libnccl${nccl:Major}
+Section: libs
+Architecture: ${deb:Arch}
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: NVIDIA Collectives Communication Library (NCCL) Runtime
+ NCCL (pronounced "Nickel") is a stand-alone library of standard collective
+ communication routines for GPUs, such as all-gather, reduce, broadcast, etc.,
+ that have been optimized to achieve high bandwidth over PCIe. NCCL supports up
+ to eight GPUs and can be used in either single- or multi-process (e.g., MPI)
+ applications.
+
+Package: libnccl-dev
+Section: libdevel
+Architecture: ${deb:Arch}
+Depends: ${misc:Depends}, ${shlibs:Depends}, libnccl${nccl:Major} (= ${binary:Version})
+Description: NVIDIA Collectives Communication Library (NCCL) Development Files
+ NCCL (pronounced "Nickel") is a stand-alone library of standard collective
+ communication routines for GPUs, such as all-gather, reduce, broadcast, etc.,
+ that have been optimized to achieve high bandwidth over PCIe. NCCL supports up
+ to eight GPUs and can be used in either single- or multi-process (e.g., MPI)
+ applications.
