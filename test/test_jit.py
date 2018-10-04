@@ -1957,7 +1957,7 @@ class TestJit(JitTestCase):
                     c = 2
                 else:
                     c = 3
-            return a + 1
+            return a + 1 + c
 
         @torch.jit.script
         def loop_use_test(y):

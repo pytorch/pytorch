@@ -19,4 +19,5 @@ def script(a1, b1):
     a = a2
     b = b2
     c = c4
-  return aten::add(a, 1, 1)
+  t27 = aten::add(a, 1, 1)
+  return aten::add(t27, c, 1)

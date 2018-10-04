@@ -141,8 +141,7 @@ class PrettyPrintPass {
         });
 
     // Print condition initial assignment
-    printAssignment(
-        out, body_block->inputs()[0], node->inputs()[1], level);
+    printAssignment(out, body_block->inputs()[0], node->inputs()[1], level);
 
     // Loop header
     indent(out, level);
@@ -203,7 +202,6 @@ class PrettyPrintPass {
           return out;
         }
 
-        // printAssignment(out, node, level);
         indent(out, level);
         // Print outputs
         if (node->outputs().size() > 0) {
@@ -216,7 +214,7 @@ class PrettyPrintPass {
           out << " = ";
         }
 
-        printRHS(out, node, level);
+        printRHS(out, node);
 
         out << "\n";
     }
@@ -224,9 +222,8 @@ class PrettyPrintPass {
     return out;
   }
 
-  std::ostream& printRHS(std::ostream& out,
-  const Node* node,
-  const size_t level) {
+  // Prints the RHS value of a Node, e.g. `aten::add(x, y)`
+  std::ostream& printRHS(std::ostream& out, const Node* node) {
     IR_IFM_CONST(node, PythonOp)
     out << "^" << value->name();
     value->writeScalars(out);
@@ -295,11 +292,10 @@ class PrettyPrintPass {
       return out;
     }
 
-    auto is_unresolved = skipped_nodes_.count(node) > 0;
-    if (is_unresolved) {
+    if (skipped_nodes_.count(node) > 0) {
       skipped_nodes_.erase(node);
-      // Node is unresolved (wasn't printed when visited earlier, so print now)
-      printRHS(out, node, /*level=*/0);
+      // Node was skipped earlier, so print it now
+      printRHS(out, node);
       return out;
     }
 
