@@ -13,15 +13,47 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/simple_queue.h"
 
-CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
-CAFFE2_DECLARE_int(caffe2_max_tensor_serializer_threads);
-CAFFE2_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
+C10_DECLARE_int(caffe2_tensor_chunk_size);
+C10_DECLARE_int(caffe2_max_tensor_serializer_threads);
+C10_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 
 namespace caffe2 {
 
 constexpr auto kTensorBlobType = "Tensor";
 // String used to separate chunk id from the blob name when storing in DB
 constexpr auto kChunkIdSeparator = "#%";
+
+/**
+ * Serializes the given blob, if possible. Note that this serialization uses
+ * the registration mechanism and one has to implement specific serialization
+ * approaches for specific classes. Acceptor should take care of writing data
+ * to the actual storage.
+ */
+CAFFE2_API void SerializeBlob(
+    const Blob& blob,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor,
+    int chunk_size = kDefaultChunkSize);
+
+/**
+ * @brief Convenience function to serialize a blob to a string.
+ *
+ * This is a conveinence function to serialize small Blobs that produce
+ * manageable serialized strings. To serialize big blobs such as
+ * large sparse tensors, use the fully-functional interface in
+ * blob_serializer_base.h.
+ *
+ * NOTE: this function doesn't do chunking and might break with big tensors.
+ */
+CAFFE2_API string SerializeBlob(const Blob& blob, const string& name);
+
+/**
+ * Deserializes from a string containing either BlobProto or TensorProto. If
+ * the deserialization fails, the content in the blob should no longer be
+ * trusted.
+ */
+CAFFE2_API void DeserializeBlob(const string& content, Blob* result);
+CAFFE2_API void DeserializeBlob(const BlobProto& proto, Blob* result);
 
 /**
  * @brief TensorSerializer is the serializer for Tensors.

@@ -60,7 +60,7 @@ class ArgOp final : public Operator<Context> {
         next_size,
         n,
         X.template data<T>(),
-        Y->template mutable_data<TIndex>(),
+        Y->template mutable_data<int64_t>(),
         &context_);
   }
 
@@ -78,7 +78,7 @@ struct ArgMaxReducer {
       const int next_size,
       const int n,
       const T* X,
-      TIndex* Y,
+      int64_t* Y,
       Context* context) const;
 };
 
@@ -90,7 +90,7 @@ struct ArgMinReducer {
       const int next_size,
       const int n,
       const T* X,
-      TIndex* Y,
+      int64_t* Y,
       Context* context) const;
 };
 

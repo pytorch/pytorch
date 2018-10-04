@@ -1,3 +1,4 @@
+
 case NNKind::Relu:
   return "Relu";
 
@@ -37,6 +38,9 @@ case NNKind::Receive:
 case NNKind::BatchNormalization:
   return "BatchNormalization";
 
+case NNKind::Clip:
+  return "Clip";
+
 case NNKind::FC:
   return "FC";
 
@@ -61,8 +65,20 @@ case NNKind::Reshape:
 case NNKind::Flatten:
   return "Flatten";
 
+case NNKind::CopyToOpenCL:
+  return "CopyToOpenCL";
+
+case NNKind::CopyFromOpenCL:
+  return "CopyFromOpenCL";
+
 case NNKind::NCHW2NHWC:
   return "NCHW2NHWC";
 
 case NNKind::NHWC2NCHW:
   return "NHWC2NCHW";
+
+case NNKind::Declare:
+  return "Declare";
+
+case NNKind::Export:
+  return "Export";

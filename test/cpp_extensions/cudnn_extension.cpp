@@ -10,7 +10,7 @@
  * 5) Return something (optional).
  */
 
-#include <torch/torch.h>
+#include <torch/extension.h>
 
 #include <ATen/cudnn/Descriptors.h> // for TensorDescriptor
 #include <ATen/cuda/Exceptions.h> // for CUDNN_CHECK

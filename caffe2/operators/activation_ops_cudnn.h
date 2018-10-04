@@ -19,7 +19,7 @@ class CuDNNActivationOpBase : public Operator<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateActivationDescriptor(&act_desc_));
   }
 
-  ~CuDNNActivationOpBase() {
+  virtual ~CuDNNActivationOpBase() {
     CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(data_desc_));
     CUDNN_ENFORCE(cudnnDestroyActivationDescriptor(act_desc_));
   }
@@ -62,7 +62,7 @@ class CuDNNActivationOp final : public CuDNNActivationOpBase {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -100,7 +100,7 @@ class CuDNNActivationGradientOp final : public CuDNNActivationOpBase {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>

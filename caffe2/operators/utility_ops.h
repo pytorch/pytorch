@@ -91,8 +91,8 @@ class PrintOp final : public Operator<Context> {
       return true;
     }
 
-    if (!this->template InputIsType<Tensor>(0, Context::GetDeviceType()) &&
-        !this->template InputIsType<Tensor>(0, CPU)) {
+    if (!this->InputIsTensorType(0, Context::GetDeviceType()) &&
+        !this->InputIsTensorType(0, CPU)) {
       LOG(INFO) << "Blob of type: "
                 << OperatorBase::Inputs().at(0)->meta().name();
       return true;
@@ -113,7 +113,7 @@ class PrintOp final : public Operator<Context> {
         unsigned char,
         std::string>;
 
-    if (this->template InputIsType<Tensor>(0, CPU)) {
+    if (this->InputIsTensorType(0, CPU)) {
       return DispatchHelper<Types>::call(
           this, this->template Input<Tensor>(0, CPU));
     } else {
@@ -129,7 +129,7 @@ class PrintOp final : public Operator<Context> {
     // will handle memory deallocation itself so no smart pointer is needed.
     const TensorCPU* tensor;
     Tensor tensor_copy_if_needed(CPU);
-    if (this->template InputIsType<Tensor>(0, CPU)) {
+    if (this->InputIsTensorType(0, CPU)) {
       tensor = &this->template Input<Tensor>(0, CPU);
     } else {
       tensor_copy_if_needed.CopyFrom(Input(0), &context_);
@@ -321,45 +321,70 @@ class WeightedSumOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(WeightedSumOp);
 
-  template <typename DstType>
+  bool RunOnDevice() override;
+
+  template <typename T>
   bool DoRunWithType() {
-    CAFFE_ENFORCE_EQ(InputSize() % 2, 0);
-    auto& X0 = Input(0);
-    auto& weight0 = Input(1);
+    const int input_size = this->InputSize();
+    CAFFE_ENFORCE_EQ(input_size % 2, 0);
+    const auto& X0 = Input(0);
+    const auto& weight0 = Input(1);
     CAFFE_ENFORCE_GT(X0.size(), 0);
     CAFFE_ENFORCE_EQ(weight0.size(), 1);
-    int size = X0.size();
-    auto* output = Output(0);
-    output->ResizeLike(X0);
-    math::Scale<float, DstType, Context>(
+    const int size = X0.size();
+    auto* Y = Output(0);
+    if (Y != &X0) {
+      Y->ResizeLike(X0);
+    }
+    T* Y_data = Y->template mutable_data<T>();
+    if (input_size == 2) {
+      math::Scale<float, T>(
+          size,
+          weight0.template data<float>(),
+          X0.template data<T>(),
+          Y_data,
+          &context_);
+      return true;
+    }
+    const auto& X1 = Input(2);
+    CAFFE_ENFORCE_NE(
+        &X1,
+        Y,
+        "Input #2 is the same as output. If you want to do in-place updates, "
+        "put the output as input #0.");
+    const auto& weight1 = Input(3);
+    CAFFE_ENFORCE_EQ(X1.size(), size);
+    CAFFE_ENFORCE_EQ(weight1.size(), 1);
+    if (Y != &X0) {
+      context_.template CopySameDevice<T>(size, X0.template data<T>(), Y_data);
+    }
+    math::Axpby<float, T, Context>(
         size,
+        weight1.template data<float>(),
+        X1.template data<T>(),
         weight0.template data<float>(),
-        X0.template data<DstType>(),
-        output->template mutable_data<DstType>(),
+        Y_data,
         &context_);
-    for (int i = 2; i < InputSize(); i += 2) {
-      auto& X = Input(i);
+    for (int i = 4; i < input_size; i += 2) {
+      const auto& Xi = Input(i);
       // Do a check: if the input is the same as output, we have a problem -
       // in-place update should always only happen with the zeroth input.
-      if (&X == output) {
-        LOG(ERROR) << "Input #" << i << " is the same as output. "
-                   << "If you want to do in-place updates, put the output as "
-                   << "input #0.";
-        return false;
-      }
-      auto& weight = Input(i + 1);
-      CAFFE_ENFORCE_EQ(X.size(), size);
-      CAFFE_ENFORCE_EQ(weight.size(), 1);
-      math::Axpy<DstType, Context>(
+      const std::string err_msg = "Input #" + to_string(i) +
+          " is the same as output. If you want to do in-place updates, "
+          "put the output as input #0.";
+      CAFFE_ENFORCE_NE(&Xi, Y, err_msg);
+      const auto& weighti = Input(i + 1);
+      CAFFE_ENFORCE_EQ(Xi.size(), size);
+      CAFFE_ENFORCE_EQ(weighti.size(), 1);
+      math::Axpy<T, Context>(
           size,
-          weight.template data<float>(),
-          X.template data<DstType>(),
-          output->template mutable_data<DstType>(),
+          weighti.template data<float>(),
+          Xi.template data<T>(),
+          Y_data,
           &context_);
     }
     return true;
   }
-  bool RunOnDevice() override;
 };
 
 template <class Context>
@@ -369,7 +394,8 @@ class WeightedSumGradientOp : public Operator<Context> {
 
   WeightedSumGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        grad_on_w_(this->template GetSingleArgument<bool>("grad_on_w", false)) {}
+        grad_on_w_(this->template GetSingleArgument<bool>("grad_on_w", false)) {
+  }
 
   template <typename DstType>
   bool DoRunWithType() {
@@ -470,7 +496,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
  private:
   template <typename Index>
   bool DoRunWithType() {
-    TIndex block_size = Input(0).size_from_dim(1);
+    int64_t block_size = Input(0).size_from_dim(1);
     return DispatchHelper<FixedValues<1>, Index>::call(this, block_size);
   }
 
@@ -486,10 +512,10 @@ class ScatterWeightedSumOp : public Operator<Context> {
     CAFFE_ENFORCE_GT(X0.size(), 0);
     CAFFE_ENFORCE_GT(X0.ndim(), 0, "X0 has to be at least the vector");
     CAFFE_ENFORCE_EQ(weight0.size(), 1);
-    TIndex M = X0.size();
-    TIndex N = X0.dim(0);
-    TIndex K = indices.size();
-    TIndex block_size = M / N;
+    int64_t M = X0.size();
+    int64_t N = X0.dim(0);
+    int64_t K = indices.size();
+    int64_t block_size = M / N;
     T* data = output->template mutable_data<T>();
     const Index* idxs = indices.template data<Index>();
     T w0 = *weight0.template data<T>();
@@ -573,7 +599,7 @@ class ScatterAssignOp : public Operator<Context> {
         runners_({{{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT},
                    &ScatterAssignOp::DoRun<int32_t, float>},
                   {{TensorProto_DataType_INT32, TensorProto_DataType_FLOAT16},
-                   &ScatterAssignOp::DoRun<int32_t, float16>},
+                   &ScatterAssignOp::DoRun<int32_t, at::Half>},
                   {{TensorProto_DataType_INT32, TensorProto_DataType_UINT8},
                    &ScatterAssignOp::DoRun<int32_t, uint8_t>},
                   {{TensorProto_DataType_INT32, TensorProto_DataType_INT32},
@@ -583,7 +609,7 @@ class ScatterAssignOp : public Operator<Context> {
                   {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT},
                    &ScatterAssignOp::DoRun<int64_t, float>},
                   {{TensorProto_DataType_INT64, TensorProto_DataType_FLOAT16},
-                   &ScatterAssignOp::DoRun<int64_t, float16>},
+                   &ScatterAssignOp::DoRun<int64_t, at::Half>},
                   {{TensorProto_DataType_INT64, TensorProto_DataType_UINT8},
                    &ScatterAssignOp::DoRun<int64_t, uint8_t>},
                   {{TensorProto_DataType_INT64, TensorProto_DataType_INT32},
@@ -638,10 +664,10 @@ class ScatterAssignOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(&input, output, "In place operation is required");
 
     CAFFE_ENFORCE_GT(input.ndim(), 0, "X0 has to be at least the vector");
-    TIndex M = input.size();
-    TIndex N = input.dim(0);
-    TIndex K = indices.size();
-    TIndex block_size = M / N;
+    int64_t M = input.size();
+    int64_t N = input.dim(0);
+    int64_t K = indices.size();
+    int64_t block_size = M / N;
     CAFFE_ENFORCE_EQ(slices.size(), block_size * K);
     // TODO(dzhulgakov): it can be made to work with arbitrary data type by
     // using raw_mutable_data
@@ -656,9 +682,9 @@ class ScatterAssignOp : public Operator<Context> {
       T* data,
       const Index* idxs,
       const T* slicesData,
-      TIndex N,
-      TIndex K,
-      TIndex block_size) {
+      int64_t N,
+      int64_t K,
+      int64_t block_size) {
     for (int i = 0; i < K; ++i) {
       Index idx = idxs[i];
       // double-checking the indices, but it's fine as it's DCHECK only
@@ -670,32 +696,6 @@ class ScatterAssignOp : public Operator<Context> {
   }
 
   INPUT_TAGS(DATA, INDICES, SLICES);
-};
-
-template <class Context, class DstContext, class SrcContext>
-class CopyOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(CopyOp);
-
-  bool RunOnDevice() override {
-    auto& input = this->template Input<Tensor>(0, SrcContext::GetDeviceType());
-    auto* output = this->template Output<Tensor>(0, DstContext::GetDeviceType());
-    output->ResizeLike(input);
-    this->context_.template CopyItems<SrcContext, DstContext>(
-        input.meta(),
-        input.size(),
-        input.raw_data(),
-        output->raw_mutable_data(input.meta()));
-    return true;
-  }
-};
-
-template <class Context, class DstContext, class SrcContext>
-class CopyOnDeviceLikeOp : public CopyOp<Context, DstContext, SrcContext> {
- public:
-  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
-      : CopyOp<Context, DstContext, SrcContext>(operator_def, ws) {}
 };
 
 template <class Context>
@@ -936,23 +936,8 @@ class HasElementsOp : public Operator<Context> {
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
-    output->Resize(std::vector<TIndex>{});
+    output->Resize(std::vector<int64_t>{});
     *output->template mutable_data<bool>() = input.size() > 0;
-    return true;
-  }
-};
-
-template <class Context>
-class IsEmptyOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(IsEmptyOp);
-
-  bool RunOnDevice() override {
-    auto& input = Input(0);
-    auto* output = Output(0);
-    output->Resize(std::vector<TIndex>{});
-    *output->template mutable_data<bool>() = (input.size() == 0);
     return true;
   }
 };
@@ -968,7 +953,7 @@ class SizeOp : public Operator<Context> {
     auto& input = Input(0);
     auto* output = Output(0);
 
-    output->Resize(vector<TIndex>());
+    output->Resize(vector<int64_t>());
     auto* output_data = output->template mutable_data<int64_t>();
 
     auto size = input.size();
@@ -1114,7 +1099,7 @@ class LengthsGatherOp : public Operator<Context> {
     const auto* lengths_data = lengths.template data<int32_t>();
     const auto* indices_data = indices.template data<Index>();
 
-    TIndex total_length = 0;
+    int64_t total_length = 0;
     for (size_t i = 0; i < indices.size(); ++i) {
       auto idx = indices_data[i];
       CAFFE_ENFORCE_LT(idx, lengths.size());
@@ -1125,7 +1110,7 @@ class LengthsGatherOp : public Operator<Context> {
     output->Resize(shape);
 
     offsets_.clear();
-    TIndex running_offset = 0;
+    int64_t running_offset = 0;
     offsets_.reserve(lengths.size());
     for (size_t i = 0; i < lengths.size(); ++i) {
       offsets_.push_back(running_offset);
@@ -1154,7 +1139,7 @@ class LengthsGatherOp : public Operator<Context> {
     return true;
   }
 
-  std::vector<TIndex> offsets_;
+  std::vector<int64_t> offsets_;
 
   INPUT_TAGS(ITEMS, LENGTHS, INDICES);
 };

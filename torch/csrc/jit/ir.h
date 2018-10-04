@@ -56,7 +56,6 @@ struct Node;
 struct Value;
 
 TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
-TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 TORCH_API std::ostream& operator<<(std::ostream & out, const Node & n);
 
 // A list of nodes, with inputs and outputs
@@ -114,7 +113,7 @@ private:
 public:
   Scope() {
     name_ = Symbol::scope("");
-    parent_ = NULL;
+    parent_ = nullptr;
   }
   Scope(Scope* parent, Symbol name) {
     name_ = name;
@@ -125,13 +124,13 @@ public:
     return children_.back().get();
   }
   Scope* parent() {
-    if (parent_ == NULL) {
+    if (parent_ == nullptr) {
       throw std::runtime_error("Cannot get parent from Scope with no parent");
     }
     return parent_;
   }
   bool isRoot() {
-    return parent_ == NULL;
+    return parent_ == nullptr;
   }
   Scope* getRoot() {
     Scope* current = this;
@@ -151,6 +150,7 @@ public:
     }
     Scope* parent = this->parent_;
     while (!parent->isRoot()) {
+      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
       out = std::string(parent->name_.toUnqualString()) + separator + out;
       parent = parent->parent_;
     }
@@ -182,13 +182,16 @@ private:
   std::string unique_name_;
   TypePtr type_;
 public:
-  Value* setType(const TypePtr type);
+  Value* setType(TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
     setType(CompleteTensorType::create(output));
   }
   const TypePtr & type() const {
     JIT_ASSERT(type_ != nullptr);
     return type_;
+  }
+  bool requires_grad() const {
+    return type()->requires_grad();
   }
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
@@ -197,7 +200,7 @@ public:
     return unique_;
   }
   bool hasUniqueName() const {
-    return unique_name_ != "";
+    return !unique_name_.empty();
   }
   TORCH_API Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
@@ -233,7 +236,7 @@ public:
 
   void replaceFirstUseWith(Value * newValue);
 
-  // Replaces all uses of this node with 'newValue'.
+  // Replaces all uses of this value with 'newValue'.
   //
   // Given:   %3 = f(%1, %2)
   //          %4 = g(%3)
@@ -317,6 +320,9 @@ public:
   Block * owningBlock() {
     return owning_block_;
   }
+  const Block * owningBlock() const {
+    return owning_block_;
+  }
   size_t stage() const {
     return stage_;
   }
@@ -331,7 +337,7 @@ public:
     scope_ = scope;
   }
   std::string scopeName() const {
-    if (scope_ == NULL) {
+    if (scope_ == nullptr) {
       return "";
     }
     return scope_->namesFromRoot();
@@ -364,9 +370,12 @@ public:
     // raw pointers are.
     return {outputs_.data(), outputs_.size()};
   }
+  Value * output(size_t i) const {
+    return outputs_.at(i);
+  }
   bool hasUses() const {
     for(auto o : outputs()) {
-      if(o->uses().size() > 0)
+      if(!o->uses().empty())
         return true;
     }
     return false;
@@ -393,9 +402,6 @@ public:
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.
-  Value * input(size_t i) {
-    return inputs_.at(i);
-  }
   Value * input(size_t i) const {
     return inputs_.at(i);
   }
@@ -413,9 +419,11 @@ public:
 
 
   // Returns true if the value of input name is statically known
-  bool is_constant(Symbol name) {
+  bool is_constant(Symbol name) const {
     return static_cast<bool>(get(name));
   }
+
+  TORCH_API bool isNondeterministic() const;
 
   // Graphs
 
@@ -437,33 +445,33 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.addInput(%4)
   // Result:  %3 = f(%1, %2, %4)
-  Value* addInput(Value * node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
+  Value* addInput(Value * value) {
+    JIT_ASSERT(graph_ == value->owningGraph());
     schema_ = nullptr;
-    node->uses_.emplace_back(this, inputs_.size());
-    inputs_.push_back(node);
-    return node;
+    value->uses_.emplace_back(this, inputs_.size());
+    inputs_.push_back(value);
+    return value;
   }
 
-  // Add 'node' as an input to 'this' at the specified position in the
-  // arguments. Returns the added node for ease of chaining.
-  Value* insertInput(size_t i, Value* node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
+  // Add 'value' as an input to 'this' at the specified position in the
+  // arguments. Returns the added value for ease of chaining.
+  Value* insertInput(size_t i, Value* value) {
+    JIT_ASSERT(graph_ == value->owningGraph());
     schema_ = nullptr;
     // First we update the offsets for all existing inputs that will reside
     // after the one we're inserting. Concretely, these are the inputs at
     // indices [i, # input). Since we're inserting one input before all of
-    // these inputs, increment their use offsets for this Node by 1
+    // these inputs, increment their use offsets for this value by 1
     for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
       // See Note [User node does not uniquely identify use]
       auto use = findUseForInput(use_itr);
       use->offset += 1;
     }
     // Insert the actual input at the specified index
-    inputs_.insert(inputs_.begin() + i, node);
+    inputs_.insert(inputs_.begin() + i, value);
     // Register the new use of the value we're inserted as an input.
-    node->uses_.emplace_back(this, i);
-    return node;
+    value->uses_.emplace_back(this, i);
+    return value;
   }
 
   // Replace the input of 'this' at position 'i' with
@@ -544,7 +552,7 @@ public:
     return {blocks_.data(), blocks_.size()};
   }
 
-  // Insert unattached 'this' node after 'n' in the topological order.
+  // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
   //
   // Given:   %3 = f(%1, %2)
@@ -678,7 +686,7 @@ public:
   }
 
   // XXX: this function is meant to be used with string literals only!
-  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={});
+  TORCH_API bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={}) const;
 
   const FunctionSchema& schema() const {
     if (!schema_)
@@ -769,10 +777,10 @@ struct Block {
     return static_cast<const Node*>(output_)->inputs();
   }
   graph_node_list nodes() {
-    return graph_node_list(output_, kNextDirection);
+    return {output_, kNextDirection};
   }
   const_graph_node_list nodes() const {
-    return const_graph_node_list(output_, kNextDirection);
+    return {output_, kNextDirection};
   }
   Node * return_node() {
     return output_;
@@ -799,8 +807,8 @@ struct Block {
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
-  size_t registerOutput(Value * n) {
-    output_->addInput(n);
+  size_t registerOutput(Value * v) {
+    output_->addInput(v);
     return outputs().size() - 1;
   }
   size_t insertOutput(size_t i, Value* n) {
@@ -889,7 +897,7 @@ public:
   Graph(std::shared_ptr<Scope> scope_root)
   : next_unique_(0)
   , new_node_stage_(0)
-  , scope_root_(scope_root)
+  , scope_root_(std::move(scope_root))
   , current_scope_(scope_root_.get())
   , block_(new Block(this, nullptr))
   , insert_before_(return_node()) {}
@@ -967,6 +975,9 @@ public:
     new_node_stage_ = s;
     return ResourceGuard([prev_stage, this]() { this->new_node_stage_ = prev_stage; });
   }
+  const std::unordered_map<std::string, Value*>& uniqueNames() const {
+    return unique_names_;
+  }
 
   size_t registerOutput(Value * n) {
     return block_->registerOutput(n);
@@ -989,6 +1000,11 @@ public:
 
   Node * createUndefined() {
     return create(prim::Undefined);
+  }
+  Node * createNoneGenerator() {
+    auto n = create(prim::NoneGenerator);
+    n->output()->setType(GeneratorType::get());
+    return n;
   }
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
@@ -1019,10 +1035,28 @@ public:
     n->output()->setType(ListType::create(elem_type));
     return n;
   }
+  Node * createListUnpack(Value *v, size_t size) {
+    ListTypePtr list_type = v->type()->expect<ListType>();
+    TypePtr elem_type = list_type->getElementType();
+    auto n = create(prim::ListUnpack, {v}, 0);
+    for (size_t i = 0; i < size; ++i) {
+      n->addOutput()->setType(elem_type);
+    }
+    return n;
+  }
   Node* createNumToTensor(Value* value) {
     auto typ = value->type();
     Node * result = create(prim::NumToTensor, {value});
     result->output()->setType(CompleteTensorType::fromNumberType(typ));
+    return result;
+  }
+  Node* createBoolToTensor(Value* value) {
+    auto typ = value->type();
+    Node * result = create(prim::BoolToTensor, {value});
+    if (!typ->isSubtypeOf(BoolType::get())) {
+      AT_ERROR("Cannot create bool type from ", typ->str());
+    }
+    result->output()->setType(CompleteTensorType::fromBoolType());
     return result;
   }
   Node* createTensorToNum(const TypePtr& type, Value* value) {
@@ -1035,6 +1069,11 @@ public:
     result->output()->setType(type);
     return result;
   }
+  Node* createTensorToBool(Value* value) {
+    auto* result = create(prim::TensorToBool, {value});
+    result->output()->setType(BoolType::get());
+    return result;
+  }
   Node* createIntToFloat(Value* value) {
     JIT_ASSERT(*value->type() == *IntType::get());
     auto* result = create(prim::IntToFloat, {value});
@@ -1045,6 +1084,12 @@ public:
     JIT_ASSERT(*value->type() == *FloatType::get());
     auto* result = create(prim::FloatToInt, {value});
     result->output()->setType(IntType::get());
+    return result;
+  }
+  Node* createStringToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *StringType::get());
+    auto* result = create(prim::StringToFloat, {value});
+    result->output()->setType(FloatType::get());
     return result;
   }
   Node* createPythonOp(
@@ -1077,6 +1122,12 @@ public:
       IValue val,
       at::optional<SourceRange> loc = at::nullopt) {
     return jit::insertConstant(*this, std::move(val), loc);
+  }
+
+  Value* insertDummyWorld() {
+    auto node = create(prim::DummyWorld, 1);
+    node->output()->setType(WorldType::get());
+    return insertNode(node)->output();
   }
 
   // schema-driven insert
@@ -1145,6 +1196,10 @@ public:
   }
 
   friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
+
+  TORCH_API std::ostream& prettyPrint(std::ostream & out);
+  TORCH_API void dumpPretty();
+
   TORCH_API std::shared_ptr<Graph> copy();
 
 private:
@@ -1248,7 +1303,7 @@ inline Node::Node(Graph * graph_, NodeKind kind_) :
 
 inline void Node::eraseOutput(size_t i) {
   JIT_ASSERT(i < outputs_.size());
-  JIT_ASSERT(outputs_[i]->uses().size() == 0);
+  JIT_ASSERT(outputs_[i]->uses().empty());
   schema_ = nullptr;
   Value * n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
@@ -1273,9 +1328,9 @@ inline void Node::eraseBlock(size_t i) {
 }
 
 inline void Node::destroy() {
-  while(outputs().size() > 0)
+  while(!outputs().empty())
     eraseOutput(outputs().size() - 1);
-  while(blocks().size() > 0)
+  while(!blocks().empty())
     eraseBlock(blocks().size() - 1);
   removeAllInputs();
   if(inBlockList())
@@ -1291,11 +1346,11 @@ inline void Node::cloneFrom(Node * s) {
 	copyAttributes(*s);
 }
 
-inline Block::Block(Graph * graph_, Node * node_)
-: graph_(graph_)
-, output_(initOutput(graph_->create(prim::Return, 0)))
-, input_(graph_->create(prim::Param,0))
-, owning_node_(node_) {
+inline Block::Block(Graph* graph_, Node* node_)
+    : graph_(graph_),
+      output_(initOutput(graph_->create(prim::Return, 0))),
+      input_(graph_->create(prim::Param, 0)),
+      owning_node_(node_) {
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   input_->owning_block_ = this;
@@ -1377,8 +1432,8 @@ struct PythonOp : public Node {
   // TraceInterpreterState for execution semantics.
   THPObjectPtr pyobj;
   // The calling convention for the Python function.
-  // 's' -- python scalar argument
-  // 't' -- tensor argument
+  // 'c' -- constant argument
+  // 'd' -- dynamic argument
   std::string cconv;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
@@ -1409,13 +1464,13 @@ inline Node* Graph::createPythonOp(
 }
 
 inline graph_node_list_iterator Node::iterator() {
-  return graph_node_list_iterator(this, 0);
+  return {this, 0};
 }
 inline graph_node_list_iterator Node::reverseIterator() {
   return iterator().reverse();
 }
 inline const_graph_node_list_iterator Node::iterator() const {
-  return const_graph_node_list_iterator(this, 0);
+  return {this, 0};
 }
 inline const_graph_node_list_iterator Node::reverseIterator() const {
   return iterator().reverse();

@@ -105,7 +105,7 @@ op = core.CreateOperator(
   ["Y"]
   )
 
-workspace.FeedBlob("X", np.random.randn(4, 4).astype(np.float32)) # NCHW
+workspace.FeedBlob("X", np.random.randn(4, 4).astype(np.float32)) // NCHW
 print("X:\n", workspace.FetchBlob("X"), "\n")
 
 workspace.RunOperatorOnce(op)

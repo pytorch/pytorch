@@ -24,8 +24,7 @@ struct CuDNNWorkspace {
   void* get(size_t nbytes) {
     if (nbytes_ < nbytes) {
       reset();
-      auto data_and_deleter = CUDAContext::New(nbytes);
-      data_ = {data_and_deleter.first, data_and_deleter.second};
+      data_ = CUDAContext::New(nbytes);
       nbytes_ = nbytes;
     }
     CAFFE_ENFORCE_GE(nbytes_, nbytes);
@@ -33,12 +32,12 @@ struct CuDNNWorkspace {
   }
 
   void reset() {
-    data_ = nullptr;
+    data_.clear();
     nbytes_ = 0;
   }
 
  private:
-  std::unique_ptr<void, MemoryDeleter> data_{nullptr, NoDelete};
+  at::DataPtr data_{nullptr, nullptr, &NoDelete, at::Device(CUDA)};
   size_t nbytes_{0};
 };
 
@@ -89,7 +88,7 @@ class CuDNNState {
   cudaStream_t stream_{nullptr};
   CuDNNWorkspace workspace_;
   size_t gpu_id_{0};
-  AT_DISABLE_COPY_AND_ASSIGN(CuDNNState);
+  C10_DISABLE_COPY_AND_ASSIGN(CuDNNState);
 };
 
 /**
@@ -153,7 +152,7 @@ class CuDNNWrapper {
       CAFFE2_COMPILE_TIME_MAX_GPUS>;
   static PerGPUCuDNNStates& cudnn_states();
 
-  AT_DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
+  C10_DISABLE_COPY_AND_ASSIGN(CuDNNWrapper);
 };
 
 }; // namespace caffe2

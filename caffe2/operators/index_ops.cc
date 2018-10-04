@@ -11,12 +11,12 @@
 namespace caffe2 {
 namespace {
 using IndexKeyTypes = TensorTypes<int32_t, int64_t, std::string>;
-using TIndexValue = int64_t;
+using int64_tValue = int64_t;
 }  // namespace
 
 struct IndexBase {
  public:
-  IndexBase(TIndexValue maxElements, const TypeMeta& type)
+  IndexBase(int64_tValue maxElements, const TypeMeta& type)
     : maxElements_{maxElements}
     , meta_(type)
     , frozen_{false} {}
@@ -35,7 +35,7 @@ struct IndexBase {
 
   const TypeMeta& Type() const { return meta_; }
 
-  TIndexValue Size() {
+  int64_tValue Size() {
     std::lock_guard<std::mutex> guard(dictMutex_);
     return nextId_;
   }
@@ -43,17 +43,17 @@ struct IndexBase {
  protected:
   int64_t maxElements_;
   TypeMeta meta_;
-  TIndexValue nextId_{1}; // guarded by dictMutex_
+  int64_tValue nextId_{1}; // guarded by dictMutex_
   std::atomic<bool> frozen_{false};
   std::mutex dictMutex_;
 };
 
 template<typename T>
 struct Index: IndexBase {
-  explicit Index(TIndexValue maxElements)
+  explicit Index(int64_tValue maxElements)
     : IndexBase(maxElements, TypeMeta::Make<T>()) {}
 
-  void Get(const T* keys, TIndexValue* values, size_t numKeys) {
+  void Get(const T* keys, int64_tValue* values, size_t numKeys) {
     if (frozen_) {
       FrozenGet(keys, values, numKeys);
       return;
@@ -104,14 +104,14 @@ struct Index: IndexBase {
   }
 
  private:
-  void FrozenGet(const T* keys, TIndexValue* values, size_t numKeys) {
+  void FrozenGet(const T* keys, int64_tValue* values, size_t numKeys) {
     for (int i = 0; i < numKeys; ++i) {
       auto it = dict_.find(keys[i]);
       values[i] = it != dict_.end() ? it->second : 0;
     }
   }
 
-  std::unordered_map<T, TIndexValue> dict_;
+  std::unordered_map<T, int64_tValue> dict_;
 };
 
 // TODO(azzolini): support sizes larger than int32
@@ -131,7 +131,7 @@ class IndexCreateOp: public Operator<CPUContext> {
   }
 
  private:
-  TIndexValue maxElements_;
+  int64_tValue maxElements_;
 };
 
 class IndexGetOp: public Operator<CPUContext> {
@@ -152,7 +152,7 @@ class IndexGetOp: public Operator<CPUContext> {
     values->ResizeLike(keys);
     dict->Get(
         keys.data<T>(),
-        values->template mutable_data<TIndexValue>(),
+        values->template mutable_data<int64_tValue>(),
         keys.size());
     return true;
   }
@@ -227,8 +227,8 @@ class IndexSizeOp : public Operator<CPUContext> {
   bool RunOnDevice() override {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
     auto* out = Output(0);
-    out->Resize(std::vector<TIndex>{});
-    *out->template mutable_data<TIndexValue>() = base->Size();
+    out->Resize(std::vector<int64_t>{});
+    *out->template mutable_data<int64_tValue>() = base->Size();
     return true;
   }
 };
@@ -353,7 +353,7 @@ class IndexSerializer : public BlobSerializerBase {
       SerializationAcceptor acceptor) override {
     auto& base = blob.template Get<std::unique_ptr<IndexBase>>();
     Blob tensor_blob;
-    auto* tensor_out = tensor_blob.GetMutableTensor(CPU);
+    auto* tensor_out = BlobGetMutableTensor(&tensor_blob, CPU);
 
     if (base->Type().Match<std::string>()) {
       doStore<std::string>(base, tensor_out);

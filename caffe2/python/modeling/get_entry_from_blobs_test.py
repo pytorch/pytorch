@@ -60,7 +60,7 @@ class GetEntryFromBlobsTest(unittest.TestCase):
 
         # no operator name set, will use default
         brew.fc(model, fc1, "fc2", dim_in=4, dim_out=4)
-        i1, i2 = np.random.randint(4, size=2)
+        i1, i2 = np.random.randint(4), np.random.randint(5) - 1
         net_modifier = GetEntryFromBlobs(
             blobs=['fc1_w', 'fc2_w'],
             logging_frequency=10,
@@ -74,10 +74,18 @@ class GetEntryFromBlobsTest(unittest.TestCase):
         workspace.RunNetOnce(model.net)
 
         fc1_w = workspace.FetchBlob('fc1_w')
-        fc1_w_entry = workspace.FetchBlob('fc1_w_{0}_{1}'.format(i1, i2))
+        if i2 < 0:
+            fc1_w_entry = workspace.FetchBlob('fc1_w_{0}_all'.format(i1))
+        else:
+            fc1_w_entry = workspace.FetchBlob('fc1_w_{0}_{1}'.format(i1, i2))
 
-        self.assertEqual(fc1_w_entry.size, 1)
-        self.assertEqual(fc1_w_entry[0], fc1_w[i1][i2])
+        if i2 < 0:
+            self.assertEqual(fc1_w_entry.size, 4)
+            for j in range(4):
+                self.assertEqual(fc1_w_entry[0][j], fc1_w[i1][j])
+        else:
+            self.assertEqual(fc1_w_entry.size, 1)
+            self.assertEqual(fc1_w_entry[0], fc1_w[i1][i2])
 
         assert 'fc1_w' + net_modifier.field_name_suffix() in\
             model.net.output_record().field_blobs(),\

@@ -97,7 +97,7 @@ void callOperatorWithTuple(
       std::forward<Implementation>(implementation)(std::get<Is>(tuple)...);
 
   if (jit::tracer::isTracing()) {
-    jit::tracer::postRecordTrace(node, result);
+    jit::tracer::addOutput(node, result);
   }
 
   push(stack, IValue(std::move(result)));

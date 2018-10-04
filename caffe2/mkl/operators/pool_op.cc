@@ -41,8 +41,8 @@ class MKLPoolOp final : public ConvPoolOpBase<MKLContext> {
   // Input: X
   // Output: Y
  private:
-  vector<TIndex> cached_input_dims_;
-  // vector<TIndex> cached_avgpool_input_dims_;
+  vector<int64_t> cached_input_dims_;
+  // vector<int64_t> cached_avgpool_input_dims_;
   LayoutWrapper<T> workspace_layout_;
   std::unique_ptr<MKLWorkspace<T>> workspace_buffer_;
   PrimitiveWrapper<T> primitive_;
@@ -58,7 +58,7 @@ bool MKLPoolOp<float>::RunOnDeviceWithOrderNCHW() {
 
   bool dims_changed;
   CHECK_INPUT_DIMS(X, dims_changed);
-  if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
+  if (dims_changed || c10::FLAGS_caffe2_mkl_memonger_in_use) {
     // We will utilize the SetOutputSize() function in the base class
     // with dummy TensorCPU input and output to calculate the sizes.
     Tensor dummy_input(X.dims(), CPU);
@@ -101,7 +101,7 @@ bool MKLPoolOp<float>::RunOnDeviceWithOrderNCHW() {
   resources_[dnnResourceWorkspace] = workspace_buffer_->buffer();
   MKLDNN_SAFE_CALL(mkl::dnnExecute<float>(primitive_, resources_));
   buffer_.CopyTo(Y, primitive_, dnnResourceDst);
-  if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+  if (c10::FLAGS_caffe2_mkl_memonger_in_use && !shared) {
     buffer_.Reset();
   }
   return true;

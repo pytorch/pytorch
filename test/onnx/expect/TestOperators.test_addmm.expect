@@ -3,20 +3,16 @@ producer_name: "pytorch"
 producer_version: "0.4"
 graph {
   node {
-    input: "0"
-    input: "1"
-    input: "2"
     output: "3"
-    op_type: "Gemm"
+    op_type: "Constant"
     attribute {
-      name: "alpha"
-      f: 1
-      type: FLOAT
-    }
-    attribute {
-      name: "beta"
-      f: 1
-      type: FLOAT
+      name: "value"
+      t {
+        dims: 1
+        data_type: FLOAT
+        raw_data: "\000\000\000\000"
+      }
+      type: TENSOR
     }
   }
   node {
@@ -32,9 +28,51 @@ graph {
     }
     attribute {
       name: "beta"
+      f: 0
+      type: FLOAT
+    }
+  }
+  node {
+    input: "2"
+    input: "4"
+    output: "5"
+    op_type: "Add"
+  }
+  node {
+    output: "6"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: FLOAT
+        raw_data: "\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "0"
+    input: "1"
+    input: "6"
+    output: "7"
+    op_type: "Gemm"
+    attribute {
+      name: "alpha"
       f: 1
       type: FLOAT
     }
+    attribute {
+      name: "beta"
+      f: 0
+      type: FLOAT
+    }
+  }
+  node {
+    input: "5"
+    input: "7"
+    output: "8"
+    op_type: "Add"
   }
   name: "torch-jit-export"
   input {
@@ -83,7 +121,7 @@ graph {
     }
   }
   output {
-    name: "4"
+    name: "8"
     type {
       tensor_type {
         elem_type: FLOAT
@@ -100,5 +138,5 @@ graph {
   }
 }
 opset_import {
-  version: 7
+  version: 9
 }

@@ -3,7 +3,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 
-CAFFE2_DECLARE_bool(caffe2_dag_net_collect_stats);
+C10_DECLARE_bool(caffe2_dag_net_collect_stats);
 
 namespace caffe2 {
 
@@ -16,10 +16,9 @@ AsyncPollingNet::AsyncPollingNet(
     task_timers_[task_id] = caffe2::make_unique<Timer>();
   }
 
-  stats_.reserve(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
-  for (auto device_idx = 0;
-       device_idx < DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES;
-       ++device_idx) {
+  auto MAX_DEVICE_TYPES = DeviceTypeProto::PROTO_COMPILE_TIME_MAX_DEVICE_TYPES;
+  stats_.reserve(MAX_DEVICE_TYPES);
+  for (auto device_idx = 0; device_idx < MAX_DEVICE_TYPES; ++device_idx) {
     stats_.emplace_back(
         "async_net/stats/" + net_def->name() + "/" +
         caffe2::DeviceTypeName(device_idx));
@@ -37,8 +36,8 @@ bool AsyncPollingNet::DoRunAsync() {
 
   Timer timer;
   bool success = pollAndSchedule();
-  if (FLAGS_caffe2_dag_net_collect_stats) {
-    CAFFE_EVENT(stats_[CPU], poll_time_ms, timer.MilliSeconds());
+  if (c10::FLAGS_caffe2_dag_net_collect_stats) {
+    CAFFE_EVENT(stats_[PROTO_CPU], poll_time_ms, timer.MilliSeconds());
   }
   if (!success) {
     finalizeEvents();
@@ -50,14 +49,14 @@ bool AsyncPollingNet::DoRunAsync() {
 }
 
 void AsyncPollingNet::schedule(int task_id) {
-  if (FLAGS_caffe2_dag_net_collect_stats) {
+  if (c10::FLAGS_caffe2_dag_net_collect_stats) {
     task_timers_[task_id]->Start();
   }
   const auto& device_option = event(task_id).GetDeviceOption();
   pool(device_option)->run([this, task_id, device_option]() {
     int stream_id = stream(task_id);
 
-    if (FLAGS_caffe2_dag_net_collect_stats) {
+    if (c10::FLAGS_caffe2_dag_net_collect_stats) {
       CAFFE_EVENT(
           stats_[device_option.device_type()],
           task_pool_wait_time_us,
@@ -65,7 +64,7 @@ void AsyncPollingNet::schedule(int task_id) {
     }
 
     try {
-      if (FLAGS_caffe2_dag_net_collect_stats) {
+      if (c10::FLAGS_caffe2_dag_net_collect_stats) {
         Timer run_time;
         run(task_id, stream_id);
         CAFFE_EVENT(
@@ -105,7 +104,7 @@ bool AsyncPollingNet::pollAndSchedule() {
     std::unordered_set<int> next_tasks;
     updated_tasks.reserve(current_tasks.size());
 
-    if (FLAGS_caffe2_dag_net_collect_stats) {
+    if (c10::FLAGS_caffe2_dag_net_collect_stats) {
       timer.Start();
     }
     if (has_chain_failed_) {
@@ -122,7 +121,7 @@ bool AsyncPollingNet::pollAndSchedule() {
 
       if (prev_status != status_[task_id]) {
         updated_tasks.insert(task_id);
-        if (FLAGS_caffe2_dag_net_collect_stats) {
+        if (c10::FLAGS_caffe2_dag_net_collect_stats) {
           updateTaskStats(task_id);
         }
       }
@@ -131,9 +130,9 @@ bool AsyncPollingNet::pollAndSchedule() {
         next_tasks.insert(task_id);
       }
     }
-    if (FLAGS_caffe2_dag_net_collect_stats) {
+    if (c10::FLAGS_caffe2_dag_net_collect_stats) {
       CAFFE_EVENT(
-          stats_[CPU], poll_status_update_time_us, timer.MicroSeconds());
+          stats_[PROTO_CPU], poll_status_update_time_us, timer.MicroSeconds());
     }
 
     std::unordered_set<int> visited_children;

@@ -95,10 +95,10 @@ void BlobToTensorProto(
   }
 
   // Set values
-  if (blob->template IsType<Tensor>(CPU)) {
+  if (BlobIsTensorType(*blob, CPU)) {
     const auto& cpu_tensor = blob->template Get<TensorCPU>();
     CPUTensorToTensorProto(cpu_tensor, t);
-  } else if (blob->template IsType<Tensor>(CUDA)) {
+  } else if (BlobIsTensorType(*blob, CUDA)) {
     const auto& cuda_tensor = blob->template Get<TensorCUDA>();
     const auto cpu_tensor = TensorCPU(cuda_tensor, context);
     context->FinishDeviceComputation();

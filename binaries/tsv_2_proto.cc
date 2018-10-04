@@ -21,16 +21,16 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_string(f_in, "", "The input data file name.");
-CAFFE2_DEFINE_string(f_out, "", "The output data file name.");
+C10_DEFINE_string(f_in, "", "The input data file name.");
+C10_DEFINE_string(f_out, "", "The output data file name.");
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
-  std::ifstream f_in(caffe2::FLAGS_f_in);
-  std::ofstream f_out(caffe2::FLAGS_f_out);
+  std::ifstream f_in(c10::FLAGS_f_in);
+  std::ofstream f_out(c10::FLAGS_f_out);
   std::string line;
   caffe2::TensorProtos tensor_protos;
   while (std::getline(f_in, line)) {

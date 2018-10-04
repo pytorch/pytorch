@@ -208,7 +208,7 @@ void testGather(int iter = 10000) {
         allOutputTensors[i][0][j] = at::zeros({16, 16});
       }
     } else {
-      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>();
+      allOutputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
     }
   }
 
@@ -265,7 +265,7 @@ void testScatter(int iter = 1) {
         allInputTensors[i][0][j] = at::ones({16, 16}) * rank * i;
       }
     } else {
-      allInputTensors[i] = std::vector<std::vector<at::Tensor>>();
+      allInputTensors[i] = std::vector<std::vector<at::Tensor>>(1);
     }
   }
 
@@ -318,7 +318,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> works;
     for (auto& tensors : allTensors) {
       // Kick off work
-      std::shared_ptr<::c10d::ProcessGroup::Work> work = pg->send(tensors, 1);
+      std::shared_ptr<::c10d::ProcessGroup::Work> work = pg->send(tensors, 1, 0);
       works.push_back(std::move(work));
     }
     for (auto& work : works) {
@@ -337,11 +337,11 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     for (auto& tensors : allTensors) {
       // Kick off work
       if (!recvAnysource) {
-        std::shared_ptr<::c10d::ProcessGroup::Work> work = pg->recv(tensors, 0);
+        std::shared_ptr<::c10d::ProcessGroup::Work> work = pg->recv(tensors, 0, 0);
         works.push_back(std::move(work));
       } else {
         std::shared_ptr<::c10d::ProcessGroup::Work> work =
-            pg->recvAnysource(tensors, &srcRanks[i]);
+            pg->recvAnysource(tensors, &srcRanks[i], 0);
         works.push_back(std::move(work));
       }
       ++i;

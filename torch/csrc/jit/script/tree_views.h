@@ -233,6 +233,7 @@ struct Expr : public TreeView {
       case '*':
       case TK_STARRED:
       case '/':
+      case '%':
       case TK_NOT:
       case TK_CONST:
       case TK_STRINGLITERAL:
@@ -421,6 +422,7 @@ struct AssignKind : public TreeView {
       case '-':
       case '*':
       case '/':
+      case '%':
         return;
       default:
         throw ErrorReport(tree) << "is not a valid AssignKind";
@@ -496,6 +498,7 @@ struct BinOp : public Expr {
       case '-':
       case '@':
       case TK_POW:
+      case '%':
         if (tree->trees().size() != 2)
           throw ErrorReport(tree) << "BinOp expected 2 subtrees, found " << tree->trees().size();
         return;

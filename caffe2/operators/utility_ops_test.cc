@@ -4,19 +4,19 @@
 #include "caffe2/operators/utility_ops.h"
 #include <gtest/gtest.h>
 
-CAFFE2_DECLARE_string(caffe_test_root);
+C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 
 static void AddConstInput(
-    const vector<TIndex>& shape,
+    const vector<int64_t>& shape,
     const float value,
     const string& name,
     Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = BlobGetMutableTensor(blob, CPU);
   tensor->Resize(shape);
   math::Set<float, CPUContext>(
       tensor->size(), value, tensor->template mutable_data<float>(), &context);
@@ -32,7 +32,7 @@ TEST(UtilityOpTest, testReshapeWithScalar) {
   def.add_output("XNew");
   def.add_output("OldShape");
   def.add_arg()->CopyFrom(MakeArgument("shape", vector<int64_t>{1}));
-  AddConstInput(vector<TIndex>(), 3.14, "X", &ws);
+  AddConstInput(vector<int64_t>(), 3.14, "X", &ws);
   // execute the op
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
   EXPECT_TRUE(op->Run());

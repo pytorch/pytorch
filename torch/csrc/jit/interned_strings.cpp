@@ -1,5 +1,5 @@
 #include "torch/csrc/jit/interned_strings.h"
-#include <stdint.h>
+#include <cstdint>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -8,7 +8,7 @@
 #include <vector>
 #include "ATen/core/Error.h"
 #include "ATen/core/optional.h"
-#include "string.h"
+#include <cstring>
 #include "torch/csrc/jit/interned_strings_class.h"
 
 namespace torch { namespace jit {

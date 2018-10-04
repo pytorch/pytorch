@@ -26,7 +26,7 @@ class MKLMemorySerializer : public BlobSerializerBase {
     blob_proto.set_type(kTensorBlobType);
     TensorProto* proto = blob_proto.mutable_tensor();
     auto* device_detail = proto->mutable_device_detail();
-    device_detail->set_device_type(MKLDNN);
+    device_detail->set_device_type(PROTO_MKLDNN);
     proto->set_name(name);
     if (blob.IsType<MKLMemory<float>>()) {
       const MKLMemory<float>& src = blob.Get<MKLMemory<float>>();
@@ -84,8 +84,8 @@ class MKLMemoryDeserializer : public BlobDeserializerBase {
         "MKLMemory only supports either float or double formats.");
     CAFFE_ENFORCE(
         !proto.has_segment(), "MKLMemory does not support segment right now.");
-    vector<TIndex> dims;
-    for (const TIndex d : proto.dims()) {
+    vector<int64_t> dims;
+    for (const int64_t d : proto.dims()) {
       dims.push_back(d);
     }
     // TODO: right now, every time we do a deserializer we create a new MKL

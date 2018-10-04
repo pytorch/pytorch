@@ -3,13 +3,13 @@
 #include <torch/nn/cursor.h>
 #include <torch/tensor.h>
 
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace torch {
 namespace optim {
 namespace detail {
-
 OptimizerBase::OptimizerBase(std::vector<Tensor> parameters)
     : parameters_(std::move(parameters)) {}
 
@@ -36,9 +36,20 @@ void OptimizerBase::zero_grad() {
   }
 }
 
+const std::vector<Tensor>& OptimizerBase::parameters() const noexcept {
+  return parameters_;
+}
+
+std::vector<Tensor>& OptimizerBase::parameters() noexcept {
+  return parameters_;
+}
+
 size_t OptimizerBase::size() const noexcept {
   return parameters_.size();
 }
+
+void OptimizerBase::save(serialize::OutputArchive& archive) const {}
+void OptimizerBase::load(serialize::InputArchive& archive) {}
 } // namespace detail
 } // namespace optim
 } // namespace torch

@@ -56,6 +56,9 @@ struct SymbolicVariable {
   SymbolicVariable operator*(const SymbolicVariable rhs) const {
     return create(aten::mul, {*this, rhs})[0].typeLike(*this);
   }
+  SymbolicVariable operator/(const SymbolicVariable rhs) const {
+    return create(aten::div, {*this, rhs})[0].typeLike(*this);
+  }
   SymbolicVariable operator*(at::Scalar rhs) const {
     if (isConstInt(rhs, 1))
       return *this;
@@ -64,14 +67,26 @@ struct SymbolicVariable {
   SymbolicVariable operator>(at::Scalar rhs) const {
     return create(aten::gt, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
+  SymbolicVariable operator>(const SymbolicVariable rhs) const {
+    return create(aten::gt, {*this, rhs})[0].typeLikeWithScalarType(*this, at::kByte);
+  }
   SymbolicVariable operator<(at::Scalar rhs) const {
     return create(aten::lt, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
+  }
+  SymbolicVariable operator<(const SymbolicVariable rhs) const {
+    return create(aten::lt, {*this, rhs})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator>=(at::Scalar rhs) const {
     return create(aten::ge, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
+  SymbolicVariable operator>=(const SymbolicVariable rhs) const {
+    return create(aten::ge, {*this, rhs})[0].typeLikeWithScalarType(*this, at::kByte);
+  }
   SymbolicVariable operator<=(at::Scalar rhs) const {
     return create(aten::le, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
+  }
+  SymbolicVariable operator<=(const SymbolicVariable rhs) const {
+    return create(aten::le, {*this, rhs})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator==(at::Scalar rhs) const {
     return create(aten::eq, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
@@ -97,6 +112,9 @@ struct SymbolicVariable {
   SymbolicVariable operator%(at::Scalar rhs) const {
     return create(aten::remainder, {*this, insertConstant(rhs)})[0].typeLike(*this);
   }
+  SymbolicVariable isnan() const {
+    return create(aten::ne, {*this, *this})[0].typeLikeWithScalarType(*this, at::kByte);
+  }
   SymbolicVariable mm(const SymbolicVariable rhs) const {
     return create(t("mm"), {*this, rhs})[0];
   }
@@ -110,7 +128,10 @@ struct SymbolicVariable {
     return create(aten::tanh, {*this})[0].typeLike(*this);
   }
   std::vector<SymbolicVariable> chunk(int64_t chunks, int dim) const {
-    return create(t("chunk"), { *this , insertConstant(chunks), insertConstant(dim) }, chunks);
+    Node *chunk;
+    auto outputs = create(prim::ConstantChunk, {value()}, chunks, &chunk);
+    chunk->i_(attr::chunks, chunks)->i_(attr::dim, dim);
+    return outputs;
   }
   SymbolicVariable type_as(const SymbolicVariable rhs) const {
     return create(aten::type_as, {*this, rhs})[0].typeLikeWithRhsScalarType(*this, rhs);
@@ -120,8 +141,13 @@ struct SymbolicVariable {
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, Value* dim) {
     Graph *g = dim->owningGraph();
-    auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
-    Value *input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    Value * input_list;
+    if (inputs.size() == 1 && inputs[0].value()->type()->isSubtypeOf(ListType::ofTensors())) {
+      input_list = inputs[0];
+    } else {
+      auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
+      input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
+    }
     return create(aten::cat, {input_list, dim})[0];
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int dim) {
@@ -143,7 +169,33 @@ struct SymbolicVariable {
     Graph *g = inputs[0].value()->owningGraph();
     auto value_inputs = fmap(inputs, [](const SymbolicVariable & v) { return v.value(); });
     Value * input_list = g->insertNode(g->createList(DynamicType::get(), value_inputs))->output();
-    return create(aten::broadcast_tensors, { input_list }, inputs.size());
+    Value * output_list = g->insert(aten::broadcast_tensors, {input_list});
+    Node * unpack = g->insertNode(g->create(prim::ListUnpack, {output_list}, inputs.size()));
+    return fmap<SymbolicVariable>(unpack->outputs());
+  }
+  static SymbolicVariable zeros_like(const SymbolicVariable input) {
+    return create(t("zeros_like"), {input})[0];
+  }
+  SymbolicVariable cos() const {
+    return create(t("cos"), {*this})[0];
+  }
+  SymbolicVariable cosh() const {
+    return create(t("cosh"), {*this})[0];
+  }
+  SymbolicVariable pow(at::Scalar other) const {
+    return create(t("pow"), {*this, insertConstant(other)})[0];
+  }
+  SymbolicVariable rsqrt() const {
+    return create(t("rsqrt"), {*this})[0];
+  }
+  SymbolicVariable sign() const {
+    return create(t("sign"), {*this})[0];
+  }
+  SymbolicVariable sin() const {
+    return create(t("sin"), {*this})[0];
+  }
+  SymbolicVariable sinh() const {
+    return create(t("sinh"), {*this})[0];
   }
   SymbolicVariable sum() const {
     return create(t("sum"), {*this})[0];
@@ -176,7 +228,7 @@ struct SymbolicVariable {
     return reshape(insertConstant(sizes));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
-    return create(aten::addmm, {*this, mat1, mat2, insertConstant(1.0), insertConstant(1.0)})[0];
+    return create(aten::addmm, {*this, mat1, mat2, insertConstant(1), insertConstant(1)})[0];
   }
   Value * value() const {
     return v;

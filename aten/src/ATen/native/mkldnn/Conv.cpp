@@ -9,25 +9,25 @@ namespace at { namespace native {
 at::Tensor mkldnn_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
     IntList padding, IntList stride, IntList dilation, int64_t groups) {
-  throw std::runtime_error("mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
+  AT_ERROR("mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
 
 at::Tensor mkldnn_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined) {
-  throw std::runtime_error("mkldnn_convolution_backward_input: ATen not compiled with MKLDNN support");
+  AT_ERROR("mkldnn_convolution_backward_input: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor> mkldnn_convolution_backward_weights(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined) {
-  throw std::runtime_error("mkldnn_convolution_backward_weights: ATen not compiled with MKLDNN support");
+  AT_ERROR("mkldnn_convolution_backward_weights: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> mkldnn_convolution_backward(
     const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups, std::array<bool,3> output_mask) {
-  throw std::runtime_error("mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
+  AT_ERROR("mkldnn_convolution_backward: ATen not compiled with MKLDNN support");
 }
 
 }}
@@ -70,8 +70,8 @@ at::Tensor mkldnn_convolution(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
     IntList padding, IntList stride, IntList dilation, int64_t groups)
 {
-  auto output = input.type().tensor(conv_output_size(
-    input.sizes(), weight.sizes(), padding, stride, dilation, groups));
+  auto output = at::empty(conv_output_size(
+    input.sizes(), weight.sizes(), padding, stride, dilation, groups), input.options());
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
 
@@ -182,7 +182,7 @@ Tensor mkldnn_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined)
 {
-  auto grad_input = grad_output.type().tensor(input_size);
+  auto grad_input = at::empty(input_size, grad_output.options());
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
 
@@ -294,11 +294,11 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined)
 {
-  auto grad_weight = grad_output.type().tensor(weight_size);
+  auto grad_weight = at::empty(weight_size, grad_output.options());
 
   Tensor grad_bias;
   if (bias_defined) {
-    grad_bias = grad_output.type().tensor({grad_output.size(1)});
+    grad_bias = at::empty({grad_output.size(1)}, grad_output.options());
   }
 
   auto cpu_engine = CpuEngine::Instance().get_engine();

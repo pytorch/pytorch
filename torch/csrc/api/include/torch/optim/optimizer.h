@@ -1,18 +1,22 @@
 #pragma once
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/utils/variadic.h>
 #include <torch/nn/cursor.h>
+#include <torch/optim/serialize.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
 
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace torch {
 namespace optim {
 namespace detail {
-
 /// Base class for all optimizers, that does not yet define a `step()`
 /// mechanism. All it specifies is that optimizers must be supplied with a
 /// vector of parameters. It also defines certain methods that all optimizers
@@ -31,23 +35,25 @@ class OptimizerBase {
   virtual ~OptimizerBase() = default;
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
-  /// Override this method if you want to modify the way parameters are added to
-  /// the `Optimizer`.
-  virtual void add_parameters(const std::vector<Tensor>& parameters);
+  void add_parameters(const std::vector<Tensor>& parameters);
 
   /// Adds the `ParameterCursor`'s parameters to the optimizer's parameter list.
-  /// NOTE: Calls the `vector<Tensor>` overload of `add_parameters` -- override
-  /// that method if you want to modify the behavior of `add_parameters`.
-  virtual void add_parameters(const ParameterCursor& cursor);
+  void add_parameters(const ParameterCursor& cursor);
 
   /// Zeros out the gradients of all parameters.
   virtual void zero_grad();
 
-  /// Provides a reference to the parameters this optimizer holds.
+  /// Provides a const reference to the parameters this optimizer holds.
   const std::vector<Tensor>& parameters() const noexcept;
+
+  /// Provides a reference to the parameters this optimizer holds.
+  std::vector<Tensor>& parameters() noexcept;
 
   /// Returns the number of parameters referenced by the optimizer.
   size_t size() const noexcept;
+
+  virtual void save(serialize::OutputArchive& archive) const;
+  virtual void load(serialize::InputArchive& archive);
 
  protected:
   OptimizerBase() = default;

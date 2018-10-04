@@ -241,6 +241,10 @@ class Tensor(torch._C._TensorBase):
         r"""See :func: `torch.argsort`"""
         return torch.argsort(self, dim, descending)
 
+    def norm(self, p="fro", dim=None, keepdim=False):
+        r"""See :func: `torch.norm`"""
+        return torch.norm(self, p, dim, keepdim)
+
     def btrifact(self, info=None, pivot=True):
         r"""See :func:`torch.btrifact`
         """
@@ -319,13 +323,24 @@ class Tensor(torch._C._TensorBase):
         """
         return self.clone().masked_fill_(mask, value)
 
-    def unique(self, sorted=False, return_inverse=False):
+    def unique(self, sorted=False, return_inverse=False, dim=None):
         r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
 
         See :func:`torch.unique`
         """
-        output, inverse_indices = self._unique(
-            sorted=sorted, return_inverse=return_inverse)
+        if dim is not None:
+            output, inverse_indices = torch._unique_dim(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse,
+                dim=dim
+            )
+        else:
+            output, inverse_indices = torch._unique(
+                self,
+                sorted=sorted,
+                return_inverse=return_inverse
+            )
         if return_inverse:
             return output, inverse_indices
         else:
@@ -392,6 +407,11 @@ class Tensor(torch._C._TensorBase):
         # map will interleave them.)
         if self.dim() == 0:
             raise TypeError('iteration over a 0-d tensor')
+        if torch._C._get_tracing_state():
+            warnings.warn('Iterating over a tensor might cause the trace to be incorrect. '
+                          'Passing a tensor of different shape won\'t change the number of '
+                          'iterations executed (and might lead to errors or silently give '
+                          'incorrect results).', category=RuntimeWarning)
         return iter(imap(lambda i: self[i], range(self.size(0))))
 
     def __hash__(self):

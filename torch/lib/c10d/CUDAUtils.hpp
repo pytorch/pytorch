@@ -16,7 +16,7 @@ class CUDAEvent {
 
   CUDAEvent() : CUDAEvent(nullptr, 0) {}
 
-  ~CUDAEvent();
+  ~CUDAEvent() noexcept(false);
 
   static CUDAEvent create(unsigned int flags = cudaEventDefault);
 

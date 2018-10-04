@@ -43,12 +43,18 @@ class DataPtr {
   void* release_context() {
     return ptr_.release_context();
   }
+  std::unique_ptr<void, DeleterFnPtr>&& move_context() {
+    return ptr_.move_context();
+  }
   operator bool() const {
     return static_cast<bool>(ptr_);
   }
   template <typename T>
   T* cast_context(DeleterFnPtr expected_deleter) const {
     return ptr_.cast_context<T>(expected_deleter);
+  }
+  DeleterFnPtr get_deleter() const {
+    return ptr_.get_deleter();
   }
   Device device() const {
     return device_;
@@ -115,7 +121,7 @@ struct Allocator {
   }
 };
 
-struct AT_CORE_API InefficientStdFunctionContext {
+struct CAFFE2_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(
       std::unique_ptr<void, std::function<void(void*)>>&& ptr)

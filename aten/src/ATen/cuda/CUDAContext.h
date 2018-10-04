@@ -9,6 +9,7 @@
 
 #include "cuda_runtime_api.h"
 #include "cusparse.h"
+#include "cublas_v2.h"
 
 namespace at {
 namespace cuda {
@@ -35,37 +36,31 @@ manage their own state. There is only a single CUDA context/state.
 */
 
 /* Device info */
-AT_API int64_t getNumGPUs();
+CAFFE2_API int64_t getNumGPUs();
 
-AT_API int64_t current_device();
+CAFFE2_API int64_t current_device();
 
-AT_API cudaDeviceProp* getCurrentDeviceProperties();
+CAFFE2_API void set_device(int64_t device);
 
-AT_API cudaDeviceProp* getDeviceProperties(int64_t device);
+CAFFE2_API cudaDeviceProp* getCurrentDeviceProperties();
+
+CAFFE2_API cudaDeviceProp* getDeviceProperties(int64_t device);
 
 /* Streams */
-AT_API CUDAStream createCUDAStream();
+CAFFE2_API CUDAStream
+createCUDAStream(const bool isHighPriority = false, int64_t device = -1);
 
-AT_API CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority);
+CAFFE2_API CUDAStream getDefaultCUDAStream(int64_t device = -1);
+CAFFE2_API CUDAStream getCurrentCUDAStream(int64_t device = -1);
 
-AT_API CUDAStream getDefaultCUDAStream();
+CAFFE2_API void setCurrentCUDAStream(CUDAStream stream);
+CAFFE2_API void uncheckedSetCurrentCUDAStream(CUDAStream stream);
 
-AT_API CUDAStream getDefaultCUDAStreamOnDevice(int64_t device);
-
-AT_API CUDAStream getCurrentCUDAStream();
-
-AT_API CUDAStream getCurrentCUDAStreamOnDevice(int64_t device);
-
-AT_API void setCurrentCUDAStream(CUDAStream stream);
-
-AT_API void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream);
-
-AT_API void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream);
+CAFFE2_API Allocator* getCUDADeviceAllocator();
 
 /* Handles */
-#ifndef __HIP_PLATFORM_HCC__
-  AT_API cusparseHandle_t getCurrentCUDASparseHandle();
-#endif
+CAFFE2_API cusparseHandle_t getCurrentCUDASparseHandle();
+CAFFE2_API cublasHandle_t getCurrentCUDABlasHandle();
 
 
 } // namespace cuda
