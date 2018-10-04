@@ -410,7 +410,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(__clang__)
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
   C10_EXPORT TypeIdentifier TypeMeta::Id<T>() {                           \
@@ -418,7 +418,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
   }
-#else // _MSC_VER
+#else // defined(_MSC_VER) || defined(__clang__)
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
   TypeIdentifier TypeMeta::Id<T>() {                                      \
@@ -426,7 +426,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     static TypeNameRegisterer<T> registerer(type_id, #T);                 \
     return type_id;                                                       \
   }
-#endif
+#endif // defined(_MSC_VER) || defined(__clang__)
 
 /**
  * CAFFE_DECLARE_KNOWN_TYPE and CAFFE_DEFINE_KNOWN_TYPE are used
