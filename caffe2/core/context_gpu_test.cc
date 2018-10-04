@@ -11,12 +11,6 @@ CAFFE2_DECLARE_bool(caffe2_cuda_full_device_control);
 
 namespace caffe2 {
 
-namespace {
-std::shared_ptr<void> shared_from_new(std::pair<void*, MemoryDeleter>&& p) {
-  return std::shared_ptr<void>(p.first, std::move(p.second));
-}
-}
-
 TEST(CUDATest, HasCudaRuntime) {
   EXPECT_TRUE(HasCudaRuntime());
 }
@@ -25,7 +19,7 @@ TEST(CUDAContextTest, TestAllocDealloc) {
   if (!HasCudaGPU()) return;
   CUDAContext context(0);
   context.SwitchToDevice();
-  auto data = shared_from_new(CUDAContext::New(10 * sizeof(float)));
+  auto data = CUDAContext::New(10 * sizeof(float));
   EXPECT_NE(data.get(), nullptr);
 }
 
@@ -66,20 +60,20 @@ TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
   for (int i = 0; i < NumCudaDevices(); ++i) {
     LOG(INFO) << "Device " << i << " of " << NumCudaDevices();
     DeviceGuard guard(i);
-    auto allocated = shared_from_new(CUDAContext::New(nbytes));
+    auto allocated = CUDAContext::New(nbytes);
     EXPECT_NE(allocated, nullptr);
     cudaPointerAttributes attr;
     CUDA_ENFORCE(cudaPointerGetAttributes(&attr, allocated.get()));
     EXPECT_EQ(attr.memoryType, cudaMemoryTypeDevice);
     EXPECT_EQ(attr.device, i);
     void* prev_allocated = allocated.get();
-    allocated.reset();
-    auto new_allocated = shared_from_new(CUDAContext::New(nbytes));
+    allocated.clear();
+    auto new_allocated = CUDAContext::New(nbytes);
     // With a pool, the above allocation should yield the same address.
     EXPECT_EQ(new_allocated.get(), prev_allocated);
     // But, if we are allocating something larger, we will have a different
     // chunk of memory.
-    auto larger_allocated = shared_from_new(CUDAContext::New(nbytes * 2));
+    auto larger_allocated = CUDAContext::New(nbytes * 2);
     EXPECT_NE(larger_allocated.get(), prev_allocated);
   }
 }

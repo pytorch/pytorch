@@ -62,7 +62,7 @@ class MKLContext : public BaseContext {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
+  inline static at::DataPtr New(size_t nbytes) {
     return StaticContext()->New(nbytes);
   }
 
@@ -153,8 +153,8 @@ inline void MKLContext::CopyBytes<MKLContext, MKLContext>(
 
 class MKLStaticContext : public BaseStaticContext {
  public:
-  inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
-    return GetCPUAllocator()->New(nbytes);
+  inline at::DataPtr New(size_t nbytes) const override {
+    return GetCPUAllocator()->allocate(nbytes);
   }
 
   DeviceType GetDeviceType() override {
