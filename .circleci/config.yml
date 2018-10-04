@@ -80,14 +80,13 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         export PYTORCH_CI_ENV_DIR=/var/lib/jenkins/pytorch-ci-env
         mkdir -p ${PYTORCH_CI_ENV_DIR}
         cp -r /var/lib/jenkins/workspace ${PYTORCH_CI_ENV_DIR}/build_workspace  # This copies all source files from build step to the next step
-        cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch* ${PYTORCH_CI_ENV_DIR}
+        cp -r /opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch ${PYTORCH_CI_ENV_DIR}/torch
         cp -r build/bin ${PYTORCH_CI_ENV_DIR}/cpp_test_bin
         if [ -d "../cpp-build" ]; then
           cp -r ../cpp-build ${PYTORCH_CI_ENV_DIR}/cpp-build
         fi
         if [ -d "../custom-op-build" ]; then
           cp -r ../custom-op-build ${PYTORCH_CI_ENV_DIR}/custom-op-build
-          chmod -R 777 ${PYTORCH_CI_ENV_DIR}/custom-op-build
         fi
   - persist_to_workspace:
       root: /var/lib/jenkins/pytorch-ci-env
@@ -155,7 +154,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         cp -r /opt/workspace/cpp_test_bin /home/circleci/project/build/bin
         docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
         echo "mkdir -p /opt/conda/lib/python${PYTHON_VERSION}/site-packages" | docker exec -u jenkins -i "$id" bash
-        docker cp "/opt/workspace/torch*" "$id:/opt/conda/lib/python${PYTHON_VERSION}/site-packages"
+        docker cp "/opt/workspace/torch" "$id:/opt/conda/lib/python${PYTHON_VERSION}/site-packages/torch"
         if [ -d "/opt/workspace/cpp-build" ]; then
           docker cp "/opt/workspace/cpp-build" "$id:/var/lib/jenkins/cpp-build"
         fi
