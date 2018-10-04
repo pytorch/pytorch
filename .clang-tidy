@@ -1,51 +1,11 @@
 ---
 # NOTE: there must be no spaces before the '-', so put the comma first.
 Checks: '
-  *
-  ,clang-analyzer-*
-  ,modernize-*
-  ,-cert-dcl21-cpp
-  ,-cert-err58-cpp
-  ,-cert-err60-cpp
-  ,-clang-diagnostic-*
-  ,-cppcoreguidelines-owning-memory
-  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
-  ,-cppcoreguidelines-pro-bounds-constant-array-index
-  ,-cppcoreguidelines-pro-type-member-init
-  ,-cppcoreguidelines-pro-type-static-cast-downcast
-  ,-cppcoreguidelines-pro-type-union-access
-  ,-cppcoreguidelines-pro-type-vararg
-  ,-cppcoreguidelines-special-member-functions
-  ,-fuchsia-*
-  ,-google-build-using-namespace
-  ,-google-default-arguments
-  ,-google-explicit-constructor
-  ,-google-readability-braces-around-statements
-  ,-google-readability-namespace-comments
-  ,-google-readability-todo
-  ,-google-runtime-references
-  ,-google-runtime-references
-  ,-hicpp-braces-around-statements
-  ,-hicpp-explicit-conversions
-  ,-hicpp-member-init
-  ,-hicpp-no-array-decay
-  ,-hicpp-signed-bitwise
-  ,-hicpp-special-member-functions
-  ,-hicpp-vararg
-  ,-llvm-header-guard
-  ,-llvm-include-order
-  ,-llvm-namespace-comment
-  ,-misc-unused-parameters
-  ,-modernize-make-unique
-  ,-modernize-use-default-member-init
-  ,-performance-unnecessary-value-param
-  ,-readability-braces-around-statements
-  ,-readability-else-after-return
-  ,-readability-implicit-bool-conversion
-  ,-readability-named-parameter
+  -*
+  ,modernize-deprecated-headers
   '
-WarningsAsErrors: ''
-HeaderFilterRegex: 'torch/csrc/'
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'torch/csrc/.*'
 AnalyzeTemporaryDtors: false
 CheckOptions:
 ...

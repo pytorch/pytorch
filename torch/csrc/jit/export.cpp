@@ -559,6 +559,8 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("FloatType");
   } else if (kind == TypeKind::IntType) {
     type_proto->set_denotation("IntType");
+  } else if (kind == TypeKind::BoolType) {
+    type_proto->set_denotation("BoolType");
   } else if (kind == TypeKind::NoneType) {
     type_proto->set_denotation("NoneType");
   } else if (kind == TypeKind::GeneratorType) {
