@@ -12,7 +12,6 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
-import torchvision.models as models
 import warnings
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.trainer import Trainer
@@ -22,6 +21,15 @@ import torch.utils.hub as hub
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
 from common import IS_WINDOWS, IS_PPC, skipIfRocm
+
+try:
+    import torchvision.models as models
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+
+
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -539,6 +547,7 @@ class TestHub(TestCase):
     def setUpClass(cls):
         cls.resnet18_pretrained = models.__dict__['resnet18'](pretrained=True).state_dict()
 
+    @skipIfNoTorchVision
     def test_load_from_github(self):
         hub_model = hub.load(
             'ailzhang/vision:hub',
@@ -546,6 +555,7 @@ class TestHub(TestCase):
             kwargs={'pretrained': True})
         self.assertEqual(self.resnet18_pretrained, hub_model.state_dict())
 
+    @skipIfNoTorchVision
     def test_load_multi_callables(self):
         callables = ['wrapper1', 'wrapper2']
         kwargs = [{'pretrained': True}, {'pretrained': True}]
@@ -556,8 +566,9 @@ class TestHub(TestCase):
         for model in hub_models:
             self.assertEqual(self.resnet18_pretrained, model.state_dict())
 
+    @skipIfNoTorchVision
     def test_hub_cache(self):
-        hub_dir = os.path.expanduser('~/.torch_hub')
+        hub_dir = os.path.expanduser('~/.torch/hub')
         hub_model = hub.load(
             'ailzhang/vision:hub',
             'wrapper1',

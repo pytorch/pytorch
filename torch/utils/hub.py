@@ -23,7 +23,7 @@ MASTER_BRANCH = 'master'
 ENV_TORCH_HUB_DIR = 'TORCH_HUB_DIR'
 # TODO: Discussion: default hub_dir
 # DEFAULT_TORCH_HUB_DIR = site.getusersitepackages()
-DEFAULT_TORCH_HUB_DIR = '~/.torch_hub'
+DEFAULT_TORCH_HUB_DIR = '~/.torch/hub'
 HUB_INFO_KEYS = [KEY_ENTRYPOINTS, KEY_DEPENDENCIES, KEY_HELP]
 READ_DATA_CHUNK = 8192
 
@@ -146,7 +146,7 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
             and has an entry in the repo's hub entrypoints.
         hub_dir: Optional, local dir to save the intermediate model & checkpoint files.
             If this argument is not specified, env variable `TORCH_HUB_DIR` will be searched first,
-            `~/.torch_hub` will be created and used as the fallback.
+            `~/.torch/hub` will be created and used as the fallback.
         cache: Optional, whether to delete the intermediate folder after loading the model.
             Default is `False`.
         args: Optional, the corresponding args for callables in `model`.
