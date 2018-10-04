@@ -516,7 +516,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                    \
   namespace detail {                                               \
     template<>                                                     \
-    C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =   \
+    TypeMetaData _typeMetaDataInstance<T>::instance =              \
         _typeMetaDataInstance<T>::_make();                         \
   }
 
