@@ -11,27 +11,27 @@
 #include "caffe2/core/operator.h"
 
 #if !CAFFE2_MOBILE
-C10_DEFINE_int64(
+CAFFE2_DEFINE_int64(
     aiBench_netInitSampleRate,
     0,
     "One in N sampling rate for net delay");
 
-C10_DEFINE_int64(
+CAFFE2_DEFINE_int64(
     aiBench_netFollowupSampleRate,
     0,
     "One in N sampling rate for net delay");
 
-C10_DEFINE_int64(
+CAFFE2_DEFINE_int64(
     aiBench_netFollowupSampleCount,
     0,
     "control the following c logs");
 
-C10_DEFINE_int64(
+CAFFE2_DEFINE_int64(
     aiBench_operatorNetSampleRatio,
     0,
     "One in N sampling rate for operator delay");
 
-C10_DEFINE_int64(
+CAFFE2_DEFINE_int64(
     aiBench_skipIters,
     0,
     "skip the first N iterations of the net run");
@@ -51,11 +51,11 @@ bool registerGlobalPerfNetObserverCreator(int* /*pargc*/, char*** /*pargv*/) {
       caffe2::make_unique<caffe2::NetObserverReporterPrint>());
 
   caffe2::ObserverConfig::initSampleRate(
-      c10::FLAGS_aiBench_netInitSampleRate,
-      c10::FLAGS_aiBench_netFollowupSampleRate,
-      c10::FLAGS_aiBench_netFollowupSampleCount,
-      c10::FLAGS_aiBench_operatorNetSampleRatio,
-      c10::FLAGS_aiBench_skipIters);
+      FLAGS_aiBench_netInitSampleRate,
+      FLAGS_aiBench_netFollowupSampleRate,
+      FLAGS_aiBench_netFollowupSampleCount,
+      FLAGS_aiBench_operatorNetSampleRatio,
+      FLAGS_aiBench_skipIters);
 #endif
 
   return true;

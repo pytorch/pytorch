@@ -2,12 +2,12 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
 
-C10_DEFINE_bool(
+CAFFE2_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
     "If set, print out detailed memory usage");
 
-C10_DEFINE_bool(
+CAFFE2_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
     true,
     "If set, do memory zerofilling when allocating on CPU");

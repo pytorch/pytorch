@@ -7,7 +7,7 @@
 #include "caffe2/operators/reshape_op.h"
 #include "caffe2/utils/math.h"
 
-C10_DECLARE_string(caffe_test_root);
+CAFFE2_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 

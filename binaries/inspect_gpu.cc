@@ -19,18 +19,17 @@
 #include <sstream>
 #include <vector>
 
-#include "c10/util/Flags.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 
 using std::vector;
 
-C10_DECLARE_int(caffe2_log_level);
+CAFFE2_DECLARE_int(caffe2_log_level);
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
-  c10::SetUsageMessage(
+  caffe2::SetUsageMessage(
       "Inspects the GPUs on the current machine and prints out their details "
       "provided by cuda.");
 

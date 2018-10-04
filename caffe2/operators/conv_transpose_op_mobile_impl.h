@@ -20,7 +20,7 @@
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/math_utils.h"
 
-C10_DECLARE_bool(caffe2_force_shared_col_buffer);
+CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -679,7 +679,7 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       Ydata += Y->size() / Y->dim32(0);
     }
   };
-  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, f);
   } else {
     f(&threadBuffer_);

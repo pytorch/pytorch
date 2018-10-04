@@ -3,7 +3,7 @@
 
 #include "caffe2/core/logging.h"
 
-C10_DECLARE_bool(caffe2_cpu_numa_enabled);
+CAFFE2_DECLARE_bool(caffe2_cpu_numa_enabled);
 
 namespace caffe2 {
 
