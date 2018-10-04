@@ -7204,7 +7204,7 @@ a")
 
         @torch.jit.weak_script
         def weak_script_fn(x):
-            return x + 5 + weak_script_fn_inner(x)
+            return x + 5 + weak_script_fn_inner(x) + weak_script_fn_inner(x)
 
         def fn(x):
             x = not_a_script_fn(x)

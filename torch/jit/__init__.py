@@ -648,10 +648,12 @@ def _try_compile_weak_script(fn):
     if entry is None:
         return None
     if entry["status"] == COMPILATION_PENDING:
-        entry["status"] = COMPILED
         compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
         compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
-    return compiled_fn
+        entry["status"] = COMPILED
+        return compiled_fn
+    else:
+        return entry["compiled_fn"]
 
 
 def script(fn, optimize=True, _frames_up=0, rcb=None):
