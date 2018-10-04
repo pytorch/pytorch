@@ -46,7 +46,7 @@ def _tensor_splits(draw, add_axis=False):
 
 
 class TestFunctional(hu.HypothesisTestCase):
-    @given(X=hu.tensor(), engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
+    @given(X=hu.tensor(), engine=st.sampled_from(["", "MIOPEN" if workspace.has_hip_support else "CUDNN"]), **hu.gcs)
     def test_relu(self, X, engine, gc, dc):
         X += 0.02 * np.sign(X)
         X[X == 0.0] += 0.02

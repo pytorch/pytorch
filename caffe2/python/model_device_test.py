@@ -124,7 +124,7 @@ class TestMiniAlexNet(test_util.TestCase):
         cpu_device = caffe2_pb2.DeviceOption()
         cpu_device.device_type = caffe2_pb2.CPU
         gpu_device = caffe2_pb2.DeviceOption()
-        gpu_device.device_type = caffe2_pb2.CUDA
+        gpu_device.device_type = caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA
 
         checker = device_checker.DeviceChecker(0.05, [cpu_device, gpu_device])
         ret = checker.CheckNet(
@@ -136,7 +136,7 @@ class TestMiniAlexNet(test_util.TestCase):
         )
         self.assertEqual(ret, True)
 
-    @unittest.skipIf(not workspace.has_gpu_support,
+    @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support,
                      "No GPU support. Skipping test.")
     def testMiniAlexNetNCHW(self):
         self._testMiniAlexNet("NCHW")

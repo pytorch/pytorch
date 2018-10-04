@@ -7,7 +7,7 @@ from hypothesis import assume, given, settings
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 
 import unittest
@@ -38,7 +38,8 @@ class TestGroupConvolution(hu.HypothesisTestCase):
             order, engine, use_bias, gc, dc):
         assume(size >= kernel)
         # TODO: Group conv in NHWC not implemented for GPU yet.
-        assume(group == 1 or order == "NCHW" or gc.device_type != caffe2_pb2.CUDA)
+        gpu_device_type = caffe2_pb2.HIP if workspace.has_hip_support else caffe2_pb2.CUDA
+        assume(group == 1 or order == "NCHW" or gc.device_type != gpu_device_type)
         input_channels = input_channels_per_group * group
         output_channels = output_channels_per_group * group
 
@@ -65,8 +66,8 @@ class TestGroupConvolution(hu.HypothesisTestCase):
             w = w.transpose((0, 3, 1, 2))
 
         inputs = [X, w, b] if use_bias else [X, w]
-
-        self.assertDeviceChecks(dc, op, inputs, [0])
+        if order != 'NHWC' or group == 1:
+            self.assertDeviceChecks(dc, op, inputs, [0])
         for i in range(len(inputs)):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 

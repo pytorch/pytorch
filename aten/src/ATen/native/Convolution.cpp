@@ -3,6 +3,9 @@
 
 #include "ATen/Config.h"
 
+static const int MIOPEN_DIM_MAX = 4;
+static const bool MIOPEN_ENABLED = getenv("DISABLE_MIOPEN") != NULL;
+
 namespace at { namespace native {
 
 struct ConvParams {
@@ -123,7 +126,8 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
   return ((input.type().scalarType() == at::kFloat) || (input.type().scalarType() == at::kHalf))
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.type().is_cuda()
-         && cudnn_enabled
+         && input.dim() > MIOPEN_DIM_MAX
+         && MIOPEN_ENABLED
          ;
 }
 

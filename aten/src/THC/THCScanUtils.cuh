@@ -213,7 +213,7 @@ __device__ void exclusiveBinaryPrefixScan(T* smem, bool in, T* out, T* carry, Bi
   *out -= (T) in;
 
   // The outgoing carry for all threads is the last warp's sum
-  *carry = smem[(blockDim.x / SCAN_UTILS_WARP_SIZE) - 1];
+  *carry = smem[THCCeilDiv<int>(blockDim.x, SCAN_UTILS_WARP_SIZE) - 1];
 
   if (KillWARDependency) {
     __syncthreads();

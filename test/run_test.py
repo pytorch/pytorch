@@ -49,7 +49,6 @@ ROCM_BLACKLIST = [
     'multiprocessing',
     'nccl',
     'thd_distributed',
-    'utils',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {

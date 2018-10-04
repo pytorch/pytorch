@@ -340,8 +340,8 @@ tests = [
     ('kthvalue', small_3d_unique, lambda t: [3, -1], 'neg_dim'),
     ('lerp', small_3d, lambda t: [small_3d(t), 0.3]),
     ('max', small_3d_unique, lambda t: []),
-    ('max', small_3d_unique, lambda t: [1], 'dim', types, False, skipIfRocm),
-    ('max', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
+    ('max', small_3d_unique, lambda t: [1], 'dim'),
+    ('max', small_3d_unique, lambda t: [-1], 'neg_dim'),
     ('max', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
     ('min', small_3d_unique, lambda t: []),
     ('min', small_3d_unique, lambda t: [1], 'dim', types, False, skipIfRocm),
@@ -350,9 +350,9 @@ tests = [
     ('mean', small_3d, lambda t: []),
     ('mean', small_3d, lambda t: [-1], 'neg_dim'),
     ('mean', small_3d, lambda t: [1], 'dim'),
-    ('mode', small_3d, lambda t: [], '', types, False, skipIfRocm),
-    ('mode', small_3d, lambda t: [1], 'dim', types, False, skipIfRocm),
-    ('mode', small_3d, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
+    ('mode', small_3d, lambda t: []),
+    ('mode', small_3d, lambda t: [1], 'dim'),
+    ('mode', small_3d, lambda t: [-1], 'neg_dim'),
     ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.1, 10), lambda t: [1], '2d_p=1', float_types_no_half),
     ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.6, 10), lambda t: [2], '2d_p=2', float_types_no_half),
     ('remainder', small_3d, lambda t: [3], 'value', types, False, "skipIfRocm:HalfTensor"),
@@ -957,7 +957,6 @@ class TestCuda(TestCase):
     def test_broadcast_gpu(self):
         self._test_broadcast(torch.randn(5, 5).cuda())
 
-    @skipIfRocm
     def test_min_max_nan(self):
         tests = [(lambda x: x.min(), 'min'),
                  (lambda x: x.max(), 'max'),
@@ -1723,7 +1722,6 @@ class TestCuda(TestCase):
     def test_tensor_scatterFill(self):
         TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
-    @skipIfRocm
     def test_min_max_inits(self):
         # Testing if THC_reduceAll received the correct index initialization.
         # This affects the result of THC_reduceAll operations at extreme values
@@ -1737,11 +1735,9 @@ class TestCuda(TestCase):
         _, v = y.min(dim=0)
         self.assertEqual(v, expected)
 
-    @skipIfRocm
     def test_max_with_inf(self):
         TestTorch._test_max_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
-    @skipIfRocm
     def test_min_with_inf(self):
         TestTorch._test_min_with_inf(self, (torch.half, torch.float, torch.double), 'cuda')
 
