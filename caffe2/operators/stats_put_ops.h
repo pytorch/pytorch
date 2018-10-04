@@ -33,10 +33,11 @@ struct TemplatePutOp : public Operator<CPUContext> {
   bool DoRunWithType() {
     auto input = *Input(0).template data<V>();
 
-    CAFFE_ENFORCE(
-        static_cast<int64_t>(input + 1) <
-            std::numeric_limits<int64_t>::max() / magnitude_expand_,
-        "Input value is too large for the given magnitude expansion!");
+    if (static_cast<int64_t>(input + 1) >
+        std::numeric_limits<int64_t>::max() / magnitude_expand_) {
+      CAFFE_EVENT(stat_, stat_value, -1);
+      return true;
+    }
 
     int64_t int_value = input * magnitude_expand_;
 
