@@ -48,8 +48,10 @@ _use_shared_memory = False
 r"""Whether to use shared memory in default_collate"""
 
 MP_STATUS_CHECK_INTERVAL = 5.0
-r"""Interval (in seconds) to check status of other process to avoid hanging in
-    multiprocessing data loading"""
+r"""Interval (in seconds) to check status of processes to avoid hanging in
+    multiprocessing data loading. This is mainly used in getting data from
+    another process, in which case we need to periodically check whether the
+    sender is alive to prevent hanging."""
 
 if IS_WINDOWS:
     # On Windows, the parent ID of the worker process remains unchanged when the manager process
@@ -127,7 +129,7 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
                 return
             elif done_event.is_set():
                 # Done event is set. But I haven't received the final signal
-                # (None) yet. We keep continuing until get it, and skip the
+                # (None) yet. I will keep continuing until get it, and skip the
                 # processing steps.
                 continue
             idx, batch_indices = r
@@ -150,7 +152,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
 
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
-    while not done_event.is_set():
+    while True:
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
@@ -317,41 +319,41 @@ class _DataLoaderIter(object):
     #
     #      We delay the discussion on the logic in this case until later.
     #
-    #   2. The iterator exits the workers when the problem ends
+    #   2. The iterator exits the workers when the program ends without error.
     #
     #      We set all workers and `pin_memory_thread` to have `daemon=True`.
-    #      Doing so means that when the program ends, it shuts the workers down
-    #      with a SIGTERM. `pin_memory_thread` will exit too, but by a different
-    #      mechanism.
     #
-    #      You may ask, why don't we just not set the workers as daemonic, and
+    #      When a process ends, it shuts the all its daemonic children down with
+    #      a SIGTERM (instead of joining them without a timeout). Simiarly for
+    #      threads, but by a different mechanism.
+    #
+    #      You may ask, why can't we make the workers non-daemonic, and
     #      gracefully exit using the same logic as we have in `__del__` when the
-    #      iterator gets deleted (see 1 above)? The answer requires a bit
-    #      understanding of Python multiprocessing design. As of Python 3.7, for
-    #      reasons I have yet to understand, in a subprocess, Python runs the
-    #      given function (e.g., the `target` argument passed to a `mp.Process`)
-    #      using this pattern (unrelated code removed for clarity):
+    #      iterator gets deleted (see 1 above)?
     #
-    #          # These are run the sub-process
+    #      When a process exits, Python joins all its non-daemonic subprocesses,
+    #      and terminates (via SIGTERM) all daemonic ones. This fact, together
+    #      with a few implementation details of multiprocessing, forces us to
+    #      make workers  daemonic. All of our problems arise when a DataLoader
+    #      is used in a subprocess, and are caused by multiprocessing code
+    #      which looks more or less like this:
+    #
     #          try:
-    #              user_provided_function()
+    #              your_function_using_a_dataloader()
     #          finally:
     #              multiprocessing.util._exit_function()
     #
-    #      In `_exit_function`, Python joins all non-daemonic subprocesses of
-    #      this process (which is a subprocess of a Python process itself), and
-    #      sends SIGTERM to the daemonic ones. Therefore, if a DataLoader is
-    #      used in a subprocess (i.e., used in `user_provided_function` above),
-    #      and an error is raised containing frames that references the
-    #      DataLoaderIter (Python exception traces keeps local objects in
-    #      relevant frames alive), workers will be joined in `_exit_function`
-    #      before the `__del__` is called (which starts the shutdown logic). And
-    #      unfortunately the DataLoaderIter process will hang. E.g., such errors
-    #      can be timeout, or arbitrary error if users hold a reference to an
-    #      iterator.
+    #      The joining/termination mentioned above happens inside
+    #      `_exit_function()`. Now, if `your_function_using_a_dataloader()`
+    #      throws, the stack trace stored in the exception will prevent the
+    #      frame which uses `DataLoaderIter` to be freed. If the frame has any
+    #      reference to the `DataLoaderIter` (e.g., in a method of the iter),
+    #      its  `__del__`, which starts the shutdown procedure, will not be
+    #      called. That, in turn, means that workers aren't notified. Attempting
+    #      to join in `_exit_function` will then result in a hang.
     #
     #      For context, `_exit_function` is also registered as an `atexit` call.
-    #      So I really don't understand the need to do this in a finally block
+    #      So it is unclear to me (@ssnl) why this is needed in a finally block.
     #      The code dates back to 2008 and there is no comment on the original
     #      PEP 371 or patch https://bugs.python.org/issue3050 (containing both
     #      the finally block and the `atexit` registration) that explains this.
@@ -363,7 +365,7 @@ class _DataLoaderIter(object):
     #           iterator.
     #
     #   3. All processes exit if any of them die unexpectedly (e.g., error,
-    #      SIGKILL).
+    #      fatal signals).
     #
     #      As shown above, the workers are set as daemonic children of the main
     #      process. However, automatic cleaning-up of such child processes only
@@ -420,12 +422,25 @@ class _DataLoaderIter(object):
     # To achieve this, we implement the following logic along with the design
     # choices mentioned above:
     #
-    # [pin_memory_thread] and [worker processes]
-    #   When getting from queues,
-    #     if get a `None`, exit.
-    #     if get anything else or time out, check `done_event`,
-    #        if set, keep getting until see the `None`, then exit.
-    #        otherwise, process the data.
+    # [worker processes]
+    #   While loader process is alive:
+    #     Get from index_queue.
+    #       If got a `None`, exit.
+    #       If get anything else or time out, check `done_event`.
+    #          If set, continue to next iteration
+    #                  i.e., keep getting until see the `None`, then exit.
+    #          Otherwise, process data or continue to next iteration.
+    #
+    # [pin_memory_thread]
+    #   # No need to check main thread. If this thread is alive, the main loader
+    #   # thread must be alive, because this thread is set as daemonic.
+    #   While True:
+    #     Get from index_queue.
+    #       If got a `None`, exit.
+    #       If get anything else or time out, check `done_event`.
+    #          If set, continue to next iteration
+    #                  i.e., keep getting until see the `None`, then exit.
+    #          Otherwise, process data or continue to next iteration.
     #
     # [main process]
     #   In the DataLoader Iter's `__del__`
@@ -469,7 +484,7 @@ class _DataLoaderIter(object):
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
             self.worker_queue_idx = 0
-            self.worker_result_queue = multiprocessing.JoinableQueue()
+            self.worker_result_queue = multiprocessing.Queue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False
@@ -544,9 +559,8 @@ class _DataLoaderIter(object):
             else:
                 # while condition is false, i.e., pin_memory_thread died.
                 raise RuntimeError('Pin memory thread exited unexpectedly')
-            # In this case, `self.data_queue` is a `queue.Queue`, which needs us
-            # calling `.task_done()`.
-            self.data_queue.task_done()
+            # In this case, `self.data_queue` is a `queue.Queue`,. But we don't
+            # need to call `.task_done()` because we don't use `.join()`.
         else:
             batch = self.data_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         return batch

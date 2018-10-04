@@ -262,7 +262,7 @@ def _test_timeout_pin_memory():
     _ = next(iter(dataloader))
 
 
-def disable_stderr(_):
+def disable_stderr(worker_id):
     r"""
     Avoids printing "ERROR: Unexpected segmentation fault encountered in worker."
     from workers. Since worker signal handler prints with low-level write(),
