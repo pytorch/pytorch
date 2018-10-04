@@ -21,7 +21,8 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/operator_schema.h"
 
-C10_DEFINE_string(schema, "", "Print doc and schema of a particular operator");
+CAFFE2_DEFINE_string(schema, "",
+                     "Print doc and schema of a particular operator");
 
 static bool HasSchema(const std::string& str) {
   return caffe2::OpSchemaRegistry::Schema(str);
@@ -35,14 +36,15 @@ static bool HasDoc(const std::string& str) {
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
 
-  if (!c10::FLAGS_schema.empty()) {
-    const auto* schema = caffe2::OpSchemaRegistry::Schema(c10::FLAGS_schema);
+  if (!caffe2::FLAGS_schema.empty()) {
+    const auto* schema = caffe2::OpSchemaRegistry::Schema(
+        caffe2::FLAGS_schema);
     if (!schema) {
-      std::cerr << "Operator " << c10::FLAGS_schema << " doesn't have a schema"
-                << std::endl;
+      std::cerr << "Operator " << caffe2::FLAGS_schema
+                << " doesn't have a schema" << std::endl;
       return 1;
     }
-    std::cout << "Operator " << c10::FLAGS_schema << ": " << std::endl
+    std::cout << "Operator " << caffe2::FLAGS_schema << ": " << std::endl
               << *schema;
     return 0;
   }

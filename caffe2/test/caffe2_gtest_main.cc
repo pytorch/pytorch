@@ -33,10 +33,8 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/init.h"
 
-C10_DEFINE_string(
-    caffe_test_root,
-    "gen/",
-    "The root of the caffe test folder.");
+CAFFE2_DEFINE_string(
+    caffe_test_root, "gen/", "The root of the caffe test folder.");
 
 GTEST_API_ int main(int argc, char **argv) {
   // std::cout << "Running main() from gtest_main.cc\n";

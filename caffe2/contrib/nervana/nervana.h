@@ -9,7 +9,7 @@
 /**
  * A flag that specifies the nervana cubin path.
  */
-C10_DECLARE_string(nervana_cubin_path);
+CAFFE2_DECLARE_string(nervana_cubin_path);
 
 namespace caffe2 {
 

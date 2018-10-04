@@ -11,10 +11,9 @@
 #include <ATen/core/context_base.h>
 #include <ATen/core/optional.h>
 
-#include "c10/util/Flags.h"
-
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
+#include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -24,13 +23,14 @@
 // This parameter is respected "upper-case" methods which call Resize()
 // (e.g., CopyFrom, ResizeLike); it is NOT respected by Tensor::resize_
 // or ShrinkTo, both of which guarantee to never to free memory.
-C10_DECLARE_bool(caffe2_keep_on_shrink);
+CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
 
 // Since we can have high variance in blob memory allocated across different
 // inputs in the same run, we will shrink the blob only if the memory gain
 // is larger than this flag in bytes.  This only applies to functions which
 // respect caffe2_keep_on_shrink.
-C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
+CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
+
 
 namespace caffe2 {
 
@@ -604,13 +604,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // is smaller than new size
         reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize();
       } else {
-        reset_tensor = storage_.capacity() <
-                (storage_offset_ + numel_) * storage_.itemsize() ||
-            !c10::FLAGS_caffe2_keep_on_shrink ||
-            storage_.capacity() -
-                    (storage_offset_ + numel_) * storage_.itemsize() >
-                static_cast<size_t>(
-                    c10::FLAGS_caffe2_max_keep_on_shrink_memory);
+        reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize() ||
+            !caffe2::FLAGS_caffe2_keep_on_shrink ||
+            storage_.capacity() - (storage_offset_ + numel_) * storage_.itemsize() >
+                static_cast<size_t>(caffe2::FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
       if (reset_tensor && !is_init) {
