@@ -428,12 +428,16 @@ class _DataLoaderIter(object):
     #              any time after they receive `None`.
     #
     #     b. Exit `pin_memory_thread`
-    #          i.  Put `None` in `worker_result_queue`.
-    #          ii. Join the `pin_memory_thread`.
+    #          i.   Put `None` in `worker_result_queue`.
+    #          ii.  Join the `pin_memory_thread`.
+    #          iii. `worker_result_queue.cancel_join_thread()` in case that
+    #               `pin_memory_thread` died so the `None` can't be put.
     #
     #     c. Exit the workers.
-    #          i.  Put `None` in each worker's `index_queue`.
-    #          ii. Join the workers.
+    #          i.   Put `None` in each worker's `index_queue`.
+    #          ii.  Join the workers.
+    #          iii. `index_queue.cancel_join_thread()` for each index queue in
+    #               case that the worker died so the `None` can't be put.
     #
     #        Note: this has to be after (b) because it may leave corrupted data
     #              in `worker_result_queue`, which `pin_memory_thread` reads
@@ -611,6 +615,7 @@ class _DataLoaderIter(object):
                 # current process.
                 self.worker_result_queue.close()
                 self.pin_memory_thread.join()
+                self.worker_result_queue.cancel_join_thread()
 
             # Exit workers now.
             for q in self.index_queues:
@@ -620,6 +625,8 @@ class _DataLoaderIter(object):
                 q.close()
             for w in self.workers:
                 w.join()
+            for q in self.index_queues:
+                q.cancel_join_thread()
 
     def __del__(self):
         if self.num_workers > 0:
