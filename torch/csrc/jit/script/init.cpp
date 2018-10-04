@@ -317,11 +317,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<PythonModuleValue>(obj);
   }
 
-  auto compiled_fn =
-      py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
-  if (!compiled_fn.is(py::none())) {
-    auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
-    return std::make_shared<ModuleValue>(mod);
+  if (py::isinstance<py::function>(obj)) {
+    auto compiled_fn =
+        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
+    if (!compiled_fn.is(py::none())) {
+      auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
+      return std::make_shared<ModuleValue>(mod);
+    }
   }
 
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);

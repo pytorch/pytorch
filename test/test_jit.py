@@ -7083,18 +7083,33 @@ a")
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
 
     def test_weak_script_function(self):
+        outer_var = 10
+        outer_var2 = 11
+
         def not_a_script_fn(x):
             return x + 2
+
+        @torch.jit.script
+        def even_more_inner(x):
+            return x + 1
+
+        @torch.jit.script
+        def inner(x):
+            return not_a_script_fn(x) + x + even_more_inner(x)
 
         @torch.jit.script
         def strong_script_fn(x):
             if bool(x.norm() > 2):
                 x = x + 3
-            return x + 4
+            return x + 4 + inner(x)
+
+        @torch.jit.weak_script
+        def weak_script_fn_inner(x):
+            return x + 6 + not_a_script_fn(x)
 
         @torch.jit.weak_script
         def weak_script_fn(x):
-            return x + 5
+            return x + 5 + weak_script_fn_inner(x)
 
         def fn(x):
             x = not_a_script_fn(x)

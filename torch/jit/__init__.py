@@ -46,6 +46,7 @@ _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 compiled_weak_fns = weakref.WeakKeyDictionary()
 COMPILATION_PENDING = object()
+COMPILED = object()
 
 
 @contextlib.contextmanager
@@ -583,25 +584,31 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def weak_script(fn):
-    compiled_weak_fns[fn] = COMPILATION_PENDING
+def weak_script(fn, _frames_up=0):
+    compiled_weak_fns[fn] = {
+        "status": COMPILATION_PENDING,
+        "compiled_fn": None,
+        "rcb": createResolutionCallback(_frames_up + 1)
+    }
     return fn
 
 
 def _try_compile_weak_script(fn):
-    v = compiled_weak_fns.get(fn)
-    if v is None:
+    entry = compiled_weak_fns.get(fn)
+    if entry is None:
         return None
-    if v == COMPILATION_PENDING:
-        v = torch.jit.script(fn)
-        compiled_weak_fns[fn] = v
-    return v
+    if entry["status"] == COMPILATION_PENDING:
+        entry["status"] = COMPILED
+        compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
+        compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
+    return compiled_fn
 
 
-def script(fn, optimize=True, _frames_up=0):
+def script(fn, optimize=True, _frames_up=0, rcb=None):
     if not _enabled:
         return fn
-    rcb = createResolutionCallback(_frames_up + 1)
+    if rcb is None:
+        rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
     graph = _jit_script_compile(ast, rcb)
     mod = ScriptModule()
