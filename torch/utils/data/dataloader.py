@@ -11,7 +11,6 @@ import re
 import sys
 import threading
 import traceback
-import atexit
 import os
 import time
 from torch._six import string_classes, int_classes, FileNotFoundError

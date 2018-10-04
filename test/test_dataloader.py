@@ -11,7 +11,6 @@ import traceback
 import unittest
 import subprocess
 import itertools
-import threading
 from torch import multiprocessing as mp
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
@@ -266,14 +265,14 @@ def _test_timeout_pin_memory():
 def disable_stderr(_):
     r"""
     Avoids printing "ERROR: Unexpected segmentation fault encountered in worker."
-    from workers.
+    from workers. Since worker signal handler prints with low-level write(),
+    this has to be done on OS level.
     """
     os.close(sys.stderr.fileno())
 
 
 def _test_segfault():
     dataset = SegfaultDataset(10)
-
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, worker_init_fn=disable_stderr)
     _ = next(iter(dataloader))
 
