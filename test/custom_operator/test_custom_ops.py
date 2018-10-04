@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 import torch
+import torch.ops
 
 from model import Model, get_custom_op_library_path
 
