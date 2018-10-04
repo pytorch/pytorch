@@ -467,7 +467,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     return #T;                                                            \
   }                                                                       \
   template<>                                                              \
-  TypeMetaData _typeMetaDataInstance<T>::instance =                       \
+  C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =            \
       _typeMetaDataInstance<T>::_make();                                  \
   }
 #else // defined(_MSC_VER) || defined(__clang__)
@@ -483,7 +483,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     return #T;                                                            \
   }                                                                       \
   template<>                                                              \
-  TypeMetaData _typeMetaDataInstance<T>::instance =                       \
+  C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =            \
       _typeMetaDataInstance<T>::_make();                                  \
   }
 #endif // defined(_MSC_VER) || defined(__clang__)
@@ -520,12 +520,21 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   }
 #endif
 
+#if defined(_MSC_VER)
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                    \
   namespace detail {                                               \
     template<>                                                     \
     TypeMetaData _typeMetaDataInstance<T>::instance =              \
         _typeMetaDataInstance<T>::_make();                         \
   }
+#else
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                    \
+  namespace detail {                                               \
+    template<>                                                     \
+    C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =   \
+        _typeMetaDataInstance<T>::_make();                         \
+  }
+#endif
 
 class Tensor;
 
