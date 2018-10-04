@@ -6,9 +6,11 @@ import sys
 import zipfile
 
 if sys.version_info[0] == 2:
+    from urlparse import urlparse
     from urllib2 import urlopen  # noqa f811
 else:
     from urllib.request import urlopen
+    from urllib.parse import urlparse
 
 import torch
 import torch.utils.model_zoo as model_zoo
@@ -94,7 +96,7 @@ def _check_type(value, T):
     return value
 
 
-def _load_single_model(func_name, entrypoints, hub_dir, args, kwargs):
+def _load_single_model(func_name, entrypoints, hub_dir, cache, args, kwargs):
     entry = None
     for e in entrypoints:
         if e[0] == func_name:
@@ -116,10 +118,18 @@ def _load_single_model(func_name, entrypoints, hub_dir, args, kwargs):
 
     model = _load_and_execute_func(module_name, func_name, args, kwargs)
 
+    parts = urlparse(checkpoint)
+    filename = os.path.basename(parts.path)
+    cached_checkpoint = os.path.join(hub_dir, filename)
+    if not cache and os.path.exists(cached_checkpoint):
+        os.remove(cached_checkpoint)
+
     if checkpoint is None:
         print('No pretrained weights provided. Proceeding with random initialized weights...')
     else:
         model.load_state_dict(model_zoo.load_url(checkpoint, model_dir=hub_dir, progress=False))
+        if not cache:
+            os.remove(cached_checkpoint)
     return model
 
 
@@ -145,7 +155,9 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
         a single model or a list of models with corresponding pretrained weights.
     """
     # Setup hub_dir to save downloaded files
+    hub_dir_existed = True
     if hub_dir is None:
+        hub_dir_existed = False
         hub_dir = os.path.expanduser(os.getenv(ENV_TORCH_HUB_DIR, DEFAULT_TORCH_HUB_DIR))
     if not os.path.exists(hub_dir):
         os.makedirs(hub_dir)
@@ -164,25 +176,28 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
     # Download zipped code from github
     url = _git_archive_link(repo_info, branch)
     cached_file = os.path.join(hub_dir, branch + '.zip')
-    _download_url_to_file(url, cached_file)
 
     extracted_repo = os.path.join(hub_dir, repo_name + '-' + branch)
     repo_dir = os.path.join(hub_dir, repo_name)
-    if os.path.exists(extracted_repo):
-        shutil.rmtree(extracted_repo)
-    if os.path.exists(repo_dir):
-        shutil.rmtree(repo_dir)
+    sys.path.insert(0, repo_dir)  # Make Python interpreter aware of the repo
+
+    use_cache = cache and os.path.exists(repo_dir)
 
     # Github uses '{repo_name}-{branch_name}' as folder name which is not importable
     # We need to manually rename it to '{repo_name}'
     # Unzip the code and rename the base folder
-    try:
-        zipfile.ZipFile(cached_file).extractall(hub_dir)
-        os.remove(cached_file)  # remove zip file
-        shutil.move(extracted_repo, repo_dir)
-        sys.path.insert(0, repo_dir)  # Make Python interpreter aware of the repo
-    except Exception:
-        raise RuntimeError('Failed to extract/rename the repo')
+    if not use_cache:
+        try:
+            if os.path.exists(extracted_repo):
+                shutil.rmtree(extracted_repo)
+            if os.path.exists(repo_dir):
+                shutil.rmtree(repo_dir)
+            _download_url_to_file(url, cached_file)
+            zipfile.ZipFile(cached_file).extractall(hub_dir)
+            os.remove(cached_file)  # remove zip file
+            shutil.move(extracted_repo, repo_dir)
+        except Exception:
+            raise RuntimeError('Failed to extract/rename the repo')
 
     # Parse the hubconf.py in repo to get hub information
     entrypoints, dependencies, help_msg = _load_hubconf('hubconf')
@@ -199,14 +214,17 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
         if (len(args) and len(model) != len(args)) or (len(kwargs) and len(kwargs) != len(model)):
             raise ValueError('If not empty, args/kwargs should have the same length as model')
         for func_name, arg, kwarg in zip(model, args, kwargs):
-            res.append(_load_single_model(func_name, entrypoints, hub_dir, arg, kwarg))
+            res.append(_load_single_model(func_name, entrypoints, hub_dir, cache, arg, kwarg))
     elif isinstance(model, str):
-        res = _load_single_model(model, entrypoints, hub_dir, args, kwargs)
+        res = _load_single_model(model, entrypoints, hub_dir, cache, args, kwargs)
     else:
         raise ValueError('Invalid input: model should be a string or a list of strings')
 
-    # Clean up downloaded files and hub_dir
+    # Clean up downloaded files
     if not cache:
-        shutil.rmtree(hub_dir)
+        if hub_dir_existed:
+            shutil.rmtree(repo_dir)
+        else:
+            shutil.rmtree(hub_dir)
 
     return res
