@@ -8,16 +8,17 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 
-CAFFE2_DEFINE_bool(caffe2_hip_full_device_control,
-                   false,
-                   "If true, assume all the hipSetDevice and hipGetDevice calls will be "
-                   "controlled by Caffe2, and non-Caffe2 code will ensure that the entry and "
-                   "exit point has the same cuda device. Under the hood, Caffe2 will use "
-                   "thread local variables to cache the device, in order to speed up set and "
-                   "get device calls. This is an experimental feature that may have non "
-                   "trivial side effects, so use it with care and only enable it if you are "
-                   "absolutely sure. Also, this flag should not be changed after the program "
-                   "initializes.");
+C10_DEFINE_bool(
+    caffe2_hip_full_device_control,
+    false,
+    "If true, assume all the hipSetDevice and hipGetDevice calls will be "
+    "controlled by Caffe2, and non-Caffe2 code will ensure that the entry and "
+    "exit point has the same cuda device. Under the hood, Caffe2 will use "
+    "thread local variables to cache the device, in order to speed up set and "
+    "get device calls. This is an experimental feature that may have non "
+    "trivial side effects, so use it with care and only enable it if you are "
+    "absolutely sure. Also, this flag should not be changed after the program "
+    "initializes.");
 
 namespace caffe2 {
 
@@ -88,7 +89,7 @@ int NumHipDevices()
 
 namespace {
 int gDefaultGPUID = 0;
-// Only used when FLAGS_caffe2_hip_full_device_control is set true.
+// Only used when c10::FLAGS_caffe2_hip_full_device_control is set true.
 thread_local int gCurrentDevice = -1;
 } // namespace
 
@@ -108,36 +109,28 @@ int GetDefaultGPUID() { return gDefaultGPUID; }
 
 int CaffeHipGetDevice()
 {
-    if(FLAGS_caffe2_hip_full_device_control)
-    {
-        if(gCurrentDevice < 0)
-        {
-            HIP_ENFORCE(hipGetDevice(&gCurrentDevice));
-        }
-        return gCurrentDevice;
+  if (c10::FLAGS_caffe2_hip_full_device_control) {
+    if (gCurrentDevice < 0) {
+      HIP_ENFORCE(hipGetDevice(&gCurrentDevice));
     }
-    else
-    {
-        int gpu_id = 0;
-        HIP_ENFORCE(hipGetDevice(&gpu_id));
-        return gpu_id;
-    }
+    return gCurrentDevice;
+  } else {
+    int gpu_id = 0;
+    HIP_ENFORCE(hipGetDevice(&gpu_id));
+    return gpu_id;
+  }
 }
 
 void CaffeHipSetDevice(const int id)
 {
-    if(FLAGS_caffe2_hip_full_device_control)
-    {
-        if(gCurrentDevice != id)
-        {
-            HIP_ENFORCE(hipSetDevice(id));
-        }
-        gCurrentDevice = id;
+  if (c10::FLAGS_caffe2_hip_full_device_control) {
+    if (gCurrentDevice != id) {
+      HIP_ENFORCE(hipSetDevice(id));
     }
-    else
-    {
-        HIP_ENFORCE(hipSetDevice(id));
-    }
+    gCurrentDevice = id;
+  } else {
+    HIP_ENFORCE(hipSetDevice(id));
+  }
 }
 
 int GetGPUIDForPointer(const void* ptr)

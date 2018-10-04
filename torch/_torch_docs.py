@@ -1210,7 +1210,7 @@ digamma(input) -> Tensor
 Computes the logarithmic derivative of the gamma function on `input`.
 
 .. math::
-    \psi(x) = \frac{d}{dx} \ln\left(\gamma\left(x\right)\right) = \frac{\gamma'(x)}{\gamma(x)}
+    \psi(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
 
 Args:
     input (Tensor): the tensor to compute the digamma function on
@@ -2936,9 +2936,9 @@ mvlgamma(input, p) -> Tensor
 Computes the multivariate log-gamma function with dimension :math:`p` element-wise, given by
 
 .. math::
-    \log(\gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\gamma\left(a - \frac{i - 1}{2}\right)\right)
+    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
 
-where :math:`C = \log(\pi) \times \frac{p (p - 1)}{2}` and :math:`\gamma(.)` is the Gamma function.
+where :math:`C = \log(\pi) \times \frac{p (p - 1)}{2}` and :math:`\Gamma(\cdot)` is the Gamma function.
 
 If any of the elements are less than or equal to :math:`\frac{p - 1}{2}`, then an error
 is thrown.

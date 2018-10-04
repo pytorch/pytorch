@@ -54,13 +54,12 @@ endif()
 if (USE_OPENCV)
   caffe2_binary_target("make_image_db.cc")
   target_link_libraries(make_image_db ${OpenCV_LIBS})
+  caffe2_binary_target("convert_image_to_tensor.cc")
+  target_link_libraries(convert_image_to_tensor ${OpenCV_LIBS})
 endif()
 
 if (USE_OBSERVERS)
-  add_executable(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
-  target_link_libraries(caffe2_benchmark  ${Caffe2_MAIN_LIBS})
-  target_link_libraries(caffe2_benchmark ${Caffe2_MODULES})
-  install(TARGETS caffe2_benchmark DESTINATION bin)
+  caffe2_binary_target(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
 endif()
 
 # ---[ tutorials

@@ -16,9 +16,9 @@
 
 // This script converts an image dataset to leveldb.
 //
-// caffe2::FLAGS_input_folder is the root folder that holds all the images, and
-// caffe2::FLAGS_list_file should be a list of files as well as their labels, in the
-// format as
+// c10::FLAGS_input_folder is the root folder that holds all the images, and
+// c10::FLAGS_list_file should be a list of files as well as their labels, in
+// the format as
 //   subfolder1/file1.JPEG 7
 //   ....
 
@@ -35,14 +35,15 @@
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
 
-CAFFE2_DEFINE_string(input_db_name, "", "The input image file name.");
-CAFFE2_DEFINE_string(output_db_name, "", "The output training leveldb name.");
-CAFFE2_DEFINE_bool(color, true, "If set, load images in color.");
-CAFFE2_DEFINE_int(scale, 256,
-    "If caffe2::FLAGS_raw is set, scale all the images' shorter edge to the given "
+C10_DEFINE_string(input_db_name, "", "The input image file name.");
+C10_DEFINE_string(output_db_name, "", "The output training leveldb name.");
+C10_DEFINE_bool(color, true, "If set, load images in color.");
+C10_DEFINE_int(
+    scale,
+    256,
+    "If c10::FLAGS_raw is set, scale all the images' shorter edge to the given "
     "value.");
-CAFFE2_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
-
+C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
 
 namespace caffe2 {
 
@@ -92,7 +93,7 @@ void ConvertToRawDataset(
   data->set_data_type(TensorProto::BYTE);
   data->add_dims(0);
   data->add_dims(0);
-  if (caffe2::FLAGS_color) {
+  if (c10::FLAGS_color) {
     data->add_dims(3);
   }
   string value;
@@ -107,28 +108,30 @@ void ConvertToRawDataset(
     const string& encoded_image = input_protos.protos(0).string_data(0);
     int encoded_size = encoded_image.size();
     cv::Mat img = cv::imdecode(
-        cv::Mat(1, &encoded_size, CV_8UC1,
-        const_cast<char*>(encoded_image.data())),
-        caffe2::FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+        cv::Mat(
+            1, &encoded_size, CV_8UC1, const_cast<char*>(encoded_image.data())),
+        c10::FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
     cv::Mat resized_img;
     int scaled_width, scaled_height;
-    if (caffe2::FLAGS_warp) {
-      scaled_width = caffe2::FLAGS_scale;
-      scaled_height = caffe2::FLAGS_scale;
+    if (c10::FLAGS_warp) {
+      scaled_width = c10::FLAGS_scale;
+      scaled_height = c10::FLAGS_scale;
     } else if (img.rows > img.cols) {
-      scaled_width = caffe2::FLAGS_scale;
-      scaled_height = static_cast<float>(img.rows) * caffe2::FLAGS_scale / img.cols;
+      scaled_width = c10::FLAGS_scale;
+      scaled_height =
+          static_cast<float>(img.rows) * c10::FLAGS_scale / img.cols;
     } else {
-      scaled_height = caffe2::FLAGS_scale;
-      scaled_width = static_cast<float>(img.cols) * caffe2::FLAGS_scale / img.rows;
+      scaled_height = c10::FLAGS_scale;
+      scaled_width = static_cast<float>(img.cols) * c10::FLAGS_scale / img.rows;
     }
     cv::resize(img, resized_img, cv::Size(scaled_width, scaled_height), 0, 0,
                  cv::INTER_LINEAR);
     data->set_dims(0, scaled_height);
     data->set_dims(1, scaled_width);
     DCHECK(resized_img.isContinuous());
-    data->set_byte_data(resized_img.ptr(),
-                        scaled_height * scaled_width * (caffe2::FLAGS_color ? 3 : 1));
+    data->set_byte_data(
+        resized_img.ptr(),
+        scaled_height * scaled_width * (c10::FLAGS_color ? 3 : 1));
     output_protos.SerializeToString(&value);
     // Put in db
     batch->Put(iter->key(), value);
@@ -151,6 +154,6 @@ void ConvertToRawDataset(
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
   caffe2::ConvertToRawDataset(
-      caffe2::FLAGS_input_db_name, caffe2::FLAGS_output_db_name);
+      c10::FLAGS_input_db_name, c10::FLAGS_output_db_name);
   return 0;
 }

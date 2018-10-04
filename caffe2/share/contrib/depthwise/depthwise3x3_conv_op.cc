@@ -7,7 +7,7 @@
 #include <arm_neon.h>
 #endif
 
-CAFFE2_DEFINE_bool(caffe2_profile_depthwise, false, "");
+C10_DEFINE_bool(caffe2_profile_depthwise, false, "");
 
 namespace caffe2 {
 
@@ -502,7 +502,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
       }
     }
 #endif
-    if (FLAGS_caffe2_profile_depthwise) {
+    if (c10::FLAGS_caffe2_profile_depthwise) {
       char buffer[1024];
       const double gmacs = double(
                                Y->dim32(2) * Y->dim32(3) * Y->dim32(1) *
