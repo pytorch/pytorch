@@ -126,8 +126,8 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
                 assert done_event.is_set()
                 return
             elif done_event.is_set():
-                # Done event is set. But I haven't received the final .signal
-                # (None) yet. We keep continuing until get it. Skips the
+                # Done event is set. But I haven't received the final signal
+                # (None) yet. We keep continuing until get it, and skip the
                 # processing steps.
                 continue
             idx, batch_indices = r
@@ -165,6 +165,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
             assert done_event.is_set()
             return
         elif done_event.is_set():
+            # Haven't seen the final signal yet. Keep getting until None.
             continue
         elif isinstance(r[1], ExceptionWrapper):
             out_queue.put(r)
@@ -361,7 +362,8 @@ class _DataLoaderIter(object):
     #        b. It doesn't prevent hanging if users have references to the
     #           iterator.
     #
-    #   3. All processes exit if any of them die unexpectedly (e.g., SIGKILL).
+    #   3. All processes exit if any of them die unexpectedly (e.g., error,
+    #      SIGKILL).
     #
     #      As shown above, the workers are set as daemonic children of the main
     #      process. However, automatic cleaning-up of such child processes only
@@ -377,13 +379,17 @@ class _DataLoaderIter(object):
     #           `cancel_join_thread` or unexpected exit).
     #
     #           For child exit, we register SIGCHLD handler on main process,
-    #           and checks if any of the workers fail in the (Python) handler.
+    #           which checks if any of the workers fail in the (Python) handler.
     #           See DataLoader.cpp.
     #
-    #           For other `.get()` calls, we guard them with timeouts, and check
-    #           the status of the sender when timeout happens. E.g., in the
-    #           workers, the `ManagerWatchdog` class is used to check main
-    #           process status.
+    #           For `.get()` calls where the sender(s) is not the workers, we
+    #           guard them with timeouts, and check the status of the sender
+    #           when timeout happens:
+    #             + in the workers, the `ManagerWatchdog` class checks the main
+    #               process status.
+    #             + if `pin_memory=True`, when getting from `pin_memory_thread`,
+    #               check `pin_memory_thread` status periodically until `.get()`
+    #               returns or see that `pin_memory_thread` died.
     #
     #        b. A process won't hang when putting into a queue;
     #
@@ -397,6 +403,11 @@ class _DataLoaderIter(object):
     #           and each `index_queue` (main process -> worker), we use
     #           `q.cancel_join_thread()` in sender process before any `q.put` to
     #           prevent this automatic join.
+    #
+    #           Moreover, having all queues called `cancel_join_thread` makes
+    #           implementing graceful shutdown logic in `__del__` much easier.
+    #           It won't need to get from any queue, which would also need to be
+    #           guarded by periodic status checks.
     #
     #           Note that this may leave corrupted data in the queue, but we
     #           don't care about the data anyways once we are shutting down.
@@ -515,17 +526,29 @@ class _DataLoaderIter(object):
         return len(self.batch_sampler)
 
     def _get_batch(self):
+        # In the non-timeout case, worker exit is covered by SIGCHLD handler.
+        # But if `pin_memory=True`, we still need account for the possibility
+        # that `pin_memory_thread` dies.
         if self.timeout > 0:
             try:
                 batch = self.data_queue.get(timeout=self.timeout)
             except queue.Empty:
                 raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
-        else:
-            batch = self.data_queue.get()
-        if self.pin_memory:
+        elif self.pin_memory:
+            while self.pin_memory_thread.is_alive():
+                try:
+                    batch = self.data_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+                    break
+                except queue.Empty:
+                    continue
+            else:
+                # while condition is false, i.e., pin_memory_thread died.
+                raise RuntimeError('Pin memory thread exited unexpectedly')
             # In this case, `self.data_queue` is a `queue.Queue`, which needs us
             # calling `.task_done()`.
             self.data_queue.task_done()
+        else:
+            batch = self.data_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         return batch
 
     def __next__(self):

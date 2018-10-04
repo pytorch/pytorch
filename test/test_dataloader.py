@@ -619,6 +619,9 @@ class TestDataLoader(TestCase):
         r'''There might be ConnectionResetError or leaked semaphore warning
         (due to dirty process exit), but they are all safe to ignore'''
 
+        # TODO: test the case where the pin_memory_thread triggers an
+        #       error/fatal signal. I haven't found out how to properly do that.
+
         # Array to store the worker pids.
         worker_pids = mp.Array('i', [-1 for _ in range(10)])
 
