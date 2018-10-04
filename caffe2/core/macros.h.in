@@ -38,7 +38,6 @@ static_assert(
 #cmakedefine CAFFE2_USE_CUDNN
 #cmakedefine CAFFE2_USE_EIGEN_FOR_BLAS
 #cmakedefine CAFFE2_USE_FBCODE
-#cmakedefine CAFFE2_USE_GFLAGS
 #cmakedefine CAFFE2_USE_GOOGLE_GLOG
 #cmakedefine CAFFE2_USE_LITE_PROTO
 #cmakedefine CAFFE2_USE_MKL

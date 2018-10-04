@@ -23,9 +23,9 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/utils/zmq_helper.h"
 
-CAFFE2_DEFINE_string(server, "tcp://*:5555", "The server address.");
-CAFFE2_DEFINE_string(input_db, "", "The input db.");
-CAFFE2_DEFINE_string(input_db_type, "", "The input db type.");
+C10_DEFINE_string(server, "tcp://*:5555", "The server address.");
+C10_DEFINE_string(input_db, "", "The input db.");
+C10_DEFINE_string(input_db_type, "", "The input db type.");
 
 using caffe2::db::DB;
 using caffe2::db::Cursor;
@@ -36,11 +36,11 @@ int main(int argc, char** argv) {
 
   LOG(INFO) << "Opening DB...";
   auto in_db = caffe2::db::CreateDB(
-      caffe2::FLAGS_input_db_type, caffe2::FLAGS_input_db, caffe2::db::READ);
+      c10::FLAGS_input_db_type, c10::FLAGS_input_db, caffe2::db::READ);
   CAFFE_ENFORCE(
       in_db,
-      "Cannot load input db " + caffe2::FLAGS_input_db + " of expected type " +
-          caffe2::FLAGS_input_db_type);
+      "Cannot load input db " + c10::FLAGS_input_db + " of expected type " +
+          c10::FLAGS_input_db_type);
   auto cursor = in_db->NewCursor();
   LOG(INFO) << "DB opened.";
 
@@ -48,8 +48,8 @@ int main(int argc, char** argv) {
 
   //  Socket to talk to clients
   caffe2::ZmqSocket sender(ZMQ_PUSH);
-  sender.Bind(caffe2::FLAGS_server);
-  LOG(INFO) << "Server created at " << caffe2::FLAGS_server;
+  sender.Bind(c10::FLAGS_server);
+  LOG(INFO) << "Server created at " << c10::FLAGS_server;
 
   while (1) {
     VLOG(1) << "Sending " << cursor->key();
