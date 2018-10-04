@@ -27,6 +27,7 @@ struct DefaultTensorOptions {
 };
 
 // TODO: Even better would be < sizeof(int64_t)
-static_assert(sizeof(DefaultTensorOptions) < sizeof(int64_t) * 2);
+static_assert(sizeof(DefaultTensorOptions) < sizeof(int64_t) * 2,
+              "DefaultTensorOptions must fit in 128 bits");
 
 } // namespace at

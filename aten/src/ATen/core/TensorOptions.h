@@ -234,7 +234,8 @@ struct CAFFE2_API TensorOptions {
 // We should aspire to fit in one machine-size word; but a size greater than two
 // words is too much.  (We are doing terribly on 32-bit archs, where we require
 // three machine size words to store tensor options.  Eek!)
-static_assert( sizeof(TensorOptions) <= sizeof(int64_t) * 2 );
+static_assert( sizeof(TensorOptions) <= sizeof(int64_t) * 2,
+               "TensorOptions must fit in 128-bits" );
 
 /// Convenience function that returns a `TensorOptions` object with the `dtype`
 /// set to the given one.
