@@ -403,7 +403,7 @@ class CAFFE2_API TypeMeta {
    * Returns a TypeMeta object that corresponds to the typename T.
    */
   template <typename T>
-  static TypeMeta Make() {
+  static constexpr TypeMeta Make() {
     // The instance pointed to is declared here, but defined in a .cpp file.
     // We need to silence the compiler warning about using an undefined
     // variable template. '-Wpragmas' and '-Wunknown-warning-option' has to be
