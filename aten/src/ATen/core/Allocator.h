@@ -156,8 +156,4 @@ struct AllocatorRegisterer {
   static AllocatorRegisterer<t> g_allocator_##d(f); \
   }
 
-// std::unique_ptr<at::Allocator>* GetAllocatorArray();
-// extern std::unique_ptr<at::Allocator> allocator_array[static_cast<int>(
-//      at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
-
 } // namespace caffe2
