@@ -401,7 +401,7 @@ class _DataLoaderIter(object):
     #                 are stopping the workers.
     #             ii. for main process that sends indices to workers, if workers
     #                 exit unexpectedly, the SIGCHLD handler registered in (a)
-    #                 above will interrupt the main process, and should cause
+    #                 above will interrupt the main process, and should trigger
     #                 cleaning-up. The putting thread of `index_queue` will then
     #                 fail with SIGPIPE when closed (`.close()` is alawys called
     #                 before joining).
@@ -482,11 +482,6 @@ class _DataLoaderIter(object):
                           self.worker_result_queue, self.done_event,
                           self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
-                # NB: Do **not** set w.daemon=True. Otherwise during cleaning up
-                #     Python may terminate the workers before they send the last
-                #     `None`s over and signaling termination to either
-                #     pin_memory_thread or main process.
-                #
                 w.daemon = True
                 # NB: Process.start() actually take some time as it needs to
                 #     start a process and pass the arguments over via a pipe.
