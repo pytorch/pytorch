@@ -56,7 +56,15 @@ CAFFE2_API const DefaultTensorOptions& getDefaultTensorOptions();
 ///     at::zeros({2,2}, at::requires_grad());
 ///
 struct CAFFE2_API TensorOptions {
-  TensorOptions() {}
+  TensorOptions()
+    : requires_grad_(false)
+    , is_variable_(false)
+    , has_device_(false)
+    , has_dtype_(false)
+    , has_layout_(false)
+    , has_requires_grad_(false)
+    , has_is_variable_(false)
+    {}
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
@@ -137,13 +145,13 @@ struct CAFFE2_API TensorOptions {
 
   /// Returns the device of the `TensorOptions`.
   Device device() const noexcept {
-    return has_device_ ? device_ : getDefaultTensorOptions().device()
+    return has_device_ ? device_ : getDefaultTensorOptions().device();
   }
 
   /// Returns the device of the `TensorOptions`, or `nullopt` if
   /// device is not specified.
   optional<Device> device_opt() const noexcept {
-    return has_device_ ? device_ : nullopt;
+    return has_device_ ? make_optional(device_) : nullopt;
   }
 
   /// Returns the device index of the `TensorOptions`.
@@ -153,13 +161,13 @@ struct CAFFE2_API TensorOptions {
 
   /// Returns the dtype of the `TensorOptions`.
   ScalarType dtype() const noexcept {
-    return has_dtype_ ? dtype_ : getDefaultTensorOptions().dtype()
+    return has_dtype_ ? dtype_ : getDefaultTensorOptions().dtype();
   }
 
   /// Returns the dtype of the `TensorOptions`, or `nullopt` if
   /// device is not specified.
   optional<ScalarType> dtype_opt() const noexcept {
-    return has_dtype_ ? dtype_ : nullopt;
+    return has_dtype_ ? make_optional(dtype_) : nullopt;
   }
 
   /// Returns the layout of the `TensorOptions`.
@@ -170,7 +178,7 @@ struct CAFFE2_API TensorOptions {
   /// Returns the layout of the `TensorOptions`, or `nullopt` if
   /// layout is not specified.
   optional<Layout> layout_opt() const noexcept {
-    return has_layout_ ? layout_ : nullopt;
+    return has_layout_ ? make_optional(layout_) : nullopt;
   }
 
   /// Returns the `requires_grad` property of the `TensorOptions`.
@@ -181,7 +189,7 @@ struct CAFFE2_API TensorOptions {
   /// Returns the `requires_grad` property of the `TensorOptions`, or `nullopt`
   /// if `requires_grad` is not specified.
   optional<bool> requires_grad_opt() const noexcept {
-    return has_requires_grad_ ? requires_grad_ : nullopt;
+    return has_requires_grad_ ? make_optional(requires_grad_) : nullopt;
   }
 
   /// Returns the `is_variable` property of the `TensorOptions`.
@@ -192,7 +200,7 @@ struct CAFFE2_API TensorOptions {
   /// Returns the `is_variable` property of the `TensorOptions`, or
   /// `nullopt` if `is_variable` is not specified.
   optional<bool> is_variable_opt() const noexcept {
-    return has_is_variable_ ? is_variable_ : nullopt;
+    return has_is_variable_ ? make_optional(is_variable_) : nullopt;
   }
 
   // Resolves the ATen backend specified by the current construction axes.
@@ -213,22 +221,22 @@ struct CAFFE2_API TensorOptions {
   // NB: We didn't use at::optional here, because then we can't pack
   // the has_***_ boolean fields.
 
-  Device     device_; // 64-bit (TODO: this should be 32-bit)
+  Device     device_  = at::kCPU; // 64-bit (TODO: this should be 32-bit)
 
   // Bitmask required here to get this to fit inside 32 bits (or even 64 bits,
   // for that matter)
 
-  ScalarType dtype_;  // 8-bit
-  Layout     layout_; // 8-bit
+  ScalarType dtype_   = at::kFloat;  // 8-bit
+  Layout     layout_  = at::kStrided; // 8-bit
 
-  bool requires_grad_     : 1 = false;
-  bool is_variable_       : 1 = false;
+  bool requires_grad_     : 1;
+  bool is_variable_       : 1;
 
-  bool has_device_        : 1 = false;
-  bool has_dtype_         : 1 = false;
-  bool has_layout_        : 1 = false;
-  bool has_requires_grad_ : 1 = false;
-  bool has_is_variable_   : 1 = false;
+  bool has_device_        : 1;
+  bool has_dtype_         : 1;
+  bool has_layout_        : 1;
+  bool has_requires_grad_ : 1;
+  bool has_is_variable_   : 1;
 };
 
 // We should aspire to fit in one machine-size word; but a size greater than two

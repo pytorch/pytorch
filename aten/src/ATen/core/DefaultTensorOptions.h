@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/core/Backend.h>
 #include <ATen/core/Device.h>
 #include <ATen/core/Layout.h>
@@ -16,7 +18,7 @@ struct DefaultTensorOptions {
   bool is_variable()    const noexcept { return is_variable_; }
 
   // Defined in TensorOptions.h
-  DefaultTensorOptions& merge(const TensorOptions& options);
+  inline DefaultTensorOptions& merge(const TensorOptions& options);
 
  private:
   Device device_      = at::kCPU;     // 64-bit

@@ -29,7 +29,7 @@ struct OptionsGuard {
 
   /// Restores the original default options.
   ~OptionsGuard() {
-    getDefaultTensorOptions() = original_;
+    mutateDefaultTensorOptions() = original_;
   }
 
  private:
