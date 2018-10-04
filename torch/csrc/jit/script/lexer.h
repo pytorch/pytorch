@@ -8,6 +8,7 @@
 #include <vector>
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/source_range.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include <torch/csrc/utils/memory.h>
 #include <locale.h>
 
@@ -98,8 +99,8 @@ enum TokenKind {
 #undef DEFINE_TOKEN
 };
 
-std::string kindToString(int kind);
-int stringToKind(std::string str);
+TORCH_API std::string kindToString(int kind);
+TORCH_API int stringToKind(std::string str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;
@@ -132,7 +133,7 @@ struct TokenTrie {
 
 // stuff that is shared against all TC lexers/parsers and is initialized only
 // once.
-struct SharedParserData {
+struct TORCH_API SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
@@ -338,7 +339,7 @@ struct SharedParserData {
   TokenTrieRef head;
 };
 
-SharedParserData& sharedParserData();
+TORCH_API SharedParserData& sharedParserData();
 
 struct Token {
   int kind;

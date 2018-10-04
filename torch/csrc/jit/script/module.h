@@ -38,7 +38,7 @@ namespace torch { namespace jit { namespace script {
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 
-struct Method {
+struct TORCH_API Method {
   Method(std::string name, bool optimize,
          std::shared_ptr<Graph> graph,
          std::vector<at::Tensor*> initial_members,
@@ -252,12 +252,12 @@ private:
 
 struct Module;
 
-struct NamedModule {
+struct TORCH_API NamedModule {
   std::string name;
   std::shared_ptr<Module> module;
 };
 
-struct NamedParameter {
+struct TORCH_API NamedParameter {
   NamedParameter(std::string name, at::Tensor tensor, bool is_buffer)
   : name(std::move(name))
   , is_buffer(is_buffer)
@@ -276,7 +276,7 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-struct Module {
+struct TORCH_API Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module()
   : modules("Module")
@@ -429,7 +429,7 @@ struct Module {
 
 // returns c10::nullopt and fills in failure_messages if the callee does not
 // match the functions schema
-c10::optional<std::vector<Value*>> try_emit_call_to(
+TORCH_API c10::optional<std::vector<Value*>> try_emit_call_to(
     Graph& graph,
     SourceRange loc,
     Method& callee,
