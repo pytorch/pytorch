@@ -391,19 +391,15 @@ class _DataLoaderIter(object):
     #           objects. The background thread is usually automatically joined
     #           when the process exits.
     #
-    #           However, in case that the receiver has ended abruptly, the join
-    #           will hang forever. Therefore,
-    #             i.  for workers that send data to main process, we use
-    #                 `data_queue.cancel_join_thread()` to prevent this
-    #                 automatic join. Note that this may leave corrupted data in
-    #                 the queue, but we don't want those data anyways once we
-    #                 are stopping the workers.
-    #             ii. for main process that sends indices to workers, if workers
-    #                 exit unexpectedly, the SIGCHLD handler registered in (a)
-    #                 above will interrupt the main process, and should trigger
-    #                 cleaning-up. The putting thread of `index_queue` will then
-    #                 fail with SIGPIPE when closed (`.close()` is alawys called
-    #                 before joining).
+    #           However, in case that the receiver has ended abruptly while
+    #           reading from the pipe, the join will hang forever. Therefore,
+    #           for both `worker_result_queue` (worker -> main process/pin_memory_thread)
+    #           and each `index_queue` (main process -> worker), we use
+    #           `q.cancel_join_thread()` in sender process before any `q.put` to
+    #           prevent this automatic join.
+    #
+    #           Note that this may leave corrupted data in the queue, but we
+    #           don't care about the data anyways once we are shutting down.
     #
     #
     # Now let's get back to 1:
@@ -430,16 +426,12 @@ class _DataLoaderIter(object):
     #     b. Exit `pin_memory_thread`
     #          i.   Put `None` in `worker_result_queue`.
     #          ii.  Join the `pin_memory_thread`.
-    #          iii. `worker_result_queue.cancel_join_thread()` in case that
-    #               `pin_memory_thread` died so the `None` can't be put.
     #
     #     c. Exit the workers.
     #          i.   Put `None` in each worker's `index_queue`.
     #          ii.  Join the workers.
-    #          iii. `index_queue.cancel_join_thread()` for each index queue in
-    #               case that the worker died so the `None` can't be put.
     #
-    #        Note: this has to be after (b) because it may leave corrupted data
+    #        Note: This has to be after (b) because it may leave corrupted data
     #              in `worker_result_queue`, which `pin_memory_thread` reads
     #              from.
     #
@@ -479,6 +471,7 @@ class _DataLoaderIter(object):
             self.workers = []
             for i in range(self.num_workers):
                 index_queue = multiprocessing.Queue()
+                index_queue.cancel_join_thread()
                 w = multiprocessing.Process(
                     target=_worker_loop,
                     args=(self.dataset, index_queue,
@@ -610,12 +603,14 @@ class _DataLoaderIter(object):
             # reads from.
             if hasattr(self, 'pin_memory_thread'):
                 # Use hasattr in case error happens before we set the attribute.
+                # First time do `worker_result_queue.put` in this process.
+                # `cancel_join_thread` in case that pin_memory_thread exited.
+                self.worker_result_queue.cancel_join_thread()
                 self.worker_result_queue.put(None)
                 # Indicate that no more data will be put on this queue by the
                 # current process.
                 self.worker_result_queue.close()
                 self.pin_memory_thread.join()
-                self.worker_result_queue.cancel_join_thread()
 
             # Exit workers now.
             for q in self.index_queues:
@@ -625,8 +620,6 @@ class _DataLoaderIter(object):
                 q.close()
             for w in self.workers:
                 w.join()
-            for q in self.index_queues:
-                q.cancel_join_thread()
 
     def __del__(self):
         if self.num_workers > 0:
