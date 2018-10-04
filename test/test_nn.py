@@ -6921,7 +6921,8 @@ def bceloss_weights_no_reduce_test():
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
-        pickle=False, test_cuda=(not TEST_WITH_ROCM))
+        pickle=False, test_cuda=(not TEST_WITH_ROCM)
+    )
 
 
 def bceloss_weights_no_reduce_scalar_test():
@@ -6935,7 +6936,8 @@ def bceloss_weights_no_reduce_scalar_test():
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
-        pickle=False)
+        pickle=False
+    )
 
 
 def bce_with_logistic_no_reduce_test():
@@ -6963,7 +6965,8 @@ def bce_with_logistic_no_reduce_scalar_test():
         reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
         check_gradgrad=False,
         pickle=False,
-        decorator=skipIfRocm)
+        decorator=skipIfRocm
+    )
 
 
 def kldivloss_with_target_no_reduce_test():
