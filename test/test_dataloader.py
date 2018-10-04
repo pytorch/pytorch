@@ -261,7 +261,6 @@ def _test_timeout_pin_memory():
     dataset = SleepDataset(10, 3)
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1, pin_memory=True)
     _ = next(iter(dataloader))
-    time.sleep(100)
 
 
 def disable_stderr(_):
