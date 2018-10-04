@@ -326,7 +326,7 @@ void TrackMemoryAlloc(size_t nbytes)
 }
 }
 
-std::pair<void*, MemoryDeleter> HIPStaticContext::New(size_t nbytes) const {
+at::DataPtr HIPStaticContext::New(size_t nbytes) const {
   // Lock the mutex
   std::lock_guard<std::mutex> lock(HIPContext::mutex());
   // A one-time caffe2 cuda initializer.
@@ -344,7 +344,7 @@ std::pair<void*, MemoryDeleter> HIPStaticContext::New(size_t nbytes) const {
             g_size_map[ptr]               = nbytes;
             g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
-        return {ptr, Delete};
+        return {ptr, ptr, &Delete, at::Device(HIP)};
     case HipMemoryPoolType::CUB:
         HIP_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
         g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
@@ -353,7 +353,7 @@ std::pair<void*, MemoryDeleter> HIPStaticContext::New(size_t nbytes) const {
         {
             g_size_map[ptr] = nbytes;
         }
-        return {ptr, Delete};
+        return {ptr, ptr, &Delete, at::Device(HIP)};
     case HipMemoryPoolType::THC:
         HIP_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
         if (FLAGS_caffe2_gpu_memory_tracking)
@@ -361,9 +361,9 @@ std::pair<void*, MemoryDeleter> HIPStaticContext::New(size_t nbytes) const {
           g_size_map[ptr]                = nbytes;
           g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
-        return {ptr, Delete};
-    }
-    return {nullptr, Delete};
+        return {ptr, ptr, &Delete, at::Device(HIP)};
+  }
+  return {nullptr, nullptr, &Delete, at::Device(HIP)};
 }
 
 void HIPStaticContext::Delete(void* ptr) {
