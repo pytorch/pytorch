@@ -6925,7 +6925,7 @@ def bce_with_logistic_no_reduce_test():
         reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
         check_gradgrad=False,
         pickle=False,
-        )
+    )
 
 
 def bce_with_logistic_no_reduce_scalar_test():
@@ -6965,7 +6965,7 @@ def kldivloss_no_reduce_test():
         reference_fn=lambda i, _:
             loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduction='none'),
         pickle=False,
-        )
+    )
 
 
 def kldivloss_no_reduce_scalar_test():
