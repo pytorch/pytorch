@@ -159,12 +159,6 @@ std::unique_ptr<at::Allocator>* GetAllocatorArray();
 // extern std::unique_ptr<at::Allocator> allocator_array[static_cast<int>(
 //    at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 
-inline at::Allocator* GetAllocator(const at::DeviceType& t) {
-  auto* allocator_array = GetAllocatorArray();
-  auto& uniq_ptr = allocator_array[static_cast<int>(t)];
-  auto* alloc = uniq_ptr.get();
-  AT_ASSERTM(alloc, "Allocator for ", t, " is not set.");
-  return alloc;
-}
+at::Allocator* GetAllocator(const at::DeviceType& t);
 
 } // namespace caffe2

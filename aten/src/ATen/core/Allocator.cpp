@@ -42,4 +42,12 @@ void SetAllocator(at::DeviceType t, at::Allocator* alloc) {
   uniq_ptr.reset(alloc);
 }
 
+at::Allocator* GetAllocator(const at::DeviceType& t) {
+  auto* allocator_array = GetAllocatorArray();
+  auto& uniq_ptr = allocator_array[static_cast<int>(t)];
+  auto* alloc = uniq_ptr.get();
+  AT_ASSERTM(alloc, "Allocator for ", t, " is not set.");
+  return alloc;
+}
+
 } // namespace caffe2
