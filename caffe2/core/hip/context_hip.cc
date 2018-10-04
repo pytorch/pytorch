@@ -327,22 +327,29 @@ void TrackMemoryAlloc(size_t nbytes)
 }
 
 at::DataPtr HIPStaticContext::New(size_t nbytes) const {
-  // Lock the mutex
-  std::lock_guard<std::mutex> lock(HIPContext::mutex());
-  // A one-time caffe2 cuda initializer.
-  static Caffe2HipInitializerHelper g_hip_initializer_;
-  void* ptr = nullptr;
+  return GetHIPAllocator()->allocate(nbytes);
+}
 
-  if (FLAGS_caffe2_gpu_memory_tracking) {
-    TrackMemoryAlloc(nbytes);
-  }
-  switch (g_hip_memory_pool_type) {
-    case HipMemoryPoolType::NONE:
+struct DefaultHIPAllocator final : public at::Allocator {
+  DefaultHIPAllocator() {}
+  ~DefaultHIPAllocator() override {}
+  at::DataPtr allocate(size_t nbytes) const override {
+    // Lock the mutex
+    std::lock_guard<std::mutex> lock(HIPContext::mutex());
+    // A one-time caffe2 cuda initializer.
+    static Caffe2HipInitializerHelper g_hip_initializer_;
+    void* ptr = nullptr;
+
+    if (FLAGS_caffe2_gpu_memory_tracking) {
+      TrackMemoryAlloc(nbytes);
+    }
+    switch (g_hip_memory_pool_type) {
+      case HipMemoryPoolType::NONE:
         HIP_ENFORCE(hipMalloc(&ptr, nbytes));
         if(FLAGS_caffe2_gpu_memory_tracking)
         {
-            g_size_map[ptr]               = nbytes;
-            g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
+          g_size_map[ptr] = nbytes;
+          g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
         return {ptr, ptr, &Delete, at::Device(HIP)};
     case HipMemoryPoolType::CUB:
@@ -351,7 +358,7 @@ at::DataPtr HIPStaticContext::New(size_t nbytes) const {
         VLOG(2) << "CUB allocating pointer " << ptr << " on device " << CaffeHipGetDevice();
         if(FLAGS_caffe2_gpu_memory_tracking)
         {
-            g_size_map[ptr] = nbytes;
+          g_size_map[ptr] = nbytes;
         }
         return {ptr, ptr, &Delete, at::Device(HIP)};
     case HipMemoryPoolType::THC:
@@ -362,27 +369,26 @@ at::DataPtr HIPStaticContext::New(size_t nbytes) const {
           g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
         return {ptr, ptr, &Delete, at::Device(HIP)};
-  }
-  return {nullptr, nullptr, &Delete, at::Device(HIP)};
-}
-
-void HIPStaticContext::Delete(void* ptr) {
-  // lock the mutex
-  std::lock_guard<std::mutex> lock(HIPContext::mutex());
-
-  if (FLAGS_caffe2_gpu_memory_tracking) {
-    auto sz_it = g_size_map.find(ptr);
-    DCHECK(sz_it != g_size_map.end());
-    auto aff_it = g_hip_device_affiliation.find(ptr);
-    DCHECK(aff_it != g_hip_device_affiliation.end());
-    g_total_mem -= sz_it->second;
-    g_total_by_gpu_map[aff_it->second] -= sz_it->second;
-    g_size_map.erase(sz_it);
+    }
+    return {nullptr, nullptr, &Delete, at::Device(HIP)};
   }
 
-  switch (g_hip_memory_pool_type) {
-    case HipMemoryPoolType::NONE:
-    {
+  static void Delete(void* ptr) {
+    // lock the mutex
+    std::lock_guard<std::mutex> lock(HIPContext::mutex());
+
+    if (FLAGS_caffe2_gpu_memory_tracking) {
+      auto sz_it = g_size_map.find(ptr);
+      DCHECK(sz_it != g_size_map.end());
+      auto aff_it = g_hip_device_affiliation.find(ptr);
+      DCHECK(aff_it != g_hip_device_affiliation.end());
+      g_total_mem -= sz_it->second;
+      g_total_by_gpu_map[aff_it->second] -= sz_it->second;
+      g_size_map.erase(sz_it);
+    }
+
+    switch (g_hip_memory_pool_type) {
+      case HipMemoryPoolType::NONE: {
         // If memory pool is not set up, use simple hipFree.
         hipError_t error = hipFree(ptr);
         // For some reason, in Python runtime we sometimes delete a data pointer
@@ -393,34 +399,44 @@ void HIPStaticContext::Delete(void* ptr) {
         // ignore it. This is definitely not ideal but works for now.
         if(error != hipSuccess)
         {
-            LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
-                       << hipGetErrorString(error);
+          LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
+                     << hipGetErrorString(error);
         }
 
         if(FLAGS_caffe2_gpu_memory_tracking)
         {
-            g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
+          g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
         }
 
         break;
-    }
-    case HipMemoryPoolType::CUB:
-    {
+      }
+      case HipMemoryPoolType::CUB: {
         auto it = g_hip_device_affiliation.find(ptr);
         DCHECK(it != g_hip_device_affiliation.end());
         VLOG(2) << "CUB freeing pointer " << ptr << " on device " << it->second;
         HIP_ENFORCE(g_cub_allocator->DeviceFree(it->second, ptr));
         g_hip_device_affiliation.erase(it);
         break;
-    }
-    case HipMemoryPoolType::THC: {
-      HIP_ENFORCE(g_thc_allocator->Free(ptr));
-      if (FLAGS_caffe2_gpu_memory_tracking) {
-        g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
       }
-      break;
+      case HipMemoryPoolType::THC: {
+        HIP_ENFORCE(g_thc_allocator->Free(ptr));
+        if (FLAGS_caffe2_gpu_memory_tracking) {
+          g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
+        }
+        break;
+      }
     }
-    }
+  }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
+  }
+};
+
+static std::unique_ptr<at::Allocator> g_hip_allocator(
+    new DefaultHIPAllocator());
+at::Allocator* GetHIPAllocator() {
+  return g_hip_allocator.get();
 }
 
 BaseStaticContext* GetHIPStaticContext() {
