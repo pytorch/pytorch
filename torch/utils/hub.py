@@ -3,6 +3,7 @@ import os
 import shutil
 import site
 import sys
+import tempfile
 import zipfile
 
 if sys.version_info[0] == 2:
@@ -155,12 +156,19 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
         a single model or a list of models with corresponding pretrained weights.
     """
     # Setup hub_dir to save downloaded files
-    hub_dir_existed = True
-    if hub_dir is None:
-        hub_dir_existed = False
+    if not cache:
+        hub_dir = tempfile.gettempdir()
+    elif hub_dir is None:
         hub_dir = os.path.expanduser(os.getenv(ENV_TORCH_HUB_DIR, DEFAULT_TORCH_HUB_DIR))
+
+    if '~' in hub_dir:
+        hub_dir = os.path.expanduser(hub_dir)
+
     if not os.path.exists(hub_dir):
+        hub_dir_existed = False
         os.makedirs(hub_dir)
+    else:
+        hub_dir_existed = True
 
     # Parse github repo information
     branch = MASTER_BRANCH
