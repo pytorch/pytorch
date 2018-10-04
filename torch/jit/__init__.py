@@ -48,7 +48,8 @@ _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 
 _compiled_weak_fns = weakref.WeakKeyDictionary()
-_compiled_weak_methods = dict()
+_compiled_weak_modules = {}
+_compiled_weak_methods = {}
 _COMPILATION_PENDING = object()
 _COMPILED = object()
 
@@ -635,28 +636,32 @@ class CompilationUnit(object):
     def __getattr__(self, attr):
         return self.module._get_method(attr)
 
+WeakScriptEntry = namedtuple('WeakScriptEntry', ('status', 'compiled_fn', 'fn', 'rcb'))
+
 
 def _try_compile_weak_script(fn):
     entry = _compiled_weak_fns.get(fn)
     if entry is None:
         return None
 
-    if entry["status"] == _COMPILATION_PENDING:
-        compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
-        _compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
-        entry["status"] = _COMPILED
+    if entry.status == _COMPILATION_PENDING:
+        compiled_fn = torch.jit.script(fn, True, 0, entry.rcb)
+        _compiled_weak_fns[fn] = WeakScriptEntry(
+            _COMPILED,
+            compiled_fn,
+            entry.fn,
+            entry.rcb)
         return compiled_fn
     else:
-        return entry["compiled_fn"]
+        return entry.compiled_fn
 
 
 def weak_script(fn, _weak_fns=_compiled_weak_fns, _frames_up=0, _key=None):
-    _weak_fns[fn if _key is None else _key] = {
-        "status": _COMPILATION_PENDING,
-        "compiled_fn": None,
-        "fn": fn,
-        "rcb": createResolutionCallback(_frames_up + 1)
-    }
+    _weak_fns[fn if _key is None else _key] = WeakScriptEntry(
+        _COMPILATION_PENDING,
+        None,
+        fn,
+        createResolutionCallback(_frames_up + 1))
     return fn
 
 
@@ -683,7 +688,11 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_'
 
 
 def weak_script_method(fn):
-    return weak_script(fn, _weak_fns=_compiled_weak_methods, _frames_up=1, _key=fn.__name__)
+    return weak_script(
+        fn,
+        _weak_fns=_compiled_weak_methods,
+        _frames_up=1,
+        _key=fn.__qualname__)
 
 
 def script_method(fn, _rcb=None):
@@ -708,20 +717,25 @@ def script_method(fn, _rcb=None):
 
 
 def _compile_weak_script_module(mod):
+    entry = _compiled_weak_modules.get(mod.__class__.__name__)
+    if entry is not None:
+        return entry
+
     attrs = {}
     for func_attr in dir(mod):
         func = getattr(mod, func_attr)
         if not callable(func) or not isinstance(func, types.MethodType):
             continue
 
-        entry = _compiled_weak_methods.get(func.__name__)
+        entry = _compiled_weak_methods.get(func.__qualname__)
         if entry is not None:
-            # Construct new class attributes (and create ScriptMethodStubs if necessary)
-            attrs[entry["fn"].__name__] = script_method(entry["fn"], entry["rcb"])
+            # Create ScriptMethodStubs for weak_script_methods
+            attrs[entry.fn.__name__] = script_method(entry.fn, entry.rcb)
+            _compiled_weak_methods.pop(func.__qualname__)
 
     # Generate a new subclass of ScriptModule with the WeakScriptModule methods
-    generated_class_name = "{}Compiled".format(mod.__class__.__name__)
-    result_class = type(generated_class_name, (mod.__class__, ScriptModule), attrs)
+    result_class = type(mod.__class__.__name__, (mod.__class__, ScriptModule), attrs)
+    _compiled_weak_modules[mod.__class__.__name__] = result_class
 
     return result_class()
 
