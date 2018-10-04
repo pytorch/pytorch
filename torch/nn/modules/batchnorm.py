@@ -43,7 +43,7 @@ class _BatchNorm(Module):
     def reset_parameters(self):
         self.reset_running_stats()
         if self.affine:
-            init.uniform_(self.weight)
+            init.ones_(self.weight)
             init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
