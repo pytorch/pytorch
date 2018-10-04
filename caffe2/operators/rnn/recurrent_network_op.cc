@@ -5,7 +5,7 @@
 #ifndef CAFFE2_RNN_NO_TEXT_FORMAT
 #endif
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_rnn_executor,
     true,
     "If set, uses special RNN executor for executing RecurrentNetworkOp");

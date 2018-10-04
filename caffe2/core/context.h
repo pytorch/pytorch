@@ -16,7 +16,7 @@
 #include <ATen/core/ATenCoreTest.h>
 #include <ATen/core/ArrayRef.h>
 
-CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
+C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {
 

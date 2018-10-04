@@ -5,13 +5,13 @@
 
 #ifdef CAFFE2_HAS_MKL_DNN
 
-CAFFE2_DEFINE_bool(
-    caffe2_mkl_implicit_layout_change, false,
+C10_DEFINE_bool(
+    caffe2_mkl_implicit_layout_change,
+    false,
     "Controls the behavior when we call View() on an MKLMemory: if it is set "
     "true, then the View() function will actually change the underlying "
     "storage. If it is set false, an implicit copy is triggered but the "
-    "original storage is not affected."
-    );
+    "original storage is not affected.");
 
 namespace caffe2 {
 
