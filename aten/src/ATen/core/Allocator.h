@@ -142,7 +142,7 @@ namespace caffe2 {
 /** Set the allocator for DeviceType `t` and takes ownership of the allocator
  */
 CAFFE2_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
-at::Allocator* GetAllocator(const at::DeviceType& t);
+CAFFE2_API at::Allocator* GetAllocator(const at::DeviceType& t);
 
 template <at::DeviceType t>
 struct AllocatorRegisterer {
@@ -159,7 +159,5 @@ struct AllocatorRegisterer {
 // std::unique_ptr<at::Allocator>* GetAllocatorArray();
 // extern std::unique_ptr<at::Allocator> allocator_array[static_cast<int>(
 //      at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
-
-at::Allocator* GetAllocator(const at::DeviceType& t);
 
 } // namespace caffe2
