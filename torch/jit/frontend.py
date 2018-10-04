@@ -209,7 +209,10 @@ def build_param(ctx, py_arg):
 def get_default_args(fn):
     if PY2:
         argspec = inspect.getargspec(fn)
-        return dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults))
+        if argspec.defaults is not None:
+            return dict(zip(argspec.args[-len(argspec.defaults):], argspec.defaults))
+        else:
+            return {}
     else:
         signature = inspect.signature(fn)
         return {

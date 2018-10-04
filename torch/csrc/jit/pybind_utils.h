@@ -1,5 +1,8 @@
 #pragma once
 
+#include "torch/csrc/Device.h"
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/Layout.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/stack.h"
@@ -53,6 +56,30 @@ inline void findErrorInKwargs(
   }
 }
 } // namespace detail
+
+inline at::optional<IValue> constantToIValue(py::object obj) {
+  if (py::isinstance<py::bool_>(obj)) {
+    return IValue(py::cast<bool>(obj));
+  } else if (py::isinstance<py::int_>(obj)) {
+    return IValue(py::cast<int64_t>(obj));
+  } else if (py::isinstance<py::float_>(obj)) {
+    return IValue(py::cast<float>(obj));
+  } else if (THPDevice_Check(obj.ptr())) {
+    auto device = (THPDevice*)obj.ptr();
+    std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
+                              device->device.index()};
+    return IValue(v);
+  } else if (THPLayout_Check(obj.ptr())) {
+    auto layout = (THPLayout*)obj.ptr();
+    const auto v = static_cast<int64_t>(layout->layout);
+    return IValue(v);
+  } else if (THPDtype_Check(obj.ptr())) {
+    auto dtype = (THPDtype*)(obj.ptr());
+    const auto v = static_cast<int64_t>(dtype->scalar_type);
+    return IValue(v);
+  }
+  return at::nullopt;
+}
 
 inline IValue toIValue(py::handle input) {
   if (THPVariable_Check(input.ptr())) {

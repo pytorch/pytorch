@@ -1,8 +1,5 @@
 #include "torch/csrc/jit/script/init.h"
 
-#include "torch/csrc/Device.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/Layout.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/script/compiler.h"
 
@@ -265,24 +262,6 @@ struct ModuleValue : public SugaredValue {
   std::shared_ptr<Module> module;
 };
 
-
-IValue getScalarAsTensor(py::object obj) {
-  at::Tensor tensor;
-  if (py::isinstance<py::bool_>(obj)) {
-    tensor = at::scalar_to_tensor(py::cast<bool>(obj));
-  } else if (py::isinstance<py::int_>(obj)) {
-    tensor = at::scalar_to_tensor(py::cast<int64_t>(obj));
-  } else if (py::isinstance<py::float_>(obj)) {
-    tensor = at::scalar_to_tensor(py::cast<float>(obj));
-  } else if (obj.is(py::none())) {
-    return IValue();
-  } else {
-    AT_ERROR("Unknown python object type");
-  }
-  return autograd::make_variable(tensor);
-}
-
-
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Method& m,
@@ -296,28 +275,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   //   f = f + 1
   auto& g = *m.graph();
   if (is_constant) {
-    if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
-    } else if (py::isinstance<py::int_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
-    } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<float>(obj), loc));
-    } else if (THPDevice_Check(obj.ptr())) {
-      auto device = (THPDevice*)obj.ptr();
-      std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
-                                device->device.index()};
-      return toSimple(g.insertConstant(std::move(v)));
-    } else if (THPLayout_Check(obj.ptr())) {
-      auto layout = (THPLayout*)obj.ptr();
-      const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(g.insertConstant(v, loc));
-    } else if (THPDtype_Check(obj.ptr())) {
-      auto dtype = (THPDtype*)(obj.ptr());
-      const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(g.insertConstant(v, loc));
-    } else if (py::isinstance<py::tuple>(obj)) {
+    if (py::isinstance<py::tuple>(obj)) {
      return std::make_shared<ConstantPythonTupleValue>(obj);
-    }
+   } else {
+     auto val = constantToIValue(obj);
+     if (val) {
+       return toSimple(g.insertConstant(*val, loc));
+     }
+   }
   }
   if (py::isinstance<Module>(obj)) {
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
@@ -393,16 +358,21 @@ Resolver pythonResolver(ResolutionCallback rcb) {
 
 FunctionSchema getSchemaWithDefaults(
     std::unordered_map<std::string, py::object>& default_args,
-    FunctionSchema schema) {
+    FunctionSchema& schema) {
   std::vector<Argument> new_args;
   for (auto& arg : schema.arguments) {
     auto it = default_args.find(arg.name);
     if (it != default_args.end()) {
+      IValue value = *constantToIValue(it->second);
+      if (value.isScalar()) {
+        // Convert to tensor
+        value = autograd::make_variable(at::scalar_to_tensor(value.toScalar()));
+      }
       new_args.push_back(Argument(
           arg.name,
           arg.type,
           arg.N,
-          getScalarAsTensor(it->second),
+          value,
           arg.kwarg_only));
     } else {
       new_args.push_back(arg);
