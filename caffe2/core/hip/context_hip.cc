@@ -374,7 +374,7 @@ struct DefaultHIPAllocator final : public at::Allocator {
     // lock the mutex
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
 
-    if (FLAGS_caffe2_gpu_memory_tracking) {
+    if (c10::FLAGS_caffe2_gpu_memory_tracking) {
       auto sz_it = g_size_map.find(ptr);
       DCHECK(sz_it != g_size_map.end());
       auto aff_it = g_hip_device_affiliation.find(ptr);
@@ -416,7 +416,7 @@ struct DefaultHIPAllocator final : public at::Allocator {
       }
       case HipMemoryPoolType::THC: {
         HIP_ENFORCE(g_thc_allocator->Free(ptr));
-        if (FLAGS_caffe2_gpu_memory_tracking) {
+        if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
         }
         break;
