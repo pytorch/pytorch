@@ -21,24 +21,4 @@ std::ostream& operator<<(
                 << options.requires_grad() << ")";
 }
 
-Device TensorOptions::device() const noexcept {
-  return device_.value_or(getDefaultTensorOptions().device());
-}
-
-ScalarType TensorOptions::dtype() const noexcept {
-  return dtype_.value_or(getDefaultTensorOptions().dtype());
-}
-
-Layout TensorOptions::layout() const noexcept {
-  return layout_.value_or(getDefaultTensorOptions().layout());
-}
-
-bool TensorOptions::requires_grad() const noexcept {
-  return requires_grad_.value_or(getDefaultTensorOptions().requires_grad());
-}
-
-bool TensorOptions::is_variable() const noexcept {
-  return is_variable_.value_or(getDefaultTensorOptions().is_variable());
-}
-
 } // namespace at

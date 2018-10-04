@@ -4,12 +4,20 @@
 #include <ATen/core/Device.h>
 #include <ATen/core/Layout.h>
 #include <ATen/core/ScalarType.h>
+#include <ATen/core/DefaultTensorOptions.h>
 
 #include <cstddef>
 #include <iosfwd>
 #include <utility>
 
 namespace at {
+
+// Forward declaration from OptionsGuard.h
+//
+// Hopefully the out-of-line function call is not costing us too much: all this
+// function does is return a memory address, so it shouldn't be costing
+// us too much optimizer juice.
+CAFFE2_API DefaultTensorOptions& getDefaultTensorOptions();
 
 /// A class to encapsulate construction axes of an Tensor.  TensorOptions was
 /// designed to support the Python style API for specifying construction options
@@ -48,14 +56,7 @@ namespace at {
 ///     at::zeros({2,2}, at::requires_grad());
 ///
 struct CAFFE2_API TensorOptions {
-  // NB: Explicit construction of all optional fields is REQUIRED
-  // to work around an nvcc bug.  Otherwise, you get:
-  //
-  //    Error: Internal Compiler Error (codegen): "there was an error in
-  //    verifying the lgenfe output!"
-  //
-  // This bug only occurs when compiling with --expt-relaxed-constexpr
-  TensorOptions() : dtype_(), device_(), layout_(), requires_grad_(), is_variable_() {}
+  TensorOptions() {}
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
@@ -109,33 +110,41 @@ struct CAFFE2_API TensorOptions {
   /// Sets the dtype of the `TensorOptions`.
   TensorOptions& dtype(ScalarType dtype) {
     dtype_ = dtype;
+    has_dtype_ = true;
     return *this;
   }
 
   /// Sets the layout of the `TensorOptions`.
   TensorOptions& layout(Layout layout) {
     layout_ = layout;
+    has_layout_ = true;
     return *this;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
   TensorOptions& requires_grad(bool requires_grad) {
     requires_grad_ = requires_grad;
+    has_requires_grad_ = true;
     return *this;
   }
 
   /// Sets the `is_variable` property on the `TensorOptions`.
   TensorOptions& is_variable(bool is_variable) {
     is_variable_ = is_variable;
+    has_is_variable_ = true;
     return *this;
   }
 
   /// Returns the device of the `TensorOptions`.
-  Device device() const noexcept;
+  Device device() const noexcept {
+    return has_device_ ? device_ : getDefaultTensorOptions().device()
+  }
 
   /// Returns the device of the `TensorOptions`, or `nullopt` if
   /// device is not specified.
-  optional<Device> device_opt() const noexcept { return device_; }
+  optional<Device> device_opt() const noexcept {
+    return has_device_ ? device_ : nullopt;
+  }
 
   /// Returns the device index of the `TensorOptions`.
   int32_t device_index() const noexcept {
@@ -143,32 +152,48 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Returns the dtype of the `TensorOptions`.
-  ScalarType dtype() const noexcept;
+  ScalarType dtype() const noexcept {
+    return has_dtype_ ? dtype_ : getDefaultTensorOptions().dtype()
+  }
 
   /// Returns the dtype of the `TensorOptions`, or `nullopt` if
   /// device is not specified.
-  optional<ScalarType> dtype_opt() const noexcept { return dtype_; }
+  optional<ScalarType> dtype_opt() const noexcept {
+    return has_dtype_ ? dtype_ : nullopt;
+  }
 
   /// Returns the layout of the `TensorOptions`.
-  Layout layout() const noexcept;
+  Layout layout() const noexcept {
+    return has_layout_ ? layout_ : getDefaultTensorOptions().layout();
+  }
 
   /// Returns the layout of the `TensorOptions`, or `nullopt` if
   /// layout is not specified.
-  optional<Layout> layout_opt() const noexcept { return layout_; }
+  optional<Layout> layout_opt() const noexcept {
+    return has_layout_ ? layout_ : nullopt;
+  }
 
   /// Returns the `requires_grad` property of the `TensorOptions`.
-  bool requires_grad() const noexcept;
+  bool requires_grad() const noexcept {
+    return has_requires_grad_ ? requires_grad_ : getDefaultTensorOptions().requires_grad();
+  }
 
   /// Returns the `requires_grad` property of the `TensorOptions`, or `nullopt`
   /// if `requires_grad` is not specified.
-  optional<bool> requires_grad_opt() const noexcept { return requires_grad_; }
+  optional<bool> requires_grad_opt() const noexcept {
+    return has_requires_grad_ ? requires_grad_ : nullopt;
+  }
 
   /// Returns the `is_variable` property of the `TensorOptions`.
-  bool is_variable() const noexcept;
+  bool is_variable() const noexcept {
+    return has_is_variable_ ? is_variable_ : getDefaultTensorOptions().is_variable();
+  }
 
   /// Returns the `is_variable` property of the `TensorOptions`, or
   /// `nullopt` if `is_variable` is not specified.
-  optional<bool> is_variable_opt() const noexcept { return is_variable_; }
+  optional<bool> is_variable_opt() const noexcept {
+    return has_is_variable_ ? is_variable_ : nullopt;
+  }
 
   // Resolves the ATen backend specified by the current construction axes.
   Backend backend() const noexcept {
@@ -184,12 +209,32 @@ struct CAFFE2_API TensorOptions {
  private:
   // WARNING: If you edit TensorOptions to add more options, you
   // must adjust the implementation of Tensor::options
-  optional<ScalarType> dtype_;
-  optional<Device> device_;
-  optional<Layout> layout_;
-  optional<bool> requires_grad_;
-  optional<bool> is_variable_;
+
+  // NB: We didn't use at::optional here, because then we can't pack
+  // the has_***_ boolean fields.
+
+  Device     device_; // 64-bit (TODO: this should be 32-bit)
+
+  // Bitmask required here to get this to fit inside 32 bits (or even 64 bits,
+  // for that matter)
+
+  ScalarType dtype_;  // 8-bit
+  Layout     layout_; // 8-bit
+
+  bool requires_grad_     : 1 = false;
+  bool is_variable_       : 1 = false;
+
+  bool has_device_        : 1 = false;
+  bool has_dtype_         : 1 = false;
+  bool has_layout_        : 1 = false;
+  bool has_requires_grad_ : 1 = false;
+  bool has_is_variable_   : 1 = false;
 };
+
+// We should aspire to fit in one machine-size word; but a size greater than two
+// words is too much.  (We are doing terribly on 32-bit archs, where we require
+// three machine size words to store tensor options.  Eek!)
+static_assert( sizeof(TensorOptions) <= sizeof(int64_t) * 2 );
 
 /// Convenience function that returns a `TensorOptions` object with the `dtype`
 /// set to the given one.
@@ -224,5 +269,25 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
 std::ostream& operator<<(
     std::ostream& stream,
     const TensorOptions& options);
+
+
+DefaultTensorOptions& DefaultTensorOptions::merge(const TensorOptions& options) {
+  if (options.dtype_opt().has_value()) {
+    dtype_ = options.dtype();
+  }
+  if (options.device_opt().has_value()) {
+    device_ = options.device();
+  }
+  if (options.layout_opt().has_value()) {
+    layout_ = options.layout();
+  }
+  if (options.requires_grad_opt().has_value()) {
+    requires_grad_ = options.requires_grad();
+  }
+  if (options.is_variable_opt().has_value()) {
+    is_variable_ = options.is_variable();
+  }
+  return *this;
+}
 
 } // namespace at
