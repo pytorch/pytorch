@@ -87,6 +87,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
         fi
         if [ -d "../custom-op-build" ]; then
           cp -r ../custom-op-build ${PYTORCH_CI_ENV_DIR}/custom-op-build
+          chmod -R 777 ${PYTORCH_CI_ENV_DIR}/custom-op-build
         fi
   - persist_to_workspace:
       root: /var/lib/jenkins/pytorch-ci-env

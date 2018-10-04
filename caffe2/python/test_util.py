@@ -10,7 +10,8 @@ from caffe2.python import core, workspace
 import unittest
 import os
 
-IN_CIRCLECI = "IN_CIRCLECI" in os.environ
+# IN_CIRCLECI = "IN_CIRCLECI" in os.environ
+IN_CIRCLECI = False
 
 def rand_array(*dims):
     # np.random.rand() returns float instead of 0-dim array, that's why need to
