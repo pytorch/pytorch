@@ -1,7 +1,7 @@
 graph(%a : Dynamic) {
   %1 : int = prim::Constant[value=2]()
   %2 : Dynamic = aten::lt(%a, %1)
-  %3 : int = prim::TensorToNum(%2)
+  %3 : bool = prim::TensorToBool(%2)
   %c : int = prim::If(%3)
     block0() {
       %5 : int = prim::Constant[value=5]()

@@ -20,6 +20,8 @@ class IDEEPContext final : public BaseContext {
                                      : RandomNumberSeed()) {
     CAFFE_ENFORCE_EQ(option.device_type(), PROTO_IDEEP);
   }
+  explicit IDEEPContext(const at::Device& device)
+      : IDEEPContext(DeviceToOption(device)) {}
 
   ~IDEEPContext() noexcept override {}
 
@@ -53,7 +55,7 @@ class IDEEPContext final : public BaseContext {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
+  inline static at::DataPtr New(size_t nbytes) {
     return StaticContext()->New(nbytes);
   }
 
@@ -174,17 +176,8 @@ inline void IDEEPContext::CopyBytes<IDEEPContext, CPUContext>(
 
 class IDEEPStaticContext : public BaseStaticContext {
  public:
-  inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
-    return GetCPUAllocator()->New(nbytes);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<IDEEPContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<IDEEPContext>(option);
+  inline at::DataPtr New(size_t nbytes) const override {
+    return GetCPUAllocator()->allocate(nbytes);
   }
 
   DeviceType GetDeviceType() override {

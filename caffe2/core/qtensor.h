@@ -59,7 +59,7 @@ class C10_EXPORT QTensor {
       size_t source_size = std::accumulate(
           dim_source.begin(), dim_source.end(), 1, std::multiplies<int>());
       if ((source_size * (precision_ + signed_)) > capacity_) {
-        data_.reset();
+        data_ptr_.clear();
         capacity_ = 0;
       }
       dims_ = dim_source;
@@ -104,12 +104,12 @@ class C10_EXPORT QTensor {
 
   void SetPrecision(const unsigned char precision) {
     precision_ = precision;
-    data_.reset();
+    data_ptr_.clear();
   }
 
   void SetSigned(const bool make_signed = true) {
     signed_ = make_signed;
-    data_.reset();
+    data_ptr_.clear();
   }
 
   void SetScale(const double scale) {
@@ -121,19 +121,16 @@ class C10_EXPORT QTensor {
   }
 
   unsigned char* mutable_data() {
-    if (!data_) {
-      auto ptr_and_deleter = Context::New(nbytes());
-      data_.reset(
-          static_cast<unsigned char*>(ptr_and_deleter.first),
-          ptr_and_deleter.second);
+    if (!data_ptr_) {
+      data_ptr_ = Context::New(nbytes());
       capacity_ = nbytes() * CHAR_BIT;
     }
     CAFFE_ENFORCE(capacity_ == nbytes() * CHAR_BIT);
-    return data_.get();
+    return static_cast<unsigned char*>(data_ptr_.get());
   }
 
   inline const unsigned char* data() const {
-    return data_.get();
+    return static_cast<unsigned char*>(data_ptr_.get());
   }
 
   inline size_t size() const {
@@ -242,7 +239,7 @@ class C10_EXPORT QTensor {
   unsigned char alignment_ = CHAR_BIT;
 
   // Allocated data.
-  std::shared_ptr<unsigned char> data_;
+  at::DataPtr data_ptr_;
 
   // value = scale_ * (x + bias_)
   double scale_;

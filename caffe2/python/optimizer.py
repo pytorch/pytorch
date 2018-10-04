@@ -83,7 +83,7 @@ class Optimizer(object):
 
         if current_scope.device_type == caffe2_pb2.CUDA:
             return self.get_gpu_blob_name(
-                base_str, current_scope.device_id, current_scope.node_name
+                base_str, current_scope.cuda_gpu_id, current_scope.node_name
             )
         else:
             return self.get_cpu_blob_name(base_str, current_scope.node_name)
@@ -279,7 +279,7 @@ class SgdOptimizer(Optimizer):
         # to include device information.
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}{}".format(dev.device_type, dev.device_id, dev.node_name),
+            "ONE_{}_{}{}".format(dev.device_type, dev.cuda_gpu_id, dev.node_name),
             shape=[1],
             value=1.0
         )
@@ -488,12 +488,12 @@ class WeightDecayBuilder(Optimizer):
 
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}".format(dev.device_type, dev.device_id),
+            "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
             shape=[1],
             value=1.0
         )
         WD = param_init_net.ConstantFill(
-            [], "wd_{}_{}".format(dev.device_type, dev.device_id),
+            [], "wd_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
             shape=[1], value=self.weight_decay
         )
 
@@ -1160,7 +1160,7 @@ class RmsPropOptimizer(Optimizer):
 
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}".format(dev.device_type, dev.device_id),
+            "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
             shape=[1],
             value=1.0
         )
