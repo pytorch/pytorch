@@ -362,6 +362,8 @@ class DistributedDataParallel(Module):
             def allreduce_hook(*unused):
                 Variable._execution_engine.queue_callback(reduction_fn_nccl)
 
+            allreduce_hook._torch_unserializable = True
+
             p.register_hook(allreduce_hook)
 
     def _make_param_hook(self, param, device_idx):
@@ -388,6 +390,8 @@ class DistributedDataParallel(Module):
                 with self.dispatch_lock:
                     self.bucket_events[bucket_idx][device_idx] = event
                     self._queue_reduction(bucket_idx)
+
+        distributed_data_parallel_hook._torch_unserializable = True
 
         return distributed_data_parallel_hook
 

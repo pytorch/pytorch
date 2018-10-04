@@ -1,4 +1,5 @@
 import torch
+import torch.utils.hooks
 import os
 import weakref
 import threading
@@ -107,6 +108,8 @@ def reduce_tensor(tensor):
                            "since autograd does not support crossing process boundaries.  "
                            "If you just want to transfer the data, call detach() on the tensor "
                            "before serializing (e.g., putting it on the queue).")
+
+    torch.utils.hooks.warn_if_has_hooks(tensor)
 
     # Note [CUDA IPC and the caching allocator]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

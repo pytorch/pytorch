@@ -34,3 +34,11 @@ class RemovableHandle(object):
 
     def __exit__(self, type, value, tb):
         self.remove()
+
+
+def warn_if_has_hooks(tensor):
+    if tensor._backward_hooks:
+        for k in tensor._backward_hooks:
+            if not hasattr(tensor._backward_hooks[k], "_torch_unserializable"):
+                print(tensor._backward_hooks[k])
+                raise RuntimeError("KILL ALL OCCURRENCES OF ME")

@@ -32,6 +32,7 @@ class Tensor(torch._C._TensorBase):
 
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]
+        torch.utils.hooks.warn_if_has_hooks(self)
         args = (self.storage(),
                 self.storage_offset(),
                 tuple(self.size()),
