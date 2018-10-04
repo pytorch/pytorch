@@ -879,20 +879,19 @@ std::unique_ptr<detail::DynamicDAG<std::string>> newDynamicDAG() {
 
 void testNewVertex() {
   auto graph = newDynamicDAG();
-  JIT_ASSERT(graph->numVertices() == 0);
+  JIT_ASSERT(graph->debugNumVertices() == 0);
 
   auto a = graph->newVertex("a");
-  JIT_ASSERT(graph->numVertices() == 1);
+  JIT_ASSERT(graph->debugNumVertices() == 1);
   JIT_ASSERT(a->ord == 0);
   JIT_ASSERT(a->rdata.size() == 1);
   JIT_ASSERT(a->rdata[0] == "a");
-  JIT_ASSERT(a->visited == false);
-  JIT_ASSERT(a->in_edges.size() == 0);
-  JIT_ASSERT(a->out_edges.size() == 0);
+  JIT_ASSERT(a->in_edges().size() == 0);
+  JIT_ASSERT(a->out_edges().size() == 0);
 
   auto b = graph->newVertex("b");
   auto c = graph->newVertex("c");
-  JIT_ASSERT(graph->numVertices() == 3);
+  JIT_ASSERT(graph->debugNumVertices() == 3);
   JIT_ASSERT(b->ord == 1);
   JIT_ASSERT(c->ord == 2);
 }
@@ -907,20 +906,20 @@ void testAddEdgeBasic() {
   graph->addEdge(a, b);
   graph->addEdge(b, c);
   graph->addEdge(a, c);
-  JIT_ASSERT(a->in_edges.size() == 0);
-  JIT_ASSERT(a->out_edges.size() == 2);
-  JIT_ASSERT(a->out_edges.count(b));
-  JIT_ASSERT(a->out_edges.count(c));
+  JIT_ASSERT(a->in_edges().size() == 0);
+  JIT_ASSERT(a->out_edges().size() == 2);
+  JIT_ASSERT(detail::EdgeData<std::string>::has(a->out_edges(), b));
+  JIT_ASSERT(detail::EdgeData<std::string>::has(a->out_edges(), c));
 
-  JIT_ASSERT(b->in_edges.size() == 1);
-  JIT_ASSERT(b->out_edges.size() == 1);
-  JIT_ASSERT(b->in_edges.count(a));
-  JIT_ASSERT(b->out_edges.count(c));
+  JIT_ASSERT(b->in_edges().size() == 1);
+  JIT_ASSERT(b->out_edges().size() == 1);
+  JIT_ASSERT(detail::EdgeData<std::string>::has(b->in_edges(), a));
+  JIT_ASSERT(detail::EdgeData<std::string>::has(b->out_edges(), c));
 
-  JIT_ASSERT(c->in_edges.size() == 2);
-  JIT_ASSERT(c->out_edges.size() == 0);
-  JIT_ASSERT(c->in_edges.count(a));
-  JIT_ASSERT(c->in_edges.count(b));
+  JIT_ASSERT(c->in_edges().size() == 2);
+  JIT_ASSERT(c->out_edges().size() == 0);
+  JIT_ASSERT(detail::EdgeData<std::string>::has(c->in_edges(), a));
+  JIT_ASSERT(detail::EdgeData<std::string>::has(c->in_edges(), b));
 }
 
 void testAddEdgeCycleDetection() {
@@ -936,7 +935,7 @@ void testAddEdgeCycleDetection() {
   bool erred = false;
   try {
     graph->addEdge(c, a);
-  } catch (const std::runtime_error& err) {
+  } catch (at::Error& err) {
     erred = true;
   }
   JIT_ASSERT(erred);
@@ -976,23 +975,23 @@ void testAddEdgeReordersComplicated() {
   JIT_ASSERT(a->ord == 2);
   JIT_ASSERT(b->ord == 3);
 
-  JIT_ASSERT(c->in_edges.size() == 0);
-  JIT_ASSERT(c->out_edges.size() == 1);
-  JIT_ASSERT(c->out_edges.count(d));
+  JIT_ASSERT(c->in_edges().size() == 0);
+  JIT_ASSERT(c->out_edges().size() == 1);
+  JIT_ASSERT(detail::EdgeData<std::string>::has(c->out_edges(), d));
 
-  JIT_ASSERT(d->in_edges.size() == 1);
-  JIT_ASSERT(d->out_edges.size() == 1);
-  JIT_ASSERT(d->in_edges.count(c));
-  JIT_ASSERT(d->out_edges.count(a));
+  JIT_ASSERT(d->in_edges().size() == 1);
+  JIT_ASSERT(d->out_edges().size() == 1);
+  JIT_ASSERT(detail::EdgeData<std::string>::has(d->in_edges(), c));
+  JIT_ASSERT(detail::EdgeData<std::string>::has(d->out_edges(), a));
 
-  JIT_ASSERT(a->in_edges.size() == 1);
-  JIT_ASSERT(a->out_edges.size() == 1);
-  JIT_ASSERT(a->in_edges.count(d));
-  JIT_ASSERT(a->out_edges.count(b));
+  JIT_ASSERT(a->in_edges().size() == 1);
+  JIT_ASSERT(a->out_edges().size() == 1);
+  JIT_ASSERT(detail::EdgeData<std::string>::has(a->in_edges(), d));
+  JIT_ASSERT(detail::EdgeData<std::string>::has(a->out_edges(), b));
 
-  JIT_ASSERT(b->in_edges.size() == 1);
-  JIT_ASSERT(b->out_edges.size() == 0);
-  JIT_ASSERT(b->in_edges.count(a));
+  JIT_ASSERT(b->in_edges().size() == 1);
+  JIT_ASSERT(b->out_edges().size() == 0);
+  JIT_ASSERT(detail::EdgeData<std::string>::has(b->in_edges(), a));
 }
 
 void testRemoveEdgeBasic() {
@@ -1001,12 +1000,12 @@ void testRemoveEdgeBasic() {
   auto a = graph->newVertex("a");
   auto b = graph->newVertex("b");
   graph->addEdge(a, b);
-  JIT_ASSERT(graph->numVertices() == 2);
+  JIT_ASSERT(graph->debugNumVertices() == 2);
 
   graph->removeEdge(a, b);
-  JIT_ASSERT(graph->numVertices() == 2);
-  JIT_ASSERT(a->out_edges.size() == 0);
-  JIT_ASSERT(b->in_edges.size() == 0);
+  JIT_ASSERT(graph->debugNumVertices() == 2);
+  JIT_ASSERT(a->out_edges().size() == 0);
+  JIT_ASSERT(b->in_edges().size() == 0);
 }
 
 void testRemoveVertexBasic() {
@@ -1017,12 +1016,12 @@ void testRemoveVertexBasic() {
   auto c = graph->newVertex("c");
   graph->addEdge(a, b);
   graph->addEdge(b, c);
-  JIT_ASSERT(graph->numVertices() == 3);
+  JIT_ASSERT(graph->debugNumVertices() == 3);
 
   graph->removeVertex(b);
-  JIT_ASSERT(graph->numVertices() == 2);
-  JIT_ASSERT(a->out_edges.size() == 0);
-  JIT_ASSERT(c->in_edges.size() == 0);
+  JIT_ASSERT(graph->debugNumVertices() == 2);
+  JIT_ASSERT(a->out_edges().size() == 0);
+  JIT_ASSERT(c->in_edges().size() == 0);
 }
 
 void testContractEdgeBasic() {
@@ -1037,20 +1036,20 @@ void testContractEdgeBasic() {
   graph->addEdge(c, d);
 
   graph->contractEdge(b, c);
-  JIT_ASSERT(graph->numVertices() == 3);
-  JIT_ASSERT(a->out_edges.size() == 1);
-  JIT_ASSERT(d->in_edges.size() == 1);
-  JIT_ASSERT(*a->out_edges.begin() == *d->in_edges.begin());
+  JIT_ASSERT(graph->debugNumVertices() == 3);
+  JIT_ASSERT(a->out_edges().size() == 1);
+  JIT_ASSERT(d->in_edges().size() == 1);
+  JIT_ASSERT(*a->out_edges().begin() == *d->in_edges().begin());
 
-  auto* contracted = *a->out_edges.begin();
+  auto* contracted = *a->out_edges().begin();
   JIT_ASSERT(contracted->rdata.size() == 2);
   JIT_ASSERT(contracted->rdata[0] == "c");
   JIT_ASSERT(contracted->rdata[1] == "b");
 
-  JIT_ASSERT(contracted->out_edges.size() == 1);
-  JIT_ASSERT(contracted->in_edges.size() == 1);
-  JIT_ASSERT(contracted->out_edges.count(d) == 1);
-  JIT_ASSERT(contracted->in_edges.count(a) == 1);
+  JIT_ASSERT(contracted->out_edges().size() == 1);
+  JIT_ASSERT(contracted->in_edges().size() == 1);
+  JIT_ASSERT(detail::EdgeData<std::string>::has(contracted->in_edges(), a));
+  JIT_ASSERT(detail::EdgeData<std::string>::has(contracted->out_edges(), d));
 }
 
 void testContractEdgeCycleDetection() {

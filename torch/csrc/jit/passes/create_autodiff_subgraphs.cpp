@@ -159,10 +159,15 @@ static detail::DynamicDAG<Node*> make_dependency_graph(Block * block) {
         // dependency graph (in this case, the Vertex containing the if Node*)
         // and then record the dependency.
         auto * owning_node = use.user;
-        while (owning_node != nullptr) {
+        if (owning_node == block->return_node()) {
+          // The return node is not in the dag. Carry on.
+          continue;
+        }
+        while (true) {
           auto search = node_to_vertex.find(owning_node);
           if (search == node_to_vertex.end()) {
             owning_node = owning_node->owningBlock()->owningNode();
+            JIT_ASSERT(owning_node != nullptr);
             continue;
           }
           dag.addEdge(node_to_vertex[node], search->second);
@@ -178,29 +183,23 @@ static void find_differentiable_groups(
     detail::DynamicDAG<Node*>& dep_graph,
     size_t distance_threshold=64,
     size_t producer_outedge_threshold=16) {
-  // A Vertex contains a Node* or a differential group of Node*.
+  // A Vertex contains a Node* or a differentiable group of Node*.
   // Perform graph contraction on dep_graph: contract two vertices(x, y) if
   // the following conditions hold:
-  // - x, y can be merged to form a differential group
+  // - x, y can be merged to form a differentiable group
   // - the contraction would not invalidate the dag (it creates no cycles).
 
   // Iterate in reverse topological order
   int64_t ord = dep_graph.size() - 1;
-  while (ord >= 0) {
-    if (!dep_graph.at(ord)) {
-      --ord;
-      continue;
-    }
+  for (int64_t ord = dep_graph.size() - 1; ord >= 0; --ord) {
+    if (!dep_graph.at(ord)) continue;
 
     auto* consumer = dep_graph.at(ord).value();
-    if (!shouldConsiderForMerge(consumer)) {
-      --ord;
-      continue;
-    }
+    if (!shouldConsiderForMerge(consumer)) continue;
 
-    // Iterate through consumer->in_edges in reverse topological order
+    // Iterate through consumer->out_edges() in reverse topological order
     detail::vertex_list<Node*> in_edges;
-    in_edges.assign(consumer->in_edges.begin(), consumer->in_edges.end());
+    in_edges.assign(consumer->in_edges().begin(), consumer->in_edges().end());
     dep_graph.sort(in_edges);
 
     bool changed = false;
@@ -211,20 +210,21 @@ static void find_differentiable_groups(
       // 1) preserve locality of tensors. We don't want to keep them alive for too long.
       // 2) Bound the computation complexity for contractEdge
       if (consumer->ord - producer->ord > distance_threshold) continue;
-      if (producer->out_edges.size() > producer_outedge_threshold) continue;
+      if (producer->out_edges().size() > producer_outedge_threshold) continue;
       if (!shouldConsiderForMerge(producer)) continue;
 
-      // If the edge contraction is successful, consumer->in_edges
+      // If the edge contraction is successful, consumer->out_edges()
       // may have changed so we break out of this loop.
       if (dep_graph.contractEdge(producer, consumer)) {
         changed = true;
         break;
       }
     }
+
     // If we successfully contracted an edge, stay at this vertex.
     // It may have new edges that should be looked at before moving on.
-    if (!changed) {
-      --ord;
+    if (changed) {
+      ++ord;
     }
   }
 }
@@ -236,6 +236,8 @@ static void reorder_according_to_dag(Block * block, const detail::DynamicDAG<Nod
 
     auto& rnodes = vertex.value()->rdata;
     for (auto it = rnodes.rbegin(); it != rnodes.rend(); ++it) {
+      // Move all nodes according to the topological order in dep_graph. A lot
+      // of the moves are unnecessary but this is a quick & easy solution.
       (*it)->moveBefore(block->return_node());
     }
   }

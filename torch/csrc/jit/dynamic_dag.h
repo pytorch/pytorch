@@ -12,81 +12,138 @@ namespace torch { namespace jit { namespace detail {
 // DynamicDAG is a DAG that dynamically maintains a topological order as
 // edges/vertices are added and removed.
 //
-// The implementation is based off of the following paper:
+// [Example applications]
+// - Let's say you have a DAG where each vertex is black or red. How do we
+//   merge black nodes that are directly connected by contracting the
+//   edge between them while still maintaining the DAG and a topological order?
+//   Use contractEdge().
+// - Let's say you have a DAG where each vertex is a Node* and the edges represent
+//   data dependencies. We wish to determine if adding a new Node* with certain
+//   data dependencies (or moving an existing one to use new dependencies) is valid.
+//   Use DynamicDAG::addEdge() to add the new data dependencies to the DAG:
+//   it will either find a valid reordering of the DAG's topological order or throw
+//   if the resulting DAG is invalid.
+//
+// The implementation is based off of the PK algorithm in the following paper:
 // "A Dynamic Topsort Algorithm for Directed Acyclic Graphs"
 // by David Pearce and Paul Kelly
 // https://www.doc.ic.ac.uk/~phjk/Publications/DynamicTopoSortAlg-JEA-07.pdf
+// It is summarized in [Edge addition] (see DynamicDAG<T>::addEdge)
 
 template <typename T> struct Vertex;
+template <typename T> struct DynamicDAG;
+template <typename T> using vertex_list = std::vector<Vertex<T>*>;
 
-template <typename T>
-using vertex_set = std::unordered_set<Vertex<T>*>;
+enum DFSDirection {forward, backward};
 
+// Because our graphs shouldn't fan out or in very much,
+// we use std::vector<Vertex<T>*>  to record edges.
 template <typename T>
-using vertex_list = std::vector<Vertex<T>*>;
+struct EdgeData {
+  vertex_list<T> in_edges;
+  vertex_list<T> out_edges;
 
+  static void insert(vertex_list<T>& lst, Vertex<T>* v) {
+    lst.push_back(v);
+  }
+
+  static void erase(vertex_list<T>& lst, Vertex<T>* v) {
+    lst.erase(std::find(lst.begin(), lst.end(), v));
+  }
+
+  static bool has(vertex_list<T>& lst, Vertex<T>* v) {
+    return std::find(lst.begin(), lst.end(), v) != lst.end();
+  }
+};
+
+// Simple RAII wrapper around a vertex_list<T>.
+// When adding a vertex to the list, mark it as visited.
+// Clears the visited flag of each vertex in the vertex_list on deletion.
 template <typename T>
-using maybe_vertex_list = std::vector<std::unique_ptr<Vertex<T>>>;
+struct visited_list {
+  ~visited_list() {
+    for (auto* v : data_) {
+      v->visited_ = false;
+    }
+  }
+
+  void push_back(Vertex<T>* elt) {
+    JIT_ASSERT(!elt->visited_);
+    elt->visited_ = true;
+    data_.push_back(elt);
+  }
+
+  vertex_list<T>& vector() { return data_; }
+
+ private:
+  vertex_list<T> data_;
+};
 
 template <typename T>
 struct Vertex {
   Vertex(size_t ord, T datum)
-  : ord(ord), visited(false) { rdata.push_back(datum); }
+  : ord(ord), visited_(false) { rdata.push_back(datum); }
 
-  std::vector<T> rdata; // stored in reverse order
-  size_t ord; // index in topological ordering. Is unique.
-  bool visited; // If this vertex has been visited
-  vertex_set<T> in_edges;
-  vertex_set<T> out_edges;
+  // Holds data. When two Vertices (x) -> (y) are merged (contracted
+  // along their edge), their rdata is merged as well in reverse
+  // topological order {y.rdata, x.rdata}.
+  std::vector<T> rdata;
+  size_t ord; // unique topological index
 
   std::string toString();
+  vertex_list<T>& in_edges() { return edges_.in_edges; }
+  vertex_list<T>& out_edges() { return edges_.out_edges; }
+
+  bool visited() { return visited_; }
+
+private:
+  friend DynamicDAG<T>;
+  EdgeData<T> edges_;
+
+  friend visited_list<T>;
+  bool visited_; // If this vertex has been visited
 };
 
 template <typename T>
 struct DynamicDAG {
-
   Vertex<T>* newVertex(T datum);
-  std::pair<vertex_set<T>,vertex_set<T>> removeVertex(Vertex<T>* v);
+  EdgeData<T> removeVertex(Vertex<T>* v);
 
   void addEdge(Vertex<T>* producer, Vertex<T>* consumer);
   void removeEdge(Vertex<T>* producer, Vertex<T>* consumer);
   bool contractEdge(Vertex<T>* producer, Vertex<T>* consumer);
-
-  bool contractionProducesCycle(Vertex<T>* producer, Vertex<T>* consumer);
-  bool dfsForward(Vertex<T>* producer, size_t upper_bound, vertex_list<T>& visited);
-  void dfsBackward(Vertex<T>* producer, size_t lower_bound, vertex_list<T>& visited);
-  void clearVisited(vertex_list<T>& visited);
-
-  void reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB);
-  void sort(vertex_list<T>& delta);
 
   // size() >= the number of live vertices.
   // for all vertices v, v.ord < size()
   size_t size() const { return vertices_.size(); };
   at::optional<Vertex<T>*> at(size_t ord) const;
 
-  // Use for debugging. Don't call these often.
-  size_t numVertices() const;
-  void checkInvariants();
-
+  void sort(vertex_list<T>& delta);
   std::string toString();
 
+  // Use for debugging. Don't call these often.
+  size_t debugNumVertices() const;
+  void debugCheckInvariants();
+
  private:
+  void reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB);
+  bool contractionProducesCycle(Vertex<T>* producer, Vertex<T>* consumer);
+  bool dfsSearch(
+      DFSDirection direction,
+      Vertex<T>* start,
+      Vertex<T>* end,
+      size_t bound,
+      visited_list<T>& visited);
 
   // Store vertices indexed by their topological order.
   // If a vertex v has ord 5, then it can be found at vertices_[5].
   // There may be gaps in vertices_; this is to enable fast deletion.
-  maybe_vertex_list<T> vertices_;
-
-  // temp buffers used in the PK algorithm.
-  // Their usage makes this data structure NOT thread safe.
-  vertex_list<T> deltaF_;  // all vertices visited by dfsForward
-  vertex_list<T> deltaB_;  // all vertices visited by dfsBackward
+  std::vector<std::unique_ptr<Vertex<T>>> vertices_;
 };
 
 // O(vertices_.size()). Used for testing, don't call this often.
 template <typename T>
-size_t DynamicDAG<T>::numVertices() const {
+size_t DynamicDAG<T>::debugNumVertices() const {
   return std::count_if(vertices_.begin(), vertices_.end(),
       [](const std::unique_ptr<Vertex<T>>& v) {
         if (v) return true;
@@ -101,25 +158,32 @@ Vertex<T>* DynamicDAG<T>::newVertex(T datum) {
 }
 
 template <typename T>
-void DynamicDAG<T>::removeEdge(Vertex<T>* producer, Vertex<T>* consumer) {
-  JIT_ASSERT(producer != consumer);
-  JIT_ASSERT(producer->out_edges.count(consumer));
-  JIT_ASSERT(consumer->in_edges.count(producer));
-  producer->out_edges.erase(consumer);
-  consumer->in_edges.erase(producer);
+void DynamicDAG<T>::sort(vertex_list<T>& delta) {
+  std::sort(delta.begin(), delta.end(), [](Vertex<T>* a, Vertex<T>* b) {
+    return a->ord < b->ord;
+  });
 }
 
 template <typename T>
-void DynamicDAG<T>::checkInvariants() {
+void DynamicDAG<T>::removeEdge(Vertex<T>* producer, Vertex<T>* consumer) {
+  JIT_ASSERT(producer != consumer);
+  JIT_ASSERT(EdgeData<T>::has(producer->out_edges(), consumer));
+  JIT_ASSERT(EdgeData<T>::has(consumer->in_edges(), producer));
+  EdgeData<T>::erase(producer->out_edges(), consumer);
+  EdgeData<T>::erase(consumer->in_edges(), producer);
+}
+
+template <typename T>
+void DynamicDAG<T>::debugCheckInvariants() {
   for (size_t ord = 0; ord < vertices_.size(); ++ord) {
     const auto& vertex = vertices_.at(ord);
     if (!vertex) continue;
 
     JIT_ASSERT(vertex->ord == ord);
-    for (auto* v : vertex->in_edges) {
+    for (auto* v : vertex->in_edges()) {
       JIT_ASSERT(v->ord < ord);
     }
-    for (auto* v : vertex->out_edges) {
+    for (auto* v : vertex->out_edges()) {
       JIT_ASSERT(v->ord > ord);
     }
   }
@@ -135,34 +199,81 @@ at::optional<Vertex<T>*> DynamicDAG<T>::at(size_t ord) const {
   }
 }
 
-
 template <typename T>
-std::pair<vertex_set<T>,vertex_set<T>> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
-  for (auto* parent : v->in_edges) {
-    parent->out_edges.erase(v);
+EdgeData<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
+  for (auto* parent : v->in_edges()) {
+    EdgeData<T>::erase(parent->out_edges(), v);
   }
-  for (auto* child : v->out_edges) {
-    child->in_edges.erase(v);
+  for (auto* child : v->out_edges()) {
+    EdgeData<T>::erase(child->in_edges(), v);
   }
-  auto in_edges = std::move(v->in_edges);
-  auto out_edges = std::move(v->out_edges);
-
-  std::unique_ptr<Vertex<T>> empty(nullptr);
-  vertices_[v->ord] = std::move(empty);
-
-  return std::make_pair<vertex_set<T>,vertex_set<T>>(std::move(in_edges), std::move(out_edges));
+  auto edges = std::move(v->edges_);
+  vertices_[v->ord] = std::move(std::unique_ptr<Vertex<T>>(nullptr));
+  return edges;
 }
 
-// This is O(|AR|) which is the same thing as O(ord(consumer) - ord(producer))
-// AR is the "affected region": { v s.t. ord(v) in [ord(producer), ord(consumer)] }
-// consisting of the only verticies that can possibly be moved around due
-// to this edge addition.
+/*
+ * [Edge addition]
+ * When adding an edge x -> y,
+ * - if ord(x) < ord(y), don't do anything.
+ * - if ord(y) < ord(x), some graph reordering must occur.
+ *
+ * Assume we are adding an edge x -> y and that ord(x) > ord(y).
+ * First, if there is a path y ----> x through some other vertices, then this
+ * edge addition would create a cycle. Figure this out via DFS and throw if necessary.
+ *
+ * Now, consider the set of all vertices v such that ord(x) > ord(v) > ord(y).
+ * Call this set the affected region (AR) -- these are the only vertices we
+ * need to consider for reordering to make the resulting graph valid.
+ *
+ * Find all children of y (through DFS) in AR (call this set deltaF and add y to it)
+ * Find all parents of x in AR (call this set deltaB and add x to it).
+ *
+ * Move y and all the children of y to after x and all the parents of x. The
+ * result topological ordering is valid.
+ *
+ * [Visual algorithm reference]
+ * Higher nodes come earlier in topological order.
+ * We are adding an edge between x -> y.
+ * The topological ordering is e, y, c, a, d, b, x, f.
+ * The affected region is {y, c, a, d, b, x}. e and f cannot be involved
+ * in the reorder.
+ *
+ *           (e)       <- ord = 0 ->                   (e)
+ *            |                                         |
+ *            v                                         v
+ *           (y)       <- ord = 1 ->        \          (c)
+ *            ^ \                       -----\          |
+ *        (c) |  v     <- ord = 2 ->    -----/     (d)  v
+ *          \ | (a)    <- ord = 3 ->        /       \->(x)
+ *           ||  |                                      /\
+ *       (d) ||  |     <- ord = 4 ->              (y)<-/  \
+ *        |  ||  v                                 \       |
+ *        \  v| (b)    <- ord = 5 ->                \->(a) |
+ *         ->(x)       <- ord = 6 ->             (b)<--/   v
+ *            \->(f)   <- ord = 7 ->                      (f)
+ *
+ * We find all children of y in the affected region. deltaF = {y, a, b}
+ * We find all parents of x via DFS. deltaB = {c, d, x}
+ *
+ * Now, we reorder all vertices in deltaB to come before deltaF.
+ * result = {c, d, x, y, a, b}, and we assign these {1, 2, 3, 4, 5, 6}.
+ *
+ * [Analysis]
+ * This is O(|AR|) which is the same thing as O(ord(consumer) - ord(producer))
+ * AR is the "affected region": { v s.t. ord(v) in [ord(producer), ord(consumer)] }
+ * consisting of the only verticies that can possibly be moved around due
+ * to this edge addition.
+ */
 template <typename T>
 void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   JIT_ASSERT(producer != consumer);
-  if (producer->out_edges.count(consumer)) return;
-  producer->out_edges.insert(consumer);
-  consumer->in_edges.insert(producer);
+  if (EdgeData<T>::has(producer->out_edges(), consumer)) return;
+  EdgeData<T>::insert(producer->out_edges(), consumer);
+  EdgeData<T>::insert(consumer->in_edges(), producer);
+
+  visited_list<T> deltaF;
+  visited_list<T> deltaB;
 
   if (producer->ord <= consumer->ord) {
     // topological ordering is already consistent, no need to update.
@@ -171,18 +282,20 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 
   // Search for vertices that are reachable from consumer that have a now incorrect
   // topological ordering.
-  if (!dfsForward(consumer, producer->ord, deltaF_)) {
-    // dfsForward returns false if there is a path from consumer to producer.
-    throw std::runtime_error("Cycle detected while trying to add edge.");
+  if (dfsSearch(DFSDirection::forward, consumer, producer,
+                /*upper_bound=*/producer->ord, deltaF)) {
+    // Path found! This means there's a cycle.
+    AT_ERROR("Cycle detected while trying to add edge.");
   }
 
   // Search for vertices that can reach producer that have a now incorrect
   // topological ordering
-  dfsBackward(producer, consumer->ord, deltaB_);
+  JIT_ASSERT(!dfsSearch(DFSDirection::backward, producer, consumer,
+                        /*lower_bound=*/consumer->ord, deltaB));
 
   // Reorder the vertices that are reachable from consumer to occur BEFORE
   // the vertices that can reach producer.
-  reorder(deltaF_, deltaB_);
+  reorder(deltaF.vector(), deltaB.vector());
 }
 
 // Define the affected region for contractEdge(producer, consumer) as
@@ -200,23 +313,24 @@ bool DynamicDAG<T>::contractEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 
   removeEdge(producer, consumer);
 
+  // TODO(rzou): apply heuristic to merge producer into consumer or the other way around
+  // depending on |out_edges(producer)| and |in_edges(consumer)|.
+  //
   // We can either merge producer into consumer or the other way around.
   // I've chosen to merge producer into consumer for now but this is arbitrary.
   consumer->rdata.insert(consumer->rdata.end(), producer->rdata.begin(), producer->rdata.end());
 
-  vertex_set<T> in_edges;
-  vertex_set<T> out_edges;
-  std::tie(in_edges, out_edges) = removeVertex(producer);
+  auto edges = removeVertex(producer);
 
   // Each of these are constant b/c ord(consumer) > ord(producer) > ord(parent)
   // so the edge addition still preserves the existing topological order.
-  for (auto* parent : in_edges) {
+  for (auto* parent : edges.in_edges) {
     addEdge(parent, consumer);
   }
 
   // NB: each addEdge call is linear in (ord(consumer) - ord(child)).
   // This makes contractEdges O(|out_edges(producer)| * |AR|).
-  for (auto* child : out_edges) {
+  for (auto* child : edges.out_edges) {
     addEdge(consumer, child);
   }
   return true;
@@ -224,108 +338,74 @@ bool DynamicDAG<T>::contractEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 
 template <typename T>
 bool DynamicDAG<T>::contractionProducesCycle(Vertex<T>* producer, Vertex<T>* consumer) {
-  // Basically a modified dfsForward
-  vertex_list<T> stack;
-  vertex_list<T> visited;
-  stack.push_back(producer);
+  visited_list<T> visited;
 
+  // If there are multiple paths from producer to consumer then contracting
+  // (merging) producer and consumer would create a cycle.
+  //
+  // Search for a path from producer to consumer while ignoring the
+  // producer -> consumer edge.
   size_t upper_bound = consumer->ord;
-
-  while (!stack.empty()) {
-    auto* vertex = stack.back();
-    stack.pop_back();
-
-    if (vertex->visited) continue;
-    vertex->visited = true;
-    visited.push_back(vertex);
-
-    for (auto* next : vertex->out_edges) {
-      if (vertex != producer && next->ord == upper_bound) {
-        clearVisited(visited);
-        return true;
-      }
-      if (next->ord < upper_bound) {
-        stack.push_back(next);
-      }
+  for (auto* child : producer->out_edges()) {
+    if (child == consumer) continue;
+    if (child->visited()) continue; // already visited by dfs
+    if (dfsSearch(DFSDirection::forward, child, consumer, upper_bound, visited)) {
+      return true;
     }
   }
-  clearVisited(visited);
   return false;
 }
 
 
-// Performs a forward DFS.
-// Marks vertices as 'visited' and inserts them into visited.
-// Returns false immediately if upper_bound is reached.
-// Returns true otherwise.
+static bool is_within_bound(DFSDirection direction, size_t value, size_t bound) {
+  if (direction == DFSDirection::forward) {
+    return value < bound; // upper bound
+  } else {
+    return value > bound; // lower bound
+  }
+}
+
+// Searches for a path from start to end via a forward or backward dfs.
+// Returns if a path exists from start to end.
+// In addition, dfsSearch marks vertices as visited and inserts them into visited.
 template <typename T>
-bool DynamicDAG<T>::dfsForward(Vertex<T>* producer, size_t upper_bound,
-    vertex_list<T>& visited) {
+bool DynamicDAG<T>::dfsSearch(
+    DFSDirection direction,
+    Vertex<T>* start,
+    Vertex<T>* end,
+    size_t bound,
+    visited_list<T>& visited) {
   vertex_list<T> stack;
-  stack.push_back(producer);
+
+  auto visit = [&](Vertex<T>* v) {
+    visited.push_back(v);
+    stack.push_back(v);
+  };
+
+  visit(start);
 
   while (!stack.empty()) {
     auto* vertex = stack.back();
     stack.pop_back();
 
-    if (vertex->visited) continue;
-    vertex->visited = true;
-    visited.push_back(vertex);
+    vertex_list<T>* next_edges = (direction == DFSDirection::forward) ?
+      &vertex->out_edges() :
+      &vertex->in_edges();
 
-    for (auto* next : vertex->out_edges) {
-      if (next->ord == upper_bound) {
-        return false;
+    for (Vertex<T>* next : *next_edges) {
+      if (next == end) {
+        // Path found from start to end.
+        visit(next);
+        return true;
       }
-      if (next->ord < upper_bound) {
-        stack.push_back(next);
-      }
-    }
-  }
-  return true;
-}
-
-// Performs a backward DFS.
-// Marks vertices as 'visited' and inserts them into visited.
-template <typename T>
-void DynamicDAG<T>::dfsBackward(Vertex<T>* producer, size_t lower_bound,
-    vertex_list<T>& visited) {
-  vertex_list<T> stack;
-  stack.push_back(producer);
-
-  while (!stack.empty()) {
-    auto* vertex = stack.back();
-    stack.pop_back();
-
-    if (vertex->visited) continue;
-
-    vertex->visited = true;
-    visited.push_back(vertex);
-
-    for (auto* next : vertex->in_edges) {
-      if (next->ord > lower_bound) {
-        stack.push_back(next);
+      if (!next->visited() && is_within_bound(direction, next->ord, bound)) {
+        visit(next);
       }
     }
   }
+  return false;
 }
 
-template <typename T>
-void DynamicDAG<T>::sort(vertex_list<T>& delta) {
-  struct {
-    bool operator()(Vertex<T>* a, Vertex<T>* b) const {
-      return a->ord < b->ord;
-    }
-  } custom_less;
-  std::sort(delta.begin(), delta.end(), custom_less);
-}
-
-template <typename T>
-void DynamicDAG<T>::clearVisited(vertex_list<T>& visited) {
-  for (auto* v: visited) {
-    v->visited = false;
-  }
-  visited.clear();
-}
 
 template <typename T>
 void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
@@ -333,7 +413,12 @@ void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
   sort(deltaB);
   sort(deltaF);
 
+  size_t num_affected = deltaB.size() + deltaF.size();
+
+  // TODO(rzou): there are five vector allocations. All of this can be done
+  // as one in-place operation; optimize this sometime.
   vertex_list<T> tmp;
+  tmp.reserve(num_affected);
 
   std::vector<size_t> deltaB_ords = fmap(deltaB, [](Vertex<T>* v) { return v->ord; });
   std::vector<size_t> deltaF_ords = fmap(deltaF, [](Vertex<T>* v) { return v->ord; });
@@ -348,6 +433,7 @@ void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
   tmp.insert(tmp.end(), deltaF.begin(), deltaF.end());
 
   std::vector<std::unique_ptr<Vertex<T>>> tmp_storage;
+  tmp_storage.reserve(num_affected);
 
   // [Reordering std::unique_ptr in a std::vector]
   // Be careful to not delete the data.
@@ -361,9 +447,6 @@ void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
     new_vertex->ord = new_ord;
     vertices_[new_ord] = std::move(new_vertex);
   }
-
-  clearVisited(deltaF);
-  clearVisited(deltaB);
 }
 
 template <typename T>
@@ -382,7 +465,7 @@ std::string Vertex<T>::toString() {
   std::stringstream ss;
   ss << "node(" << ord << ")\n";
   ss << "[";
-  for (auto* c : in_edges) {
+  for (auto* c : in_edges()) {
     ss << c->ord << " ";
   }
   ss << "] -> {\n";
@@ -390,7 +473,7 @@ std::string Vertex<T>::toString() {
     ss << "  " << d;
   }
   ss << "} ("<< ord << ") -> [";
-  for (auto* c : out_edges) {
+  for (auto* c : out_edges()) {
     ss << c->ord << " ";
   }
   ss << "]\n";
