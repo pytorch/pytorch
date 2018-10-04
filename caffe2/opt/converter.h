@@ -13,6 +13,9 @@
 
 namespace caffe2 {
 
+CAFFE2_API void injectDataEdgeIndicators(caffe2::NetDef* net);
+CAFFE2_API void removeDataEdgeIndicators(caffe2::NetDef* net);
+
 CAFFE2_API nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict = false);
 CAFFE2_API caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 
@@ -44,9 +47,9 @@ class CAFFE2_API Converter {
   virtual ~Converter() {}
 };
 
-CAFFE_DECLARE_REGISTRY(ConverterRegistry, Converter);
+C10_DECLARE_REGISTRY(ConverterRegistry, Converter);
 #define REGISTER_CONVERTER(name, cls) \
-  CAFFE_REGISTER_CLASS(ConverterRegistry, name, cls)
+  C10_REGISTER_CLASS(ConverterRegistry, name, cls)
 
 #define TRIVIAL_CONVERTER(opName)                                             \
   class opName##Converter : public Converter {                                \

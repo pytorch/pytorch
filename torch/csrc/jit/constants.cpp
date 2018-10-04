@@ -27,6 +27,13 @@ Value* insertConstant(
   } else if(val.isDouble()) {
     n->f_(attr::value, val.toDouble());
     n->output()->setType(FloatType::get());
+  } else if (val.isBool()) {
+    n->i_(attr::value, val.toBool());
+    n->output()->setType(BoolType::get());
+  } else if (val.isBoolList()) {
+    auto bool_list = val.toBoolList()->elements();
+    n->is_(attr::value, std::vector<int64_t>(bool_list.begin(), bool_list.end()));
+    n->output()->setType(ListType::ofBools());
   } else if(val.isIntList()) {
     n->is_(attr::value, val.toIntList()->elements());
     n->output()->setType(ListType::ofInts());
@@ -42,6 +49,8 @@ Value* insertConstant(
     n->destroy();
     n = g.create(prim::None);
     n->output()->setType(NoneType::get());
+  } else if(val.isWorld()) {
+    n->output()->setType(WorldType::get());
   } else {
     throw constant_not_supported_error("Unsupported value kind: " + val.tagKind());
   }
@@ -60,6 +69,12 @@ RegisterOperators reg({
           auto t = autograd::make_variable(node->t(attr::value));
           return [t](Stack& stack) {
             stack.push_back(t);
+            return 0;
+          };
+        } else if (type->isSubtypeOf(BoolType::get())) {
+          bool b = node->i(attr::value);
+          return [b](Stack& stack) {
+            push(stack, b);
             return 0;
           };
         } else if (
@@ -82,6 +97,12 @@ RegisterOperators reg({
           auto is = node->is(attr::value);
           return [is](Stack& stack) {
             push(stack, is);
+            return 0;
+          };
+        } else if(type->isSubtypeOf(ListType::ofBools())) {
+          auto bs = node->is(attr::value);
+          return [bs](Stack& stack) {
+            push(stack, bs);
             return 0;
           };
         } else if(type->isSubtypeOf(ListType::ofTensors())) {
