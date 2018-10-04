@@ -3,16 +3,16 @@ graph() {
   %b.2 : int = prim::Constant[value=1]()
   %2 : int = prim::Constant[value=2147483647]()
   %b.1 : int = prim::Constant[value=0]()
-  %4 : int = prim::Constant[value=1]()
+  %4 : bool = prim::Constant[value=1]()
   %b.3 : int = prim::Loop(%2, %4, %b.1)
     block0(%6 : int, %7 : int) {
-      %8 : int = prim::Constant[value=1]()
+      %8 : bool = prim::Constant[value=1]()
       -> (%8, %b.2)
     }
-  %9 : int = prim::Constant[value=0]()
+  %9 : bool = prim::Constant[value=0]()
   %b : int = prim::Loop(%2, %9, %b.3)
     block0(%11 : int, %12 : int) {
-      %13 : int = prim::Constant[value=0]()
+      %13 : bool = prim::Constant[value=0]()
       -> (%13, %b.4)
     }
   return (%b);

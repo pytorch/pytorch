@@ -1,6 +1,6 @@
 #include "caffe2/operators/create_scope_op.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_workspace_stack_debug,
     false,
     "Enable debug checks for CreateScope's workspace stack");

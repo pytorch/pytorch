@@ -1050,6 +1050,15 @@ public:
     result->output()->setType(CompleteTensorType::fromNumberType(typ));
     return result;
   }
+  Node* createBoolToTensor(Value* value) {
+    auto typ = value->type();
+    Node * result = create(prim::BoolToTensor, {value});
+    if (!typ->isSubtypeOf(BoolType::get())) {
+      AT_ERROR("Cannot create bool type from ", typ->str());
+    }
+    result->output()->setType(CompleteTensorType::fromBoolType());
+    return result;
+  }
   Node* createTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::TensorToNum, {value});
     result->output()->setType(type);
@@ -1058,6 +1067,11 @@ public:
   Node* createImplicitTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::ImplicitTensorToNum, {value});
     result->output()->setType(type);
+    return result;
+  }
+  Node* createTensorToBool(Value* value) {
+    auto* result = create(prim::TensorToBool, {value});
+    result->output()->setType(BoolType::get());
     return result;
   }
   Node* createIntToFloat(Value* value) {

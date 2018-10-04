@@ -7,13 +7,12 @@
 #include "caffe2/core/workspace.h"
 #include <unordered_set>
 
-CAFFE2_DEFINE_int(warmup, 3, "The number of iterations to warm up.");
-CAFFE2_DEFINE_int(iter, 100, "The number of iterations to run.");
-CAFFE2_DEFINE_bool(
+C10_DEFINE_int(warmup, 3, "The number of iterations to warm up.");
+C10_DEFINE_int(iter, 100, "The number of iterations to run.");
+C10_DEFINE_bool(
     run_individual,
     true,
     "Whether to benchmark individual operators.");
-
 
 constexpr float tol = 0.03;
 namespace caffe2 {
@@ -46,7 +45,8 @@ namespace caffe2 {
   LOG(ERROR) << "[C2DEBUG] after compareNetResult4D";
   NetBase* net = ws->CreateNet(predict_net_def_gpu);
   LOG(ERROR) << "[C2DEBUG] Benchmarking OpenGL Net";
-  net->TEST_Benchmark(caffe2::FLAGS_warmup, caffe2::FLAGS_iter, caffe2::FLAGS_run_individual);
+  net->TEST_Benchmark(
+      c10::FLAGS_warmup, c10::FLAGS_iter, c10::FLAGS_run_individual);
   // Test CPU
   for (auto i = 0; i < predict_net_def.op().size(); ++i) {
     auto op = predict_net_def.mutable_op(i);
@@ -58,7 +58,7 @@ namespace caffe2 {
   predict_net_def.set_name("cpu_net");
   net = ws->CreateNet(predict_net_def);
   LOG(INFO) << "[C2DEBUG] Benchmarking CPU Net";
-  net->TEST_Benchmark(caffe2::FLAGS_warmup, caffe2::FLAGS_iter, caffe2::FLAGS_run_individual);
-
+  net->TEST_Benchmark(
+      c10::FLAGS_warmup, c10::FLAGS_iter, c10::FLAGS_run_individual);
   }
 } // namespace caffe2

@@ -33,14 +33,14 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/core/logging.h"
 
-CAFFE2_DEFINE_string(input_folder, "", "The input folder name.");
-CAFFE2_DEFINE_string(output_train_db_name,
-                     "", "The output training db name.");
-CAFFE2_DEFINE_string(output_test_db_name,
-                     "", "The output testing db name.");
-CAFFE2_DEFINE_string(db, "leveldb", "The db type.");
-CAFFE2_DEFINE_bool(is_cifar100, false,
-            "If set, convert cifar100. Otherwise do cifar10.");
+C10_DEFINE_string(input_folder, "", "The input folder name.");
+C10_DEFINE_string(output_train_db_name, "", "The output training db name.");
+C10_DEFINE_string(output_test_db_name, "", "The output testing db name.");
+C10_DEFINE_string(db, "leveldb", "The db type.");
+C10_DEFINE_bool(
+    is_cifar100,
+    false,
+    "If set, convert cifar100. Otherwise do cifar10.");
 
 namespace caffe2 {
 
@@ -57,7 +57,7 @@ const int kCIFAR100TestDataSize = 10000;
 
 void ReadImage(std::ifstream* file, int* label, char* buffer) {
   char label_char;
-  if (caffe2::FLAGS_is_cifar100) {
+  if (c10::FLAGS_is_cifar100) {
     // Skip the coarse label.
     file->read(&label_char, 1);
   }
@@ -110,31 +110,29 @@ void WriteToDB(const string& filename, const int num_items,
 
 void ConvertCIFAR() {
   std::unique_ptr<db::DB> train_db(
-      db::CreateDB(caffe2::FLAGS_db, caffe2::FLAGS_output_train_db_name,
-                   db::NEW));
+      db::CreateDB(c10::FLAGS_db, c10::FLAGS_output_train_db_name, db::NEW));
   std::unique_ptr<db::DB> test_db(
-      db::CreateDB(caffe2::FLAGS_db, caffe2::FLAGS_output_test_db_name,
-                   db::NEW));
+      db::CreateDB(c10::FLAGS_db, c10::FLAGS_output_test_db_name, db::NEW));
 
-  if (!caffe2::FLAGS_is_cifar100) {
+  if (!c10::FLAGS_is_cifar100) {
     // This is cifar 10.
     for (int fileid = 0; fileid < kCIFAR10TrainBatches; ++fileid) {
       stringstream train_file;
-      train_file << caffe2::FLAGS_input_folder << "/data_batch_" << fileid + 1
+      train_file << c10::FLAGS_input_folder << "/data_batch_" << fileid + 1
                  << ".bin";
       WriteToDB(train_file.str(), kCIFAR10BatchSize,
                 fileid * kCIFAR10BatchSize, train_db.get());
     }
     stringstream test_file;
-    test_file << caffe2::FLAGS_input_folder << "/test_batch.bin";
+    test_file << c10::FLAGS_input_folder << "/test_batch.bin";
     WriteToDB(test_file.str(), kCIFAR10TestDataSize, 0, test_db.get());
   } else {
     // This is cifar 100.
     stringstream train_file;
-    train_file << caffe2::FLAGS_input_folder << "/train.bin";
+    train_file << c10::FLAGS_input_folder << "/train.bin";
     WriteToDB(train_file.str(), kCIFAR100TrainDataSize, 0, train_db.get());
     stringstream test_file;
-    test_file << caffe2::FLAGS_input_folder << "/test.bin";
+    test_file << c10::FLAGS_input_folder << "/test.bin";
     WriteToDB(test_file.str(), kCIFAR100TestDataSize, 0, test_db.get());
   }
 }

@@ -13,7 +13,7 @@
 // an MKLMemory: if it is set true, then the View() function will actually
 // change the underlying storage. If it is set false, an implicit copy is
 // triggered but the original storage is not affected.
-CAFFE2_DECLARE_bool(caffe2_mkl_implicit_layout_change);
+C10_DECLARE_bool(caffe2_mkl_implicit_layout_change);
 
 namespace caffe2 {
 namespace mkl {
@@ -511,7 +511,7 @@ class C10_EXPORT MKLMemory {
           dnnConversionCreate<T>, layout_, layout_wanted);
       MKLDNN_SAFE_CALL(dnnConversionExecute<T>(
           convert, buffer_.get(), temp_buffer));
-      if (primitive && FLAGS_caffe2_mkl_implicit_layout_change) {
+      if (primitive && c10::FLAGS_caffe2_mkl_implicit_layout_change) {
         VLOG(2) << "Implicit layout change set. "
                    "Changing the underlying storage.";
         // We will need to call Reset to set up all the member variables.

@@ -175,10 +175,10 @@ class TestConversion(TestCase):
     def _make_fake_if_op(self, true_nodes, false_nodes, output_types):
         true = helper.make_tensor("condition", TensorProto.BOOL, (), [True])
         true_graph = helper.make_graph(true_nodes, "true_graph", [], [
-            helper.make_tensor_value_info("_Y", TensorProto.FLOAT, (2, 2)),
+            helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 2)),
         ])
         false_graph = helper.make_graph(false_nodes, "false_graph", [], [
-            helper.make_tensor_value_info("_Y", TensorProto.FLOAT, (2, 2)),
+            helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 2)),
         ])
         if_inputs = ["condition"]
         if_outputs = [name for _, _, name in output_types]
@@ -191,8 +191,8 @@ class TestConversion(TestCase):
 
     def test_onnx_to_caffe2_if(self):
         true_nodes = [helper.make_node(
-            "MatMul", ["X", "W"], ["_Y"])]
-        false_nodes = [helper.make_node("Slice", ["X"], ["_Y"], axes=[0, 1], starts=[0, 0], ends=[0, 2])]
+            "MatMul", ["X", "W"], ["Y"])]
+        false_nodes = [helper.make_node("Slice", ["X"], ["Y"], axes=[0, 1], starts=[0, 0], ends=[0, 2])]
         nodes = self._make_fake_if_op(true_nodes, false_nodes, [(TensorProto.FLOAT, (2, 2), "Y")])
         X = np.random.rand(2, 3).astype(np.float32)
         W = np.random.rand(3, 2).flatten().astype(np.float32)

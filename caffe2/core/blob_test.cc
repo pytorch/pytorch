@@ -18,9 +18,9 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_int64(caffe2_test_big_tensor_size, 100000000, "");
-CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
-CAFFE2_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
+C10_DEFINE_int64(caffe2_test_big_tensor_size, 100000000, "");
+C10_DECLARE_int(caffe2_tensor_chunk_size);
+C10_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 
 namespace caffe2 {
 using namespace ::caffe2::db;
@@ -455,8 +455,8 @@ TYPED_TEST(TensorCPUTest, NoLongerSharesAfterFreeMemory) {
 
 TYPED_TEST(TensorCPUTest, KeepOnShrink) {
   // Set flags (defaults)
-  FLAGS_caffe2_keep_on_shrink = true;
-  FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
+  c10::FLAGS_caffe2_keep_on_shrink = true;
+  c10::FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
 
   vector<int> dims{2, 3, 5};
   Tensor tensor(dims, CPU);
@@ -486,8 +486,8 @@ TYPED_TEST(TensorCPUTest, KeepOnShrink) {
 
 TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
   // Set flags
-  FLAGS_caffe2_keep_on_shrink = true;
-  FLAGS_caffe2_max_keep_on_shrink_memory = 8 * 4 * sizeof(TypeParam);
+  c10::FLAGS_caffe2_keep_on_shrink = true;
+  c10::FLAGS_caffe2_max_keep_on_shrink_memory = 8 * 4 * sizeof(TypeParam);
 
   vector<int> dims{1, 8, 8};
   Tensor tensor(dims, CPU);
@@ -507,7 +507,7 @@ TYPED_TEST(TensorCPUTest, MaxKeepOnShrink) {
   //EXPECT_NE(ptr, new_ptr);
 
   // Restore default flags
-  FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
+  c10::FLAGS_caffe2_max_keep_on_shrink_memory = LLONG_MAX;
 }
 
 TYPED_TEST(TensorCPUDeathTest, CannotAccessRawDataWhenEmpty) {
@@ -710,7 +710,7 @@ TEST(TensorTest, Half) {
   const TensorProto& tensor_proto = proto.tensor();
   EXPECT_EQ(
       tensor_proto.data_type(), TypeMetaToDataType(TypeMeta::Make<at::Half>()));
-  if (FLAGS_caffe2_serialize_fp16_as_bytes) {
+  if (c10::FLAGS_caffe2_serialize_fp16_as_bytes) {
     EXPECT_EQ(tensor_proto.byte_data().size(), 2 * kSize);
     for (int i = 0; i < kSize; ++i) {
       auto value = tensor->mutable_data<at::Half>()[i].x;
@@ -850,8 +850,8 @@ TYPED_TEST_CASE(TypedTensorTest, TensorDataTypes);
 
 TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
   int64_t d1 = 2;
-  int64_t d2 = FLAGS_caffe2_test_big_tensor_size
-      ? FLAGS_caffe2_test_big_tensor_size / d1
+  int64_t d2 = c10::FLAGS_caffe2_test_big_tensor_size
+      ? c10::FLAGS_caffe2_test_big_tensor_size / d1
       : static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
   int64_t size = d1 * d2;
   string db_source = (string)std::tmpnam(nullptr);
@@ -1024,8 +1024,8 @@ TEST(ContentChunks, Serialization) {
 
 TEST(CustomChunkSize, BigTensorSerialization) {
   int64_t d1 = 2;
-  int64_t d2 = FLAGS_caffe2_test_big_tensor_size
-      ? FLAGS_caffe2_test_big_tensor_size / d1
+  int64_t d2 = c10::FLAGS_caffe2_test_big_tensor_size
+      ? c10::FLAGS_caffe2_test_big_tensor_size / d1
       : static_cast<int64_t>(std::numeric_limits<int>::max()) + 1;
   int64_t size = d1 * d2;
 

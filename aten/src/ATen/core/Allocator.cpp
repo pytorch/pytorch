@@ -20,30 +20,25 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
 
 namespace caffe2 {
 
-std::mutex& GetAllocatorArrayMutex() {
-  static std::mutex mutex;
-  return mutex;
-}
-
-// CAFFE2_API std::unique_ptr<at::Allocator> allocator_array[static_cast<int>(
-//    at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
-std::unique_ptr<at::Allocator>* GetAllocatorArray() {
-  static std::unique_ptr<at::Allocator>* array =
-      new std::unique_ptr<at::Allocator>[static_cast<int>(
-          at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
-  return array;
-}
+CAFFE2_API std::unique_ptr<at::Allocator> allocator_array[static_cast<int>(
+    at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+// std::unique_ptr<at::Allocator>* GetAllocatorArray() {
+//   static std::unique_ptr<at::Allocator>* array =
+//       new std::unique_ptr<at::Allocator>[static_cast<int>(
+//           at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+//   return array;
+// }
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc) {
-  auto* allocator_array = GetAllocatorArray();
-  auto& mutex = GetAllocatorArrayMutex();
-  std::lock_guard<std::mutex> guard(mutex);
+  // auto* allocator_array = GetAllocatorArray();
+  // auto& mutex = GetAllocatorArrayMutex();
+  // std::lock_guard<std::mutex> guard(mutex);
   auto& uniq_ptr = allocator_array[static_cast<int>(t)];
   uniq_ptr.reset(alloc);
 }
 
 at::Allocator* GetAllocator(const at::DeviceType& t) {
-  auto* allocator_array = GetAllocatorArray();
+  // auto* allocator_array = GetAllocatorArray();
   auto& uniq_ptr = allocator_array[static_cast<int>(t)];
   auto* alloc = uniq_ptr.get();
   AT_ASSERTM(alloc, "Allocator for ", t, " is not set.");
