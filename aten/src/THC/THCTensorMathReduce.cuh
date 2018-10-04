@@ -315,7 +315,7 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
         tgt->template data<T>(), src->template data<T>(), num_orows, num_irows, row_size);
   }
 
-  cudaError errcode = cudaGetLastError();
+  cudaError_t errcode = cudaGetLastError();
   if (errcode != cudaSuccess) THError(cudaGetErrorString(errcode));
 }
 
@@ -456,7 +456,7 @@ __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, Tenso
         tgt->template data<T>(), src->template data<T>(), num_rows, row_size);
   }
 
-  cudaError errcode = cudaGetLastError();
+  cudaError_t errcode = cudaGetLastError();
   if (errcode != cudaSuccess) THError(cudaGetErrorString(errcode));
 }
 

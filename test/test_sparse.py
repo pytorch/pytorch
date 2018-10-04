@@ -1167,6 +1167,7 @@ class TestSparse(TestCase):
             device=self.device)
         self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
 
+    @skipIfRocm
     def test_sparse_add_coalesce(self):
         i = self.IndexTensor([[1, 2, 1]])
         v = self.ValueTensor([3, 4, 5])

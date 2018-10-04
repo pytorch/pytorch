@@ -5,7 +5,7 @@ graph(%x.1_data : Dynamic
       %y_mask : Dynamic
       %y_dims : Dynamic) {
   %6 : int = prim::Constant[value=10]()
-  %7 : int = prim::Constant[value=1]()
+  %7 : bool = prim::Constant[value=1]()
   %x : Dynamic, %9 : Dynamic, %10 : Dynamic = prim::Loop(%6, %7, %x.1_data, %x.1_mask, %x.1_dims)
     block0(%loop_num : int, %5_data : Dynamic, %5_mask : Dynamic, %5_dims : Dynamic) {
       %15 : int = prim::Constant[value=1]()
@@ -14,7 +14,7 @@ graph(%x.1_data : Dynamic
       %data.1 : Dynamic = aten::add(%5_data, %y_data, %alpha)
       %mask : Dynamic = aten::mul(%5_mask, %y_mask)
       %dims : Dynamic = aten::__or__(%5_dims, %y_dims)
-      %21 : int = prim::Constant[value=1]()
+      %21 : bool = prim::Constant[value=1]()
       %data : Dynamic = aten::where(%mask, %data.1, %5_data)
       -> (%21, %data, %mask, %dims)
     }

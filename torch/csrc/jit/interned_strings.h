@@ -46,9 +46,11 @@ namespace torch { namespace jit {
   _(prim, TupleUnpack)             \
   _(prim, ListConstruct)           \
   _(prim, ListUnpack)              \
+  _(prim, BoolToTensor)            \
   _(prim, NumToTensor)             \
   _(prim, TensorToNum)             \
   _(prim, ImplicitTensorToNum)     \
+  _(prim, TensorToBool)            \
   _(prim, IntToFloat)              \
   _(prim, FloatToInt)              \
   _(prim, StringToFloat)           \
