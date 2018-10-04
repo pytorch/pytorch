@@ -9,7 +9,7 @@ if (NOT __NCCL_INCLUDED)
       target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
   else()
     # build directory
-    set(nccl_PREFIX ${PROJECT_SOURCE_DIR}/third_party/nccl)
+    set(nccl_PREFIX ${PROJECT_SOURCE_DIR}/third_party/nccl/nccl)
 
     # we build nccl statically, but want to link it into the caffe shared library
     # this requires position-independent code
