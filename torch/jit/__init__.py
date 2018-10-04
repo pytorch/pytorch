@@ -46,9 +46,11 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
-compiled_weak_fns = weakref.WeakKeyDictionary()
-COMPILATION_PENDING = object()
-COMPILED = object()
+
+_compiled_weak_fns = weakref.WeakKeyDictionary()
+_compiled_weak_methods = dict()
+_COMPILATION_PENDING = object()
+_COMPILED = object()
 
 
 @contextlib.contextmanager
@@ -634,26 +636,28 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def weak_script(fn, _frames_up=0):
-    compiled_weak_fns[fn] = {
-        "status": COMPILATION_PENDING,
-        "compiled_fn": None,
-        "rcb": createResolutionCallback(_frames_up + 1)
-    }
-    return fn
-
-
 def _try_compile_weak_script(fn):
-    entry = compiled_weak_fns.get(fn)
+    entry = _compiled_weak_fns.get(fn)
     if entry is None:
         return None
-    if entry["status"] == COMPILATION_PENDING:
+
+    if entry["status"] == _COMPILATION_PENDING:
         compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
-        compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
-        entry["status"] = COMPILED
+        _compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
+        entry["status"] = _COMPILED
         return compiled_fn
     else:
         return entry["compiled_fn"]
+
+
+def weak_script(fn, _weak_fns=_compiled_weak_fns, _frames_up=0, _key=None):
+    _weak_fns[fn if _key is None else _key] = {
+        "status": _COMPILATION_PENDING,
+        "compiled_fn": None,
+        "fn": fn,
+        "rcb": createResolutionCallback(_frames_up + 1)
+    }
+    return fn
 
 
 def script(fn, optimize=True, _frames_up=0, _rcb=None):
@@ -678,7 +682,11 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 
-def script_method(fn):
+def weak_script_method(fn):
+    return weak_script(fn, _weak_fns=_compiled_weak_methods, _frames_up=1, _key=fn.__name__)
+
+
+def script_method(fn, _rcb=None):
     if not _enabled:
         return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
@@ -693,9 +701,29 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    rcb = createResolutionCallback(frames_up=2)
+    if _rcb is None:
+        _rcb = createResolutionCallback(frames_up=2)
     ast = get_jit_ast(fn, is_method=True)
-    return ScriptMethodStub(rcb, ast, fn)
+    return ScriptMethodStub(_rcb, ast, fn)
+
+
+def _compile_weak_script_module(mod):
+    attrs = {}
+    for func_attr in dir(mod):
+        func = getattr(mod, func_attr)
+        if not callable(func) or not isinstance(func, types.MethodType):
+            continue
+
+        entry = _compiled_weak_methods.get(func.__name__)
+        if entry is not None:
+            # Construct new class attributes (and create ScriptMethodStubs if necessary)
+            attrs[entry["fn"].__name__] = script_method(entry["fn"], entry["rcb"])
+
+    # Generate a new subclass of ScriptModule with the WeakScriptModule methods
+    generated_class_name = "{}Compiled".format(mod.__class__.__name__)
+    result_class = type(generated_class_name, (mod.__class__, ScriptModule), attrs)
+
+    return result_class()
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -1076,8 +1104,14 @@ if _enabled:
             # we add 1 to get to the proper surrounding scope.
             rcb = createResolutionCallback(frames_up=1)
             self._define(lang, rcb, True)
+
+    class WeakScriptModule(Module):
+        def __init__(self):
+            Module.__init__(self)
+
 else:
     ScriptModule = torch.nn.Module
+    WeakScriptModule = torch.nn.Module
 
 
 def _get_methods(cls):
