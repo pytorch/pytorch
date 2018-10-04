@@ -263,7 +263,7 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   }else if (kind == "StringType") {
     return StringType::get();
   } else {
-    throw std::runtime_error("unexpected string for type kind");
+    throw std::runtime_error("unexpected string for type kind: " + kind);
   }
 }
 
