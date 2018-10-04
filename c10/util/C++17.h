@@ -251,5 +251,4 @@ template<class T> inline std::string to_string(T value) {
     return detail::to_string_<T>::call(value);
 }
 
-
 }}

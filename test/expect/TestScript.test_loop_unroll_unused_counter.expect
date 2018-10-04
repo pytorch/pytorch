@@ -2,7 +2,7 @@ graph(%x : Dynamic) {
   %1 : int = prim::Constant[value=1]()
   %y.1 : int = prim::Constant[value=0]()
   %3 : int = prim::TensorToNum(%x)
-  %4 : int = prim::Constant[value=1]()
+  %4 : bool = prim::Constant[value=1]()
   %5 : int = prim::Constant[value=8]()
   %6 : int = aten::floordiv(%3, %5)
   %7 : int = prim::Constant[value=8]()
@@ -18,13 +18,13 @@ graph(%x : Dynamic) {
       %y.9 : int = aten::add(%y.8, %1)
       %y.10 : int = aten::add(%y.9, %1)
       %y.11 : int = aten::add(%y.10, %1)
-      %21 : int = prim::Constant[value=1]()
+      %21 : bool = prim::Constant[value=1]()
       -> (%21, %y.11)
     }
   %y : int = prim::Loop(%9, %4, %y.3)
     block0(%i : int, %24 : int) {
       %y.4 : int = aten::add(%24, %1)
-      %26 : int = prim::Constant[value=1]()
+      %26 : bool = prim::Constant[value=1]()
       -> (%26, %y.4)
     }
   return (%y);

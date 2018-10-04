@@ -10,6 +10,8 @@ if (NOT MSVC)
   set(CMAKE_C_STANDARD 11)
 endif()
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # One variable that determines whether the current cmake process is being run
 # with the main Caffe2 library. This is useful for building modules - if
 # modules are built with the main Caffe2 library then one does not need to do

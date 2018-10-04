@@ -63,6 +63,10 @@ class UniqueVoidPtr {
   void* release_context() {
     return ctx_.release();
   }
+  std::unique_ptr<void, DeleterFnPtr>&& move_context() {
+    return std::move(ctx_);
+  }
+
   template <typename T>
   T* cast_context(DeleterFnPtr expected_deleter) const {
     if (get_deleter() != expected_deleter)

@@ -7,6 +7,7 @@ else()
   project(torch CXX C)
   find_package(Caffe2 REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
+  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
 option(BUILD_TEST "Build torch test binaries" ON)

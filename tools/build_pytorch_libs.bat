@@ -201,7 +201,6 @@ goto:eof
                   -DMKLDNN_LIBRARY="%MKLDNN_LIBRARY%" ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-                  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
