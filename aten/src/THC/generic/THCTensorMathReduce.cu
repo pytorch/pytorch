@@ -72,7 +72,7 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
       <<<grid, threads, 0, THCState_getCurrentStream(state)>>>
       (THCTensor_(data)(state, data), scalar_cast<accreal>(value), size, scalar_cast<accreal>(maxnorm));
 
-    cudaError errcode = cudaGetLastError();
+    cudaError_t errcode = cudaGetLastError();
     if(errcode != cudaSuccess)
       THError(cudaGetErrorString(errcode));
   }

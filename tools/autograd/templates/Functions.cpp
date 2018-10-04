@@ -1,3 +1,10 @@
+// NB: Must be at the top of file to avoid including the deprecated "math.h".
+// https://stackoverflow.com/questions/6563810/m-pi-works-with-math-h-but-not-with-cmath-in-visual-studio
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <cmath>
+#endif
+
 #include "Functions.h"
 #include <ATen/Utils.h>
 #include <ATen/core/TensorOptions.h>
@@ -6,12 +13,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/Reduction.h>
 
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#define _USE_MATH_DEFINES
 #include <ciso646>
-#endif
-#include <math.h>
 #include <algorithm>
 #include <numeric>
 

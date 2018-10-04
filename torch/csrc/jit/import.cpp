@@ -257,6 +257,8 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     return FloatType::get();
   } else if (kind == "IntType") {
     return IntType::get();
+  } else if (kind == "BoolType") {
+    return BoolType::get();
   } else if (kind == "NoneType") {
     return NoneType::get();
   } else if (kind == "GeneratorType") {

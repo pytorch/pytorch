@@ -179,7 +179,7 @@ bool DeformConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     }
   };
 
-  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, f);
   } else {
     f(&col_buffer_);
