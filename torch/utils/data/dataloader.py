@@ -369,9 +369,10 @@ class _DataLoaderIter(object):
     #
     #      As shown above, the workers are set as daemonic children of the main
     #      process. However, automatic cleaning-up of such child processes only
-    #      happen if the parent process exits gracefully (e.g., SIGTERM). So we
-    #      must ensure that each process will exit even the process that should
-    #      send/receive data to/from it were killed, i.e.,
+    #      happens if the parent process exits gracefully (e.g., not via fatal
+    #      signals like SIGKILL). So we must ensure that each process will exit
+    #      even the process that should send/receive data to/from it were
+    #      killed, i.e.,
     #
     #        a. A process won't hang when getting from a queue.
     #

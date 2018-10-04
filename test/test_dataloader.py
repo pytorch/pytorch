@@ -266,9 +266,11 @@ def disable_stderr(worker_id):
     r"""
     Avoids printing "ERROR: Unexpected segmentation fault encountered in worker."
     from workers. Since worker signal handler prints with low-level write(),
-    this has to be done on OS level.
+    this has to be done on OS level via dup.
     """
-    os.close(sys.stderr.fileno())
+    sys.stderr.flush()  # flush library buffers that dup2 knows nothing about
+    devnull = open(os.devnull, 'w')
+    os.dup2(devnull.fileno(), sys.stderr.fileno())
 
 
 def _test_segfault():
