@@ -333,9 +333,7 @@ bool MIOPENConvOp::DoRunWithType() {
       fwdAlgo_ = perf.fwd_algo;
     }
   }
-  }
 
->>>>>>> master
   miopen_wrapper_.with_miopen_state(miopen_state_, [&](MIOPENState* state) {
       MIOPEN_ENFORCE(miopenConvolutionForward(
         state->miopen_handle(),
