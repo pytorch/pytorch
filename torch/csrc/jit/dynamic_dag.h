@@ -26,10 +26,13 @@ template <typename T>
 using vertex_list = std::vector<Vertex<T>*>;
 
 template <typename T>
-using maybe_vertex_list = std::vector<at::optional<Vertex<T>*>>;
+using maybe_vertex_list = std::vector<std::unique_ptr<Vertex<T>>>;
 
 template <typename T>
 struct Vertex {
+  Vertex(size_t ord, T datum)
+  : ord(ord), visited(false) { rdata.push_back(datum); }
+
   std::vector<T> rdata; // stored in reverse order
   size_t ord; // index in topological ordering. Is unique.
   bool visited; // If this vertex has been visited
@@ -41,7 +44,6 @@ struct Vertex {
 
 template <typename T>
 struct DynamicDAG {
-  ~DynamicDAG();
 
   Vertex<T>* newVertex(T datum);
   std::pair<vertex_set<T>,vertex_set<T>> removeVertex(Vertex<T>* v);
@@ -58,13 +60,14 @@ struct DynamicDAG {
   void reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB);
   void sort(vertex_list<T>& delta);
 
-  void checkInvariants();
+  // size() >= the number of live vertices.
+  // for all vertices v, v.ord < size()
+  size_t size() const { return vertices_.size(); };
+  at::optional<Vertex<T>*> at(size_t ord) const;
 
-  Vertex<T>* at(size_t ord) const { return vertices_.at(ord).value(); };
-  const maybe_vertex_list<T>& maybe_vertices() const { return vertices_; };
-
-  // Use for debugging. Don't call this often.
+  // Use for debugging. Don't call these often.
   size_t numVertices() const;
+  void checkInvariants();
 
   std::string toString();
 
@@ -81,31 +84,20 @@ struct DynamicDAG {
   vertex_list<T> deltaB_;  // all vertices visited by dfsBackward
 };
 
-template <typename T>
-DynamicDAG<T>::~DynamicDAG() {
-  for (auto v : vertices_) {
-    if (v.has_value()) {
-      delete v.value();
-    }
-  }
-}
-
 // O(vertices_.size()). Used for testing, don't call this often.
 template <typename T>
 size_t DynamicDAG<T>::numVertices() const {
-  return std::count_if(vertices_.begin(), vertices_.end(), [](at::optional<Vertex<T>*> v) {
-      return v;
-  });
+  return std::count_if(vertices_.begin(), vertices_.end(),
+      [](const std::unique_ptr<Vertex<T>>& v) {
+        if (v) return true;
+        return false;
+      });
 }
 
 template <typename T>
 Vertex<T>* DynamicDAG<T>::newVertex(T datum) {
-  auto* vertex = new Vertex<T>();
-  vertex->rdata.push_back(datum);
-  vertex->visited = false;
-  vertex->ord = vertices_.size();
-  vertices_.push_back(vertex);
-  return vertex;
+  vertices_.emplace_back(new Vertex<T>(vertices_.size(), datum));
+  return vertices_.back().get();
 }
 
 template <typename T>
@@ -120,9 +112,8 @@ void DynamicDAG<T>::removeEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 template <typename T>
 void DynamicDAG<T>::checkInvariants() {
   for (size_t ord = 0; ord < vertices_.size(); ++ord) {
-    const auto& maybe_vertex = vertices_.at(ord);
-    if (!maybe_vertex.has_value()) continue;
-    auto* vertex = maybe_vertex.value();
+    const auto& vertex = vertices_.at(ord);
+    if (!vertex) continue;
 
     JIT_ASSERT(vertex->ord == ord);
     for (auto* v : vertex->in_edges) {
@@ -131,6 +122,16 @@ void DynamicDAG<T>::checkInvariants() {
     for (auto* v : vertex->out_edges) {
       JIT_ASSERT(v->ord > ord);
     }
+  }
+}
+
+template <typename T>
+at::optional<Vertex<T>*> DynamicDAG<T>::at(size_t ord) const {
+  const auto& vertex = vertices_.at(ord);
+  if (!vertex) {
+    return at::nullopt;
+  } else {
+    return vertex.get();
   }
 }
 
@@ -145,8 +146,10 @@ std::pair<vertex_set<T>,vertex_set<T>> DynamicDAG<T>::removeVertex(Vertex<T>* v)
   }
   auto in_edges = std::move(v->in_edges);
   auto out_edges = std::move(v->out_edges);
-  vertices_[v->ord] = at::nullopt;
-  delete v;
+
+  std::unique_ptr<Vertex<T>> empty(nullptr);
+  vertices_[v->ord] = std::move(empty);
+
   return std::make_pair<vertex_set<T>,vertex_set<T>>(std::move(in_edges), std::move(out_edges));
 }
 
@@ -344,10 +347,19 @@ void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
   tmp.insert(tmp.end(), deltaB.begin(), deltaB.end());
   tmp.insert(tmp.end(), deltaF.begin(), deltaF.end());
 
+  std::vector<std::unique_ptr<Vertex<T>>> tmp_storage;
+
+  // [Reordering std::unique_ptr in a std::vector]
+  // Be careful to not delete the data.
+  for (size_t i = 0; i < tmp.size(); i++) {
+    auto old_ord = tmp[i]->ord;
+    tmp_storage.push_back(std::move(vertices_[old_ord]));
+  }
   for (size_t i = 0; i < tmp.size(); i++) {
     auto new_ord = computed_ords[i];
-    tmp[i]->ord = new_ord;
-    vertices_[new_ord] = tmp[i];
+    auto new_vertex = std::move(tmp_storage[i]);
+    new_vertex->ord = new_ord;
+    vertices_[new_ord] = std::move(new_vertex);
   }
 
   clearVisited(deltaF);
@@ -357,9 +369,9 @@ void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
 template <typename T>
 std::string DynamicDAG<T>::toString() {
   std::stringstream ss;
-  for (auto v : maybe_vertices()) {
-    if (v.has_value()) {
-      ss << v.value()->toString() << "\n";
+  for (auto v : vertices_) {
+    if (v) {
+      ss << v->toString() << "\n";
     }
   }
   return ss.str();
