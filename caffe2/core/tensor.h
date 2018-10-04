@@ -115,12 +115,12 @@ class CAFFE2_API Tensor final {
     return impl_.get()->GetStaticContext();
   }
 
-  std::unique_ptr<BaseContext> CreateContext() const {
-    return impl_.get()->CreateContext();
-  }
-
   DeviceType GetDeviceType() const {
     return impl_->device_type();
+  }
+
+  at::Device GetDevice() const {
+    return impl_.get()->GetDevice();
   }
 
   void CopyFrom(const Tensor& src, BaseContext* context = nullptr) const {
