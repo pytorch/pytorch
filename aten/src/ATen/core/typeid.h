@@ -260,12 +260,11 @@ const char* __TypeName() noexcept;
 
 template <class T>
 const char* _TypeName() noexcept {
-  static const char* literal_name = __TypeName<T>();
 #ifdef __GXX_RTTI
-  std::ignore = literal_name; // suppress unused warning
   static const std::string name = at::demangle(typeid(T).name());
   return name.c_str();
 #else
+  static const char* literal_name = __TypeName<T>();
   return literal_name;
 #endif
 }
