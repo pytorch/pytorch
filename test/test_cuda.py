@@ -344,8 +344,8 @@ tests = [
     ('max', small_3d_unique, lambda t: [-1], 'neg_dim'),
     ('max', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
     ('min', small_3d_unique, lambda t: []),
-    ('min', small_3d_unique, lambda t: [1], 'dim', types, False, skipIfRocm),
-    ('min', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
+    ('min', small_3d_unique, lambda t: [1], 'dim'),
+    ('min', small_3d_unique, lambda t: [-1], 'neg_dim'),
     ('min', medium_2d, lambda t: [medium_2d(t)], 'elementwise'),
     ('mean', small_3d, lambda t: []),
     ('mean', small_3d, lambda t: [-1], 'neg_dim'),
@@ -393,11 +393,11 @@ tests = [
     ('size', new_t(1, 2, 3, 4), lambda t: [],),
     ('size', new_t(1, 2, 3, 4), lambda t: [1], 'dim'),
     ('size', new_t(1, 2, 3, 4), lambda t: [-2], 'neg_dim'),
-    ('sort', small_3d_unique, lambda t: [], '', types, False, skipIfRocm),
-    ('sort', small_3d_unique, lambda t: [1], 'dim', types, False, skipIfRocm),
-    ('sort', small_3d_unique, lambda t: [-1], 'neg_dim', types, False, skipIfRocm),
-    ('sort', small_3d_unique, lambda t: [1, True], 'dim_descending', types, False, skipIfRocm),
-    ('sort', small_3d_unique, lambda t: [-1, True], 'neg_dim_descending', types, False, skipIfRocm),
+    ('sort', small_3d_unique, lambda t: [], ''),
+    ('sort', small_3d_unique, lambda t: [1], 'dim'),
+    ('sort', small_3d_unique, lambda t: [-1], 'neg_dim'),
+    ('sort', small_3d_unique, lambda t: [1, True], 'dim_descending'),
+    ('sort', small_3d_unique, lambda t: [-1, True], 'neg_dim_descending'),
     ('split', small_3d, lambda t: [2],),
     ('split', small_3d, lambda t: [2, 1], 'dim'),
     ('split', small_3d, lambda t: [2, -3], 'neg_dim'),
@@ -409,9 +409,9 @@ tests = [
     ('transpose', new_t(1, 2, 3, 4), lambda t: [1, 2],),
     ('transpose', new_t(1, 2, 3, 4), lambda t: [-1, -2], 'neg_dim'),
     ('to_list', small_3d, lambda t: [],),
-    ('topk', small_3d_unique, lambda t: [2, 1, False, True], 'dim_sort', types, False, skipIfRocm),
-    ('topk', small_3d_unique, lambda t: [2, -1, False, True], 'neg_dim_sort', types, False, skipIfRocm),
-    ('topk', small_3d_unique, lambda t: [2, 1, True, True], 'dim_desc_sort', types, False, skipIfRocm),
+    ('topk', small_3d_unique, lambda t: [2, 1, False, True], 'dim_sort', types, False, "skipIfRocm:HalfTensor"),
+    ('topk', small_3d_unique, lambda t: [2, -1, False, True], 'neg_dim_sort', types, False, "skipIfRocm:HalfTensor"),
+    ('topk', small_3d_unique, lambda t: [2, 1, True, True], 'dim_desc_sort', types, False, "skipIfRocm:HalfTensor"),
     ('trace', medium_2d, lambda t: []),
     ('tril', medium_2d, lambda t: [],),
     ('tril', medium_2d_expanded, lambda t: [], 'zero_stride', types, True),
@@ -1210,11 +1210,9 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-    @skipIfRocm
     def test_cat_empty_legacy(self):
         TestTorch._test_cat_empty_legacy(self, use_cuda=True)
 
-    @skipIfRocm
     def test_cat_empty(self):
         TestTorch._test_cat_empty(self, use_cuda=True)
 
@@ -1708,7 +1706,6 @@ class TestCuda(TestCase):
     def test_dim_reduction(self):
         TestTorch._test_dim_reduction(self, lambda t: t.cuda())
 
-    @skipIfRocm
     def test_tensor_gather(self):
         TestTorch._test_gather(self, lambda t: t.cuda(), False)
 
