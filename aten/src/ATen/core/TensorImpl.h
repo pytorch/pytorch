@@ -162,7 +162,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
   explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0) {
-    data_type_ = storage_ ? storage_.dtype() : caffe2::TypeMeta{};
+    AT_ASSERT(storage_);
+    data_type_ = storage_.dtype();
   }
 
   TensorImpl(const TensorImpl&) = default;
@@ -442,7 +443,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       numel_ = -1;
       strides_.reset();
       is_contiguous_ = true;
-      storage_.reset();
+      storage_ = at::Storage(device_type(), caffe2::TypeMeta());
       data_type_ = caffe2::TypeMeta();
       return;
     }
