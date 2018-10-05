@@ -2,7 +2,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/AccumulateType.h"
 #include "ATen/CPUApplyUtils.h"
-
+#include "ATen/Parallel.h"
 #include "ATen/Config.h"
 
 #include "ATen/detail/CUDAHooksInterface.h"
@@ -43,7 +43,6 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_template(const Tensor& input, co
   Tensor output = at::native::empty_like(input);
 
   int64_t n_input = input.size(1);
-  int64_t f;
   int64_t n = input.numel() / n_input;
 
   Tensor save_mean;
@@ -59,54 +58,55 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_template(const Tensor& input, co
   auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
   auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
 
-  #pragma omp parallel for
-  for (f = 0; f < n_input; ++f) {
-    Tensor in = input.select(1, f);
-    Tensor out = output.select(1, f);
+  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
+      for (int64_t f = b_begin; f < b_end; ++f) {
+	Tensor in = input.select(1, f);
+	Tensor out = output.select(1, f);
 
-    scalar_t mean, invstd;
+	scalar_t mean, invstd;
 
-    if (train) {
-      // compute mean per input
-      accscalar_t sum = in.sum()._local_scalar().to<accscalar_t>(); // accumulation dtype ?
+	if (train) {
+	  // compute mean per input
+	  accscalar_t sum = in.sum()._local_scalar().to<accscalar_t>(); // accumulation dtype ?
 
-      mean = (scalar_t) sum / n;
-      save_mean_a[f] = mean;
+	  mean = (scalar_t) sum / n;
+	  save_mean_a[f] = mean;
 
-      // compute variance per input
-      sum = 0;
-      CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
-	  sum += (i - mean) * (i - mean);
-	});
+	  // compute variance per input
+	  sum = 0;
+	  CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
+	      sum += (i - mean) * (i - mean);
+	    });
 
-      if (sum == 0 && eps == 0.0) {
-        invstd = 0;
-      } else {
-        invstd = (scalar_t) (1 / std::sqrt(sum/n + eps));
+	  if (sum == 0 && eps == 0.0) {
+	    invstd = 0;
+	  } else {
+	    invstd = (scalar_t) (1 / std::sqrt(sum/n + eps));
+	  }
+	  save_var_a[f] = sum/n;
+
+	  // update running averages
+	  if (running_mean.defined()) {
+	    running_mean_a[f] = momentum * mean + (1 - momentum) * running_mean_a[f];
+	  }
+	  if (running_var.defined()) {
+	    accscalar_t unbiased_var = sum / (n - 1);
+	    running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+	  }
+	} else {
+	  mean = running_mean_a[f];
+	  invstd = 1 / std::sqrt(running_var_a[f] + eps);
+	}
+
+	// compute output
+	scalar_t w = weight.defined() ? weight.data<scalar_t>()[f * weight.stride(0)] : 1;
+	scalar_t b = bias.defined() ? bias.data<scalar_t>()[f * bias.stride(0)] : 0;
+
+	CPU_tensor_apply2<scalar_t,scalar_t>(out, in, [&](scalar_t& o, const scalar_t& i) {
+	    o = ((i - mean) * invstd) * w + b;
+	  });
       }
-      save_var_a[f] = sum/n;
-
-      // update running averages
-      if (running_mean.defined()) {
-	running_mean_a[f] = momentum * mean + (1 - momentum) * running_mean_a[f];
-      }
-      if (running_var.defined()) {
-        accscalar_t unbiased_var = sum / (n - 1);
-	running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
-      }
-    } else {
-      mean = running_mean_a[f];
-      invstd = 1 / std::sqrt(running_var_a[f] + eps);
-    }
-
-    // compute output
-    scalar_t w = weight.defined() ? weight.data<scalar_t>()[f * weight.stride(0)] : 1;
-    scalar_t b = bias.defined() ? bias.data<scalar_t>()[f * bias.stride(0)] : 0;
-
-    CPU_tensor_apply2<scalar_t,scalar_t>(out, in, [&](scalar_t& o, const scalar_t& i) {
-	o = ((i - mean) * invstd) * w + b;
-      });
-  }
+    });
   return std::make_tuple(output, save_mean, save_var);
 }
 
@@ -144,76 +144,77 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
   auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
   auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
 
-  int64_t f;
-  #pragma omp parallel for
-  for (f = 0; f < n_input; ++f) {
-    Tensor in = input.select(1, f);
-    Tensor grad_out = grad_out_.select(1, f);
 
-    scalar_t w = weight.defined() ? weight_a[f] : 1;
+  parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
+      for (int64_t f = b_begin; f < b_end; ++f) {
+	Tensor in = input.select(1, f);
+	Tensor grad_out = grad_out_.select(1, f);
 
-    scalar_t mean, var;
-    scalar_t invstd = 0;
-    if (train) {
-      mean = save_mean_a[f];
-      var = save_var_a[f];
-    } else {
-      mean = running_mean_a[f];
-      var = running_var_a[f];
-    }
-    if (var != 0 || eps != 0) {
-      invstd = 1 / std::sqrt(var + eps);
-    }
+	scalar_t w = weight.defined() ? weight_a[f] : 1;
 
-    // sum over all gradOutput in feature plane
-    accscalar_t sum = 0;
-    CPU_tensor_apply1<scalar_t>(grad_out, [&](const scalar_t& g) {
-	sum += g;
-      });
+	scalar_t mean, var;
+	scalar_t invstd = 0;
+	if (train) {
+	  mean = save_mean_a[f];
+	  var = save_var_a[f];
+	} else {
+	  mean = running_mean_a[f];
+	  var = running_var_a[f];
+	}
+	if (var != 0 || eps != 0) {
+	  invstd = 1 / std::sqrt(var + eps);
+	}
 
-    // dot product of the Q(X) and gradOuput
-    accscalar_t dotp = 0;
-    CPU_tensor_apply2<scalar_t,scalar_t>(in, grad_out, [&](const scalar_t& i, const scalar_t& go) {
-	dotp += (i - mean) * go;
-      });
-
-    if (grad_input_mask[0]) {
-      Tensor grad_in = grad_input.select(1, f);
-      if (train) {
-        // when in training mode
-        // Q(X) = X - E[x] ; i.e. input centered to zero mean
-        // Y = Q(X) / σ    ; i.e. BN output before weight and bias
-        // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / σ * w
-
-        // projection of gradOutput on to output scaled by std
-        scalar_t k = (scalar_t) dotp * invstd * invstd / n;
-
-	CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, in, [&](scalar_t& gi, const scalar_t& i) {
-	    gi = (i - mean)* k;
+	// sum over all gradOutput in feature plane
+	accscalar_t sum = 0;
+	CPU_tensor_apply1<scalar_t>(grad_out, [&](const scalar_t& g) {
+	    sum += g;
 	  });
 
-        accscalar_t grad_mean = sum / n;
-	CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
+	// dot product of the Q(X) and gradOuput
+	accscalar_t dotp = 0;
+	CPU_tensor_apply2<scalar_t,scalar_t>(in, grad_out, [&](const scalar_t& i, const scalar_t& go) {
+	    dotp += (i - mean) * go;
+	  });
+
+	if (grad_input_mask[0]) {
+	  Tensor grad_in = grad_input.select(1, f);
+	  if (train) {
+	    // when in training mode
+	    // Q(X) = X - E[x] ; i.e. input centered to zero mean
+	    // Y = Q(X) / σ    ; i.e. BN output before weight and bias
+	    // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / σ * w
+
+	    // projection of gradOutput on to output scaled by std
+	    scalar_t k = (scalar_t) dotp * invstd * invstd / n;
+
+	    CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, in, [&](scalar_t& gi, const scalar_t& i) {
+		gi = (i - mean)* k;
+	      });
+
+	    accscalar_t grad_mean = sum / n;
+	    CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
 	    gi = (go - grad_mean - gi) * invstd * w;
-	  });
-      } else {
-        // when in evaluation mode
-        // Q(X) = X - running_mean  ; i.e. input centered to zero mean
-        // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
-        // dL/dX = w / running_std
-	CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
-	    gi = go * invstd * w;
-	  });
-      }
-    }
-    if (grad_input_mask[1]) {
-      grad_weight_a[f] = dotp * invstd;
-    }
+	      });
+	  } else {
+	    // when in evaluation mode
+	    // Q(X) = X - running_mean  ; i.e. input centered to zero mean
+	    // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
+	    // dL/dX = w / running_std
+	    CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
+		gi = go * invstd * w;
+	      });
+	  }
+	}
+	if (grad_input_mask[1]) {
+	  grad_weight_a[f] = dotp * invstd;
+	}
 
-    if (grad_input_mask[2]) {
-      grad_bias_a[f] = sum;
-    }
-  }
+	if (grad_input_mask[2]) {
+	  grad_bias_a[f] = sum;
+	}
+      }
+    });
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
