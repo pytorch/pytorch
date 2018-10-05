@@ -317,6 +317,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<PythonModuleValue>(obj);
   }
 
+  py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
+  if (!builtin_name.is_none()) {
+    return std::make_shared<BuiltinFunction>(
+        Symbol::fromQualString(py::str(builtin_name)), at::nullopt);
+  }
+
   if (py::isinstance<py::function>(obj)) {
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
@@ -324,12 +330,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
       return std::make_shared<ModuleValue>(mod);
     }
-  }
-
-  py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
-  if (!builtin_name.is_none()) {
-    return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(py::str(builtin_name)), at::nullopt);
   }
   return std::make_shared<PythonValue>(obj);
 }
