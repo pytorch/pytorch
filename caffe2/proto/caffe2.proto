@@ -40,7 +40,9 @@ message TensorProto {
 
     // Special data type, type information is stored in the special type field
     SPECIAL = 51;
-    // Use TensorProto to specify the shape and type
+    // When DataType is NO_CONTENT, we use TensorProto to store only type
+    // and shape information. Reuse TensorProto to store type and shape
+    // because we can just have one proto, not having another ValueInfoProto
     NO_CONTENT = 52;
   }
   optional DataType data_type = 2 [default = FLOAT];
@@ -52,7 +54,6 @@ message TensorProto {
     TYPED = 1;
     RAW = 2;
     EXTERNAL = 3;
-    ALIAS = 4;
   }
   optional StorageType storage_type = 14 [default = TYPED];
   // For float
@@ -73,8 +74,6 @@ message TensorProto {
   optional bytes raw_data = 15;
   // External data by file name
   optional string external_data = 16;
-  // For argument, to share the content
-  optional string alias = 17;
 
   // Optionally, a name for the tensor.
   optional string name = 7;
@@ -89,17 +88,15 @@ message TensorProto {
   message Segment {
     required int64 begin = 1;
     required int64 end = 2;
-    optional int64 chunk_num = 51;
-    optional int64 chunk_id = 52;
   }
   optional Segment segment = 11;
-  optional string debug_info = 18;
+  optional string debug_info = 17;
 
   // For PyTorch serialized tensor.
-  optional bool require_gradient = 19;
-  optional bool is_buffer = 20;
-
-  repeated Argument annotations = 21;
+  // When save Variable in PyTorch using TensorProto, we also need
+  // to store whether this Variable requires gradient, whether it's buffer.
+  optional bool require_gradient = 18;
+  optional bool is_buffer = 19;
 }
 
 message QTensorProto {
@@ -198,15 +195,27 @@ message DeviceOption {
 // Operator Definition.
 message OperatorDef {
   repeated string input = 1; // the name of the input blobs
-  // the input name in the schema, for named inputs
+  // we plan to support named inputs in schema, and this extension is for the
+  // named inputs
+  // if inputs are positional, just leave mapped_inputs empty
+  // if (some) inputs are named in the schema, the positional inputs have
+  // empty string as place holder in mapped_inputs, and the named inputs
+  // have their schema input names at the correponding postition in
+  // mapped_inputs
   repeated string mapped_inputs = 11;
   repeated string output = 2; // the name of output top blobs
-  // the outputname in the schema, for named outputs
+  // we plan to support named outputs in schema, and this extension is for the
+  // named outputs
+  // if outputs are positional, just leave mapped_outputs empty
+  // if (some) outputs are named, the positional outputs have empty string
+  // as place holder in mapped_outputs, and the named inputs have names
+  // in mapped_outputs
   repeated string mapped_outputs = 12;
   optional string name = 3; // the operator name. This is optional.
   // the operator type. This is needed to create the object from the operator
-  // registry.
+  // registry. the domain and concrete aten function are also embedded here.
   optional string type = 4;
+  // arg is for the argument defined in operator schema
   repeated Argument arg = 5;
 
   // The device option that the operator should run under.
@@ -237,15 +246,23 @@ message OperatorDef {
   // operators can be constructed in any language.
   optional string debug_info = 10;
 
-  // additional annotations
+  // place for additional information
+  // for example, for some training platform, if they want to tag the
+  // operator for placing strategy, component info and parallel strategy,
+  // such information is not about the model/operator itself, but about
+  // the runtime/platform.
+  // existing solution is saving extra info in device option,
+  // however, it's more natural to keep the information here
+  // existing usage: https://fb.quip.com/yAiuAXkRXZGx
   repeated Argument annotations = 13;
 
-  // for jit ir exporting
-  optional string aten_function = 14;
-
-  // for operator versioning
-  optional string domain = 15;
-  optional string op_version = 16;
+  // each operator is has its own version number.
+  // operator version information
+  // each time, we change the API or semantics of the operator,
+  // we bump the version for the operator.
+  // the runtime system should check the op_version of each OperatorDef
+  // and decide it should reject or accept the model
+  optional string op_version = 15;
 }
 
 // Network definition.
