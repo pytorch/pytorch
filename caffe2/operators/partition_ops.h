@@ -41,7 +41,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
     const auto& in0Shape = Input(1).dims();
     CAFFE_ENFORCE_GE(in0Shape.size(), 1);
 
-    vector<int64_t> outShape(keysShape);
+    vector<int64_t> outShape(keysShape.vec());
     outShape.insert(outShape.end(), in0Shape.begin() + 1, in0Shape.end());
 
     CAFFE_ENFORCE_GE(outShape.size(), 1);

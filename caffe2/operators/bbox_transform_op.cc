@@ -138,7 +138,7 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  CAFFE_ENFORCE_EQ(iminfo_in.dims(), (vector<int64_t>{batch_size, 3}));
+  CAFFE_ENFORCE_EQ(iminfo_in.dims(), (at::IntList{batch_size, 3}));
   Eigen::Map<const ERArrXXf> iminfo(
       iminfo_in.data<float>(), iminfo_in.dim(0), iminfo_in.dim(1));
 

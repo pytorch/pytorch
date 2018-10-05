@@ -26,6 +26,8 @@ void printValueRef(std::ostream & out, const Value * n) {
   out << "%" << n->uniqueName();
 }
 
+// NB: This overload will become ambiguous with the one Caffe2 provides in its
+// logging, if they ever intersect.
 template <typename T>
 std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
   out << at::ArrayRef<T>{nodes};
@@ -33,7 +35,7 @@ std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
 }
 
 template <typename T>
-std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
+std::ostream& printValueRefs(std::ostream & out, const at::ArrayRef<T> & nodes) {
   size_t i = 0;
   for(auto n : nodes) {
     if(i++ > 0)
@@ -41,6 +43,17 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
     printValueRef(out, n);
   }
   return out;
+}
+
+// Can't make these two overloads directly a template, it'll be ambiguous with
+// the global printer for operator<<.
+
+std::ostream& operator<<(std::ostream & out, const at::ArrayRef<const Value*> & nodes) {
+  return printValueRefs(out, nodes);
+}
+
+std::ostream& operator<<(std::ostream & out, const at::ArrayRef<Value*> & nodes) {
+  return printValueRefs(out, nodes);
 }
 
 struct const_value_list_with_types {
