@@ -71,7 +71,7 @@ class OrderedDict {
   }
 
   // Move works by default, because you can move-construct vectors of const
-  // values..
+  // values.
   // NB: I tried to make this noexcept (conditional on the move constructors of
   // index_ and items_ being noexcept) but the obvious spelling didn't compile
   // on Windows.
