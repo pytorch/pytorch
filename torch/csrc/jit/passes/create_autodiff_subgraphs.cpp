@@ -182,7 +182,7 @@ static detail::DynamicDAG<Node*> make_dependency_graph(Block * block) {
 static void find_differentiable_groups(
     detail::DynamicDAG<Node*>& dep_graph,
     size_t distance_threshold=64,
-    size_t producer_outedge_threshold=16) {
+    size_t producer_edge_threshold=16) {
   // A Vertex contains a Node* or a differentiable group of Node*.
   // Perform graph contraction on dep_graph: contract two vertices(x, y) if
   // the following conditions hold:
@@ -208,9 +208,12 @@ static void find_differentiable_groups(
       // The distance threshold makes this algorithm "not optimal": it will miss
       // some possible contraction opportunities, but it hopefully lets us:
       // 1) preserve locality of tensors. We don't want to keep them alive for too long.
-      // 2) Bound the computation complexity for contractEdge
+      // 2) Help bound the computation complexity for contractEdge
       if (consumer->ord - producer->ord > distance_threshold) continue;
-      if (producer->out_edges().size() > producer_outedge_threshold) continue;
+      // This also helps bound the complexity: contractEdge's complexity involves
+      // min(|out_edges(producer)|, |in_edges(consumer)|).
+      if (std::min(producer->out_edges().size(), consumer->in_edges().size()) >
+          producer_edge_threshold) continue;
       if (!shouldConsiderForMerge(producer)) continue;
 
       // If the edge contraction is successful, consumer->out_edges()

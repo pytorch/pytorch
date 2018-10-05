@@ -126,6 +126,8 @@ struct DynamicDAG {
   void debugCheckInvariants();
 
  private:
+  void mergeProducerIntoConsumer(Vertex<T>* producer, Vertex<T>* consumer);
+  void mergeConsumerIntoProducer(Vertex<T>* producer, Vertex<T>* consumer);
   void reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB);
   bool contractionProducesCycle(Vertex<T>* producer, Vertex<T>* consumer);
   bool dfsSearch(
@@ -313,11 +315,18 @@ bool DynamicDAG<T>::contractEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 
   removeEdge(producer, consumer);
 
-  // TODO(rzou): apply heuristic to merge producer into consumer or the other way around
-  // depending on |out_edges(producer)| and |in_edges(consumer)|.
-  //
-  // We can either merge producer into consumer or the other way around.
-  // I've chosen to merge producer into consumer for now but this is arbitrary.
+  // Optimization: pick which order to merge depending on potential complexity.
+  if (producer->out_edges().size() > consumer->in_edges().size()) {
+    mergeConsumerIntoProducer(producer, consumer);
+  } else {
+    mergeProducerIntoConsumer(producer, consumer);
+  }
+
+  return true;
+}
+
+template <typename T>
+void DynamicDAG<T>::mergeProducerIntoConsumer(Vertex<T>* producer, Vertex<T>* consumer) {
   consumer->rdata.insert(consumer->rdata.end(), producer->rdata.begin(), producer->rdata.end());
 
   auto edges = removeVertex(producer);
@@ -329,11 +338,33 @@ bool DynamicDAG<T>::contractEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   }
 
   // NB: each addEdge call is linear in (ord(consumer) - ord(child)).
-  // This makes contractEdges O(|out_edges(producer)| * |AR|).
+  // This makes this function O(|out_edges(producer)| * |AR|).
   for (auto* child : edges.out_edges) {
     addEdge(consumer, child);
   }
-  return true;
+}
+
+template <typename T>
+void DynamicDAG<T>::mergeConsumerIntoProducer(Vertex<T>* producer, Vertex<T>* consumer) {
+  // Optimization: instead of inserting consumer.rdata into the beginning of
+  // producer.rdata, insert producer.rdata into the end of consumer.rdata
+  consumer->rdata.insert(consumer->rdata.end(), producer->rdata.begin(), producer->rdata.end());
+  std::swap(consumer->rdata, producer->rdata);
+
+  auto edges = removeVertex(consumer);
+
+  // Each of these are constant b/c ord(child) > ord(consumer) > ord(producer)
+  // so the edge addition still preserves the existing topological order.
+  for (auto* child : edges.out_edges) {
+    addEdge(producer, child);
+  }
+
+  // NB: each addEdge call is linear in (ord(producer) - ord(parent)).
+  // This makes this function O(|in_edges(consumer)| * |AR|).
+  for (auto* parent : edges.in_edges) {
+    addEdge(parent, producer);
+  }
+
 }
 
 template <typename T>
