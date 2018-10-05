@@ -418,6 +418,9 @@ class TestMultiprocessing(TestCase):
         def hook(*unused):
             pass
 
+        # Shut up warnings
+        hook._torch_unserializable = True
+
         if var.requires_grad:
             var.register_hook(hook)
         var._grad = torch.zeros(5, 5, device=device)
