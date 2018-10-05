@@ -500,7 +500,7 @@ const TypeMetaData* _typeMetaDataInstance<T>() noexcept {                 \
  */
 #ifdef _MSC_VER
 #define _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(Id, T)    \
-  extern const TypeMetaData                                                   \
+  CAFFE2_API extern const TypeMetaData                                        \
       MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id);                  \
   template<>                                                                  \
   C10_EXPORT inline const TypeMetaData* _typeMetaDataInstance<T>() noexcept { \
@@ -517,6 +517,12 @@ const TypeMetaData* _typeMetaDataInstance<T>() noexcept {                 \
     return #T;                                                                \
   }                                                                           \
   _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(PreallocatedId, T) \
+  }
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(Id, T)                           \
+  namespace detail {                                                          \
+  C10_EXPORT const TypeMetaData                                               \
+    MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id)                     \
+      = _makeTypeMetaDataInstance<T>();                                       \
   }
 #else // _MSC_VER
 #define _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(Id, T)    \
@@ -538,13 +544,13 @@ inline const TypeMetaData* _typeMetaDataInstance<T>() noexcept {              \
   }                                                                           \
   _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(PreallocatedId, T) \
   }
-#endif
-
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(Id, T)                           \
   namespace detail {                                                          \
-  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id)    \
+  const TypeMetaData                                                          \
+    MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id)                     \
       = _makeTypeMetaDataInstance<T>();                                       \
   }
+#endif
 
 // Note: we have preallocated the numbers so they line up exactly
 // with at::ScalarType's numbering.  All other numbers do not matter.
