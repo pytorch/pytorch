@@ -1163,6 +1163,9 @@
 - func: mul_(Tensor self, Scalar other) -> Tensor
   variants: method
 
+- func: multi_mm(TensorList matrices) -> Tensor
+  variants: function
+
 - func: mv(Tensor self, Tensor vec) -> Tensor
   variants: function, method
 
