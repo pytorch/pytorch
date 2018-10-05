@@ -468,7 +468,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     return #T;                                                            \
   }                                                                       \
   template<>                                                              \
-  TypeMetaData _typeMetaDataInstance<T>::instance =                       \
+  CAFFE2_API TypeMetaData _typeMetaDataInstance<T>::instance =            \
       _typeMetaDataInstance<T>::_make();                                  \
   }
 #elif defined(__clang__)
