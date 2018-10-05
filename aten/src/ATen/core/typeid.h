@@ -295,14 +295,6 @@ inline TypeMetaData _makeTypeMetaDataInstance() {
   };
 }
 
-#if defined(_MSC_VER) || defined(__clang__)
-template<class T>
-CAFFE2_API const TypeMetaData* _typeMetaDataInstance() noexcept;
-#else
-template<class T>
-C10_EXPORT const TypeMetaData* _typeMetaDataInstance() noexcept;
-#endif
-
 } // namespace detail
 
 /**
@@ -419,12 +411,15 @@ class CAFFE2_API TypeMeta {
 #pragma GCC diagnostic ignored "-Wpragmas"
 #pragma GCC diagnostic ignored "-Wunknown-warning-option"
 #pragma GCC diagnostic ignored "-Wundefined-var-template"
-    return TypeMeta(detail::_typeMetaDataInstance<T>());
+    return TypeMeta(_typeMetaDataInstance<T>());
 #pragma GCC diagnostic pop
   }
 
  private:
   const detail::TypeMetaData* data_;
+
+  template<class T>
+  CAFFE2_API static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
 };
 
 inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
@@ -455,11 +450,13 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 // and as a result, we define these two macros slightly differently.
 #if defined(_MSC_VER) || defined(__clang__)
 #define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)        \
+  namespace detail {                                                      \
   const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) =      \
       _makeTypeMetaDataInstance<T>();                                     \
+  }                                                                       \
   template<>                                                              \
-  C10_EXPORT const TypeMetaData* _typeMetaDataInstance<T>() noexcept {    \
-    return &MACRO_CONCAT(_typeMetaDataInstance_, Counter);                \
+  C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {    \
+    return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
   }
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
@@ -472,16 +469,18 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   C10_EXPORT const char* __TypeName<T>() noexcept {                       \
     return #T;                                                            \
   }                                                                       \
-  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)          \
-  }
+  }                                                                       \
+  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
 #else // defined(_MSC_VER) || defined(__clang__)
 #define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)        \
-const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) =        \
-    _makeTypeMetaDataInstance<T>();                                       \
-template<>                                                                \
-C10_EXPORT const TypeMetaData* _typeMetaDataInstance<T>() noexcept {      \
-  return &MACRO_CONCAT(_typeMetaDataInstance_, Counter);                  \
-}
+  namespace detail {                                                      \
+  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) =      \
+      _makeTypeMetaDataInstance<T>();                                     \
+  }                                                                       \
+  template<>                                                              \
+  const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+    return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
+  }
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
   TypeIdentifier TypeIdentifier::Get<T>() {                               \
@@ -493,8 +492,8 @@ C10_EXPORT const TypeMetaData* _typeMetaDataInstance<T>() noexcept {      \
   const char* __TypeName<T>() noexcept {                                  \
     return #T;                                                            \
   }                                                                       \
-  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)          \
-  }
+  }                                                                       \
+  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
 #endif // defined(_MSC_VER) || defined(__clang__)
 
 /**
@@ -505,11 +504,13 @@ C10_EXPORT const TypeMetaData* _typeMetaDataInstance<T>() noexcept {      \
  */
 #ifdef _MSC_VER
 #define _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(Id, T)    \
+  namespace detail {                                                          \
   C10_EXPORT extern const TypeMetaData                                        \
       MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id);                  \
+  }                                                                           \
   template<>                                                                  \
-  C10_EXPORT inline const TypeMetaData* _typeMetaDataInstance<T>() noexcept { \
-    return &MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id);            \
+  C10_EXPORT inline const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept { \
+    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, Id);    \
   }
 #define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)              \
   template <>                                                                 \
@@ -521,8 +522,8 @@ C10_EXPORT const TypeMetaData* _typeMetaDataInstance<T>() noexcept {      \
   inline C10_EXPORT const char* __TypeName<T>() noexcept {                    \
     return #T;                                                                \
   }                                                                           \
-  _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(PreallocatedId, T) \
-  }
+  }                                                                           \
+  _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(PreallocatedId, T)
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(Id, T)                           \
   namespace detail {                                                          \
   C10_EXPORT const TypeMetaData                                               \
@@ -531,12 +532,14 @@ C10_EXPORT const TypeMetaData* _typeMetaDataInstance<T>() noexcept {      \
   }
 #else // _MSC_VER
 #define _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(Id, T)    \
-C10_EXPORT extern const TypeMetaData                                          \
-    MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id);                    \
-template<>                                                                    \
-inline const TypeMetaData* _typeMetaDataInstance<T>() noexcept {              \
-  return &MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id);              \
-}
+  namespace detail {                                                          \
+  C10_EXPORT extern const TypeMetaData                                        \
+      MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id);                  \
+  }                                                                           \
+  template<>                                                                  \
+  inline const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {  \
+    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, Id);    \
+  }
 #define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)              \
   template <>                                                                 \
   inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                 \
@@ -547,8 +550,8 @@ inline const TypeMetaData* _typeMetaDataInstance<T>() noexcept {              \
   inline C10_EXPORT const char* __TypeName<T>() noexcept {                    \
     return #T;                                                                \
   }                                                                           \
-  _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(PreallocatedId, T) \
-  }
+  }                                                                           \
+  _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(PreallocatedId, T)
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(Id, T)                           \
   namespace detail {                                                          \
   const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id)    \
