@@ -1,5 +1,6 @@
 import collections
 import weakref
+import warnings
 
 
 class RemovableHandle(object):
@@ -39,6 +40,9 @@ class RemovableHandle(object):
 def warn_if_has_hooks(tensor):
     if tensor._backward_hooks:
         for k in tensor._backward_hooks:
-            if not hasattr(tensor._backward_hooks[k], "_torch_unserializable"):
-                print(tensor._backward_hooks[k])
-                raise RuntimeError("KILL ALL OCCURRENCES OF ME")
+            hook = tensor._backward_hooks[k]
+            if not hasattr(k, "_torch_unserializable"):
+                warnings.warn("backward hook {} on tensor will not be "
+                              "serialized.  If this is expected, you can "
+                              "set the attribute _torch_unserializable on "
+                              "the hook to suppress this warning".format(repr(hook)))
