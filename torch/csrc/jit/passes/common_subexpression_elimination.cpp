@@ -78,7 +78,6 @@ struct HashNodeCSE {
   size_t operator()(const Node* k) const {
     JIT_ASSERT(k != nullptr);
     return get_hash(k->kind(),
-                    k->stage(),
                     fmap(k->outputs(), [](const Value *v) { return v->type()->kind(); }),
                     fmap(k->inputs(), [](const Value *v) { return v->unique(); }));
   }
@@ -90,7 +89,6 @@ struct EqualNodeCSE {
     if (lhs == nullptr || rhs == nullptr) return false;
 
     if (lhs->kind() != rhs->kind()) return false;
-    if (lhs->stage() != rhs->stage()) return false;
 
     // Check whether the output types are the same.
     auto lhs_outputs = lhs->outputs();
