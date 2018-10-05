@@ -11,6 +11,7 @@
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include <exception>
@@ -122,6 +123,40 @@ void desugarTripCounts(Block * b) {
     }
     for(auto sb : n->blocks()) {
       desugarTripCounts(sb);
+    }
+  }
+}
+
+// Currently inline the Fork node's block to evaluate it eagerly.
+void desugarForkJoin(Block *b) {
+  for (auto n : b->nodes()) {
+    for (auto block : n->blocks()) {
+      desugarForkJoin(block);
+    }
+    if (n->kind() == prim::Fork) {
+      auto g = n->owningGraph();
+      auto body_block = n->blocks()[0];
+      auto input_tup = n->input(0);
+      auto tup_unpack = g->createTupleUnpack(input_tup)->insertBefore(n);
+      std::unordered_map<Value*, Value*> value_remap;
+
+      for (size_t i = 0; i < body_block->inputs().size(); ++i) {
+        value_remap[body_block->inputs()[i]] = tup_unpack->outputs()[i];
+      }
+
+      {
+        WithInsertPoint guard(n);
+        for (auto sub_node : body_block->nodes()) {
+          auto inserted_node = g->insertNode(g->createClone(sub_node, [&value_remap](Value* v) { return value_remap[v];}));
+          for (size_t i = 0; i < sub_node->outputs().size(); ++i) {
+            value_remap[sub_node->outputs()[i]] = inserted_node->outputs()[i];
+          }
+        }
+        JIT_ASSERT(body_block->outputs().size() == 1);
+        n->output()->replaceAllUsesWith(value_remap[body_block->outputs()[0]]);
+      }
+    } else if (n->kind() == prim::Wait) {
+      n->output()->replaceAllUsesWith(n->input());
     }
   }
 }
@@ -289,6 +324,8 @@ struct PreprocessGraph {
   PreprocessGraph(Graph & g)
   : graph(g.copy()) {
     desugarTripCounts(graph->block());
+    desugarForkJoin(graph->block());
+    EliminateDeadCode(graph->block());
     flattenIO(*graph);
     dropUnused(graph->block());
     // fill in move_flags by scanning blocks;

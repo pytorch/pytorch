@@ -8428,11 +8428,31 @@ class TestAsync(JitTestCase):
             y = torch.jit.Wait(fut)
             return y, y_hat
 
-        print(wait_script.graph)
-
         y, y_hat = wait_script(x)
-        print(y)
-        print(y_hat)
+
+        self.assertEqual(y, y_hat)
+
+    def test_async_script_nested(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.neg(x), x
+
+        x = torch.rand(3, 4)
+
+        @torch.jit.script
+        def wait_script(x):
+            fut = torch.jit.Fork(foo, (x,))
+            y_hat = foo(x)
+            y = torch.jit.Wait(fut)
+            return y, y_hat
+
+
+        @torch.jit.script
+        def wait_script_nest(x):
+            fut = torch.jit.Fork(wait_script, (x,))
+            return torch.jit.Wait(fut)
+
+        y, y_hat = wait_script_nest(x)
 
         self.assertEqual(y, y_hat)
 
