@@ -2,6 +2,7 @@
 #define CAFFE2_CORE_TENSOR_H_
 
 #include "caffe2/core/storage.h"
+#include "caffe2/core/tensor_factories.h"
 #include "caffe2/core/tensor_impl.h"
 
 #include <ATen/core/intrusive_ptr.h>

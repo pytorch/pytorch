@@ -116,12 +116,20 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return outputs_.at(idx)->template GetMutable<T>();
   }
 
+  Tensor* Output(
+      int idx,
+      const vector<int64_t>& dims,
+      const at::TensorOptions& options) {
+    return BlobGetMutableTensor(outputs_.at(idx), dims, options);
+  }
+
   // TODO(jerryzh): Remove this template
   template <typename T>
   inline T* Output(int idx, DeviceType type) {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
+    // When you get a Tensor here it is not fully initialized
     return BlobGetMutableTensor(outputs_.at(idx), type);
   }
 

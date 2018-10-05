@@ -135,6 +135,12 @@ struct CAFFE2_API TensorOptions {
     return *this;
   }
 
+  template <typename T>
+  TensorOptions& dtype() {
+    dtype_ = CTypeToScalarType<T>::to();
+    return *this;
+  }
+
   /// Sets the layout of the `TensorOptions`.
   TensorOptions& layout(Layout layout) {
     layout_ = layout;
