@@ -454,7 +454,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 //   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
-#if defined(_MSC_VER) || defined(__clang__)
+#if defined(_MSC_VER)
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
   C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                    \
@@ -468,6 +468,22 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   }                                                                       \
   template<>                                                              \
   TypeMetaData _typeMetaDataInstance<T>::instance =                       \
+      _typeMetaDataInstance<T>::_make();                                  \
+  }
+#elif defined(__clang__)
+#define CAFFE_KNOWN_TYPE(T)                                               \
+  template <>                                                             \
+  C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                    \
+    static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
+    return type_id;                                                       \
+  }                                                                       \
+  namespace detail {                                                      \
+  template <>                                                             \
+  C10_EXPORT const char* __TypeName<T>() noexcept {                       \
+    return #T;                                                            \
+  }                                                                       \
+  template<>                                                              \
+  C10_EXPORT TypeMetaData _typeMetaDataInstance<T>::instance =            \
       _typeMetaDataInstance<T>::_make();                                  \
   }
 #else // defined(_MSC_VER) || defined(__clang__)
@@ -520,7 +536,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   }
 #endif
 
-#if defined(_MSC_VER) || defined(__clang__)
+#if defined(_MSC_VER)
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(T)                    \
   namespace detail {                                               \
     template<>                                                     \
