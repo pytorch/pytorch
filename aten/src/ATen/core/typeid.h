@@ -455,7 +455,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
 #if defined(_MSC_VER)
-#pragma message "--- compiler is msvc ---"
+#pragma message("--- compiler is msvc ---")
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
   C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                    \
