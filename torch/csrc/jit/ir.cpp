@@ -601,7 +601,7 @@ inline const SourceRange& fakeRange() {
 }
 
 Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
-  return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
+  return script::emitBuiltinCall(fakeRange(), *this, opname, at::nullopt, args, kwargs, /*required=*/true);
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {
