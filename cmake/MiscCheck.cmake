@@ -210,6 +210,10 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
       ##########################################
       #/wd4018 # (3): Signed/unsigned mismatch. We've used it in many places
       #        #      of the code and it would be hard to correct all.
+      /wd4068 # (1): We often use pragmas to control behavior of one of the
+              # compilers we care about, and it would be irritating to
+              # ifdef it out for all the other ones.  This is consistent
+              # with our use of -Wno-unknown-pragmas outside of MSVC.
       #/wd4244 # (2/3/4): Possible loss of precision. Various cases where we
       #        #      implicitly cast TIndex to int etc. Need cleaning.
       #/wd4267 # (3): Conversion of size_t to smaller type. Same as 4244.

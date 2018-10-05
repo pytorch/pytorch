@@ -65,7 +65,16 @@ ENDIF()
 IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
-  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
+  LIST(APPEND CUDA_NVCC_FLAGS
+        -Xcompiler /wd4068 # unknown pragma
+        -Xcompiler /wd4190 # identifier1' has C-linkage specified, but returns UDT 'identifier2' which is incompatible with C
+        -Xcompiler /wd4244 # conversion from 'type1' to 'type2', possible loss of data
+        -Xcompiler /wd4251 # class 'type' needs to have dll-interface to be used by clients of class 'type2'
+        -Xcompiler /wd4275 # non – DLL-interface classkey 'identifier' used as base for DLL-interface classkey 'identifier'
+        -Xcompiler /wd4503 # decorated name length exceeded, name was truncated
+        -Xcompiler /wd4522 # multiple assignment operators specified
+        -Xcompiler /wd4819 # The file contains a character that cannot be represented in the current code page (number).
+      )
 ENDIF(MSVC)
 
 if(USE_ROCM)

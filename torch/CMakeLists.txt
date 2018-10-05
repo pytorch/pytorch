@@ -263,17 +263,17 @@ if(MSVC)
     /Z7
     /EHa
     /DNOMINMAX
-    /wd4267
-    /wd4251
-    /wd4522
-    /wd4522
-    /wd4838
-    /wd4305
-    /wd4244
-    /wd4190
-    /wd4101
-    /wd4996
-    /wd4275
+    /wd4068 # unknown pragma
+    /wd4101 # unreferenced local variable
+    /wd4190 # identifier1' has C-linkage specified, but returns UDT 'identifier2' which is incompatible with C
+    /wd4244 # conversion from 'type1' to 'type2', possible loss of data
+    /wd4251 # class 'type' needs to have dll-interface to be used by clients of class 'type2'
+    /wd4267 # conversion from 'size_t' to 'type', possible loss of data
+    /wd4275 # non – DLL-interface classkey 'identifier' used as base for DLL-interface classkey 'identifier'
+    /wd4305 # truncation from 'type1' to 'type2'
+    /wd4522 # multiple assignment operators specified
+    /wd4838 # conversion from 'type_1' to 'type_2' requires a narrowing conversion
+    /wd4996 # The compiler encountered a deprecated declaration.
     /bigobj
     )
 else()
