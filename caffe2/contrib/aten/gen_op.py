@@ -237,13 +237,7 @@ if __name__ == '__main__':
         }
         defined_inferred_type = False
 
-        if 'Tensor' in o['method_of']:
-            # make sure 'self' is the first argument. currently Declarations.yaml
-            # does not always do this. Instead it keeps the argument list the same order
-            # as the Type method.
-            # o['arguments'] = self_as_first_argument(o['arguments'])
-            pass
-        elif 'namespace' not in o['method_of']:
+        if 'namespace' not in o['method_of'] and 'Tensor' not in o['method_of']:
             # methods on type like 'ones' or 'zeros' always take a
             # string attribute that is translated into the at::Type object
             # e.g. "Float" is at::kFloat
