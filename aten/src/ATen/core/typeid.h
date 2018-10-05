@@ -226,6 +226,7 @@ class CAFFE2_API TypeMeta {
    * Returns a printable name for the type.
    */
   const char* name() const noexcept {
+    std::lock_guard<std::mutex> guard(gTypeRegistrationMutex());
     auto it = gTypeNames().find(id_);
     assert(it != gTypeNames().end());
     return it->second.c_str();
@@ -265,6 +266,7 @@ class CAFFE2_API TypeMeta {
    */
   template <typename T>
   static const char* TypeName() {
+    std::lock_guard<std::mutex> guard(gTypeRegistrationMutex());
     auto it = gTypeNames().find(Id<T>());
     assert(it != gTypeNames().end());
     return it->second.c_str();
