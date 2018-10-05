@@ -53,7 +53,7 @@ class RemoveDataBlocksOp final : public Operator<Context> {
     indices_size = ind_vec.size();
 
     auto* output = Output(0);
-    auto shape = data.dims();
+    auto shape = data.dims().vec();
     shape[0] -= indices_size;
     output->Resize(shape);
     char* out_ptr = (char*)output->raw_mutable_data(data.meta());

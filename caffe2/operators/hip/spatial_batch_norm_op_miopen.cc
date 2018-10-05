@@ -139,7 +139,7 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   // See if we need to reshape.
   if (N > 0 && X.dims() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors.";
-    miopen_input_dims_ = X.dims();
+    miopen_input_dims_ = X.dims().vec();
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
@@ -273,7 +273,7 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   CAFFE_ENFORCE_EQ(scale.dim32(0), C);
   // See if we need to reshape.
   if (N > 0 && X.dims() != miopen_input_dims_) {
-    miopen_input_dims_ = X.dims();
+    miopen_input_dims_ = X.dims().vec();
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
         data_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
 
