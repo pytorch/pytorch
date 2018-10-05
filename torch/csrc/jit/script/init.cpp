@@ -364,7 +364,7 @@ FunctionSchema getSchemaWithDefaults(
     auto it = default_args.find(arg.name);
     if (it != default_args.end()) {
       IValue value = *constantToIValue(it->second);
-      if (value.isScalar()) {
+      if (arg.type->isSubtypeOf(DynamicType::get()) && value.isScalar()) {
         // Convert to tensor
         value = autograd::make_variable(at::scalar_to_tensor(value.toScalar()));
       }
