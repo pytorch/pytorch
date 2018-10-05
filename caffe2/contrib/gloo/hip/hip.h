@@ -13,7 +13,7 @@
 #include <atomic>
 #include <mutex>
 
-#include <hip/hip_runtime.h>
+#include "hip/hip_runtime.h"
 
 #include "gloo/algorithm.h"
 #include "gloo/config.h"
