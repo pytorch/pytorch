@@ -136,10 +136,9 @@ struct CAFFE2_API InefficientStdFunctionContext {
 
 namespace caffe2 {
 
-// using AllocatorArray = std::array<
-//     std::unique_ptr<at::Allocator>,
-//     static_cast<int>(at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>;
-/** Set the allocator for DeviceType `t` and takes ownership of the allocator
+/** Set the allocator for DeviceType `t` without taking ownership to avoid
+ *  invalidation when a user already hold the pointer to the previous
+ *  allocator.
  */
 CAFFE2_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
 CAFFE2_API at::Allocator* GetAllocator(const at::DeviceType& t);

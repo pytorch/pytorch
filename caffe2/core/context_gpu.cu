@@ -209,6 +209,8 @@ static void Caffe2SetCUDAMemoryPool() {
   }
 }
 
+static PinnedCPUAllocator g_pinned_cpu_alloc;
+
 // An initialization function that sets the CPU side to use pinned cpu
 // allocator.
 void Caffe2UsePinnedCPUAllocator() {
@@ -226,7 +228,7 @@ void Caffe2UsePinnedCPUAllocator() {
     return;
   }
   VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
-  SetCPUAllocator(new PinnedCPUAllocator());
+  SetCPUAllocator(&g_pinned_cpu_alloc);
 #endif
 }
 
@@ -426,7 +428,9 @@ at::Allocator* GetCUDAAllocator() {
   return GetAllocator(CUDA);
 }
 
-REGISTER_ALLOCATOR(CUDA, new DefaultCUDAAllocator());
+static DefaultCUDAAllocator g_cuda_alloc;
+
+REGISTER_ALLOCATOR(CUDA, &g_cuda_alloc);
 
 BaseStaticContext* GetCUDAStaticContext() {
   static CUDAStaticContext context;

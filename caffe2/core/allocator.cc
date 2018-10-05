@@ -25,7 +25,10 @@ void SetCPUAllocator(at::Allocator* alloc) {
   SetAllocator(CPU, alloc);
 }
 
-REGISTER_ALLOCATOR(CPU, new DefaultCPUAllocator());
+// Global default CPU Allocator
+static DefaultCPUAllocator g_cpu_alloc;
+
+REGISTER_ALLOCATOR(CPU, &g_cpu_alloc);
 
 MemoryAllocationReporter DefaultCPUAllocator::reporter_;
 

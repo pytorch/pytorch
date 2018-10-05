@@ -203,6 +203,8 @@ static void Caffe2SetHIPMemoryPool()
   }
 }
 
+static PinnedCPUAllocator g_pinned_cpu_alloc;
+
 // An initialization function that sets the CPU side to use pinned cpu
 // allocator.
 void Caffe2UsePinnedCPUAllocator()
@@ -222,7 +224,7 @@ void Caffe2UsePinnedCPUAllocator()
         return;
     }
     VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
-    SetCPUAllocator(new PinnedCPUAllocator());
+    SetCPUAllocator(&g_pinned_cpu_alloc);
 #endif
 }
 
@@ -425,7 +427,8 @@ struct DefaultHIPAllocator final : public at::Allocator {
   }
 };
 
-REGISTER_ALLOCATOR(HIP, new DefaultHIPAllocator());
+static DefaultHIPAllocator g_hip_alloc;
+REGISTER_ALLOCATOR(HIP, &g_hip_alloc);
 
 BaseStaticContext* GetHIPStaticContext() {
   static HIPStaticContext context;

@@ -20,17 +20,15 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
 
 namespace caffe2 {
 
-CAFFE2_API std::unique_ptr<at::Allocator> allocator_array[static_cast<int>(
+CAFFE2_API at::Allocator* allocator_array[static_cast<int>(
     at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc) {
-  auto& uniq_ptr = allocator_array[static_cast<int>(t)];
-  uniq_ptr.reset(alloc);
+  allocator_array[static_cast<int>(t)] = alloc;
 }
 
 at::Allocator* GetAllocator(const at::DeviceType& t) {
-  auto& uniq_ptr = allocator_array[static_cast<int>(t)];
-  auto* alloc = uniq_ptr.get();
+  auto* alloc = allocator_array[static_cast<int>(t)];
   AT_ASSERTM(alloc, "Allocator for ", t, " is not set.");
   return alloc;
 }
