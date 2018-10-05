@@ -133,9 +133,9 @@ struct CAFFE2_API PlacementDeleteContext {
 };
 
 struct TensorImplOptions {
-  const bool is_variable_;
-  const bool has_storage_;
-  const bool has_strides_;
+  bool is_variable_;
+  bool has_storage_;
+  bool has_strides_;
   TensorImplOptions(bool is_variable)
                     : is_variable_(is_variable),
                       has_storage_(true),
@@ -177,7 +177,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, TensorImplOptions options);
   TensorImpl(Storage&& storage, TensorTypeId type_id, TensorImplOptions options);
 
-  explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0) {
+  explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0), options_(at::TensorImplOptions(false)) {
     data_type_ = storage_ ? storage_.dtype() : caffe2::TypeMeta{};
   }
 
@@ -399,7 +399,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         strides_.reset(new int64_t[new_size.size()]);
       }
       for (size_t i = 0; i < new_size.size(); i++) {
-        strides_[i] = new_stride[i];
+        strides_[i] = (*new_stride)[i];
       }
     } else {
       AT_CHECK(!new_stride, type_id_, " does not have strides, but new_stride is non-null");
@@ -432,7 +432,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  private:
-  TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable);
+  TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, TensorImplOptions options);
 
  public:
 
