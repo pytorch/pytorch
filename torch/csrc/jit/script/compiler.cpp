@@ -1864,8 +1864,17 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
           Symbol::aten(builtin_cast_methods().at(field)),
           NamedValue(loc, "self", value));
     }
-    Node *node = m.graph()->createTensorAttr(value, field);
-    if (node) {
+    if (field == "dtype") {
+      auto* node = m.graph()->create(prim::TensorDType, {value});
+      node->output()->setType(IntType::get());
+      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    } else if (field == "device") {
+      auto* node = m.graph()->create(prim::TensorDevice, {value});
+      node->output()->setType(ListType::create(IntType::get()));
+      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    } else if (field == "shape") {
+      auto* node = m.graph()->create(prim::TensorShape, {value});
+      node->output()->setType(ListType::create(IntType::get()));
       return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
     }
   }
