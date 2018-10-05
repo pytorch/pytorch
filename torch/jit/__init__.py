@@ -605,12 +605,14 @@ def createResolutionCallback(frames_up=0):
         baz()
     """
     frame = inspect.stack()[1 + frames_up][0]
+    f_locals = frame.f_locals
+    f_globals = frame.f_globals
 
     def env(key):
-        if key in frame.f_locals:
-            return frame.f_locals[key]
-        elif key in frame.f_globals:
-            return frame.f_globals[key]
+        if key in f_locals:
+            return f_locals[key]
+        elif key in f_globals:
+            return f_globals[key]
         else:
             return None
 
@@ -649,6 +651,7 @@ def _try_compile_weak_script(fn):
         return None
     if entry["status"] == COMPILATION_PENDING:
         compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
+        del entry["rcb"]
         compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
         entry["status"] = COMPILED
         return compiled_fn
