@@ -267,6 +267,8 @@ def disable_stderr(worker_id):
     Avoids printing "ERROR: Unexpected segmentation fault encountered in worker."
     from workers. Since worker signal handler prints with low-level write(),
     this has to be done on OS level via dup.
+
+    This is used as worker_init_fn for test_segfault.
     """
     sys.stderr.flush()  # flush library buffers that dup2 knows nothing about
     devnull = open(os.devnull, 'w')
@@ -301,7 +303,7 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
     if exit_method == 'worker_error' or exit_method == 'worker_kill':
         assert use_workers is True
 
-    ds = TestProperExitDataset(10, setup_event if exit_method == 'worker_error' else None)
+    ds = TestProperExitDataset(16, setup_event if exit_method == 'worker_error' else None)
 
     loader = DataLoader(ds, batch_size=2, shuffle=False,
                         num_workers=num_workers, pin_memory=pin_memory)
@@ -310,7 +312,8 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
         for i, w in enumerate(it.workers):
             worker_pids[i] = w.pid
 
-    assert len(loader) > 2
+    error_it = 4
+    assert len(loader) > error_it
 
     def kill_pid(pid):
         if IS_WINDOWS:
@@ -323,7 +326,7 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
             if not hold_iter_reference:
                 del it
             setup_event.set()
-        elif i == 2:
+        if i == error_it:
             if exit_method == 'main_error':
                 raise RuntimeError('Error')
             elif exit_method == 'main_kill':
@@ -582,10 +585,14 @@ class TestDataLoader(TestCase):
         self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
     @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_partial_workers(self):
         r"""Check that workers exit even if the iterator is not exhausted."""
-        for pin_memory in (True, False):
+        if TEST_CUDA:
+            pin_memory_configs = (True, False)
+        else:
+            pin_memory_configs = (False,)
+
+        for pin_memory in pin_memory_configs:
             loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=pin_memory))
             workers = loader.workers
             if pin_memory:
@@ -593,6 +600,7 @@ class TestDataLoader(TestCase):
             for i, sample in enumerate(loader):
                 if i == 10:
                     break
+            assert i == 10
             del loader
             for w in workers:
                 w.join(JOIN_TIMEOUT)

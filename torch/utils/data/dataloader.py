@@ -154,7 +154,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
     # logic of this function.
     while True:
         try:
-            r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+            r = in_queue.get(False)
         except queue.Empty:
             continue
         except Exception:
@@ -427,10 +427,14 @@ class _DataLoaderIter(object):
     #   While loader process is alive:
     #     Get from index_queue.
     #       If got a `None`, exit.
-    #       If get anything else or time out, check `done_event`.
-    #          If set, continue to next iteration
-    #                  i.e., keep getting until see the `None`, then exit.
-    #          Otherwise, process data or continue to next iteration.
+    #       If get anything else,
+    #          Check `done_event`.
+    #            If set, continue to next iteration
+    #                    i.e., keep getting until see the `None`, then exit.
+    #            Otherwise, process data.
+    #       If timed out,
+    #          No matter `done_event` is set (still need to see `None`) or not,
+    #          must continue to next iteration .
     #
     # [pin_memory_thread]
     #   # No need to check main thread. If this thread is alive, the main loader
@@ -438,10 +442,11 @@ class _DataLoaderIter(object):
     #   While True:
     #     Get from index_queue.
     #       If got a `None`, exit.
-    #       If get anything else or time out, check `done_event`.
-    #          If set, continue to next iteration
-    #                  i.e., keep getting until see the `None`, then exit.
-    #          Otherwise, process data or continue to next iteration.
+    #       If get anything else,
+    #          Check `done_event`.
+    #            If set, continue to next iteration
+    #                    i.e., keep getting until see the `None`, then exit.
+    #            Otherwise, process data.
     #
     # [main process]
     #   In the DataLoader Iter's `__del__`
@@ -458,11 +463,11 @@ class _DataLoaderIter(object):
     #          i.   Put `None` in each worker's `index_queue`.
     #          ii.  Join the workers.
     #
-    #        Note: This has to be after (b) because it may leave corrupted data
+    #        NOTE: This has to be after (b) because it may leave corrupted data
     #              in `worker_result_queue`, which `pin_memory_thread` reads
     #              from.
     #
-    #   Note: If `pin_memory=False`, there is no `pin_memory_thread` and (b)
+    #   NOTE: If `pin_memory=False`, there is no `pin_memory_thread` and (b)
     #         can be omitted
     #
     # NB: `done_event`s isn't strictly needed. E.g., we can just check for
@@ -547,14 +552,13 @@ class _DataLoaderIter(object):
         # that `pin_memory_thread` dies.
         if self.timeout > 0:
             try:
-                batch = self.data_queue.get(timeout=self.timeout)
+                return self.data_queue.get(timeout=self.timeout)
             except queue.Empty:
                 raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
         elif self.pin_memory:
             while self.pin_memory_thread.is_alive():
                 try:
-                    batch = self.data_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
-                    break
+                    return self.data_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
                 except queue.Empty:
                     continue
             else:
@@ -563,8 +567,7 @@ class _DataLoaderIter(object):
             # In this case, `self.data_queue` is a `queue.Queue`,. But we don't
             # need to call `.task_done()` because we don't use `.join()`.
         else:
-            batch = self.data_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
-        return batch
+            return self.data_queue.get()
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
@@ -642,13 +645,19 @@ class _DataLoaderIter(object):
             if hasattr(self, 'pin_memory_thread'):
                 # Use hasattr in case error happens before we set the attribute.
                 # First time do `worker_result_queue.put` in this process.
-                # `cancel_join_thread` in case that pin_memory_thread exited.
+
+                # `cancel_join_thread` in case that `pin_memory_thread` exited.
                 self.worker_result_queue.cancel_join_thread()
                 self.worker_result_queue.put(None)
-                # Indicate that no more data will be put on this queue by the
-                # current process.
-                self.worker_result_queue.close()
                 self.pin_memory_thread.join()
+
+                # Indicate that no more data will be put on this queue by the
+                # current process. This **must** be called after
+                # `pin_memory_thread` is joined because that thread shares the
+                # same pipe handles with this loader thread. If the handle is
+                # closed, Py3 will error in this case, but Py2 will just time
+                # out even if there is data in the queue.
+                self.worker_result_queue.close()
 
             # Exit workers now.
             for q in self.index_queues:
