@@ -25,7 +25,7 @@ void sparse_lengths_sum_op_cpu_impl(
   const int64_t M = lengthsInput.dim(0);
   const int64_t indices_size = indicesInput.size();
 
-  auto shape = dataInput.dims();
+  auto shape = dataInput.dims().vec();
   shape[0] = M;
   output->Resize(shape);
   T* out_data = output->template mutable_data<T>();

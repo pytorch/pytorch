@@ -187,7 +187,7 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
   auto* indices = Output(1);
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
-  const std::vector<int64_t>& input_dims = input.dims();
+  at::IntList input_dims = input.dims();
   if (axis_ == -1) {
     axis_ = input_dims.size() - 1;
   }
@@ -195,7 +195,7 @@ bool TopKCudaOp<T, Context>::RunOnDevice() {
   CAFFE_ENFORCE_LT(axis_, input_dims.size());
 
   const bool need_transpose = axis_ < input_dims.size() - 1;
-  std::vector<int64_t> output_dims = input_dims;
+  std::vector<int64_t> output_dims = input_dims.vec();
   output_dims[axis_] = k_;
   const int64_t prev_size = std::accumulate(
       input_dims.cbegin(),
@@ -322,8 +322,8 @@ bool TopKGradientCudaOp<T, Context>::RunOnDevice() {
   const auto& indices = Input(1);
   const auto& original_input = Input(2);
   auto* output = Output(0);
-  const std::vector<int64_t>& values_dims = values.dims();
-  const std::vector<int64_t>& origin_dims = original_input.dims();
+  at::IntList values_dims = values.dims();
+  at::IntList origin_dims = original_input.dims();
   CAFFE_ENFORCE_EQ(values_dims.size(), origin_dims.size());
   output->Resize(origin_dims);
   T* output_data = output->template mutable_data<T>();

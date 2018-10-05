@@ -27,7 +27,7 @@ static vector<int64_t> GetMKLTensorInfo(
   *capacity = tc->size() * sizeof(T);
   device->set_device_type(PROTO_MKLDNN);
   device->set_cuda_gpu_id(0);
-  return tc->dims();
+  return tc->dims().vec();
 }
 
 template <typename T>

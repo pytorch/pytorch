@@ -178,7 +178,7 @@ bool RecurrentOp<T>::RunOnDevice() {
         Output(OUTPUT),
         Output(HIDDEN_OUTPUT),
         Output(CELL_OUTPUT));
-    cachedInputDims_ = Input(INPUT).dims();
+    cachedInputDims_ = Input(INPUT).dims().vec();
   }
 
   // Validation checks
@@ -266,7 +266,7 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
   if (Input(INPUT).dims() != cachedInputDims_) {
     initialize(Input(INPUT));
-    cachedInputDims_ = Input(INPUT).dims();
+    cachedInputDims_ = Input(INPUT).dims().vec();
   }
   MIOPEN_ENFORCE(miopenGetRNNTrainingReserveSize(
       miopen_wrapper_.inline_miopen_handle(),

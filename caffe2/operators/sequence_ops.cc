@@ -68,7 +68,7 @@ bool RemovePaddingOp<CPUContext>::DoRunWithType() {
 
   auto* out = Output(0);
   {
-    auto out_dims = in.dims();
+    auto out_dims = in.dims().vec();
     out_dims[0] -= pad_width * lengths_size;
     out->Resize(std::move(out_dims));
   }
@@ -196,7 +196,7 @@ bool PadEmptySamplesOp<CPUContext>::RunOnDevice() {
     const auto block_size = features.size_from_dim(1);
 
     auto* out_features = Output(1 + k);
-    auto outDim = features.dims();
+    auto outDim = features.dims().vec();
     outDim.at(0) += needPadding;
     out_features->Resize(outDim);
     auto dst =
