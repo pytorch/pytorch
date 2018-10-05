@@ -660,6 +660,8 @@ class TestConvolution(serial.SerializedTestCase):
     def test_1x1_conv(self, op_type, N, G, DX, DY, H, W, use_bias, order,
                       force_algo_fwd, force_algo_dgrad,
                       force_algo_wgrad, gc, dc):
+        if _run_in_hip(gc, dc):
+            assume(order == "NCHW")
         if order == "NHWC":
             G = 1
 
