@@ -1858,10 +1858,16 @@ static const std::unordered_map<std::string, std::string> &builtin_cast_methods(
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
-  if (value->type()->isSubtypeOf(DynamicType::get()) && builtin_cast_methods().count(field)) {
-    return std::make_shared<BuiltinFunction>(
-        Symbol::aten(builtin_cast_methods().at(field)),
-        NamedValue(loc, "self", value));
+  if (value->type()->isSubtypeOf(DynamicType::get())) {
+    if (builtin_cast_methods().count(field)) {
+      return std::make_shared<BuiltinFunction>(
+          Symbol::aten(builtin_cast_methods().at(field)),
+          NamedValue(loc, "self", value));
+    }
+    Node *node = m.graph->createTensorAttr(this, field);
+    if (node) {
+      return std::make_shared<SimpleValue>(m.graph->insertNode(node)->output());
+    }
   }
   if (getValue()->type()->isSubtypeOf(NumberType::get())) {
     throw ErrorReport(loc) << "Cannot call methods on numbers";

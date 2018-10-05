@@ -1092,6 +1092,23 @@ public:
     result->output()->setType(FloatType::get());
     return result;
   }
+  Node* createTensorAttr(Value* value, const std::string& field) {
+    JIT_ASSERT(*value->type() == *DynamicType::get());
+    if (field == "dtype") {
+      auto* result = create(prim::TensorDType, {value});
+      result->output()->setType(IntType::get());
+      return result;
+    } else if (field == "device") {
+      auto* result = create(prim::TensorDevice, {value});
+      result->output()->setType(ListType::create(IntType::get()));
+      return result;
+    } else if (field == "shape") {
+      auto* result = create(prim::TensorShape, {value});
+      result->output()->setType(ListType::create(IntType::get()));
+      return result;
+    }
+    return nullptr;
+  }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
