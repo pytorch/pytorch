@@ -28,4 +28,14 @@ if [[ ! -d build ]]; then
 fi
 
 # Run Clang-Tidy
-time python tools/clang_tidy.py -vp torch/csrc -d master "$@"
+time python tools/clang_tidy.py    \
+  --verbose                        \
+  --paths torch/csrc               \
+  --diff master                    \
+  -g"-torch/csrc/jit/init.cpp"     \
+  -g"-torch/csrc/jit/export.cpp"   \
+  -g"-torch/csrc/jit/import.cpp"   \
+  -g"-torch/csrc/jit/test_jit.cpp" \
+  "$@"
+
+# The negative filters above are to exclude files that include onnx_pb.h
