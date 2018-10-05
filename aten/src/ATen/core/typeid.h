@@ -300,7 +300,7 @@ template<class T>
 CAFFE2_API const TypeMetaData* _typeMetaDataInstance() noexcept;
 #else
 template<class T>
-const TypeMetaData* _typeMetaDataInstance() noexcept;
+CAFFE2_API const TypeMetaData* _typeMetaDataInstance() noexcept;
 #endif
 
 } // namespace detail
@@ -479,7 +479,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) =        \
     _makeTypeMetaDataInstance<T>();                                       \
 template<>                                                                \
-const TypeMetaData* _typeMetaDataInstance<T>() noexcept {                 \
+CAFFE2_API const TypeMetaData* _typeMetaDataInstance<T>() noexcept {      \
   return &MACRO_CONCAT(_typeMetaDataInstance_, Counter);                  \
 }
 #define CAFFE_KNOWN_TYPE(T)                                               \
