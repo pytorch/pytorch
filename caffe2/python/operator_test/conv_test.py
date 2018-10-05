@@ -15,7 +15,6 @@ import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
 import caffe2.python.serialized_test.serialized_test_util as serial
 import caffe2.python._import_c_extension as C
-from caffe2.python.test_util import IN_CIRCLECI
 
 import unittest
 import os
@@ -435,7 +434,6 @@ class TestConvolution(serial.SerializedTestCase):
                    or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
                     raise e
 
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
            stride=st.integers(1, 3),
            pad=st.integers(0, 3),

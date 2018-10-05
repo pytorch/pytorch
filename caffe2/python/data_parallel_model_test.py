@@ -17,7 +17,7 @@ import hypothesis.strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, cnn, data_parallel_model, dyndep, \
     model_helper, optimizer, rnn_cell, workspace
-from caffe2.python.test_util import TestCase, IN_CIRCLECI
+from caffe2.python.test_util import TestCase
 
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
@@ -831,7 +831,6 @@ class RecurrentNetworkParallelTest(TestCase):
 
         return workspace.FetchBlob("{}_0/partest/i2h_w".format(model._device_prefix))
 
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     def test_equiv_recurrent(self):
         '''
         Test that the model produces exactly same results given

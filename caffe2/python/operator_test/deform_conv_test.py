@@ -9,7 +9,6 @@ import hypothesis.strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.test_util import IN_CIRCLECI
 import unittest
 import os
 
@@ -378,7 +377,6 @@ class TestConvolution(hu.HypothesisTestCase):
 
     # CUDNN does NOT support different padding values and we skip it
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     @given(stride_h=st.integers(1, 3),
            stride_w=st.integers(1, 3),
            pad_h=st.integers(0, 3),

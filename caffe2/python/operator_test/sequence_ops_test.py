@@ -8,7 +8,6 @@ from functools import partial
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-from caffe2.python.test_util import IN_CIRCLECI
 import hypothesis.strategies as st
 import numpy as np
 import unittest
@@ -189,7 +188,6 @@ class TestSequenceOps(serial.SerializedTestCase):
             inputs=[data, lengths],
             reference=partial(_remove_padding_ref, start_pad_width, end_pad_width))
 
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     @serial.given(start_pad_width=st.integers(min_value=0, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=True),

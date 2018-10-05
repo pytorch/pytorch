@@ -25,7 +25,6 @@ import numpy as np
 from caffe2.python.models.download import downloadFromURLToFile, getURLFromName, deleteDirectory
 
 from caffe2.python.onnx.tests.test_utils import TestCase
-from caffe2.python.test_util import IN_CIRCLECI
 
 import caffe2.python._import_c_extension as C
 
@@ -649,7 +648,6 @@ class TestCaffe2End2End(TestCase):
     def test_bvlc_reference_caffenet(self):
         self._test_net('bvlc_reference_caffenet')
 
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     def test_bvlc_reference_rcnn_ilsvrc13(self):
         self._test_net('bvlc_reference_rcnn_ilsvrc13')
 

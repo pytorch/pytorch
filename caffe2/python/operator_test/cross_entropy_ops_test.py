@@ -5,7 +5,6 @@ from __future__ import unicode_literals
 from caffe2.python import core
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.test_util import IN_CIRCLECI
 import hypothesis.strategies as st
 import numpy as np
 
@@ -251,7 +250,6 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             output_to_grad='xentropy',
             grad_reference=weighted_sigmoid_xentr_logit_grad_ref)
 
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     @given(n=st.integers(2, 10),
            b=st.integers(1, 5),
            **hu.gcs_cpu_only)

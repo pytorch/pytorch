@@ -15,7 +15,6 @@ import os
 from caffe2.python import core, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.proto import caffe2_pb2
-from caffe2.python.test_util import IN_CIRCLECI
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
@@ -195,7 +194,6 @@ class TestOperators(hu.HypothesisTestCase):
         _test_binary("Mul", ref, filter_=not_overflow, test_gradient=True)(self)
         _test_binary_broadcast("Mul", ref, filter_=not_overflow)(self)
 
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     def test_div(self):
         def ref(x, y):
             return (x / y, )
@@ -1826,7 +1824,6 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, [a], ref)
         self.assertEqual(dst, out.dtype)
 
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     @given(a=hu.tensor(),
            eps=st.floats(min_value=1e-4, max_value=1e-2),
            a_grad=hu.tensor(elements=st.floats(min_value=0.01, max_value=0.99)),

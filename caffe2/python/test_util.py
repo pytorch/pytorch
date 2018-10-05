@@ -10,8 +10,7 @@ from caffe2.python import core, workspace
 import unittest
 import os
 
-# IN_CIRCLECI = "IN_CIRCLECI" in os.environ
-IN_CIRCLECI = False
+IN_CIRCLECI_FLAKY_ENV = "IN_CIRCLECI" in os.environ and "py2-gcc4.8-ubuntu14.04" in os.environ.get("BUILD_ENVIRONMENT", "")
 
 def rand_array(*dims):
     # np.random.rand() returns float instead of 0-dim array, that's why need to

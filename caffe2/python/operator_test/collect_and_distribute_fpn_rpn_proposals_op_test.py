@@ -14,7 +14,6 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, utils
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-from caffe2.python.test_util import IN_CIRCLECI
 
 #
 # Should match original Detectron code at
@@ -132,7 +131,6 @@ def collect_and_distribute_fpn_rpn_ref(*inputs):
 
 
 class TestCollectAndDistributeFpnRpnProposals(serial.SerializedTestCase):
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     @serial.given(proposal_count=st.integers(min_value=1000, max_value=8000),
                   rpn_min_level=st.integers(min_value=1, max_value=4),
                   rpn_num_levels=st.integers(min_value=1, max_value=6),

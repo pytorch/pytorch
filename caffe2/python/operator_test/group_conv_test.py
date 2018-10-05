@@ -9,7 +9,6 @@ import hypothesis.strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.test_util import IN_CIRCLECI
 
 import unittest
 import os
@@ -17,7 +16,6 @@ import os
 
 class TestGroupConvolution(hu.HypothesisTestCase):
 
-    @unittest.skipIf(IN_CIRCLECI, "FIXME: flaky test in CircleCI")
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),
