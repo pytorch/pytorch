@@ -470,6 +470,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)          \
   }
 #else // defined(_MSC_VER) || defined(__clang__)
+#define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)        \
 const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) =        \
     _makeTypeMetaDataInstance<T>();                                       \
 template<>                                                                \
