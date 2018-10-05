@@ -4,11 +4,11 @@
 namespace at {
 
 namespace {
-  DeviceType sparseTensorIdToDeviceType(TensorTypeId type_id) {
+  Backend sparseTensorIdToDenseBackend(TensorTypeId type_id) {
     if (type_id == SparseCPUTensorId()) {
-      return kCPU;
+      return Backend::CPU;
     } else if (type_id == SparseCUDATensorId()) {
-      return kCUDA;
+      return Backend::CUDA;
     } else {
       AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", type_id);
     }
@@ -33,8 +33,8 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
-    , indices_(at::empty({1, 0}, TensorOptions(false).device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long)))
-    , values_(at::empty({0}, TensorOptions(false).device(sparseTensorIdToDeviceType(type_id)).dtype(dataTypeToScalarType(data_type.id())))) {}
+    , indices_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), ScalarType::Long)->tensor({1, 0}))
+    , values_(globalContext().getNonVariableTypeOpt(sparseTensorIdToDenseBackend(type_id), dataTypeToScalarType(data_type.id()))->tensor()) {}
 
 IntList SparseTensorImpl::sizes() const {
   return size_;
