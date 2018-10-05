@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/core/Backend.h>
+#include <ATen/core/DefaultTensorOptions.h>
 #include <ATen/core/Device.h>
 #include <ATen/core/Layout.h>
 #include <ATen/core/ScalarType.h>
-#include <ATen/core/DefaultTensorOptions.h>
+#include <ATen/core/ScalarTypeUtils.h>
 
 #include <cstddef>
 #include <iosfwd>
