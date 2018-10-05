@@ -1864,9 +1864,9 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
           Symbol::aten(builtin_cast_methods().at(field)),
           NamedValue(loc, "self", value));
     }
-    Node *node = m.graph->createTensorAttr(this, field);
+    Node *node = m.graph()->createTensorAttr(value, field);
     if (node) {
-      return std::make_shared<SimpleValue>(m.graph->insertNode(node)->output());
+      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
     }
   }
   if (getValue()->type()->isSubtypeOf(NumberType::get())) {
