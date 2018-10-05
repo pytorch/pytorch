@@ -34,7 +34,8 @@ std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
   return out;
 }
 
-std::ostream& operator<<(std::ostream & out, const at::ArrayRef<Value*> & nodes) {
+template <typename T>
+std::ostream& printValueRefs(std::ostream & out, const at::ArrayRef<T> & nodes) {
   size_t i = 0;
   for(auto n : nodes) {
     if(i++ > 0)
@@ -42,6 +43,17 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<Value*> & nodes)
     printValueRef(out, n);
   }
   return out;
+}
+
+// Can't make these two overloads directly a template, it'll be ambiguous with
+// the global printer for operator<<.
+
+std::ostream& operator<<(std::ostream & out, const at::ArrayRef<const Value*> & nodes) {
+  return printValueRefs(out, nodes);
+}
+
+std::ostream& operator<<(std::ostream & out, const at::ArrayRef<Value*> & nodes) {
+  return printValueRefs(out, nodes);
 }
 
 struct const_value_list_with_types {
