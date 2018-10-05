@@ -20,8 +20,8 @@ CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 CONFIGURE_FILE(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
 
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
-FILE(GLOB base_h "*.h" "detail/*.h")
-FILE(GLOB base_cpp "*.cpp" "detail/*.cpp")
+FILE(GLOB base_h "*.h" "detail/*.h" "cpu/*.h")
+FILE(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
 add_subdirectory(core)
 FILE(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 FILE(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
