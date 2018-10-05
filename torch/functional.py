@@ -10,20 +10,116 @@ __all__ = [
     'argmax',
     'argmin',
     'argsort',
+    'broadcast_tensors',
     'btrifact',
     'btriunpack',
     'einsum',
-    'broadcast_tensors',
     'isfinite',
     'isinf',
     'isnan',
-    'norm',
     'meshgrid',
+    'multi_mm',
+    'norm',
     'split',
     'stft',
     'tensordot',
     'unique',
 ]
+
+
+def argmax(input, dim=None, keepdim=False):
+    r"""Returns the indices of the maximum values of a tensor across a dimension.
+
+    This is the second value returned by :meth:`torch.max`. See its
+    documentation for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int): the dimension to reduce. If ``None``, the argmax of the
+            flattened input is returned.
+        keepdim (bool): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if ``dim=None``.
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+        tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
+                [-0.7401, -0.8805, -0.3402, -1.1936],
+                [ 0.4907, -1.3948, -1.0691, -0.3132],
+                [-1.6092,  0.5419, -0.2993,  0.3195]])
+
+
+        >>> torch.argmax(a, dim=1)
+        tensor([ 0,  2,  0,  1])
+    """
+    if dim is None:
+        return torch._argmax(input.contiguous().view(-1), dim=0, keepdim=False)
+    return torch._argmax(input, dim, keepdim)
+
+
+def argmin(input, dim=None, keepdim=False):
+    r"""Returns the indices of the minimum values of a tensor across a dimension.
+
+    This is the second value returned by :meth:`torch.min`. See its
+    documentation for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int): the dimension to reduce. If ``None``, the argmin of the
+            flattened input is returned.
+        keepdim (bool): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if ``dim=None``.
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+        tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
+                [ 1.0100, -1.1975, -0.0102, -0.4732],
+                [-0.9240,  0.1207, -0.7506, -1.0213],
+                [ 1.7809, -1.2960,  0.9384,  0.1438]])
+
+
+        >>> torch.argmin(a, dim=1)
+        tensor([ 2,  1,  3,  1])
+    """
+    if dim is None:
+        return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
+    return torch._argmin(input, dim, keepdim)
+
+
+def argsort(input, dim=None, descending=False):
+    r"""Returns the indices that sort a tensor along a given dimension in ascending
+    order by value.
+
+    This is the second value returned by :meth:`torch.sort`.  See its documentation
+    for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int, optional): the dimension to sort along
+        descending (bool, optional): controls the sorting order (ascending or descending)
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+        tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
+                [ 0.1598,  0.0788, -0.0745, -1.2700],
+                [ 1.2208,  1.0722, -0.7064,  1.2564],
+                [ 0.0669, -0.2318, -0.8229, -0.9280]])
+
+
+        >>> torch.argsort(a, dim=1)
+        tensor([[2, 0, 3, 1],
+                [3, 2, 1, 0],
+                [2, 1, 0, 3],
+                [3, 2, 1, 0]])
+    """
+    if dim is None:
+        return torch.sort(input, -1, descending)[1]
+    return torch.sort(input, dim, descending)[1]
 
 
 def broadcast_tensors(*tensors):
@@ -46,31 +142,6 @@ def broadcast_tensors(*tensors):
                 [0, 1, 2]])
     """
     return torch._C._VariableFunctions.broadcast_tensors(tensors)
-
-
-def split(tensor, split_size_or_sections, dim=0):
-    r"""Splits the tensor into chunks.
-
-    If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
-    be split into equally sized chunks (if possible). Last chunk will be smaller if
-    the tensor size along the given dimension :attr:`dim` is not divisible by
-    :attr:`split_size`.
-
-    If :attr:`split_size_or_sections` is a list, then :attr:`tensor` will be split
-    into ``len(split_size_or_sections)`` chunks with sizes in :attr:`dim` according
-    to :attr:`split_size_or_sections`.
-
-    Arguments:
-        tensor (Tensor): tensor to split.
-        split_size_or_sections (int) or (list(int)): size of a single chunk or
-            list of sizes for each chunk
-        dim (int): dimension along which to split the tensor.
-    """
-    # Overwriting reason:
-    # This dispatches to two ATen functions depending on the type of
-    # split_size_or_sections. The branching code is in tensor.py, which we
-    # call here.
-    return tensor.split(split_size_or_sections, dim)
 
 
 def btrifact(A, info=None, pivot=True):
@@ -281,6 +352,25 @@ def isinf(tensor):
     return tensor.abs() == inf
 
 
+def isnan(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+
+    Example::
+
+        >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
+        tensor([ 0,  1,  0], dtype=torch.uint8)
+    """
+    if not isinstance(tensor, torch.Tensor):
+        raise ValueError("The argument is not a tensor", str(tensor))
+    return tensor != tensor
+
+
 def meshgrid(*tensors, **kwargs):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
 vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
@@ -316,6 +406,117 @@ expanding the :math:`i`th input over dimensions defined by other inputs.
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]
     return torch._C._VariableFunctions.meshgrid(tensors)
+
+
+def multi_mm(*matrices):
+    r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
+using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
+of arithmetic operations `[1]`_. Note that :math:`N` needs to be greater than or equal to 2; if equal to 2
+then a trivial matrix-matrix product is returned.
+
+
+    Args:
+        matrices (list of Tensors): list of 2-D tensors whose product is to be determined.
+
+    Returns:
+        Tensor: if the :math:`i^{th}` tensor was of dimensions :math:`p_{i} \times p_{i + 1}`, then the product
+                would be of dimensions `p_{1} \times p_{N + 1}`.
+
+    Example::
+
+        >>> a = torch.randn(3, 4)
+        >>> b = torch.randn(4, 5)
+        >>> c = torch.randn(5, 6)
+        >>> d = torch.randn(6, 7)
+        >>> torch.multi_mm(a, b, c, d)
+        tensor([[ -2.3375,  -3.9790,  -4.1119,  -6.6577,   9.5609, -11.5095,  -3.2614],
+                [ 21.4038,   3.3378,  -8.4982,  -5.2457, -10.2561,  -2.4684,   2.7163],
+                [ -0.9647,  -5.8917,  -2.3213,  -5.2284,  12.8615, -12.2816,  -2.5095]])
+    """
+    if len(matrices) == 1 and isinstance(matrices[0], (list, tuple)):
+        matrices = matrices[0]
+    return torch._C._VariableFunctions.multi_mm(matrices)
+
+
+def norm(input, p="fro", dim=None, keepdim=False, out=None):
+    r"""Returns the matrix norm or vector norm of a given tensor.
+
+    Args:
+        input (Tensor): the input tensor
+        p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
+            The following norms can be calculated:
+
+            =====  ============================  ==========================
+            ord    matrix norm                   vector norm
+            =====  ============================  ==========================
+            None   Frobenius norm                2-norm
+            'fro'  Frobenius norm                --
+            'nuc'  nuclear norm                  --
+            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
+            =====  ============================  ==========================
+
+        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
+            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
+            will be calculated. If the value is None, matrix norm will be calculated
+            when the input tensor only has two dimensions, vector norm will be
+            calculated when the input tensor only has one dimension. If the input
+            tensor has more than two dimensions, the vector norm will be applied to
+            last dimension.
+        keepdim (bool, optional): whether the output tensors have :attr:`dim`
+            retained or not. Ignored if :attr:`dim` = ``None`` and
+            :attr:`out` = ``None``. Default: ``False``
+        out (Tensor, optional): the output tensor. Ignored if
+            :attr:`dim` = ``None`` and :attr:`out` = ``None``.
+
+    Example::
+
+        >>> import torch
+        >>> a = torch.arange(9, dtype= torch.float) - 4
+        >>> b = a.reshape((3, 3))
+        >>> torch.norm(a)
+        tensor(7.7460)
+        >>> torch.norm(b)
+        tensor(7.7460)
+        >>> torch.norm(a, float('inf'))
+        tensor(4.)
+        >>> torch.norm(b, float('inf'))
+        tensor([4., 3., 4.])
+        >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        >>> torch.norm(c, dim=0)
+        tensor([1.4142, 2.2361, 5.0000])
+        >>> torch.norm(c, dim=1)
+        tensor([3.7417, 4.2426])
+        >>> torch.norm(c, p=1, dim=1)
+        tensor([6., 6.])
+        >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
+        >>> torch.norm(d, dim=(1,2))
+        tensor([ 3.7417, 11.2250])
+        >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
+        (tensor(3.7417), tensor(11.2250))
+    """
+    ndim = input.dim()
+
+    # catch default case
+    if dim is None and out is None:
+        if p == "fro":
+            return torch._C._VariableFunctions.frobenius_norm(input)
+        elif p != "nuc":
+            return torch._C._VariableFunctions.norm(input, p)
+
+    if p == "fro":
+        if dim is None:
+            dim = tuple(range(ndim))
+        if out is None:
+            return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim)
+        return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim, out=out)
+    elif p == "nuc":
+        if out is None:
+            torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
+        return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
+    else:
+        if out is None:
+            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
+    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
 
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
@@ -411,23 +612,59 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
     return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
-def isnan(tensor):
-    r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
+def tensordot(a, b, dims=2):
+    r"""Returns a contraction of a and b over multiple dimensions.
 
-    Arguments:
-        tensor (Tensor): A tensor to check
+    :attr:`tensordot` implements a generalizes the matrix product.
 
-    Returns:
-        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
+    Args:
+      a (Tensor): Left tensor to contract
+      b (Tensor): Right tensor to contract
+      dims (int or tuple of two lists of integers): number of dimensions to
+         contract or explicit lists of dimensions for :attr:`a` and
+         :attr:`b` respectively
 
-    Example::
+    When called with an integer argument :attr:`dims` = :math:`d`, and the number of
+    dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`, respectively,
+    it computes
 
-        >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
-        tensor([ 0,  1,  0], dtype=torch.uint8)
+    .. math::
+        r_{i_0,...,i_{m-d}, i_d,...,i_n}
+          = \sum_{k_0,...,k_{d-1}} a_{i_0,...,i_{m-d},k_0,...,k_{d-1}} \times b_{k_0,...,k_{d-1}, i_d,...,i_n}.
+
+    When called with :attr:`dims` of the list form, the given dimensions will be contracted
+    in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
+    in these dimensions must match, but :attr:`tensordot` will deal with broadcasted
+    dimensions.
+
+    Examples::
+
+        >>> a = torch.arange(60.).reshape(3, 4, 5)
+        >>> b = torch.arange(24.).reshape(4, 3, 2)
+        >>> torch.tensordot(a, b, dims=([1, 0], [0, 1]))
+        tensor([[4400., 4730.],
+                [4532., 4874.],
+                [4664., 5018.],
+                [4796., 5162.],
+                [4928., 5306.]])
+
+        >>> a = torch.randn(3, 4, 5, device='cuda')
+        >>> b = torch.randn(4, 5, 6, device='cuda')
+        >>> c = torch.tensordot(a, b, dims=2).cpu()
+        tensor([[ 8.3504, -2.5436,  6.2922,  2.7556, -1.0732,  3.2741],
+                [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
+                [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
+
     """
-    if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor", str(tensor))
-    return tensor != tensor
+    if isinstance(dims, (list, tuple)) or \
+       (isinstance(dims, torch.Tensor) and dims.numel() > 1):
+        dims_a, dims_b = dims
+    else:
+        if isinstance(dims, torch.Tensor):
+            dims = dims.item()
+        dims_a = list(range(-dims, 0))
+        dims_b = list(range(dims))
+    return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
 
 
 def unique(input, sorted=False, return_inverse=False, dim=None):
@@ -493,232 +730,26 @@ def unique(input, sorted=False, return_inverse=False, dim=None):
         return output
 
 
-def argmax(input, dim=None, keepdim=False):
-    r"""Returns the indices of the maximum values of a tensor across a dimension.
+def split(tensor, split_size_or_sections, dim=0):
+    r"""Splits the tensor into chunks.
 
-    This is the second value returned by :meth:`torch.max`. See its
-    documentation for the exact semantics of this method.
+    If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
+    be split into equally sized chunks (if possible). Last chunk will be smaller if
+    the tensor size along the given dimension :attr:`dim` is not divisible by
+    :attr:`split_size`.
 
-    Args:
-        input (Tensor): the input tensor
-        dim (int): the dimension to reduce. If ``None``, the argmax of the
-            flattened input is returned.
-        keepdim (bool): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if ``dim=None``.
+    If :attr:`split_size_or_sections` is a list, then :attr:`tensor` will be split
+    into ``len(split_size_or_sections)`` chunks with sizes in :attr:`dim` according
+    to :attr:`split_size_or_sections`.
 
-    Example::
-
-        >>> a = torch.randn(4, 4)
-        >>> a
-        tensor([[ 1.3398,  0.2663, -0.2686,  0.2450],
-                [-0.7401, -0.8805, -0.3402, -1.1936],
-                [ 0.4907, -1.3948, -1.0691, -0.3132],
-                [-1.6092,  0.5419, -0.2993,  0.3195]])
-
-
-        >>> torch.argmax(a, dim=1)
-        tensor([ 0,  2,  0,  1])
+    Arguments:
+        tensor (Tensor): tensor to split.
+        split_size_or_sections (int) or (list(int)): size of a single chunk or
+            list of sizes for each chunk
+        dim (int): dimension along which to split the tensor.
     """
-    if dim is None:
-        return torch._argmax(input.contiguous().view(-1), dim=0, keepdim=False)
-    return torch._argmax(input, dim, keepdim)
-
-
-def argmin(input, dim=None, keepdim=False):
-    r"""Returns the indices of the minimum values of a tensor across a dimension.
-
-    This is the second value returned by :meth:`torch.min`. See its
-    documentation for the exact semantics of this method.
-
-    Args:
-        input (Tensor): the input tensor
-        dim (int): the dimension to reduce. If ``None``, the argmin of the
-            flattened input is returned.
-        keepdim (bool): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if ``dim=None``.
-
-    Example::
-
-        >>> a = torch.randn(4, 4)
-        >>> a
-        tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
-                [ 1.0100, -1.1975, -0.0102, -0.4732],
-                [-0.9240,  0.1207, -0.7506, -1.0213],
-                [ 1.7809, -1.2960,  0.9384,  0.1438]])
-
-
-        >>> torch.argmin(a, dim=1)
-        tensor([ 2,  1,  3,  1])
-    """
-    if dim is None:
-        return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
-    return torch._argmin(input, dim, keepdim)
-
-
-def tensordot(a, b, dims=2):
-    r"""Returns a contraction of a and b over multiple dimensions.
-
-    :attr:`tensordot` implements a generalizes the matrix product.
-
-    Args:
-      a (Tensor): Left tensor to contract
-      b (Tensor): Right tensor to contract
-      dims (int or tuple of two lists of integers): number of dimensions to
-         contract or explicit lists of dimensions for :attr:`a` and
-         :attr:`b` respectively
-
-    When called with an integer argument :attr:`dims` = :math:`d`, and the number of
-    dimensions of :attr:`a` and :attr:`b` is :math:`m` and :math:`n`, respectively,
-    it computes
-
-    .. math::
-        r_{i_0,...,i_{m-d}, i_d,...,i_n}
-          = \sum_{k_0,...,k_{d-1}} a_{i_0,...,i_{m-d},k_0,...,k_{d-1}} \times b_{k_0,...,k_{d-1}, i_d,...,i_n}.
-
-    When called with :attr:`dims` of the list form, the given dimensions will be contracted
-    in place of the last :math:`d` of :attr:`a` and the first :math:`d` of :math:`b`. The sizes
-    in these dimensions must match, but :attr:`tensordot` will deal with broadcasted
-    dimensions.
-
-    Examples::
-
-        >>> a = torch.arange(60.).reshape(3, 4, 5)
-        >>> b = torch.arange(24.).reshape(4, 3, 2)
-        >>> torch.tensordot(a, b, dims=([1, 0], [0, 1]))
-        tensor([[4400., 4730.],
-                [4532., 4874.],
-                [4664., 5018.],
-                [4796., 5162.],
-                [4928., 5306.]])
-
-        >>> a = torch.randn(3, 4, 5, device='cuda')
-        >>> b = torch.randn(4, 5, 6, device='cuda')
-        >>> c = torch.tensordot(a, b, dims=2).cpu()
-        tensor([[ 8.3504, -2.5436,  6.2922,  2.7556, -1.0732,  3.2741],
-                [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
-                [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
-
-    """
-    if isinstance(dims, (list, tuple)) or \
-       (isinstance(dims, torch.Tensor) and dims.numel() > 1):
-        dims_a, dims_b = dims
-    else:
-        if isinstance(dims, torch.Tensor):
-            dims = dims.item()
-        dims_a = list(range(-dims, 0))
-        dims_b = list(range(dims))
-    return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
-
-
-def argsort(input, dim=None, descending=False):
-    r"""Returns the indices that sort a tensor along a given dimension in ascending
-    order by value.
-
-    This is the second value returned by :meth:`torch.sort`.  See its documentation
-    for the exact semantics of this method.
-
-    Args:
-        input (Tensor): the input tensor
-        dim (int, optional): the dimension to sort along
-        descending (bool, optional): controls the sorting order (ascending or descending)
-
-    Example::
-
-        >>> a = torch.randn(4, 4)
-        >>> a
-        tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
-                [ 0.1598,  0.0788, -0.0745, -1.2700],
-                [ 1.2208,  1.0722, -0.7064,  1.2564],
-                [ 0.0669, -0.2318, -0.8229, -0.9280]])
-
-
-        >>> torch.argsort(a, dim=1)
-        tensor([[2, 0, 3, 1],
-                [3, 2, 1, 0],
-                [2, 1, 0, 3],
-                [3, 2, 1, 0]])
-    """
-    if dim is None:
-        return torch.sort(input, -1, descending)[1]
-    return torch.sort(input, dim, descending)[1]
-
-
-def norm(input, p="fro", dim=None, keepdim=False, out=None):
-    r"""Returns the matrix norm or vector norm of a given tensor.
-
-    Args:
-        input (Tensor): the input tensor
-        p (int, float, inf, -inf, 'fro', 'nuc', optional): the order of norm. Default: ``'fro'``
-            The following norms can be calculated:
-
-            =====  ============================  ==========================
-            ord    matrix norm                   vector norm
-            =====  ============================  ==========================
-            None   Frobenius norm                2-norm
-            'fro'  Frobenius norm                --
-            'nuc'  nuclear norm                  --
-            Other  as vec norm when dim is None  sum(abs(x)**ord)**(1./ord)
-            =====  ============================  ==========================
-
-        dim (int, 2-tuple of ints, 2-list of ints, optional): If it is an int,
-            vector norm will be calculated, if it is 2-tuple of ints, matrix norm
-            will be calculated. If the value is None, matrix norm will be calculated
-            when the input tensor only has two dimensions, vector norm will be
-            calculated when the input tensor only has one dimension. If the input
-            tensor has more than two dimensions, the vector norm will be applied to
-            last dimension.
-        keepdim (bool, optional): whether the output tensors have :attr:`dim`
-            retained or not. Ignored if :attr:`dim` = ``None`` and
-            :attr:`out` = ``None``. Default: ``False``
-        out (Tensor, optional): the output tensor. Ignored if
-            :attr:`dim` = ``None`` and :attr:`out` = ``None``.
-
-    Example::
-
-        >>> import torch
-        >>> a = torch.arange(9, dtype= torch.float) - 4
-        >>> b = a.reshape((3, 3))
-        >>> torch.norm(a)
-        tensor(7.7460)
-        >>> torch.norm(b)
-        tensor(7.7460)
-        >>> torch.norm(a, float('inf'))
-        tensor(4.)
-        >>> torch.norm(b, float('inf'))
-        tensor([4., 3., 4.])
-        >>> c = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
-        >>> torch.norm(c, dim=0)
-        tensor([1.4142, 2.2361, 5.0000])
-        >>> torch.norm(c, dim=1)
-        tensor([3.7417, 4.2426])
-        >>> torch.norm(c, p=1, dim=1)
-        tensor([6., 6.])
-        >>> d = torch.arange(8, dtype= torch.float).reshape(2,2,2)
-        >>> torch.norm(d, dim=(1,2))
-        tensor([ 3.7417, 11.2250])
-        >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
-        (tensor(3.7417), tensor(11.2250))
-    """
-    ndim = input.dim()
-
-    # catch default case
-    if dim is None and out is None:
-        if p == "fro":
-            return torch._C._VariableFunctions.frobenius_norm(input)
-        elif p != "nuc":
-            return torch._C._VariableFunctions.norm(input, p)
-
-    if p == "fro":
-        if dim is None:
-            dim = tuple(range(ndim))
-        if out is None:
-            return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim)
-        return torch._C._VariableFunctions.frobenius_norm(input, dim, keepdim=keepdim, out=out)
-    elif p == "nuc":
-        if out is None:
-            torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim)
-        return torch._C._VariableFunctions.nuclear_norm(input, keepdim=keepdim, out=out)
-    else:
-        if out is None:
-            return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim)
-    return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
+    # Overwriting reason:
+    # This dispatches to two ATen functions depending on the type of
+    # split_size_or_sections. The branching code is in tensor.py, which we
+    # call here.
+    return tensor.split(split_size_or_sections, dim)
