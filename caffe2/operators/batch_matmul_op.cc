@@ -141,7 +141,8 @@ two diemnsional, it behaves like normal matrix multiplication.
         "Pass 1 to allow broadcasting of dimensions. Behavior is the same as numpy.matmul. Gradient is currently not supported when running in broadcast mode.")
     .TensorInferenceFunction(TensorInferenceForBatchMatMul)
     .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForBatchMatMul));
+        OpSchema::CostInferenceFunctionType(CostInferenceForBatchMatMul))
+    .InheritOnnxSchema("BatchMatMul");
 
 class GetBatchMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

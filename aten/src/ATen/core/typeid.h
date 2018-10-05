@@ -496,7 +496,8 @@ CAFFE_DECLARE_KNOWN_TYPE(24, int*)
 // int64_t. As a result we will need to actually define them separately.
 // It is recommended that one does NOT use long - use int32_t and int64_t
 // explicitly. Explicit long type annotation may go away in the future.
-#if defined(_MSC_VER) || defined(__APPLE__) || defined(__ANDROID__)
+#if defined(_MSC_VER) || defined(__APPLE__) || \
+    (defined(__ANDROID__) && !defined(__LP64__))
 CAFFE_DECLARE_KNOWN_TYPE(25, long)
 CAFFE_DECLARE_KNOWN_TYPE(26, std::vector<long>)
 #endif 
