@@ -295,8 +295,13 @@ inline TypeMetaData _makeTypeMetaDataInstance() {
   };
 }
 
+#if defined(_MSC_VER) || defined(__clang__)
 template<class T>
 CAFFE2_API const TypeMetaData* _typeMetaDataInstance() noexcept;
+#else
+template<class T>
+const TypeMetaData* _typeMetaDataInstance() noexcept;
+#endif
 
 } // namespace detail
 
