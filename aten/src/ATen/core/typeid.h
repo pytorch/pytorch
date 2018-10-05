@@ -127,9 +127,8 @@ struct TypeMetaData final {
     TypeIdentifier id,
     const char* name) noexcept
   : itemsize_(itemsize), ctor_(ctor), copy_(copy), dtor_(dtor), id_(id), name_(name) {}
-  static constexpr TypeMetaData uninitialized() noexcept {
-    return TypeMetaData(0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)");
-  }
+
+  static const TypeMetaData uninitialized;
 
   size_t itemsize_;
   PlacementNew* ctor_;
@@ -304,9 +303,6 @@ inline TypeMetaData _makeTypeMetaDataInstance() {
  * for run-time inspection.
  */
 class CAFFE2_API TypeMeta {
- private:
-  static constexpr detail::TypeMetaData uninitialized_ = detail::TypeMetaData::uninitialized();
-
  public:
   using PlacementNew = detail::TypeMetaData::PlacementNew;
   using TypedCopy = detail::TypeMetaData::TypedCopy;
@@ -315,7 +311,7 @@ class CAFFE2_API TypeMeta {
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
    */
-  constexpr TypeMeta() noexcept : data_(&uninitialized_) {}
+  constexpr TypeMeta() noexcept : data_(&detail::TypeMetaData::uninitialized) {}
 
   /**
    * Copy constructor.
