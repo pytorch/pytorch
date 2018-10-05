@@ -309,7 +309,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         returned_grad = returned_grad.unsqueeze(*it);
       return {returned_grad};
 
-    } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const=*/attr::dim)) {
+    } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
       int64_t dim = *node->get<int64_t>(attr::dim);
       const auto& sizes = inputs.at(0).sizes();
       wrapDim(dim, sizes);
@@ -318,7 +318,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       }
       return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim), nullptr};
 
-    } else if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*const=*/attr::dim)) {
+    } else if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
       int dim = *node->get<int64_t>(attr::dim);
       auto tensor_inputs = inputs; tensor_inputs.pop_back();
       const auto& first_sizes = tensor_inputs.at(0).sizes();

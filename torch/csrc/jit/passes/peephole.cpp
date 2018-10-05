@@ -25,7 +25,7 @@ void PeepholeOptimize(Block * block) {
     // XXX: remember that if you want to simplify an expression by combining multiple nodes
     // into a different one, then you need to check that they all belong to the given block
     if (node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
-        /*with_const=*/attr::size)) {
+        /*const_inputs=*/attr::size)) {
       // x.expand(x.size()) == x
       if (auto input_type = node->namedInput(attr::self)->type()->cast<CompleteTensorType>()) {
         auto expanded_sizes = node->get<std::vector<int64_t>>(attr::size);
@@ -49,7 +49,7 @@ void PeepholeOptimize(Block * block) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
     } else if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-               /*with_const=*/attr::alpha)) {
+               /*const_inputs=*/attr::alpha)) {
       // z + x.mm(y) == z.addmm(x, y) == x.mm(y) + z
       // This optimization has been disabled at the moment, because it's not helpful at all
       // until we will be able to represent torch.addmm(a, b, c, out=a). That's because addmm
@@ -101,14 +101,14 @@ void PeepholeOptimize(Block * block) {
         }
       }
     // TODO: this doesn't work with Scalar-Tensor ops! We should canonicalize those
-    } else if (node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*with_const=*/attr::other) ||
-               node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*with_const=*/attr::other)) {
+    } else if (node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
+               node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other)) {
       // x * 1 == x / 1 == x
       if (node->get<at::Scalar>(attr::other)->toDouble() == 1) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
-    } else if (node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor", /*with_const=*/{attr::alpha, attr::other}) ||
-               node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor", /*with_const=*/{attr::alpha, attr::other})) {
+    } else if (node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor", /*const_inputs=*/{attr::alpha, attr::other}) ||
+               node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor", /*const_inputs=*/{attr::alpha, attr::other})) {
       // x + 0 == x - 0 == x
       if (node->get<at::Scalar>(attr::alpha)->toDouble() == 1 &&
           node->get<at::Scalar>(attr::other)->toDouble() == 0) {

@@ -140,8 +140,8 @@ struct SharedParserData {
     }
 
 #define ADD_CASE(tok, _, tokstring) \
-  if (*tokstring != '\0') {         \
-    head->insert(tokstring, tok);   \
+  if (*(tokstring) != '\0') {         \
+    head->insert((tokstring), (tok));   \
   }
     TC_FORALL_TOKEN_KINDS(ADD_CASE)
 #undef ADD_CASE

@@ -35,7 +35,7 @@ protected:
 
   virtual uint64_t get_rand_offset(uint32_t numel) override {
      int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
-     return 4 * (ceil(numel/(4 * blockSize * numBlocks)) + 1);
+     return 4 * (ceil(numel / (4.0 * blockSize * numBlocks)) + 1);
   }
 
   virtual void launch_raw(uint32_t numel, void ** arguments) override;
@@ -53,7 +53,7 @@ protected:
 };
 
 } // namespace cudafuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
 
 #endif // USE_CUDA_FUSER

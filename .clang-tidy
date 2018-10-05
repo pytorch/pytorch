@@ -3,6 +3,8 @@
 Checks: '
   -*
   ,modernize-deprecated-headers
+  ,bugprone-*
+  ,-bugprone-macro-parentheses
   '
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'torch/csrc/.*'

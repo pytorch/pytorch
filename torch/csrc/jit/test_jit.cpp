@@ -706,7 +706,7 @@ void argumentSpecTest() {
   CATCH_REQUIRE(no_grad != a);
 
   std::unordered_set<CompleteArgumentSpec> spec;
-  spec.insert(std::move(a));
+  spec.insert(a);
   CATCH_REQUIRE(spec.count(b) > 0);
   CATCH_REQUIRE(spec.count(no_grad) == 0);
   spec.insert(std::move(no_grad));
@@ -832,7 +832,7 @@ void testIValue() {
   auto foo2 = std::move(bar);
   JIT_ASSERT(foo.use_count() == 3);
   JIT_ASSERT(foo2.isIntList());
-  JIT_ASSERT(bar.isNone());
+  JIT_ASSERT(bar.isNone()); // NOLINT(bugprone-use-after-move)
   foo2 = IValue(4.0);
   JIT_ASSERT(foo2.isDouble());
   JIT_ASSERT(foo2.toDouble() == 4.0);
@@ -841,7 +841,7 @@ void testIValue() {
 
   auto move_it = std::move(baz).toIntList();
   JIT_ASSERT(foo.use_count() == 2);
-  JIT_ASSERT(baz.isNone());
+  JIT_ASSERT(baz.isNone()); // NOLINT(bugprone-use-after-move)
   IValue i(4);
   JIT_ASSERT(i.isInt() && i.toInt() == 4);
   IValue dlist(DoubleList::create({3.5}));
@@ -849,7 +849,7 @@ void testIValue() {
       dlist.isDoubleList() &&
       ArrayRef<double>(std::move(dlist).toDoubleList()->elements())
           .equals({3.5}));
-  JIT_ASSERT(dlist.isNone());
+  JIT_ASSERT(dlist.isNone()); // NOLINT(bugprone-use-after-move)
   dlist = IValue(DoubleList::create({3.4}));
   JIT_ASSERT(ArrayRef<double>(dlist.toDoubleList()->elements()).equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));

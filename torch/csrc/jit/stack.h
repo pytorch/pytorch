@@ -73,7 +73,7 @@ static inline void push(Stack& stack, Types&&... args) {
 // pack takes the return values of aten functions pushes them onto the stack
 template<typename T>
 inline void pack(Stack & stack, T&& v) {
-  stack.emplace_back(std::move(v));
+  stack.emplace_back(std::forward<T>(v));
 }
 
 template<std::size_t remaining, typename... Args>

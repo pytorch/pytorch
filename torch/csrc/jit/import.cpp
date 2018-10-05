@@ -372,7 +372,7 @@ ModuleDecoder::ModuleDecoder(
 void import_ir_module(
     ModuleLookup module_lookup,
     std::istream& in) {
-  ModuleDecoder(module_lookup, in);
+  ModuleDecoder(module_lookup, in); // NOLINT(bugprone-unused-raii)
 }
 
 void import_ir_module(
@@ -380,7 +380,7 @@ void import_ir_module(
     const std::string& filename) {
   std::ifstream in(filename, std::ios_base::binary);
 
-  ModuleDecoder(module_lookup, in);
+  ModuleDecoder(module_lookup, in); // NOLINT(bugprone-unused-raii)
 }
 
 std::shared_ptr<script::Module> load(std::istream& in) {
@@ -397,7 +397,7 @@ std::shared_ptr<script::Module> load(std::istream& in) {
     return curr;
   };
 
-  ModuleDecoder(module_lookup, in);
+  ModuleDecoder(module_lookup, in); // NOLINT(bugprone-unused-raii)
 
   return module;
 }
