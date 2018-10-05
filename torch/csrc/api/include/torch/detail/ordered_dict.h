@@ -73,8 +73,8 @@ class OrderedDict {
   // Move works by default, because you can move-construct vectors of const
   // values..
   OrderedDict(OrderedDict&& other) noexcept(
-      noexcept(std::unordered_map<Key, size_t>()) &&
-      noexcept(std::vector<Item>())) = default;
+      noexcept(std::unordered_map<Key, size_t>(std::move(other.index_))) &&
+      noexcept(std::vector<Item>(std::move(other.items_)))) = default;
   OrderedDict& operator=(OrderedDict&& other) = default;
 
   ~OrderedDict() = default;
