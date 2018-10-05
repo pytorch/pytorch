@@ -33,7 +33,7 @@ class ModuleDecoder {
                   std::unordered_map<std::string, Value*>& value_map);
 
   void buildBlocks(const std::vector<onnx::GraphProto>& graphs_, Node* node,
-                  std::unordered_map<std::string, Value*>& value_map);
+                   std::unordered_map<std::string, Value*>& value_map);
 
   void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto);
 

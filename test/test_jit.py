@@ -5400,7 +5400,7 @@ a")
                 self.weight = torch.nn.Parameter(torch.rand(n, m))
 
             @torch.jit.script_method
-            def forward(self, input: torch.Tensor):
+            def forward(self, input):
                 if bool(input.sum() > 0):
                     output = self.weight.mv(input)
                 else:
