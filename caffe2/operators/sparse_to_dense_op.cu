@@ -45,7 +45,7 @@ namespace caffe2 {
     const int output_first_dim =
         GetOutputFirstDim(sparse_indices_vec, sparse_indices_len);
 
-    auto shape = sparse_values.dims();
+    auto shape = sparse_values.dims().vec();
     shape[0] = output_first_dim;
     auto* output = Output(0);
     output->Resize(shape);
