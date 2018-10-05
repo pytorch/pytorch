@@ -37,28 +37,6 @@ if(EXISTS "/etc/os-release")
   endif()
 endif()
 
-# ---[ Check if the data type long and int32_t/int64_t overlap.
-cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++11")
-CHECK_CXX_SOURCE_COMPILES(
-    "#include <cstdint>
-
-    template <typename T> void Foo();
-    template<> void Foo<int32_t>() {}
-    template<> void Foo<int64_t>() {}
-    int main(int argc, char** argv) {
-      Foo<long>();
-      return 0;
-    }" CAFFE2_LONG_IS_INT32_OR_64)
-
-if (CAFFE2_LONG_IS_INT32_OR_64)
-  message(STATUS "Does not need to define long separately.")
-else()
-  message(STATUS "Need to define long as a separate typeid.")
-  set(CAFFE2_UNIQUE_LONG_TYPEMETA 1)
-endif()
-cmake_pop_check_state()
-
 # ---[ Check if std::exception_ptr is supported.
 cmake_push_check_state(RESET)
 set(CMAKE_REQUIRED_FLAGS "-std=c++11")
