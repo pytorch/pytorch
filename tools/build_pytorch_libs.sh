@@ -162,7 +162,6 @@ function build() {
       # installed libraries instead
       ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DTorch_FOUND="1" \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
 		       -DCMAKE_C_FLAGS="$BUILD_C_FLAGS $USER_CFLAGS" \
@@ -226,7 +225,6 @@ function build_nccl() {
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
       ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DCMAKE_BUILD_TYPE=Release \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
 		       -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
@@ -270,7 +268,6 @@ function build_caffe2() {
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
       ${CMAKE_VERSION} $BASE_DIR \
 		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
 		       -DBUILDING_WITH_TORCH_LIBS=ON \
 		       -DTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION" \
