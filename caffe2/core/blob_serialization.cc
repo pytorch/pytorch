@@ -6,17 +6,17 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/utils/proto_utils.h"
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_tensor_chunk_size,
     1000000,
     "Chunk size to split tensor data into");
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_max_tensor_serializer_threads,
     16,
     "Maximal number of threads that can be used for tensor serialization");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_serialize_fp16_as_bytes,
     false,
     "Serialize FLOAT16 tensors using byte_data field");
@@ -102,7 +102,7 @@ void TensorSerializer::SerializeWithChunkSize(
   if (chunk_size == kNoChunking) {
     chunk_size = tensor.size() + 1; // to account for empty tensors
   } else if (chunk_size == kDefaultChunkSize) {
-    chunk_size = FLAGS_caffe2_tensor_chunk_size;
+    chunk_size = c10::FLAGS_caffe2_tensor_chunk_size;
   }
 
   auto processChunk = [&](int64_t chunkStart) {
@@ -129,7 +129,7 @@ void TensorSerializer::SerializeWithChunkSize(
     }
   };
   if (tensor.size() > chunk_size) {
-    for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
+    for (int i = 0; i < c10::FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
   }
@@ -196,7 +196,7 @@ void TensorSerializer::Serialize(
   const TensorProto::DataType data_type = TypeMetaToDataType(input.meta());
   proto.set_data_type(data_type);
   StoreDeviceDetail(input, &proto);
-  auto uniq_ptr = input.GetStaticContext()->CreateContext();
+  auto uniq_ptr = CreateContext(input.GetDevice());
   // A lot of copypaste is error prone. Should we create a macro for this?
   switch (data_type) {
     case TensorProto_DataType_FLOAT:
@@ -268,7 +268,7 @@ void TensorSerializer::Serialize(
           uniq_ptr.get());
       break;
     case TensorProto_DataType_FLOAT16: {
-      if (FLAGS_caffe2_serialize_fp16_as_bytes) {
+      if (c10::FLAGS_caffe2_serialize_fp16_as_bytes) {
         const int kValue = 1;
         CAFFE_ENFORCE_EQ(
             reinterpret_cast<const char*>(&kValue)[0],
@@ -322,13 +322,13 @@ void TensorSerializer::StoreDeviceDetail(
   input.ExtractDeviceOption(proto->mutable_device_detail());
 }
 // The actual serialization registry objects.
-CAFFE_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
     TypeIdentifier,
     BlobSerializerBase,
     std::unique_ptr);
 
-CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
+C10_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 
 void DeserializeBlob(const string& content, Blob* result) {
   BlobProto blob_proto;
@@ -371,8 +371,7 @@ void TensorDeserializer::Deserialize(const BlobProto& blob_proto, Blob* blob) {
 void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
   // We create a local context for deserializing. Since Caffe2 contexts are
   // usually lightweight, this should not involve too much overhead.
-  auto uniq_ptr =
-      tensor->GetStaticContext()->CreateContext(proto.device_detail());
+  auto uniq_ptr = CreateContext(OptionToDevice(proto.device_detail()));
   auto context = uniq_ptr.get();
   context->SwitchToDevice(0);
   vector<int64_t> dims;

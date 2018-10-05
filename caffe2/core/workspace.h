@@ -11,14 +11,14 @@
 #include <unordered_set>
 #include <vector>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/signal_handler.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
-CAFFE2_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
+C10_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
 
 namespace caffe2 {
 
@@ -105,7 +105,7 @@ class CAFFE2_API Workspace {
   }
 
   ~Workspace() {
-    if (FLAGS_caffe2_print_blob_sizes_at_exit) {
+    if (c10::FLAGS_caffe2_print_blob_sizes_at_exit) {
       PrintBlobSizes();
     }
     // This is why we have a bookkeeper_ shared_ptr instead of a naked static! A

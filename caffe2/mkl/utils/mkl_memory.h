@@ -13,7 +13,7 @@
 // an MKLMemory: if it is set true, then the View() function will actually
 // change the underlying storage. If it is set false, an implicit copy is
 // triggered but the original storage is not affected.
-CAFFE2_DECLARE_bool(caffe2_mkl_implicit_layout_change);
+C10_DECLARE_bool(caffe2_mkl_implicit_layout_change);
 
 namespace caffe2 {
 namespace mkl {
@@ -148,7 +148,7 @@ class LayoutWrapper {
  * Most of the MKLMemory functions are not thread safe.
  */
 template <typename T>
-class MKLMemory {
+class C10_EXPORT MKLMemory {
  public:
   // Initializes an empty MKLMemory.
   MKLMemory() {}
@@ -460,7 +460,7 @@ class MKLMemory {
     return dims_;
   }
 
-  inline const int ndim() const { return dims_.size(); }
+  inline int ndim() const { return dims_.size(); }
 
   inline int dim32(const int i) const {
     CAFFE_ENFORCE_LT(dims_.at(i), std::numeric_limits<int>::max());
@@ -511,7 +511,7 @@ class MKLMemory {
           dnnConversionCreate<T>, layout_, layout_wanted);
       MKLDNN_SAFE_CALL(dnnConversionExecute<T>(
           convert, buffer_.get(), temp_buffer));
-      if (primitive && FLAGS_caffe2_mkl_implicit_layout_change) {
+      if (primitive && c10::FLAGS_caffe2_mkl_implicit_layout_change) {
         VLOG(2) << "Implicit layout change set. "
                    "Changing the underlying storage.";
         // We will need to call Reset to set up all the member variables.

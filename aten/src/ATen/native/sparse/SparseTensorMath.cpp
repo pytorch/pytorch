@@ -98,7 +98,7 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
       r.is_coalesced(), "log1p: in-place on uncoalesced tensors is not supported yet!");
   }
   else {
-    r = raw_copy_sparse_(r, t.coalesce());
+    copy_sparse_to_sparse_(r, t.coalesce());
   }
   r._values().log1p_();
   return r;
@@ -192,7 +192,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   AT_CHECK(t.sizes().equals(src.sizes()), "add: expected sizes of 'self' and 'other' to match, but ", t.sizes(), " != ", src.sizes());
 
   if (src._nnz() == 0) {
-    return raw_copy_sparse_(r, t);
+    return copy_sparse_to_sparse_(r, t);
   }
   if (t._nnz() == 0) {
     return mul_out_sparse_scalar(r, src, value);

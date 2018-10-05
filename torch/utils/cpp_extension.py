@@ -10,8 +10,6 @@ import sysconfig
 import tempfile
 import warnings
 
-from future.utils import raise_from
-
 import torch
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
@@ -858,7 +856,7 @@ def _build_extension_module(name, build_directory, verbose):
         message = "Error building extension '{}'".format(name)
         if hasattr(error, 'output') and error.output:
             message += ": {}".format(error.output.decode())
-        raise_from(RuntimeError(message), None)
+        raise RuntimeError(message)
 
 
 def _import_module_from_library(module_name, path):

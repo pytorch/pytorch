@@ -197,7 +197,7 @@ function build() {
 		       -DCMAKE_DEBUG_POSTFIX="" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
 		       ${@:2} \
-		       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ${CMAKE_ARGS[@]}
+		       ${CMAKE_ARGS[@]}
   fi
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   popd
@@ -284,6 +284,7 @@ function build_caffe2() {
 		       -DBUILD_CAFFE2_OPS=$BUILD_CAFFE2_OPS \
 		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
 		       -DUSE_CUDA=$USE_CUDA \
+		       -DUSE_NUMPY=$USE_NUMPY \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \
@@ -301,7 +302,6 @@ function build_caffe2() {
 		       -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
 		       -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-		       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
 		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \

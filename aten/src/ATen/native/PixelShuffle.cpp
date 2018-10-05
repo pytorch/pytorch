@@ -1,7 +1,7 @@
 #include "ATen/native/TensorTransformations.h"
 
 #include <ATen/NativeFunctions.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <algorithm>
 #include <vector>

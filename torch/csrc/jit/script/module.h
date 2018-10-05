@@ -20,6 +20,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <ostream>
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -84,6 +85,7 @@ struct Method {
 
   // defined here to keep details of member_input handling confined to this class
   std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
+
   // if this isn't yet defined, run its method_creator function
   void ensure_defined();
 
@@ -376,6 +378,8 @@ struct Module {
     return get_method(method_name)({IValue(std::forward<Types>(args))...});
   }
 
+  void save(std::ostream& out);
+
   void save(const std::string& filename);
 
  private:
@@ -389,5 +393,19 @@ struct Module {
   torch::detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
+
+// returns at::nullopt and fills in failure_messages if the callee does not
+// match the functions schema
+at::optional<std::vector<Value*>> try_emit_call_to(
+    Graph& graph,
+    SourceRange loc,
+    Method& callee,
+    ArrayRef<NamedValue> args,
+    ArrayRef<NamedValue> kwargs,
+    std::stringstream& failure_messages,
+    // when callee uses no parameters (e.g. it is a function in a compilation unit,
+    // and not a method), then nullptr can be passed as caller.
+    Method* caller,
+    bool conv_tensors_to_nums);
 
 }}}

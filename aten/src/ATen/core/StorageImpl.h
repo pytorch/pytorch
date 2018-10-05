@@ -74,6 +74,8 @@ struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
 
   template <typename T>
   inline T* data() const {
+    // TODO: This is bad: it means storage.data<T>() calls only work on
+    // T that are valid ScalarType.  FIXME!
     auto data_type_T = at::scalarTypeToDataType(at::CTypeToScalarType<T>::to());
     if (dtype().id() != data_type_T) {
       AT_ERROR(
