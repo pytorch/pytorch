@@ -144,7 +144,7 @@ private:
   }
   template <typename T>
   void assignToValue(Tensor* dst, T v) {
-    dst->Resize(std::vector<TIndex>());
+    dst->Resize(std::vector<int64_t>());
     math::Set(1, v, dst->template mutable_data<T>(), &context_);
   }
   int findImplementation(const OperatorDef& operator_def) {

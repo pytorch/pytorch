@@ -19,6 +19,9 @@
 #include <pybind11/stl.h>
 
 #include <Python.h>
+
+#ifdef USE_NUMPY
+
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #define PY_ARRAY_UNIQUE_SYMBOL caffe2_python_ARRAY_API
 #include <numpy/arrayobject.h>
@@ -29,6 +32,12 @@
 #define NPY_ARRAY_C_CONTIGUOUS NPY_C_CONTIGUOUS
 #define PyArray_SetBaseObject(arr, x) (PyArray_BASE(arr) = (x))
 #endif
+
+#else
+
+struct PyArrayObject;  // Forward declaring PyArrayObject for safety
+
+#endif // USE_NUMPY
 
 namespace caffe2 {
 namespace python {
@@ -43,7 +52,7 @@ void addObjectMethods(pybind11::module& m);
 // Get current workspace
 Workspace* GetCurrentWorkspace();
 
-class CAFFE2_EXPORT BlobFetcherBase {
+class C10_EXPORT BlobFetcherBase {
  public:
   struct FetchedBlob {
     pybind11::object obj;
@@ -60,24 +69,24 @@ class BlobFeederBase {
   Feed(const DeviceOption& option, PyArrayObject* array, Blob* blob) = 0;
 };
 
-CAFFE2_EXPORT CAFFE_DECLARE_TYPED_REGISTRY(
+C10_DECLARE_TYPED_REGISTRY(
     BlobFetcherRegistry,
     TypeIdentifier,
     BlobFetcherBase,
     std::unique_ptr);
 #define REGISTER_BLOB_FETCHER(id, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(BlobFetcherRegistry, id, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(BlobFetcherRegistry, id, __VA_ARGS__)
 inline unique_ptr<BlobFetcherBase> CreateFetcher(TypeIdentifier id) {
   return BlobFetcherRegistry()->Create(id);
 }
 
-CAFFE_DECLARE_TYPED_REGISTRY(
+C10_DECLARE_TYPED_REGISTRY(
     BlobFeederRegistry,
     DeviceType,
     BlobFeederBase,
     std::unique_ptr);
 #define REGISTER_BLOB_FEEDER(device_type, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(BlobFeederRegistry, device_type, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(BlobFeederRegistry, device_type, __VA_ARGS__)
 inline unique_ptr<BlobFeederBase> CreateFeeder(int device_type) {
   return BlobFeederRegistry()->Create(
       caffe2::ProtoToType(static_cast<DeviceTypeProto>(device_type)));
@@ -100,11 +109,16 @@ class TensorFetcher : public BlobFetcherBase {
   // Checks whether the data with type `meta` needs to be copied in the context
   // of `tensor`
   bool NeedsCopy(const Tensor* tensor, const TypeMeta& meta) const {
+#ifdef USE_NUMPY
     return tensor->GetStaticContext() != GetCPUStaticContext() ||
         CaffeToNumpyType(meta) == NPY_OBJECT;
+#else
+    return tensor->GetStaticContext() != GetCPUStaticContext();
+#endif // USE_NUMPY
   }
 
   FetchedBlob FetchTensor(const Tensor& tensor, bool force_copy) {
+#ifdef USE_NUMPY
     FetchedBlob result;
     CAFFE_ENFORCE_GE(tensor.size(), 0, "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(tensor.meta());
@@ -148,11 +162,14 @@ class TensorFetcher : public BlobFetcherBase {
     }
 
     if (result.copied) {
-      auto context = tensor.GetStaticContext()->CreateContext();
+      auto context = CreateContext(tensor.GetDeviceType());
       context->CopyBytesToCPU(tensor.nbytes(), tensor.raw_data(), outPtr);
       context->FinishDeviceComputation();
     }
     return result;
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 };
 
@@ -163,6 +180,7 @@ class TensorFeeder : public BlobFeederBase {
       const DeviceOption& option,
       PyArrayObject* original_array,
       Tensor* tensor) {
+#ifdef USE_NUMPY
     PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
@@ -178,7 +196,7 @@ class TensorFeeder : public BlobFeederBase {
     // numpy requires long int as its dims.
     int ndim = PyArray_NDIM(array);
     npy_intp* npy_dims = PyArray_DIMS(array);
-    std::vector<TIndex> dims;
+    std::vector<int64_t> dims;
     for (int i = 0; i < ndim; ++i) {
       dims.push_back(npy_dims[i]);
     }
@@ -227,6 +245,9 @@ class TensorFeeder : public BlobFeederBase {
             tensor->raw_mutable_data(meta));
     }
     context.FinishDeviceComputation();
+#else
+    CAFFE_THROW("Caffe2 compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 
   virtual void
@@ -234,7 +255,7 @@ class TensorFeeder : public BlobFeederBase {
     FeedTensor(
         option,
         original_array,
-        blob->GetMutableTensor(Context::GetDeviceType()));
+        BlobGetMutableTensor(blob, Context::GetDeviceType()));
   }
 };
 
@@ -366,31 +387,32 @@ class PythonOpBase : public Operator<Context> {
 
         // make sure output blob is initialized before creating the binding
         if (forced_cpu_outputs_.count(i)) {
-          blob->GetMutableTensor(Context::GetDeviceType());
+          BlobGetMutableTensor(blob, Context::GetDeviceType());
         } else {
-          blob->GetMutableTensor(Context::GetDeviceType());
+          BlobGetMutableTensor(blob, Context::GetDeviceType());
         }
 
         py::object py_obj;
         if (blob->template IsType<Tensor>()) {
           if (use_dlpack) {
             DLPackWrapper<CPUContext> wrapper(
-                blob->GetMutableTensor(Context::GetDeviceType()), cpu_option);
+                BlobGetMutableTensor(blob, Context::GetDeviceType()),
+                cpu_option);
             py_obj = py::cast(wrapper, py::return_value_policy::copy);
           } else {
             py_obj = py::cast(
-                blob->GetMutableTensor(Context::GetDeviceType()),
+                BlobGetMutableTensor(blob, Context::GetDeviceType()),
                 py::return_value_policy::reference);
           }
         } else {
           if (use_dlpack) {
             DLPackWrapper<Context> wrapper(
-                blob->GetMutableTensor(Context::GetDeviceType()),
+                BlobGetMutableTensor(blob, Context::GetDeviceType()),
                 this->device_option());
             py_obj = py::cast(wrapper, py::return_value_policy::copy);
           } else {
             py_obj = py::cast(
-                blob->GetMutableTensor(Context::GetDeviceType()),
+                BlobGetMutableTensor(blob, Context::GetDeviceType()),
                 py::return_value_policy::reference);
           }
         }

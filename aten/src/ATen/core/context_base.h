@@ -6,11 +6,13 @@
 #include <memory>
 #include <unordered_map>
 
-#include <ATen/core/DeviceType.h>
+#include <ATen/core/ATenGeneral.h>
+#include <ATen/core/Allocator.h>
+#include <ATen/core/Device.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/UniqueVoidPtr.h>
 #include <ATen/core/typeid.h>
-#include <ATen/core/ATenGeneral.h>
+#include <c10/util/Registry.h>
 
 namespace caffe2 {
 class Event;
@@ -25,16 +27,11 @@ class BaseContext;
    functions that are invoked statically before in Tensor class, e.g. New,
    We will merge this with Allocator later.
  */
-class AT_CORE_API BaseStaticContext {
+class CAFFE2_API BaseStaticContext {
  public:
   virtual ~BaseStaticContext() noexcept {}
 
-  virtual std::pair<void*, DeleterFnPtr> New(size_t nbytes) const = 0;
-
-  virtual std::unique_ptr<BaseContext> CreateContext() = 0;
-
-  virtual std::unique_ptr<BaseContext> CreateContext(
-      const caffe2::DeviceOption&) = 0;
+  virtual at::DataPtr New(size_t nbytes) const = 0;
 
   virtual DeviceType GetDeviceType() = 0;
 
@@ -55,7 +52,7 @@ class AT_CORE_API BaseStaticContext {
  * functions in the BaseContext class.
  * TODO: add docs after this is finalized.
  */
-class AT_CORE_API BaseContext {
+class CAFFE2_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 
@@ -184,6 +181,22 @@ class AT_CORE_API BaseContext {
   }
 };
 
+// Context constructor registry
+C10_DECLARE_TYPED_REGISTRY(
+    ContextRegistry,
+    at::DeviceType,
+    at::BaseContext,
+    std::unique_ptr,
+    at::Device);
+
+#define REGISTER_CONTEXT(type, ...) \
+  C10_REGISTER_TYPED_CLASS(ContextRegistry, type, __VA_ARGS__)
+
+inline std::unique_ptr<at::BaseContext> CreateContext(
+    const at::Device& device) {
+  return at::ContextRegistry()->Create(device.type(), device);
+}
+
 } // namespace at
 
 namespace caffe2 {
@@ -192,9 +205,9 @@ using at::BaseContext;
 using at::BaseStaticContext;
 
 using StaticContextMap = std::unordered_map<at::DeviceType, BaseStaticContext*>;
-AT_API StaticContextMap& GetStaticContexts();
-AT_API void set_static_context(at::DeviceType t, BaseStaticContext* ptr);
-AT_API BaseStaticContext* get_static_context(at::DeviceType t);
+CAFFE2_API StaticContextMap& GetStaticContexts();
+CAFFE2_API void set_static_context(at::DeviceType t, BaseStaticContext* ptr);
+CAFFE2_API BaseStaticContext* get_static_context(at::DeviceType t);
 
 template <at::DeviceType t>
 struct StaticContextFunctionRegisterer {

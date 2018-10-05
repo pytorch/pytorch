@@ -11,7 +11,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DECLARE_bool(caffe2_workspace_stack_debug);
+C10_DECLARE_bool(caffe2_workspace_stack_debug);
 
 namespace caffe2 {
 namespace detail {
@@ -33,7 +33,7 @@ class CAFFE2_API WorkspaceStack {
       Workspace* parent_ws,
       const std::unordered_map<std::string, std::string>& blob_bindings) {
     checkStack();
-    if (FLAGS_caffe2_workspace_stack_debug) {
+    if (c10::FLAGS_caffe2_workspace_stack_debug) {
       if (parent_ws_) {
         CAFFE_ENFORCE_EQ(parent_ws_, parent_ws, "Parent workspace mismatch");
       } else {
@@ -75,7 +75,7 @@ class CAFFE2_API WorkspaceStack {
       Workspace* parent_ws,
       const std::unordered_map<std::string, std::string>& grad_blob_bindings) {
     checkStack();
-    if (FLAGS_caffe2_workspace_stack_debug) {
+    if (c10::FLAGS_caffe2_workspace_stack_debug) {
       if (parent_ws_) {
         CAFFE_ENFORCE_EQ(parent_ws_, parent_ws, "Parent workspace mismatch");
       } else {

@@ -21,7 +21,7 @@ bool DiagonalFillOp<CPUContext>::FillWithType(Tensor* output) {
   math::Set<T, CPUContext>(output->size(), T(0), data, &context_);
   // then calculate step size for diagonal
   auto step = GetStepSize(output);
-  for (TIndex i = 0; i < output->size(); i += step) {
+  for (int64_t i = 0; i < output->size(); i += step) {
     math::Set<T, CPUContext>(1, value, data, &context_);
     data += step;
   }

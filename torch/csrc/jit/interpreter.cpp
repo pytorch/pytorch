@@ -32,7 +32,7 @@ namespace torch { namespace jit {
 // to what the instructions will look like.
 // In particular we:
 // * (TODO) desugar Loop trip counts into c = 0, c += 1 instructions in the loop
-// * flatten stages so that each stage starts with a load from the stack
+// * flatten stages so that each stage starts with a load to registers
 //   and ends with a store to the stack
 // *. computes move_flags (see Outputs), and inserts
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
@@ -61,18 +61,16 @@ Value* createTripCountConjunctiveCondition(
   // Emit initial comparison -- initial_trip_count < max_trip_count
   Value* initial_comparison_value =
       g->insertNode(g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
-          ->output()->setType(IntType::get());
+          ->output()->setType(BoolType::get());
 
   // Replace initial condition with logical `and` of trip count and
   // initial condition
   Value* new_cond =
       g->insertNode(
            g->create(aten::__and__, {initial_comparison_value, cond}, 1))
-          ->output()->setType(IntType::get());
+          ->output()->setType(BoolType::get());
   return new_cond;
 }
-
-} // namespace
 
 // this currently just _removes_ the trip count inputs and checks they are
 // unused. In the future they will be desugared into normal arithmetic to
@@ -142,9 +140,9 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
   auto it = graph.nodes().begin();
   for(size_t i = 0; i <= graph.stage(); i++) {
     stage_input_types.emplace_back();
-    auto store = graph.create(prim::Store, 0)->insertBefore(*it);
+    auto load = graph.create(prim::Load, 0)->insertBefore(*it);
     while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
-      auto nv = store->addOutput();
+      auto nv = load->addOutput();
       auto old_node = graph.inputs()[input_pos];
       nv->setType(old_node->type());
       stage_input_types[i].push_back(old_node->type());
@@ -153,9 +151,9 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
     }
     while(it != graph.nodes().end() && it->stage() == i)
       ++it;
-    auto load = graph.create(prim::Load, 0)->insertBefore(*it);
+    auto store = graph.create(prim::Store, 0)->insertBefore(*it);
     while(output_pos < graph.outputs().size() && graph.outputs()[output_pos]->stage() == i) {
-      load->addInput(graph.outputs()[output_pos]);
+      store->addInput(graph.outputs()[output_pos]);
       output_pos++;
     }
   }
@@ -307,6 +305,7 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
 
   return FindLastUses(g).move_flags;
 }
+} //namespace
 
 // pre-processing that happens once per graph
 struct PreprocessGraph {
@@ -389,30 +388,29 @@ struct CodeImpl {
   CodeImpl(std::shared_ptr<Graph>& graph_)
       : preprocess(*graph_) {
     graph = preprocess.graph;
-    // std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
   }
 
-  // jump when input is 0
-  void createJumpZ(int from_inst, int to_inst) {
+  // jump when input is false
+  void createJumpFalse(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = pop(stack).toInt();
-      return (t == 0) ? offset : 0;
+      auto t = pop(stack).toBool();
+      return t ? 0 : offset;
     };
     inst.debug_name = prim::JumpZ;
   }
 
-  // jump when input is not 0
-  void createJumpNZ(int from_inst, int to_inst) {
+  // jump when input is true
+  void createJumpTrue(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = pop(stack).toInt();
-      return (t != 0) ? offset : 0;
+      auto t = pop(stack).toBool();
+      return t ? offset : 0;
     };
     inst.debug_name = prim::JumpNZ;
   }
@@ -461,7 +459,7 @@ struct CodeImpl {
           insertNodesFromBlock(then_block);
           insertAssign(source_location, then_block->outputs(), moveFlags(then_block), node->outputs());
           createJump(jump, instructions.size());
-          createJumpNZ(cond_branch, then_block_start);
+          createJumpTrue(cond_branch, then_block_start);
         } break;
         case prim::Loop: {
           // o0 = while c i0
@@ -496,17 +494,17 @@ struct CodeImpl {
           // after branch: stack: ...
 
           aliasRegistersTo(node->outputs(), body_block->inputs());
-          createJumpZ(cond_branch, instructions.size());
-          createJumpNZ(cond_branch_end, entry);
+          createJumpFalse(cond_branch, instructions.size());
+          createJumpTrue(cond_branch_end, entry);
         } break;
         default: {
           insertInstruction(node);
         } break;
       }
-      // each stage ends with a load instruction
+      // each stage ends with a store instruction
       // we record where these instructions occur, and use them to
       // exit the interpreter
-      if(node->kind() == prim::Load) {
+      if(node->kind() == prim::Store) {
         stage_end.push_back(instructions.size());
       }
     }
@@ -694,7 +692,7 @@ struct InterpreterStateImpl {
           for(int i = inst.outputs.size - 1; i >= 0; i--) {
             int reg = get(inst.outputs,i);
             registers[reg] = pop(stack);
-            // std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
+            // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
           }
           pc = new_pc;
         } catch(std::exception & e) {

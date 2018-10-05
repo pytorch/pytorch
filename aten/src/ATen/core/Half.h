@@ -34,8 +34,8 @@ namespace at {
 
 namespace detail {
 
-AT_CORE_API float halfbits2float(unsigned short bits);
-AT_CORE_API unsigned short float2halfbits(float value);
+CAFFE2_API float halfbits2float(unsigned short bits);
+CAFFE2_API unsigned short float2halfbits(float value);
 
 } // namespace detail
 
@@ -178,7 +178,7 @@ To checked_convert(From f, const char* name) {
   return convert<To, From>(f);
 }
 
-AT_CORE_API std::ostream& operator<<(std::ostream& out, const Half& value);
+CAFFE2_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace at
 

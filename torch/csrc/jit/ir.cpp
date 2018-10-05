@@ -248,18 +248,22 @@ void Node::lint() const {
   }
 
   // Node subclass invariants
-  // - Return uses is zero
-  // - Param inputs is zero
-  // - Select inputs is one
-  // - Python operator cconv is correct
-
   IR_IF(this,Constant)
     JIT_ASSERT(inputs_.size() == 0);
+  IR_ELSEIF(LoadWorld)
+    JIT_ASSERT(inputs_.size() == 0);
+    JIT_ASSERT(outputs_.size() == 1);
+  IR_ELSEIF(StoreWorld)
+    JIT_ASSERT(inputs_.size() == 1);
+    JIT_ASSERT(outputs_.size() == 0);
   IR_ELSEIF(Return)
+    // Return uses is zero
     JIT_ASSERT(outputs().size() == 0);
   IR_ELSEIF(Param)
+    // Param inputs is zero
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIFM_CONST(PythonOp)
+    // Python operator cconv is correct
     size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
       if (c == 'c') {
@@ -381,6 +385,7 @@ void Graph::lint() const {
       for (auto n : b->nodes()) {
         JIT_ASSERT(n->kind_ != prim::Param);
         JIT_ASSERT(n->kind_ != prim::Return);
+        JIT_ASSERT(n->kind_ != prim::DummyWorld);
         check_node(n);
       }
 
@@ -447,6 +452,7 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
     local_map[input] = this->addInput()->copyMetadata(input)->setStage(input->stage());
     graph->setStage(std::max(graph->stage(), input->stage()));
   }
+
   for(auto node : src->nodes()) {
     auto new_node = this->appendNode(graph->createClone(node, env));
     new_node->setStage(node->stage());
@@ -466,8 +472,9 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
 
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
-  auto env = [](Value *) -> Value* {
-    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
+  auto env = [](Value* v) -> Value* {
+    AT_ERROR(
+        "Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -555,18 +562,18 @@ namespace {
 
 const OperatorSet& nondeterminstic_aten_ops() {
   static OperatorSet nondeterministic_ops = {
-    "aten::dropout(Tensor input, float p, int train) -> Tensor",
+    "aten::dropout(Tensor input, float p, bool train) -> Tensor",
     "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
     "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
     "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
     "aten::bernoulli(Tensor self, float p, *, Generator generator) -> Tensor",
-    "aten::multinomial(Tensor self, int num_samples, int replacement, *, Generator generator) -> Tensor",
+    "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator generator) -> Tensor",
     "aten::normal(Tensor mean, Tensor std, *, Generator generator) -> Tensor",
     "aten::normal(float mean, Tensor std, *, Generator generator) -> Tensor",
     "aten::normal(Tensor mean, float std, *, Generator generator) -> Tensor",
     "aten::poisson(Tensor self, Generator generator) -> Tensor",
-    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
-    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, int training, Generator generator) -> Tensor",
+    "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
+    "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator) -> Tensor",
     "aten::rand(int[] size, *, int dtype, int layout, int[] device) -> Tensor",
     "aten::rand_like(Tensor self) -> Tensor",
     "aten::rand_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
@@ -591,7 +598,7 @@ bool Node::isNondeterministic() const {
     return false;
   }
   // Dropout with train = False is deterministic
-  if (matches("aten::dropout(Tensor input, float p, int train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
+  if (matches("aten::dropout(Tensor input, float p, bool train) -> Tensor") && is_constant(attr::train) && !get<bool>(attr::train).value()) {
     return false;
   }
   return true;

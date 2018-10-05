@@ -74,7 +74,7 @@ void Powx(const int N, const T* a, const T b, T* y, Context* context);
 template <typename T, class Context>
 void Inv(const int N, const T* x, T* y, Context* context);
 
-#define CAFFE2_DECLARE_COMPARE_OP(Comp)                                      \
+#define C10_DECLARE_COMPARE_OP(Comp)                                         \
   template <typename T, class Context>                                       \
   void Comp(const int N, const T* A, const T* B, bool* C, Context* context); \
                                                                              \
@@ -107,16 +107,16 @@ void Inv(const int N, const T* x, T* y, Context* context);
       bool* C,                                                               \
       Context* context);
 
-CAFFE2_DECLARE_COMPARE_OP(EQ)
-CAFFE2_DECLARE_COMPARE_OP(NE)
-CAFFE2_DECLARE_COMPARE_OP(LT)
-CAFFE2_DECLARE_COMPARE_OP(LE)
-CAFFE2_DECLARE_COMPARE_OP(GT)
-CAFFE2_DECLARE_COMPARE_OP(GE)
+C10_DECLARE_COMPARE_OP(EQ)
+C10_DECLARE_COMPARE_OP(NE)
+C10_DECLARE_COMPARE_OP(LT)
+C10_DECLARE_COMPARE_OP(LE)
+C10_DECLARE_COMPARE_OP(GT)
+C10_DECLARE_COMPARE_OP(GE)
 
-#undef CAFFE2_DECLARE_COMPARE_OP
+#undef C10_DECLARE_COMPARE_OP
 
-#define CAFFE2_DECLARE_BINARY_OP(Func)                                    \
+#define C10_DECLARE_BINARY_OP(Func)                                       \
   template <typename T, class Context>                                    \
   void Func(const int N, const T* A, const T* B, T* C, Context* context); \
                                                                           \
@@ -149,20 +149,20 @@ CAFFE2_DECLARE_COMPARE_OP(GE)
       T* C,                                                               \
       Context* context);
 
-CAFFE2_DECLARE_BINARY_OP(Add)
-CAFFE2_DECLARE_BINARY_OP(Sub)
-CAFFE2_DECLARE_BINARY_OP(Mul)
-CAFFE2_DECLARE_BINARY_OP(Div)
+C10_DECLARE_BINARY_OP(Add)
+C10_DECLARE_BINARY_OP(Sub)
+C10_DECLARE_BINARY_OP(Mul)
+C10_DECLARE_BINARY_OP(Div)
 
-CAFFE2_DECLARE_BINARY_OP(And)
-CAFFE2_DECLARE_BINARY_OP(Or)
-CAFFE2_DECLARE_BINARY_OP(Xor)
+C10_DECLARE_BINARY_OP(And)
+C10_DECLARE_BINARY_OP(Or)
+C10_DECLARE_BINARY_OP(Xor)
 
-CAFFE2_DECLARE_BINARY_OP(BitwiseAnd)
-CAFFE2_DECLARE_BINARY_OP(BitwiseOr)
-CAFFE2_DECLARE_BINARY_OP(BitwiseXor)
+C10_DECLARE_BINARY_OP(BitwiseAnd)
+C10_DECLARE_BINARY_OP(BitwiseOr)
+C10_DECLARE_BINARY_OP(BitwiseXor)
 
-#undef CAFFE2_DECLARE_BINARY_OP
+#undef C10_DECLARE_BINARY_OP
 
 template <typename T, class Context>
 CAFFE2_API void

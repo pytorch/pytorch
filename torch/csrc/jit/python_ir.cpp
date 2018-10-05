@@ -45,7 +45,7 @@ std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
     auto pytuple = pyobj.cast<py::tuple>();
     out << "(";
     size_t i = 0;
-    for (auto& o : pytuple) {
+    for (const auto& o : pytuple) {
       if (i > 0) {
         out << ", ";
       }
@@ -455,6 +455,12 @@ void initPythonIRBindings(PyObject * module_) {
           return "StringType";
         case TypeKind::GeneratorType:
           return "GeneratorType";
+        case TypeKind::BoolType:
+          return "BoolType";
+        case TypeKind::VarType:
+          return "VarType";
+        case TypeKind::WorldType:
+          return "WorldType";
         }
         // not reachable, but some compilers complain
         AT_ERROR("Unknown Type Kind");
@@ -487,6 +493,8 @@ void initPythonIRBindings(PyObject * module_) {
     .def_static("get", &FloatType::get);
   py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
     .def_static("get", &DynamicType::get);
+  py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
+    .def_static("get", &BoolType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
     .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))

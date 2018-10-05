@@ -11,7 +11,7 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
     false,
     "If used we will handle exceptions in executor threads. "
@@ -131,7 +131,8 @@ struct WorkspaceIdInjector {
           "Integer overflow while calculating GLOBAL_WORKSPACE_ID blob");
       int32_t global_ws_id = (seq_++) + (static_cast<int32_t>(node_id) << 16);
       Blob* global_ws_id_blob = workspace->CreateLocalBlob(GLOBAL_WORKSPACE_ID);
-      TensorCPU* global_ws_id_tensor = global_ws_id_blob->GetMutableTensor(CPU);
+      TensorCPU* global_ws_id_tensor =
+          BlobGetMutableTensor(global_ws_id_blob, CPU);
       global_ws_id_tensor->Resize();
       global_ws_id_tensor->template mutable_data<int32_t>()[0] = global_ws_id;
       VLOG(1) << "Adding " << GLOBAL_WORKSPACE_ID << " = " << global_ws_id;
@@ -417,11 +418,11 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
           } catch (const std::exception& ex) {
             std::lock_guard<std::mutex> guard(exception_mutex);
             if (!first_exception.size()) {
-              first_exception = GetExceptionString(ex);
+              first_exception = at::GetExceptionString(ex);
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
             }
             compiledStep->gotFailure = true;
-            if (!FLAGS_caffe2_handle_executor_threads_exceptions) {
+            if (!c10::FLAGS_caffe2_handle_executor_threads_exceptions) {
               // In complex plans other threads might get stuck if another
               // one fails. So we let exception to go out of thread which
               // causes SIGABRT. In local setup one might use this flag
@@ -488,7 +489,9 @@ bool RunPlanOnWorkspace(
 
   NetDefMap net_defs;
   for (const NetDef& net_def : plan.network()) {
-    LOG(INFO) << "Processing net '" << net_def.name() << "'";
+    LOG(INFO) << "Processing net '" << net_def.name() << "', type: '"
+              << net_def.type() << "', #ops: " << net_def.op_size()
+              << ", num_workers: " << net_def.num_workers();
     CAFFE_ENFORCE(
         net_defs.count(net_def.name()) == 0,
         "Your plan contains networks of the same name \"",

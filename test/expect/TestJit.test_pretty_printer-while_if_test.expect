@@ -1,6 +1,6 @@
 def script(a1, b1):
   t5 = aten::lt(a1, 10)
-  t6 = prim::TensorToNum(t5)
+  t6 = prim::TensorToBool(t5)
   a = a1
   b = b1
   c = 0
@@ -9,16 +9,15 @@ def script(a1, b1):
     a2 = aten::add(a, 1, 1)
     b2 = aten::add(b, 1, 1)
     t15 = aten::gt(a2, b2)
-    t16 = prim::TensorToNum(t15)
+    t16 = prim::TensorToBool(t15)
     if t16:
       c4 = 2
     else:
       c4 = 3
     t21 = aten::lt(a2, 10)
-    t22 = prim::TensorToNum(t21)
-    t7 = t22
+    t7 = prim::TensorToBool(t21)
     a = a2
     b = b2
     c = c4
   t27 = aten::add(a, 1, 1)
-  return t27
+  return aten::add(t27, c, 1)

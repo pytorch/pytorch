@@ -79,7 +79,8 @@ OPERATOR_SCHEMA(SparseLengthsSum)
         SparseLengthsSumOp::LENGTHS)
     .SetDoc(FormatDoc<SparseLengthsSumDef>())
     .Output(0, "OUTPUT", "Aggregated tensor")
-    .FillUsing(SparseLengthsSumDef::PopulateSchema);
+    .FillUsing(SparseLengthsSumDef::PopulateSchema)
+    .InheritOnnxSchema("SparseLengthsSum");
 REGISTER_CPU_OPERATOR(
     SparseLengthsSumGradient,
     SparseLengthsSumDef::BackwardOp);

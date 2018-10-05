@@ -479,7 +479,6 @@ class TestSparse(TestCase):
         exp_v = self.ValueTensor(2, 3, 0)
         test_tensor(x, exp_i, exp_v)
 
-    @skipIfRocm
     def test_clone(self):
         def test_shape(sparse_dims, nnz, with_size):
             x = self._gen_sparse(sparse_dims, nnz, with_size)[0]
@@ -495,6 +494,76 @@ class TestSparse(TestCase):
         test_shape(4, 20, 5)
         test_shape(3, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
+
+    @skipIfRocm
+    def test_Sparse_to_Sparse_copy_(self):
+        # This is for testing torch.copy_(SparseTensor, SparseTensor)
+        sparse_dims = 3
+        nnz = 10
+        sizes = [2, 3, 4, 5]  # hybrid sparse
+        x1, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+        x2, _, _ = self._gen_sparse(sparse_dims, nnz + 10, sizes)
+
+        # test copy
+        x2_dense = x2.to_dense()
+        x1.copy_(x2)
+        self.assertEqual(x2_dense, x1.to_dense())
+
+        # test type conversion (when x1.copy_(x2), x1.dtype should stay the same)
+        x1 = x1.to(torch.float32)
+        x2 = x2.to(torch.float64)
+        x1_dtype = x1.dtype
+        x1.copy_(x2)
+        self.assertEqual(x1_dtype, x1.dtype)
+
+        # test no broadcast
+        self.assertRaises(RuntimeError, lambda: x1.copy_(x2.narrow_copy(0, 0, 1)))
+
+        # test raise error on copy_() between dense and sparse Tensors
+        self.assertRaises(RuntimeError, lambda: x1.copy_(torch.randn(5, 5)))
+
+        # test autograd
+        x1, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+        x2, _, _ = self._gen_sparse(sparse_dims, nnz + 10, sizes)
+        x2.requires_grad_(True)
+        x1.copy_(x2)
+        y = x1 * 2
+        x2_clone = x2.clone()
+        y.backward(x2_clone)
+        expected_grad = x2_clone * 2
+        self.assertEqual(expected_grad.to_dense(), x2.grad.to_dense())
+        self.assertEqual(None, x1.grad)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
+    @skipIfRocm
+    def test_Sparse_to_Sparse_copy_multi_gpu(self):
+        # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
+        sparse_dims = 3
+        nnz = 10
+        sizes = [2, 3, 4, 5]  # hybrid sparse
+        x1, _, _ = self._gen_sparse(sparse_dims, nnz, sizes)
+        x2, _, _ = self._gen_sparse(sparse_dims, nnz + 10, sizes)
+        x1 = x1.to('cuda:0')
+
+        def test_cross_device(x1, x2):
+            x1_device = x1.device
+            x1.copy_(x2)
+            self.assertEqual(x2.to('cuda:0').to_dense(), x1.to_dense())
+            self.assertEqual(x1_device, x1.device)
+
+        test_cross_device(x1, x2.to('cuda:1'))  # test across gpu devices
+        test_cross_device(x1, x2.to('cpu'))  # test between cpu and gpu
+
+        # test autograd
+        x2 = x2.to('cuda:1')
+        x2.requires_grad_(True)
+        x1.copy_(x2)
+        y = x1 * 2
+        x2_clone = x2.clone().to('cuda:0')
+        y.backward(x2_clone)
+        expected_grad = x2_clone * 2
+        self.assertEqual(expected_grad.to_dense(), x2.grad.to('cuda:0').to_dense())
+        self.assertEqual(None, x1.grad)
 
     @cuda_only
     def test_cuda_empty(self):
@@ -754,7 +823,6 @@ class TestSparse(TestCase):
         self._test_spadd_shape(0, [50, 30, 0], [2, 0])
         self._test_spadd_shape(10, [50, 30, 20], [2, 0])
 
-    @skipIfRocm
     def test_norm(self):
         def test_shape(sparse_dims, nnz, with_size):
             x, _, _ = self._gen_sparse(sparse_dims, nnz, with_size)
@@ -854,7 +922,6 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape(0, 0, [10, 10, 10], [2, 0])
         self._test_basic_ops_shape(0, 0, [10, 10, 0], [2, 0])
 
-    @skipIfRocm
     def test_add_dense_sparse_mismatch(self):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=self.value_dtype, device=self.device)
@@ -1023,6 +1090,34 @@ class TestSparse(TestCase):
         test_shape([0, 3, 4], [3, 4, 5, 6], [0])
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
+    def _test_narrow(self, input, narrow_args):
+        expected = input.to_dense().narrow(*narrow_args)
+        self.assertEqual(expected, input.narrow_copy(*narrow_args).to_dense())
+
+    def _all_narrow_combs(self, shape):
+        for dim, dim_sz in enumerate(shape):
+            for start in range(dim_sz):
+                for length in range(dim_sz - start):
+                    yield [dim, start, length]
+
+    @skipIfRocm
+    def test_narrow(self):
+        shape = [3, 3, 4, 2]
+        input, _, _ = self._gen_sparse(4, 19, shape)
+        for narrow_args in self._all_narrow_combs(shape):
+            self._test_narrow(input, narrow_args)
+
+        self.assertRaises(RuntimeError, lambda: input.narrow_copy(-1, 0, 3))  # dim < 0
+        self.assertRaises(RuntimeError, lambda: input.narrow_copy(10, 0, 3))  # dim > input.dim()
+        self.assertRaises(RuntimeError, lambda: input.narrow_copy(0, shape[0] + 1, 3))  # start > size of dim
+        self.assertRaises(RuntimeError, lambda: input.narrow_copy(0, 2, shape[0]))  # start+length > size of dim
+
+        with_dense, _, _ = self._gen_sparse(2, 7, shape)
+        for narrow_args in self._all_narrow_combs(shape):
+            self._test_narrow(with_dense, narrow_args)
+
+        self.assertRaises(RuntimeError, lambda: with_dense.narrow_copy(10, 0, 3))  # dim > sparseDim + denseDim
+
     def _test_log1p_tensor(self, input, dense_tensor):
         expected_output = torch.tensor(dense_tensor).log1p_()
         self.assertEqual(expected_output, input.log1p().to_dense())
@@ -1100,7 +1195,6 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    @skipIfRocm
     def test_same_gpu(self):
         def check_device(x, device_id):
             self.assertEqual(x.get_device(), device_id)
@@ -1210,7 +1304,6 @@ class TestSparse(TestCase):
                                 self.assertEqual(device, sparse_tensor._values().device)
                             self.assertEqual(True, sparse_tensor.requires_grad)
 
-    @skipIfRocm
     def test_factory_size_check(self):
         indices = self.IndexTensor([[1, 2],
                                     [0, 2]])
@@ -1276,7 +1369,6 @@ class TestSparse(TestCase):
         expected_indices = torch.empty((4, 0), dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
-    @skipIfRocm
     def test_factory_nnz(self):
         indices = self.IndexTensor([[0]])  # (sparseDims, nnz): (1, 1)
         values = self.ValueTensor([[1, 1], [1, 1]])  # (nnz, ...): (2, 2)
@@ -1310,7 +1402,6 @@ class TestSparse(TestCase):
         test_shape([3, 0], [0, 2, 4, 0], [0, 0, 0, 2, 4, 0], [0, 0, 0, 2, 4, 0])
         test_shape([3, 0], [0, 2, 4, 0], [1, 2, 3, 2, 4, 0], [1, 2, 3, 2, 4, 0])
 
-    @skipIfRocm
     def test_factory_dense_dims(self):
         indices = self.IndexTensor([[0]])
         values = self.ValueTensor([[[1, 1, 1], [1, 1, 1]]])
@@ -1341,7 +1432,6 @@ class TestSparse(TestCase):
         self.assertEqual(torch.int64, t.dtype)
 
     @cuda_only
-    @skipIfRocm
     def test_factory_device_type_inference(self):
         # both indices/values are CUDA
         shape = (1, 3)
@@ -1410,6 +1500,7 @@ class TestSparse(TestCase):
         test_tensor(indices, values, False, True)  # An empty tensor's data_ptr is always equal to 0
 
     @cpu_only  # just run once, we test both cpu and cuda
+    @skipIfRocm
     def test_constructor_device_legacy(self):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
         v = torch.tensor([3., 4., 5.])
@@ -1453,7 +1544,6 @@ class TestSparse(TestCase):
             TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
             TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
-    @skipIfRocm
     def test_is_sparse(self):
         x = torch.randn(3, 3)
         self.assertFalse(x.is_sparse)
@@ -1503,7 +1593,6 @@ class TestSparse(TestCase):
         self.assertEqual(x.to_dense().view(-1)[0:x_v_numel].view(x_v),
                          x_dense.view(-1)[0:x_v_numel].view(x_v))
 
-    @skipIfRocm
     def test_resize(self):
         # 1. Expand the size of some dense dimensions [Supported]
         self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
@@ -1556,6 +1645,7 @@ class TestSparse(TestCase):
             self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
                                     [1, 1], [1, 2, 0], [2, 2, 0])
 
+    @skipIfRocm
     def test_is_nonzero(self):
         self.assertTrue(torch.sparse_coo_tensor(([0],), 1., (1,)).is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0],), 0., (1,)).is_nonzero())
@@ -1593,7 +1683,6 @@ class TestCudaUncoalescedSparse(TestCudaSparse):
 
 class TestSparseOneOff(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @skipIfRocm
     def test_cuda_from_cpu(self):
         with self.assertRaisesRegex(
                 RuntimeError,
@@ -1617,7 +1706,6 @@ class TestSparseOneOff(TestCase):
                                      [0, 4, 4, 0])
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @skipIfRocm
     def test_cuda_sparse_cpu_dense_add(self):
         x = torch.zeros(3, 4, 4)
         sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),

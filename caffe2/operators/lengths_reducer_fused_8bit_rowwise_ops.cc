@@ -1,5 +1,5 @@
 #include "caffe2/operators/lengths_reducer_fused_8bit_rowwise_ops.h"
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 
 namespace caffe2 {
 
@@ -32,7 +32,8 @@ stores quantized values, and then 4-byte scale and 4-byte bias).
         2,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Output(0, "output", "output");
+    .Output(0, "output", "output")
+    .InheritOnnxSchema("SparseLengthsSumFused8BitRowwise");
 NO_GRADIENT(SparseLengthsSumFused8BitRowwise);
 
 REGISTER_CPU_OPERATOR(

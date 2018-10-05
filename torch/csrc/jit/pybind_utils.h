@@ -9,7 +9,7 @@
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/utils/auto_gil.h"
 
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -86,7 +86,7 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
   for(auto elem : obj) {
     elems.push_back(toIValue(elem, elem_type));
   }
-  return ConstantList<IValue>::create(std::move(elems));
+  return List<IValue>::create(std::move(elems));
 }
 
 inline IValue toIValue(py::handle obj, const TypePtr& type) {
@@ -107,6 +107,8 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
         return py::cast<int64_t>(obj);
       case TypeKind::NoneType:
         return {};
+      case TypeKind::BoolType:
+        return py::cast<bool>(obj);
       case TypeKind::TupleType: {
         if(!PyTuple_Check(obj.ptr()))
           throw py::cast_error(); // note: the py::cast does not throw cast_error
@@ -140,8 +142,11 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
             return createGenericList(obj, elem_type);
         }
       }
+      case TypeKind::WorldType:
+        AT_ERROR("World arguments should not be passed in by users");
       case TypeKind::NumberType:
       case TypeKind::GeneratorType:
+      case TypeKind::VarType:
         break;
     }
   AT_ERROR("Missing cases in toIValue for type: ", type->str(), "! File a bug report.");
@@ -193,12 +198,24 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::cast(ivalue.toDouble());
   } else if (ivalue.isInt()) {
     return py::cast(ivalue.toInt());
+  }else if (ivalue.isBool()) {
+    return py::cast(ivalue.toBool());
   } else if (ivalue.isIntList()) {
     return py::cast(ivalue.toIntListRef());
   } else if (ivalue.isDoubleList()) {
     return py::cast(ivalue.toDoubleListRef());
+  } else if (ivalue.isBoolList()) {
+    return py::cast(ivalue.toBoolListRef());
   } else if (ivalue.isTensorList()) {
     return py::cast(ivalue.toTensorListRef());
+  } else if (ivalue.isGenericList()) {
+    auto list = ivalue.toGenericList();
+    const auto & elements = list->elements();
+    py::list t { elements.size() };
+    for (size_t i = 0; i < elements.size(); ++i) {
+      t[i] = toPyObject(IValue{elements[i]});
+    }
+    return t;
   } else if (ivalue.isTuple()) {
     auto tuple = ivalue.toTuple();
     const auto & elements = tuple->elements();

@@ -64,7 +64,7 @@ FROM_IVALUE = {
     'ScalarType': '{}.to<at::ScalarType>()',
     'Tensor': '{}.toTensor()',
     'TensorList': '{}.toTensorList()->elements()',
-    'bool': 'bool({}.toInt())',
+    'bool': '{}.toBool()',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'std::string': '{}.toString()->string()',
@@ -351,7 +351,7 @@ def main():
                         help='path to Declarations.yaml')
     parser.add_argument('out', metavar='OUT',
                         help='path to output directory')
-    parser.add_argument('template-path', metavar='TEMPLATE_PATH',
+    parser.add_argument('template_path', metavar='TEMPLATE_PATH',
                         help='path to templates directory')
     args = parser.parse_args()
     gen_jit_dispatch(args.declarations, args.out, args.template_path)

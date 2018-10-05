@@ -45,7 +45,7 @@ class PackSegmentsOp final : public Operator<Context> {
   INPUT_TAGS(LENGTHS, DATA);
 
  private:
-  TIndex max_length_;
+  int64_t max_length_;
   bool pad_minf_;
   float padding_;
   bool return_presence_mask_;
@@ -80,7 +80,7 @@ class UnpackSegmentsOp final : public Operator<Context> {
   INPUT_TAGS(LENGTHS, DATA);
 
  private:
-  TIndex max_length_;
+  int64_t max_length_;
   Tensor dev_buffer_{Context::GetDeviceType()};
   Tensor dev_lengths_prefix_sum_{Context::GetDeviceType()};
   Tensor dev_max_length_{Context::GetDeviceType()};
