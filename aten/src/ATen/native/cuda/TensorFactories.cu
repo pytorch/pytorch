@@ -45,7 +45,7 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
   result.resize_({n});
 
   if (result.type().scalarType() == at::ScalarType::Half) {
-    auto result_float = at::empty({n}, TensorOptions(false).device(Device(DeviceType::CUDA)));
+    auto result_float = CUDA(kFloat).tensor({n});
     result.copy_(randperm_out_cuda(result_float, n, generator));
   } else {
     if (n < 30000) {  // For small inputs, we offload it to CPU instead.

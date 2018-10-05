@@ -64,7 +64,7 @@ at::ScalarType DecoderBase::onnxTypeToATenType(onnx::TensorProto_DataType onnx_t
 }
 
 at::Tensor DecoderBase::buildTensor(const onnx::TensorProto& tensor_proto) {
-  at::Tensor tensor = at::empty({0}, at::TensorOptions(false).dtype(onnxTypeToATenType(tensor_proto.data_type())));
+  at::Tensor tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor();
   std::vector<int64_t> sizes = { tensor_proto.dims().begin(), tensor_proto.dims().end() };
   tensor.resize_(sizes);
 

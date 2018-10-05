@@ -62,7 +62,7 @@ inline SparseTensor _new_with_dims_and_tensor_sparse(
     ArrayRef<int64_t> sizes,
     const LongTensor& indices,
     const Tensor& values) {
-  SparseTensor self = at::empty({0}, dtype.options());
+  SparseTensor self = new_sparse(dtype);
   _get_sparse_impl(self)->resize_(sparseDims, denseDims, sizes);
   _alias_into_sparse(self, indices, values);
   return self;
