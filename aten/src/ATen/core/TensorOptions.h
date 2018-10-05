@@ -93,8 +93,17 @@ struct CAFFE2_API TensorOptions {
 
   /// True if all elements of the `TensorOptions` match that of the other.
   bool operator==(const TensorOptions& other) const noexcept {
-    return dtype_ == other.dtype_ && layout_ == other.layout_ &&
-        device_ == other.device_ && requires_grad_ == other.requires_grad_;
+    return
+        has_dtype_ == other.has_dtype_ &&
+        has_layout_ == other.has_layout_ &&
+        has_device_ == other.has_device_ &&
+        has_requires_grad_ == other.has_requires_grad_ &&
+        has_is_variable_ == other.has_is_variable_ &&
+        dtype_ == other.dtype_ &&
+        layout_ == other.layout_ &&
+        device_ == other.device_ &&
+        requires_grad_ == other.requires_grad_ &&
+        is_variable_ == other.is_variable_;
   }
 
   /// True if any of the elements of this `TensorOptions` do not match that of
@@ -106,11 +115,15 @@ struct CAFFE2_API TensorOptions {
   /// Sets the device of the `TensorOptions`.
   TensorOptions& device(Device device) {
     device_ = device;
+    has_device_ = true;
     return *this;
   }
 
   /// Sets the device of the `TensorOptions` to CUDA, and then sets the device
   /// index to the given one.
+  ///
+  /// TODO: This function encourages bad behavior (assuming CUDA is
+  /// the only device that matters).  Get rid of it / rename it.
   TensorOptions& device_index(int32_t device_index) {
     return device({Device::Type::CUDA, device_index});
   }
