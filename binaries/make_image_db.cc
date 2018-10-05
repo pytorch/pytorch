@@ -16,9 +16,9 @@
 
 // This script converts an image dataset to a database.
 //
-// caffe2::FLAGS_input_folder is the root folder that holds all the images
+// c10::FLAGS_input_folder is the root folder that holds all the images
 //
-// caffe2::FLAGS_list_file is the path to a file containing a list of files
+// c10::FLAGS_list_file is the path to a file containing a list of files
 // and their labels, as follows:
 //
 //   subfolder1/file1.JPEG 7
@@ -42,24 +42,28 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/core/logging.h"
 
-CAFFE2_DEFINE_bool(shuffle, false,
+C10_DEFINE_bool(
+    shuffle,
+    false,
     "Randomly shuffle the order of images and their labels");
-CAFFE2_DEFINE_string(input_folder, "", "The input image file name.");
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(input_folder, "", "The input image file name.");
+C10_DEFINE_string(
     list_file,
     "",
     "The text file containing the list of images.");
-CAFFE2_DEFINE_string(output_db_name, "", "The output training leveldb name.");
-CAFFE2_DEFINE_string(db, "leveldb", "The db type.");
-CAFFE2_DEFINE_bool(raw, false,
+C10_DEFINE_string(output_db_name, "", "The output training leveldb name.");
+C10_DEFINE_string(db, "leveldb", "The db type.");
+C10_DEFINE_bool(
+    raw,
+    false,
     "If set, we pre-read the images and store the raw buffer.");
-CAFFE2_DEFINE_bool(color, true, "If set, load images in color.");
-CAFFE2_DEFINE_int(
+C10_DEFINE_bool(color, true, "If set, load images in color.");
+C10_DEFINE_int(
     scale,
     256,
-    "If caffe2::FLAGS_raw is set, scale the shorter edge to the given value.");
-CAFFE2_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
-CAFFE2_DEFINE_int(
+    "If c10::FLAGS_raw is set, scale the shorter edge to the given value.");
+C10_DEFINE_bool(warp, false, "If warp is set, warp the images to square.");
+C10_DEFINE_int(
     num_threads,
     -1,
     "Number of image parsing and conversion threads.");
@@ -71,11 +75,11 @@ class Converter {
   explicit Converter() {
     data_ = protos_.add_protos();
     label_ = protos_.add_protos();
-    if (caffe2::FLAGS_raw) {
+    if (c10::FLAGS_raw) {
       data_->set_data_type(TensorProto::BYTE);
       data_->add_dims(0);
       data_->add_dims(0);
-      if (caffe2::FLAGS_color) {
+      if (c10::FLAGS_color) {
         data_->add_dims(3);
       }
     } else {
@@ -115,7 +119,7 @@ class Converter {
   }
 
   void run() {
-    const auto& input_folder = caffe2::FLAGS_input_folder;
+    const auto& input_folder = c10::FLAGS_input_folder;
     std::unique_lock<std::mutex> lock(mutex_);
     std::string value;
     while (!in_.empty()) {
@@ -126,7 +130,7 @@ class Converter {
       label_->set_int32_data(0, pair.second);
 
       // Add raw file contents to DB if !raw
-      if (!caffe2::FLAGS_raw) {
+      if (!c10::FLAGS_raw) {
         std::ifstream image_file_stream(input_folder + pair.first);
         if (!image_file_stream) {
           LOG(ERROR) << "Cannot open " << input_folder << pair.first
@@ -140,23 +144,22 @@ class Converter {
         // Load image
         cv::Mat img = cv::imread(
             input_folder + pair.first,
-            caffe2::FLAGS_color ? CV_LOAD_IMAGE_COLOR
-                                : CV_LOAD_IMAGE_GRAYSCALE);
+            c10::FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
 
         // Resize image
         cv::Mat resized_img;
         int scaled_width, scaled_height;
-        if (caffe2::FLAGS_warp) {
-          scaled_width = caffe2::FLAGS_scale;
-          scaled_height = caffe2::FLAGS_scale;
+        if (c10::FLAGS_warp) {
+          scaled_width = c10::FLAGS_scale;
+          scaled_height = c10::FLAGS_scale;
         } else if (img.rows > img.cols) {
-          scaled_width = caffe2::FLAGS_scale;
+          scaled_width = c10::FLAGS_scale;
           scaled_height =
-              static_cast<float>(img.rows) * caffe2::FLAGS_scale / img.cols;
+              static_cast<float>(img.rows) * c10::FLAGS_scale / img.cols;
         } else {
-          scaled_height = caffe2::FLAGS_scale;
+          scaled_height = c10::FLAGS_scale;
           scaled_width =
-              static_cast<float>(img.cols) * caffe2::FLAGS_scale / img.rows;
+              static_cast<float>(img.cols) * c10::FLAGS_scale / img.rows;
         }
         cv::resize(
             img,
@@ -211,12 +214,12 @@ void ConvertImageDataset(
     lines.push_back(std::make_pair(filename, file_label));
   }
 
-  if (caffe2::FLAGS_shuffle) {
+  if (c10::FLAGS_shuffle) {
     LOG(INFO) << "Shuffling data";
     std::shuffle(lines.begin(), lines.end(), std::default_random_engine(1701));
   }
 
-  auto num_threads = caffe2::FLAGS_num_threads;
+  auto num_threads = c10::FLAGS_num_threads;
   if (num_threads < 1) {
     num_threads = std::thread::hardware_concurrency();
   }
@@ -224,7 +227,7 @@ void ConvertImageDataset(
   LOG(INFO) << "Processing " << lines.size() << " images...";
   LOG(INFO) << "Opening DB " << output_db_name;
 
-  auto db = db::CreateDB(caffe2::FLAGS_db, output_db_name, db::NEW);
+  auto db = db::CreateDB(c10::FLAGS_db, output_db_name, db::NEW);
   auto transaction = db->NewTransaction();
 
   LOG(INFO) << "Using " << num_threads << " processing threads...";
@@ -274,7 +277,9 @@ void ConvertImageDataset(
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
   caffe2::ConvertImageDataset(
-      caffe2::FLAGS_input_folder, caffe2::FLAGS_list_file,
-      caffe2::FLAGS_output_db_name, caffe2::FLAGS_shuffle);
+      c10::FLAGS_input_folder,
+      c10::FLAGS_list_file,
+      c10::FLAGS_output_db_name,
+      c10::FLAGS_shuffle);
   return 0;
 }

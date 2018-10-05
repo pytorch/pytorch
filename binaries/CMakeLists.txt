@@ -59,10 +59,7 @@ if (USE_OPENCV)
 endif()
 
 if (USE_OBSERVERS)
-  add_executable(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
-  target_link_libraries(caffe2_benchmark  ${Caffe2_MAIN_LIBS})
-  target_link_libraries(caffe2_benchmark ${Caffe2_MODULES})
-  install(TARGETS caffe2_benchmark DESTINATION bin)
+  caffe2_binary_target(caffe2_benchmark "caffe2_benchmark.cc" "benchmark_helper.cc")
 endif()
 
 # ---[ tutorials

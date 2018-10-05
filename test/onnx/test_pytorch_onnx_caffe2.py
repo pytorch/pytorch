@@ -919,6 +919,15 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_tensor_factories(self):
+        class TensorFactory(torch.nn.Module):
+            def forward(self, x):
+                return torch.zeros(x.size()) + torch.ones(x.size())
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+
 # a bit of metaprogramming to set up all the rnn tests
 
 

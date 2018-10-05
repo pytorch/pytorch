@@ -68,7 +68,8 @@ SparseTensor new_sparse(const SparseType& dtype) {
   } else {
     type_id = SparseCPUTensorId();
   }
-  return SparseTensor(c10::make_intrusive<SparseTensorImpl>(type_id, scalarTypeToTypeMeta(dtype.scalarType())));
+  return detail::make_tensor<SparseTensorImpl>(
+      type_id, scalarTypeToTypeMeta(dtype.scalarType()));
 }
 
 /*** Helper methods ***/

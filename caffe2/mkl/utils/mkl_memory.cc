@@ -5,13 +5,13 @@
 
 #ifdef CAFFE2_HAS_MKL_DNN
 
-CAFFE2_DEFINE_bool(
-    caffe2_mkl_implicit_layout_change, false,
+C10_DEFINE_bool(
+    caffe2_mkl_implicit_layout_change,
+    false,
     "Controls the behavior when we call View() on an MKLMemory: if it is set "
     "true, then the View() function will actually change the underlying "
     "storage. If it is set false, an implicit copy is triggered but the "
-    "original storage is not affected."
-    );
+    "original storage is not affected.");
 
 namespace caffe2 {
 
@@ -27,7 +27,7 @@ static vector<int64_t> GetMKLTensorInfo(
   *capacity = tc->size() * sizeof(T);
   device->set_device_type(PROTO_MKLDNN);
   device->set_cuda_gpu_id(0);
-  return tc->dims();
+  return tc->dims().vec();
 }
 
 template <typename T>

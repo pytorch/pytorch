@@ -46,7 +46,7 @@ class LengthsPadOp : public Operator<Context> {
 
     CAFFE_ENFORCE_EQ(total_length, data.dim(0));
 
-    auto shape = data.dims();
+    auto shape = data.dims().vec();
     shape[0] = lengths_size * target_length_;
     output->Resize(shape);
 

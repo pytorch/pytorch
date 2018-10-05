@@ -408,38 +408,9 @@ std::shared_ptr<Graph> build_lstm() {
   return r;
 }
 
-std::shared_ptr<Graph> build_lstm_stages() {
-  auto r = std::make_shared<Graph>();
-  auto & g = *r;
-  Var input = g.addInput();
-  Var hx = g.addInput();
-  Var cx = g.addInput();
-  Var w_ih = g.addInput();
-  Var w_hh = g.addInput();
-
-  Var hy;
-  Var cy;
-  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
-
-  // use some stuff from the previous stage as well
-  // as a new input
-  g.advanceStage();
-  hx = hy;
-  cy.addAsOutput();
-  cx = g.addInput();
-
-  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
-
-  hy.addAsOutput();
-  cy.addAsOutput();
-  g.lint();
-
-  return r;
-}
-
-void runOneStage(InterpreterState & interp, const std::vector<at::Tensor> & inputs, std::vector<at::Tensor> & outputs) {
+void run(InterpreterState & interp, const std::vector<at::Tensor> & inputs, std::vector<at::Tensor> & outputs) {
   std::vector<IValue> stack(inputs.begin(), inputs.end());
-  interp.runOneStage(stack);
+  interp.run(stack);
   outputs.clear();
   for(auto & ivalue : stack) {
     outputs.push_back(std::move(ivalue).toTensor());
@@ -463,41 +434,8 @@ void interpTest() {
     Code lstm_function(lstm_g);
     std::vector<at::Tensor> outputs;
     InterpreterState lstm_interp(lstm_function);
-    runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
+    run(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
     std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
-
-    //std::cout << almostEqual(outputs[0],hx) << "\n";
-    CATCH_REQUIRE(exactlyEqual(outputs[0],hx));
-    CATCH_REQUIRE(exactlyEqual(outputs[1],cx));
-}
-
-void interpStageTest() {
-    constexpr int batch_size = 4;
-    constexpr int input_size = 256;
-    constexpr int seq_len = 32;
-
-    int hidden_size = 2*input_size;
-    auto input = at::randn({seq_len, batch_size, input_size}, at::kCUDA);
-    auto hx    = at::randn({batch_size, hidden_size}, at::kCUDA);
-    auto cx    = at::randn({batch_size, hidden_size}, at::kCUDA);
-    auto cx1 = at::randn({batch_size, hidden_size}, at::kCUDA);
-    auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
-    auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
-
-
-    auto lstm_g = build_lstm_stages();
-    Code lstm_function(lstm_g);
-    std::vector<at::Tensor> outputs;
-    InterpreterState lstm_interp(lstm_function);
-    runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
-    auto cy0 = outputs[0];
-    runOneStage(lstm_interp, {cx1}, outputs);
-    at::Tensor ihx = outputs[0];
-    at::Tensor icx = outputs[1];
-
-
-    std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
-    std::tie(hx, cx) = lstm(input[0], hx, cx1, w_ih, w_hh);
 
     //std::cout << almostEqual(outputs[0],hx) << "\n";
     CATCH_REQUIRE(exactlyEqual(outputs[0],hx));
@@ -569,7 +507,7 @@ std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
       df_code{grad_spec.df};
   InterpreterState f_interpreter { f_code }, df_interpreter { df_code };
 
-  runOneStage(f_interpreter, tensors_in, tensors_out);
+  run(f_interpreter, tensors_in, tensors_out);
 
   tensor_list df_inputs;
   df_inputs.insert(df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
@@ -577,7 +515,7 @@ std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
     df_inputs.push_back(tensors_in[offset]);
   for(auto offset : grad_spec.df_input_captured_outputs)
     df_inputs.push_back(tensors_out[offset]);
-  runOneStage(df_interpreter, df_inputs, tensor_grads_out);
+  run(df_interpreter, df_inputs, tensor_grads_out);
 
   // Outputs of f needs to be sliced
   tensors_out.erase(tensors_out.begin() + grad_spec.f_real_outputs, tensors_out.end());
@@ -599,7 +537,7 @@ void testADFormulas() {
     {"tanh",    unary_pointwise,  [](const VL& v) -> VL { return {v[0].tanh()}; }},
     {"t",       unary_pointwise_2d,  [](const VL& v) -> VL { return {v[0].t()}; }},
     {"mm",      {{10, 12}, {12, 15}}, [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
-    // TODO: enable once we'll be able to capture lists accross stages
+    // TODO: enable once we'll be able to capture lists across forward-backward
     //{"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
     //{"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},
     //{"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(4, 1)); }},
@@ -868,7 +806,7 @@ void testControlFlow() {
     auto graph = cu.get_method(name).graph();
     Code code(graph);
     InterpreterState interp(code);
-    interp.runOneStage(stack);
+    interp.run(stack);
     return stack;
   };
 
@@ -1142,7 +1080,6 @@ TORCH_API std::string runJITCPPTests() {
   testDifferentiateWithRequiresGrad(out);
   testADFormulas();
   interpTest();
-  interpStageTest();
   codeTemplateTest();
   fusionTests();
   attributesTest();
@@ -1189,8 +1126,6 @@ CATCH_TEST_CASE( "jit test CUDA", "[cuda]" ) {
     fusionTests();
   CATCH_SECTION( "interp" )
     interpTest();
-  CATCH_SECTION( "interp stage" )
-    interpStageTest();
   CATCH_SECTION( "argument spec" )
     argumentSpecTest();
 }

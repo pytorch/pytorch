@@ -5,50 +5,50 @@
 #include "caffe2/core/timer.h"
 
 // experimental support for multiple streams per worker per GPU
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_streams_per_gpu,
     1,
     "Number of streams per worker per GPU"
     " to use in GPU thread pool (experimental)");
 
-CAFFE2_DECLARE_bool(caffe2_dag_net_collect_stats);
+C10_DECLARE_bool(caffe2_dag_net_collect_stats);
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_finish_chain,
     false,
     "Wait for chain to finish");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_always_schedule_child,
     false,
     "Always schedule child chains from parent chain");
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_net_async_max_gpus,
     16,
     "Max number of GPUs allowed in net async executor");
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_net_async_max_numa_nodes,
     8,
     "Max number of NUMA nodes allowed in net async executor");
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_net_async_cpu_pool_size,
     0,
     "Number of threads in CPU pool by default");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_check_stream_status,
     false,
     "Select next non-busy stream");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_use_single_pool,
     false,
     "Use single thread pool for all devices");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_use_per_net_pools,
     false,
     "Use per net thread pools");
@@ -152,14 +152,14 @@ TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
     }
     CAFFE_ENFORCE_LT(
         numa_node_id,
-        FLAGS_caffe2_net_async_max_numa_nodes,
+        c10::FLAGS_caffe2_net_async_max_numa_nodes,
         "Invalid NUMA node id: ",
         numa_node_id);
     return poolGetter(cpu_pools_, PROTO_CPU, numa_node_id, num_workers_);
   } else if (device_option.device_type() == PROTO_CUDA) {
     auto gpu_id = device_option.cuda_gpu_id();
     CAFFE_ENFORCE(
-        gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
+        gpu_id >= 0 && gpu_id < c10::FLAGS_caffe2_net_async_max_gpus,
         "Invalid GPU id: " + caffe2::to_string(gpu_id));
     return poolGetter(gpu_pools_, PROTO_CUDA, gpu_id, num_workers_);
   } else {
@@ -432,8 +432,8 @@ GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new) {
   static std::mutex pool_mutex;
 
   if (pool_size <= 0) {
-    if (FLAGS_caffe2_net_async_cpu_pool_size > 0) {
-      pool_size = FLAGS_caffe2_net_async_cpu_pool_size;
+    if (c10::FLAGS_caffe2_net_async_cpu_pool_size > 0) {
+      pool_size = c10::FLAGS_caffe2_net_async_cpu_pool_size;
       LOG(INFO) << "Using default CPU pool size: " << pool_size
                 << "; NUMA node id: " << numa_node_id;
     } else {
@@ -495,12 +495,12 @@ void AsyncNetBase::computeExecutionModeFlags() {
     use_per_net_pools_ = true;
     is_blocking_ = true;
   } else {
-    streams_per_gpu_ = FLAGS_caffe2_streams_per_gpu;
-    finish_chain_ = FLAGS_caffe2_net_async_finish_chain;
-    always_schedule_child_ = FLAGS_caffe2_net_async_always_schedule_child;
-    check_stream_status_ = FLAGS_caffe2_net_async_check_stream_status;
-    use_single_pool_ = FLAGS_caffe2_net_async_use_single_pool;
-    use_per_net_pools_ = FLAGS_caffe2_net_async_use_per_net_pools;
+    streams_per_gpu_ = c10::FLAGS_caffe2_streams_per_gpu;
+    finish_chain_ = c10::FLAGS_caffe2_net_async_finish_chain;
+    always_schedule_child_ = c10::FLAGS_caffe2_net_async_always_schedule_child;
+    check_stream_status_ = c10::FLAGS_caffe2_net_async_check_stream_status;
+    use_single_pool_ = c10::FLAGS_caffe2_net_async_use_single_pool;
+    use_per_net_pools_ = c10::FLAGS_caffe2_net_async_use_per_net_pools;
     is_blocking_ = false;
   }
 }

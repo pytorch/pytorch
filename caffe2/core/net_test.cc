@@ -7,7 +7,7 @@
 
 #include <google/protobuf/text_format.h>
 
-CAFFE2_DECLARE_bool(caffe2_disable_chaining);
+C10_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
 
@@ -150,9 +150,9 @@ void checkChainingAndRun(
       ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
+    auto old = c10::FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_disable_chaining = old; });
+    c10::FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
@@ -177,9 +177,9 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   }
 
   {
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
+    auto old = c10::FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_disable_chaining = old; });
+    c10::FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
@@ -572,9 +572,9 @@ TEST(NetTest, DISABLED_FailingOperator) {
 
   {
     net_def.set_num_workers(4);
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
+    auto old = c10::FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_disable_chaining = old; });
+    c10::FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     for (int i = 0; i < 10; i++) {
@@ -684,9 +684,9 @@ TEST(NetTest, ExecutorOverride) {
 
   {
     Workspace ws;
-    auto old = FLAGS_caffe2_override_executor;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_override_executor = old; });
-    FLAGS_caffe2_override_executor = "dag,async_scheduling";
+    auto old = c10::FLAGS_caffe2_override_executor;
+    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_override_executor = old; });
+    c10::FLAGS_caffe2_override_executor = "dag,async_scheduling";
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto async_net =

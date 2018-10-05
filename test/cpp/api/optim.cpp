@@ -191,53 +191,53 @@ TEST(OptimTest, XORConvergence_AdamWithAmsgrad) {
 }
 
 TEST(OptimTest, ProducesPyTorchValues_Adam) {
-  check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam);
+  check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecay) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-2),
-      expected_parameters::Adam_with_weight_decay);
+      expected_parameters::Adam_with_weight_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
-      expected_parameters::Adam_with_weight_decay_and_amsgrad);
+      expected_parameters::Adam_with_weight_decay_and_amsgrad());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_Adagrad) {
   check_exact_values<Adagrad>(
-      AdagradOptions(1.0), expected_parameters::Adagrad);
+      AdagradOptions(1.0), expected_parameters::Adagrad());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdagradWithWeightDecay) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-2),
-      expected_parameters::Adagrad_with_weight_decay);
+      expected_parameters::Adagrad_with_weight_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_AdagradWithWeightDecayAndLRDecay) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
-      expected_parameters::Adagrad_with_weight_decay_and_lr_decay);
+      expected_parameters::Adagrad_with_weight_decay_and_lr_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_RMSprop) {
   check_exact_values<RMSprop>(
-      RMSpropOptions(0.1), expected_parameters::RMSprop);
+      RMSpropOptions(0.1), expected_parameters::RMSprop());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecay) {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-2),
-      expected_parameters::RMSprop_with_weight_decay);
+      expected_parameters::RMSprop_with_weight_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecayAndCentered) {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-6).centered(true),
-      expected_parameters::RMSprop_with_weight_decay_and_centered);
+      expected_parameters::RMSprop_with_weight_decay_and_centered());
 }
 
 TEST(
@@ -245,29 +245,30 @@ TEST(
     ProducesPyTorchValues_RMSpropWithWeightDecayAndCenteredAndMomentum) {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-6).centered(true).momentum(0.9),
-      expected_parameters::RMSprop_with_weight_decay_and_centered_and_momentum);
+      expected_parameters::
+          RMSprop_with_weight_decay_and_centered_and_momentum());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_SGD) {
-  check_exact_values<SGD>(SGDOptions(0.1), expected_parameters::SGD);
+  check_exact_values<SGD>(SGDOptions(0.1), expected_parameters::SGD());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecay) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-2),
-      expected_parameters::SGD_with_weight_decay);
+      expected_parameters::SGD_with_weight_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecayAndMomentum) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-2).momentum(0.9),
-      expected_parameters::SGD_with_weight_decay_and_momentum);
+      expected_parameters::SGD_with_weight_decay_and_momentum());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecayAndNesterovMomentum) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-6).momentum(0.9).nesterov(true),
-      expected_parameters::SGD_with_weight_decay_and_nesterov_momentum);
+      expected_parameters::SGD_with_weight_decay_and_nesterov_momentum());
 }
 
 TEST(OptimTest, ZeroGrad) {

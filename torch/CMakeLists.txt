@@ -7,6 +7,7 @@ else()
   project(torch CXX C)
   find_package(Caffe2 REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
+  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
 option(BUILD_TEST "Build torch test binaries" ON)
@@ -143,7 +144,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
@@ -173,7 +173,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/pretty_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
@@ -299,12 +298,6 @@ else()
   endif()
 
 endif()
-
-# see the source file for explanation
-set_source_files_properties(
-  ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
-  PROPERTIES COMPILE_FLAGS -O0
-  )
 
 if (MSVC)
 elseif ($ENV{WERROR})

@@ -2,15 +2,14 @@ def script(y1):
   x = aten::add(y1, 1, 1)
   z1 = aten::add(x, 5, 1)
   t9 = aten::lt(y1, 8)
-  t10 = prim::TensorToNum(t9)
+  t10 = prim::TensorToBool(t9)
   y = y1
   z = z1
   t11 = t10
   while t11:
     y2 = aten::add(y, 1, 1)
     t17 = aten::lt(y2, 8)
-    t18 = prim::TensorToNum(t17)
-    t11 = t18
+    t11 = prim::TensorToBool(t17)
     y = y2
     z = x
   return (x, z)
