@@ -546,8 +546,7 @@ inline const TypeMetaData* _typeMetaDataInstance<T>() noexcept {              \
   }
 #define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(Id, T)                           \
   namespace detail {                                                          \
-  C10_EXPORT const TypeMetaData                                               \
-    MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id)                     \
+  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id)    \
       = _makeTypeMetaDataInstance<T>();                                       \
   }
 #endif
