@@ -94,6 +94,8 @@ class DistributedDataParallelCPU(Module):
             def allreduce_hook(*unused):
                 Variable._execution_engine.queue_callback(allreduce_params)
 
+            allreduce_hook._torch_unserializable = True
+
             if param.requires_grad:
                 param.register_hook(allreduce_hook)
 
