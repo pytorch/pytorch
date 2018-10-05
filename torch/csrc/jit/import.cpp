@@ -257,6 +257,8 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
     return FloatType::get();
   } else if (kind == "IntType") {
     return IntType::get();
+  } else if (kind == "BoolType") {
+    return BoolType::get();
   } else if (kind == "NoneType") {
     return NoneType::get();
   } else if (kind == "GeneratorType") {
@@ -268,7 +270,7 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   } else if (kind.find("TypeVar:") == 0) {
     return VarType::create(kind.substr(strlen("TypeVar:")));
   } else {
-    throw std::runtime_error("unexpected string for type kind");
+    throw std::runtime_error("unexpected string for type kind: " + kind);
   }
 }
 

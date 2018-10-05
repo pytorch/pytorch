@@ -12,7 +12,7 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-CAFFE2_DEFINE_string(
+C10_DEFINE_string(
     caffe2_override_executor,
     "",
     "Comma-separated list of executor overrides");
@@ -115,7 +115,7 @@ const std::unordered_map<std::string, std::string>& defaultOverrides() {
 }
 
 void checkExecutorOverride(std::string& net_type) {
-  auto executors = caffe2::split(',', FLAGS_caffe2_override_executor);
+  auto executors = caffe2::split(',', c10::FLAGS_caffe2_override_executor);
   CAFFE_ENFORCE(
       executors.size() % 2 == 0, "Invalid override executors flag value");
   std::unordered_map<std::string, std::string> overrides;

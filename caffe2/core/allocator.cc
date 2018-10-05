@@ -3,12 +3,12 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
     "If set, print out detailed memory usage");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
     true,
     "If set, do memory zerofilling when allocating on CPU");
@@ -25,7 +25,10 @@ void SetCPUAllocator(at::Allocator* alloc) {
   SetAllocator(CPU, alloc);
 }
 
-REGISTER_ALLOCATOR(CPU, new DefaultCPUAllocator());
+// Global default CPU Allocator
+static DefaultCPUAllocator g_cpu_alloc;
+
+REGISTER_ALLOCATOR(CPU, &g_cpu_alloc);
 
 MemoryAllocationReporter DefaultCPUAllocator::reporter_;
 

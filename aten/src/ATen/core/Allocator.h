@@ -136,11 +136,12 @@ struct CAFFE2_API InefficientStdFunctionContext {
 
 namespace caffe2 {
 
-// using AllocatorArray = std::array<
-//     std::unique_ptr<at::Allocator>,
-//     static_cast<int>(at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>;
+/** Set the allocator for DeviceType `t` without taking ownership to avoid
+ *  invalidation when a user already hold the pointer to the previous
+ *  allocator.
+ */
 CAFFE2_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
-at::Allocator* GetAllocator(const at::DeviceType& t);
+CAFFE2_API at::Allocator* GetAllocator(const at::DeviceType& t);
 
 template <at::DeviceType t>
 struct AllocatorRegisterer {
@@ -153,18 +154,5 @@ struct AllocatorRegisterer {
   namespace {                                       \
   static AllocatorRegisterer<t> g_allocator_##d(f); \
   }
-
-std::mutex& GetAllocatorArrayMutex();
-// AllocatorArray& GetAllocatorArray();
-extern std::unique_ptr<at::Allocator> allocator_array[static_cast<int>(
-    at::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
-
-inline at::Allocator* GetAllocator(const at::DeviceType& t) {
-  // auto& array = GetAllocatorArray();
-  auto& uniq_ptr = allocator_array[static_cast<int>(t)];
-  auto* alloc = uniq_ptr.get();
-  AT_ASSERTM(alloc, "Allocator for ", t, " is not set.");
-  return alloc;
-}
 
 } // namespace caffe2

@@ -11,9 +11,10 @@
 #include <ATen/core/context_base.h>
 #include <ATen/core/optional.h>
 
+#include <c10/util/Flags.h>
+
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
-#include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -23,14 +24,13 @@
 // This parameter is respected "upper-case" methods which call Resize()
 // (e.g., CopyFrom, ResizeLike); it is NOT respected by Tensor::resize_
 // or ShrinkTo, both of which guarantee to never to free memory.
-CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
+C10_DECLARE_bool(caffe2_keep_on_shrink);
 
 // Since we can have high variance in blob memory allocated across different
 // inputs in the same run, we will shrink the blob only if the memory gain
 // is larger than this flag in bytes.  This only applies to functions which
 // respect caffe2_keep_on_shrink.
-CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
-
+C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace caffe2 {
 
@@ -162,7 +162,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
   explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0) {
-    data_type_ = storage_ ? storage_.dtype() : caffe2::TypeMeta{};
+    AT_ASSERT(storage_);
+    data_type_ = storage_.dtype();
   }
 
   TensorImpl(const TensorImpl&) = default;
@@ -260,11 +261,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual Tensor& grad();
   virtual const Tensor& grad() const;
 
-  // TODO: make these protected
-  // Note: storage->size() may be greater than the recorded size
-  // of a tensor
-  at::Storage storage_;
-
   template <typename T>
   inline T * data() const {
     AT_ASSERT(!is_variable());
@@ -317,8 +313,17 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   virtual void resize_dim(int64_t ndim) {
     // NB: This is *truly* a resize; calling code (e.g., squeeze)
     // assumes that old values are preserved
+    auto old_dim = sizes_.size();
     sizes_.resize(ndim);
-    strides_.resize(ndim);
+    auto new_strides = c10::guts::make_unique<int64_t[]>(ndim);
+    for (size_t i = 0; i < std::min(old_dim, static_cast<size_t>(ndim)); i++) {
+      new_strides[i] = strides_[i];
+    }
+    for (size_t i = old_dim; i < static_cast<size_t>(ndim); i++) {
+      // If ndim < old_dim, this loop never executes
+      new_strides[i] = 0;
+    }
+    strides_ = std::move(new_strides);
     refresh_numel();
     refresh_contiguous();
   }
@@ -330,7 +335,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   virtual void set_stride(int64_t dim, int64_t new_stride) {
-    strides_.at(dim) = new_stride;
+    AT_ASSERTM(strides_, "Caffe2 tensors don't have meaningful strides and "
+                         "cannot be used in PyTorch");
+    strides_[dim] = new_stride;
     refresh_numel();
     refresh_contiguous();
   }
@@ -353,8 +360,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         ") must match dimensionality of strides (",
         new_stride.size(),
         ")");
+    auto old_dim = sizes_.size();
     sizes_ = new_size.vec();
-    strides_ = new_stride.vec();
+    if (old_dim != sizes_.size()) {
+      strides_.reset(new int64_t[sizes_.size()]);
+    }
+    for (size_t i = 0; i < sizes_.size(); i++) {
+      strides_[i] = new_stride[i];
+    }
     refresh_numel();
     refresh_contiguous();
   }
@@ -365,13 +378,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_variable() const { return is_variable_; };
 
  private:
-  int64_t storage_offset_ = 0;
-  std::vector<int64_t> sizes_;
-  std::vector<int64_t> strides_;
-
-  bool is_contiguous_ = true;
-  int64_t numel_ = -1;
-
   int64_t compute_numel() const {
     int64_t n = 1;
     for (auto s : sizes()) {
@@ -390,12 +396,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     AT_ASSERT(!is_variable());
     is_contiguous_ = compute_contiguous();
   }
-  TensorTypeId type_id_;
-  // INVARIANT: When storage is non-null, this type meta must
-  // agree with the type meta in storage
-  caffe2::TypeMeta data_type_;
-  bool is_variable_ = false;
-  bool is_wrapped_number_ = false;
 
  private:
   TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable);
@@ -430,13 +430,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     if (src.numel() == -1) {
       sizes_.clear();
       numel_ = -1;
-      strides_.clear();
+      strides_.reset();
       is_contiguous_ = true;
-      storage_.reset();
+      storage_ = at::Storage(device_type(), caffe2::TypeMeta());
       data_type_ = caffe2::TypeMeta();
       return;
     }
-    Resize(src.dims());
+    Resize(src.sizes());
     if (numel() > 0) {
       if (data_type_.copy()) {
         CAFFE_ENFORCE(
@@ -594,10 +594,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // is smaller than new size
         reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize();
       } else {
-        reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize() ||
-            !caffe2::FLAGS_caffe2_keep_on_shrink ||
-            storage_.capacity() - (storage_offset_ + numel_) * storage_.itemsize() >
-                static_cast<size_t>(caffe2::FLAGS_caffe2_max_keep_on_shrink_memory);
+        reset_tensor = storage_.capacity() <
+                (storage_offset_ + numel_) * storage_.itemsize() ||
+            !c10::FLAGS_caffe2_keep_on_shrink ||
+            storage_.capacity() -
+                    (storage_offset_ + numel_) * storage_.itemsize() >
+                static_cast<size_t>(
+                    c10::FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
       if (reset_tensor && !is_init) {
@@ -797,28 +800,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }
 
-  /**
-   * Returns the dimensions of the tensor as a vector.
-   */
-  inline const std::vector<int64_t>& dims() const {
-    // TODO: This method will no longer work if we change the
-    // internal representation of dims().  That's BAD.  Let's get
-    // people to stop using this.
-    return sizes_;
-  }
-
- protected:
-  // we decide to keep reserved_ and it will
-  // live in Tensor after the split
-  // The logic is that if Extend() or ReserveSpace() were ever called,
-  // then subsequent Resize()s will not free up Storage.
-  bool reserved_ = false;
-
  private:
   template <
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
-  bool SetDims(const std::vector<T>& src) {
+  bool SetDimsTemplate(at::ArrayRef<T> src) {
     auto old_numel = numel_;
     sizes_.resize(src.size());
     int64_t new_numel = 1;
@@ -831,64 +817,68 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return numel_ != old_numel;
   }
 
-  bool SetDims() {
-    auto old_numel = numel_;
-    sizes_.resize(0);
-    update_to_contiguous_strides();
-    numel_ = 1;
-    return numel_ != old_numel;
+  bool SetDims(at::ArrayRef<int64_t> s) {
+    return SetDimsTemplate(s);
   }
 
-  // TODO(jiayq): maybe rewrite the following functions with initializer list.
-  // NVCC does not play well with initializer lists last time, but worth
-  // another shot.
+  bool SetDims(at::ArrayRef<int> s) {
+    return SetDimsTemplate(s);
+  }
+
+  bool SetDims(at::ArrayRef<size_t> s) {
+    return SetDimsTemplate(s);
+  }
+
+  bool SetDims() {
+    return SetDims(at::IntList{});
+  }
+
   bool SetDims(const int64_t d0) {
-    auto old_numel = numel_;
-    sizes_.resize(1);
-    sizes_[0] = d0;
-    update_to_contiguous_strides();
-    numel_ = d0;
-    return numel_ != old_numel;
+    return SetDims(at::IntList{d0});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1) {
-    auto old_numel = numel_;
-    sizes_.resize(2);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    update_to_contiguous_strides();
-    numel_ = d0 * d1;
-    return numel_ != old_numel;
+    return SetDims(at::IntList{d0, d1});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2) {
-    auto old_numel = numel_;
-    sizes_.resize(3);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    sizes_[2] = d2;
-    update_to_contiguous_strides();
-    numel_ = d0 * d1 * d2;
-    return numel_ != old_numel;
+    return SetDims(at::IntList{d0, d1, d2});
   }
 
-  bool
-  SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
-    auto old_numel = numel_;
-    sizes_.resize(4);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    sizes_[2] = d2;
-    sizes_[3] = d3;
-    update_to_contiguous_strides();
-    numel_ = d0 * d1 * d2 * d3;
-    return numel_ != old_numel;
+  bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
+    return SetDims(at::IntList{d0, d1, d2, d3});
   }
 
   inline void update_to_contiguous_strides() {
-    strides_.resize(0);
+    strides_.reset();
     is_contiguous_ = true;
   }
+
+public:
+  at::Storage storage_; // TODO: Fix visibility on me
+
+protected:
+  std::vector<int64_t> sizes_;
+  std::unique_ptr<int64_t[]> strides_; // this saves two words
+
+  int64_t storage_offset_ = 0;
+  int64_t numel_ = -1;
+
+  // INVARIANT: When storage is non-null, this type meta must
+  // agree with the type meta in storage
+  caffe2::TypeMeta data_type_;
+
+  // You get to have eight byte-size fields here, before you
+  // should pack this into a bitfield.
+  TensorTypeId type_id_;
+  bool is_contiguous_ = true;
+  bool is_variable_ = false;
+  bool is_wrapped_number_ = false;
+  // we decide to keep reserved_ and it will
+  // live in Tensor after the split
+  // The logic is that if Extend() or ReserveSpace() were ever called,
+  // then subsequent Resize()s will not free up Storage.
+  bool reserved_ = false;
 
 };
 } // namespace at

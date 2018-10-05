@@ -27,15 +27,19 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/core/logging.h"
 
-CAFFE2_DEFINE_string(image_file, "", "The input image file name.");
-CAFFE2_DEFINE_string(label_file, "", "The label file name.");
-CAFFE2_DEFINE_string(output_file, "", "The output db name.");
-CAFFE2_DEFINE_string(db, "leveldb", "The db type.");
-CAFFE2_DEFINE_int(data_limit, -1,
-             "If set, only output this number of data points.");
-CAFFE2_DEFINE_bool(channel_first, false,
-            "If set, write the data as channel-first (CHW order) as the old "
-            "Caffe does.");
+C10_DEFINE_string(image_file, "", "The input image file name.");
+C10_DEFINE_string(label_file, "", "The label file name.");
+C10_DEFINE_string(output_file, "", "The output db name.");
+C10_DEFINE_string(db, "leveldb", "The db type.");
+C10_DEFINE_int(
+    data_limit,
+    -1,
+    "If set, only output this number of data points.");
+C10_DEFINE_bool(
+    channel_first,
+    false,
+    "If set, write the data as channel-first (CHW order) as the old "
+    "Caffe does.");
 
 namespace caffe2 {
 uint32_t swap_endian(uint32_t val) {
@@ -79,7 +83,8 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   cols = swap_endian(cols);
 
   // leveldb
-  std::unique_ptr<db::DB> mnist_db(db::CreateDB(caffe2::FLAGS_db, db_path, db::NEW));
+  std::unique_ptr<db::DB> mnist_db(
+      db::CreateDB(c10::FLAGS_db, db_path, db::NEW));
   std::unique_ptr<db::Transaction> transaction(mnist_db->NewTransaction());
   // Storing to db
   char label_value;
@@ -93,7 +98,7 @@ void convert_dataset(const char* image_filename, const char* label_filename,
   TensorProto* data = protos.add_protos();
   TensorProto* label = protos.add_protos();
   data->set_data_type(TensorProto::BYTE);
-  if (caffe2::FLAGS_channel_first) {
+  if (c10::FLAGS_channel_first) {
     data->add_dims(1);
     data->add_dims(rows);
     data->add_dims(cols);
@@ -133,7 +138,10 @@ void convert_dataset(const char* image_filename, const char* label_filename,
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
-  caffe2::convert_dataset(caffe2::FLAGS_image_file.c_str(), caffe2::FLAGS_label_file.c_str(),
-                          caffe2::FLAGS_output_file.c_str(), caffe2::FLAGS_data_limit);
+  caffe2::convert_dataset(
+      c10::FLAGS_image_file.c_str(),
+      c10::FLAGS_label_file.c_str(),
+      c10::FLAGS_output_file.c_str(),
+      c10::FLAGS_data_limit);
   return 0;
 }
