@@ -91,8 +91,10 @@ def get_num_params(fn):
     if source is None:
         return None
     py_ast = ast.parse(source)
-    if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("expected a single top-level function")
+    if len(py_ast.body) != 1:
+        raise RuntimeError("expected a single top-level function, but found {} nodes".format(len(py_ast.body)))
+    elif not isinstance(py_ast.body[0], ast.FunctionDef):
+        raise RuntimeError("expected a single top-level function, but found node of type {}".format(py_ast.body[0]))
     py_def = py_ast.body[0]
     if py_def.args.vararg is not None:
         return None

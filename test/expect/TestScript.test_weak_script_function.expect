@@ -6,7 +6,7 @@ graph(%x.1 : Dynamic) {
   %5 : int = prim::Constant[value=2]()
   %6 : Dynamic = aten::norm(%x.3, %5)
   %7 : Dynamic = aten::gt(%6, %4)
-  %8 : int = prim::TensorToNum(%7)
+  %8 : bool = prim::TensorToBool(%7)
   %x.4 : Dynamic = prim::If(%8)
     block0() {
       %10 : int = prim::Constant[value=1]()

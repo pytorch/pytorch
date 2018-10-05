@@ -719,7 +719,7 @@ def script_method(fn, _rcb=None):
 def _compile_weak_script_module(mod):
     entry = _compiled_weak_modules.get(mod.__class__.__name__)
     if entry is not None:
-        return entry
+        return entry()
 
     attrs = {}
     for func_attr in dir(mod):

@@ -7228,6 +7228,85 @@ a")
         with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
             fn(torch.tensor(4))
 
+    def test_weak_script_module(self):
+        class WeakScriptModule(torch.jit.WeakScriptModule):
+            __constants__ = ['number']
+
+            def __init__(self):
+                super(WeakScriptModule, self).__init__()
+                self.number = 100
+
+            def python_op_in_weak_module(self, input):
+                return input + 123
+
+            @torch.jit.weak_script_method
+            def forward(self, input):
+                return input + self.number + self.python_op_in_weak_module(input)
+
+        class OtherScriptModule(torch.jit.ScriptModule):
+            __constants__ = ['number']
+
+            def __init__(self):
+                super(OtherScriptModule, self).__init__()
+                self.number = 357
+
+            def python_op_in_strong_module(self, input):
+                return input + 456
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + self.number + self.python_op_in_strong_module(input)
+
+        class MyModulePassthrough(torch.jit.ScriptModule):
+            def __init__(self):
+                super(MyModulePassthrough, self).__init__()
+                self.weakScriptModule = WeakScriptModule()
+                self.strongModule = OtherScriptModule()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.weakScriptModule(input)
+
+        weak_mod = WeakScriptModule()
+        input = torch.ones(1)
+        expected_result = input + 100 + (input + 123)
+
+        # Ensure weak mod is running without the JIT by passing the wrong type
+        # (i.e. not a tensor)
+        weak_mod(2)
+
+        python_result = weak_mod(input)
+        strong_mod = MyModulePassthrough()
+        script_result = strong_mod(input)
+
+        self.assertEqual(python_result, expected_result)
+        self.assertEqual(script_result, expected_result)
+        self.assertExpectedGraph(strong_mod.graph, "basic")
+
+        class MyModule(torch.jit.ScriptModule):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.weakScriptModule = WeakScriptModule()
+                self.strongModule = OtherScriptModule()
+
+            @torch.jit.script_method
+            def forward(self, input):
+                x = 2 * input
+                return x + 1 + self.weakScriptModule(x) + self.strongModule(x)
+
+        mod = MyModule()
+        mod2 = MyModule()
+        input = torch.ones(1)
+        expected_result = (input * 2) + 1 + (input * 2 + 100 + input * 2 + 123) + (input * 2 + 357 + input * 2 + 456)
+
+        script_result = mod(input)
+        script_result2 = mod2(input)
+
+        self.assertEqual(script_result, expected_result)
+        self.assertEqual(script_result, script_result2)
+        self.assertExpectedGraph(mod.graph, "scope_test")
+
+
 
 class MnistNet(nn.Module):
     def __init__(self):
