@@ -28,8 +28,8 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
         data.type().allocator(),
         at::TensorImplOptions(
           /* is_variable */ true,
-          /* has_storage */ true,
-          /* has_strides */ true)),
+          /* has_storage */ data.getIntrusivePtr()->options().has_storage_,
+          /* has_strides */ data.getIntrusivePtr()->options().has_strides_)),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),

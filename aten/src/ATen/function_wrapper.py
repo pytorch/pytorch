@@ -186,7 +186,7 @@ if(${check_name}.type().is_sparse()) {
 
 BUFFER_DEFINITION = CodeTemplate("""\
 auto ${name}_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
-    ${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), ${THTensor}_new(), TensorImplOptions(false)).release();
+    ${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), ${THTensor}_new(), TensorImplOptions(false, true, true)).release();
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -327,18 +327,18 @@ CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_NOARGS_WRAP = {
     'THTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                 '(${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), allocator(), TensorImplOptions(false)).release()',
+                 '(${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), allocator(), TensorImplOptions(false, true, true)).release()',
     'THBoolTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                     '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Byte), allocator(), TensorImplOptions(false)).release()',
+                     '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Byte), allocator(), TensorImplOptions(false, true, true)).release()',
     'THIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                      '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Long), allocator(), TensorImplOptions(false)).release()',
+                      '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Long), allocator(), TensorImplOptions(false, true, true)).release()',
     'THIntegerTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                        '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Int), allocator(), TensorImplOptions(false)).release()',
+                        '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Int), allocator(), TensorImplOptions(false, true, true)).release()',
     'THDenseTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
-                      '(${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), allocator(), TensorImplOptions(false)).release()',
+                      '(${Backend}TensorId(), caffe2::TypeMeta::Make<${ScalarType}>(), allocator(), TensorImplOptions(false, true, true)).release()',
     'THDenseIndexTensor*': 'c10::make_intrusive<TensorImpl, UndefinedTensorImpl>'
                            '(${Backend}TensorId(), scalarTypeToTypeMeta(ScalarType::Long), '
-                           'allocator(), TensorImplOptions(false)).release()'
+                           'allocator(), TensorImplOptions(false, true, true)).release()'
 }
 
 ALLOC_WRAP = {

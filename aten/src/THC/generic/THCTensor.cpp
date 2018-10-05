@@ -66,7 +66,7 @@ THCTensor *THCTensor_(new)(THCState *state)
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
     at::CUDATensorId(),
-    at::TensorImplOptions(false)
+    at::TensorImplOptions(false, true, true)
   ).release();
 }
 
@@ -76,7 +76,7 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
     at::CUDATensorId(),
-    at::TensorImplOptions(false)
+    at::TensorImplOptions(false, true, true)
   ).release();
   THCTensor_(setStorageNd)(state,
                            self,
@@ -96,7 +96,7 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
     at::CUDATensorId(),
-    at::TensorImplOptions(false)
+    at::TensorImplOptions(false, true, true)
   ).release();
   THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
@@ -426,7 +426,7 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
     }
   }
 
-  self->set_sizes_and_strides(newSize, at::optional<at::IntList>(newStride));
+  self->set_sizes_and_strides(newSize, at::IntList(newStride));
 }
 
 /* we have to handle the case where the result is a number */

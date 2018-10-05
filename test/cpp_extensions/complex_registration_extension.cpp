@@ -57,7 +57,7 @@ struct CPUComplexFloatType : public at::CPUTypeDefault {
     Tensor t{c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
         std::move(s),
         at::CPUTensorId(),
-        TensorImplOptions(/* is_variable */ false))};
+        TensorImplOptions(false, true, true))};
     return t;
   }
 };

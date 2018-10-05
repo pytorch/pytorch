@@ -136,10 +136,6 @@ struct TensorImplOptions {
   bool is_variable_;
   bool has_storage_;
   bool has_strides_;
-  TensorImplOptions(bool is_variable)
-                    : is_variable_(is_variable),
-                      has_storage_(true),
-                      has_strides_(true) {};
   TensorImplOptions(bool is_variable,
                     bool has_storage,
                     bool has_strides)
@@ -177,7 +173,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, Allocator *allocator, TensorImplOptions options);
   TensorImpl(Storage&& storage, TensorTypeId type_id, TensorImplOptions options);
 
-  explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0), options_(at::TensorImplOptions(false)) {
+  explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0), options_(at::TensorImplOptions(false, true, true)) {
     data_type_ = storage_ ? storage_.dtype() : caffe2::TypeMeta{};
   }
 
@@ -402,7 +398,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         strides_[i] = (*new_stride)[i];
       }
     } else {
-      AT_CHECK(!new_stride, type_id_, " does not have strides, but new_stride is non-null");
+      AT_CHECK(!new_stride, type_id_, " does not have strides, but new_stride is specified");
     }
     sizes_ = new_size.vec();
     refresh_numel();
@@ -435,6 +431,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, TensorImplOptions options);
 
  public:
+
+  const at::TensorImplOptions& options() const {
+    return options_;
+  }
 
   at::DeviceType device_type() const {
     AT_ASSERT(!is_variable());

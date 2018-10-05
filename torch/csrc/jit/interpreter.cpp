@@ -335,7 +335,7 @@ struct PreprocessGraph {
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(at::UndefinedTensorId(), caffe2::TypeMeta(), nullptr, at::TensorImplOptions(/* is_variable */false)) {}
+  : TensorImpl(at::UndefinedTensorId(), caffe2::TypeMeta(), nullptr, at::TensorImplOptions(false, true, true)) {}
 
   virtual ~ContainerTensor() = default;
   virtual at::IntList sizes() const override {
