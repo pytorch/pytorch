@@ -51,7 +51,7 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   }
 
   variable_list results(values);
-  results[value_idx] = ((THPVariable*)value.get())->cdata;
+  if (value != Py_None) results[value_idx] = ((THPVariable*)value.get())->cdata;
   return results;
 }
 

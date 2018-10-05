@@ -15,7 +15,7 @@
 namespace at {
 struct Generator;
 struct Type;
-struct Tensor;
+class Tensor;
 struct TensorOptions;
 } // namespace at
 
@@ -37,11 +37,12 @@ namespace at {
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-struct AT_API Tensor {
+class CAFFE2_API Tensor {
+public:
   Tensor(){};
   Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
-      : tensor_impl_(std::move(tensor_impl)) {
-    if (tensor_impl_.get() == nullptr) {
+      : impl_(std::move(tensor_impl)) {
+    if (impl_.get() == nullptr) {
       throw std::runtime_error("TensorBaseImpl with nullptr not supported");
     }
   }
@@ -50,25 +51,25 @@ struct AT_API Tensor {
   Tensor(Tensor&&) = default;
 
   int64_t dim() const {
-    return tensor_impl_->dim();
+    return impl_->dim();
   }
 
   TensorImpl * unsafeGetTensorImpl() const {
-    return tensor_impl_.get();
+    return impl_.get();
   }
   TensorImpl * unsafeReleaseTensorImpl() {
-    return tensor_impl_.release();
+    return impl_.release();
   }
   const c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>& getIntrusivePtr() const {
-    return tensor_impl_;
+    return impl_;
   }
 
   bool defined() const {
-    return tensor_impl_;
+    return impl_;
   }
 
   void reset() {
-    tensor_impl_.reset();
+    impl_.reset();
   }
 
   // The following overloads are very intruiging.  Consider the following
@@ -102,11 +103,11 @@ struct AT_API Tensor {
   // Tensor& operator=(const Tensor&) & = default;
   // Tensor& operator=(Tensor&&) & = default;
   Tensor& operator=(const Tensor& x) & {
-    tensor_impl_ = x.tensor_impl_;
+    impl_ = x.impl_;
     return *this;
   }
   Tensor& operator=(Tensor&& x) & {
-    tensor_impl_ = std::move(x.tensor_impl_);
+    impl_ = std::move(x.impl_);
     return *this;
   }
 
@@ -115,37 +116,37 @@ struct AT_API Tensor {
   Tensor& operator=(Tensor&&) &&;
 
   bool is_same(const Tensor& other) const noexcept {
-    return tensor_impl_ == other.tensor_impl_;
+    return impl_ == other.impl_;
   }
   size_t use_count() const noexcept {
-    return tensor_impl_.use_count();
+    return impl_.use_count();
   }
   size_t weak_use_count() const noexcept {
-    return tensor_impl_.weak_use_count();
+    return impl_.weak_use_count();
   }
 
   const char * toString() const;
 
   IntList sizes() const {
-    return tensor_impl_->sizes();
+    return impl_->sizes();
   }
   IntList strides() const {
-    return tensor_impl_->strides();
+    return impl_->strides();
   }
   int64_t ndimension() const {
     return dim();
   }
   Type & type() const {
-    return tensor_impl_->type();
+    return impl_->type();
   }
   TensorTypeId type_id() const {
-    return tensor_impl_->type_id();
+    return impl_->type_id();
   }
   ScalarType scalar_type() const {
-    return tensor_impl_->scalar_type();
+    return dataTypeToScalarType(impl_->dtype().id());
   }
   const Storage& storage() const {
-    return tensor_impl_->storage();
+    return impl_->storage();
   }
   Tensor toType(const Type & t, bool non_blocking=false) const;
   Tensor & copy_(const Tensor & src, bool non_blocking=false);
@@ -172,19 +173,11 @@ struct AT_API Tensor {
   template<typename T>
   T * data() const;
 
+  template <typename T>
+  T item() const;
+
   // Purposely not defined here to avoid inlining
   void print() const;
-
-  //toLongData(), toFloatData() etc.
-  #define TO_TYPE_DATA(T,name,_) \
-  T * to##name##Data() const;
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_TYPE_DATA)
-  #undef TO_TYPE_DATA
-
-  #define TO_C_TYPE(T,name,_) \
-  T toC##name () const;
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(TO_C_TYPE)
-  #undef TO_C_TYPE
 
   // Return a `TensorAccessor` for CPU `Tensor`s. You have to specify scalar type and
   // dimension.
@@ -230,18 +223,18 @@ struct AT_API Tensor {
   // ~~~~~ Autograd API ~~~~~
 
   Tensor& set_requires_grad(bool requires_grad) {
-    tensor_impl_->set_requires_grad(requires_grad);
+    impl_->set_requires_grad(requires_grad);
     return *this;
   }
   bool requires_grad() const {
-    return tensor_impl_->requires_grad();
+    return impl_->requires_grad();
   }
 
   Tensor& grad() {
-    return tensor_impl_->grad();
+    return impl_->grad();
   }
   const Tensor& grad() const {
-    return tensor_impl_->grad();
+    return impl_->grad();
   }
 
   void set_data(Tensor new_data);
@@ -441,12 +434,10 @@ struct AT_API Tensor {
   Tensor & atan_();
   Tensor baddbmm(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1) const;
   Tensor & baddbmm_(const Tensor & batch1, const Tensor & batch2, Scalar beta=1, Scalar alpha=1);
-  Tensor bernoulli(const Tensor & p, Generator * generator=nullptr) const;
-  Tensor bernoulli(double p, Generator * generator=nullptr) const;
-  Tensor bernoulli() const;
+  Tensor bernoulli(Generator * generator=nullptr) const;
   Tensor & bernoulli_(const Tensor & p, Generator * generator=nullptr);
-  Tensor & bernoulli_(double p, Generator * generator=nullptr);
-  Tensor & bernoulli_();
+  Tensor & bernoulli_(double p=0.5, Generator * generator=nullptr);
+  Tensor bernoulli(double p, Generator * generator=nullptr) const;
   Tensor bincount(const Tensor & weights={}, int64_t minlength=0) const;
   Tensor bmm(const Tensor & mat2) const;
   Tensor ceil() const;
@@ -542,6 +533,7 @@ struct AT_API Tensor {
   Tensor mv(const Tensor & vec) const;
   Tensor mvlgamma(int64_t p) const;
   Tensor & mvlgamma_(int64_t p);
+  Tensor narrow_copy(int64_t dim, int64_t start, int64_t length) const;
   Tensor narrow(int64_t dim, int64_t start, int64_t length) const;
   Tensor permute(IntList dims) const;
   Tensor pin_memory() const;
@@ -553,6 +545,8 @@ struct AT_API Tensor {
   Tensor & round_();
   Tensor relu() const;
   Tensor & relu_();
+  Tensor prelu(const Tensor & weight) const;
+  std::tuple<Tensor,Tensor> prelu_backward(const Tensor & grad_output, const Tensor & weight) const;
   Tensor hardshrink(Scalar lambd=0.5) const;
   Tensor hardshrink_backward(const Tensor & grad_out, Scalar lambd) const;
   Tensor rsqrt() const;
@@ -653,34 +647,36 @@ struct AT_API Tensor {
   friend struct WeakTensor;
 
 protected:
-  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl_;
+  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
 
-struct AT_API WeakTensor {
-  WeakTensor(const Tensor& t) : weak_tensor_impl_(t.tensor_impl_) {}
+struct CAFFE2_API WeakTensor {
+  WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
 
   // XXX: this can return undefined tensors
   // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
   Tensor lock() const {
-    return Tensor(weak_tensor_impl_.lock());
+    return Tensor(weak_impl_.lock());
   }
 
   bool is_same(const WeakTensor& other) const noexcept {
-    return weak_tensor_impl_ == other.weak_tensor_impl_;
+    return weak_impl_ == other.weak_impl_;
   }
 
   size_t use_count() const noexcept {
-    return weak_tensor_impl_.use_count();
+    return weak_impl_.use_count();
   }
   size_t weak_use_count() const noexcept {
-    return weak_tensor_impl_.weak_use_count();
+    return weak_impl_.weak_use_count();
   }
 
   TensorImpl* unsafeGetTensorImpl() const {
-    return weak_tensor_impl_._unsafe_get_target();
+    return weak_impl_._unsafe_get_target();
   }
 
 private:
-  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_tensor_impl_;
+  c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
 };
 } // namespace at
+
+#include "ATen/core/TensorMethods.h"

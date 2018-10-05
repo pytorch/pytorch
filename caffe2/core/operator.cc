@@ -16,11 +16,11 @@
 
 #include "caffe2/core/operator_c10wrapper.h"
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_operator_max_engine_name_length,
     10,
     "Maximum engine name length to be stored");
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_disable_implicit_engine_preference,
     false,
     "If set, disable implicit engine preferences. This is useful for unit "
@@ -151,7 +151,7 @@ unique_ptr<OperatorBase> _CreateOperator(
     const auto op_def_engines = split(',', operator_def.engine());
     engines.insert(engines.end(), op_def_engines.begin(), op_def_engines.end());
   }
-  if (!FLAGS_caffe2_disable_implicit_engine_preference &&
+  if (!c10::FLAGS_caffe2_disable_implicit_engine_preference &&
       g_per_op_engine_pref().count(device_type) &&
       g_per_op_engine_pref()[device_type].count(op_type)) {
     const auto& preferred_engines =
@@ -160,7 +160,7 @@ unique_ptr<OperatorBase> _CreateOperator(
     engines.insert(
         engines.end(), preferred_engines.begin(), preferred_engines.end());
   }
-  if (!FLAGS_caffe2_disable_implicit_engine_preference &&
+  if (!c10::FLAGS_caffe2_disable_implicit_engine_preference &&
       g_global_engine_pref().count(device_type)) {
     const auto& preferred_engines = g_global_engine_pref()[device_type];
     VLOG(2) << "Inserting global engine preference: " << preferred_engines;
@@ -173,11 +173,12 @@ unique_ptr<OperatorBase> _CreateOperator(
             << engine;
     auto op = TryCreateOperator(key, operator_def, ws);
     if (op) {
-      if (engine.size() <= (unsigned)FLAGS_caffe2_operator_max_engine_name_length) {
+      if (engine.size() <=
+          (unsigned)c10::FLAGS_caffe2_operator_max_engine_name_length) {
         op->annotate_engine(engine);
       } else {
-        op->annotate_engine(
-            engine.substr(0, FLAGS_caffe2_operator_max_engine_name_length));
+        op->annotate_engine(engine.substr(
+            0, c10::FLAGS_caffe2_operator_max_engine_name_length));
       }
       return op;
     } else {
@@ -316,31 +317,32 @@ std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
   return &g_device_type_registry;
 }
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CPUOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     HIPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
-    const OperatorDef&, const vector<GradientWrapper>&);
+    const OperatorDef&,
+    const vector<GradientWrapper>&);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {
@@ -581,7 +583,7 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
 }
 
 TensorShapes InferBlobShapesAndTypesFromMap(
-    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
   // Populate shapes from known blobs
@@ -597,7 +599,7 @@ TensorShapes InferBlobShapesAndTypesFromMap(
 }
 
 TensorShapes InferBlobShapesAndTypesFromMap(
-    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, std::vector<int64_t>>& blob_dimensions,
     const CaffeMap<std::string, TensorProto_DataType>& blob_types,
     const vector<NetDef*>& nets) {
   CaffeMap<string, TensorShape> blob_desc;
@@ -691,6 +693,17 @@ std::set<std::string> GetRegisteredOperators() {
   }
 
   return all_keys;
+}
+
+static std::function<void(const OperatorDef&)> OperatorLogger =
+    [](const OperatorDef&) { return; };
+
+void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer) {
+  OperatorLogger = tracer;
+}
+
+std::function<void(const OperatorDef&)> GetOperatorLogger() {
+  return OperatorLogger;
 }
 
 }  // namespace caffe2

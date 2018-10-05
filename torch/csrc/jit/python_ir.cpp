@@ -45,7 +45,7 @@ std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
     auto pytuple = pyobj.cast<py::tuple>();
     out << "(";
     size_t i = 0;
-    for (auto& o : pytuple) {
+    for (const auto& o : pytuple) {
       if (i > 0) {
         out << ", ";
       }
@@ -144,7 +144,8 @@ void initPythonIRBindings(PyObject * module_) {
       return ss.str();
     })
     .def("propagate_shapes", [](Graph& g, std::vector<at::Tensor> inputs, bool with_grad) {
-      PropagateInputShapes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
+      setInputTypes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+      PropagateInputShapes(g);
     })
     .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
                       int64_t onnx_opset_version, bool defer_weight_export,
@@ -215,6 +216,11 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("return_node", [](Graph &g) {
       return g.block()->return_node();
+    })
+    .def("pretty_print", [](Graph &g) {
+      std::ostringstream oss;
+      g.prettyPrint(oss);
+      return oss.str();
     })
     .GS(createFusionGroup)
     .def("createClone",[](Graph & g, Node * n, py::object fn) {
@@ -433,6 +439,8 @@ void initPythonIRBindings(PyObject * module_) {
           return "NumberType";
         case TypeKind::NoneType:
           return "NoneType";
+        case TypeKind::UndefinedTensorType:
+          return "UndefinedTensorType";
         case TypeKind::CompleteTensorType:
           return "CompleteTensorType";
         case TypeKind::TupleType:
@@ -447,6 +455,12 @@ void initPythonIRBindings(PyObject * module_) {
           return "StringType";
         case TypeKind::GeneratorType:
           return "GeneratorType";
+        case TypeKind::BoolType:
+          return "BoolType";
+        case TypeKind::VarType:
+          return "VarType";
+        case TypeKind::WorldType:
+          return "WorldType";
         }
         // not reachable, but some compilers complain
         AT_ERROR("Unknown Type Kind");
@@ -479,6 +493,8 @@ void initPythonIRBindings(PyObject * module_) {
     .def_static("get", &FloatType::get);
   py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
     .def_static("get", &DynamicType::get);
+  py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
+    .def_static("get", &BoolType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
     .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))

@@ -190,6 +190,9 @@ public:
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
+  bool requires_grad() const {
+    return type()->requires_grad();
+  }
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
@@ -233,7 +236,7 @@ public:
 
   void replaceFirstUseWith(Value * newValue);
 
-  // Replaces all uses of this node with 'newValue'.
+  // Replaces all uses of this value with 'newValue'.
   //
   // Given:   %3 = f(%1, %2)
   //          %4 = g(%3)
@@ -315,6 +318,9 @@ public:
     return graph_;
   }
   Block * owningBlock() {
+    return owning_block_;
+  }
+  const Block * owningBlock() const {
     return owning_block_;
   }
   size_t stage() const {
@@ -439,33 +445,33 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.addInput(%4)
   // Result:  %3 = f(%1, %2, %4)
-  Value* addInput(Value * node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
+  Value* addInput(Value * value) {
+    JIT_ASSERT(graph_ == value->owningGraph());
     schema_ = nullptr;
-    node->uses_.emplace_back(this, inputs_.size());
-    inputs_.push_back(node);
-    return node;
+    value->uses_.emplace_back(this, inputs_.size());
+    inputs_.push_back(value);
+    return value;
   }
 
-  // Add 'node' as an input to 'this' at the specified position in the
-  // arguments. Returns the added node for ease of chaining.
-  Value* insertInput(size_t i, Value* node) {
-    JIT_ASSERT(graph_ == node->owningGraph());
+  // Add 'value' as an input to 'this' at the specified position in the
+  // arguments. Returns the added value for ease of chaining.
+  Value* insertInput(size_t i, Value* value) {
+    JIT_ASSERT(graph_ == value->owningGraph());
     schema_ = nullptr;
     // First we update the offsets for all existing inputs that will reside
     // after the one we're inserting. Concretely, these are the inputs at
     // indices [i, # input). Since we're inserting one input before all of
-    // these inputs, increment their use offsets for this Node by 1
+    // these inputs, increment their use offsets for this value by 1
     for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
       // See Note [User node does not uniquely identify use]
       auto use = findUseForInput(use_itr);
       use->offset += 1;
     }
     // Insert the actual input at the specified index
-    inputs_.insert(inputs_.begin() + i, node);
+    inputs_.insert(inputs_.begin() + i, value);
     // Register the new use of the value we're inserted as an input.
-    node->uses_.emplace_back(this, i);
-    return node;
+    value->uses_.emplace_back(this, i);
+    return value;
   }
 
   // Replace the input of 'this' at position 'i' with
@@ -546,7 +552,7 @@ public:
     return {blocks_.data(), blocks_.size()};
   }
 
-  // Insert unattached 'this' node after 'n' in the topological order.
+  // Insert unattached 'this' node before 'n' in the topological order.
   // Returns this (for chaining).
   //
   // Given:   %3 = f(%1, %2)
@@ -801,8 +807,8 @@ struct Block {
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
-  size_t registerOutput(Value * n) {
-    output_->addInput(n);
+  size_t registerOutput(Value * v) {
+    output_->addInput(v);
     return outputs().size() - 1;
   }
   size_t insertOutput(size_t i, Value* n) {
@@ -969,6 +975,9 @@ public:
     new_node_stage_ = s;
     return ResourceGuard([prev_stage, this]() { this->new_node_stage_ = prev_stage; });
   }
+  const std::unordered_map<std::string, Value*>& uniqueNames() const {
+    return unique_names_;
+  }
 
   size_t registerOutput(Value * n) {
     return block_->registerOutput(n);
@@ -1041,6 +1050,15 @@ public:
     result->output()->setType(CompleteTensorType::fromNumberType(typ));
     return result;
   }
+  Node* createBoolToTensor(Value* value) {
+    auto typ = value->type();
+    Node * result = create(prim::BoolToTensor, {value});
+    if (!typ->isSubtypeOf(BoolType::get())) {
+      AT_ERROR("Cannot create bool type from ", typ->str());
+    }
+    result->output()->setType(CompleteTensorType::fromBoolType());
+    return result;
+  }
   Node* createTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::TensorToNum, {value});
     result->output()->setType(type);
@@ -1049,6 +1067,11 @@ public:
   Node* createImplicitTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::ImplicitTensorToNum, {value});
     result->output()->setType(type);
+    return result;
+  }
+  Node* createTensorToBool(Value* value) {
+    auto* result = create(prim::TensorToBool, {value});
+    result->output()->setType(BoolType::get());
     return result;
   }
   Node* createIntToFloat(Value* value) {
@@ -1061,6 +1084,12 @@ public:
     JIT_ASSERT(*value->type() == *FloatType::get());
     auto* result = create(prim::FloatToInt, {value});
     result->output()->setType(IntType::get());
+    return result;
+  }
+  Node* createStringToFloat(Value* value) {
+    JIT_ASSERT(*value->type() == *StringType::get());
+    auto* result = create(prim::StringToFloat, {value});
+    result->output()->setType(FloatType::get());
     return result;
   }
   Node* createPythonOp(
@@ -1093,6 +1122,12 @@ public:
       IValue val,
       at::optional<SourceRange> loc = at::nullopt) {
     return jit::insertConstant(*this, std::move(val), loc);
+  }
+
+  Value* insertDummyWorld() {
+    auto node = create(prim::DummyWorld, 1);
+    node->output()->setType(WorldType::get());
+    return insertNode(node)->output();
   }
 
   // schema-driven insert
@@ -1161,6 +1196,10 @@ public:
   }
 
   friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
+
+  TORCH_API std::ostream& prettyPrint(std::ostream & out);
+  TORCH_API void dumpPretty();
+
   TORCH_API std::shared_ptr<Graph> copy();
 
 private:
@@ -1307,11 +1346,11 @@ inline void Node::cloneFrom(Node * s) {
 	copyAttributes(*s);
 }
 
-inline Block::Block(Graph * graph_, Node * node_)
-: graph_(graph_)
-, output_(initOutput(graph_->create(prim::Return, 0)))
-, input_(graph_->create(prim::Param,0))
-, owning_node_(node_) {
+inline Block::Block(Graph* graph_, Node* node_)
+    : graph_(graph_),
+      output_(initOutput(graph_->create(prim::Return, 0))),
+      input_(graph_->create(prim::Param, 0)),
+      owning_node_(node_) {
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   input_->owning_block_ = this;

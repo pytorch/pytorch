@@ -130,6 +130,15 @@ def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
 
 
+def _try_get_scalar_type(*args):
+    for arg in args:
+        try:
+            return arg.type().scalarType()
+        except RuntimeError:
+            pass
+    return None
+
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
@@ -151,7 +160,7 @@ def _unimplemented(op, msg):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 7
+_onnx_opset_version = 9
 
 
 # ---------------------------------------------------------------------
@@ -192,25 +201,22 @@ def unused(g):
     return g.op("prim::Undefined")
 
 
-@parse_args('v', 'v', 't')
-def add(g, self, other, alpha):
-    if _scalar(alpha) != 1:
+def add(g, self, other, alpha=None):
+    # default alpha arg is to allow no-alpha add (aten add st overload no alpha)
+    if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:
         return _unimplemented("add", "alpha != 1")
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)
     return g.op("Add", self, _if_scalar_type_as(g, other, self))
 
 
-@parse_args('v', 'v', 't')
-def sub(g, self, other, alpha):
-    if _scalar(alpha) != 1:
+def sub(g, self, other, alpha=None):
+    # default alpha arg is to allow no-alpha sub (aten sub st overload no alpha)
+    if alpha and _scalar(_maybe_get_scalar(alpha)) != 1:
         return _unimplemented("sub", "alpha != 1")
     # See Note [Pointwise by scalar]. Note that self or other may be scalars.
     other = _maybe_get_scalar(other)
-    self = _maybe_get_scalar(self)
-    self = _if_scalar_type_as(g, self, other)
-    other = _if_scalar_type_as(g, other, self)
-    return g.op("Sub", self, other)
+    return g.op("Sub", self, _if_scalar_type_as(g, other, self))
 
 
 def mul(g, self, other):
@@ -244,7 +250,7 @@ def stack(g, tensor_list, dim):
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = self.type().scalarType().lower()
+    ty = _try_get_scalar_type(self, other).lower()
     C = g.constant(0, [1], ty)
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
@@ -349,7 +355,7 @@ def embedding_bag(g,
                 indices,
                 offsets,
                 operator_s="embedding_bag",
-                outputs=3,
+                outputs=4,
                 scale_grad_by_freq_i=scale_grad_by_freq,
                 mode_i=mode,
                 sparse_i=sparse)
@@ -627,12 +633,12 @@ def lt(g, input, other):
 
 def ge(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", lt(g, _if_scalar_type_as(g, other, input), input))
+    return g.op("Not", lt(g, input, _if_scalar_type_as(g, other, input)))
 
 
 def le(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Not", gt(g, _if_scalar_type_as(g, other, input), input))
+    return g.op("Not", gt(g, input, _if_scalar_type_as(g, other, input)))
 
 
 @parse_args('v', 'i')
@@ -714,6 +720,22 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         if len(input_sizes) == 2:
             res = g.op("Squeeze", res, axes_i=[2])
         return res
+
+
+@parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
+def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
+    input_sizes = input.type().sizes()
+    if weight is None or weight.node().kind() == "prim::Undefined":
+        assert len(input_sizes) > 1
+        weight_value = torch.tensor([1.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or bias.node().kind() == "prim::Undefined":
+        assert len(input_sizes) > 1
+        bias_value = torch.tensor([0.] * input_sizes[1]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        bias = g.op("Constant", value_t=bias_value)
+    return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
 
 
 @parse_args('v', 'i', 'i', 'i')
@@ -937,10 +959,6 @@ for k, v in cast_pytorch_to_onnx.items():
     globals()[name] = parse_args('v', 'i')(partial(_cast_func_template, v))
 
 
-def zeros_like(g, input):
-    return g.op("Sub", input, input).setType(input.type().contiguous())
-
-
 scalar_type_to_onnx = [
     cast_pytorch_to_onnx["Byte"],
     cast_pytorch_to_onnx["Char"],
@@ -953,11 +971,30 @@ scalar_type_to_onnx = [
 ]
 
 
-@parse_args('v', 'i', 'i', 'v')
-def zeros(g, shape, scalar_type, layout, device):
-    # NOTE: no way to set device in ONNX, so we ignore it
-    return g.op("ConstantFill", shape, dtype_i=scalar_type_to_onnx[scalar_type],
-                input_as_shape_i=1, value_f=0)
+@parse_args('v', 'i', 'v', 'v')
+def zeros(g, sizes, dtype, layout, device):
+    # NOTE: no way to set device and layout in ONNX, so we ignore it
+    return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=0)
+
+
+def zeros_like(g, input):
+    return g.op("Sub", input, input).setType(input.type().contiguous())
+
+
+@parse_args('v', 'i', 'v', 'v')
+def ones(g, sizes, dtype, layout, device):
+    return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype], input_as_shape_i=1, value_f=1)
+
+
+def full(g, sizes, value, dtype, layout, device):
+    const_value = _maybe_get_const(value, 't')
+    if _is_value(const_value):
+        tmp = zeros(sizes, dtype, layout, device)
+        return add(tmp, value, g.op("Constant", value_t=torch.tensor(1)))
+    else:
+        dtype = _get_const(dtype, 'i', 'dtype')
+        return g.op("ConstantFill", sizes, dtype_i=scalar_type_to_onnx[dtype],
+                    input_as_shape_i=1, value_f=const_value)
 
 
 def full_like(g, input, fill_value):
@@ -965,11 +1002,21 @@ def full_like(g, input, fill_value):
     return add(g, zeros_like(g, input), fill_value, g.op("Constant", value_t=torch.tensor(1)))
 
 
-@parse_args('v', 'i', 'i', 'i', 'i')
+@parse_args('v', 'v', 'v', 'v', 'i')
 def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
-    return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+    if start.node().kind() != 'onnx::Constant' or \
+            end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
+        start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
+        end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
+        dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
+        return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
+    else:
+        start = _parse_arg(start, 'i')
+        end = _parse_arg(end, 'i')
+        dim = _parse_arg(dim, 'i')
+        return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
 
 
 @parse_args('v', 'f', 'f')
@@ -1025,22 +1072,6 @@ def repeat(g, self, repeats):
         if diff_dims > 0:
             self = view(g, self, [1] * diff_dims + sizes)
     return g.op("Tile", self, repeats)
-
-
-def instance_norm(g, input, **kwargs):
-    input_type = input.type().scalarType()
-    weight = kwargs.get("weight", None)
-    bias = kwargs.get("bias", None)
-    eps = kwargs.get("eps", 1e-5)
-    if weight is None:
-        weight = g.constant(1.0, [input.type().sizes()[1]], input_type)
-    else:
-        weight = g.op('Constant', value_t=weight)
-    if bias is None:
-        bias = g.constant(0.0, [input.type().sizes()[1]], input_type)
-    else:
-        bias = g.op('Constant', value_t=bias)
-    return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,

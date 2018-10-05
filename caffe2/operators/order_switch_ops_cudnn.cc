@@ -76,7 +76,7 @@ class CuDNNNHWC2NCHWOp final : public CuDNNOrderSwithOpBase {
       : CuDNNOrderSwithOpBase(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -117,7 +117,7 @@ class CuDNNNCHW2NHWCOp final : public CuDNNOrderSwithOpBase {
       : CuDNNOrderSwithOpBase(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>

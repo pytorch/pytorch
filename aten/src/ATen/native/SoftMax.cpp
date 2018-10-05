@@ -51,13 +51,14 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
           }
 
           if (LogSoftMax)
-            tmpsum = max_input + std::log(tmpsum);
+            tmpsum = std::log(tmpsum);
           else
             tmpsum = 1 / tmpsum;
 
           for (int64_t d = 0; d < dim_size; d++)
             if (LogSoftMax)
-              output_data[d * dim_stride] = input_data[d * dim_stride] - tmpsum;
+              output_data[d * dim_stride] =
+                  input_data[d * dim_stride] - max_input - tmpsum;
             else
               output_data[d * dim_stride] *= tmpsum;
         }

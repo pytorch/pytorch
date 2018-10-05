@@ -1,11 +1,11 @@
+import math
 from numbers import Number
+
 import torch
 from torch._six import inf, nan
-import math
-from torch.distributions import constraints
+from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions import Chi2
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import _standard_normal, broadcast_all
 
 
 class StudentT(Distribution):
@@ -41,8 +41,8 @@ class StudentT(Distribution):
 
     def __init__(self, df, loc=0., scale=1., validate_args=None):
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
-        self._chi2 = Chi2(df)
-        batch_shape = torch.Size() if isinstance(df, Number) else self.df.size()
+        self._chi2 = Chi2(self.df)
+        batch_shape = self.df.size()
         super(StudentT, self).__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -65,7 +65,7 @@ class StudentT(Distribution):
         #   Z ~ Chi2(df)
         #   Y = X / sqrt(Z / df) ~ StudentT(df)
         shape = self._extended_shape(sample_shape)
-        X = self.df.new(shape).normal_()
+        X = _standard_normal(shape, dtype=self.df.dtype, device=self.df.device)
         Z = self._chi2.rsample(sample_shape)
         Y = X * torch.rsqrt(Z / self.df)
         return self.loc + self.scale * Y

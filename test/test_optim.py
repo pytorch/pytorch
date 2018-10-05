@@ -5,7 +5,6 @@ from copy import deepcopy
 import torch
 from torch._six import inf
 import torch.optim as optim
-import torch.legacy.optim as old_optim
 import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
@@ -24,44 +23,7 @@ def drosenbrock(tensor):
     return torch.DoubleTensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
-def wrap_old_fn(old_fn, **config):
-    def wrapper(closure, params, state):
-        return old_fn(closure, params, config, state)
-    return wrapper
-
-
 class TestOptim(TestCase):
-    def _test_rosenbrock(self, constructor, old_fn):
-        params_t = torch.Tensor([1.5, 1.5])
-        state = {}
-
-        params = Variable(torch.Tensor([1.5, 1.5]), requires_grad=True)
-        optimizer = constructor([params])
-
-        solution = torch.Tensor([1, 1])
-        initial_dist = params.data.dist(solution)
-
-        def eval():
-            optimizer.zero_grad()
-            loss = rosenbrock(params)
-            loss.backward()
-            # loss.backward() will give **slightly** different
-            # gradients, than drosenbtock, because of a different ordering
-            # of floating point operations. In most cases it doesn't matter,
-            # but some optimizers are so sensitive that they can temporarily
-            # diverge up to 1e-4, just to converge again. This makes the
-            # comparison more stable.
-            params.grad.data.copy_(drosenbrock(params.data))
-            return loss
-
-        for i in range(2000):
-            optimizer.step(eval)
-            old_fn(lambda _: (rosenbrock(params_t), drosenbrock(params_t)),
-                   params_t, state)
-            self.assertEqual(params.data, params_t)
-
-        self.assertLessEqual(params.data.dist(solution), initial_dist)
-
     def _test_rosenbrock_sparse(self, constructor, sparse_only=False):
         params_t = torch.Tensor([1.5, 1.5])
 
@@ -237,16 +199,6 @@ class TestOptim(TestCase):
         return [dict(params=bias, **kwargs)]
 
     def test_sgd(self):
-        self._test_rosenbrock(
-            lambda params: optim.SGD(params, lr=1e-3),
-            wrap_old_fn(old_optim.sgd, learningRate=1e-3)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.SGD(params, lr=1e-3, momentum=0.9,
-                                     dampening=0, weight_decay=1e-4),
-            wrap_old_fn(old_optim.sgd, learningRate=1e-3, momentum=0.9,
-                        dampening=0, weightDecay=1e-4)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3)
         )
@@ -273,14 +225,6 @@ class TestOptim(TestCase):
         )
 
     def test_adam(self):
-        self._test_rosenbrock(
-            lambda params: optim.Adam(params, lr=1e-2),
-            wrap_old_fn(old_optim.adam, learningRate=1e-2)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.Adam(params, lr=1e-2, weight_decay=1e-2),
-            wrap_old_fn(old_optim.adam, learningRate=1e-2, weightDecay=1e-2)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3)
         )
@@ -310,18 +254,6 @@ class TestOptim(TestCase):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
     def test_adadelta(self):
-        self._test_rosenbrock(
-            lambda params: optim.Adadelta(params),
-            wrap_old_fn(old_optim.adadelta)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.Adadelta(params, rho=0.95),
-            wrap_old_fn(old_optim.adadelta, rho=0.95)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.Adadelta(params, weight_decay=1e-2),
-            wrap_old_fn(old_optim.adadelta, weightDecay=1e-2)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta([weight, bias])
         )
@@ -333,18 +265,6 @@ class TestOptim(TestCase):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adagrad(self):
-        self._test_rosenbrock(
-            lambda params: optim.Adagrad(params, lr=1e-1),
-            wrap_old_fn(old_optim.adagrad, learningRate=1e-1)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.Adagrad(params, lr=1e-1, lr_decay=1e-3),
-            wrap_old_fn(old_optim.adagrad, learningRate=1e-1, learningRateDecay=1e-3)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.Adagrad(params, lr=1e-1, weight_decay=1e-2),
-            wrap_old_fn(old_optim.adagrad, learningRate=1e-1, weightDecay=1e-2)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
         )
@@ -367,18 +287,6 @@ class TestOptim(TestCase):
 
     @skipIfRocm
     def test_adamax(self):
-        self._test_rosenbrock(
-            lambda params: optim.Adamax(params, lr=1e-1),
-            wrap_old_fn(old_optim.adamax, learningRate=1e-1)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.Adamax(params, lr=1e-1, weight_decay=1e-2),
-            wrap_old_fn(old_optim.adamax, learningRate=1e-1, weightDecay=1e-2)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.Adamax(params, lr=1e-1, betas=(0.95, 0.998)),
-            wrap_old_fn(old_optim.adamax, learningRate=1e-1, beta1=0.95, beta2=0.998)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
         )
@@ -391,18 +299,6 @@ class TestOptim(TestCase):
             optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
     def test_rmsprop(self):
-        self._test_rosenbrock(
-            lambda params: optim.RMSprop(params, lr=1e-2),
-            wrap_old_fn(old_optim.rmsprop, learningRate=1e-2)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.RMSprop(params, lr=1e-2, weight_decay=1e-2),
-            wrap_old_fn(old_optim.rmsprop, learningRate=1e-2, weightDecay=1e-2)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.RMSprop(params, lr=1e-2, alpha=0.95),
-            wrap_old_fn(old_optim.rmsprop, learningRate=1e-2, alpha=0.95)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
         )
@@ -415,18 +311,6 @@ class TestOptim(TestCase):
             optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
     def test_asgd(self):
-        self._test_rosenbrock(
-            lambda params: optim.ASGD(params, lr=1e-3),
-            wrap_old_fn(old_optim.asgd, eta0=1e-3)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.ASGD(params, lr=1e-3, alpha=0.8),
-            wrap_old_fn(old_optim.asgd, eta0=1e-3, alpha=0.8)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.ASGD(params, lr=1e-3, t0=1e3),
-            wrap_old_fn(old_optim.asgd, eta0=1e-3, t0=1e3)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
         )
@@ -440,18 +324,6 @@ class TestOptim(TestCase):
 
     @skipIfRocm
     def test_rprop(self):
-        self._test_rosenbrock(
-            lambda params: optim.Rprop(params, lr=1e-3),
-            wrap_old_fn(old_optim.rprop, stepsize=1e-3)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.Rprop(params, lr=1e-3, etas=(0.6, 1.1)),
-            wrap_old_fn(old_optim.rprop, stepsize=1e-3, etaminus=0.6, etaplus=1.1)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.Rprop(params, lr=1e-3, step_sizes=(1e-4, 3)),
-            wrap_old_fn(old_optim.rprop, stepsize=1e-3, stepsizemin=1e-4, stepsizemax=3)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.Rprop([weight, bias], lr=1e-3)
         )
@@ -464,14 +336,6 @@ class TestOptim(TestCase):
             optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
     def test_lbfgs(self):
-        self._test_rosenbrock(
-            lambda params: optim.LBFGS(params),
-            wrap_old_fn(old_optim.lbfgs)
-        )
-        self._test_rosenbrock(
-            lambda params: optim.LBFGS(params, lr=5e-2, max_iter=5),
-            wrap_old_fn(old_optim.lbfgs, learningRate=5e-2, maxIter=5)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias]),
             ignore_multidevice=True

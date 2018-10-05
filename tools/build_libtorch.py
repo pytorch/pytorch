@@ -9,7 +9,6 @@ from setup_helpers.cuda import USE_CUDA
 if __name__ == '__main__':
     # Placeholder for future interface. For now just gives a nice -h.
     parser = argparse.ArgumentParser(description='Build libtorch')
-    parser.add_argument('--use-cereal', action='store_true')
     options = parser.parse_args()
 
     os.environ['BUILD_TORCH'] = 'ON'
@@ -23,8 +22,8 @@ if __name__ == '__main__':
     command = [build_pytorch_libs, '--use-nnpack']
     if USE_CUDA:
         command.append('--use-cuda')
-    if options.use_cereal:
-        command.append('--use-cereal')
+        if os.environ.get('USE_CUDA_STATIC_LINK', False):
+            command.append('--cuda-static-link')
     command.append('caffe2')
 
     sys.stdout.flush()

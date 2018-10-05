@@ -4,7 +4,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import _standard_normal, broadcast_all
 
 
 class Normal(ExponentialFamily):
@@ -64,7 +64,7 @@ class Normal(ExponentialFamily):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps = self.loc.new(shape).normal_()
+        eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + eps * self.scale
 
     def log_prob(self, value):

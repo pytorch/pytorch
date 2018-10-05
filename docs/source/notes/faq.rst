@@ -99,7 +99,7 @@ My data loader workers return identical random numbers
 -------------------------------------------------------
 You are likely using other libraries to generate random numbers in the dataset.
 For example, NumPy's RNG is duplicated when worker subprocesses are started via
-``fork``. See :class:`torch.utils.data.DataLoader`'s document for how to
+``fork``. See :class:`torch.utils.data.DataLoader`'s documentation for how to
 properly set up random seeds in workers with its :attr:`worker_init_fn` option.
 
 .. _pack-rnn-unpack-with-data-parallelism:

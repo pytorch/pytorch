@@ -15,6 +15,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
+#include <fstream>
 
 namespace torch { namespace jit {
 
@@ -179,6 +180,8 @@ void EncoderBase::EncodeValueInfo(
       shape->mutable_dim(i)->set_dim_value(sizes[i]);
     }
     tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
+  } else {
+    tensor_type->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   }
 }
 
@@ -423,7 +426,7 @@ void GraphEncoder::EncodeTensor(
 class ModuleEncoder: public EncoderBase {
  public:
   ModuleEncoder(const script::Module &module,
-                const std::string &filename);
+                std::ostream& out);
 
  private:
   void EncodeModule(onnx::GraphProto *graph_proto, const script::Module &module);
@@ -446,7 +449,7 @@ class ModuleEncoder: public EncoderBase {
 
   virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
                             const at::Tensor &tensor,
-                            const at::optional<std::string> external_ref) override;
+                            const at::optional<std::string> external_ref = {}) override;
 
   virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
                                            const Value* n) override;
@@ -460,7 +463,7 @@ class ModuleEncoder: public EncoderBase {
                       const TypePtr& type,
                       const std::string& name);
 
-  PyTorchFileWriter file_writer_;
+  PyTorchStreamWriter stream_writer_;
   // Used to deduplicate tensor storages
   std::unordered_map<const void*, uint64_t> storage_dedup_map_;
 
@@ -473,9 +476,9 @@ class ModuleEncoder: public EncoderBase {
 
 ModuleEncoder::ModuleEncoder(
     const script::Module &module,
-    const std::string &filename)
+    std::ostream& out)
     : EncoderBase(onnx_torch::OperatorExportTypes::RAW, false),
-      file_writer_(filename) {
+      stream_writer_(out) {
   model_proto_.set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto_.mutable_graph(), module);
 }
@@ -500,6 +503,7 @@ void ModuleEncoder::EncodeTypeInfo(
   auto kind = type->kind();
   if (kind == TypeKind::DynamicType) {
     type_proto->set_denotation("DynamicType");
+    tensortype_proto->set_elem_type(onnx::TensorProto_DataType_UNDEFINED);
   } else if (kind == TypeKind::TensorType) {
     type_proto->set_denotation("TensorType");
     // encode the number of dimensions by pushing that number of ones into the shape proto
@@ -555,10 +559,18 @@ void ModuleEncoder::EncodeTypeInfo(
     type_proto->set_denotation("FloatType");
   } else if (kind == TypeKind::IntType) {
     type_proto->set_denotation("IntType");
+  } else if (kind == TypeKind::BoolType) {
+    type_proto->set_denotation("BoolType");
   } else if (kind == TypeKind::NoneType) {
     type_proto->set_denotation("NoneType");
   } else if (kind == TypeKind::GeneratorType) {
     type_proto->set_denotation("GeneratorType");
+  } else if (kind == TypeKind::StringType) {
+    type_proto->set_denotation("StringType");
+  } else if (kind == TypeKind::VarType) {
+    type_proto->set_denotation("TypeVar:" + type->expect<VarType>()->name());
+  } else if (kind == TypeKind::WorldType) {
+    type_proto->set_denotation("WorldType");
   } else {
     throw std::runtime_error("unexpected type kind");
   }
@@ -577,7 +589,7 @@ void ModuleEncoder::EncodeModule(
   EncodeParameters(graph_proto, module, "");
   EncodeMethods(graph_proto, module, "");
   auto str = model_proto_.SerializeAsString();
-  file_writer_.writeRecord(str.data(), str.size());
+  stream_writer_.writeRecord(str.data(), str.size());
 }
 
 void ModuleEncoder::EncodeParameters(
@@ -665,7 +677,7 @@ void ModuleEncoder::EncodeMethod(
 void ModuleEncoder::EncodeTensor(
     onnx::TensorProto *tensor_proto,
     const at::Tensor &tensor,
-    const at::optional<std::string> external_ref = {}) {
+    const at::optional<std::string> external_ref) {
   auto storage_ptr = tensor.storage().unsafeGetStorageImpl();
   auto dedup_it = storage_dedup_map_.find(storage_ptr);
   if (dedup_it != storage_dedup_map_.end()) {
@@ -676,7 +688,7 @@ void ModuleEncoder::EncodeTensor(
       // NB: This new tensor is created to support cuda tensors.
       // Storages can be mutated when converting tensors from cuda to cpu,
       // and we need a cpu tensor to copy data from.
-      t = tensor.type().tensor(
+      t = at::getType(tensor).tensor(
           tensor.storage(),
           /* storageOffset = */ 0,
           /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage().size()) },
@@ -684,8 +696,8 @@ void ModuleEncoder::EncodeTensor(
         .cpu();
     }
 
-    auto record_number = file_writer_.writeRecord(
-      static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.numel());
+    auto record_number = stream_writer_.writeRecord(
+      static_cast<char*>(t.storage().data()), t.type().elementSizeInBytes() * t.storage().size());
     tensor_proto->add_int64_data(record_number);
     storage_dedup_map_[storage_ptr] = record_number;
   }
@@ -910,8 +922,14 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
                          graph_encoder.get_raw_data_export_map());
 }
 
+void ExportModule(const script::Module& module, std::ostream& out) {
+  ModuleEncoder(module, out);
+}
+
 void ExportModule(const script::Module& module, const std::string &filename) {
-  ModuleEncoder(module, filename);
+  std::ofstream out(filename, std::ios_base::binary);
+
+  ExportModule(module, out);
 }
 
 }}

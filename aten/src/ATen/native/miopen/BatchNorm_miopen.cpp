@@ -89,7 +89,7 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     mode = miopenBNSpatial;
   }
 
-  auto output_t = input->type().tensor(input->sizes());
+  auto output_t = at::empty(input->sizes(), input->options());
   TensorArg output{ output_t, "output", 0 };
 
   auto handle = getMiopenHandle();
@@ -103,8 +103,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
 
   if (training) {
     int64_t num_features = input_t.size(1);
-    save_mean = weight_t.type().tensor({ num_features });
-    save_var = weight_t.type().tensor({ num_features });
+    save_mean = at::empty({ num_features }, weight_t.options());
+    save_var = at::empty({ num_features }, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
       idesc.desc(), input->data_ptr(),
@@ -177,9 +177,9 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     mode = miopenBNSpatial;
   }
 
-  auto grad_input_t  = input->type().tensor(input->sizes());
-  auto grad_weight_t = weight->type().tensor(weight->sizes());
-  auto grad_bias_t   = weight->type().tensor(weight->sizes());
+  auto grad_input_t  = at::empty(input->sizes(), input->options());
+  auto grad_weight_t = at::empty(weight->sizes(), weight->options());
+  auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
 
   auto handle = getMiopenHandle();
   auto dataType = getMiopenDataType(*input);

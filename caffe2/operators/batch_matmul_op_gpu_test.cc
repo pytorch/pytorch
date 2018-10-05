@@ -26,11 +26,11 @@ class BatchMatMulOpGPUTest : public testing::Test {
   }
 
   void AddConstInput(
-      const std::vector<TIndex>& dims,
+      const std::vector<int64_t>& dims,
       const float value,
       const string& name) {
     Blob* blob = ws_.CreateBlob(name);
-    auto* tensor = blob->GetMutableTensor(CUDA);
+    auto* tensor = BlobGetMutableTensor(blob, CUDA);
     tensor->Resize(dims);
     math::Set<float, CUDAContext>(
         tensor->size(),
@@ -39,7 +39,7 @@ class BatchMatMulOpGPUTest : public testing::Test {
         cuda_context_.get());
   }
 
-  void VerifyOutput(const std::vector<TIndex>& dims, const float value) const {
+  void VerifyOutput(const std::vector<int64_t>& dims, const float value) const {
     const Blob* Y_blob = ws_.GetBlob("Y");
     ASSERT_NE(nullptr, Y_blob);
     const auto& Y = Y_blob->Get<Tensor>();
@@ -64,12 +64,12 @@ TEST_F(BatchMatMulOpGPUTest, BatchMatMulOpGPUNormalTest) {
   if (!HasCudaGPU()) {
     return;
   }
-  AddConstInput(std::vector<TIndex>{3, 5, 10}, 1.0f, "A");
-  AddConstInput(std::vector<TIndex>{3, 10, 6}, 1.0f, "B");
+  AddConstInput(std::vector<int64_t>{3, 5, 10}, 1.0f, "A");
+  AddConstInput(std::vector<int64_t>{3, 10, 6}, 1.0f, "B");
   std::unique_ptr<OperatorBase> op(CreateOperator(def_, &ws_));
   ASSERT_NE(nullptr, op);
   ASSERT_TRUE(op->Run());
-  VerifyOutput(std::vector<TIndex>{3, 5, 6}, 10.0f);
+  VerifyOutput(std::vector<int64_t>{3, 5, 6}, 10.0f);
 }
 
 TEST_F(BatchMatMulOpGPUTest, BatchMatMulOpGPUBroadcastTest) {
@@ -79,12 +79,12 @@ TEST_F(BatchMatMulOpGPUTest, BatchMatMulOpGPUBroadcastTest) {
   auto* arg = def_.add_arg();
   arg->set_name("broadcast");
   arg->set_i(1);
-  AddConstInput(std::vector<TIndex>{3, 5, 10}, 1.0f, "A");
-  AddConstInput(std::vector<TIndex>{2, 3, 10, 6}, 1.0f, "B");
+  AddConstInput(std::vector<int64_t>{3, 5, 10}, 1.0f, "A");
+  AddConstInput(std::vector<int64_t>{2, 3, 10, 6}, 1.0f, "B");
   std::unique_ptr<OperatorBase> op(CreateOperator(def_, &ws_));
   ASSERT_NE(nullptr, op);
   ASSERT_TRUE(op->Run());
-  VerifyOutput(std::vector<TIndex>{2, 3, 5, 6}, 10.0f);
+  VerifyOutput(std::vector<int64_t>{2, 3, 5, 6}, 10.0f);
 }
 
 } // namespace

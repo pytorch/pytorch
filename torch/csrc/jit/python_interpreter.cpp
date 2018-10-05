@@ -5,7 +5,6 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/custom_operator.h"
 #include "torch/csrc/jit/graph_executor.h"
@@ -20,6 +19,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/Exceptions.h"
 
 namespace py = pybind11;
 
@@ -54,8 +54,12 @@ Operation createPythonOperation(Node* op_) {
       i++;
     }
     drop(stack, num_inputs);
-    py::object py_output(func(*py_inputs));
-    stack.push_back(returnToIValue(op->output()->type(), py_output));
+    try {
+      py::object py_output(func(*py_inputs));
+      stack.push_back(returnToIValue(op->output()->type(), py_output));
+    } catch (py::error_already_set & e) {
+      throw python_error();
+    }
     return 0;
   };
 }

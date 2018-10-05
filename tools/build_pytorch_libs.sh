@@ -22,7 +22,6 @@ USE_NNPACK=0
 USE_MKLDNN=0
 USE_GLOO_IBVERBS=0
 CAFFE2_STATIC_LINK_CUDA=0
-TORCH_USE_CEREAL=0
 RERUN_CMAKE=1
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -46,9 +45,6 @@ while [[ $# -gt 0 ]]; do
           ;;
       --cuda-static-link)
           CAFFE2_STATIC_LINK_CUDA=1
-          ;;
-      --use-cereal)
-          TORCH_USE_CEREAL=1
           ;;
       *)
           break
@@ -194,7 +190,6 @@ function build() {
 		       -DTHCUNN_SO_VERSION=1 \
 		       -DTHD_SO_VERSION=1 \
 		       -DUSE_CUDA=$USE_CUDA \
-		       -DTORCH_USE_CEREAL=$TORCH_USE_CEREAL \
 		       -DBUILD_EXAMPLES=OFF \
 		       -DBUILD_TEST=$BUILD_TEST \
 		       -DNO_NNPACK=$((1-$USE_NNPACK)) \
@@ -202,7 +197,7 @@ function build() {
 		       -DCMAKE_DEBUG_POSTFIX="" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
 		       ${@:2} \
-		       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ${CMAKE_ARGS[@]}
+		       ${CMAKE_ARGS[@]}
   fi
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   popd
@@ -243,10 +238,10 @@ function build_nccl() {
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
   find lib -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "${INSTALL_DIR}/lib/"
-  if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
-    ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
-  fi
   popd
+  if [ -f "./nccl/nccl/src/nccl.h" ]; then
+    rm ./nccl/nccl/src/nccl.h
+  fi
 }
 
 # purposefully not using build() because we need Caffe2 to build the same
@@ -278,6 +273,7 @@ function build_caffe2() {
 		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
 		       -DBUILDING_WITH_TORCH_LIBS=ON \
+		       -DTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION" \
 		       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
 		       -DBUILD_TORCH=$BUILD_TORCH \
 		       -DBUILD_PYTHON=$BUILD_PYTHON \
@@ -288,6 +284,7 @@ function build_caffe2() {
 		       -DBUILD_CAFFE2_OPS=$BUILD_CAFFE2_OPS \
 		       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
 		       -DUSE_CUDA=$USE_CUDA \
+		       -DUSE_NUMPY=$USE_NUMPY \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DUSE_ROCM=$USE_ROCM \
 		       -DUSE_NNPACK=$USE_NNPACK \
@@ -305,7 +302,6 @@ function build_caffe2() {
 		       -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
 		       -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-		       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
 		       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
 		       -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
@@ -316,22 +312,33 @@ function build_caffe2() {
   fi
 
   # This is needed by the aten tests built with caffe2
-  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
+  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.2" ]; then
       # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
       find "${INSTALL_DIR}/lib" -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "lib/"
   fi
 
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
 
+  # Install Python proto files
+  if [[ "$BUILD_PYTHON" == 'ON' ]]; then
+      echo "Copying Caffe2 proto files from $(pwd)/caffe2/proto to  $(cd .. && pwd)/caffe2/proto"
+      echo "All the files in caffe2/proto are $(find caffe2/proto)"
+      for proto_file in $(pwd)/caffe2/proto/*.py; do
+          cp $proto_file "$(pwd)/../caffe2/proto/"
+      done
+  fi
+
+
   # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
-    # root/torch/lib/tmp_install/lib
-    pushd "$INSTALL_DIR/lib"
-    for lib in *.dylib; do
-      echo "Updating install_name for $lib"
-      install_name_tool -id @rpath/$lib $lib
-    done
-    popd
+      # root/torch/lib/tmp_install/lib
+      echo "Updating all install_names in $INSTALL_DIR/lib"
+      pushd "$INSTALL_DIR/lib"
+      for lib in *.dylib; do
+          echo "Updating install_name for $(pwd)/$lib"
+          install_name_tool -id @rpath/$lib $lib
+      done
+      popd
   fi
 }
 
@@ -373,14 +380,21 @@ pushd $TORCH_LIB_DIR
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
+echo "tools/build_pytorch_libs.sh succeeded at $(date)"
+echo "removing $INSTALL_DIR/lib/cmake and $INSTALL_DIR/lib/python"
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
+
+echo "Copying $INSTALL_DIR/lib to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/lib64"/* .
 fi
+echo "Copying $(cd ../.. && pwd)/aten/src/generic/THNN.h to $(pwd)"
 $SYNC_COMMAND ../../aten/src/THNN/generic/THNN.h .
 $SYNC_COMMAND ../../aten/src/THCUNN/generic/THCUNN.h .
+
+echo "Copying $INSTALL_DIR/include to $(pwd)"
 $SYNC_COMMAND -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     $SYNC_COMMAND -r "$INSTALL_DIR/bin/"/* .

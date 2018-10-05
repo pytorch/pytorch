@@ -7,12 +7,13 @@ import numpy as np
 from caffe2.python import core, workspace
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import hypothesis.extra.numpy as hnp
 
 
-class TestGatherOps(hu.HypothesisTestCase):
-    @given(rows_num=st.integers(1, 10000),
+class TestGatherOps(serial.SerializedTestCase):
+    @serial.given(rows_num=st.integers(1, 10000),
            index_num=st.integers(0, 5000),
            **hu.gcs)
     def test_gather_ops(self, rows_num, index_num, gc, dc):
@@ -38,10 +39,11 @@ def _inputs(draw):
     rows_num = draw(st.integers(1, 100))
     index_num = draw(st.integers(1, 10))
     batch_size = draw(st.integers(2, 10))
+    block_size = draw(st.integers(1, 2))
     return (
         draw(hnp.arrays(
             np.float32,
-            (batch_size, rows_num, 2),
+            (batch_size, rows_num, block_size),
             elements=st.floats(-10.0, 10.0),
         )),
         draw(hnp.arrays(
@@ -52,8 +54,8 @@ def _inputs(draw):
     )
 
 
-class TestBatchGatherOps(hu.HypothesisTestCase):
-    @given(inputs=_inputs(),
+class TestBatchGatherOps(serial.SerializedTestCase):
+    @serial.given(inputs=_inputs(),
            **hu.gcs)
     def test_batch_gather_ops(self, inputs, gc, dc):
         data, ind = inputs

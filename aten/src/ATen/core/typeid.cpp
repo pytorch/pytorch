@@ -26,14 +26,6 @@ std::mutex& gTypeRegistrationMutex() {
   return g_type_registration_mutex;
 }
 
-string GetExceptionString(const std::exception& e) {
-#ifdef __GXX_RTTI
-  return at::demangle(typeid(e).name()) + ": " + e.what();
-#else
-  return string("Exception (no RTTI available): ") + e.what();
-#endif // __GXX_RTTI
-}
-
 void TypeMeta::_ThrowRuntimeTypeLogicError(const std::string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
@@ -63,6 +55,7 @@ CAFFE_DEFINE_KNOWN_TYPE(int16_t);
 CAFFE_DEFINE_KNOWN_TYPE(int64_t);
 CAFFE_DEFINE_KNOWN_TYPE(double);
 CAFFE_DEFINE_KNOWN_TYPE(char);
+CAFFE_DEFINE_KNOWN_TYPE(at::Half);
 CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::mutex>);
 CAFFE_DEFINE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>);
 CAFFE_DEFINE_KNOWN_TYPE(std::vector<int32_t>);
@@ -72,10 +65,11 @@ CAFFE_DEFINE_KNOWN_TYPE(bool*);
 CAFFE_DEFINE_KNOWN_TYPE(char*);
 CAFFE_DEFINE_KNOWN_TYPE(int*);
 
-#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+// see typeid.h for details.
+#if defined(_MSC_VER) || defined(__APPLE__) || defined(__ANDROID__)
 CAFFE_DEFINE_KNOWN_TYPE(long);
 CAFFE_DEFINE_KNOWN_TYPE(std::vector<long>);
-#endif // CAFFE2_UNIQUE_LONG_TYPEMETA
+#endif
 
 CAFFE_DEFINE_KNOWN_TYPE(_CaffeHighestPreallocatedTypeId);
 

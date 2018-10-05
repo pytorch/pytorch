@@ -20,11 +20,11 @@ from __future__ import unicode_literals
 
 import hypothesis.strategies as st
 import numpy as np
-from hypothesis import given
 from functools import partial
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
 def _unique_ref(x, return_inverse):
@@ -34,8 +34,8 @@ def _unique_ref(x, return_inverse):
     return ret
 
 
-class TestUniqueOps(hu.HypothesisTestCase):
-    @given(
+class TestUniqueOps(serial.SerializedTestCase):
+    @serial.given(
         X=hu.tensor1d(
             # allow empty
             min_len=0,

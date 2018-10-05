@@ -198,22 +198,26 @@ bool SliceImpl(
 
 } // namespace
 
-template <class SIndex, class Context>
+template <class Context>
 class SliceOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(this->template GetRepeatedArgument<SIndex>("starts")),
-        ends_(this->template GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
   bool RunOnDevice() override {
-    return RunOnDeviceImpl(Input(0), Output(0));
+    if (InputSize() > 1) {
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
+    } else {
+      return DoRunWithType<int64_t>();
+    }
   }
 
- protected:
-  bool RunOnDeviceImpl(const Tensor& data, Tensor* output) {
+  template <typename SIndex>
+  bool DoRunWithType() {
     if (InputSize() > 1) {
       starts_host_.CopyFrom(Input(1));
       ends_host_.CopyFrom(Input(2));
@@ -238,31 +242,45 @@ class SliceOp : public Operator<Context> {
       }
     }
 
+    auto data = Input(0);
+    auto output = Output(0);
+
     return SliceImpl<SIndex, Context>(
         output, data, starts_host_, ends_host_, &context_);
   }
 
-  AT_DISABLE_COPY_AND_ASSIGN(SliceOp);
+  C10_DISABLE_COPY_AND_ASSIGN(SliceOp);
 
- private:
-  std::vector<SIndex> starts_;
-  std::vector<SIndex> ends_;
+ protected:
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
   Tensor starts_host_{CPU};
   Tensor ends_host_{CPU};
 };
 
-template <class SIndex, class Context>
+template <class Context>
 class SliceGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SliceGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        starts_(this->template GetRepeatedArgument<SIndex>("starts")),
-        ends_(this->template GetRepeatedArgument<SIndex>("ends")),
+        starts_(this->template GetRepeatedArgument<int64_t>("starts")),
+        ends_(this->template GetRepeatedArgument<int64_t>("ends")),
         statically_inited_(false) {}
 
+  C10_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
+
   bool RunOnDevice() override {
+    if (InputSize() == 4) {
+      return DispatchHelper<TensorTypes<int, int64_t>>::call(this, Input(1));
+    } else {
+      return DoRunWithType<int64_t>();
+    }
+  }
+
+  template <typename SIndex>
+  bool DoRunWithType()  {
     auto* gdata = Output(0);
     auto& data = Input(0);
 
@@ -301,11 +319,10 @@ class SliceGradientOp : public Operator<Context> {
     }
   }
 
-  AT_DISABLE_COPY_AND_ASSIGN(SliceGradientOp);
-
  private:
-  std::vector<SIndex> starts_;
-  std::vector<SIndex> ends_;
+
+  std::vector<int64_t> starts_;
+  std::vector<int64_t> ends_;
   bool statically_inited_;
   Tensor starts_host_{CPU};
   Tensor ends_host_{CPU};

@@ -30,10 +30,9 @@ class Pareto(TransformedDistribution):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Pareto, _instance)
-        base_dist = self.base_dist.expand(batch_shape)
-        super(Pareto, new).__init__(base_dist, self.transforms, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+        new.scale = self.scale.expand(batch_shape)
+        new.alpha = self.alpha.expand(batch_shape)
+        return super(Pareto, self).expand(batch_shape, _instance=new)
 
     @property
     def mean(self):

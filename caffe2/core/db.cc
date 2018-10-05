@@ -12,7 +12,7 @@ CAFFE_KNOWN_TYPE(db::Cursor);
 
 namespace db {
 
-CAFFE_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
+C10_DEFINE_REGISTRY(Caffe2DBRegistry, DB, const string&, Mode);
 
 // Below, we provide a bare minimum database "minidb" as a reference
 // implementation as well as a portable choice to store data.
@@ -119,7 +119,7 @@ class MiniDBTransaction : public Transaction {
   FILE* file_;
   std::lock_guard<std::mutex> lock_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(MiniDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(MiniDBTransaction);
 };
 
 class MiniDB : public DB {

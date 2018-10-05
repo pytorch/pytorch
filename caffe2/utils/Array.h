@@ -202,7 +202,7 @@ public:
 #if defined(__cpp_deduction_guides) && __cpp_deduction_guides >= 201606
   template<typename _Tp, typename... _Up>
   array(_Tp, _Up...) ->
-    array<enable_if_t<(is_same_v<_Tp, _Up> && ...), _Tp>, 1 + sizeof...(_Up)>;
+    array<enable_if_t<(std::is_same<_Tp, _Up>::value && ...), _Tp>, 1 + sizeof...(_Up)>;
 #endif
 
 // Array comparisons.
@@ -259,7 +259,7 @@ template<std::size_t _Int, typename _Tp, std::size_t _Nm>
 constexpr _Tp&& get(array<_Tp, _Nm>&& __arr) noexcept
 {
   static_assert(_Int < _Nm, "array index is within bounds");
-  return std::move(get<_Int>(__arr));
+  return guts::move(get<_Int>(__arr));
 }
 
 template<std::size_t _Int, typename _Tp, std::size_t _Nm>
@@ -292,12 +292,12 @@ constexpr inline array<T, N-1> tail(const array<T, N>& arg) {
 namespace detail {
 template<class T, size_t N, size_t... I>
 constexpr inline array<T, N+1> prepend_(T&& head, const array<T, N>& tail, guts::index_sequence<I...>) {
-  return {{std::forward<T>(head), get<I>(tail)...}};
+  return {{guts::forward<T>(head), get<I>(tail)...}};
 }
 }
 template<class T, size_t N>
 constexpr inline array<T, N+1> prepend(T&& head, const array<T, N>& tail) {
-  return detail::prepend_(std::forward<T>(head), tail, guts::make_index_sequence<N>());
+  return detail::prepend_(guts::forward<T>(head), tail, guts::make_index_sequence<N>());
 }
 
 /**

@@ -3,7 +3,7 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/fusers/interface.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/operator.h"
@@ -13,10 +13,12 @@
 
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
+#include <string>
 #include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,12 +53,30 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
 
 RegisterOperators reg({
     Operator(
+        prim::MemoryFence,
+        [](Node* node) {
+          return [](Stack& stack) {
+            return 0;
+          };
+        }),
+    Operator(
         prim::FusionGroup,
         [](Node* node) {
-          auto kernel_cache = sharedFusionCompiler().getOrCompile(node);
-          return [kernel_cache](Stack& stack) {
+          auto handle = getFusionHandle(node);
+          return [handle](Stack& stack) {
             autograd::profiler::RecordFunction record("FusionGroup");
-            kernel_cache->run(stack);
+            handle->run(stack);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::TensorToBool,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            at::DeviceGuard guard(a);
+            push(stack, a.item<int64_t>() != 0);
             return 0;
           };
         }),
@@ -68,7 +88,7 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               at::DeviceGuard guard(a);
-              push(stack, a.toCLong());
+              push(stack, a.item<int64_t>());
               return 0;
             };
           } else {
@@ -76,7 +96,7 @@ RegisterOperators reg({
               at::Tensor a;
               pop(stack, a);
               at::DeviceGuard guard(a);
-              push(stack, a.toCDouble());
+              push(stack, a.item<double>());
               return 0;
             };
           }
@@ -90,7 +110,7 @@ RegisterOperators reg({
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/true);
               at::DeviceGuard guard(a);
-              push(stack, a.toCLong());
+              push(stack, a.item<int64_t>());
               return 0;
             };
           } else {
@@ -99,7 +119,7 @@ RegisterOperators reg({
               pop(stack, a);
               checkImplicitTensorToNum(a, /*to int*/false);
               at::DeviceGuard guard(a);
-              push(stack, a.toCDouble());
+              push(stack, a.item<double>());
               return 0;
             };
           }
@@ -111,6 +131,18 @@ RegisterOperators reg({
             at::Scalar s;
             pop(stack, s);
             push(stack, autograd::make_variable(at::scalar_to_tensor(s)));
+            return 0;
+          };
+        }),
+    Operator(
+        prim::BoolToTensor,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            bool b;
+            pop(stack, b);
+            push(
+                stack,
+                autograd::make_variable(at::scalar_to_tensor(b)));
             return 0;
           };
         }),
@@ -131,6 +163,21 @@ RegisterOperators reg({
             double d;
             pop(stack, d);
             push(stack, (int64_t)d);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::StringToFloat,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            auto s = pop(stack).toString();
+            if (s->string() != "inf") {
+              AT_ERROR(
+                  "Only 'inf' can be cast to a float, but got '",
+                  s->string(),
+                  "'");
+            }
+            push(stack, std::numeric_limits<double>::infinity());
             return 0;
           };
         }),
@@ -184,6 +231,30 @@ RegisterOperators reg({
           auto N = node->inputs().size();
           return [=](Stack& stack) {
             drop(stack, N);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::LoadWorld,
+        [](Node* node) {
+          return [](Stack& stack) {
+            push(stack, World{0});
+            return 0;
+          };
+        }),
+    Operator(
+        prim::StoreWorld,
+        [](Node* node) {
+          return [](Stack& stack) {
+            drop(stack, 1);
+            return 0;
+          };
+        }),
+    Operator(
+        prim::DummyWorld,
+        [](Node* node) {
+          return [](Stack& stack) {
+            AT_ERROR("Encountered a dummy world during graph execution.");
             return 0;
           };
         }),
@@ -382,33 +453,41 @@ RegisterOperators reg({
               return 0;
             };
           } else {
-            std::stringstream ss;
-            ss << "unsupported list type: " << *lt->getElementType();
-            throw std::runtime_error(ss.str());
+            return [=](Stack& stack) {
+              const size_t stack_size = stack.size();
+              std::vector<IValue> vals;
+              vals.reserve(num_inputs);
+              for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
+                vals.push_back(std::move(stack[i]));
+              }
+              drop(stack, num_inputs);
+              push(stack, std::move(vals));
+              return 0;
+            };
           }
         }),
 });
 
 // define implementations for primitive number ops
-#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, float_result)          \
-  Operator(                                                                 \
-      #aten_op "(int a, int b) -> int",                                     \
-      [](Node* node) {                                                      \
-        return [=](Stack& stack) {                                          \
-          int64_t a, b;                                                     \
-          pop(stack, a, b);                                                 \
-          push(stack, int_op);                                                  \
-          return 0;                                                         \
-        };                                                                  \
-      }),                                                                   \
-  Operator(                                                                 \
-      #aten_op "(float a, float b) -> " #float_result, [](Node* node) {     \
-        return [=](Stack& stack) {                                          \
-          double a, b;                                                      \
-          pop(stack, a, b);                                                 \
-          push(stack, float_op);                                                  \
-          return 0;                                                         \
-        };                                                                  \
+#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
+  Operator(                                                                    \
+      #aten_op "(int a, int b) -> " #int_result,                               \
+      [](Node* node) {                                                         \
+        return [=](Stack& stack) {                                             \
+          int64_t a, b;                                                        \
+          pop(stack, a, b);                                                    \
+          push(stack, int_op);                                                 \
+          return 0;                                                            \
+        };                                                                     \
+      }),                                                                      \
+  Operator(                                                                    \
+      #aten_op "(float a, float b) -> " #float_result, [](Node* node) {        \
+        return [=](Stack& stack) {                                             \
+          double a, b;                                                         \
+          pop(stack, a, b);                                                    \
+          push(stack, float_op);                                               \
+          return 0;                                                            \
+        };                                                                     \
       }),
 
 #define DEFINE_INT_OP(aten_op, op)                            \
@@ -421,27 +500,18 @@ RegisterOperators reg({
     };                                                        \
   }),
 
-#define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, float)
-#define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, int)
-
-// define helpers for where aten is missing scalar overloads
-// note: it would be better to define these in a standard library as
-// script functions and have the compiler substitute them in
-// however, we need to add type annotations to the parser in order for us
-// to move them there.
-// e.g. s + t ==> t + s
-// e.g. s - d == -d + s
-
-#define DEFINE_ST_OP(aten_op, reverse_exp)                             \
-  Operator("aten::" #aten_op "(Scalar other, Tensor self) -> Tensor", [](Node* node) { \
-    return [=](Stack& stack) {                                         \
-      at::Scalar a;                                                    \
-      at::Tensor b;                                                    \
-      pop(stack, a, b);                                                \
-      at::DeviceGuard guard(b);                                        \
-      push(stack, reverse_exp);                                        \
-      return 0;                                                        \
-    };                                                                 \
+#define DEFINE_BINARY_OP(aten_op, op) \
+  DEFINE_GENERIC_OP(aten_op, op, op, int, float)
+#define DEFINE_COMPARISON_OP(aten_op, op) \
+  DEFINE_GENERIC_OP(aten_op, op, op, bool, bool)
+#define DEFINE_BOOL_OP(aten_op, op)                              \
+  Operator(#aten_op "(bool a, bool b) -> bool", [](Node* node) { \
+    return [=](Stack& stack) {                                   \
+      bool a, b;                                                 \
+      pop(stack, a, b);                                          \
+      push(stack, op);                                           \
+      return 0;                                                  \
+    };                                                           \
   }),
 
 // Convert an python index (which may be negative) into an index usable for a
@@ -452,6 +522,19 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
     idx = list_size + idx;
   }
   return idx;
+}
+
+template <typename TList, typename TElement>
+Operation listAppend(Node* node) {
+  return [](Stack& stack) {
+    TList a;
+    TElement el;
+    pop(stack, a, el);
+
+    a->elements().push_back(el);
+
+    return 0;
+  };
 }
 
 template <typename T>
@@ -489,11 +572,7 @@ Operation listEq(Node* node) {
     T a;
     T b;
     pop(stack, a, b);
-    if (a->elements() == b->elements()) {
-      push(stack, 1);
-    } else {
-      push(stack, 0);
-    }
+    push(stack, a->elements() == b->elements() ? 1 : 0);
     return 0;
   };
 }
@@ -587,31 +666,28 @@ Operation listSlice(Node* node) {
 }
 
 RegisterOperators reg2({
-    Operator("aten::select(int[] a, int b) -> int", listSelect<Shared<IntList>>),
-    Operator("aten::select(float[] a, int b) -> float", listSelect<Shared<DoubleList>>),
-    Operator("aten::select(Tensor[] a, int b) -> Tensor", listSelect<Shared<TensorList>>),
 
-    Operator("aten::len(int[] a) -> int", listLen<Shared<IntList>>),
-    Operator("aten::len(float[] a) -> int", listLen<Shared<DoubleList>>),
-    Operator("aten::len(Tensor[] a) -> int", listLen<Shared<TensorList>>),
+#define CREATE_LIST_OPS(decl_type, c_type) \
+    Operator("aten::select(" decl_type "[] a, int b) -> " decl_type, listSelect<Shared<c_type>>), \
+    Operator("aten::len(" decl_type "[] a) -> int", listLen<Shared<c_type>>), \
+    Operator("aten::add(" decl_type "[] a, " decl_type "[] b) -> " decl_type "[]", listAdd<Shared<c_type>, c_type::ElemType>), \
+    Operator( \
+        "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
+        listSlice<Shared<c_type>, c_type::ElemType>), \
+    Operator( \
+        "aten::append(World w, " decl_type "[] list, " decl_type " el) -> World", \
+        listAppend<Shared<c_type>, c_type::ElemType>), \
+
+
+    CREATE_LIST_OPS("int", IntList)
+    CREATE_LIST_OPS("float", DoubleList)
+    CREATE_LIST_OPS("Tensor", TensorList)
+    CREATE_LIST_OPS("t", GenericList)
+
 
     Operator("aten::eq(int[] a, int[] b) -> int", listEq<Shared<IntList>>),
     Operator("aten::eq(float[] a, float[] b) -> int", listEq<Shared<DoubleList>>),
     Operator("aten::eq(Tensor[] a, Tensor[] b) -> int", listEq<Shared<TensorList>>),
-
-    Operator("aten::add(int[] a, int[] b) -> int[]", listAdd<Shared<IntList>, int64_t>),
-    Operator("aten::add(float[] a, float[] b) -> float[]", listAdd<Shared<DoubleList>, double>),
-    Operator("aten::add(Tensor[] a, Tensor[] b) -> Tensor[]", listAdd<Shared<TensorList>, at::Tensor>),
-
-    Operator(
-        "aten::slice(int[] l, int start, int end=9223372036854775807, int step=1) -> int[]",
-        listSlice<Shared<IntList>, int64_t>),
-    Operator(
-        "aten::slice(float[] l, int start, int end=9223372036854775807, int step=1) -> float[]",
-        listSlice<Shared<DoubleList>, double>),
-    Operator(
-        "aten::slice(Tensor[] l, int start, int end=9223372036854775807, int step=1) -> Tensor[]",
-        listSlice<Shared<TensorList>, at::Tensor>),
 
     DEFINE_BINARY_OP(aten::add, a + b)
     DEFINE_BINARY_OP(aten::sub, a - b)
@@ -621,7 +697,7 @@ RegisterOperators reg2({
     // Pass in two ops for handling int and float separately as % in C++ only works for int
     // The modulus calculation is different between C++ and Python (on negative), we preserve
     // the python behavior as it's more common and match python syntax, hence the conversion.
-    DEFINE_GENERIC_OP(aten::remainder, (b + (a % b)) % b, fmod((b + fmod(a, b)), b), float)
+    DEFINE_GENERIC_OP(aten::remainder, (b + (a % b)) % b, fmod((b + fmod(a, b)), b), int, float)
 
     // TODO: Support python floordiv (//)
     // Right now aten::floordiv is only used by loop unrolling
@@ -654,8 +730,8 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::le, a <= b)
     DEFINE_COMPARISON_OP(aten::ge, a >= b)
 
-    DEFINE_INT_OP(aten::__and__, a&& b)
-    DEFINE_INT_OP(aten::__or__, a || b)
+    DEFINE_BOOL_OP(aten::__and__, a && b)
+    DEFINE_BOOL_OP(aten::__or__, a || b)
 
     Operator("aten::_construct_empty_int_list() -> int[]",
         [](Node* node) -> Operation {
@@ -710,7 +786,7 @@ RegisterOperators reg2({
             pop(stack, t);
             std::vector<int64_t> elems;
             for(int i = 0; i < t.size(0); i++){
-              elems.push_back(*t[i].toIntData());
+              elems.push_back(*t[i].data<int32_t>());
             }
             push(stack, jit::IntList::create(elems));
             return 0;
@@ -731,21 +807,5 @@ RegisterOperators reg2({
             return 0;
           };
         }),
-    // commutative
-    DEFINE_ST_OP(mul, at::mul(b, a))
-    DEFINE_ST_OP(add, at::add(b, a))
-    DEFINE_ST_OP(ne, at::ne(b, a))
-    DEFINE_ST_OP(eq, at::eq(b, a))
-
-    // comparisons, reverse the condition
-    DEFINE_ST_OP(lt, b > a)
-    DEFINE_ST_OP(le, b >= a)
-    DEFINE_ST_OP(gt, b < a)
-    DEFINE_ST_OP(ge, b <= a)
-
-    // rsub
-    DEFINE_ST_OP(sub, at::add(b.neg(), a))
-    // rdiv
-    DEFINE_ST_OP(div, at::mul(at::reciprocal(b), a))
 });
 }}} // torch::jit::anon

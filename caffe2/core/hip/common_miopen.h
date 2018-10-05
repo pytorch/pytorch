@@ -103,7 +103,7 @@ class miopenTypeWrapper<float>
 };
 
 template <>
-class miopenTypeWrapper<float16>
+class miopenTypeWrapper<at::Half>
 {
     public:
     static const miopenDataType_t type = miopenHalf;
@@ -164,7 +164,7 @@ class miopenTensorDescWrapper
     miopenTensorDescriptor_t desc_;
     miopenDataType_t type_;
     vector<int> dims_;
-    AT_DISABLE_COPY_AND_ASSIGN(miopenTensorDescWrapper);
+    C10_DISABLE_COPY_AND_ASSIGN(miopenTensorDescWrapper);
 };
 
 } // namespace caffe2

@@ -2,6 +2,7 @@
 
 #include <gloo/allreduce_halving_doubling.h>
 #include <gloo/allreduce_ring_chunked.h>
+#include <gloo/barrier_all_to_one.h>
 #include <gloo/broadcast_one_to_all.h>
 
 #ifdef USE_CUDA
@@ -145,7 +146,7 @@ ProcessGroupGloo::WorkGloo::WorkGloo()
 
 ProcessGroupGloo::WorkGloo::~WorkGloo() {}
 
-bool ProcessGroupGloo::WorkGloo::isCompleted() const {
+bool ProcessGroupGloo::WorkGloo::isCompleted() {
   return completed_;
 }
 
@@ -186,23 +187,26 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
   {
     std::unique_lock<std::mutex> lock(m_);
     completed_ = true;
+    if (entry.key.type != nullptr) {
 #ifdef USE_CUDA
-    cuda_ = entry.key.type->is_cuda();
-    // Populate devices and events so that we can later synchronize
-    // with the operation associated with this work finishing.
-    if (cuda_) {
-      at::DeviceGuard deviceGuard;
-      devices_ = entry.key.devices;
-      events_.resize(devices_.size());
-      for (size_t i = 0; i < devices_.size(); i++) {
-        deviceGuard.set_index(devices_[i]);
-        events_[i] = CUDAEvent::create();
-        const auto& event = events_[i].getEvent();
-        const auto& stream = entry.streams[i].getStream();
-        C10D_CUDA_CHECK(cudaEventRecord(event, stream));
+      cuda_ = entry.key.type->is_cuda();
+
+      // Populate devices and events so that we can later synchronize
+      // with the operation associated with this work finishing.
+      if (cuda_) {
+        at::DeviceGuard deviceGuard;
+        devices_ = entry.key.devices;
+        events_.resize(devices_.size());
+        for (size_t i = 0; i < devices_.size(); i++) {
+          deviceGuard.set_index(devices_[i]);
+          events_[i] = CUDAEvent::create();
+          const auto& event = events_[i].getEvent();
+          const auto& stream = entry.streams[i].getStream();
+          C10D_CUDA_CHECK(cudaEventRecord(event, stream));
+        }
       }
-    }
 #endif
+    }
   }
   cv_.notify_all();
 }
@@ -222,7 +226,7 @@ ProcessGroupGloo::SendWork::SendWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)) {}
 
-bool ProcessGroupGloo::SendWork::isCompleted() const {
+bool ProcessGroupGloo::SendWork::isCompleted() {
   // No way to poll for completion yet
   return true;
 }
@@ -252,7 +256,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
     int* srcRank)
     : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(srcRank) {}
 
-bool ProcessGroupGloo::RecvWork::isCompleted() const {
+bool ProcessGroupGloo::RecvWork::isCompleted() {
   // No way to poll for completion yet
   return true;
 }
@@ -306,10 +310,6 @@ ProcessGroupGloo::ProcessGroupGloo(
   for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this);
   }
-
-#ifdef USE_CUDA
-  thcState_ = ::at::globalContext().lazyInitCUDA();
-#endif
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -383,6 +383,10 @@ void ProcessGroupGloo::createAlgorithm(AlgorithmEntry& entry) {
       return;
     case CollectiveType::BROADCAST:
       GENERATE_ALL_TYPES(key.type->scalarType(), createBroadcast, entry);
+      return;
+    case CollectiveType::BARRIER:
+      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+          new ::gloo::BarrierAllToOne(contexts_[0]));
       return;
     case CollectiveType::UNUSED:
       break;
@@ -497,6 +501,11 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
 
+  // Without type there is nothing else to construct
+  if (key.type == nullptr) {
+    return entry;
+  }
+
   // Allocate source tensors for this entry
   auto& srcSizes = key.srcSizes;
   entry->src.resize(srcSizes.size());
@@ -509,7 +518,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     }
     deviceGuard.set_index(-1);
 #endif
-    entry->src[i] = key.type->tensor(srcSizes[i]);
+    entry->src[i] = at::empty(srcSizes[i], key.type->options());
   }
 
 #ifdef USE_CUDA
@@ -592,14 +601,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
   // In case of CUDA, ensure that operations that are queued after
   // this collective wait for the collective to complete.
   if (key.type->is_cuda()) {
-    synchronizeStreams(thcState_, entry);
+    auto thcState = ::at::globalContext().lazyInitCUDA();
+    synchronizeStreams(thcState, entry);
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (size_t i = 0; i < tensors.size(); i++) {
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
-        THCStreamGuard guard(thcState_, entry->streams[i]);
+        THCStreamGuard guard(thcState, entry->streams[i]);
         tensors[i].copy_(entry->src[i]);
       }
     };
@@ -642,14 +652,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
   // In case of CUDA, ensure that operations that are queued after
   // this collective wait for the collective to complete.
   if (key.type->is_cuda()) {
-    synchronizeStreams(thcState_, entry);
+    auto thcState = ::at::globalContext().lazyInitCUDA();
+    synchronizeStreams(thcState, entry);
     entry->run = [=]() mutable {
       entry->algorithm->run();
       for (size_t i = 0; i < tensors.size(); i++) {
         // The THCStreamGuard is a RAII wrapper for temporarily
         // overriding the current THCStream. This also sets the
         // current device to the stream's device.
-        THCStreamGuard guard(thcState_, entry->streams[i]);
+        THCStreamGuard guard(thcState, entry->streams[i]);
         tensors[i].copy_(entry->src[i]);
       }
     };
@@ -707,17 +718,26 @@ at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   return tensor;
 }
 
+uint32_t checkTag(int32_t tag) {
+  if (tag < 0) {
+    throw std::runtime_error("Tag must be >= 0");
+  }
+  return (uint32_t) tag;
+}
+
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
     std::vector<at::Tensor>& tensors,
-    int dstRank) {
+    int dstRank,
+    int tag) {
   auto& tensor = checkSingleTensor(tensors);
+  auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.type().elementSizeInBytes();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
   auto buf = context->createUnboundBuffer(ptr, size);
-  buf->send(dstRank, 0);
+  buf->send(dstRank, utag);
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the send.
@@ -726,15 +746,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
     std::vector<at::Tensor>& tensors,
-    int srcRank) {
+    int srcRank,
+    int tag) {
   auto& tensor = checkSingleTensor(tensors);
+  auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.type().elementSizeInBytes();
 
   // Construct unbound buffer.
   auto& context = contexts_[0];
   auto buf = context->createUnboundBuffer(ptr, size);
-  buf->recv(srcRank, 0);
+  buf->recv(srcRank, utag);
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
@@ -743,8 +765,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
     std::vector<at::Tensor>& tensors,
-    int* srcRank) {
+    int* srcRank,
+    int tag) {
   auto& tensor = checkSingleTensor(tensors);
+  auto utag = checkTag(tag);
   auto ptr = tensor.data_ptr();
   auto size = tensor.numel() * tensor.type().elementSizeInBytes();
 
@@ -761,7 +785,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
     srcRanks.push_back(i);
   }
 
-  buf->recv(srcRanks, 0);
+  buf->recv(srcRanks, utag);
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
@@ -769,7 +793,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
-  throw std::runtime_error("ProcessGroupGloo does not support barrier");
+  AlgorithmKey key;
+  key.collectiveType = CollectiveType::BARRIER;
+
+  auto entry = checkout(key);
+  entry->run = [=]() mutable {
+    entry->algorithm->run();
+  };
+  return enqueue(entry);
 }
 
 std::unordered_map<int, int> ProcessGroupGloo::getGroupRank() {

@@ -24,7 +24,7 @@ namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
     : TensorImpl(
         data.type().type_id(),
-        data.type().scalarType(),
+        data.type().typeMeta(),
         data.type().allocator(),
         at::TensorImplOptions(
           /* is_variable */ true,
@@ -166,7 +166,7 @@ void Variable::Impl::set_data(Tensor new_data) {
   }
 
   // Updates metadata
-  scalar_type_ = new_data.type().scalarType();
+  data_type_ = new_data.type().typeMeta();
   type_id_ = new_data.type().type_id();
   AT_ASSERT(options_.is_variable_);
   data_ = std::move(new_data);

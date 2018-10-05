@@ -119,6 +119,39 @@ void Module::zero_grad() {
   }
 }
 
+void Module::save(serialize::OutputArchive& archive) const {
+  for (const auto& parameter : parameters_) {
+    archive.write(parameter.key, parameter.value);
+  }
+  for (const auto& buffer : buffers_) {
+    archive.write(buffer.key, buffer.value, /*is_buffer=*/true);
+  }
+  for (const auto& child : children_) {
+    serialize::OutputArchive child_archive;
+    child.value->save(child_archive);
+    archive.write(child.key, child_archive);
+  }
+}
+
+void Module::load(serialize::InputArchive& archive) {
+  for (auto& parameter : parameters_) {
+    archive.read(parameter.key, parameter.value);
+  }
+  for (auto& buffer : buffers_) {
+    archive.read(buffer.key, buffer.value, /*is_buffer=*/true);
+  }
+  for (const auto& child : children_) {
+    // Modules that have no state at all (parameters or buffers) are currently
+    // not stored in Protobuf at all, so we can just skip them.
+    if (!child.value->parameters_.is_empty() ||
+        !child.value->buffers_.is_empty()) {
+      serialize::InputArchive child_archive;
+      archive.read(child.key, child_archive);
+      child.value->load(child_archive);
+    }
+  }
+}
+
 Tensor& Module::register_parameter(
     std::string name,
     Tensor tensor,

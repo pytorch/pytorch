@@ -11,14 +11,14 @@
 #include <unordered_set>
 #include <vector>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/signal_handler.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
-CAFFE2_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
+C10_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
 
 namespace caffe2 {
 
@@ -105,7 +105,7 @@ class CAFFE2_API Workspace {
   }
 
   ~Workspace() {
-    if (FLAGS_caffe2_print_blob_sizes_at_exit) {
+    if (c10::FLAGS_caffe2_print_blob_sizes_at_exit) {
       PrintBlobSizes();
     }
     // This is why we have a bookkeeper_ shared_ptr instead of a naked static! A
@@ -151,7 +151,7 @@ class CAFFE2_API Workspace {
       auto* to_blob = CreateBlob(blob);
       CAFFE_ENFORCE(to_blob);
       const auto& from_tensor = from_blob->template Get<Tensor>();
-      auto* to_tensor = to_blob->GetMutableTensor(Context::GetDeviceType());
+      auto* to_tensor = BlobGetMutableTensor(to_blob, Context::GetDeviceType());
       to_tensor->CopyFrom(from_tensor);
     }
   }
@@ -328,7 +328,7 @@ class CAFFE2_API Workspace {
   std::mutex thread_pool_creation_mutex_;
   std::shared_ptr<Bookkeeper> bookkeeper_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(Workspace);
+  C10_DISABLE_COPY_AND_ASSIGN(Workspace);
 };
 
 }  // namespace caffe2

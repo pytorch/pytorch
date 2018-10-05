@@ -12,10 +12,10 @@
 
 namespace at {
 
-struct Tensor;
+class Tensor;
 
-class AT_API Scalar {
-public:
+class CAFFE2_API Scalar {
+ public:
   Scalar() : Scalar(int64_t(0)) {}
 
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
@@ -99,6 +99,6 @@ template<> \
 inline T Scalar::to<T>() { \
   return to##name(); \
 }
-AT_FORALL_SCALAR_TYPES(DEFINE_TO)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 #undef DEFINE_TO
 }

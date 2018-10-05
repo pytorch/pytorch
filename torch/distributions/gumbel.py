@@ -33,19 +33,17 @@ class Gumbel(TransformedDistribution):
         if isinstance(loc, Number) and isinstance(scale, Number):
             base_dist = Uniform(finfo.tiny, 1 - finfo.eps)
         else:
-            base_dist = Uniform(self.loc.new(self.loc.size()).fill_(finfo.tiny), 1 - finfo.eps)
+            base_dist = Uniform(torch.full_like(self.loc, finfo.tiny),
+                                torch.full_like(self.loc, 1 - finfo.eps))
         transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
                       ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
         super(Gumbel, self).__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Gumbel, _instance)
-        batch_shape = torch.Size(batch_shape)
-        base_dist = self.base_dist.expand(batch_shape)
-        transforms = self.transforms
-        super(Gumbel, new).__init__(base_dist, transforms, validate_args=False)
-        new._validate_args = self._validate_args
-        return new
+        new.loc = self.loc.expand(batch_shape)
+        new.scale = self.scale.expand(batch_shape)
+        return super(Gumbel, self).expand(batch_shape, _instance=new)
 
     @property
     def mean(self):

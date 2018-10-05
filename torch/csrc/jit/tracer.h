@@ -37,6 +37,11 @@ inline void setValueTrace(const Variable& var, Value *value) {
   getTracingState()->value_map[var] = value;
 }
 
+inline void delValueTrace(const Variable& var) {
+  JIT_ASSERT(var.defined());
+  getTracingState()->value_map.erase(var);
+}
+
 // Given a variable 'var', return the 'node' which represents the instruction
 // which computes the value of this variable in the IR.
 // Here, we interpret untraced variables as constants that are just embedded
