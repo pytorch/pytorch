@@ -19,6 +19,9 @@ import caffe2.python._import_c_extension as C
 import unittest
 import os
 
+def _run_in_hip(gc, dc):
+    return (gc.device_type == caffe2_pb2.HIP) or (
+        caffe2_pb2.HIP in {d.device_type for d in dc})
 
 def _cudnn_supports(
         dilation=False,
@@ -213,9 +216,12 @@ class TestConvolution(serial.SerializedTestCase):
         dkernel = dilation * (kernel - 1) + 1
 
         if engine == 'CUDNN':
-            assume(_cudnn_supports(dilation=(dilation > 1),
-                                   nhwc=(order == 'NHWC'),
-                                   backward=True))
+            if _run_in_hip(gc, dc):
+                assume((order == "NCHW") and not (dilation > 1 and group > 1))
+            else:
+                assume(_cudnn_supports(dilation=(dilation > 1),
+                                       nhwc=(order == 'NHWC'),
+                                       backward=True))
 
         assume(engine != "MKLDNN" or use_bias is True)
 
@@ -462,8 +468,12 @@ class TestConvolution(serial.SerializedTestCase):
 
         for order in ["NCHW", "NHWC"]:
             engine_list = ['']
-            if _cudnn_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
-                engine_list.append('CUDNN')
+            if _run_in_hip(gc, dc):
+                if order == 'NCHW':
+                    engine_list.append('CUDNN')
+            else:
+                if _cudnn_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
+                    engine_list.append('CUDNN')
 
             for engine in engine_list:
                 op = core.CreateOperator(
