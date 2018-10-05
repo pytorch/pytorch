@@ -126,7 +126,7 @@ auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
   return ((input.type().scalarType() == at::kFloat) || (input.type().scalarType() == at::kHalf))
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.type().is_cuda()
-         && input.dim() > MIOPEN_DIM_MAX
+         && input.dim() <= MIOPEN_DIM_MAX
          && MIOPEN_ENABLED
          ;
 }

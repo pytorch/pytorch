@@ -70,7 +70,7 @@ Tensor batch_norm(
   }
 
   bool use_miopen = (input.type().is_cuda()
-               && input.dim() < MIOPEN_DIM_MAX
+               && input.dim() <= MIOPEN_DIM_MAX
                && input.type().scalarType() != at::kDouble
                && (input.type().scalarType() == weight.type().scalarType())
                && weight.defined() && bias.defined()
