@@ -1138,8 +1138,6 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
     See :class:`torch.nn.Embedding` for more details.
 
-    .. include:: cuda_deterministic_backward.rst
-
     Args:
         input (LongTensor): Tensor containing indices into the embedding matrix
         weight (Tensor): The embedding matrix

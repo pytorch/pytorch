@@ -29,7 +29,7 @@ variance in the result. PyTorch functions that use :attr:`atomicAdd` in the forw
 include :meth:`torch.Tensor.index_add_`, :meth:`torch.Tensor.scatter_add_`,
 :meth:`torch.bincount`.
 A number of operations have backwards that use :attr:`atomicAdd`, in particular
-:meth:`torch.nn.functional.embedding`, :meth:`torch.nn.functional.embedding_bag`,
+:meth:`torch.nn.functional.embedding_bag`,
 :meth:`torch.nn.functional.ctc_loss` and many forms of pooling, padding, and sampling.
 There currently is no simple way of avoiding non-determinism in these functions.
 
