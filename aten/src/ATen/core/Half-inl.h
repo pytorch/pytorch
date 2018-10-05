@@ -190,6 +190,34 @@ inline AT_HOST_DEVICE Half operator/(int a, Half b) {
   return static_cast<Half>(a) / b;
 }
 
+//// Arithmetic with int64_t
+
+inline AT_HOST_DEVICE Half operator+(Half a, int64_t b) {
+  return a + static_cast<Half>(b);
+}
+inline AT_HOST_DEVICE Half operator-(Half a, int64_t b) {
+  return a - static_cast<Half>(b);
+}
+inline AT_HOST_DEVICE Half operator*(Half a, int64_t b) {
+  return a * static_cast<Half>(b);
+}
+inline AT_HOST_DEVICE Half operator/(Half a, int64_t b) {
+  return a / static_cast<Half>(b);
+}
+
+inline AT_HOST_DEVICE Half operator+(int64_t a, Half b) {
+  return static_cast<Half>(a) + b;
+}
+inline AT_HOST_DEVICE Half operator-(int64_t a, Half b) {
+  return static_cast<Half>(a) - b;
+}
+inline AT_HOST_DEVICE Half operator*(int64_t a, Half b) {
+  return static_cast<Half>(a) * b;
+}
+inline AT_HOST_DEVICE Half operator/(int64_t a, Half b) {
+  return static_cast<Half>(a) / b;
+}
+
 /// NOTE: we do not define comparisons directly and instead rely on the implicit
 /// conversion from at::Half to float.
 
