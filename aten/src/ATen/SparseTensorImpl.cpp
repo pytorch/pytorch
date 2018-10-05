@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
+#include <ATen/InitialTensorOptions.h>
 
 namespace at {
 
@@ -33,8 +34,8 @@ SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeM
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)
-    , indices_(at::empty({1, 0}, TensorOptions(false).device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long)))
-    , values_(at::empty({0}, TensorOptions(false).device(sparseTensorIdToDeviceType(type_id)).dtype(dataTypeToScalarType(data_type.id())))) {}
+    , indices_(at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long)))
+    , values_(at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(dataTypeToScalarType(data_type.id())))) {}
 
 IntList SparseTensorImpl::sizes() const {
   return size_;
