@@ -857,12 +857,33 @@
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
 - func: index_copy_(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
-  variants: method
+  variants: function, method
+
+- func: index_copy(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
+  variants: function, method
 
 - func: index_put(Tensor self, TensorList indices, Tensor values) -> Tensor
   variants: function, method
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
+  variants: function, method
+
+- func: index_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
+  variants: function, method
+
+- func: index_fill(Tensor self, int64_t dim, IndexTensor index, Scalar source) -> Tensor
+  variants: function, method
+
+- func: scatter(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
+  variants: function, method
+
+- func: scatter_add(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
+  variants: function, method
+
+- func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
+  variants: function, method
+
+- func: masked_fill(Tensor self, Tensor mask, Scalar source) -> Tensor
   variants: function, method
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, double momentum, double eps, bool cudnn_enabled) -> Tensor
