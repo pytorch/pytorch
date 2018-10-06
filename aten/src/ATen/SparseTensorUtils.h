@@ -3,6 +3,8 @@
 
 namespace at { namespace sparse {
 
+constexpr size_t dim_bitset_size = 64;
+
 // Just for documentary purposes
 using SparseTensor = Tensor;
 using LongTensor = Tensor;
@@ -107,6 +109,16 @@ inline LongTensor flatten_indices(const Tensor& indices, IntList full_size, bool
     // on CUDA Long. So mul is faster.
     return indices.mul(indices_mult).sum(0);
   }
+}
+
+// flatten indices from nD to 1D
+inline LongTensor flatten_indices_by_dims(const LongTensor& indices, const IntList& sizes, const IntList& dims_to_flatten){
+  LongTensor new_indices = at::zeros({indices.size(1)}, indices.options());
+  for (auto d : dims_to_flatten) {
+    new_indices.mul_(sizes[d]);
+    new_indices.add_(indices.select(0, d));
+  }
+  return new_indices;
 }
 
 }} // namespace at::sparse
