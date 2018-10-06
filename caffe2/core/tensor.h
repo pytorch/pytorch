@@ -435,6 +435,8 @@ class CAFFE2_API Tensor final {
   }
 };
 
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
+
 using TensorCPU = Tensor;
 
 constexpr int k_limit_default_ = 1000;
