@@ -154,7 +154,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
     # logic of this function.
     while True:
         try:
-            r = in_queue.get(False)
+            r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
             continue
         except Exception:
