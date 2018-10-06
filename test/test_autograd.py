@@ -2176,6 +2176,19 @@ class TestAutograd(TestCase):
         gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
         gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
 
+    @skipIfRocm
+    def test_multi_mm(self):
+        def gen_matrices(p):
+            matrices = []
+            for (pi, pi_1) in zip(p[:-1], p[1:]):
+                matrices.append(torch.randn(pi, pi_1).requires_grad_())
+            return matrices
+
+        gradcheck(torch.multi_mm, gen_matrices([5, 10, 15, 5]))
+        gradcheck(torch.multi_mm, gen_matrices([3, 5, 2, 6]))
+        gradgradcheck(torch.multi_mm, gen_matrices([5, 10, 15, 5]))
+        gradgradcheck(torch.multi_mm, gen_matrices([3, 5, 2, 6]))
+
     def test_profiler(self):
         x = torch.randn(10, 10)
 
