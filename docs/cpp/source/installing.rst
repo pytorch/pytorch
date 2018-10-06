@@ -16,9 +16,8 @@ example:
 
 .. code-block:: sh
 
-  wget http://pytorch.org/libtorch/libtorch-latest.zip
-  unzip libtorch-latest.zip
-  ls -1R libtorch-latest
+  wget https://download.pytorch.org/libtorch/nightly/cpu/libtorch-shared-with-deps-latest.zip
+  unzip libtorch-shared-with-deps-latest.zip
 
 
 Next, we can write a minimal CMake build configuration to develop a small

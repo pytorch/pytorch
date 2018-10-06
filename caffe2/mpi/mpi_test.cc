@@ -4,8 +4,10 @@
 #include "caffe2/mpi/mpi_common.h"
 #include <gtest/gtest.h>
 
-CAFFE2_DEFINE_string(
-    caffe_test_root, "gen/", "The root of the caffe test folder.");
+C10_DEFINE_string(
+    caffe_test_root,
+    "gen/",
+    "The root of the caffe test folder.");
 
 namespace caffe2 {
 

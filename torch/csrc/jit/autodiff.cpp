@@ -150,8 +150,8 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       return {grads.at(0) / inputs.at(1), nullptr};
 
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
-      // TODO: The order of operations matter in this case. This 
-      // works for ppc64le and x86_64. Need to look at why the 
+      // TODO: The order of operations matter in this case. This
+      // works for ppc64le and x86_64. Need to look at why the
       // order matters.
       return {(1 - outputs.at(0)) * outputs.at(0) * grads.at(0)};
 
@@ -280,7 +280,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {
       return {grads.at(0).mm(inputs.at(1).t()), inputs.at(0).t().mm(grads.at(0))};
 
-    } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor")) {
+    } else if (node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor")) {
       const auto& input_sizes = inputs.at(0).sizes();
       if (input_sizes.size() == 0)
         return {grads.at(0).sum(), nullptr, nullptr};
@@ -550,11 +550,9 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     }
   };
   for (Value * input : graph.inputs()) {
-    if (input->stage() != 0) break;
     check_uses(input);
   }
   for (Node * node : graph.nodes()) {
-    if (node->stage() != 0) break;
     for (Value * output : node->outputs())
       check_uses(output);
   }

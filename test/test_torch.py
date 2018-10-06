@@ -7684,7 +7684,6 @@ class TestTorch(TestCase):
             self.assertEqual(device, device_copied)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    @skipIfRocm
     def test_half_tensor_cuda(self):
         x = torch.randn(5, 5).half()
         self.assertEqual(x.cuda(), x)

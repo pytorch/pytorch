@@ -58,7 +58,7 @@
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
-#   USE_LMBD
+#   USE_LMDB
 #     enables use of LMDB for storage
 #
 #   BUILD_BINARY
@@ -86,6 +86,9 @@
 #   CUDA_PATH (Windows)
 #     specify where CUDA is installed; usually /usr/local/cuda or
 #     /usr/local/cuda-x.y
+#   CUDAHOSTCXX
+#     specify a different compiler than the system one to use as the CUDA
+#     host compiler for nvcc.
 #
 #   CUDNN_LIB_DIR
 #   CUDNN_INCLUDE_DIR
@@ -1192,6 +1195,7 @@ if __name__ == '__main__':
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
+                'lib/include/ATen/cpu/*.h',
                 'lib/include/ATen/core/*.h',
                 'lib/include/ATen/cuda/*.cuh',
                 'lib/include/ATen/cuda/*.h',

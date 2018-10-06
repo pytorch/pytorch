@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include "torch/csrc/jit/attributes.h"
@@ -177,7 +176,6 @@ private:
   Node * node_;
   size_t offset_;
   size_t unique_ = 0;          // unique id
-  size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
   use_list uses_;
   std::string unique_name_;
   TypePtr type_;
@@ -207,13 +205,6 @@ public:
     if (hasUniqueName())
       return unique_name_;
     return std::to_string(unique());
-  }
-  Value* setStage(size_t s) {
-    stage_ = s;
-    return this;
-  }
-  size_t stage() const {
-    return stage_;
   }
   Node* node() {
     return node_;
@@ -290,7 +281,6 @@ private:
   Graph* graph_;
   Block* owning_block_;
   std::shared_ptr<SourceLocation> source_location_;
-  size_t stage_;
   Scope* scope_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
@@ -322,13 +312,6 @@ public:
   }
   const Block * owningBlock() const {
     return owning_block_;
-  }
-  size_t stage() const {
-    return stage_;
-  }
-  Node* setStage(size_t s) {
-    stage_ = s;
-    return this;
   }
   Scope* scope() {
     return scope_;
@@ -753,8 +736,6 @@ protected:
   // 'this' will be allocated with s->allocNewInstance(g) so it should have
   // the same concrete type as 's'
   //
-  // NB: This does NOT clone stages.  You're expected to set the stage correctly
-  // if you are going to preserve it.
   virtual void cloneFrom(Node * s);
 };
 
@@ -845,7 +826,6 @@ private:
   Node* initOutput(Node* p) {
     p->next() = p;
     p->prev() = p;
-    p->setStage(std::numeric_limits<size_t>::max());
     return p;
   }
 
@@ -882,8 +862,6 @@ private:
 
   std::unordered_map<std::string, Value*> unique_names_;
 
-  size_t new_node_stage_;
-
   std::shared_ptr<Scope> scope_root_;
   Scope * current_scope_;
 
@@ -896,7 +874,6 @@ public:
 
   Graph(std::shared_ptr<Scope> scope_root)
   : next_unique_(0)
-  , new_node_stage_(0)
   , scope_root_(std::move(scope_root))
   , current_scope_(scope_root_.get())
   , block_(new Block(this, nullptr))
@@ -960,20 +937,6 @@ public:
   }
   void eraseOutput(size_t i) {
     block_->eraseOutput(i);
-  }
-  void advanceStage() {
-    new_node_stage_++;
-  }
-  void setStage(size_t new_stage) {
-    new_node_stage_ = new_stage;
-  }
-  size_t stage() const {
-    return new_node_stage_;
-  }
-  ResourceGuard setStageTemporary(size_t s) {
-    auto prev_stage = new_node_stage_;
-    new_node_stage_ = s;
-    return ResourceGuard([prev_stage, this]() { this->new_node_stage_ = prev_stage; });
   }
   const std::unordered_map<std::string, Value*>& uniqueNames() const {
     return unique_names_;
@@ -1050,6 +1013,15 @@ public:
     result->output()->setType(CompleteTensorType::fromNumberType(typ));
     return result;
   }
+  Node* createBoolToTensor(Value* value) {
+    auto typ = value->type();
+    Node * result = create(prim::BoolToTensor, {value});
+    if (!typ->isSubtypeOf(BoolType::get())) {
+      AT_ERROR("Cannot create bool type from ", typ->str());
+    }
+    result->output()->setType(CompleteTensorType::fromBoolType());
+    return result;
+  }
   Node* createTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::TensorToNum, {value});
     result->output()->setType(type);
@@ -1058,6 +1030,11 @@ public:
   Node* createImplicitTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::ImplicitTensorToNum, {value});
     result->output()->setType(type);
+    return result;
+  }
+  Node* createTensorToBool(Value* value) {
+    auto* result = create(prim::TensorToBool, {value});
+    result->output()->setType(BoolType::get());
     return result;
   }
   Node* createIntToFloat(Value* value) {
@@ -1241,7 +1218,6 @@ inline Value::Value(Node * node_, size_t offset_)
 : node_(node_),
   offset_(offset_),
   unique_(node_->graph_->next_unique_++),
-  stage_(node_->graph_->new_node_stage_),
   type_(DynamicType::get()) {
   node_->graph_->all_values.emplace(this);
 }
@@ -1281,7 +1257,6 @@ inline Node::Node(Graph * graph_, NodeKind kind_) :
   kind_(kind_),
   graph_(graph_),
   owning_block_(nullptr),
-  stage_(graph_->new_node_stage_),
   scope_(graph_->current_scope_),
   schema_(nullptr) {
   graph_->all_nodes.emplace(this);

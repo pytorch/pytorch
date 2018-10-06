@@ -11,7 +11,7 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
     false,
     "If used we will handle exceptions in executor threads. "
@@ -422,7 +422,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
             }
             compiledStep->gotFailure = true;
-            if (!FLAGS_caffe2_handle_executor_threads_exceptions) {
+            if (!c10::FLAGS_caffe2_handle_executor_threads_exceptions) {
               // In complex plans other threads might get stuck if another
               // one fails. So we let exception to go out of thread which
               // causes SIGABRT. In local setup one might use this flag
@@ -489,7 +489,9 @@ bool RunPlanOnWorkspace(
 
   NetDefMap net_defs;
   for (const NetDef& net_def : plan.network()) {
-    LOG(INFO) << "Processing net '" << net_def.name() << "'";
+    LOG(INFO) << "Processing net '" << net_def.name() << "', type: '"
+              << net_def.type() << "', #ops: " << net_def.op_size()
+              << ", num_workers: " << net_def.num_workers();
     CAFFE_ENFORCE(
         net_defs.count(net_def.name()) == 0,
         "Your plan contains networks of the same name \"",

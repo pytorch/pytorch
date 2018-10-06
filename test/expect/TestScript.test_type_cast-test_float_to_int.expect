@@ -1,6 +1,6 @@
 graph() {
   %0 : int = prim::Constant[value=1]()
-  %1 : float = prim::Constant[value=2]()
+  %1 : float = prim::Constant[value=5]()
   %b : int = prim::FloatToInt(%1)
   %3 : int = aten::add(%b, %0)
   return (%3);
