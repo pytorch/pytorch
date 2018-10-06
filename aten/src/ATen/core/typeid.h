@@ -461,18 +461,18 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
       _makeTypeMetaDataInstance<T>();                                     \
   }                                                                       \
   template<>                                                              \
-  C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+  CAFFE2_API const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
     return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
   }
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                    \
+  CAFFE2_API TypeIdentifier TypeIdentifier::Get<T>() {                    \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     return type_id;                                                       \
   }                                                                       \
   namespace detail {                                                      \
   template <>                                                             \
-  C10_EXPORT const char* __TypeName<T>() noexcept {                       \
+  CAFFE2_API const char* __TypeName<T>() noexcept {                       \
     return #T;                                                            \
   }                                                                       \
   }                                                                       \
