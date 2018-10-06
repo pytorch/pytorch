@@ -95,7 +95,6 @@ _(aten, _log2) \
 _(aten, _logspace) \
 _(aten, _masked_scale) \
 _(aten, _mm) \
-_(aten, _multi_mm) \
 _(aten, _mv) \
 _(aten, _native_sparse_coo_tensor_unsafe) \
 _(aten, _nnz) \
@@ -459,6 +458,7 @@ _(aten, mul) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
+_(aten, multi_mm) \
 _(aten, multilabel_margin_loss) \
 _(aten, multilabel_margin_loss_backward) \
 _(aten, multilabel_margin_loss_forward) \
