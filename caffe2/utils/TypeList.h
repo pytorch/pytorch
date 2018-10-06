@@ -298,4 +298,92 @@ template<class TypeList, class Func> auto map_types_to_values(Func&& func)
 }
 
 
+
+/**
+ * Finds a type in a typelist, returning the index.
+ *
+ * Example:
+ * 2 == find<typelist<int, double, float, string>, float>::value
+ *
+ * It is a compiler error if the typelist doesn't contain the type.
+ */
+namespace detail {
+template<class T, class... Types> struct find_ final {};
+template<class T, class Head, class... Tail> struct find_<T, Head, Tail...> final {
+  static constexpr size_t value() {
+    return find_<T, Tail...>::value() + 1;
+  }
+};
+template<class T, class... Tail>
+struct find_<T, T, Tail...> final {
+  static constexpr size_t value() {
+    return 0;
+  }
+};
+template<class T>
+struct find_<T> final {
+  static_assert(detail::false_t<T>::value, "typelist::find<>() didn't find type in typelist.");
+};
+}
+template<class TypeList, class T> struct find final {
+  static_assert(detail::false_t<TypeList>::value, "In typelist::find<T, U>, the T argument must be typelist<...>.");
+};
+template<class... Types, class T> struct find<typelist<Types...>, T> final {
+  static constexpr size_t value = detail::find_<T, Types...>::value();
+};
+template<class... Types, class T> constexpr size_t find<typelist<Types...>, T>::value;
+
+
+
+
+/**
+ * Returns if a typelist contains a given type.
+ *
+ * Example:
+ * true == contains<typelist<int, double>, int>::value
+ * false == contains<typelist<int, double>, string>::value
+ * false == contains<typelist<int, double>, int&>::values
+ */
+template<class TypeList, class T> struct contains {
+  static_assert(detail::false_t<TypeList>::value, "In typelist::contains<T, U>, the T argument must be typelist<...>.");
+};
+template<class T, class Head, class... Tail> struct contains<typelist<Head, Tail...>, T> : contains<typelist<Tail...>, T>::type {};
+template<class T, class... Tail> struct contains<typelist<T, Tail...>, T> : std::true_type {};
+template<class T> struct contains<typelist<>, T> : std::false_type {};
+template<class TypeList, class T> using contains_t = typename contains<TypeList, T>::type;
+
+
+
+
+/**
+ * Removes duplicate types from a typelist, leaving only the first occurrence of each type.
+ *
+ * Examples:
+ * typelist<int, double, string> == unique_t<typelist<int, double, int, int, string, double>>;
+ * typelist<int, int&, int&&> == unique_t<typelist<int, int, int&, int&&, int&, int>>;
+ */
+namespace detail {
+template<class AccumulatorList, class Enable, class... Types> struct unique_ final {};
+template<class AccumulatorList, class Head, class... Tail>
+struct unique_<AccumulatorList, enable_if_t<contains<AccumulatorList, Head>::value>, Head, Tail...> final {
+  using type = typename unique_<AccumulatorList, void, Tail...>::type;
+};
+template<class AccumulatorList, class Head, class... Tail>
+struct unique_<AccumulatorList, enable_if_t<!contains<AccumulatorList, Head>::value>, Head, Tail...> final {
+  using type = typename unique_<concat_t<AccumulatorList, typelist<Head>>, void, Tail...>::type;
+};
+template<class AccumulatorList>
+struct unique_<AccumulatorList, void> final {
+  using type = AccumulatorList;
+};
+}
+template<class TypeList> struct unique final {
+  static_assert(detail::false_t<TypeList>::value, "In typelist::unique<T>, the T argument must be typelist<...>.");
+};
+template<class... Types> struct unique<typelist<Types...>> final {
+  using type = typename detail::unique_<typelist<>, void, Types...>::type;
+};
+template<class TypeList> using unique_t = typename unique<TypeList>::type;
+
+
 }}}
