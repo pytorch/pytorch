@@ -292,7 +292,7 @@ inline TypeMetaData _makeTypeMetaDataInstance() {
   };
 }
 
-C10_EXPORT extern const TypeMetaData _typeMetaDataInstance_uninitialized;
+class _Uninitialized final {};
 
 } // namespace detail
 
@@ -311,7 +311,7 @@ class CAFFE2_API TypeMeta {
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
    */
-  constexpr TypeMeta() noexcept : data_(&detail::_typeMetaDataInstance_uninitialized) {}
+  TypeMeta() noexcept;
 
   /**
    * Copy constructor.
@@ -417,6 +417,11 @@ class CAFFE2_API TypeMeta {
   template<class T>
   CAFFE2_API static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
 };
+
+template<>
+C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<detail::_Uninitialized>() noexcept;
+
+inline TypeMeta::TypeMeta() noexcept : data_(_typeMetaDataInstance<detail::_Uninitialized>()) {}
 
 inline bool operator==(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   return (lhs.data_ == rhs.data_);
