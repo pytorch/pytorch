@@ -86,7 +86,7 @@ inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
 }
 
 #define AT_DECLARE_TENSOR_TYPE(TensorName) \
-  CAFFE2_API at::TensorTypeId TensorName();
+  CAFFE2_API at::TensorTypeId TensorName()
 
 #define AT_DEFINE_TENSOR_TYPE(TensorName)           \
   at::TensorTypeId TensorName() {                   \
@@ -94,10 +94,10 @@ inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
     return registration_raii.id();                  \
   }
 
-AT_DECLARE_TENSOR_TYPE(UndefinedTensorId)
-AT_DECLARE_TENSOR_TYPE(CPUTensorId) // Caffe2 supported
-AT_DECLARE_TENSOR_TYPE(CUDATensorId) // Caffe2 supported
-AT_DECLARE_TENSOR_TYPE(SparseCPUTensorId)
-AT_DECLARE_TENSOR_TYPE(SparseCUDATensorId)
+AT_DECLARE_TENSOR_TYPE(UndefinedTensorId);
+AT_DECLARE_TENSOR_TYPE(CPUTensorId); // Caffe2 supported
+AT_DECLARE_TENSOR_TYPE(CUDATensorId); // Caffe2 supported
+AT_DECLARE_TENSOR_TYPE(SparseCPUTensorId);
+AT_DECLARE_TENSOR_TYPE(SparseCUDATensorId);
 
 } // namespace at

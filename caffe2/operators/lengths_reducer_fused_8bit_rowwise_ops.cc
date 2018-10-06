@@ -32,7 +32,8 @@ stores quantized values, and then 4-byte scale and 4-byte bias).
         2,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Output(0, "output", "output");
+    .Output(0, "output", "output")
+    .InheritOnnxSchema("SparseLengthsSumFused8BitRowwise");
 NO_GRADIENT(SparseLengthsSumFused8BitRowwise);
 
 REGISTER_CPU_OPERATOR(
