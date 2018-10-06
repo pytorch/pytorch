@@ -8997,8 +8997,21 @@ class TestTorch(TestCase):
         expected = torch.empty(0, 4, dtype=b.dtype)
         self.assertEqual(expected, prod)
 
+        # test single input
+        prod = torch.cartesian_prod(b)
+        self.assertEqual(b.view(-1, 1), prod)
+
     def test_combinations(self):
         a = torch.tensor([1, 2, 3])
+
+        c = torch.combinations(a, r=1)
+        expected = torch.tensor(list(combinations(a, r=1)))
+        self.assertEqual(c, expected)
+
+        c = torch.combinations(a, r=1, with_replacement=True)
+        expected = torch.tensor(list(combinations_with_replacement(a, r=1)))
+        self.assertEqual(c, expected)
+
         c = torch.combinations(a)
         expected = torch.tensor(list(combinations(a, r=2)))
         self.assertEqual(c, expected)
