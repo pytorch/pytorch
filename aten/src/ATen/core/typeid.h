@@ -452,7 +452,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #if defined(_MSC_VER) || defined(__clang__)
 #define EXPORT_IF_NOT_GCC C10_EXPORT
 #else
-#define EXPORT_IF_NOT_GCC
+#define EXPORT_IF_NOT_GCC C10_EXPORT
 #endif
 
 #define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)        \
