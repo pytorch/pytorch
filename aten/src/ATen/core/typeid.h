@@ -128,8 +128,6 @@ struct TypeMetaData final {
     const char* name) noexcept
   : itemsize_(itemsize), ctor_(ctor), copy_(copy), dtor_(dtor), id_(id), name_(name) {}
 
-  static const TypeMetaData uninitialized;
-
   size_t itemsize_;
   PlacementNew* ctor_;
   TypedCopy* copy_;
@@ -294,6 +292,8 @@ inline TypeMetaData _makeTypeMetaDataInstance() {
   };
 }
 
+C10_EXPORT extern const TypeMetaData _typeMetaDataInstance_uninitialized;
+
 } // namespace detail
 
 /**
@@ -311,7 +311,7 @@ class CAFFE2_API TypeMeta {
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
    */
-  constexpr TypeMeta() noexcept : data_(&detail::TypeMetaData::uninitialized) {}
+  constexpr TypeMeta() noexcept : data_(&detail::_typeMetaDataInstance_uninitialized) {}
 
   /**
    * Copy constructor.

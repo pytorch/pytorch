@@ -16,9 +16,11 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
   // for a library
   AT_ERROR(msg);
 }
+
+const detail::TypeMetaData _typeMetaDataInstance_uninitialized = detail::TypeMetaData(0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)");
+
 } // namespace detail
 
-const detail::TypeMetaData detail::TypeMetaData::uninitialized = TypeMetaData(0, nullptr, nullptr, nullptr, TypeIdentifier::uninitialized(), "nullptr (uninitialized)");
 
 TypeIdentifier TypeIdentifier::createTypeId() {
   static std::atomic<TypeIdentifier::underlying_type> counter(
