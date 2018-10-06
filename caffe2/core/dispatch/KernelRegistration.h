@@ -132,9 +132,6 @@ public:
 
 } // namespace c10
 
-#define CONCAT_IMPL(x, y) x##y
-#define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)
-
 // TODO Can the builder logic be moved to compile time?
 // NB: Semicolon after applying this macro is MANDATORY
 #define C10_REGISTER_KERNEL(OpSchemaDef)                                                           \

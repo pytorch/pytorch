@@ -9,7 +9,6 @@
 
 namespace at { namespace native { namespace sparse { namespace cuda {
 
-#ifndef __HIP_PLATFORM_HCC__
 
 std::string cusparseGetErrorString(cusparseStatus_t status) {
   switch(status)
@@ -224,6 +223,5 @@ void XcoosortByRow(int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols
   CUSPARSE_CHECK(cusparseXcoosortByRow(handle, i_m, i_n, i_nnz, cooRows, cooCols, P, pBuffer));
 }
 
-#endif
 
 }}}} // namespace at::native::sparse::cuda
