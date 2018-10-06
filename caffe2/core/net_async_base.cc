@@ -119,7 +119,7 @@ bool AsyncNetBase::RunAsync() {
   return DoRunAsync();
 }
 
-TaskThreadPoolBase* AsyncNetBase::poolGetter(
+TaskThreadPool* AsyncNetBase::poolGetter(
     PoolsMap& pools,
     int device_type,
     int device_id,
@@ -134,7 +134,7 @@ TaskThreadPoolBase* AsyncNetBase::poolGetter(
   return pool.get();
 }
 
-TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
+TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (use_single_pool_) {
     return poolGetter(cpu_pools_, PROTO_CPU, -1, num_workers_);
   }
@@ -418,17 +418,53 @@ void AsyncNetBase::finalizeEvents() {
 
 AsyncNetBase::~AsyncNetBase() {}
 
-C10_DEFINE_SHARED_REGISTRY(
-    ThreadPoolRegistry,
-    TaskThreadPoolBase,
-    int,
-    int,
-    bool);
+C10_DEFINE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int, bool);
 
-C10_REGISTER_CREATOR(
-    ThreadPoolRegistry,
-    CPU,
-    GetAsyncNetCPUThreadPool<TaskThreadPool>);
+C10_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
+
+/* static */
+std::shared_ptr<TaskThreadPool>
+GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new) {
+  // Note: numa_node_id = -1 corresponds to no NUMA used
+  static std::
+      unordered_map<int, std::unordered_map<int, std::weak_ptr<TaskThreadPool>>>
+          pools;
+  static std::mutex pool_mutex;
+
+  if (pool_size <= 0) {
+    if (c10::FLAGS_caffe2_net_async_cpu_pool_size > 0) {
+      pool_size = c10::FLAGS_caffe2_net_async_cpu_pool_size;
+      LOG(INFO) << "Using default CPU pool size: " << pool_size
+                << "; NUMA node id: " << numa_node_id;
+    } else {
+      auto num_cores = std::thread::hardware_concurrency();
+      CAFFE_ENFORCE(num_cores > 0, "Failed to get number of CPU cores");
+      LOG(INFO) << "Using estimated CPU pool size: " << num_cores
+                << "; NUMA node id: " << numa_node_id;
+      pool_size = num_cores;
+    }
+  } else {
+    LOG(INFO) << "Using specified CPU pool size: " << pool_size
+              << "; NUMA node id: " << numa_node_id;
+  }
+
+  if (create_new) {
+    LOG(INFO) << "Created new CPU pool, size: " << pool_size
+              << "; NUMA node id: " << numa_node_id;
+    return std::make_shared<TaskThreadPool>(pool_size, numa_node_id);
+  } else {
+    std::lock_guard<std::mutex> lock(pool_mutex);
+
+    auto shared_pool = pools[numa_node_id][pool_size].lock();
+    if (!shared_pool) {
+      LOG(INFO) << "Created shared CPU pool, size: " << pool_size
+                << "; NUMA node id: " << numa_node_id;
+      shared_pool = std::make_shared<TaskThreadPool>(pool_size, numa_node_id);
+      pools[numa_node_id][pool_size] = shared_pool;
+    }
+    return shared_pool;
+  }
+}
 
 void AsyncNetBase::computeExecutionModeFlags() {
   static const std::string kDag = "dag";
