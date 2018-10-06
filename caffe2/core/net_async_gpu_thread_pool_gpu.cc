@@ -8,7 +8,7 @@ namespace caffe2 {
 
 C10_REGISTER_CREATOR(ThreadPoolRegistry, CUDA, GetAsyncNetGPUThreadPool);
 
-std::shared_ptr<TaskThreadPoolBase>
+std::shared_ptr<TaskThreadPool>
 GetAsyncNetGPUThreadPool(int gpu_id, int pool_size, bool create_new) {
   // For GPU, use per device thread pools of predefined constant size
   if (pool_size != c10::FLAGS_caffe2_threads_per_gpu) {
