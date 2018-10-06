@@ -452,7 +452,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 #if defined(_MSC_VER) || defined(__clang__)
 #define EXPORT_IF_NOT_GCC C10_EXPORT
 #else
-#define EXPORT_IF_NOT_GCC C10_EXPORT
+#define EXPORT_IF_NOT_GCC
 #endif
 
 #define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)        \
@@ -461,18 +461,18 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
       _makeTypeMetaDataInstance<T>();                                     \
   }                                                                       \
   template<>                                                              \
-  EXPORT_IF_NOT_GCC const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+  C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
     return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
   }
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  EXPORT_IF_NOT_GCC TypeIdentifier TypeIdentifier::Get<T>() {             \
+  C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                    \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     return type_id;                                                       \
   }                                                                       \
   namespace detail {                                                      \
   template <>                                                             \
-  EXPORT_IF_NOT_GCC const char* __TypeName<T>() noexcept {                \
+  C10_EXPORT const char* __TypeName<T>() noexcept {                       \
     return #T;                                                            \
   }                                                                       \
   }                                                                       \
