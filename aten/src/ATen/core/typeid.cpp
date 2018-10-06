@@ -67,11 +67,8 @@ CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(23, char*)
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(24, int*)
 
 // see typeid.h for details.
-#if defined(_MSC_VER) || defined(__APPLE__) || \
-    (defined(__ANDROID__) && !defined(__LP64__))
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(25, long);
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(26, std::vector<long>);
-#endif
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(25, detail::_maybe_long<long>);
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(26, detail::_maybe_long<std::vector<long>>);
 
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
 
