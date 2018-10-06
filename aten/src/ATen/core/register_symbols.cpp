@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/interned_strings_class.h"
+#include "ATen/core/interned_strings_class.h"
 
 // This file is compiled with -O0 because the fully-macro-expanded
 // function is huge and only called once at startup.
