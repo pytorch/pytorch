@@ -13,15 +13,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API TaskThreadPoolBase {
- public:
-  virtual void run(const std::function<void()>& func) = 0;
-  virtual size_t size() const = 0;
-  virtual size_t numAvailable() const = 0;
-  virtual ~TaskThreadPoolBase() {}
-};
-
-class CAFFE2_API TaskThreadPool : public TaskThreadPoolBase {
+class CAFFE2_API TaskThreadPool {
  private:
   struct task_element_t {
     bool run_with_id;
@@ -59,7 +51,7 @@ class CAFFE2_API TaskThreadPool : public TaskThreadPoolBase {
   }
 
   // Set running flag to false then notify all threads.
-  ~TaskThreadPool() override {
+  ~TaskThreadPool() {
     {
       std::unique_lock<std::mutex> lock(mutex_);
       running_ = false;
@@ -74,14 +66,14 @@ class CAFFE2_API TaskThreadPool : public TaskThreadPoolBase {
     }
   }
 
-  size_t size() const override {
+  size_t size() const {
     return threads_.size();
   }
 
   /**
    * The number of available (i.e. idle) threads in this thread pool.
    */
-  size_t numAvailable() const override {
+  size_t num_available() const {
     return available_;
   }
 
@@ -97,7 +89,7 @@ class CAFFE2_API TaskThreadPool : public TaskThreadPoolBase {
     condition_.notify_one();
   }
 
-  void run(const std::function<void()>& func) override {
+  void run(const std::function<void()>& func) {
     runTask(func);
   }
 
