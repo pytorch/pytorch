@@ -2,7 +2,7 @@
 
 #include "caffe2/core/net_async_tracing.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_optimize_polling,
     true,
     "Use event callbacks whenever possible instead of polling");
@@ -93,7 +93,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
               if (!canSchedule(parent_id, child_id)) {
                 // we can't schedule a child because of this parent,
                 // check if parent supports callback
-                if (FLAGS_caffe2_net_async_optimize_polling &&
+                if (c10::FLAGS_caffe2_net_async_optimize_polling &&
                     parent_event.SupportsCallback()) {
                   parents_with_callback.push_back(parent_id);
                 } else {

@@ -12,11 +12,12 @@
 
 #include "caffe2/core/init.h"
 
-CAFFE2_DEFINE_int(
-    caffe2_omp_num_threads, 0,
+C10_DEFINE_int(
+    caffe2_omp_num_threads,
+    0,
     "The number of openmp threads. 0 to use default value. "
     "Does not have effect if OpenMP is disabled.");
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_mkl_num_threads,
     0,
     "The number of mkl threads. 0 to use default value. If set, "
@@ -34,9 +35,10 @@ bool Caffe2SetOpenMPThreads(int*, char***) {
     omp_set_num_threads(1);
   }
 
-  if (FLAGS_caffe2_omp_num_threads > 0) {
-    VLOG(1) << "Setting omp_num_threads to " << FLAGS_caffe2_omp_num_threads;
-    omp_set_num_threads(FLAGS_caffe2_omp_num_threads);
+  if (c10::FLAGS_caffe2_omp_num_threads > 0) {
+    VLOG(1) << "Setting omp_num_threads to "
+            << c10::FLAGS_caffe2_omp_num_threads;
+    omp_set_num_threads(c10::FLAGS_caffe2_omp_num_threads);
   }
   VLOG(1) << "Caffe2 running with " << omp_get_max_threads() << " OMP threads";
   return true;
@@ -54,16 +56,18 @@ bool Caffe2SetMKLThreads(int*, char***) {
   }
 
   // If caffe2_omp_num_threads is set, we use that for MKL as well.
-  if (FLAGS_caffe2_omp_num_threads > 0) {
-    VLOG(1) << "Setting mkl_num_threads to " << FLAGS_caffe2_omp_num_threads
+  if (c10::FLAGS_caffe2_omp_num_threads > 0) {
+    VLOG(1) << "Setting mkl_num_threads to "
+            << c10::FLAGS_caffe2_omp_num_threads
             << " as inherited from omp_num_threads.";
-    mkl_set_num_threads(FLAGS_caffe2_omp_num_threads);
+    mkl_set_num_threads(c10::FLAGS_caffe2_omp_num_threads);
   }
 
   // Override omp_num_threads if mkl_num_threads is set.
-  if (FLAGS_caffe2_mkl_num_threads > 0) {
-    VLOG(1) << "Setting mkl_num_threads to " << FLAGS_caffe2_mkl_num_threads;
-    mkl_set_num_threads(FLAGS_caffe2_mkl_num_threads);
+  if (c10::FLAGS_caffe2_mkl_num_threads > 0) {
+    VLOG(1) << "Setting mkl_num_threads to "
+            << c10::FLAGS_caffe2_mkl_num_threads;
+    mkl_set_num_threads(c10::FLAGS_caffe2_mkl_num_threads);
   }
   VLOG(1) << "Caffe2 running with " << mkl_get_max_threads() << " MKL threads";
   return true;

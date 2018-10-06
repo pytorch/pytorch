@@ -27,8 +27,8 @@
 #include "caffe2/core/logging_is_not_google_glog.h"
 #endif // CAFFE2_USE_GOOGLE_GLOG
 
-CAFFE2_DECLARE_int(caffe2_log_level);
-CAFFE2_DECLARE_bool(caffe2_use_fatal_for_enforce);
+C10_DECLARE_int(caffe2_log_level);
+C10_DECLARE_bool(caffe2_use_fatal_for_enforce);
 
 namespace caffe2 {
 // Functions that we use for initialization.
