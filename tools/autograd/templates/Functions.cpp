@@ -738,7 +738,7 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
 Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
   Tensor grad_target;
   if (pos_weight.defined()) {
-    grad_target = (- pos_weight.mul(self.sigmoid().log()) + (1. - self.sigmoid()).log()).mul(grad_output);
+    grad_target = (1. - self.sigmoid()).log_().sub_(pos_weight.mul(self.sigmoid().log_())).mul_(grad_output);
   } else {
     grad_target = self.mul(-grad_output);
   }

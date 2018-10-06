@@ -8,7 +8,7 @@
 namespace {
   static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
     if (reduction == Reduction::ElementwiseMean) {
-      return unreduced.sum() / unreduced.numel();
+      return unreduced.mean();
     } else if (reduction == Reduction::Sum) {
       return unreduced.sum();
     }
@@ -89,18 +89,17 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
 
 Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
     Tensor loss;
-    auto max_val = at::clamp_min(-input, 0);
+    auto max_val = (-input).clamp_min_(0);
     if (pos_weight.defined()) {
-        auto log_weight = 1 + (pos_weight - 1) * target;
-        loss = input - input * target
-               + log_weight * (max_val + at::log(at::exp(-max_val) + at::exp(-input - max_val)));
+        // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+        auto log_weight = (pos_weight - 1).mul(target).add_(1);
+        loss = (1 - target).mul_(input).add_(log_weight.mul_((-max_val).exp_().mul_(1 + (-input).exp_()).log_()));
     } else {
-        loss = input - input * target + max_val
-               + at::log(at::exp(-max_val) + at::exp(-input - max_val));
+        loss = (1 - target).mul_(input).add_(max_val).add_((-max_val).exp_().add_((-input -max_val).exp_()).log_());
     }
 
     if (weight.defined()) {
-        loss = loss * weight;
+        loss.mul_(weight);
     }
 
     return apply_loss_reduction(loss, reduction);
@@ -109,13 +108,15 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
 Tensor binary_cross_entropy_with_logits_backward(const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
     Tensor grad_input;
     if (pos_weight.defined()) {
-        grad_input = (-pos_weight * target + (pos_weight * target + 1 - target) * at::sigmoid(input)) * grad;
+        // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+        auto t = pos_weight.mul(target);
+        grad_input = t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t).mul_(grad);
     } else {
-        grad_input = (-target + at::sigmoid(input)) * grad;
+        grad_input = (input.sigmoid() - target).mul_(grad);
     }
 
     if (weight.defined()) {
-        grad_input = weight * grad_input;
+        grad_input.mul_(weight);
     }
 
     if (reduction == Reduction::ElementwiseMean) {
