@@ -76,6 +76,3 @@
 [submodule "third_party/ideep"]
 	path = third_party/ideep
 	url = https://github.com/intel/ideep
-[submodule "third_party/nccl/nccl"]
-	path = third_party/nccl/nccl
-	url = https://github.com/NVIDIA/nccl

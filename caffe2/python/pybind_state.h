@@ -19,6 +19,9 @@
 #include <pybind11/stl.h>
 
 #include <Python.h>
+
+#ifdef USE_NUMPY
+
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 #define PY_ARRAY_UNIQUE_SYMBOL caffe2_python_ARRAY_API
 #include <numpy/arrayobject.h>
@@ -29,6 +32,12 @@
 #define NPY_ARRAY_C_CONTIGUOUS NPY_C_CONTIGUOUS
 #define PyArray_SetBaseObject(arr, x) (PyArray_BASE(arr) = (x))
 #endif
+
+#else
+
+struct PyArrayObject;  // Forward declaring PyArrayObject for safety
+
+#endif // USE_NUMPY
 
 namespace caffe2 {
 namespace python {
@@ -100,11 +109,16 @@ class TensorFetcher : public BlobFetcherBase {
   // Checks whether the data with type `meta` needs to be copied in the context
   // of `tensor`
   bool NeedsCopy(const Tensor* tensor, const TypeMeta& meta) const {
+#ifdef USE_NUMPY
     return tensor->GetStaticContext() != GetCPUStaticContext() ||
         CaffeToNumpyType(meta) == NPY_OBJECT;
+#else
+    return tensor->GetStaticContext() != GetCPUStaticContext();
+#endif // USE_NUMPY
   }
 
   FetchedBlob FetchTensor(const Tensor& tensor, bool force_copy) {
+#ifdef USE_NUMPY
     FetchedBlob result;
     CAFFE_ENFORCE_GE(tensor.size(), 0, "Trying to fetch uninitialized tensor");
     const int numpy_type = CaffeToNumpyType(tensor.meta());
@@ -153,6 +167,9 @@ class TensorFetcher : public BlobFetcherBase {
       context->FinishDeviceComputation();
     }
     return result;
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 };
 
@@ -163,6 +180,7 @@ class TensorFeeder : public BlobFeederBase {
       const DeviceOption& option,
       PyArrayObject* original_array,
       Tensor* tensor) {
+#ifdef USE_NUMPY
     PyArrayObject* array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
 
@@ -227,6 +245,9 @@ class TensorFeeder : public BlobFeederBase {
             tensor->raw_mutable_data(meta));
     }
     context.FinishDeviceComputation();
+#else
+    CAFFE_THROW("Caffe2 compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 
   virtual void
