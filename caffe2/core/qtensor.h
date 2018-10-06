@@ -47,14 +47,14 @@ class C10_EXPORT QTensor {
    * Explained here: https://arxiv.org/abs/1606.06160
    */
   explicit QTensor(
-      const std::vector<int>& dims,
+      at::ArrayRef<int> dims,
       const unsigned char precision,
       const bool signbit = false)
       : precision_(precision), signed_(signbit) {
     Resize(dims);
   }
 
-  void Resize(std::vector<int> dim_source) {
+  void Resize(at::ArrayRef<int> dim_source) {
     if (dims_ != dim_source) {
       size_t source_size = std::accumulate(
           dim_source.begin(), dim_source.end(), 1, std::multiplies<int>());
@@ -62,7 +62,7 @@ class C10_EXPORT QTensor {
         data_ptr_.clear();
         capacity_ = 0;
       }
-      dims_ = dim_source;
+      dims_ = dim_source.vec();
       size_ = source_size;
     }
   }
@@ -145,7 +145,7 @@ class C10_EXPORT QTensor {
     return precision_;
   }
 
-  inline const vector<int>& dims() const {
+  inline at::ArrayRef<int> dims() const {
     return dims_;
   }
 

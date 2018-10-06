@@ -35,7 +35,7 @@ void concat_op_cpu_impl(
   }
 
   int before = 1, after = 1;
-  vector<int64_t> output_dims(inputs[0]->dims());
+  vector<int64_t> output_dims(inputs[0]->dims().vec());
   for (int i = 0; i < inputs[0]->ndim(); ++i) {
     if (i == canonical_axis && !add_axis) {
       continue;

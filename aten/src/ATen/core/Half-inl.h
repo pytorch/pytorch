@@ -190,30 +190,31 @@ inline AT_HOST_DEVICE Half operator/(int a, Half b) {
   return static_cast<Half>(a) / b;
 }
 
-//// Arithmetic with longs
-inline AT_HOST_DEVICE Half operator+(Half a, long b) {
+//// Arithmetic with int64_t
+
+inline AT_HOST_DEVICE Half operator+(Half a, int64_t b) {
   return a + static_cast<Half>(b);
 }
-inline AT_HOST_DEVICE Half operator-(Half a, long b) {
+inline AT_HOST_DEVICE Half operator-(Half a, int64_t b) {
   return a - static_cast<Half>(b);
 }
-inline AT_HOST_DEVICE Half operator*(Half a, long b) {
+inline AT_HOST_DEVICE Half operator*(Half a, int64_t b) {
   return a * static_cast<Half>(b);
 }
-inline AT_HOST_DEVICE Half operator/(Half a, long b) {
+inline AT_HOST_DEVICE Half operator/(Half a, int64_t b) {
   return a / static_cast<Half>(b);
 }
 
-inline AT_HOST_DEVICE Half operator+(long a, Half b) {
+inline AT_HOST_DEVICE Half operator+(int64_t a, Half b) {
   return static_cast<Half>(a) + b;
 }
-inline AT_HOST_DEVICE Half operator-(long a, Half b) {
+inline AT_HOST_DEVICE Half operator-(int64_t a, Half b) {
   return static_cast<Half>(a) - b;
 }
-inline AT_HOST_DEVICE Half operator*(long a, Half b) {
+inline AT_HOST_DEVICE Half operator*(int64_t a, Half b) {
   return static_cast<Half>(a) * b;
 }
-inline AT_HOST_DEVICE Half operator/(long a, Half b) {
+inline AT_HOST_DEVICE Half operator/(int64_t a, Half b) {
   return static_cast<Half>(a) / b;
 }
 

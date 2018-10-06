@@ -59,7 +59,7 @@ _(int64_t,Long,i) \
 _(float,Float,d) \
 _(double,Double,d)
 
-enum class ScalarType {
+enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1,n,_2) \
   n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ENUM)
@@ -189,7 +189,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
 }
 
 class Tensor;
-typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;
 
 inline std::ostream& operator<<(
