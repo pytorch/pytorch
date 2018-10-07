@@ -28,6 +28,56 @@ merge_pull_request_onto_master: &merge_pull_request_onto_master
       git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
     fi
 
+setup_ci_environment: &setup_ci_environment
+  name: Set Up CI Environment
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    sudo pip install awscli
+
+    sudo apt-get update
+    sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
+    sudo apt-get install linux-headers-$(uname -r)
+    sudo apt-get install linux-image-generic
+
+    curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+    echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+    echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+    echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
+    sudo apt-get update
+    sudo apt-get install -y nvidia-docker2
+    sudo pkill -SIGHUP dockerd
+
+    if [[ "${JOB_BASE_NAME}" == *-test* ]]; then
+      if [ -n "${CUDA_VERSION}" ]; then
+        wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
+        sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s --no-drm
+        nvidia-smi
+      fi
+    fi
+
+    if [[ "${JOB_BASE_NAME}" == *-build ]]; then
+      echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
+      echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
+      echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
+      if [ -n "${CUDA_VERSION}" ]; then
+        echo "declare -x TORCH_CUDA_ARCH_LIST=5.2" >> /home/circleci/project/env
+      fi
+      export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
+      export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
+      export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
+      echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
+
+      # This IAM user allows write access to S3 bucket for sccache
+      echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
+      echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
+    fi
+
+    # This IAM user only allows read-write access to ECR
+    export AWS_ACCESS_KEY_ID=AKIAI43PKLK3PGLUWQMA
+    export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE}
+    eval $(aws ecr get-login --region us-east-1 --no-include-email)
+
 pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
   resource_class: large
   working_directory: /var/lib/jenkins/workspace
@@ -60,52 +110,22 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   - run:
       <<: *merge_pull_request_onto_master
   - run:
+      <<: *setup_ci_environment
+  - run:
       name: Build
       no_output_timeout: "1h"
       command: |
-        set -ex
-        sudo pip install awscli
-
-        sudo apt-get update
-        sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
-        sudo apt-get install linux-headers-$(uname -r)
-        sudo apt-get install linux-image-generic
-
-        curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-        echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        sudo apt-get update
-        sudo apt-get install -y nvidia-docker2
-
-        echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
-        echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
-        echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
-        if [ -n "${CUDA_VERSION}" ]; then
-          echo "declare -x TORCH_CUDA_ARCH_LIST=5.2" >> /home/circleci/project/env
-        fi
-        export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
-        export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
-        export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
-        echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
-
-        # This IAM user allows write access to S3 bucket for sccache
-        echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
-        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
+        # Pull Docker image and run build
+        docker pull ${DOCKER_IMAGE}
+        export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
         git submodule sync && git submodule update --init
 
-        sudo pkill -SIGHUP dockerd
-        # This IAM user only allows read-write access to ECR
-        export AWS_ACCESS_KEY_ID=AKIAI43PKLK3PGLUWQMA
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE}
-        eval $(aws ecr get-login --region us-east-1 --no-include-email)
-        docker pull ${DOCKER_IMAGE}
-        export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
         (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh') | docker exec -u jenkins -i "$id" bash
 
+        # Push intermediate Docker image and save COMMIT_DOCKER_IMAGE for next phase to use
         mkdir -p /home/circleci/project/pytorch-ci-env
         touch /home/circleci/project/pytorch-ci-env/.tmp  # Dummy file so that the persist_to_workspace step won't complain about not finding any file
 
@@ -132,39 +152,12 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   - attach_workspace:
       at: /home/circleci/project/pytorch-ci-env
   - run:
+      <<: *setup_ci_environment
+  - run:
       name: Test
       no_output_timeout: "1h"
       command: |
-        set -x
-        sudo pip install awscli
-
-        sudo apt-get update
-        sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
-        sudo apt-get install linux-headers-$(uname -r)
-        sudo apt-get install linux-image-generic
-
-        curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-        echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        sudo apt-get update
-        sudo apt-get install -y nvidia-docker2
-
-        if [ -n "${CUDA_VERSION}" ]; then
-          wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
-          sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s --no-drm
-        fi
-        sudo pkill -SIGHUP dockerd
-        if [ -n "${CUDA_VERSION}" ]; then
-          nvidia-smi
-        fi
-        # This IAM user only allows read-write access to ECR
-        export AWS_ACCESS_KEY_ID=AKIAI43PKLK3PGLUWQMA
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE}
-        eval $(aws ecr get-login --region us-east-1 --no-include-email)
-
         source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
-
         docker pull ${COMMIT_DOCKER_IMAGE}
         if [ -n "${CUDA_VERSION}" ]; then
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -172,7 +165,6 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
           id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         fi
         pwd
-
         if [ -n "${MULTI_GPU}" ]; then
           (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh') | docker exec -u jenkins -i "$id" bash
         else
@@ -532,7 +524,6 @@ jobs:
   pytorch_linux_xenial_py3_clang5_asan_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-py3-clang5-asan-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:248"
       PYTHON_VERSION: "3.6"
     resource_class: large
     <<: *pytorch_linux_test_defaults
@@ -548,7 +539,6 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn6_py3_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:248"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
     resource_class: gpu.medium
@@ -557,11 +547,27 @@ jobs:
   pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-multigpu-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda8-cudnn6-py3:248"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
       MULTI_GPU: "1"
     resource_class: gpu.large
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX2_test:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-NO_AVX2-test
+      PYTHON_VERSION: "3.6"
+      CUDA_VERSION: "8"
+      MULTI_GPU: "1"
+    resource_class: gpu.medium
+    <<: *pytorch_linux_test_defaults
+
+  pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX_NO_AVX2_test:
+    environment:
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-NO_AVX-NO_AVX2-test
+      PYTHON_VERSION: "3.6"
+      CUDA_VERSION: "8"
+    resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
   pytorch_linux_xenial_cuda9_cudnn7_py2_build:
@@ -575,7 +581,6 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py2_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py2-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:248"
       PYTHON_VERSION: "2.7"
       CUDA_VERSION: "9"
     resource_class: gpu.medium
@@ -592,7 +597,6 @@ jobs:
   pytorch_linux_xenial_cuda9_cudnn7_py3_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9-cudnn7-py3-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:248"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "9"
     resource_class: gpu.medium
@@ -609,11 +613,37 @@ jobs:
   pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
     environment:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:248"
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "9.2"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
+
+  pytorch_short_perf_test_gpu:
+    environment:
+      JOB_BASE_NAME: pytorch-short-perf-test-gpu
+      PYTHON_VERSION: "3.6"
+      CUDA_VERSION: "8"
+    resource_class: gpu.medium
+    machine:
+      image: default
+    steps:
+    - run:
+        name: Prepare workspace
+        command: |
+          sudo mkdir -p /home/circleci/project/pytorch-ci-env
+          sudo chmod -R 777 /home/circleci/project/pytorch-ci-env
+    - attach_workspace:
+        at: /home/circleci/project/pytorch-ci-env
+    - run:
+        <<: *setup_ci_environment
+    - run:
+        name: Perf Test
+        no_output_timeout: "1h"
+        command: |
+          source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
+          docker pull ${COMMIT_DOCKER_IMAGE}
+          id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh') | docker exec -u jenkins -i "$id" bash
 
   pytorch_macos_10_13_py3_build:
     macos:
@@ -922,36 +952,45 @@ workflows:
   version: 2
   build:
     jobs:
-      - pytorch_linux_trusty_py2_7_9_build_test
-      - pytorch_linux_trusty_py2_7_build_test
-      - pytorch_linux_trusty_py3_5_build_test
-      - pytorch_linux_trusty_py3_6_gcc4_8_build_test
-      - pytorch_linux_trusty_py3_6_gcc5_4_build_test
-      - pytorch_linux_trusty_py3_6_gcc7_build_test
-      - pytorch_linux_trusty_pynightly_build_test
-      - pytorch_linux_xenial_py3_clang5_asan_build
-      - pytorch_linux_xenial_py3_clang5_asan_test:
-          requires:
-            - pytorch_linux_xenial_py3_clang5_asan_build
+      # - pytorch_linux_trusty_py2_7_9_build_test
+      # - pytorch_linux_trusty_py2_7_build_test
+      # - pytorch_linux_trusty_py3_5_build_test
+      # - pytorch_linux_trusty_py3_6_gcc4_8_build_test
+      # - pytorch_linux_trusty_py3_6_gcc5_4_build_test
+      # - pytorch_linux_trusty_py3_6_gcc7_build_test
+      # - pytorch_linux_trusty_pynightly_build_test
+      # - pytorch_linux_xenial_py3_clang5_asan_build
+      # - pytorch_linux_xenial_py3_clang5_asan_test:
+      #     requires:
+      #       - pytorch_linux_xenial_py3_clang5_asan_build
       - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
+      # - pytorch_linux_xenial_cuda8_cudnn6_py3_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      # - pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      - pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX2_test:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda8_cudnn6_py3_multigpu_test:
+      - pytorch_linux_xenial_cuda8_cudnn6_py3_NO_AVX_NO_AVX2_test:
           requires:
             - pytorch_linux_xenial_cuda8_cudnn6_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
+      - pytorch_short_perf_test_gpu:
           requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py2_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
-      - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
-          requires:
-            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+            - pytorch_linux_xenial_cuda8_cudnn6_py3_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py2_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda9_cudnn7_py2_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      # - pytorch_linux_xenial_cuda9_cudnn7_py3_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda9_cudnn7_py3_build
+      # - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
+      # - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_test:
+      #     requires:
+      #       - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
 
       # - pytorch_macos_10_13_py3_build
       # - pytorch_macos_10_13_py3_test:
@@ -959,35 +998,35 @@ workflows:
       #       - pytorch_macos_10_13_py3_build
       # - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build
 
-      - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
-      - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
-      - caffe2_py2_mkl_ubuntu16_04_build
-      - caffe2_py2_mkl_ubuntu16_04_test:
-          requires:
-            - caffe2_py2_mkl_ubuntu16_04_build
-      - caffe2_py2_gcc4_8_ubuntu14_04_build
-      - caffe2_py2_gcc4_8_ubuntu14_04_test:
-          requires:
-            - caffe2_py2_gcc4_8_ubuntu14_04_build
-      - caffe2_onnx_py2_gcc5_ubuntu16_04_build
-      - caffe2_onnx_py2_gcc5_ubuntu16_04_test:
-          requires:
-            - caffe2_onnx_py2_gcc5_ubuntu16_04_build
-      - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
-      - caffe2_py2_clang3_8_ubuntu16_04_build
-      - caffe2_py2_clang3_9_ubuntu16_04_build
-      - caffe2_py2_android_ubuntu16_04_build
-      - caffe2_py2_cuda9_0_cudnn7_centos7_build
+      # - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
+      # - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_cuda8_0_cudnn6_ubuntu16_04_build
+      # - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_cuda9_1_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_mkl_ubuntu16_04_build
+      # - caffe2_py2_mkl_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_py2_mkl_ubuntu16_04_build
+      # - caffe2_py2_gcc4_8_ubuntu14_04_build
+      # - caffe2_py2_gcc4_8_ubuntu14_04_test:
+      #     requires:
+      #       - caffe2_py2_gcc4_8_ubuntu14_04_build
+      # - caffe2_onnx_py2_gcc5_ubuntu16_04_build
+      # - caffe2_onnx_py2_gcc5_ubuntu16_04_test:
+      #     requires:
+      #       - caffe2_onnx_py2_gcc5_ubuntu16_04_build
+      # - caffe2_py2_cuda8_0_cudnn7_ubuntu16_04_build
+      # - caffe2_py2_clang3_8_ubuntu16_04_build
+      # - caffe2_py2_clang3_9_ubuntu16_04_build
+      # - caffe2_py2_android_ubuntu16_04_build
+      # - caffe2_py2_cuda9_0_cudnn7_centos7_build
 
       # - caffe2_py2_ios_macos10_13_build
       # - caffe2_py2_system_macos10_13_build
