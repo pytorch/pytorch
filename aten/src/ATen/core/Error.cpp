@@ -113,7 +113,7 @@ std::function<std::string(void)>* GetFetchStackTrace() {
   return &func;
 };
 
-void ThrowAtEnforceNotMet(
+void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
