@@ -315,11 +315,15 @@ Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
-  return self.clone().masked_scatter_(mask, source);
+  Tensor _self, _mask, _source;
+  std::tie(_self, _mask, _source) = expand_outplace(self.clone(), mask, source);
+  return _self.masked_scatter_(mask, source);
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
-  return self.clone().masked_fill_(mask, source);
+  Tensor _self;
+  std::tie(_self) = expand_inplace(mask, self.clone());
+  return _self.masked_fill_(mask, source);
 }
 
 }} // at::native

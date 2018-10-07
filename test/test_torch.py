@@ -3090,31 +3090,39 @@ class TestTorch(TestCase):
                 # map and map2 are not implementd on CUDA tensors
                 continue
 
-            # TODO: fix masked_scatter and masked_fill broadcasting
-            if hasattr(large_expanded, fn) and fn not in ['masked_scatter', 'masked_fill']:
+            def specialized(myfn, t1, t2, t3):
+                if fn == "lerp":
+                    return myfn(t1, t2, 0.5)
+                elif fn == "masked_select":
+                    return myfn(t1, t2 < 0)
+                elif fn == "masked_scatter":
+                    return myfn(t1, t2 < 0.5, cast(torch.arange(1, t1.nelement() + 1).float()))
+                elif fn == "masked_fill":
+                    return myfn(t1, t2 < 0.5, 1.0)
+                elif fn in fns_3_args:
+                    return myfn(t1, 1.0, t2, t3)
+                else:
+                    return myfn(t1, t2)
+
+            if hasattr(large_expanded, fn):
                 # run through tensor versions of functions
                 # and verify fully expanded inputs give same results
                 expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
 
-                def tensorfn(myfn, t1, t2):
-                    if fn == "lerp":
-                        return myfn(t1, 0.5)
-                    elif fn == "masked_select":
-                        return myfn(t1 < 0)
-                    elif fn in fns_3_args:
-                        return myfn(1, t1, t2)
-                    else:
-                        return myfn(t1)
+                def prepend_unused_arg(f):
+                    def wrapper(_, *args):
+                        return f(*args)
+                    return wrapper
 
                 # test various orders
                 for first, second, third in [(large, small, small2), (small, large, small2),
                                              (small2, small, large), (small2, large, small)]:
                     if first is None:
                         break  # ignore last iter when small2 is None
-                    method_expanded = getattr(expanded[first], fn)
-                    method = getattr(first, fn)
-                    r1 = tensorfn(method_expanded, expanded[second], expanded[third])
-                    r2 = tensorfn(method, second, third)
+                    method_expanded = prepend_unused_arg(getattr(expanded[first], fn))
+                    method = prepend_unused_arg(getattr(first, fn))
+                    r1 = specialized(method_expanded, expanded[first], expanded[second], expanded[third])
+                    r2 = specialized(method, first, second, third)
                     self.assertEqual(r1, r2)
 
             # now for torch. versions of functions
@@ -3122,35 +3130,14 @@ class TestTorch(TestCase):
                 fntorch = getattr(torch, fn)
                 expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
 
-                def torchfn(t1, t2, t3):
-                    if fn == "lerp":
-                        return fntorch(t1, t2, 0.5)
-                    elif fn == "masked_select":
-                        return fntorch(t1, t2 < 0)
-                    elif fn == "masked_scatter":
-                        return fntorch(t1, t2 < 0.5, cast(torch.arange(1, t1.nelement() + 1).float()))
-                    elif fn == "masked_fill":
-                        return fntorch(t1, t2 < 0.5, 1.0)
-                    elif fn in fns_3_args:
-                        return fntorch(t1, 1.0, t2, t3)
-                    else:
-                        return fntorch(t1, t2)
-
                 # test various orders
                 for first, second, third in [(large, small, small2), (small, large, small2),
                                              (small2, small, large), (small2, large, small)]:
                     if first is None:
                         return  # ignore last iter when small2 is None
-                    # in-place tensor is not broadcastable; test only guaranteed
-                    # to work by broadcasting other argument(s)
-                    if not hasattr(large_expanded, fn + "_"):
-                        r1 = torchfn(expanded[first], expanded[second], expanded[third])
-                        r2 = torchfn(first, second, third)
-                        self.assertEqual(r1, r2)
-                    else:
-                        r1 = torchfn(expanded[first], expanded[second], expanded[third])
-                        r2 = torchfn(expanded[first], second, third)
-                        self.assertEqual(r1, r2)
+                    r1 = specialized(fntorch, expanded[first], expanded[second], expanded[third])
+                    r2 = specialized(fntorch, first, second, third)
+                    self.assertEqual(r1, r2)
 
             # now for in place functions
             # in-place tensor is not broadcastable; test only guaranteed
