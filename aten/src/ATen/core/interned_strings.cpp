@@ -1,4 +1,3 @@
-#include "torch/csrc/jit/interned_strings.h"
 #include <cstdint>
 #include <iostream>
 #include <mutex>
@@ -7,9 +6,10 @@
 #include <unordered_map>
 #include <vector>
 #include "ATen/core/Error.h"
+#include "ATen/core/interned_strings.h"
+#include "ATen/core/interned_strings_class.h"
 #include "ATen/core/optional.h"
-#include "string.h"
-#include "torch/csrc/jit/interned_strings_class.h"
+#include <cstring>
 
 namespace torch { namespace jit {
 
@@ -25,7 +25,7 @@ std::pair<const char*, const char*> InternedStrings::string(Symbol sym) {
   // know their string value
   switch (sym) {
 #define DEFINE_CASE(ns, s) \
-  case ns::s:              \
+  case static_cast<unique_t>(ns::s): \
     return {#ns "::" #s, #s};
     FORALL_NS_SYMBOLS(DEFINE_CASE)
 #undef DEFINE_CASE
@@ -37,7 +37,7 @@ std::pair<const char*, const char*> InternedStrings::string(Symbol sym) {
 Symbol InternedStrings::ns(Symbol sym) {
   switch (sym) {
 #define DEFINE_CASE(ns, s) \
-  case ns::s:              \
+  case static_cast<unique_t>(ns::s): \
     return namespaces::ns;
     FORALL_NS_SYMBOLS(DEFINE_CASE)
 #undef DEFINE_CASE

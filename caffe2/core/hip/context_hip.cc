@@ -15,40 +15,48 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/string_utils.h"
 
-CAFFE2_DEFINE_string(caffe2_hip_memory_pool,
-                     "",
-                     "Sets the memory pool used by caffe2. Possible values are "
-                     "none, cnmen and cub.");
+C10_DEFINE_string(
+    caffe2_hip_memory_pool,
+    "",
+    "Sets the memory pool used by caffe2. Possible values are "
+    "none, cnmen and cub.");
 
 // For description of CUB caching allocator configuration, see
 // https://nvlabs.github.io/cub/structcub_1_1_caching_device_allocator.html
-CAFFE2_DEFINE_int(caffe2_cub_bin_growth,
-                  8,
-                  "If using cub as the memory allocator, sets the growth of bins "
-                  "used by the cub pool.");
-CAFFE2_DEFINE_int(caffe2_cub_min_bin,
-                  3,
-                  "If using cub as the memory allocator, sets the min number of "
-                  "bins.");
-CAFFE2_DEFINE_int(caffe2_cub_max_bin,
-                  10,
-                  "If using cub as the memory allocator, sets the max number of "
-                  "bins.");
-CAFFE2_DEFINE_int(caffe2_cub_max_managed_mb,
-                  10 * 1024,
-                  "If using cub as the memory allocators, sets the maximum amount "
-                  "of memory managed in gigabytes");
-CAFFE2_DEFINE_bool(caffe2_cub_print_allocation_events,
-                   false,
-                   "If true CachingDeviceAllocator will print allocation and deallocation "
-                   "events to stdout.");
+C10_DEFINE_int(
+    caffe2_cub_bin_growth,
+    8,
+    "If using cub as the memory allocator, sets the growth of bins "
+    "used by the cub pool.");
+C10_DEFINE_int(
+    caffe2_cub_min_bin,
+    3,
+    "If using cub as the memory allocator, sets the min number of "
+    "bins.");
+C10_DEFINE_int(
+    caffe2_cub_max_bin,
+    10,
+    "If using cub as the memory allocator, sets the max number of "
+    "bins.");
+C10_DEFINE_int(
+    caffe2_cub_max_managed_mb,
+    10 * 1024,
+    "If using cub as the memory allocators, sets the maximum amount "
+    "of memory managed in gigabytes");
+C10_DEFINE_bool(
+    caffe2_cub_print_allocation_events,
+    false,
+    "If true CachingDeviceAllocator will print allocation and deallocation "
+    "events to stdout.");
 
-CAFFE2_DEFINE_bool(caffe2_gpu_memory_tracking,
-                   false,
-                   "If set, logs changes in GPU memory allocations");
-CAFFE2_DEFINE_int(caffe2_gpu_memory_report_interval_mb,
-                  128,
-                  "The threshold in MB on how frequently to report memory changes");
+C10_DEFINE_bool(
+    caffe2_gpu_memory_tracking,
+    false,
+    "If set, logs changes in GPU memory allocations");
+C10_DEFINE_int(
+    caffe2_gpu_memory_report_interval_mb,
+    128,
+    "The threshold in MB on how frequently to report memory changes");
 
 namespace at {
 
@@ -157,13 +165,13 @@ static void SetUpCub()
     // Sets up the cub memory pool
     try
     {
-        g_cub_allocator.reset(
-            new cub::CachingDeviceAllocator(FLAGS_caffe2_cub_bin_growth,
-                                            FLAGS_caffe2_cub_min_bin,
-                                            FLAGS_caffe2_cub_max_bin,
-                                            size_t(FLAGS_caffe2_cub_max_managed_mb) * 1024L * 1024L,
-                                            false,
-                                            FLAGS_caffe2_cub_print_allocation_events));
+      g_cub_allocator.reset(new cub::CachingDeviceAllocator(
+          c10::FLAGS_caffe2_cub_bin_growth,
+          c10::FLAGS_caffe2_cub_min_bin,
+          c10::FLAGS_caffe2_cub_max_bin,
+          size_t(c10::FLAGS_caffe2_cub_max_managed_mb) * 1024L * 1024L,
+          false,
+          c10::FLAGS_caffe2_cub_print_allocation_events));
     }
     catch(...)
     {
@@ -174,30 +182,25 @@ static void SetUpCub()
 
 static void Caffe2SetHIPMemoryPool()
 {
-    if(FLAGS_caffe2_hip_memory_pool == "" || FLAGS_caffe2_hip_memory_pool == "none")
-    {
-        g_hip_memory_pool_type = HipMemoryPoolType::NONE;
-    }
-    else if(FLAGS_caffe2_hip_memory_pool == "cnmem")
-    {
-        CAFFE_THROW("CNMEM is no longer used by Caffe2. Use cub instead. "
-                    "This error message may go away in the future.");
-    }
-    else if(FLAGS_caffe2_hip_memory_pool == "cub")
-    {
-        // Sets up cub.
-        g_hip_memory_pool_type = HipMemoryPoolType::CUB;
-        SetUpCub();
-    }
-    else if(FLAGS_caffe2_hip_memory_pool == "thc")
-    {
-        g_hip_memory_pool_type = HipMemoryPoolType::THC;
-        g_thc_allocator.reset(new THCCachingAllocator());
-    }
-    else
-    {
-        CAFFE_THROW("Unrecognized HIP memory pool type: ", FLAGS_caffe2_hip_memory_pool);
-    }
+  if (c10::FLAGS_caffe2_hip_memory_pool == "" ||
+      c10::FLAGS_caffe2_hip_memory_pool == "none") {
+    g_hip_memory_pool_type = HipMemoryPoolType::NONE;
+  } else if (c10::FLAGS_caffe2_hip_memory_pool == "cnmem") {
+    CAFFE_THROW(
+        "CNMEM is no longer used by Caffe2. Use cub instead. "
+        "This error message may go away in the future.");
+  } else if (c10::FLAGS_caffe2_hip_memory_pool == "cub") {
+    // Sets up cub.
+    g_hip_memory_pool_type = HipMemoryPoolType::CUB;
+    SetUpCub();
+  } else if (c10::FLAGS_caffe2_hip_memory_pool == "thc") {
+    g_hip_memory_pool_type = HipMemoryPoolType::THC;
+    g_thc_allocator.reset(new THCCachingAllocator());
+  } else {
+    CAFFE_THROW(
+        "Unrecognized HIP memory pool type: ",
+        c10::FLAGS_caffe2_hip_memory_pool);
+  }
 }
 
 // An initialization function that sets the CPU side to use pinned cpu
@@ -281,16 +284,18 @@ std::mutex& HIPContext::mutex()
 std::vector<long> HIPContext::TotalMemoryByGpu()
 {
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
-    CAFFE_ENFORCE(FLAGS_caffe2_gpu_memory_tracking,
-                  "Pass --caffe2_gpu_memory_tracking to enable memory stats");
+    CAFFE_ENFORCE(
+        c10::FLAGS_caffe2_gpu_memory_tracking,
+        "Pass --caffe2_gpu_memory_tracking to enable memory stats");
     return g_total_by_gpu_map;
 }
 
 std::vector<long> HIPContext::MaxMemoryByGpu()
 {
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
-    CAFFE_ENFORCE(FLAGS_caffe2_gpu_memory_tracking,
-                  "Pass --caffe2_gpu_memory_tracking to enable memory stats");
+    CAFFE_ENFORCE(
+        c10::FLAGS_caffe2_gpu_memory_tracking,
+        "Pass --caffe2_gpu_memory_tracking to enable memory stats");
     return g_max_by_gpu_map;
 }
 
@@ -301,88 +306,86 @@ void TrackMemoryAlloc(size_t nbytes)
     g_total_by_gpu_map[this_gpu] += nbytes;
     g_max_by_gpu_map[this_gpu] = std::max(g_max_by_gpu_map[this_gpu], g_total_by_gpu_map[this_gpu]);
     g_total_mem += nbytes;
-    if(g_total_mem - g_last_rep > FLAGS_caffe2_gpu_memory_report_interval_mb * 1024 * 1024)
-    {
-        for(int gpu = 0; gpu < g_total_by_gpu_map.size(); gpu++)
-        {
-            long t     = g_total_by_gpu_map[gpu];
-            long max_t = g_max_by_gpu_map[gpu];
-            if(max_t > 0)
-            {
-                if(max_t != t)
-                {
-                    LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB"
-                              << " (max: " << max_t / 1024 / 1024 << " MB)";
-                }
-                else
-                {
-                    LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB";
-                }
-            }
+    if (g_total_mem - g_last_rep >
+        c10::FLAGS_caffe2_gpu_memory_report_interval_mb * 1024 * 1024) {
+      for (int gpu = 0; gpu < g_total_by_gpu_map.size(); gpu++) {
+        long t = g_total_by_gpu_map[gpu];
+        long max_t = g_max_by_gpu_map[gpu];
+        if (max_t > 0) {
+          if (max_t != t) {
+            LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB"
+                      << " (max: " << max_t / 1024 / 1024 << " MB)";
+          } else {
+            LOG(INFO) << "GPU " << gpu << ": " << t / 1024 / 1024 << " MB";
+          }
         }
-        LOG(INFO) << "Total: " << g_total_mem / 1024 / 1024 << " MB";
-        g_last_rep = g_total_mem;
+      }
+      LOG(INFO) << "Total: " << g_total_mem / 1024 / 1024 << " MB";
+      g_last_rep = g_total_mem;
     }
 }
 }
 
-std::pair<void*, MemoryDeleter> HIPStaticContext::New(size_t nbytes) const {
-  // Lock the mutex
-  std::lock_guard<std::mutex> lock(HIPContext::mutex());
-  // A one-time caffe2 cuda initializer.
-  static Caffe2HipInitializerHelper g_hip_initializer_;
-  void* ptr = nullptr;
+at::DataPtr HIPStaticContext::New(size_t nbytes) const {
+  return GetHIPAllocator()->allocate(nbytes);
+}
 
-  if (FLAGS_caffe2_gpu_memory_tracking) {
-    TrackMemoryAlloc(nbytes);
-  }
-  switch (g_hip_memory_pool_type) {
-    case HipMemoryPoolType::NONE:
+struct DefaultHIPAllocator final : public at::Allocator {
+  DefaultHIPAllocator() {}
+  ~DefaultHIPAllocator() override {}
+  at::DataPtr allocate(size_t nbytes) const override {
+    // Lock the mutex
+    std::lock_guard<std::mutex> lock(HIPContext::mutex());
+    // A one-time caffe2 cuda initializer.
+    static Caffe2HipInitializerHelper g_hip_initializer_;
+    void* ptr = nullptr;
+
+    if (c10::FLAGS_caffe2_gpu_memory_tracking) {
+      TrackMemoryAlloc(nbytes);
+    }
+    switch (g_hip_memory_pool_type) {
+      case HipMemoryPoolType::NONE:
         HIP_ENFORCE(hipMalloc(&ptr, nbytes));
-        if(FLAGS_caffe2_gpu_memory_tracking)
-        {
-            g_size_map[ptr]               = nbytes;
-            g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
+        if (c10::FLAGS_caffe2_gpu_memory_tracking) {
+          g_size_map[ptr] = nbytes;
+          g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
-        return {ptr, Delete};
+        return {ptr, ptr, &Delete, at::Device(HIP)};
     case HipMemoryPoolType::CUB:
         HIP_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
         g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         VLOG(2) << "CUB allocating pointer " << ptr << " on device " << CaffeHipGetDevice();
-        if(FLAGS_caffe2_gpu_memory_tracking)
-        {
-            g_size_map[ptr] = nbytes;
+        if (c10::FLAGS_caffe2_gpu_memory_tracking) {
+          g_size_map[ptr] = nbytes;
         }
-        return {ptr, Delete};
+        return {ptr, ptr, &Delete, at::Device(HIP)};
     case HipMemoryPoolType::THC:
         HIP_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
-        if (FLAGS_caffe2_gpu_memory_tracking)
-        {
+        if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr]                = nbytes;
           g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
-        return {ptr, Delete};
+        return {ptr, ptr, &Delete, at::Device(HIP)};
     }
-    return {nullptr, Delete};
-}
-
-void HIPStaticContext::Delete(void* ptr) {
-  // lock the mutex
-  std::lock_guard<std::mutex> lock(HIPContext::mutex());
-
-  if (FLAGS_caffe2_gpu_memory_tracking) {
-    auto sz_it = g_size_map.find(ptr);
-    DCHECK(sz_it != g_size_map.end());
-    auto aff_it = g_hip_device_affiliation.find(ptr);
-    DCHECK(aff_it != g_hip_device_affiliation.end());
-    g_total_mem -= sz_it->second;
-    g_total_by_gpu_map[aff_it->second] -= sz_it->second;
-    g_size_map.erase(sz_it);
+    return {nullptr, nullptr, &Delete, at::Device(HIP)};
   }
 
-  switch (g_hip_memory_pool_type) {
-    case HipMemoryPoolType::NONE:
-    {
+  static void Delete(void* ptr) {
+    // lock the mutex
+    std::lock_guard<std::mutex> lock(HIPContext::mutex());
+
+    if (c10::FLAGS_caffe2_gpu_memory_tracking) {
+      auto sz_it = g_size_map.find(ptr);
+      DCHECK(sz_it != g_size_map.end());
+      auto aff_it = g_hip_device_affiliation.find(ptr);
+      DCHECK(aff_it != g_hip_device_affiliation.end());
+      g_total_mem -= sz_it->second;
+      g_total_by_gpu_map[aff_it->second] -= sz_it->second;
+      g_size_map.erase(sz_it);
+    }
+
+    switch (g_hip_memory_pool_type) {
+      case HipMemoryPoolType::NONE: {
         // If memory pool is not set up, use simple hipFree.
         hipError_t error = hipFree(ptr);
         // For some reason, in Python runtime we sometimes delete a data pointer
@@ -393,34 +396,43 @@ void HIPStaticContext::Delete(void* ptr) {
         // ignore it. This is definitely not ideal but works for now.
         if(error != hipSuccess)
         {
-            LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
-                       << hipGetErrorString(error);
+          LOG(FATAL) << "Error at: " << __FILE__ << ":" << __LINE__ << ": "
+                     << hipGetErrorString(error);
         }
 
-        if(FLAGS_caffe2_gpu_memory_tracking)
-        {
-            g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
+        if (c10::FLAGS_caffe2_gpu_memory_tracking) {
+          g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
         }
 
         break;
-    }
-    case HipMemoryPoolType::CUB:
-    {
+      }
+      case HipMemoryPoolType::CUB: {
         auto it = g_hip_device_affiliation.find(ptr);
         DCHECK(it != g_hip_device_affiliation.end());
         VLOG(2) << "CUB freeing pointer " << ptr << " on device " << it->second;
         HIP_ENFORCE(g_cub_allocator->DeviceFree(it->second, ptr));
         g_hip_device_affiliation.erase(it);
         break;
-    }
-    case HipMemoryPoolType::THC: {
-      HIP_ENFORCE(g_thc_allocator->Free(ptr));
-      if (FLAGS_caffe2_gpu_memory_tracking) {
-        g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
       }
-      break;
+      case HipMemoryPoolType::THC: {
+        HIP_ENFORCE(g_thc_allocator->Free(ptr));
+        if (c10::FLAGS_caffe2_gpu_memory_tracking) {
+          g_hip_device_affiliation.erase(g_hip_device_affiliation.find(ptr));
+        }
+        break;
+      }
     }
-    }
+  }
+
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
+  }
+};
+
+static std::unique_ptr<at::Allocator> g_hip_allocator(
+    new DefaultHIPAllocator());
+at::Allocator* GetHIPAllocator() {
+  return g_hip_allocator.get();
 }
 
 BaseStaticContext* GetHIPStaticContext() {

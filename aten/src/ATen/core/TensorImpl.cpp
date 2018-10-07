@@ -109,4 +109,20 @@ const Storage& TensorImpl::storage() const {
   return storage_;
 }
 
+static void deletePlacementDeleteContext(void* ptr) {
+  delete static_cast<PlacementDeleteContext*>(ptr);
+}
+
+at::DataPtr PlacementDeleteContext::makeDataPtr(
+    at::DataPtr&& data_ptr,
+    PlacementDtor placement_dtor,
+    size_t size,
+    at::Device device) {
+  auto* ptr = data_ptr.get();
+  return {ptr,
+          new PlacementDeleteContext(std::move(data_ptr), placement_dtor, size),
+          &deletePlacementDeleteContext,
+          device};
+}
+
 } // namespace at

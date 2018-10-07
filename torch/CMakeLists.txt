@@ -7,6 +7,7 @@ else()
   project(torch CXX C)
   find_package(Caffe2 REQUIRED)
   option(USE_CUDA "Use CUDA" ON)
+  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
 option(BUILD_TEST "Build torch test binaries" ON)
@@ -143,7 +144,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
   ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
@@ -173,17 +173,16 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/pretty_print.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
   ${TORCH_SRC_DIR}/csrc/torch.cpp
   ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
+  ${TORCH_ROOT}/test/cpp/jit/no-gtest.cpp
   )
 
 SET(USE_CPU_FUSER 0)
@@ -300,12 +299,6 @@ else()
 
 endif()
 
-# see the source file for explanation
-set_source_files_properties(
-  ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
-  PROPERTIES COMPILE_FLAGS -O0
-  )
-
 if (MSVC)
 elseif ($ENV{WERROR})
   target_compile_options(torch PRIVATE -Werror -Wno-strict-overflow)
@@ -393,7 +386,7 @@ set(ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
   ${CMAKE_BINARY_DIR}/aten/src)
-target_include_directories(torch PRIVATE ${ATen_CPU_INCLUDE})
+target_include_directories(torch PUBLIC ${ATen_CPU_INCLUDE})
 
 target_include_directories(torch PUBLIC
   ${TORCH_SRC_DIR}/csrc)
@@ -415,18 +408,8 @@ install(TARGETS torch
   LIBRARY DESTINATION "${TORCH_INSTALL_LIB_DIR}"
   ARCHIVE DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
-# JIT Tests. TODO: Put into test/cpp/jit folder
 if (BUILD_TEST AND NOT MSVC AND NOT APPLE AND NOT USE_ROCM)
-  add_executable(test_jit ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp)
-  target_link_libraries(test_jit torch ${TORCH_CUDA_LIBRARIES})
-  target_compile_definitions(test_jit PUBLIC USE_CATCH _FORCE_INLINES)
-  target_include_directories(test_jit PUBLIC
-    "${TORCH_ROOT}/third_party/catch/single_include"
-    ${ATen_CPU_INCLUDE})
-
-  if (USE_CUDA)
-    target_link_libraries(test_jit ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB})
-  endif()
+  add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
 endif()
 
 if (BUILD_TEST AND NOT NO_API AND NOT USE_ROCM)

@@ -1957,7 +1957,7 @@ class TestJit(JitTestCase):
                     c = 2
                 else:
                     c = 3
-            return a + 1
+            return a + 1 + c
 
         @torch.jit.script
         def loop_use_test(y):
@@ -1968,11 +1968,19 @@ class TestJit(JitTestCase):
                 z = x
             return x, z
 
+        def python_fn(x):
+            return x + 10
+
+        @torch.jit.script
+        def python_op_name_test(y):
+            return python_fn(y)
+
         self.assertExpected(if_test.graph.pretty_print(), "if_test")
         self.assertExpected(if_one.graph.pretty_print(), "if_one")
         self.assertExpected(while_test.graph.pretty_print(), "while_test")
         self.assertExpected(while_if_test.graph.pretty_print(), "while_if_test")
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
+        self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
 
 
 class TestBatched(TestCase):
@@ -5360,6 +5368,8 @@ a")
         for type in [torch.float, torch.double]:
             m_orig = M(type)
             m_import = self.getExportImportCopy(m_orig)
+            # check to make sure the storage wasn't resized
+            self.assertTrue(m_orig.param.storage().size() == 25)
             self.assertEqual(m_orig.foo(), m_import.foo())
             self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
@@ -5377,6 +5387,8 @@ a")
 
         m_orig = M()
         m_import = self.getExportImportCopy(m_orig)
+        # check to make sure the storage wasn't resized
+        self.assertTrue(m_orig.param.storage().size() == 25)
         self.assertTrue(m_import.foo().device == torch.device('cpu'))
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
@@ -7176,6 +7188,57 @@ a")
         '''
 
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
+
+    def test_weak_script_function(self):
+        outer_var = 10
+        outer_var2 = 11
+
+        def not_a_script_fn(x):
+            return x + 2
+
+        @torch.jit.script
+        def even_more_inner(x):
+            return x + 1
+
+        @torch.jit.script
+        def inner(x):
+            return not_a_script_fn(x) + x + even_more_inner(x)
+
+        @torch.jit.script
+        def strong_script_fn(x):
+            if bool(x.norm() > 2):
+                x = x + 3
+            return x + 4 + inner(x)
+
+        @torch.jit.weak_script
+        def weak_script_fn_inner(x):
+            return x + 6 + not_a_script_fn(x)
+
+        @torch.jit.weak_script
+        def weak_script_fn(x):
+            return x + 5 + weak_script_fn_inner(x) + weak_script_fn_inner(x)
+
+        def fn(x):
+            x = not_a_script_fn(x)
+            x = strong_script_fn(x)
+            return weak_script_fn(x)
+
+        scripted = torch.jit.script(fn)
+
+        input = torch.randn(3, 4, 5)
+        self.assertExpectedGraph(scripted.graph)
+        self.assertEqual(scripted(input), fn(input))
+
+    def test_python_op_exception(self):
+        def python_op(x):
+            raise Exception("bad!")
+
+        @torch.jit.script
+        def fn(x):
+            return python_op(x)
+
+        with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
+            fn(torch.tensor(4))
 
 
 class MnistNet(nn.Module):

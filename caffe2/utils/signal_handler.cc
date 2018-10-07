@@ -356,7 +356,7 @@ void uninstallFatalSignalHandlers() {
 } // namespace
 
 #if defined(CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS)
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_print_stacktraces,
     false,
     "If set, prints stacktraces when a fatal signal is raised.");
@@ -421,7 +421,7 @@ bool printStackTracesOnFatalSignal() {
 
 namespace internal {
 bool Caffe2InitFatalSignalHandler(int*, char***) {
-  if (caffe2::FLAGS_caffe2_print_stacktraces) {
+  if (c10::FLAGS_caffe2_print_stacktraces) {
     setPrintStackTracesOnFatalSignal(true);
   }
   return true;

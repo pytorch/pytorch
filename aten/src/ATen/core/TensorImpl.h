@@ -3,17 +3,18 @@
 #include <atomic>
 #include <memory>
 
-#include "ATen/core/Storage.h"
-#include "ATen/core/optional.h"
-#include "ATen/core/TensorTypeId.h"
-#include "ATen/core/TensorTypeIdRegistration.h"
-#include "ATen/core/LegacyTypeDispatch.h"
-#include "ATen/core/Backend.h"
-#include "ATen/core/context_base.h"
+#include <ATen/core/Backend.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/Storage.h>
+#include <ATen/core/TensorTypeId.h>
+#include <ATen/core/TensorTypeIdRegistration.h>
+#include <ATen/core/context_base.h>
+#include <ATen/core/optional.h>
+
+#include "c10/util/Flags.h"
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
-#include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
@@ -23,14 +24,13 @@
 // This parameter is respected "upper-case" methods which call Resize()
 // (e.g., CopyFrom, ResizeLike); it is NOT respected by Tensor::resize_
 // or ShrinkTo, both of which guarantee to never to free memory.
-CAFFE2_DECLARE_bool(caffe2_keep_on_shrink);
+C10_DECLARE_bool(caffe2_keep_on_shrink);
 
 // Since we can have high variance in blob memory allocated across different
 // inputs in the same run, we will shrink the blob only if the memory gain
 // is larger than this flag in bytes.  This only applies to functions which
 // respect caffe2_keep_on_shrink.
-CAFFE2_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
-
+C10_DECLARE_int64(caffe2_max_keep_on_shrink_memory);
 
 namespace caffe2 {
 
@@ -99,6 +99,39 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
   return axis_index;
 }
 
+using PlacementDtor = void (*)(void*, size_t);
+
+/*
+ * A Context that will call extra placement deleter during
+ * deconstruction.
+ *
+ * Accept a already constructed DataPtr and store it as member
+ * during destruction, we'll call extra deleter on the underlying
+ * data pointer before the DataPtr is destructed.
+ * `data_ptr_` owns the memory.
+ */
+struct CAFFE2_API PlacementDeleteContext {
+  at::DataPtr data_ptr_;
+  PlacementDtor placement_dtor_;
+  size_t size_;
+  PlacementDeleteContext(
+      at::DataPtr&& data_ptr,
+      PlacementDtor placement_dtor,
+      size_t size)
+      : data_ptr_(std::move(data_ptr)),
+        placement_dtor_(placement_dtor),
+        size_(size) {}
+  static at::DataPtr makeDataPtr(
+      at::DataPtr&& data_ptr,
+      PlacementDtor placement_dtor,
+      size_t size,
+      at::Device device);
+  ~PlacementDeleteContext() {
+    placement_dtor_(data_ptr_.get(), size_);
+    // original memory will be freed when data_ptr_ is destructed
+  }
+};
+
 /**
  * The low-level representation of a tensor, which contains a storage
  * (which contains the actual data) and metadata (e.g., sizes and strides)
@@ -129,7 +162,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable);
 
   explicit TensorImpl(at::Storage storage) : storage_(std::move(storage)), storage_offset_(0) {
-    data_type_ = storage_ ? storage_.dtype() : caffe2::TypeMeta{};
+    AT_ASSERT(storage_);
+    data_type_ = storage_.dtype();
   }
 
   TensorImpl(const TensorImpl&) = default;
@@ -409,11 +443,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       numel_ = -1;
       strides_.reset();
       is_contiguous_ = true;
-      storage_.reset();
+      storage_ = at::Storage(device_type(), caffe2::TypeMeta());
       data_type_ = caffe2::TypeMeta();
       return;
     }
-    Resize(src.dims());
+    Resize(src.sizes());
     if (numel() > 0) {
       if (data_type_.copy()) {
         CAFFE_ENFORCE(
@@ -571,10 +605,13 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // is smaller than new size
         reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize();
       } else {
-        reset_tensor = storage_.capacity() < (storage_offset_ + numel_) * storage_.itemsize() ||
-            !caffe2::FLAGS_caffe2_keep_on_shrink ||
-            storage_.capacity() - (storage_offset_ + numel_) * storage_.itemsize() >
-                static_cast<size_t>(caffe2::FLAGS_caffe2_max_keep_on_shrink_memory);
+        reset_tensor = storage_.capacity() <
+                (storage_offset_ + numel_) * storage_.itemsize() ||
+            !c10::FLAGS_caffe2_keep_on_shrink ||
+            storage_.capacity() -
+                    (storage_offset_ + numel_) * storage_.itemsize() >
+                static_cast<size_t>(
+                    c10::FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
       if (reset_tensor && !is_init) {
@@ -734,29 +771,19 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.dtor();
-        void* ptr;
-        at::DeleterFnPtr deleter;
-        auto ptr_and_deleter = GetStaticContext()->New(
+        auto data_ptr = GetStaticContext()->New(
             numel_ * storage_.itemsize()); // Removing this can get rid of
                                            // InefficientStdFunctionContext
-        ptr = ptr_and_deleter.first;
-        deleter = ptr_and_deleter.second;
-        storage_.set_data_ptr(at::InefficientStdFunctionContext::makeDataPtr(
-            ptr,
-            [size, dtor, deleter](void* local_ptr) -> void {
-              dtor(local_ptr, size);
-              deleter(local_ptr);
-            },
+        storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
+            std::move(data_ptr),
+            dtor,
+            size,
             at::Device(storage_.device_type())));
         data_type_.ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.
-        auto ptr_and_deleter =
-            GetStaticContext()->New(numel_ * storage_.itemsize());
-        storage_.set_data_ptr(at::InefficientStdFunctionContext::makeDataPtr(
-            ptr_and_deleter.first,
-            ptr_and_deleter.second,
-            at::Device(storage_.device_type())));
+        storage_.set_data_ptr(
+            GetStaticContext()->New(numel_ * storage_.itemsize()));
       }
       storage_.set_numel(numel_);
       AT_ASSERT(storage_offset_ == 0); // because we just reallocated
@@ -783,21 +810,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }
 
-  /**
-   * Returns the dimensions of the tensor as a vector.
-   */
-  inline const std::vector<int64_t>& dims() const {
-    // TODO: This method will no longer work if we change the
-    // internal representation of dims().  That's BAD.  Let's get
-    // people to stop using this.
-    return sizes_;
-  }
-
  private:
   template <
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
-  bool SetDims(const std::vector<T>& src) {
+  bool SetDimsTemplate(at::ArrayRef<T> src) {
     auto old_numel = numel_;
     sizes_.resize(src.size());
     int64_t new_numel = 1;
@@ -810,58 +827,36 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return numel_ != old_numel;
   }
 
-  bool SetDims() {
-    auto old_numel = numel_;
-    sizes_.resize(0);
-    update_to_contiguous_strides();
-    numel_ = 1;
-    return numel_ != old_numel;
+  bool SetDims(at::ArrayRef<int64_t> s) {
+    return SetDimsTemplate(s);
   }
 
-  // TODO(jiayq): maybe rewrite the following functions with initializer list.
-  // NVCC does not play well with initializer lists last time, but worth
-  // another shot.
+  bool SetDims(at::ArrayRef<int> s) {
+    return SetDimsTemplate(s);
+  }
+
+  bool SetDims(at::ArrayRef<size_t> s) {
+    return SetDimsTemplate(s);
+  }
+
+  bool SetDims() {
+    return SetDims(at::IntList{});
+  }
+
   bool SetDims(const int64_t d0) {
-    auto old_numel = numel_;
-    sizes_.resize(1);
-    sizes_[0] = d0;
-    update_to_contiguous_strides();
-    numel_ = d0;
-    return numel_ != old_numel;
+    return SetDims(at::IntList{d0});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1) {
-    auto old_numel = numel_;
-    sizes_.resize(2);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    update_to_contiguous_strides();
-    numel_ = d0 * d1;
-    return numel_ != old_numel;
+    return SetDims(at::IntList{d0, d1});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2) {
-    auto old_numel = numel_;
-    sizes_.resize(3);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    sizes_[2] = d2;
-    update_to_contiguous_strides();
-    numel_ = d0 * d1 * d2;
-    return numel_ != old_numel;
+    return SetDims(at::IntList{d0, d1, d2});
   }
 
-  bool
-  SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
-    auto old_numel = numel_;
-    sizes_.resize(4);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    sizes_[2] = d2;
-    sizes_[3] = d3;
-    update_to_contiguous_strides();
-    numel_ = d0 * d1 * d2 * d3;
-    return numel_ != old_numel;
+  bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
+    return SetDims(at::IntList{d0, d1, d2, d3});
   }
 
   inline void update_to_contiguous_strides() {
