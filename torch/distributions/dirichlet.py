@@ -9,7 +9,7 @@ from torch.distributions.utils import _finfo, broadcast_all, clamp_probs
 
 
 def _dirichlet_sample_nograd(concentration):
-    probs = torch._standard_gamma(concentration)
+    probs = torch._standard_gamma(concentration.clone())
     probs /= probs.sum(-1, True)
     return clamp_probs(probs)
 
