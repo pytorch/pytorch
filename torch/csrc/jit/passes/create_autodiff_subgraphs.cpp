@@ -12,6 +12,28 @@ namespace torch { namespace jit {
 
 struct Graph;
 
+namespace detail {
+template <>
+std::string Vertex<Node*>::toString() {
+  std::stringstream ss;
+  ss << "node(" << ord << ")\n";
+  ss << "[";
+  for (auto* c : in_edges()) {
+    ss << c->ord << " ";
+  }
+  ss << "] -> {\n";
+  for (auto* d : rdata) {
+    ss << "  " << *d;
+  }
+  ss << "} ("<< ord << ") -> [";
+  for (auto* c : out_edges()) {
+    ss << c->ord << " ";
+  }
+  ss << "]\n";
+  return ss.str();
+}
+}
+
 namespace {
 
 // Move nodes that exist in graph g into a 'group_node_kind' node.

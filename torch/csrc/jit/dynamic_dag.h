@@ -33,6 +33,7 @@ namespace torch { namespace jit { namespace detail {
 template <typename T> struct Vertex;
 template <typename T> struct DynamicDAG;
 template <typename T> using vertex_list = std::vector<Vertex<T>*>;
+template <typename T> using unique_vertex = std::unique_ptr<Vertex<T>>;
 
 enum DFSDirection {forward, backward};
 
@@ -140,14 +141,14 @@ struct DynamicDAG {
   // Store vertices indexed by their topological order.
   // If a vertex v has ord 5, then it can be found at vertices_[5].
   // There may be gaps in vertices_; this is to enable fast deletion.
-  std::vector<std::unique_ptr<Vertex<T>>> vertices_;
+  std::vector<unique_vertex<T>> vertices_;
 };
 
 // O(vertices_.size()). Used for testing, don't call this often.
 template <typename T>
 size_t DynamicDAG<T>::debugNumVertices() const {
   return std::count_if(vertices_.begin(), vertices_.end(),
-      [](const std::unique_ptr<Vertex<T>>& v) {
+      [](const unique_vertex<T>& v) {
         if (v) return true;
         return false;
       });
@@ -181,12 +182,12 @@ void DynamicDAG<T>::debugCheckInvariants() {
     const auto& vertex = vertices_.at(ord);
     if (!vertex) continue;
 
-    JIT_ASSERT(vertex->ord == ord);
+    AT_ASSERTM(vertex->ord == ord, toString());
     for (auto* v : vertex->in_edges()) {
-      JIT_ASSERT(v->ord < ord);
+      AT_ASSERTM(v->ord < ord, toString());
     }
     for (auto* v : vertex->out_edges()) {
-      JIT_ASSERT(v->ord > ord);
+      AT_ASSERTM(v->ord > ord, toString());
     }
   }
 }
@@ -210,7 +211,7 @@ EdgeData<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
     EdgeData<T>::erase(child->in_edges(), v);
   }
   auto edges = std::move(v->edges_);
-  vertices_[v->ord] = std::move(std::unique_ptr<Vertex<T>>(nullptr));
+  vertices_[v->ord] = std::move(unique_vertex<T>(nullptr));
   return edges;
 }
 
@@ -438,52 +439,64 @@ bool DynamicDAG<T>::dfsSearch(
 }
 
 
+// Reorder deltaB vertices to occur before deltaF vertices.
 template <typename T>
 void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
-  // Reorder deltaB vertices to occur before deltaF vertices.
   sort(deltaB);
   sort(deltaF);
 
   size_t num_affected = deltaB.size() + deltaF.size();
 
-  // TODO(rzou): there are five vector allocations. All of this can be done
-  // as one in-place operation; optimize this sometime.
-  vertex_list<T> tmp;
-  tmp.reserve(num_affected);
-
-  std::vector<size_t> deltaB_ords = fmap(deltaB, [](Vertex<T>* v) { return v->ord; });
-  std::vector<size_t> deltaF_ords = fmap(deltaF, [](Vertex<T>* v) { return v->ord; });
-
-  std::vector<size_t> computed_ords;
-  computed_ords.reserve(deltaB_ords.size() + deltaF_ords.size());
-  std::merge(
-    deltaB_ords.begin(), deltaB_ords.end(),
-    deltaF_ords.begin(), deltaF_ords.end(), std::back_inserter(computed_ords));
-
-  tmp.insert(tmp.end(), deltaB.begin(), deltaB.end());
-  tmp.insert(tmp.end(), deltaF.begin(), deltaF.end());
-
-  std::vector<std::unique_ptr<Vertex<T>>> tmp_storage;
-  tmp_storage.reserve(num_affected);
-
-  // [Reordering std::unique_ptr in a std::vector]
-  // Be careful to not delete the data.
-  for (size_t i = 0; i < tmp.size(); i++) {
-    auto old_ord = tmp[i]->ord;
-    tmp_storage.push_back(std::move(vertices_[old_ord]));
+  // Gather vertices in the desired order. They don't have correct ords yet.
+  std::vector<unique_vertex<T>> desired_vertex_ordering;
+  desired_vertex_ordering.reserve(num_affected);
+  for (auto it = deltaB.begin(); it != deltaB.end(); ++it) {
+    desired_vertex_ordering.push_back(std::move(vertices_.at((*it)->ord)));
   }
-  for (size_t i = 0; i < tmp.size(); i++) {
-    auto new_ord = computed_ords[i];
-    auto new_vertex = std::move(tmp_storage[i]);
-    new_vertex->ord = new_ord;
-    vertices_[new_ord] = std::move(new_vertex);
+  for (auto it = deltaF.begin(); it != deltaF.end(); ++it) {
+    desired_vertex_ordering.push_back(std::move(vertices_.at((*it)->ord)));
+  }
+
+  // Sort the ords.
+  // This is done through an O(num_affected) merge operation. For example,
+  // deltaB = { 1, 4, 7 } , deltaF = {0, 2, 5 }.
+  // These two lists already contain sorted ords; we just need to merge
+  // them to create an ordering { 0, 1, 2, 4, 5, 7 } to assign the vertices.
+  std::vector<size_t> sorted_ords;
+  sorted_ords.reserve(num_affected);
+  auto output = sorted_ords.begin();
+  auto inputB = deltaB.begin();
+  auto inputF = deltaF.begin();
+  for (; inputB != deltaB.end(); ++output) {
+    if (inputF == deltaF.end()) {
+      *output = (*inputB)->ord;
+      ++inputB;
+      continue;
+    }
+    if ((*inputB)->ord < (*inputF)->ord) {
+      *output = (*inputB)->ord;
+      ++inputB;
+    } else {
+      *output = (*inputF)->ord;
+      ++inputF;
+    }
+  }
+  for (; inputF != deltaF.end(); ++inputF) {
+    *output = (*inputF)->ord;
+    ++output;
+  }
+
+  // Return the vertices back into the vertices_ storage.
+  for (size_t i = 0; i < num_affected; ++i) {
+    desired_vertex_ordering[i]->ord = sorted_ords[i];
+    vertices_[sorted_ords[i]] = std::move(desired_vertex_ordering[i]);
   }
 }
 
 template <typename T>
 std::string DynamicDAG<T>::toString() {
   std::stringstream ss;
-  for (auto v : vertices_) {
+  for (auto& v : vertices_) {
     if (v) {
       ss << v->toString() << "\n";
     }
