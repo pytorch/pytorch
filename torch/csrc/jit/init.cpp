@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
@@ -63,7 +64,13 @@ bool loadPythonClasses() {
 
 } // anonymous namespace
 
-extern std::string runJITCPPTests();
+#if defined(_WIN32)
+std::string runJITCPPTests() {
+  AT_ERROR("JIT tests not yet supported on Windows");
+}
+#else
+std::string runJITCPPTests();
+#endif
 
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
