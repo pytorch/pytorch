@@ -3136,14 +3136,19 @@ class TestTorch(TestCase):
                     else:
                         return fntorch(t1, t2)
 
-                # test various orders
-                for first, second, third in [(large, small, small2), (small, large, small2),
-                                             (small2, small, large), (small2, large, small)]:
+                def test_torchfn(first, second, third):
                     if first is None:
-                        break  # ignore last iter when small2 is None
+                        return  # ignore last iter when small2 is None
                     r1 = torchfn(expanded[first], expanded[second], expanded[third])
                     r2 = torchfn(first, second, third)
                     self.assertEqual(r1, r2)
+
+                # test various orders
+                test_torchfn(large, small, small2)
+                if not hasattr(large_expanded, fn + "_"):
+                    for first, second, third in [(small, large, small2), (small2, small, large),
+                                                 (small2, large, small)]:
+                        test_torchfn(first, second, third)
 
             # now for in place functions
             # in-place tensor is not broadcastable; test only guaranteed
