@@ -147,7 +147,7 @@ int GetGPUIDForPointer(const void* ptr) {
   // Otherwise, there must be no error
   CUDA_ENFORCE(err);
 
-  if (attr.memoryType == cudaMemoryTypeHost) {
+  if (attr.CAFFE2_CUDA_PTRATTR_MEMTYPE == cudaMemoryTypeHost) {
     return -1;
   }
 
