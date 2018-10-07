@@ -154,11 +154,52 @@ class CAFFE2_API Warning {
 // exception type before its what() content
 CAFFE2_API std::string GetExceptionString(const std::exception& e);
 
+CAFFE2_API void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller);
+
 } // namespace at
 
 // TODO: variants that print the expression tested and thus don't require
 // strings
-// TODO: CAFFE_ENFORCE_WITH_CALLER style macro
+
+#define AT_ENFORCE(condition, ...)                                         \
+  do {                                                                        \
+    if (!(condition)) {                                                       \
+      at::ThrowEnforceNotMet(                                           \
+          __FILE__, __LINE__, #condition, at::str(__VA_ARGS__), nullptr); \
+    }                                                                         \
+  } while (false)
+
+#define AT_ENFORCE_WITH_CALLER(condition, ...) \
+  do {                                            \
+    if (!(condition)) {                           \
+      at::ThrowEnforceNotMet(               \
+          __FILE__,                               \
+          __LINE__,                               \
+          #condition,                             \
+          at::str(__VA_ARGS__),      \
+          this);                                  \
+    }                                             \
+  } while (false)
+
+#define AT_ENFORCE_GT(x, y, ...) \
+  AT_ENFORCE(x > y, __VA_ARGS__)
+
+#define AT_ENFORCE_GE(x, y, ...) \
+  AT_ENFORCE(x >= y, __VA_ARGS__)
+
+#define AT_ENFORCE_LT(x, y, ...) \
+  AT_ENFORCE(x < y, __VA_ARGS__)
+
+#define AT_ENFORCE_GE_WITH_CALLER(x, y, ...) \
+  AT_ENFORCE_WITH_CALLER(x >= y, __VA_ARGS__)
+
+#define AT_ENFORCE_EQ_WITH_CALLER(x, y, ...) \
+  AT_ENFORCE_WITH_CALLER(x == y, __VA_ARGS__)
 
 #define AT_ERROR(...) \
   throw at::Error({__func__, __FILE__, __LINE__}, at::str(__VA_ARGS__))
