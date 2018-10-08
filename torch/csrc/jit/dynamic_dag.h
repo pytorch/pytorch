@@ -458,11 +458,11 @@ void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
     desired_vertex_ordering.push_back(std::move(vertices_.at((*it)->ord)));
   }
 
-  // Sort the ords.
-  // This is done through an O(num_affected) merge operation. For example,
-  // deltaB = { 1, 4, 7 } , deltaF = {0, 2, 5 }.
-  // These two lists already contain sorted ords; we just need to merge
-  // them to create an ordering { 0, 1, 2, 4, 5, 7 } to assign the vertices.
+  // Sort the ords by merging two already sorted lists into a large sorted list.
+  // input (example): deltaB = { 1, 4, 7 } , deltaF = {0, 2, 5 }.
+  // output: { 0, 1, 2, 5, 7 }.
+  // This merge operation is the same thing as (pseudocode)
+  // sorted_ords = std::merge(fmap(deltaB, lambda v: v->ord), fmap(deltaF, lambda v: v->ord))
   std::vector<size_t> sorted_ords;
   sorted_ords.reserve(num_affected);
   auto output = sorted_ords.begin();
