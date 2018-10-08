@@ -3095,8 +3095,8 @@ class TestTorch(TestCase):
                 elif fn == "masked_select":
                     return myfn(t1, t2 < 0)
                 elif fn == "masked_scatter":
-                    elements_after_broadcast = torch.broadcast_tensors(t1, t2)[0].numel()
-                    return myfn(t1, t2 < 0.5, torch.ones(elements_after_broadcast))
+                    expanded = torch.broadcast_tensors(t1, t2)[0]
+                    return myfn(t1, t2 < 0.5, torch.ones_like(expanded))
                 elif fn == "masked_fill":
                     return myfn(t1, t2 < 0.5, 1.0)
                 elif fn in fns_3_args:
