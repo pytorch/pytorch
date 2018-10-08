@@ -363,28 +363,15 @@ FunctionSchema getSchemaWithDefaults(
   for (auto& arg : schema.arguments) {
     auto it = default_args.find(arg.name);
     if (it != default_args.end()) {
-      IValue value = *constantToIValue(it->second);
-      if (arg.type->isSubtypeOf(DynamicType::get()) && value.isScalar()) {
-        // Convert to tensor
-        value = autograd::make_variable(at::scalar_to_tensor(value.toScalar()));
+      try {
+        IValue value = toIValue(it->second, arg.type);
+        new_args.push_back(
+            Argument(arg.name, arg.type, arg.N, value, arg.kwarg_only));
+      } catch (py::cast_error& e) {
+        throw ErrorReport()
+            << "Expected a default value of type " << arg.type->str()
+            << " on parameter \"" << arg.name << "\"";
       }
-      auto valueType = inferTypeFrom(value);
-      if (!valueType->isSubtypeOf(arg.type)) {
-        AT_ERROR(
-            "Expected a default value of type ",
-            arg.type->str(),
-            " but got ",
-            valueType->str(),
-            " on parameter \"",
-            arg.name,
-            "\"");
-      }
-      new_args.push_back(Argument(
-          arg.name,
-          arg.type,
-          arg.N,
-          value,
-          arg.kwarg_only));
     } else {
       new_args.push_back(arg);
     }

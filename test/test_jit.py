@@ -1983,11 +1983,13 @@ class TestJit(JitTestCase):
         self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
 
     def test_function_default_values(self):
-        outer_var = 20
-        outer_var2 = 30
+        outer_var = torch.tensor(20)
+        outer_var2 = torch.tensor(30)
+        a = torch.tensor(0.5)
+        b = torch.tensor(10)
 
         @torch.jit.script
-        def simple_fn(x, a=0.5, b=10, c=outer_var + outer_var2):
+        def simple_fn(x, a=a, b=b, c=outer_var + outer_var2):
             return x + a + b + c
 
         self.assertExpectedGraph(simple_fn.graph, "simple")
@@ -1998,8 +2000,11 @@ class TestJit(JitTestCase):
             simple_fn(torch.ones(1), torch.tensor(1), torch.tensor(3), torch.tensor(4)),
             torch.ones(1) + 1 + 3 + 4)
 
+        outer_c = torch.tensor(9)
+        outer_flag = torch.tensor(False)
+
         @torch.jit.script
-        def bool_fn(x, a=9, flag=False):
+        def bool_fn(x, a=outer_c, flag=outer_flag):
             if bool(flag):
                 result = x
             else:
@@ -2014,7 +2019,7 @@ class TestJit(JitTestCase):
 
         if not PY2:
             @torch.jit.script
-            def hints(x, a: float=0.5, b: int=10):
+            def hints(x, a: float=0.5, b: int=10):  # noqa: E999
                 return x + a + b
 
             self.assertExpectedGraph(hints.graph, "type_hints")
