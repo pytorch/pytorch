@@ -121,6 +121,7 @@ struct Allocator {
   }
 };
 
+// Question: is this still needed?
 struct CAFFE2_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(

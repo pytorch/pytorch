@@ -750,7 +750,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         return storage_.data();
       }
       const at::Allocator* allocator = storage_.allocator();
-      // TODO: Get rid of StaticContext
       CAFFE_ENFORCE(
           allocator == nullptr,
           "Allocator is not used within Caffe2 functions, please use StaticContext instead.");
@@ -761,9 +760,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.dtor();
-        auto data_ptr = allocator->allocate(
-            numel_ * storage_.itemsize()); // Removing this can get rid of
-                                           // InefficientStdFunctionContext
+        auto data_ptr = allocator->allocate(numel_ * storage_.itemsize());
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr),
             dtor,
