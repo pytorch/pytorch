@@ -22,9 +22,17 @@ message MethodDef {
   repeated string inputs = 4;
   repeated string outputs = 5;
 
-  // whether this method is main or not.
-  // by default, `forward` should the main method.
-  optional bool is_main = 6;
+  // method type, can be one of the following:
+  //   1) MAIN, the main method, by default is `forward` method
+  //   2) INIT, only run once for initialization
+  //   3) REGULAR, may run multiple times at runtime
+  enum MethodType {
+    MAIN = 1;
+    INIT = 2;
+    REGULAR = 3;
+  }
+
+  optional MethodType method_type = 6;
 
   optional string debug_info = 7;
 
