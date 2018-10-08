@@ -336,10 +336,12 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
             elif exit_method == 'worker_kill':
                 kill_pid(worker_pids[0])
 
-    # Tries to trigger the __del__ clean-up rather than the automatic exiting of
-    # daemonic children. Technically it should be automatically triggered, but
-    # I don't want to rely on the implementation detail of Python gc.
-    gc.collect()
+    if not hold_iter_reference:
+        # Tries to trigger the __del__ clean-up rather than the automatic
+        # exiting of daemonic children. Technically it should be automatically
+        # triggered, but I don't want to rely on the implementation detail of
+        # Python gc.
+        gc.collect()
 
 
 # test custom init function
