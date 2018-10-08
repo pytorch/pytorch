@@ -1176,7 +1176,7 @@ class _DistTestBase(object):
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(batch_size)]
 
-        # Test that saving and loading works
+        # Test that saving and loading work
         # TODO: It should be possible to save the entire model,
         # but this doesn't work at the moment.  Update this test
         # when it does work.

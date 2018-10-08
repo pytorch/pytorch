@@ -9,6 +9,7 @@ from sys import platform
 import torch
 import torch.cuda
 import torch.multiprocessing as mp
+import torch.utils.hooks
 from torch.autograd import Variable
 from torch.nn import Parameter
 from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN
@@ -415,6 +416,7 @@ class TestMultiprocessing(TestCase):
 
         # This would cause an error if we tried to serialize the hooks,
         # because it's a closure and pickle doesn't support closures.
+        @torch.utils.hooks.unserializable_hook
         def hook(*unused):
             pass
 

@@ -965,7 +965,7 @@ class _DistTestBase(object):
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(batch_size)]
 
-        # Test that saving and loading works
+        # Test that saving and loading work
         # gloo serialization doesn't work, see #12261
         if BACKEND != "gloo":
             tmp_file = tempfile.TemporaryFile()
