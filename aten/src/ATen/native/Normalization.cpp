@@ -46,14 +46,14 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_template(const Tensor& input, co
   int64_t n = input.numel() / n_input;
 
   Tensor save_mean;
-  Tensor save_var;
+  Tensor save_invstd;
   const int64_t zero = 0;
   if (train) {
     save_mean = at::native::empty({n_input}, input.options());
-    save_var = at::native::empty({n_input}, input.options());
+    save_invstd = at::native::empty({n_input}, input.options());
   }
   auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
-  auto save_var_a = conditional_accessor_1d<scalar_t>(save_var);
+  auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
 
   auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
   auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
@@ -83,7 +83,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_template(const Tensor& input, co
 	  } else {
 	    invstd = (scalar_t) (1 / std::sqrt(sum/n + eps));
 	  }
-	  save_var_a[f] = sum/n;
+	  save_invstd_a[f] = invstd;
 
 	  // update running averages
 	  if (running_mean.defined()) {
@@ -107,13 +107,13 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_template(const Tensor& input, co
 	  });
       }
     });
-  return std::make_tuple(output, save_mean, save_var);
+  return std::make_tuple(output, save_mean, save_invstd);
 }
 
 
 template<typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor& grad_out_, const Tensor& input, const Tensor& weight,
-								    const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_var,
+								    const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
 								    bool train, double eps, std::array<bool,3> grad_input_mask) {
 
   using accscalar_t = at::acc_type<scalar_t, false>;
@@ -139,7 +139,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
   int64_t n = input.numel() / n_input;
 
   auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
-  auto save_var_a = conditional_accessor_1d<scalar_t>(save_var);
+  auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
 
   auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
   auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
@@ -152,17 +152,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
 	scalar_t w = weight.defined() ? weight_a[f] : 1;
 
-	scalar_t mean, var;
-	scalar_t invstd = 0;
+	scalar_t mean, invstd;
 	if (train) {
 	  mean = save_mean_a[f];
-	  var = save_var_a[f];
+	  invstd = save_invstd_a[f];
 	} else {
 	  mean = running_mean_a[f];
-	  var = running_var_a[f];
-	}
-	if (var != 0 || eps != 0) {
-	  invstd = 1 / std::sqrt(var + eps);
+	  invstd = 1 / std::sqrt(running_var_a[f] + eps);
 	}
 
 	// sum over all gradOutput in feature plane
@@ -416,8 +412,6 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
     }
 }
 
-// Note: In contrast to CuDNN, we return the batch variance in save_var/as third return. This is done for a bit better stability for
-// half - where CuDNN uses float.
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const Tensor& weight, const Tensor& bias,
 						  const Tensor& running_mean, const Tensor& running_var,
 						  bool train, double momentum, double eps) {
@@ -426,13 +420,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const Tens
     });
 }
 
-// Note: In contrast to CuDNN, we have the batch variance in save_var. This is done for a bit better stability for
-// half - where CuDNN uses float.
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_out, const Tensor& self, const Tensor& weight,
-							   const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_var,
+							   const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
 							   bool train, double eps, std::array<bool,3> grad_input_mask) {
   return AT_DISPATCH_FLOATING_TYPES(self.type(), "batch_norm_backward", [&] {
-      return batch_norm_backward_cpu_template<scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_var, train, eps, grad_input_mask);
+      return batch_norm_backward_cpu_template<scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
     });
 }
 
