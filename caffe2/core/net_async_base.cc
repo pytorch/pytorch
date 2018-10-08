@@ -14,6 +14,11 @@ C10_DEFINE_int(
 C10_DECLARE_bool(caffe2_dag_net_collect_stats);
 
 C10_DEFINE_bool(
+    caffe2_net_async_inference_mode,
+    false,
+    "If set, use one single chain containing all ops");
+
+C10_DEFINE_bool(
     caffe2_net_async_finish_chain,
     false,
     "Wait for chain to finish");
@@ -73,7 +78,11 @@ AsyncNetBase::AsyncNetBase(
     operators_.push_back(op_ptr);
   }
 
-  execution_chains_ = dag_utils::computeChains(operator_nodes_);
+  if (c10::FLAGS_caffe2_net_async_inference_mode) {
+    execution_chains_ = dag_utils::computeGroups(operator_nodes_);
+  } else {
+    execution_chains_ = dag_utils::computeChains(operator_nodes_);
+  }
   chains_.reserve(execution_chains_.size());
   for (const auto& kv : execution_chains_) {
     chains_.push_back(kv.second);
