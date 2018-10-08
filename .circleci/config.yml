@@ -164,7 +164,6 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
         else
           id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
         fi
-        pwd
         if [ -n "${MULTI_GPU}" ]; then
           (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh') | docker exec -u jenkins -i "$id" bash
         else
@@ -558,7 +557,6 @@ jobs:
       JOB_BASE_NAME: pytorch-linux-xenial-cuda8-cudnn6-py3-NO_AVX2-test
       PYTHON_VERSION: "3.6"
       CUDA_VERSION: "8"
-      MULTI_GPU: "1"
     resource_class: gpu.medium
     <<: *pytorch_linux_test_defaults
 
