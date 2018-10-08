@@ -2012,6 +2012,20 @@ class TestJit(JitTestCase):
             bool_fn(torch.ones(1), torch.tensor(1), torch.tensor(True)),
             torch.ones(1))
 
+        if not PY2:
+            @torch.jit.script
+            def hints(x, a: float=0.5, b: int=10):
+                return x + a + b
+
+            self.assertExpectedGraph(hints.graph, "type_hints")
+            self.assertEqual(hints(torch.ones(1)), torch.ones(1) + 0.5 + 10)
+
+            with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
+
+                @torch.jit.script
+                def hints_bad_types(x, a: float=10, b: int=0.5):
+                    return x + a + b
+
     def test_default_values_module(self):
         class Test(torch.jit.ScriptModule):
             def __init__(self):

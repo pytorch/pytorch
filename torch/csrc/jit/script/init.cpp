@@ -368,6 +368,17 @@ FunctionSchema getSchemaWithDefaults(
         // Convert to tensor
         value = autograd::make_variable(at::scalar_to_tensor(value.toScalar()));
       }
+      auto valueType = inferTypeFrom(value);
+      if (!valueType->isSubtypeOf(arg.type)) {
+        AT_ERROR(
+            "Expected a default value of type ",
+            arg.type->str(),
+            " but got ",
+            valueType->str(),
+            " on parameter \"",
+            arg.name,
+            "\"");
+      }
       new_args.push_back(Argument(
           arg.name,
           arg.type,
