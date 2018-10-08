@@ -22,6 +22,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Device.h"
 #include "torch/csrc/Dtype.h"
+#include "torch/csrc/TypeInfo.h"
 #include "torch/csrc/DataLoader.h"
 #include "torch/csrc/Generator.h"
 #include "torch/csrc/Layout.h"
@@ -545,6 +546,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
   THPDtype_init(module);
+  THPDTypeInfo_init(module);
   THPLayout_init(module);
   THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));

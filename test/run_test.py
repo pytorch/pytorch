@@ -35,6 +35,7 @@ TESTS = [
     'sparse',
     'thd_distributed',
     'torch',
+    'type_info',
     'utils',
 ]
 
