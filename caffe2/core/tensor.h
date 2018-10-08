@@ -25,7 +25,7 @@ class CAFFE2_API Tensor final {
   TensorImplPtr impl_;
 
  public:
-  Tensor() : impl_() {}
+  Tensor() = delete;
 
   operator bool() const {
     return impl_.defined();
