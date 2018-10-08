@@ -46,6 +46,8 @@ class CAFFE2_API BaseContext {
 
   virtual BaseStaticContext* GetStaticContext() const = 0;
 
+  virtual Device device() const = 0;
+
   /* Sorry for the naming, will get rid of this in future diff */
   virtual DeviceType device_type() const = 0;
 

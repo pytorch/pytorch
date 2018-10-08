@@ -43,16 +43,12 @@ struct CAFFE2_API StorageImpl : public c10::intrusive_ptr_target {
             allocator,
             resizable) {}
 
-  explicit StorageImpl(at::DeviceType device_type)
-      : StorageImpl(device_type, caffe2::TypeMeta()) {}
+  explicit StorageImpl(at::Device device)
+      : StorageImpl(device, caffe2::TypeMeta()) {}
 
-  StorageImpl(at::DeviceType device_type, caffe2::TypeMeta data_type)
-      : StorageImpl(
-            data_type,
-            0,
-            at::DataPtr(nullptr, at::Device(device_type)),
-            nullptr,
-            true) {}
+  StorageImpl(at::Device device, caffe2::TypeMeta data_type)
+      : StorageImpl(data_type, 0, at::DataPtr(nullptr, device), nullptr, true) {
+  }
 
   StorageImpl& operator=(StorageImpl&& other) = default;
   StorageImpl& operator=(const StorageImpl&) = delete;

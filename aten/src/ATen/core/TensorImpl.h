@@ -746,7 +746,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.set_dtype(meta);
       } else {
         if (data_type_ != meta) {
-          storage_ = at::Storage(storage_.device_type(), meta);
+          storage_ = at::Storage(storage_.device(), meta);
         }
       }
       data_type_ = meta;
@@ -779,7 +779,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
             std::move(data_ptr),
             dtor,
             size,
-            at::Device(storage_.device_type())));
+            storage_.device())));
         data_type_.ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.

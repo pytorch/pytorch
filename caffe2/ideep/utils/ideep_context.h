@@ -121,6 +121,10 @@ class IDEEPContext final : public BaseContext {
     return true;
   }
 
+  at::Device device() const override {
+    return at::Device(IDEEP);
+  }
+
   DeviceType device_type() const override {
     return IDEEP;
   }

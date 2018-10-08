@@ -271,6 +271,10 @@ class HIPContext final : public BaseContext {
     return hipStreamQuery(stream) == hipSuccess;
   }
 
+  at::Device device() const override {
+    return at::Device(HIP, gpu_id_);
+  }
+
   DeviceType device_type() const override {
     return HIP;
   }

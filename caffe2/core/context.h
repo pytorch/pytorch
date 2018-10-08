@@ -155,6 +155,11 @@ class CAFFE2_API CPUContext final : public BaseContext {
     return true;
   }
 
+  at::Device device() const override {
+    // TODO: numa?
+    return at::Device(CPU);
+  }
+
   DeviceType device_type() const override {
     return CPU;
   }

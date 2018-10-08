@@ -129,6 +129,10 @@ class MKLContext : public BaseContext {
     return true;
   }
 
+  at::Device device() const override {
+    return at::Device(MKLDNN);
+  }
+
   DeviceType device_type() const override {
     return MKLDNN;
   }
