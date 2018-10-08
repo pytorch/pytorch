@@ -228,6 +228,7 @@ _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
+_(aten, chain_mm) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
@@ -458,7 +459,6 @@ _(aten, mul) \
 _(aten, multi_margin_loss) \
 _(aten, multi_margin_loss_backward) \
 _(aten, multi_margin_loss_forward) \
-_(aten, multi_mm) \
 _(aten, multilabel_margin_loss) \
 _(aten, multilabel_margin_loss_backward) \
 _(aten, multilabel_margin_loss_forward) \

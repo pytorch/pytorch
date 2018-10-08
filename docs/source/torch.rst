@@ -287,6 +287,7 @@ BLAS and LAPACK Operations
 .. autofunction:: btrifact_with_info
 .. autofunction:: btrisolve
 .. autofunction:: btriunpack
+.. autofunction:: chain_mm
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels
@@ -301,7 +302,6 @@ BLAS and LAPACK Operations
 .. autofunction:: matrix_power
 .. autofunction:: matrix_rank
 .. autofunction:: mm
-.. autofunction:: multi_mm
 .. autofunction:: mv
 .. autofunction:: orgqr
 .. autofunction:: ormqr

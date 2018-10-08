@@ -1507,8 +1507,8 @@ class TestCuda(TestCase):
     def test_matrix_power(self):
         TestTorch._test_matrix_power(self, conv_fn=lambda t: t.cuda())
 
-    def test_multi_mm(self):
-        TestTorch._test_multi_mm(self, cast=lambda t: t.cuda())
+    def test_chain_mm(self):
+        TestTorch._test_chain_mm(self, cast=lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
