@@ -766,14 +766,14 @@ class TestNN(NNTestCase):
         input = input.to(device).fill_(1 - p)
 
         module = cls(p)
-        input_var = input.clone().requires_grad()
+        input_var = input.clone().requires_grad_()
         output = module(input_var)
         self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
         output.backward(input)
         self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
 
         module = cls(p, True)
-        input_var = input.clone().requires_grad()
+        input_var = input.clone().requires_grad_()
         output = module(input_var + 0)
         self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
         output.backward(input)
