@@ -4720,7 +4720,7 @@ class TestTorch(TestCase):
         self._test_matrix_power(self, conv_fn=lambda x: x)
 
     @staticmethod
-    def _test_chain_mm(self, cast):
+    def _test_chain_matmul(self, cast):
         def product(matrices):
             for mat in matrices[1:]:
                 matrices[0] = matrices[0].mm(mat)
@@ -4730,14 +4730,14 @@ class TestTorch(TestCase):
             matrices = []
             for (pi, pi_1) in zip(p[:-1], p[1:]):
                 matrices.append(cast(torch.randn(pi, pi_1)))
-            self.assertEqual(torch.chain_mm(*matrices), product(matrices))
+            self.assertEqual(torch.chain_matmul(*matrices), product(matrices))
 
         run_test([10, 20, 30, 5], cast)
         run_test([15, 5, 10, 20, 25], cast)
 
     @skipIfRocm
-    def test_chain_mm(self):
-        self._test_chain_mm(self, cast=lambda x: x)
+    def test_chain_matmul(self):
+        self._test_chain_matmul(self, cast=lambda x: x)
 
     @staticmethod
     def _test_det_logdet_slogdet(self, conv_fn):

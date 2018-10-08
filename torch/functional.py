@@ -12,7 +12,7 @@ __all__ = [
     'argsort',
     'btrifact',
     'btriunpack',
-    'chain_mm',
+    'chain_matmul',
     'einsum',
     'broadcast_tensors',
     'isfinite',
@@ -725,7 +725,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
     return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, out=out)
 
 
-def chain_mm(*matrices):
+def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
     of arithmetic operations (`[CLRS]`_). Note that since is a function to compute the product, :math:`N`
@@ -746,7 +746,7 @@ def chain_mm(*matrices):
         >>> b = torch.randn(4, 5)
         >>> c = torch.randn(5, 6)
         >>> d = torch.randn(6, 7)
-        >>> torch.chain_mm(a, b, c, d)
+        >>> torch.chain_matmul(a, b, c, d)
         tensor([[ -2.3375,  -3.9790,  -4.1119,  -6.6577,   9.5609, -11.5095,  -3.2614],
                 [ 21.4038,   3.3378,  -8.4982,  -5.2457, -10.2561,  -2.4684,   2.7163],
                 [ -0.9647,  -5.8917,  -2.3213,  -5.2284,  12.8615, -12.2816,  -2.5095]])

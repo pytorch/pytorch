@@ -587,17 +587,17 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
   return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
 }
 
-Tensor _chain_mm_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
+Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {
   if (i == j)
     return matrices[i];
   else
-    return at::mm(_chain_mm_general(matrices, order, i, order[i][j]), _chain_mm_general(matrices, order, order[i][j] + 1, j));
+    return at::mm(_chain_matmul_general(matrices, order, i, order[i][j]), _chain_matmul_general(matrices, order, order[i][j] + 1, j));
 }
 
 // Why the separate implementation for 3 matrices?
 // The logic for three matrices is much faster when done directly
 // Requires 1 comparison to 4 comparisons and lesser arithmetic operations
-Tensor _chain_mm_three_matrices(TensorList matrices) {
+Tensor _chain_matmul_three_matrices(TensorList matrices) {
   int64_t a = matrices[0].size(0);  // This is the first dimension
   int64_t b = matrices[1].size(0);  // This is the common dimension between the first two matrices
   int64_t c = matrices[2].size(0);  // This is the common dimension between the last two matrices
@@ -616,14 +616,14 @@ Tensor _chain_mm_three_matrices(TensorList matrices) {
   }
 }
 
-Tensor chain_mm(TensorList matrices) {
+Tensor chain_matmul(TensorList matrices) {
   AT_CHECK(matrices.size() >= 2, "Expecting at least 2 matrices");
   checkAllSameDim(matrices, 2);
 
   if (matrices.size() == 2) {
     return at::mm(matrices[0], matrices[1]);
   } else if (matrices.size() == 3) {
-    return _chain_mm_three_matrices(matrices);
+    return _chain_matmul_three_matrices(matrices);
   } else {
 
     // Following the algorithm in Chapter 15.2 : Introduction to Algorithms, Cormen et al.
@@ -659,7 +659,7 @@ Tensor chain_mm(TensorList matrices) {
     }
 
     // We use the result from the algorithm to compute the matrix chain product via recursion
-    return _chain_mm_general(matrices, s, 0, n - 1);
+    return _chain_matmul_general(matrices, s, 0, n - 1);
   }
 }
 
