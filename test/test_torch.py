@@ -3058,8 +3058,7 @@ class TestTorch(TestCase):
                 dims_small = [ds] + dims_small
         return (dims_small, dims_large, dims_full)
 
-    @staticmethod
-    def _test_broadcast(self, cast):
+    def test_broadcast(self):
 
         # all functions
         fns = {
@@ -3074,8 +3073,8 @@ class TestTorch(TestCase):
 
         for fn in fns:
             (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
-            small = cast(torch.randn(*dims_small).float())
-            large = cast(torch.randn(*dims_large).float())
+            small = torch.randn(*dims_small).float()
+            large = torch.randn(*dims_large).float()
             small_expanded = small.expand(*dims_full)
             large_expanded = large.expand(*dims_full)
             small2 = None
@@ -3083,7 +3082,7 @@ class TestTorch(TestCase):
             if fn in fns_3_args:
                 # create another smaller tensor
                 (dims_small2, _, _) = self._select_broadcastable_dims(dims_full)
-                small2 = cast(torch.randn(*dims_small2).float())
+                small2 = torch.randn(*dims_small2).float()
                 small2_expanded = small2.expand(*dims_full)
 
             if small.is_cuda and fn in ['map', 'map2']:
@@ -3096,7 +3095,8 @@ class TestTorch(TestCase):
                 elif fn == "masked_select":
                     return myfn(t1, t2 < 0)
                 elif fn == "masked_scatter":
-                    return myfn(t1, t2 < 0.5, cast(torch.arange(1, t1.nelement() + 1).float()))
+                    elements_after_broadcast = torch.broadcast_tensors(t1, t2)[0].numel()
+                    return myfn(t1, t2 < 0.5, torch.ones(elements_after_broadcast))
                 elif fn == "masked_fill":
                     return myfn(t1, t2 < 0.5, 1.0)
                 elif fn in fns_3_args:
@@ -3194,9 +3194,6 @@ class TestTorch(TestCase):
             else:
                 _test_in_place_broadcastable(small2, small_expanded, large_expanded)
                 _test_in_place_broadcastable(small2, small, large)
-
-    def test_broadcast(self):
-        self._test_broadcast(self, lambda t: t)
 
     def test_broadcast_empty(self):
         # empty + empty
