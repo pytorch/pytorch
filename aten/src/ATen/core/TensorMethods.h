@@ -777,7 +777,7 @@ inline Tensor Tensor::iv(const Tensor & v) const {
     return type().iv(v, *this);
 }
 inline Tensor & Tensor::iv_(const Tensor & v) {
-    return type().iv_(v, *this);
+    return type().iv_(*this, v);
 }
 inline Tensor Tensor::index(TensorList indices) const {
     return type().index(*this, indices);

@@ -490,7 +490,7 @@ public:
   Tensor & i0_();
   Tensor i1() const;
   Tensor & i1_();
-  Tensor iv(const Tensor & v, const Tensor & source) const;
+  Tensor iv(const Tensor & v) const;
   Tensor & iv_(const Tensor & v);
   Tensor index(TensorList indices) const;
   Tensor & index_copy_(int64_t dim, const Tensor & index, const Tensor & source);
