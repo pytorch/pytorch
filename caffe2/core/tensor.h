@@ -61,9 +61,10 @@ class CAFFE2_API Tensor final {
    * context_for_copy is required to have the same DeviceType as src
    */
   Tensor(const Tensor& src, BaseContext* context_for_copy, DeviceType type)
-      : (context_for_copy && context_for_copy->device_type() == type)
-        ? Tensor(Storage(context_for_copy->device()))
-        : Tensor(Storage(type)) {
+      : Tensor(
+            (context_for_copy && context_for_copy->device_type() == type)
+                ? Storage(context_for_copy->device())
+                : Storage(type)) {
     CopyFrom(src, context_for_copy);
   }
 
@@ -109,7 +110,7 @@ class CAFFE2_API Tensor final {
   }
 
   Tensor Clone() const {
-    Tensor x(GetDeviceType());
+    Tensor x(GetDevice());
     x.CopyFrom(*this);
     return x;
   }

@@ -32,6 +32,9 @@ struct CAFFE2_API Storage {
             /* allocator */ nullptr,
             resizable)) {}
 
+  Storage(at::DeviceType device_type)
+      : storage_impl_(
+            c10::make_intrusive<StorageImpl>(at::Device(device_type))) {}
   Storage(at::Device device)
       : storage_impl_(c10::make_intrusive<StorageImpl>(device)) {}
   Storage(at::Device device, caffe2::TypeMeta data_type)
