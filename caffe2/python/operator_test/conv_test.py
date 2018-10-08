@@ -470,7 +470,7 @@ class TestConvolution(serial.SerializedTestCase):
             engine_list = ['']
             if _run_in_hip(gc, dc):
                 if order == 'NCHW':
-                    engine_list.append('CUDNN')
+                    engine_list.append('MIOPEN')
             else:
                 if _cudnn_supports(dilation=(dilation > 1), nhwc=(order == 'NHWC')):
                     engine_list.append('CUDNN')
