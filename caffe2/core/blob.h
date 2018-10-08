@@ -36,8 +36,7 @@ inline Tensor* BlobGetMutableTensor(
   if (blob->IsType<Tensor>()) {
     Tensor* tensor = blob->GetMutable<Tensor>();
     if (*tensor) {
-      if (tensor->GetDeviceType() ==
-          at::backendToDeviceType(options.backend())) {
+      if (tensor->GetDevice() == options.device()) {
         if (tensor->dims() != dims) {
           // Resize when the dims doesn't match
           tensor->Resize(dims);
@@ -49,7 +48,7 @@ inline Tensor* BlobGetMutableTensor(
         }
         return tensor;
       }
-      // If DeviceType is wrong, we'll allocate a new Tensor
+      // If device doesn't match, we'll allocate a new Tensor
     }
   }
 

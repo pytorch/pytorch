@@ -120,6 +120,11 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       int idx,
       const vector<int64_t>& dims,
       const at::TensorOptions& options) {
+    if (options.device_opt() == at::nullopt) {
+      auto opt = options;
+      opt.device(context_.device());
+      return BlobGetMutableTensor(outputs_.at(idx), dims, opt);
+    }
     return BlobGetMutableTensor(outputs_.at(idx), dims, options);
   }
 

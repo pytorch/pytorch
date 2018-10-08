@@ -65,10 +65,7 @@ class MatMulOp final : public Operator<Context> {
 
     Y_shape_cache_[0] = a_dim0;
     Y_shape_cache_[1] = b_dim1;
-    auto* Y = Output(
-        0,
-        Y_shape_cache_,
-        at::device({context_.device_type()}).template dtype<T>());
+    auto* Y = Output(0, Y_shape_cache_, at::dtype<T>());
     CAFFE_ENFORCE(a_dim0 * b_dim1 == Y->size(), dimErrorString());
     // Y = A * B
     math::Gemm<T, Context, Engine>(
