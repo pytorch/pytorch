@@ -210,6 +210,12 @@ static void find_differentiable_groups(
   // the following conditions hold:
   // - x, y can be merged to form a differentiable group
   // - the contraction would not invalidate the dag (it creates no cycles).
+  //
+  // This performs a greedy algorithm. This greedy algorithm considers
+  // dep_graph vertices in reverse topological order by reverse iterating through
+  // ord indices. For a certain ord, we attempt to merge the vertex at that ord
+  // with each of its parents. If the vertex at the ord cannot be merged with any
+  // of its parents, then we move on to a smaller ord and repeat.
 
   // Iterate in reverse topological order
   int64_t ord = dep_graph.max_size() - 1;
@@ -219,10 +225,15 @@ static void find_differentiable_groups(
     auto* consumer = dep_graph.at(ord).value();
     if (!shouldConsiderForMerge(consumer)) continue;
 
-    // Iterate through consumer->in_edges() in reverse topological order
+    // To bound the complexity of the sort. Makes the algorithm less optimal.
+    if (consumer->in_edges().size() > producer_edge_threshold) continue;
+
+    // Iterate through consumer->in_edges() in reverse topological order.
+    // sort is performed once per ord in dep_graph and once per contraction.
+    // There can be at most dep_graph.max_size() contractions, so
+    // we do at most 2 * dep_graph.max_size() sorts.
     dep_graph.sort(consumer->in_edges());
 
-    bool changed = false;
     for (auto it = consumer->in_edges().rbegin(); it != consumer->in_edges().rend(); ++it) {
       auto * producer = *it;
       // The distance threshold makes this algorithm "not optimal": it will miss
@@ -230,24 +241,16 @@ static void find_differentiable_groups(
       // 1) preserve locality of tensors. We don't want to keep them alive for too long.
       // 2) Help bound the computation complexity for contractEdge
       if (consumer->ord - producer->ord > distance_threshold) continue;
-      // This also helps bound the complexity: contractEdge's complexity involves
-      // min(|out_edges(producer)|, |in_edges(consumer)|).
-      if (std::min(producer->out_edges().size(), consumer->in_edges().size()) >
-          producer_edge_threshold) continue;
       if (!shouldConsiderForMerge(producer)) continue;
 
-      // If the edge contraction is successful, consumer->out_edges()
-      // may have changed so we break out of this loop.
+      // If the edge contraction is successful, dep_graph.at(ord) may have changed
+      // as well as consumer->in_edges() so we break out of this loop
       if (dep_graph.contractEdge(producer, consumer)) {
-        changed = true;
+        // Stay at the current ord until we are done considering the vertex
+        // at this ord for contraction
+        ++ord;
         break;
       }
-    }
-
-    // If we successfully contracted an edge, stay at this vertex.
-    // It may have new edges that should be looked at before moving on.
-    if (changed) {
-      ++ord;
     }
   }
 }
