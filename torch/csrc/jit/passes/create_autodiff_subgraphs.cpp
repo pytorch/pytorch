@@ -220,7 +220,7 @@ static void find_differentiable_groups(
     if (!shouldConsiderForMerge(consumer)) continue;
 
     // Iterate through consumer->in_edges() in reverse topological order
-    // Those should already be sorted by the DynamicDAG data structure.
+    dep_graph.sort(consumer->in_edges());
 
     bool changed = false;
     for (auto it = consumer->in_edges().rbegin(); it != consumer->in_edges().rend(); ++it) {

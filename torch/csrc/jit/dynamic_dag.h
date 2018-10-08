@@ -49,12 +49,7 @@ struct EdgeData {
   vertex_list<T> out_edges;
 
   static void insert(vertex_list<T>& lst, Vertex<T>* v) {
-    // Keep the list sorted.
-    // We can do the same thing (binary search) for erase() and has()
-    // but I'm not sure if it will perform better especially since
-    // our lists should be small.
-    lst.insert(std::upper_bound(lst.begin(), lst.end(), v,
-          [](Vertex<T>* x, Vertex<T>* y) { return x->ord < y->ord; }), v);
+    lst.push_back(v);
   }
 
   static void erase(vertex_list<T>& lst, Vertex<T>* v) {
