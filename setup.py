@@ -937,6 +937,7 @@ main_sources = [
     "torch/csrc/jit/script/init.cpp",
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/module.cpp",
+    "torch/csrc/jit/script/parser.cpp",
     "torch/csrc/jit/script/python_tree_views.cpp",
     "torch/csrc/nn/THNN.cpp",
     "torch/csrc/onnx/init.cpp",
