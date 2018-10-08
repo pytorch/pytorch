@@ -2017,6 +2017,7 @@ class TestJit(JitTestCase):
             def __init__(self):
                 super(Test, self).__init__()
 
+            @torch.jit.script_method
             def forward(self, input, other=4):
                 return input + other
 

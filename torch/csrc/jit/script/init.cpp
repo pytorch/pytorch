@@ -412,7 +412,11 @@ void initJitScriptBindings(PyObject* module) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
             return defineMethodsInModule(*m, script, pythonResolver(rcb), self);
           })
-      .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
+      .def("_create_methods", [](
+          std::shared_ptr<Module> m,
+          const std::vector<Def>& defs,
+          const std::vector<ResolutionCallback>& rcbs,
+          std::vector<std::unordered_map<std::string, py::object>>& defaults) {
         std::vector<Resolver> resolvers;
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
@@ -422,6 +426,16 @@ void initJitScriptBindings(PyObject* module) {
           defs,
           resolvers,
           std::make_shared<ModuleValue>(m));
+
+        auto defaults_it = defaults.begin();
+        auto methods_it = m->get_methods().begin();
+        while (methods_it != m->get_methods().end()) {
+          auto old_schema = (*methods_it)->get()->getSchema();
+          (*methods_it)->get()->setSchema(
+              getSchemaWithDefaults(*defaults_it, old_schema));
+          ++defaults_it;
+          ++methods_it;
+        }
       })
       .def("_get_method",
       [](Module& self, const std::string& name) -> const Method& {
@@ -548,10 +562,9 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args, py::kwargs kwargs) {
       return self.graph_for(createStackForSchema(self.getSchema(), std::move(args), std::move(kwargs)));
     })
-    .def("forward_schema", [](Method &self, Def &def, py::object defaults, bool is_method) {
+    .def("forward_schema", [](Method &self, Def &def, std::unordered_map<std::string, py::object> defaults, bool is_method) {
       auto schema = extractSchemaFromDef(def, is_method);
-      auto args = py::cast<std::unordered_map<std::string, py::object>>(defaults);
-      self.setSchema(getSchemaWithDefaults(args, schema));
+      self.setSchema(getSchemaWithDefaults(defaults, schema));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("pretty_print_schema", &Method::pretty_print_schema);

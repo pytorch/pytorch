@@ -910,7 +910,8 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             original_init(self, *args, **kwargs)
             defs = [m.def_ for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(defs, rcbs)
+            defaults = [get_default_args(m.original_method) for m in methods]
+            self._create_methods(defs, rcbs, defaults)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
