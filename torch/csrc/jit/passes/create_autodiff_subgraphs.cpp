@@ -220,10 +220,10 @@ static void find_differentiable_groups(
     if (!shouldConsiderForMerge(consumer)) continue;
 
     // Iterate through consumer->in_edges() in reverse topological order
-    dep_graph.sort(consumer->in_edges());
+    // Those should already be sorted by the DynamicDAG data structure.
 
     bool changed = false;
-    for (auto it = consumer->in_edges().rbegin(); it != consumer->in_edges.rend(); ++it) {
+    for (auto it = consumer->in_edges().rbegin(); it != consumer->in_edges().rend(); ++it) {
       auto * producer = *it;
       // The distance threshold makes this algorithm "not optimal": it will miss
       // some possible contraction opportunities, but it hopefully lets us:

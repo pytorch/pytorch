@@ -38,14 +38,23 @@ template <typename T> using unique_vertex = std::unique_ptr<Vertex<T>>;
 enum DFSDirection {forward, backward};
 
 // Because our graphs shouldn't fan out or in very much,
-// we use std::vector<Vertex<T>*>  to record edges.
+// we use std::vector<Vertex<T>*> to record edges.
+// In all of the complexity analysis it is assumed that
+// inserting, erasing, and finding take constant time.
 template <typename T>
 struct EdgeData {
+  // These are both sorted in topological order because iterating
+  // in topological order is useful.
   vertex_list<T> in_edges;
   vertex_list<T> out_edges;
 
   static void insert(vertex_list<T>& lst, Vertex<T>* v) {
-    lst.push_back(v);
+    // Keep the list sorted.
+    // We can do the same thing (binary search) for erase() and has()
+    // but I'm not sure if it will perform better especially since
+    // our lists should be small.
+    lst.insert(std::upper_bound(lst.begin(), lst.end(), v,
+          [](Vertex<T>* x, Vertex<T>* y) { return x->ord < y->ord; }), v);
   }
 
   static void erase(vertex_list<T>& lst, Vertex<T>* v) {
