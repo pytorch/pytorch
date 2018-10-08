@@ -430,11 +430,4 @@ struct DefaultHIPAllocator final : public at::Allocator {
 static DefaultHIPAllocator g_hip_alloc;
 REGISTER_ALLOCATOR(HIP, &g_hip_alloc);
 
-BaseStaticContext* GetHIPStaticContext() {
-  static HIPStaticContext context;
-  return &context;
-}
-
-REGISTER_STATIC_CONTEXT(HIP, GetHIPStaticContext());
-
 } // namespace caffe2
