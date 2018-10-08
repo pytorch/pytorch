@@ -2151,7 +2151,7 @@ class TestAutograd(TestCase):
         run_test((10,), 0)
 
     def test_pow_scalar_base(self):
-        a = torch.tensor([3.], requires_grad=True)
+        a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
     @skipIfRocm
