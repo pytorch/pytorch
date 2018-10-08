@@ -19,6 +19,7 @@ __all__ = [
     'isnan',
     'norm',
     'meshgrid',
+    'multi_mm',
     'split',
     'stft',
     'tensordot',
