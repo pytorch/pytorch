@@ -38,7 +38,10 @@ message TensorProto {
     FLOAT16 = 12;  // at::Half
     DOUBLE = 13;   // double
 
-    // Special data type, type information is stored in the special type field
+    // There are two use cases of this field:
+    //   1) to replace BlobProto
+    //   2) to enable the non-tensor storage
+    // If data_type == SPEICAL, special_type should be present
     SPECIAL = 51;
     // When DataType is NO_CONTENT, we use TensorProto to store only type
     // and shape information. Reuse TensorProto to store type and shape
@@ -126,6 +129,8 @@ message TensorShape {
 }
 
 // This is prepared for non-tensor types.
+// Right now, it only contains name, later we may add some native type
+// support in proto like ONNX.
 message SpecialType {
   optional string name = 1;
 }
