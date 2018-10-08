@@ -181,6 +181,20 @@ dominanceFrontierMap(G* g, typename G::NodeRef source = nullptr) {
   return domFrontierMap;
 }
 
+/// \brief Induces edges on a subgraph by connecting all nodes
+/// that are connected in the original graph.
+template <typename SubgraphType>
+void induceEdges(SubgraphType* sg) {
+  for (auto& node : sg->getNodes()) {
+    // We can scan only the inEdges
+    for (auto& inEdge : node->getInEdges()) {
+      if (sg->hasNode(inEdge->tail())) {
+        sg->addEdge(inEdge);
+      }
+    }
+  }
+}
+
 } // namespace algorithm
 } // namespace nom
 
