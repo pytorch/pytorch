@@ -1982,7 +1982,7 @@ class TestJit(JitTestCase):
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
         self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
 
-    def test_default_values_function(self):
+    def test_function_default_values(self):
         outer_var = 20
         outer_var2 = 30
 
@@ -2026,7 +2026,7 @@ class TestJit(JitTestCase):
                 def hints_bad_types(x, a: float=10, b: int=0.5):
                     return x + a + b
 
-    def test_default_values_module(self):
+    def test_module_default_values(self):
         class Test(torch.jit.ScriptModule):
             def __init__(self):
                 super(Test, self).__init__()
