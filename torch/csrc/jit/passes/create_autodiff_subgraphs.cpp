@@ -212,8 +212,8 @@ static void find_differentiable_groups(
   // - the contraction would not invalidate the dag (it creates no cycles).
 
   // Iterate in reverse topological order
-  int64_t ord = dep_graph.size() - 1;
-  for (int64_t ord = dep_graph.size() - 1; ord >= 0; --ord) {
+  int64_t ord = dep_graph.max_size() - 1;
+  for (int64_t ord = dep_graph.max_size() - 1; ord >= 0; --ord) {
     if (!dep_graph.at(ord)) continue;
 
     auto* consumer = dep_graph.at(ord).value();
@@ -253,7 +253,7 @@ static void find_differentiable_groups(
 }
 
 static void reorder_according_to_dag(Block * block, const detail::DynamicDAG<Node*>& dep_graph) {
-  for (size_t ord = 0; ord < dep_graph.size(); ++ord) {
+  for (size_t ord = 0; ord < dep_graph.max_size(); ++ord) {
     const auto& vertex = dep_graph.at(ord);
     if (!vertex.has_value()) continue;
 
@@ -271,7 +271,7 @@ static void merge_differentiable_groups(
     const detail::DynamicDAG<Node*>& dep_graph,
     size_t size_threshold,
     std::vector<Node*>& diff_graphs) {
-  for (size_t ord = 0; ord < dep_graph.size(); ++ord) {
+  for (size_t ord = 0; ord < dep_graph.max_size(); ++ord) {
     const auto& vertex = dep_graph.at(ord);
     if (!vertex) continue;
     if (!shouldConsiderForMerge(vertex.value())) continue;

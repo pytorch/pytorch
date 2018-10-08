@@ -89,18 +89,17 @@ struct Vertex {
   Vertex(size_t ord, T datum)
   : ord(ord), visited_(false) { data.push_back(datum); }
 
-  // Holds data.
   std::vector<T> data;
   size_t ord; // unique topological index
 
   std::string toString();
   vertex_list<T>& in_edges() { return edges_.in_edges; }
   vertex_list<T>& out_edges() { return edges_.out_edges; }
+  EdgeData<T>&& move_edges() { return std::move(edges_); }
 
   bool visited() { return visited_; }
 
 private:
-  friend DynamicDAG<T>;
   EdgeData<T> edges_;
 
   friend visited_list<T>;
@@ -116,9 +115,9 @@ struct DynamicDAG {
   void removeEdge(Vertex<T>* producer, Vertex<T>* consumer);
   bool contractEdge(Vertex<T>* producer, Vertex<T>* consumer);
 
-  // size() >= the number of live vertices.
-  // for all vertices v, v.ord < size()
-  size_t size() const { return vertices_.size(); };
+  // max_size() >= the number of live vertices.
+  // for all vertices v, v.ord < max_size()
+  size_t max_size() const { return vertices_.size(); };
   at::optional<Vertex<T>*> at(size_t ord) const;
 
   void sort(vertex_list<T>& delta);
@@ -212,8 +211,8 @@ EdgeData<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
   for (auto* child : v->out_edges()) {
     EdgeData<T>::erase(child->in_edges(), v);
   }
-  auto edges = std::move(v->edges_);
-  vertices_[v->ord] = std::move(unique_vertex<T>(nullptr));
+  auto edges = v->move_edges();
+  vertices_[v->ord] = nullptr;
   return edges;
 }
 
@@ -277,13 +276,13 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   EdgeData<T>::insert(producer->out_edges(), consumer);
   EdgeData<T>::insert(consumer->in_edges(), producer);
 
-  visited_list<T> deltaF;
-  visited_list<T> deltaB;
-
   if (producer->ord <= consumer->ord) {
     // topological ordering is already consistent, no need to update.
     return;
   }
+
+  visited_list<T> deltaF;
+  visited_list<T> deltaB;
 
   // Search for vertices that are reachable from consumer that have a now incorrect
   // topological ordering.
@@ -308,7 +307,7 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 // These are the only vertices that can possibly be moved around
 // during edge contraction.
 //
-// contractEdge is O(|AR| * |out_edges(producer)|)
+// contractEdge is O(|AR| * min(|out_edges(producer)|, |in_edges(consumer)|))
 template <typename T>
 bool DynamicDAG<T>::contractEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   JIT_ASSERT(producer != consumer);
@@ -422,11 +421,11 @@ bool DynamicDAG<T>::dfsSearch(
     auto* vertex = stack.back();
     stack.pop_back();
 
-    vertex_list<T>* next_edges = (direction == DFSDirection::forward) ?
-      &vertex->out_edges() :
-      &vertex->in_edges();
+    vertex_list<T>& next_edges = (direction == DFSDirection::forward) ?
+      vertex->out_edges() :
+      vertex->in_edges();
 
-    for (Vertex<T>* next : *next_edges) {
+    for (Vertex<T>* next : next_edges) {
       if (next == end) {
         // Path found from start to end.
         visit(next);
