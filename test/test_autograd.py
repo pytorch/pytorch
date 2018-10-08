@@ -3002,6 +3002,7 @@ method_tests = [
     ('matmul', (S, S, M, M), ((S, S, M, S),), "4d_4d"),
     ('matmul', (S, S, M, M), ((M,),), "4d_1d"),
     ('matmul', (M,), ((S, S, M, S),), "1d_4d"),
+    ('matrix_diag', (S, S), ()),
     ('matrix_power', (S, S), [2], "n=2"),
     ('matrix_power', (S, S, S), [3], "n=3"),
     ('matrix_power', (S, S, S), [1], "n=1"),

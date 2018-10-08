@@ -409,6 +409,7 @@ _(aten, masked_fill) \
 _(aten, masked_scatter) \
 _(aten, masked_select) \
 _(aten, matmul) \
+_(aten, matrix_diag) \
 _(aten, matrix_power) \
 _(aten, matrix_rank) \
 _(aten, max) \

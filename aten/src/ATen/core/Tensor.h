@@ -513,6 +513,7 @@ public:
   Tensor log_softmax(int64_t dim) const;
   Tensor logsumexp(int64_t dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
+  Tensor matrix_diag(int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) const;
   Tensor matrix_power(int64_t n) const;
   std::tuple<Tensor,Tensor> max(int64_t dim, bool keepdim=false) const;
   Tensor max_values(int64_t dim, bool keepdim=false) const;

@@ -266,6 +266,7 @@ Other Operations
 .. autofunction:: flatten
 .. autofunction:: flip
 .. autofunction:: histc
+.. autofunction:: matrix_diag
 .. autofunction:: meshgrid
 .. autofunction:: renorm
 .. autofunction:: tensordot

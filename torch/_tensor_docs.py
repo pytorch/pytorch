@@ -1344,6 +1344,13 @@ masked_select(mask) -> Tensor
 See :func:`torch.masked_select`
 """)
 
+add_docstr_all('matrix_diag',
+               r"""
+matrix_diag(offset=0, dim1=-2, dim2=-1) -> Tensor
+
+See :func:`torch.matrix_diag`
+""")
+
 add_docstr_all('matrix_power',
                r"""
 matrix_power(n) -> Tensor

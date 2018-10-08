@@ -842,6 +842,9 @@ inline Tensor Tensor::logsumexp(int64_t dim, bool keepdim) const {
 inline Tensor Tensor::matmul(const Tensor & other) const {
     return type().matmul(*this, other);
 }
+inline Tensor Tensor::matrix_diag(int64_t offset, int64_t dim1, int64_t dim2) const {
+    return type().matrix_diag(*this, offset, dim1, dim2);
+}
 inline Tensor Tensor::matrix_power(int64_t n) const {
     return type().matrix_power(*this, n);
 }

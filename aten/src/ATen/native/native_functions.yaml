@@ -1026,6 +1026,9 @@
 
 - func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
 
+- func: matrix_diag(Tensor self, int64_t offset=0, int64_t dim1=-2, int64_t dim2=-1) -> Tensor
+  variants: function, method
+
 - func: matrix_rank(Tensor self, double tol, bool symmetric=false) -> Tensor
 
 - func: matrix_rank(Tensor self, bool symmetric=false) -> Tensor

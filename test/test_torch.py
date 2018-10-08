@@ -2701,6 +2701,20 @@ class TestTorch(TestCase):
     def test_diagflat(self):
         self._test_diagflat(self, dtype=torch.float32, device='cpu')
 
+    @staticmethod
+    def _test_matrix_diag(self, dtype, device):
+        x = torch.arange(3 * 4, dtype=dtype, device=device).view(3, 4)
+        result = torch.matrix_diag(x)
+        expected = torch.stack([torch.diag(r) for r in x], 0)
+        self.assertEqual(result, expected)
+
+        result = torch.matrix_diag(x, offset=1, dim1=0, dim2=2)
+        expected = torch.stack([torch.diag(r, 1) for r in x], 1)
+        self.assertEqual(result, expected)
+
+    def test_matrix_diag(self):
+        self._test_matrix_diag(self, dtype=torch.float32, device='cpu')
+
     def test_eye(self):
         res1 = torch.eye(100, 100)
         res2 = torch.Tensor()
