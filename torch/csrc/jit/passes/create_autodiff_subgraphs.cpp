@@ -219,13 +219,11 @@ static void find_differentiable_groups(
     auto* consumer = dep_graph.at(ord).value();
     if (!shouldConsiderForMerge(consumer)) continue;
 
-    // Iterate through consumer->out_edges() in reverse topological order
-    detail::vertex_list<Node*> in_edges;
-    in_edges.assign(consumer->in_edges().begin(), consumer->in_edges().end());
-    dep_graph.sort(in_edges);
+    // Iterate through consumer->in_edges() in reverse topological order
+    dep_graph.sort(consumer->in_edges());
 
     bool changed = false;
-    for (auto it = in_edges.rbegin(); it != in_edges.rend(); ++it) {
+    for (auto it = consumer->in_edges().rbegin(); it != consumer->in_edges.rend(); ++it) {
       auto * producer = *it;
       // The distance threshold makes this algorithm "not optimal": it will miss
       // some possible contraction opportunities, but it hopefully lets us:
