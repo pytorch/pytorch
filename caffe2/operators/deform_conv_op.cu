@@ -304,8 +304,8 @@ template <typename DType, typename Context>
 void DeformConvOpBase<DType, Context>::DeformableIm2col(
     const DType* data_im,
     const DType* data_offset,
-    const std::vector<int64_t>& im_shape,
-    const std::vector<int64_t>& col_shape,
+    at::IntList im_shape,
+    at::IntList col_shape,
     DType* data_col) {
   CHECK_LT(2, CAFFE_CUDA_NUM_THREADS);
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
@@ -430,8 +430,8 @@ template <typename DType, typename Context>
 void DeformConvOpBase<DType, Context>::DeformableCol2im(
     const DType* data_col,
     const DType* data_offset,
-    const std::vector<int64_t>& im_shape,
-    const std::vector<int64_t>& col_shape,
+    at::IntList im_shape,
+    at::IntList col_shape,
     DType* grad_im) {
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
   CAFFE_ENFORCE_EQ(pad_l(), pad_r());
@@ -577,8 +577,8 @@ void DeformConvOpBase<DType, Context>::DeformableCol2imCoord(
     const DType* data_col,
     const DType* data_im,
     const DType* data_offset,
-    const std::vector<int64_t>& im_shape,
-    const std::vector<int64_t>& col_shape,
+    at::IntList im_shape,
+    at::IntList col_shape,
     DType* grad_offset) {
   CAFFE_ENFORCE_EQ(pad_t(), pad_b());
   CAFFE_ENFORCE_EQ(pad_l(), pad_r());

@@ -447,7 +447,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       data_type_ = caffe2::TypeMeta();
       return;
     }
-    Resize(src.dims());
+    Resize(src.sizes());
     if (numel() > 0) {
       if (data_type_.copy()) {
         CAFFE_ENFORCE(
@@ -810,21 +810,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }
 
-  /**
-   * Returns the dimensions of the tensor as a vector.
-   */
-  inline const std::vector<int64_t>& dims() const {
-    // TODO: This method will no longer work if we change the
-    // internal representation of dims().  That's BAD.  Let's get
-    // people to stop using this.
-    return sizes_;
-  }
-
  private:
   template <
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
-  bool SetDims(const std::vector<T>& src) {
+  bool SetDimsTemplate(at::ArrayRef<T> src) {
     auto old_numel = numel_;
     sizes_.resize(src.size());
     int64_t new_numel = 1;
@@ -837,58 +827,36 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return numel_ != old_numel;
   }
 
-  bool SetDims() {
-    auto old_numel = numel_;
-    sizes_.resize(0);
-    update_to_contiguous_strides();
-    numel_ = 1;
-    return numel_ != old_numel;
+  bool SetDims(at::ArrayRef<int64_t> s) {
+    return SetDimsTemplate(s);
   }
 
-  // TODO(jiayq): maybe rewrite the following functions with initializer list.
-  // NVCC does not play well with initializer lists last time, but worth
-  // another shot.
+  bool SetDims(at::ArrayRef<int> s) {
+    return SetDimsTemplate(s);
+  }
+
+  bool SetDims(at::ArrayRef<size_t> s) {
+    return SetDimsTemplate(s);
+  }
+
+  bool SetDims() {
+    return SetDims(at::IntList{});
+  }
+
   bool SetDims(const int64_t d0) {
-    auto old_numel = numel_;
-    sizes_.resize(1);
-    sizes_[0] = d0;
-    update_to_contiguous_strides();
-    numel_ = d0;
-    return numel_ != old_numel;
+    return SetDims(at::IntList{d0});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1) {
-    auto old_numel = numel_;
-    sizes_.resize(2);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    update_to_contiguous_strides();
-    numel_ = d0 * d1;
-    return numel_ != old_numel;
+    return SetDims(at::IntList{d0, d1});
   }
 
   bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2) {
-    auto old_numel = numel_;
-    sizes_.resize(3);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    sizes_[2] = d2;
-    update_to_contiguous_strides();
-    numel_ = d0 * d1 * d2;
-    return numel_ != old_numel;
+    return SetDims(at::IntList{d0, d1, d2});
   }
 
-  bool
-  SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
-    auto old_numel = numel_;
-    sizes_.resize(4);
-    sizes_[0] = d0;
-    sizes_[1] = d1;
-    sizes_[2] = d2;
-    sizes_[3] = d3;
-    update_to_contiguous_strides();
-    numel_ = d0 * d1 * d2 * d3;
-    return numel_ != old_numel;
+  bool SetDims(const int64_t d0, const int64_t d1, const int64_t d2, const int64_t d3) {
+    return SetDims(at::IntList{d0, d1, d2, d3});
   }
 
   inline void update_to_contiguous_strides() {

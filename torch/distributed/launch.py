@@ -120,6 +120,14 @@ process. In other words, the ``device_ids`` needs to be ``[args.local_rank]``,
 and ``output_device`` needs to be ``args.local_rank`` in order to use this
 utility
 
+.. warning::
+
+    ``local_rank`` is NOT globally unique: it is only unique per process
+    on a machine.  Thus, don't use it to decide if you should, e.g.,
+    write to a networked filesystem.  See
+    https://github.com/pytorch/pytorch/issues/12042 for an example of
+    how things can go wrong if you don't do this correctly.
+
 """
 
 

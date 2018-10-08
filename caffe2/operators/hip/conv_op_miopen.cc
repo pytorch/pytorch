@@ -252,13 +252,13 @@ bool MIOPENConvOp::DoRunWithType() {
   if (input_changed || weight_changed) {
     VLOG(1) << "Changing MIOpen descriptor configurations.";
     if (input_changed) {
-      mio_input_dims_ = X.dims();
+      mio_input_dims_ = X.dims().vec();
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           bottom_desc_, miopenTypeWrapper<T_X>::type, N, C, H, W));
     }
 
     if (weight_changed) {
-      mio_weight_dims_ = Weight.dims();
+      mio_weight_dims_ = Weight.dims().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
           mode_,
@@ -444,13 +444,13 @@ bool MIOPENConvGradientOp::DoRunWithType() {
   if (input_changed || weight_changed) {
     VLOG(1) << "Changing MIOpen descriptor configurations.";
     if (input_changed) {
-      mio_input_dims_ = X.dims();
+      mio_input_dims_ = X.dims().vec();
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           bottom_desc_, miopenTypeWrapper<T_X>::type, N, C, H, W));
     }
 
     if (weight_changed) {
-      mio_weight_dims_ = Weight.dims();
+      mio_weight_dims_ = Weight.dims().vec();
       MIOPEN_ENFORCE(miopenInitConvolutionDescriptor(
           conv_desc_,
           mode_,

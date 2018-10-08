@@ -1195,6 +1195,7 @@ if __name__ == '__main__':
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
+                'lib/include/ATen/cpu/*.h',
                 'lib/include/ATen/core/*.h',
                 'lib/include/ATen/cuda/*.cuh',
                 'lib/include/ATen/cuda/*.h',

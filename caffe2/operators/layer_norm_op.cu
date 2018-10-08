@@ -106,7 +106,7 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
       segs.begin(),
       std::bind1st(std::multiplies<int>(), right));
 
-  seg_indices_.Resize(vector<size_t>{segs.size()});
+  seg_indices_.Resize(at::IntList{static_cast<int64_t>(segs.size())});
   context_.CopyBytesFromCPU(
       sizeof(int) * segs.size(),
       static_cast<void*>(segs.data()),
@@ -261,7 +261,7 @@ bool LayerNormGradientOp<CUDAContext>::DoRunWithType<float>() {
   stats_dims.push_back(1);
   dmean_.Resize(stats_dims);
   dstdev_.Resize(stats_dims);
-  gscratch_.Resize(std::vector<size_t>{left, right});
+  gscratch_.Resize(at::IntList{static_cast<int64_t>(left), static_cast<int64_t>(right)});
 
   std::vector<int> segs(left + 1);
   std::iota(segs.begin(), segs.end(), 0);
