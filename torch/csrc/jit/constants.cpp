@@ -59,82 +59,92 @@ Value* insertConstant(
   return g.insertNode(n)->output();
 }
 
+// Implementation of constant node, computes and IValue
+Operation getConstantOperation(const Node * node) {
+  JIT_ASSERT(node->kind() == prim::Constant);
+  TypePtr type = node->outputs().at(0)->type();
+  if(type->isSubtypeOf(DynamicType::get())) {
+    auto t = autograd::make_variable(node->t(attr::value));
+    return [t](Stack& stack) {
+      stack.push_back(t);
+      return 0;
+    };
+  } else if (type->isSubtypeOf(BoolType::get())) {
+    bool b = node->i(attr::value);
+    return [b](Stack& stack) {
+      push(stack, b);
+      return 0;
+    };
+  } else if (
+      type->isSubtypeOf(NumberType::get()) &&
+      node->kindOf(attr::value) == AttributeKind::i) {
+    auto i = node->i(attr::value);
+    return [i](Stack& stack) {
+      push(stack, i);
+      return 0;
+    };
+  } else if (
+      type->isSubtypeOf(NumberType::get()) &&
+      node->kindOf(attr::value) == AttributeKind::f) {
+    auto f = node->f(attr::value);
+    return [f](Stack& stack) {
+      push(stack, f);
+      return 0;
+    };
+  } else if(type->isSubtypeOf(ListType::ofInts())) {
+    auto is = node->is(attr::value);
+    return [is](Stack& stack) {
+      push(stack, is);
+      return 0;
+    };
+  } else if(type->isSubtypeOf(ListType::ofBools())) {
+    auto bs = node->is(attr::value);
+    return [bs](Stack& stack) {
+      push(stack, bs);
+      return 0;
+    };
+  } else if(type->isSubtypeOf(ListType::ofTensors())) {
+    auto ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
+      return autograd::make_variable(t);
+    });
+    return [ts](Stack& stack) {
+      push(stack, ts);
+      return 0;
+    };
+  } else if (type == StringType::get()) {
+    auto s = node->s(attr::value);
+    return [s](Stack& stack) {
+      push(stack, s);
+      return 0;
+    };
+  } else {
+    std::stringstream ss;
+    ss << "constant literal not supported for: " << type->str();
+    throw std::runtime_error(ss.str());
+  }
+}
+
 RegisterOperators reg({
-  // Implementation of constant node, computes and IValue
   Operator(
       prim::Constant,
       [](Node* node) -> Operation {
-        TypePtr type = node->output()->type();
-        if(type->isSubtypeOf(DynamicType::get())) {
-          auto t = autograd::make_variable(node->t(attr::value));
-          return [t](Stack& stack) {
-            stack.push_back(t);
-            return 0;
-          };
-        } else if (type->isSubtypeOf(BoolType::get())) {
-          bool b = node->i(attr::value);
-          return [b](Stack& stack) {
-            push(stack, b);
-            return 0;
-          };
-        } else if (
-            type->isSubtypeOf(NumberType::get()) &&
-            node->kindOf(attr::value) == AttributeKind::i) {
-          auto i = node->i(attr::value);
-          return [i](Stack& stack) {
-            push(stack, i);
-            return 0;
-          };
-        } else if (
-            type->isSubtypeOf(NumberType::get()) &&
-            node->kindOf(attr::value) == AttributeKind::f) {
-          auto f = node->f(attr::value);
-          return [f](Stack& stack) {
-            push(stack, f);
-            return 0;
-          };
-        } else if(type->isSubtypeOf(ListType::ofInts())) {
-          auto is = node->is(attr::value);
-          return [is](Stack& stack) {
-            push(stack, is);
-            return 0;
-          };
-        } else if(type->isSubtypeOf(ListType::ofBools())) {
-          auto bs = node->is(attr::value);
-          return [bs](Stack& stack) {
-            push(stack, bs);
-            return 0;
-          };
-        } else if(type->isSubtypeOf(ListType::ofTensors())) {
-          auto ts = fmap(node->ts(attr::value), [](const at::Tensor & t) -> at::Tensor {
-            return autograd::make_variable(t);
-          });
-          return [ts](Stack& stack) {
-            push(stack, ts);
-            return 0;
-          };
-        } else if (type == StringType::get()) {
-          auto s = node->s(attr::value);
-          return [s](Stack& stack) {
-            push(stack, s);
-            return 0;
-          };
-        } else {
-          std::stringstream ss;
-          ss << "constant literal not supported for: " << type->str();
-          throw std::runtime_error(ss.str());
-        }
+        return getConstantOperation(const_cast<Node*>(node));
       }),
 });
 
-at::optional<IValue> toIValue(Value* v) {
+at::optional<IValue> toIValue(const Value* v) {
   if(v->node()->kind() != prim::Constant)
     return at::nullopt;
   // use implemenation of prim::Constant to compute the output IValue
-  auto op = getOperation(v->node());
+  auto op = getConstantOperation(v->node());
   Stack stack;
   op(stack);
   return stack.back();
+}
+
+at::optional<IValue> toIValue(Value* v) {
+  const Value *const_v = const_cast<Value*>(v);
+  return toIValue(const_v);
 }
 
 }}

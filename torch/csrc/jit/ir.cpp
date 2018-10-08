@@ -19,11 +19,30 @@
 
 namespace torch { namespace jit {
 
+namespace {
+
+//print consant ivalues inline, and do not print their nodes
+//tensors take up too much space and inlining the value makes the ir unreadable
+bool printableInline(const Node * n) {
+  return n->kind() == prim::Constant && !n->outputs().at(0)->type()->isSubtypeOf(DynamicType::get())
+    && !n->outputs().at(0)->type()->isSubtypeOf(ListType::ofTensors());
+}
+
+
+}
+
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
 constexpr Symbol PythonOp::Kind;
 
 void printValueRef(std::ostream & out, const Value * n) {
-  out << "%" << n->uniqueName();
+  //print constant ivalues inline
+  if (printableInline(n->node())) {
+    auto ivalue = toIValue(n);
+    JIT_ASSERT(ivalue);
+    out << *ivalue;
+  } else {
+    out << "%" << n->uniqueName();
+  }
 }
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
@@ -107,6 +126,11 @@ static std::ostream & indent(std::ostream & out, size_t level) {
 }
 
 std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::vector<const Node*> * groups) {
+  //we do not print out constant nodes, and print out the ivalue output inline
+  //if level == 0 then the node is being manually printed
+  if (printableInline(n) && level != 0)
+    return out;
+
   auto outputs = n->outputs();
   indent(out, level) << const_value_list_with_types(outputs);
   out << " = ";

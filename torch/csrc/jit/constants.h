@@ -32,6 +32,7 @@ TORCH_API Value* insertConstant(
 // attempt to convert a (possibly constant) Value* into an intepreter value (IValue).
 // returns at::nullopt if the Value* was not constant
 TORCH_API at::optional<IValue> toIValue(Value* v);
+TORCH_API at::optional<IValue> toIValue(const Value* v);
 
 // if a value is a constant then try to turn into type T using the
 // same rules as the interpreter
