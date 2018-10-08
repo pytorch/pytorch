@@ -271,6 +271,8 @@ def disable_stderr(worker_id):
     This is used as worker_init_fn for test_segfault.
     """
     sys.stderr.flush()  # flush library buffers that dup2 knows nothing about
+    # Can't use a with-block because otherwise the fd will be closed when this
+    # function ends.
     devnull = open(os.devnull, 'w')
     os.dup2(devnull.fileno(), sys.stderr.fileno())
 
@@ -335,7 +337,8 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
                 kill_pid(worker_pids[0])
 
     # Tries to trigger the __del__ clean-up rather than the automatic exiting of
-    # daemonic children.
+    # daemonic children. Technically it should be automatically triggered, but
+    # I don't want to rely on the implementation detail of Python gc.
     gc.collect()
 
 
@@ -658,7 +661,9 @@ class TestDataLoader(TestCase):
             # `hold_iter_reference` specifies whether we hold a reference to the
             # iterator. This is interesting because Python3 error traces holds a
             # reference to the frames, which hold references to all the local
-            # variables. It is important to see that the processes still exit.
+            # variables including the iterator, and then the iterator dtor may
+            # not be called before process end. It is important to see that the
+            # processes still exit in both cases.
 
             if pin_memory and (not TEST_CUDA or NO_MULTIPROCESSING_SPAWN):
                 # Can't use CUDA without spawn

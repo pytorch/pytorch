@@ -263,8 +263,8 @@ def _set_SIGCHLD_handler():
         return
     previous_handler = signal.getsignal(signal.SIGCHLD)
     if not callable(previous_handler):
-        # This doesn't catch SIGDFL default handler, but SIGCHLD default handler
-        # is no-op.
+        # This doesn't catch default handler, but SIGCHLD default handler is a
+        # no-op.
         previous_handler = None
 
     def handler(signum, frame):
@@ -319,24 +319,22 @@ class _DataLoaderIter(object):
     #
     #      We delay the discussion on the logic in this case until later.
     #
-    #   2. The iterator exits the workers when the program ends without error.
+    #   2. The iterator exits the workers when the loader process and/or worker
+    #      processes exits unexpectedly (e.g., SIGKILL-ed).
     #
     #      We set all workers and `pin_memory_thread` to have `daemon=True`.
-    #
-    #      When a process ends, it shuts the all its daemonic children down with
-    #      a SIGTERM (instead of joining them without a timeout). Simiarly for
-    #      threads, but by a different mechanism.
     #
     #      You may ask, why can't we make the workers non-daemonic, and
     #      gracefully exit using the same logic as we have in `__del__` when the
     #      iterator gets deleted (see 1 above)?
     #
-    #      When a process exits, Python joins all its non-daemonic subprocesses,
-    #      and terminates (via SIGTERM) all daemonic ones. This fact, together
-    #      with a few implementation details of multiprocessing, forces us to
-    #      make workers  daemonic. All of our problems arise when a DataLoader
-    #      is used in a subprocess, and are caused by multiprocessing code
-    #      which looks more or less like this:
+    #      When a process ends, it shuts the all its daemonic children down with
+    #      a SIGTERM (instead of joining them without a timeout). Simiarly for
+    #      threads, but by a different mechanism. This fact, together with a few
+    #      implementation details of multiprocessing, forces us to make workers
+    #      daemonic. All of our problems arise when a DataLoader  is used in a
+    #      subprocess, and are caused by multiprocessing code which looks more
+    #      or less like this:
     #
     #          try:
     #              your_function_using_a_dataloader()
@@ -397,8 +395,9 @@ class _DataLoaderIter(object):
     #        b. A process won't hang when putting into a queue;
     #
     #           We use `mp.Queue` which has a separate background thread to put
-    #           objects. The background thread is usually automatically joined
-    #           when the process exits.
+    #           objects from an unbounded buffer array. The background thread is
+    #           daemonic and usually automatically joined when the process
+    #           exits.
     #
     #           However, in case that the receiver has ended abruptly while
     #           reading from the pipe, the join will hang forever. Therefore,
@@ -447,6 +446,14 @@ class _DataLoaderIter(object):
     #            If set, continue to next iteration
     #                    i.e., keep getting until see the `None`, then exit.
     #            Otherwise, process data.
+    #
+    #   NOTE: we don't check the status of the main thread because
+    #           1. if the process is killed by fatal signal, `pin_memory_thread`
+    #              ends.
+    #           2. in other cases, either the cleaning-up in __del__ or the
+    #              automatic exit of daemonic thread will take care of it.
+    #              This won't busy-wait either because `.get(timeout)` does not
+    #              busy-wait.
     #
     # [main process]
     #   In the DataLoader Iter's `__del__`

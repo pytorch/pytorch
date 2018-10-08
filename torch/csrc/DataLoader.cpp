@@ -1,10 +1,10 @@
 #include "DataLoader.h"
 
-// In cases like DataLoader, if a worker process die due to bus error/segfault
-// or just hang, the main process, will hang waiting for data. This is difficult
+// In cases like DataLoader, if a worker process dies due to bus error/segfault
+// or just hang, the main process will hang waiting for data. This is difficult
 // to avoid on PyTorch side as it can be caused by limited shm, or other
 // libraries users call in the workers. The following methods is an effort to do
-// our best provide some error message to users when such unfortunate events
+// our best to provide some error message to users when such unfortunate events
 // happen.
 
 // TODO: The following don't work on Windows. Specifically, sigaction, waitid
@@ -62,6 +62,7 @@ static inline void setSignalHandler(int signal, void(*handler)(int, siginfo_t *,
 SIGNAL_HANDLER(SIGBUS, handler_SIGBUS, "ERROR: Unexpected bus error encountered in worker. "
   "This might be caused by insufficient shared memory (shm).\n");
 SIGNAL_HANDLER(SIGSEGV, handler_SIGSEGV, "ERROR: Unexpected segmentation fault encountered in worker.\n");
+SIGNAL_HANDLER(SIGFPE, handler_SIGFPE, "ERROR: Unexpected floating-point exception encountered in worker.\n");
 
 // When an error happend in DataLoader methods and Python starts to exit, the
 // error trace will keep the loader alive, and Python may kill the children
