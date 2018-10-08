@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <type_traits>
 #include <unordered_set>
 #include <vector>
 
@@ -459,32 +460,18 @@ void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
   }
 
   // Sort the ords by merging two already sorted lists into a large sorted list.
-  // input (example): deltaB = { 1, 4, 7 } , deltaF = {0, 2, 5 }.
+  // input (example): deltaB = { v(1), v(4), v(7) } , deltaF = { v(0), v(2), v(5) }.
   // output: { 0, 1, 2, 5, 7 }.
-  // This merge operation is the same thing as (pseudocode)
-  // sorted_ords = std::merge(fmap(deltaB, lambda v: v->ord), fmap(deltaF, lambda v: v->ord))
   std::vector<size_t> sorted_ords;
   sorted_ords.reserve(num_affected);
-  auto output = sorted_ords.begin();
-  auto inputB = deltaB.begin();
-  auto inputF = deltaF.begin();
-  for (; inputB != deltaB.end(); ++output) {
-    if (inputF == deltaF.end()) {
-      *output = (*inputB)->ord;
-      ++inputB;
-      continue;
-    }
-    if ((*inputB)->ord < (*inputF)->ord) {
-      *output = (*inputB)->ord;
-      ++inputB;
-    } else {
-      *output = (*inputF)->ord;
-      ++inputF;
-    }
-  }
-  for (; inputF != deltaF.end(); ++inputF) {
-    *output = (*inputF)->ord;
-    ++output;
+
+  // Use deltaB to hold the concatenation of deltaB and deltaF.
+  auto middle = deltaB.size();
+  deltaB.insert(deltaB.end(), deltaF.begin(), deltaF.end());
+  std::inplace_merge(deltaB.begin(), deltaB.begin() + middle, deltaB.end(),
+      [](Vertex<T>* x, Vertex<T>* y) { return x->ord < y->ord; });
+  for (auto* v : deltaB) {
+    sorted_ords.push_back(v->ord);
   }
 
   // Return the vertices back into the vertices_ storage.
@@ -515,7 +502,11 @@ std::string Vertex<T>::toString() {
   }
   ss << "] -> {\n";
   for (auto& d : data) {
-    ss << "  " << d;
+    if (std::is_pointer<T>::value) {
+      ss << "  " << *d;
+    } else {
+      ss << "  " << d;
+    }
   }
   ss << "} ("<< ord << ") -> [";
   for (auto* c : out_edges()) {

@@ -12,28 +12,6 @@ namespace torch { namespace jit {
 
 struct Graph;
 
-namespace detail {
-template <>
-std::string Vertex<Node*>::toString() {
-  std::stringstream ss;
-  ss << "node(" << ord << ")\n";
-  ss << "[";
-  for (auto* c : in_edges()) {
-    ss << c->ord << " ";
-  }
-  ss << "] -> {\n";
-  for (auto* d : data) {
-    ss << "  " << *d;
-  }
-  ss << "} ("<< ord << ") -> [";
-  for (auto* c : out_edges()) {
-    ss << c->ord << " ";
-  }
-  ss << "]\n";
-  return ss.str();
-}
-}
-
 namespace {
 
 // Move nodes that exist in graph g into a 'group_node_kind' node.
@@ -99,50 +77,6 @@ Node* mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
   }
   JIT_ASSERT(isDifferentiable(*new_graph));
   return group_node;
-}
-
-// TODO(rzou): delete this
-void CreateAutodiffSubgraphsNaive(
-    Block * block,
-    size_t threshold,
-    std::vector<Node*>& diff_graphs) {
-  // This implementation is not optimal, but it is simple.
-  // It just scans through the list in order looking for runs of
-  // differentiable ops, and then grouping them together when
-  // it hits the first non-differentiable op.
-  // It cannot handle things like:
-  // a = f(x, y)
-  // b = black_box(a)
-  // c = g(a)
-  // where you could group {f, g} together if the nodes were in a different
-  // topological order
-
-  // a better strategy would be to try to treat this like a fusion problem
-  // and group maximal groups
-
-  std::vector<Node*> groupable;
-  for(Node * node : block->nodes()) { // Note: nodes() iterator stays valid since it is
-                            // always pointing _after_ the nodes that mergeNodes
-                            // mutates.
-    if (isDifferentiable(node)) {
-      // Constants are generally cheap to clone, so it's better to replicate them,
-      // instead of moving them out from the original graph.
-      if (node->kind() != prim::Constant) {
-        groupable.push_back(node);
-      }
-    } else {
-      if(groupable.size() >= threshold) {
-        diff_graphs.push_back(mergeNodes(block, prim::DifferentiableGraph, groupable));
-      }
-      groupable.clear();
-      for (Block * sub_block : node->blocks()) {
-        CreateAutodiffSubgraphsNaive(sub_block, threshold, diff_graphs);
-      }
-    }
-  }
-  if(groupable.size() >= threshold) {
-    diff_graphs.push_back(mergeNodes(block, prim::DifferentiableGraph, groupable));
-  }
 }
 
 bool shouldConsiderForMerge(detail::Vertex<Node*>* v) {
