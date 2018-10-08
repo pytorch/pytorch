@@ -3196,7 +3196,7 @@ class TestTorch(TestCase):
                 _test_in_place_broadcastable(small2, small_expanded, large_expanded)
                 _test_in_place_broadcastable(small2, small, large)
 
-    def test_broadcast(self):	
+    def test_broadcast(self):
         self._test_broadcast(self, lambda t: t)
 
     def test_broadcast_empty(self):
