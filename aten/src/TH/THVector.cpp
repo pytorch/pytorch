@@ -10,11 +10,6 @@
 #include "vector/VSX.cpp"
 #endif
 
-#if defined(USE_SSE2) || defined(USE_SSE3) || defined(USE_SSSE3) \
-        || defined(USE_SSE4_1) || defined(USE_SSE4_2)
-#include "vector/SSE.cpp"
-#endif
-
 #if defined(USE_AVX)
 #include "vector/AVX.h"
 #endif
