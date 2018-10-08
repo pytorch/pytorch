@@ -38,6 +38,22 @@ template <typename T> using unique_vertex = std::unique_ptr<Vertex<T>>;
 
 enum DFSDirection {forward, backward};
 
+// Some helper functions
+template <typename T>
+struct vertex_collection {
+  static void insert(vertex_list<T>& lst, Vertex<T>* v) {
+    lst.push_back(v);
+  }
+
+  static void erase(vertex_list<T>& lst, Vertex<T>* v) {
+    lst.erase(std::find(lst.begin(), lst.end(), v));
+  }
+
+  static bool contains(vertex_list<T>& lst, Vertex<T>* v) {
+    return std::find(lst.begin(), lst.end(), v) != lst.end();
+  }
+};
+
 // Because our graphs shouldn't fan out or in very much,
 // we use std::vector<Vertex<T>*> to record edges.
 // In all of the complexity analysis it is assumed that
@@ -48,18 +64,6 @@ struct EdgeData {
   // in topological order is useful.
   vertex_list<T> in_edges;
   vertex_list<T> out_edges;
-
-  static void insert(vertex_list<T>& lst, Vertex<T>* v) {
-    lst.push_back(v);
-  }
-
-  static void erase(vertex_list<T>& lst, Vertex<T>* v) {
-    lst.erase(std::find(lst.begin(), lst.end(), v));
-  }
-
-  static bool has(vertex_list<T>& lst, Vertex<T>* v) {
-    return std::find(lst.begin(), lst.end(), v) != lst.end();
-  }
 };
 
 // Simple RAII wrapper around a vertex_list<T>.
@@ -172,10 +176,10 @@ void DynamicDAG<T>::sort(vertex_list<T>& delta) {
 template <typename T>
 void DynamicDAG<T>::removeEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   JIT_ASSERT(producer != consumer);
-  JIT_ASSERT(EdgeData<T>::has(producer->out_edges(), consumer));
-  JIT_ASSERT(EdgeData<T>::has(consumer->in_edges(), producer));
-  EdgeData<T>::erase(producer->out_edges(), consumer);
-  EdgeData<T>::erase(consumer->in_edges(), producer);
+  JIT_ASSERT(vertex_collection<T>::contains(producer->out_edges(), consumer));
+  JIT_ASSERT(vertex_collection<T>::contains(consumer->in_edges(), producer));
+  vertex_collection<T>::erase(producer->out_edges(), consumer);
+  vertex_collection<T>::erase(consumer->in_edges(), producer);
 }
 
 template <typename T>
@@ -207,10 +211,10 @@ at::optional<Vertex<T>*> DynamicDAG<T>::at(size_t ord) const {
 template <typename T>
 EdgeData<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
   for (auto* parent : v->in_edges()) {
-    EdgeData<T>::erase(parent->out_edges(), v);
+    vertex_collection<T>::erase(parent->out_edges(), v);
   }
   for (auto* child : v->out_edges()) {
-    EdgeData<T>::erase(child->in_edges(), v);
+    vertex_collection<T>::erase(child->in_edges(), v);
   }
   auto edges = v->move_edges();
   vertices_[v->ord] = nullptr;
@@ -273,9 +277,9 @@ EdgeData<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
 template <typename T>
 void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   JIT_ASSERT(producer != consumer);
-  if (EdgeData<T>::has(producer->out_edges(), consumer)) return;
-  EdgeData<T>::insert(producer->out_edges(), consumer);
-  EdgeData<T>::insert(consumer->in_edges(), producer);
+  if (vertex_collection<T>::contains(producer->out_edges(), consumer)) return;
+  vertex_collection<T>::insert(producer->out_edges(), consumer);
+  vertex_collection<T>::insert(consumer->in_edges(), producer);
 
   if (producer->ord <= consumer->ord) {
     // topological ordering is already consistent, no need to update.

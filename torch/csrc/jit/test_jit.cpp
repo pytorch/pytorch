@@ -908,18 +908,18 @@ void testAddEdgeBasic() {
   graph->addEdge(a, c);
   JIT_ASSERT(a->in_edges().size() == 0);
   JIT_ASSERT(a->out_edges().size() == 2);
-  JIT_ASSERT(detail::EdgeData<std::string>::has(a->out_edges(), b));
-  JIT_ASSERT(detail::EdgeData<std::string>::has(a->out_edges(), c));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(a->out_edges(), b));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(a->out_edges(), c));
 
   JIT_ASSERT(b->in_edges().size() == 1);
   JIT_ASSERT(b->out_edges().size() == 1);
-  JIT_ASSERT(detail::EdgeData<std::string>::has(b->in_edges(), a));
-  JIT_ASSERT(detail::EdgeData<std::string>::has(b->out_edges(), c));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(b->in_edges(), a));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(b->out_edges(), c));
 
   JIT_ASSERT(c->in_edges().size() == 2);
   JIT_ASSERT(c->out_edges().size() == 0);
-  JIT_ASSERT(detail::EdgeData<std::string>::has(c->in_edges(), a));
-  JIT_ASSERT(detail::EdgeData<std::string>::has(c->in_edges(), b));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(c->in_edges(), a));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(c->in_edges(), b));
 }
 
 void testAddEdgeCycleDetection() {
@@ -977,21 +977,21 @@ void testAddEdgeReordersComplicated() {
 
   JIT_ASSERT(c->in_edges().size() == 0);
   JIT_ASSERT(c->out_edges().size() == 1);
-  JIT_ASSERT(detail::EdgeData<std::string>::has(c->out_edges(), d));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(c->out_edges(), d));
 
   JIT_ASSERT(d->in_edges().size() == 1);
   JIT_ASSERT(d->out_edges().size() == 1);
-  JIT_ASSERT(detail::EdgeData<std::string>::has(d->in_edges(), c));
-  JIT_ASSERT(detail::EdgeData<std::string>::has(d->out_edges(), a));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(d->in_edges(), c));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(d->out_edges(), a));
 
   JIT_ASSERT(a->in_edges().size() == 1);
   JIT_ASSERT(a->out_edges().size() == 1);
-  JIT_ASSERT(detail::EdgeData<std::string>::has(a->in_edges(), d));
-  JIT_ASSERT(detail::EdgeData<std::string>::has(a->out_edges(), b));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(a->in_edges(), d));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(a->out_edges(), b));
 
   JIT_ASSERT(b->in_edges().size() == 1);
   JIT_ASSERT(b->out_edges().size() == 0);
-  JIT_ASSERT(detail::EdgeData<std::string>::has(b->in_edges(), a));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(b->in_edges(), a));
 }
 
 void testRemoveEdgeBasic() {
@@ -1048,8 +1048,8 @@ void testContractEdgeBasic() {
 
   JIT_ASSERT(contracted->out_edges().size() == 1);
   JIT_ASSERT(contracted->in_edges().size() == 1);
-  JIT_ASSERT(detail::EdgeData<std::string>::has(contracted->in_edges(), a));
-  JIT_ASSERT(detail::EdgeData<std::string>::has(contracted->out_edges(), d));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(contracted->in_edges(), a));
+  JIT_ASSERT(detail::vertex_collection<std::string>::contains(contracted->out_edges(), d));
 }
 
 void testContractEdgeCycleDetection() {
