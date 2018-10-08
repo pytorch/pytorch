@@ -92,12 +92,10 @@ struct visited_list {
 template <typename T>
 struct Vertex {
   Vertex(size_t ord, T datum)
-  : ord(ord), visited_(false) { rdata.push_back(datum); }
+  : ord(ord), visited_(false) { data.push_back(datum); }
 
-  // Holds data. When two Vertices (x) -> (y) are merged (contracted
-  // along their edge), their rdata is merged as well in reverse
-  // topological order {y.rdata, x.rdata}.
-  std::vector<T> rdata;
+  // Holds data.
+  std::vector<T> data;
   size_t ord; // unique topological index
 
   std::string toString();
@@ -337,7 +335,10 @@ bool DynamicDAG<T>::contractEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 
 template <typename T>
 void DynamicDAG<T>::mergeProducerIntoConsumer(Vertex<T>* producer, Vertex<T>* consumer) {
-  consumer->rdata.insert(consumer->rdata.end(), producer->rdata.begin(), producer->rdata.end());
+  // Optimization: we want to concat lists [producer.data, consumer.data].
+  // Instead of inserting into the beginning of consumer.data, do a swap.
+  producer->data.insert(producer->data.end(), consumer->data.begin(), consumer->data.end());
+  std::swap(consumer->data, producer->data);
 
   auto edges = removeVertex(producer);
 
@@ -356,10 +357,7 @@ void DynamicDAG<T>::mergeProducerIntoConsumer(Vertex<T>* producer, Vertex<T>* co
 
 template <typename T>
 void DynamicDAG<T>::mergeConsumerIntoProducer(Vertex<T>* producer, Vertex<T>* consumer) {
-  // Optimization: instead of inserting consumer.rdata into the beginning of
-  // producer.rdata, insert producer.rdata into the end of consumer.rdata
-  consumer->rdata.insert(consumer->rdata.end(), producer->rdata.begin(), producer->rdata.end());
-  std::swap(consumer->rdata, producer->rdata);
+  producer->data.insert(producer->data.end(), consumer->data.begin(), consumer->data.end());
 
   auto edges = removeVertex(consumer);
 
@@ -522,7 +520,7 @@ std::string Vertex<T>::toString() {
     ss << c->ord << " ";
   }
   ss << "] -> {\n";
-  for (auto& d : rdata) {
+  for (auto& d : data) {
     ss << "  " << d;
   }
   ss << "} ("<< ord << ") -> [";

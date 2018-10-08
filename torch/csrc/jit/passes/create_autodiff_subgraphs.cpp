@@ -22,7 +22,7 @@ std::string Vertex<Node*>::toString() {
     ss << c->ord << " ";
   }
   ss << "] -> {\n";
-  for (auto* d : rdata) {
+  for (auto* d : data) {
     ss << "  " << *d;
   }
   ss << "} ("<< ord << ") -> [";
@@ -146,11 +146,11 @@ void CreateAutodiffSubgraphsNaive(
 }
 
 bool shouldConsiderForMerge(detail::Vertex<Node*>* v) {
-  if (v->rdata.size() >= 2) {
+  if (v->data.size() >= 2) {
     return true;
   }
-  JIT_ASSERT(v->rdata.size() == 1);
-  auto * node = *v->rdata.begin();
+  JIT_ASSERT(v->data.size() == 1);
+  auto * node = *v->data.begin();
   if (node->kind() == prim::Constant) {
     return false;
   }
@@ -257,8 +257,8 @@ static void reorder_according_to_dag(Block * block, const detail::DynamicDAG<Nod
     const auto& vertex = dep_graph.at(ord);
     if (!vertex.has_value()) continue;
 
-    auto& rnodes = vertex.value()->rdata;
-    for (auto it = rnodes.rbegin(); it != rnodes.rend(); ++it) {
+    auto& nodes = vertex.value()->data;
+    for (auto it = nodes.begin(); it != nodes.end(); ++it) {
       // Move all nodes according to the topological order in dep_graph. A lot
       // of the moves are unnecessary but this is a quick & easy solution.
       (*it)->moveBefore(block->return_node());
@@ -276,10 +276,9 @@ static void merge_differentiable_groups(
     if (!vertex) continue;
     if (!shouldConsiderForMerge(vertex.value())) continue;
 
-    auto& nodes = vertex.value()->rdata;
+    auto& nodes = vertex.value()->data;
     if (nodes.size() < size_threshold) continue;
 
-    std::reverse(std::begin(nodes), std::end(nodes));
     diff_graphs.push_back(mergeNodes(block, prim::DifferentiableGraph, nodes));
   }
 }

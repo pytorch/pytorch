@@ -884,8 +884,8 @@ void testNewVertex() {
   auto a = graph->newVertex("a");
   JIT_ASSERT(graph->debugNumVertices() == 1);
   JIT_ASSERT(a->ord == 0);
-  JIT_ASSERT(a->rdata.size() == 1);
-  JIT_ASSERT(a->rdata[0] == "a");
+  JIT_ASSERT(a->data.size() == 1);
+  JIT_ASSERT(a->data[0] == "a");
   JIT_ASSERT(a->in_edges().size() == 0);
   JIT_ASSERT(a->out_edges().size() == 0);
 
@@ -1042,9 +1042,9 @@ void testContractEdgeBasic() {
   JIT_ASSERT(*a->out_edges().begin() == *d->in_edges().begin());
 
   auto* contracted = *a->out_edges().begin();
-  JIT_ASSERT(contracted->rdata.size() == 2);
-  JIT_ASSERT(contracted->rdata[0] == "c");
-  JIT_ASSERT(contracted->rdata[1] == "b");
+  JIT_ASSERT(contracted->data.size() == 2);
+  JIT_ASSERT(contracted->data[0] == "b");
+  JIT_ASSERT(contracted->data[1] == "c");
 
   JIT_ASSERT(contracted->out_edges().size() == 1);
   JIT_ASSERT(contracted->in_edges().size() == 1);

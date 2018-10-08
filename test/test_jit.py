@@ -8137,10 +8137,10 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             raise NotSupportedError("NYI: assertGraphHas consider_subgraphs=T")
         nodes = [node for node in graph.nodes()
                  if node.kind() == kind]
-        self.assertEquals(len(nodes), num_kind_nodes)
+        self.assertEqual(len(nodes), num_kind_nodes)
 
     def assertGraphSize(self, graph, size):
-        self.assertEquals(len(list(graph.nodes())), size)
+        self.assertEqual(len(list(graph.nodes())), size)
 
     def test_simple_merge(self):
         # o --> o
