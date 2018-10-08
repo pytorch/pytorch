@@ -12,6 +12,15 @@ if TEST_NUMPY:
 
 class TestDTypeInfo(TestCase):
 
+    def test_invalid_input(self):
+        for type in [torch.float32, torch.float64]:
+            with self.assertRaises(TypeError):
+                xinfo = torch.iinfo(type)
+
+        for type in [torch.int64, torch.int32, torch.int16, torch.uint8]:
+            with self.assertRaises(TypeError):
+                xinfo = torch.finfo(type)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_common_info(self):
         for type in [torch.float32, torch.float64,
