@@ -92,6 +92,7 @@ static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *a
   setSignalHandler(SIGBUS, &handler_SIGBUS, nullptr);
   setSignalHandler(SIGSEGV, &handler_SIGSEGV, nullptr);
   setSignalHandler(SIGTERM, &handler_SIGTERM, nullptr);
+  setSignalHandler(SIGFPE, &handler_SIGFPE, nullptr);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
