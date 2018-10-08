@@ -91,6 +91,7 @@ if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
 :: Install ninja
 if "%REBUILD%"=="" ( pip install ninja )
 
+call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
 
 git submodule update --init --recursive
