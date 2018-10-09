@@ -72,11 +72,11 @@ void CUDARecurrentNetworkExecutor::_ExecRange(int from, int to) {
       if (gpu_id == -1 &&
           rnn_op.op->device_option().device_type() ==
               DeviceTypeProto::PROTO_CUDA) {
-        gpu_id = rnn_op.op->device_option().cuda_gpu_id();
+        gpu_id = rnn_op.op->device_option().device_id();
       } else {
         CAFFE_ENFORCE(
             rnn_op.op->device_option().device_type() == 0 ||
-                rnn_op.op->device_option().cuda_gpu_id() == gpu_id,
+                rnn_op.op->device_option().device_id() == gpu_id,
             "RNN Executor only supports ops on one GPU");
       }
 
