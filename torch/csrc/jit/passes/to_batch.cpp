@@ -88,7 +88,6 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
 void ToBatch::visitConstant(Node* n, Block* block, Block* res_block){
   auto res_graph = res_block->owningGraph();
   auto* r_node = res_graph->createClone(n, rn_fn);
-  r_node->setStage(n->stage());
   res_block->appendNode(r_node);
   rn_env[n->output()] = r_node->output();
 }
@@ -97,7 +96,6 @@ void ToBatch::visitConstant(Node* n, Block* block, Block* res_block){
 void ToBatch::visitNumToTensor(Node* n, Block* block, Block* res_block){
   auto res_graph = res_block->owningGraph();
   auto* r_node = res_graph->createClone(n, rn_fn);
-  r_node->setStage(n->stage());
   res_block->appendNode(r_node);
   auto outputs = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("batch_from_scalar_tensor"), r_node->outputs());
   batch_map[n->output()] = outputs;
@@ -110,7 +108,6 @@ void ToBatch::visitTensorToNum(Node* n, Block* block, Block* res_block){
     rn_env[n->input()] = batch_map.at(n->input())[0];
   }
   auto* r_node = res_graph->createClone(n, rn_fn);
-  r_node->setStage(n->stage());
   res_block->appendNode(r_node);
   rn_env[n->output()] = r_node->output();
   batch_map[n->output()] = batch_map.at(n->input());
@@ -134,11 +131,9 @@ void ToBatch::visitListConstruct(Node* n, Block* block, Block* res_block){
       }
     }
     auto* r_node = res_graph->createClone(n, rn_fn);
-    r_node->setStage(n->stage());
     res_block->appendNode(r_node);
     // transform int[] to tensor
     auto to_tensor_node = res_graph->create(Symbol::fromQualString("aten::_list_to_tensor"));
-    to_tensor_node->setStage(n->stage());
     to_tensor_node->addInput(r_node->output());
     res_block->appendNode(to_tensor_node);
     rn_env[n->output()] = to_tensor_node->output();
@@ -378,7 +373,6 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
       r_node->insertInput((i - 2) * EXP_BTENSOR_SIZE + EXP_BTENSOR_SIZE * cond_is_tensor + 2 + j, batch_map.at(n->inputs()[i])[j]);
     }
   }
-  r_node->setStage(n->stage());
   res_block->appendNode(r_node);
 
   // create block for Loop node in res_block

@@ -124,7 +124,7 @@ void uniform_fill_op_cpu_impl(
     min = *inputs[1]->template data<float>();
     max = *inputs[2]->template data<float>();
     if (min > max) {
-      auto shape = output->dims();
+      auto shape = output->dims().vec();
       shape[0] = 0;
       output->Resize(shape);
       output->template mutable_data<float>();

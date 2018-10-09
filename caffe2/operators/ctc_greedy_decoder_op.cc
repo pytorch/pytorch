@@ -5,7 +5,7 @@ namespace caffe2 {
 namespace {
 
 const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
-  const auto& dims = tensor.dims();
+  const auto dims = tensor.dims();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
   int offset = (t * dims[1] + n) * dims[2];
   CAFFE_ENFORCE_LT(offset, tensor.size());
@@ -23,7 +23,7 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
   // [total_decoded_output]
   auto* values = Output(VALUES);
 
-  const auto& inputs_dims = inputs.dims();
+  const auto inputs_dims = inputs.dims();
   int32_t max_time_step = inputs_dims[0];
   int32_t batch_size = inputs_dims[1];
   int32_t num_classes = inputs_dims[2];

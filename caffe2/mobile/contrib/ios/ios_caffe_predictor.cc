@@ -69,5 +69,5 @@ void Caffe2IOSPredictor::run(const Tensor& inData, Tensor& outData, std::string&
   }
   caffe2::TensorCPU* output = &output_vec.front();
   outData.data = output->mutable_data<uint8_t>();
-  outData.dims = output->dims();
+  outData.dims = output->dims().vec();
 }
