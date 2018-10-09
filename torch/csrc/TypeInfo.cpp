@@ -34,15 +34,15 @@ PyObject* THPIInfo_New(const at::ScalarType& type) {
   return self.release();
 }
 
-PyObject* THPDTypeInfo_repr(THPDTypeInfo* self) {
+PyObject* THPFInfo_str(THPFInfo* self) {
   std::ostringstream oss;
-  oss << "type_info(type=" << self->type << ")";
+  oss << "finfo(type=" << self->type << ")";
   return THPUtils_packString(oss.str().c_str());
 }
 
-PyObject* THPDTypeInfo_str(THPDTypeInfo* self) {
+PyObject* THPIInfo_str(THPIInfo* self) {
   std::ostringstream oss;
-  oss << "type_info(type=" << self->type << ")";
+  oss << "iinfo(type=" << self->type << ")";
   return THPUtils_packString(oss.str().c_str());
 }
 
@@ -87,22 +87,18 @@ PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
   int bits = elementSize(self->type) * 8;
-  return PyLong_FromLong(bits);
+  return THPUtils_packInt64(bits);
 }
 
 static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      at::CPU(self->type), "epsilon", [] {
-        return PyFloat_FromDouble(
-            std::numeric_limits<
-                at::scalar_value_type<scalar_t>::type>::epsilon());
-      });
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(at::CPU(self->type), "epsilon", [] {
+    return PyFloat_FromDouble(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::epsilon());
+  });
 }
 
 static PyObject* THPFInfo_max(THPFInfo* self, void*) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(at::CPU(self->type), "max", [] {
-    return PyFloat_FromDouble(
-        std::numeric_limits<at::scalar_value_type<scalar_t>::type>::max());
+    return PyFloat_FromDouble(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::max());
   });
 }
 
@@ -114,8 +110,7 @@ static PyObject* THPIInfo_max(THPFInfo* self, void*) {
 
 static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(at::CPU(self->type), "min", [] {
-    return PyFloat_FromDouble(
-        std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min());
+    return PyFloat_FromDouble(std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min());
   });
 }
 
@@ -139,13 +134,13 @@ PyTypeObject THPFInfoType = {
     0, /* tp_getattr */
     0, /* tp_setattr */
     0, /* tp_reserved */
-    (reprfunc)THPDTypeInfo_repr, /* tp_repr */
+    (reprfunc)THPFInfo_str, /* tp_repr */
     0, /* tp_as_number */
     0, /* tp_as_sequence */
     0, /* tp_as_mapping */
     0, /* tp_hash  */
     0, /* tp_call */
-    (reprfunc)THPDTypeInfo_str, /* tp_str */
+    (reprfunc)THPFInfo_str, /* tp_str */
     0, /* tp_getattro */
     0, /* tp_setattro */
     0, /* tp_as_buffer */
@@ -188,13 +183,13 @@ PyTypeObject THPIInfoType = {
     0, /* tp_getattr */
     0, /* tp_setattr */
     0, /* tp_reserved */
-    (reprfunc)THPDTypeInfo_repr, /* tp_repr */
+    (reprfunc)THPIInfo_str, /* tp_repr */
     0, /* tp_as_number */
     0, /* tp_as_sequence */
     0, /* tp_as_mapping */
     0, /* tp_hash  */
     0, /* tp_call */
-    (reprfunc)THPDTypeInfo_str, /* tp_str */
+    (reprfunc)THPIInfo_str, /* tp_str */
     0, /* tp_getattro */
     0, /* tp_setattro */
     0, /* tp_as_buffer */
