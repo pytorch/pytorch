@@ -5,7 +5,7 @@
 
 namespace caffe2 {
 
-std::shared_ptr<TaskThreadPool>
+std::shared_ptr<TaskThreadPoolBase>
 GetAsyncNetGPUThreadPool(int gpu_id, int pool_size, bool create_new);
 
 } // namespace caffe2
