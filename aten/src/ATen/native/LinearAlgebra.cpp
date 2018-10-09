@@ -124,10 +124,10 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
   Tensor S;
   if (!symmetric) {
     Tensor U, V;
-    std::tie(U, S, V) = self.svd();
+    std::tie(U, S, V) = self.svd(/*some=*/true, /*compute_uv=*/false);
   } else {
     Tensor eigvecs;
-    std::tie(S, eigvecs) = self.symeig();
+    std::tie(S, eigvecs) = self.symeig(/*eigenvectors=*/false);
     S = S.abs();
   }
   return S;

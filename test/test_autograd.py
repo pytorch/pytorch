@@ -2553,6 +2553,13 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'backward without computing eigenvectors'):
             torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
+    @skipIfRocm
+    def test_svd_no_singularvectors(self):
+        A = torch.randn(2, 2, dtype=torch.float32, requires_grad=True)
+        u, s, v = torch.svd(A, compute_uv=False)
+        with self.assertRaisesRegex(RuntimeError, 'requires singular matrices'):
+            torch.autograd.backward([u, s, v], [torch.ones_like(u), torch.ones_like(s), torch.ones_like(v)])
+
     def test_no_grad_copy(self):
         # create autograd function that saves grad pointer as class static
         class MyFunc(Function):

@@ -1487,7 +1487,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
   if (!compute_uv) {
-      throw std::runtime_error(std::string("Backward for SVD is not implemented, since the derivative ",
+      throw std::runtime_error(std::string("Backward for SVD is not implemented, since the derivative "
                                            "requires singular matrices, which haven't been computed."));
   }
   auto m = self.size(0);
