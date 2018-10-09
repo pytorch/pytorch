@@ -1,3 +1,4 @@
+#include <ATen/core/Allocator.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
@@ -16,15 +17,18 @@ namespace caffe2 {
 
 void NoDelete(void*) {}
 
-static std::unique_ptr<at::Allocator> g_cpu_allocator(
-    new DefaultCPUAllocator());
 at::Allocator* GetCPUAllocator() {
-  return g_cpu_allocator.get();
+  return GetAllocator(CPU);
 }
 
 void SetCPUAllocator(at::Allocator* alloc) {
-  g_cpu_allocator.reset(alloc);
+  SetAllocator(CPU, alloc);
 }
+
+// Global default CPU Allocator
+static DefaultCPUAllocator g_cpu_alloc;
+
+REGISTER_ALLOCATOR(CPU, &g_cpu_alloc);
 
 MemoryAllocationReporter DefaultCPUAllocator::reporter_;
 

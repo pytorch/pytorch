@@ -133,3 +133,31 @@ struct CAFFE2_API InefficientStdFunctionContext {
 };
 
 } // namespace at
+
+namespace caffe2 {
+
+/** Set the allocator for DeviceType `t`. The passed in allocator pointer is
+ *  expected to have static lifetime; this function does NOT take ownership
+ *  of the raw pointer. (The reason for this is to prevent existing pointers
+ *  to an allocator of a particular device from being invalidated when
+ *  SetAllocator is called.)
+ *
+ *  Also note that this is not thraed-safe, and we assume this function will
+ *  only be called during initialization.
+ */
+CAFFE2_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
+CAFFE2_API at::Allocator* GetAllocator(const at::DeviceType& t);
+
+template <at::DeviceType t>
+struct AllocatorRegisterer {
+  explicit AllocatorRegisterer(at::Allocator* alloc) {
+    SetAllocator(t, alloc);
+  }
+};
+
+#define REGISTER_ALLOCATOR(t, f)                    \
+  namespace {                                       \
+  static AllocatorRegisterer<t> g_allocator_##d(f); \
+  }
+
+} // namespace caffe2
