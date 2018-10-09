@@ -601,8 +601,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         is_contiguous_,
         "Right now ReserveSpace is only supported for contiguous Tensor.");
     CAFFE_ENFORCE(
-        numel_ != -1, "size should be initialized before calling ReserveSpace");
-    CAFFE_ENFORCE(
         storage_.unique(), "Can't call ReserveSpace on shared storage.");
     auto newCapacity = sizes_;
     newCapacity[0] = outer_dim;
@@ -644,7 +642,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename... Ts>
   void Resize(Ts... dim_source) {
-    bool is_init = numel_ == -1;
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
       // If needed, we will free the data. the next mutable_data() call
@@ -664,7 +661,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
                     c10::FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
-      if (reset_tensor && !is_init) {
+      if (reset_tensor && storage_initialized()) {
         FreeMemory();
       }
     }
@@ -919,7 +916,7 @@ protected:
   std::unique_ptr<int64_t[]> strides_; // this saves two words
 
   int64_t storage_offset_ = 0;
-  int64_t numel_ = -1;
+  int64_t numel_ = 1;
 
   // INVARIANT: When storage is non-null, this type meta must
   // agree with the type meta in storage
