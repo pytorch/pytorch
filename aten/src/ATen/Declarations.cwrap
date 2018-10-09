@@ -2927,20 +2927,20 @@
     - cname: random
       arguments:
         - THTensor* self
-        - arg: THGenerator* generator
+        - arg: Generator* generator
           default: nullptr
           kwarg_only: True
     - cname: cappedRandom
       arguments:
         - THTensor* self
-        - arg: THGenerator* generator
+        - arg: Generator* generator
           default: nullptr
           kwarg_only: True
         - int64_t to
     - cname: clampedRandom
       arguments:
         - THTensor* self
-        - arg: THGenerator* generator
+        - arg: Generator* generator
           default: nullptr
           kwarg_only: True
         - int64_t from
@@ -2960,7 +2960,7 @@
   arguments:
     - arg: THIndexTensor* result
       output: True
-    - arg: THGenerator* generator
+    - arg: Generator* generator
       default: nullptr
       kwarg_only: True
     - THTensor* self
@@ -2980,7 +2980,7 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
+    - arg: Generator* generator
       default: nullptr
       kwarg_only: True
     - arg: double from
@@ -3004,7 +3004,7 @@
       arguments:
         - arg: THTensor* output
           output: True
-        - arg: THGenerator* generator
+        - arg: Generator* generator
           default: nullptr
           kwarg_only: True
         - THTensor* mean
@@ -3014,7 +3014,7 @@
       arguments:
         - arg: THTensor* output
           output: True
-        - arg: THGenerator* generator
+        - arg: Generator* generator
           default: nullptr
           kwarg_only: True
         - arg: double mean
@@ -3023,7 +3023,7 @@
       arguments:
         - arg: THTensor* output
           output: True
-        - arg: THGenerator* generator
+        - arg: Generator* generator
           default: nullptr
           kwarg_only: True
         - THTensor* mean
@@ -3041,7 +3041,7 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
+    - arg: Generator* generator
       default: nullptr
       kwarg_only: True
     - arg: double mean
@@ -3061,7 +3061,7 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
+    - arg: Generator* generator
       default: nullptr
       kwarg_only: True
     - arg: double median
@@ -3081,7 +3081,7 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
+    - arg: Generator* generator
       default: nullptr
       kwarg_only: True
     - arg: double mean
@@ -3101,7 +3101,7 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
+    - arg: Generator* generator
       default: nullptr
       kwarg_only: True
     - arg: double lambd
@@ -3117,7 +3117,7 @@
   return: self
   arguments:
     - THTensor* self
-    - arg: THGenerator* generator
+    - arg: Generator* generator
       default: nullptr
       kwarg_only: True
     - double p

@@ -7,7 +7,7 @@
 
 // ${generated_comment}
 
-#include "ATen/${Generator}.h"
+#include "ATen/core/Generator.h"
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"

@@ -48,13 +48,17 @@ class CAFFE2_API Context {
       LegacyTypeDispatch::TypeUniquePtr{t, LegacyTypeDeleter([](Type* p) { delete p; }) });
   }
 
-  Generator & defaultGenerator(DeviceType device_type) {
+  /* Generator */
+  Generator& getDefaultGenerator(DeviceType device_type, int64_t device = -1) {
     initCUDAIfNeeded(device_type);
-    auto & generator = generator_registry[static_cast<int>(device_type)];
-    if(!generator)
-      AT_ERROR(DeviceTypeName(device_type), " backend type not enabled.");
-    return *generator;
+    return detail::getDefaultGenerator(device_type, device);
   }
+
+  Generator createGenerator(DeviceType device_type, int64_t device = -1) {
+    initCUDAIfNeeded(device_type);
+    return detail::createGenerator(device_type, device);
+  }
+
   bool hasMKL() const;
   bool hasLAPACK() const;
   bool hasMAGMA() const {
@@ -74,8 +78,6 @@ class CAFFE2_API Context {
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
       thc_state = detail::getCUDAHooks().initCUDA();
-      generator_registry[static_cast<int>(DeviceType::CUDA)] =
-        detail::getCUDAHooks().initCUDAGenerator(this);
       detail::getCUDAHooks().registerCUDATypes(this);
     });
     return thc_state.get();
@@ -109,8 +111,6 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-  std::unique_ptr<Generator>
-    generator_registry[static_cast<int>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
 private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {

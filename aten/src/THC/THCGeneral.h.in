@@ -48,7 +48,6 @@
   } while(0)
 #endif
 
-struct THCRNGState;  /* Random number generator state. */
 #ifdef __cplusplus
 typedef at::cuda::impl::CUDAStreamInternals THCStream;
 #else
@@ -73,7 +72,6 @@ THC_API THCState* THCState_alloc(void);
 THC_API void THCState_free(THCState* state);
 
 THC_API void THCudaInit(THCState* state);
-THC_API void THCudaShutdown(THCState* state);
 
 /* If device `dev` can access allocations on device `devToAccess`, this will return */
 /* 1; otherwise, 0. */
@@ -82,7 +80,6 @@ THC_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAcce
 THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state);
 THC_API struct cudaDeviceProp* THCState_getDeviceProperties(THCState* state, int device);
 
-THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
 
 THC_API void THCMagma_init(THCState *state);

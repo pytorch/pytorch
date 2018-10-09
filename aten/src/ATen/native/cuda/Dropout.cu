@@ -3,30 +3,16 @@
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/cuda/detail/IndexUtils.cuh"
 #include "ATen/cuda/detail/TensorInfo.cuh"
-#include "curand_kernel.h"
+#include "ATen/cuda/PhiloxRNGEngine.h"
 
 #include <THC/THCGeneral.h>
-#include <THC/THCTensorRandom.h>
-#include <THC/THCGenerator.hpp>
-
-
-THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace at{
 namespace native{
 
 namespace {
 
-// philox generates 128 bits of randomness at a time. Kernel uses this explicitly by putting suitably transformed result into float4
-// for all members of float4 to be consumed UNROLL has to be 4. Don't change!
 const int UNROLL = 4;
-
-std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t increment) {
-  auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
-  uint64_t offset = gen_->state.philox_seed_offset.fetch_add(increment);
-  return std::make_pair(gen_->state.initial_seed, offset);
-}
-
 
 template <
           typename scalar_t,
@@ -45,24 +31,13 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
 
   accscalar_t pinv = accscalar_t(1)/p;
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
-  curandStatePhilox4_32_10_t state;
-    curand_init(
-        seeds.first,
-        idx,
-        seeds.second,
-        &state);
-  IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *
+  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
+  IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) * 
         blockDim.x * gridDim.x * UNROLL;
   for (IndexType linearIndex = idx;
        linearIndex < rounded_size;
        linearIndex += gridDim.x * blockDim.x*UNROLL) {
-//curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for halfs, so generate float for everything
-       float4 rand = curand_uniform4(&state);
        scalar_t src[UNROLL];
-       rand.x = rand.x < p;
-       rand.y = rand.y < p;
-       rand.z = rand.z < p;
-       rand.w = rand.w < p;
        for (int ii = 0; ii < UNROLL; ii++) {
            IndexType li = linearIndex + blockDim.x * gridDim.x * ii;
            if (li < totalElements) {
@@ -75,11 +50,13 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
        for (int ii = 0; ii < UNROLL; ii++) {
            IndexType li = linearIndex + blockDim.x * gridDim.x * ii;
            if (li < totalElements) {
+               float randn = at::cuda::standard_uniform_distribution(engine);
+               randn = randn < p;
     // Convert `linearIndex` into an offset of `b`
                const IndexType bOffset =
                    cuda::detail::IndexToOffset<scalar_t, IndexType, 1>::get(li, b);
-               b.data[bOffset] = src[ii]*(&rand.x)[ii]*pinv;
-               c.data[bOffset] = (uint8_t)(&rand.x)[ii];
+               b.data[bOffset] = src[ii]*randn*pinv;
+               c.data[bOffset] = (uint8_t)randn;
            }
        }
        __syncthreads();
@@ -104,8 +81,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
   dim3 dim_block(block_size);
   dim3 grid((nelem + block_size -1)/block_size);
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
-//number of times random will be generated per thread, to offset philox counter in thc random state
-  int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
+  auto gen_ = detail::checkGeneratorWithDefault(gen, &detail::getDefaultGenerator(kCUDA));
   if (cuda::detail::canUse32BitIndexMath(self)){
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
@@ -118,10 +94,22 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
       switch (self_info.dims) {
         case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
+            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                self_info, 
+                ret_info, 
+                mask_info, 
+                nelem, 
+                pa, 
+                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 4)); /* Loop unrolling 4 and engine call 1*/
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
+            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                self_info, 
+                ret_info, 
+                mask_info, 
+                nelem, 
+                pa, 
+                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 4));
       }
    });
   } else {
@@ -136,10 +124,22 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
       switch (self_info.dims) {
         case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                self_info, 
+                ret_info, 
+                mask_info, 
+                nelem, 
+                pa, 
+                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 4));
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                self_info, 
+                ret_info, 
+                mask_info, 
+                nelem, 
+                pa, 
+                gen_->incrementPhiloxOffset(nelem, grid.x, block_size, 4));
       }
    });
   }

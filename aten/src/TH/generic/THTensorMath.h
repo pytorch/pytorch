@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THTensorMath.h"
 #else
 
+#include "ATen/core/Generator.h"
+
 TH_API void THTensor_(fill)(THTensor *r_, scalar_t value);
 TH_API void THTensor_(zero)(THTensor *r_);
 
@@ -100,7 +102,7 @@ TH_API void THTensor_(diag)(THTensor *r_, THTensor *t, int k);
 TH_API void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m);
 TH_API void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step);
 TH_API void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step);
-TH_API void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n);
+TH_API void THTensor_(randperm)(THTensor *r_, at::Generator *_generator, int64_t n);
 
 TH_API void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder);
 TH_API void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted);

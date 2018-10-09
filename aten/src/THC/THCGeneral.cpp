@@ -2,7 +2,6 @@
 #include "TH.h"
 #include "THCAllocator.h"
 #include "THCCachingHostAllocator.h"
-#include "THCTensorRandom.h"
 #include "THCGeneral.hpp"
 
 #include "ATen/cuda/CUDAStream.h"
@@ -61,9 +60,6 @@ void THCudaInit(THCState* state)
   state->deviceProperties =
     (struct cudaDeviceProp*)malloc(numDevices * sizeof(struct cudaDeviceProp));
 
-  state->rngState = (THCRNGState*)malloc(sizeof(THCRNGState));
-  THCRandom_init(state, numDevices, device);
-
   // p2pAccessEnabled records if p2p copies are allowed between pairs of
   // devices. Values include "1" (copy allowed), "0" (copy not allowed), and
   // "-1" (unknown).
@@ -101,51 +97,6 @@ void THCudaInit(THCState* state)
 
   /* Restore to previous device */
   THCudaCheck(cudaSetDevice(device));
-}
-
-void THCudaShutdown(THCState* state)
-{
-  THCRandom_shutdown(state);
-
-  free(state->rngState);
-  free(state->deviceProperties);
-
-  int deviceCount = 0;
-  int prevDev = -1;
-  THCudaCheck(cudaGetDevice(&prevDev));
-  THCudaCheck(cudaGetDeviceCount(&deviceCount));
-
-  /* cleanup p2p access state */
-  for (int dev = 0; dev < deviceCount; ++dev) {
-    free(state->p2pAccessEnabled[dev]);
-  }
-  free(state->p2pAccessEnabled);
-
-  /* cleanup per-device state */
-  for (int dev = 0; dev < deviceCount; ++dev) {
-    THCudaCheck(cudaSetDevice(dev));
-    THCCudaResourcesPerDevice* res = &(state->resourcesPerDevice[dev]);
-
-    // Frees BLAS handle
-    if (res->blasHandle) {
-      THCublasCheck(cublasDestroy(res->blasHandle));
-    }
-
-    // Frees sparse handle
-    if (res->sparseHandle) {
-      THCusparseCheck(cusparseDestroy(res->sparseHandle));
-    }
-  }
-
-  free(state->resourcesPerDevice);
-  if (state->cudaDeviceAllocator == THCCachingAllocator_get()) {
-    THCCachingAllocator_emptyCache();
-  }
-  if (state->cudaHostAllocator == getTHCCachingHostAllocator()) {
-    THCCachingHostAllocator_emptyCache();
-  }
-
-  THCudaCheck(cudaSetDevice(prevDev));
 }
 
 int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
@@ -193,11 +144,6 @@ struct cudaDeviceProp* THCState_getDeviceProperties(THCState* state, int device)
 {
   THAssert(device >= 0 && device < state->numDevices);
   return &(state->deviceProperties[device]);
-}
-
-struct THCRNGState* THCState_getRngState(THCState *state)
-{
-  return state->rngState;
 }
 
 THAllocator* THCState_getCudaHostAllocator(THCState* state)

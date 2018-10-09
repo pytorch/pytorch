@@ -244,7 +244,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'const Tensor &': 'tensor',
         'SparseTensorRef': 'tensor',
         'Tensor &': 'tensor',
-        'Generator *': 'generator',
+        'Generator*': 'generator',
         'Storage &': 'storage',
         'const Type &': 'scalartype',
         'const THPLayout &': 'layout',

@@ -32,7 +32,7 @@ class THPPlugin(CWrapPlugin):
 
         'THLongStorage*': Template('((THPLongStorage*)$arg)->cdata'),
         'THStorage*': Template('((THPStorage*)$arg)->cdata'),
-        'THGenerator*': Template('THPGenerator_TH_CData($arg)'),
+        'at::Generator*': Template('((THPGenerator*)$arg)->cdata'),
         'THSize*': Template('__size.get()'),
         'THStride*': Template('__stride.get()'),
         'void*': Template('THPUtils_unpackLong($arg)'),
@@ -71,7 +71,7 @@ class THPPlugin(CWrapPlugin):
 
         'THLongStorage*': Template('(PyObject*)Py_TYPE($arg) == THPLongStorageClass'),
         'THStorage*': Template('(PyObject*)Py_TYPE($arg) == THPStorageClass'),
-        'THGenerator*': Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
+        'at::Generator*': Template('(PyObject*)Py_TYPE($arg) == THPGeneratorClass'),
         'THSize*': Template('THPUtils_tryUnpackLongs($arg, __size)'),
         'THStride*': Template('THPUtils_tryUnpackLongs($arg, __stride)'),
         'void*': Template('THPUtils_checkLong($arg)'),
@@ -171,7 +171,7 @@ ${cpu}
         'THTensor*': '" THPTensorStr "',
         'THSTensor*': '" THSPTensorStr "',
         'THStorage*': '" THPStorageStr "',
-        'THGenerator*': 'torch.Generator',
+        'at::Generator*': 'torch.Generator',
         'THLongStorage*': '" THPModuleStr "LongStorage',
         'THLongTensor*': '" THPModuleStr "LongTensor',
         'THIntTensor*': '" THPModuleStr "IntTensor',

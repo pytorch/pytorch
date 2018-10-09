@@ -11,7 +11,7 @@ void THNN_(RReLU_updateOutput)(
           accreal upper_,
           bool train,
           bool inplace,
-          THGenerator *generator)
+          at::Generator* generator)
 {
   scalar_t lower = TH_CONVERT_ACCREAL_TO_REAL(lower_);
   scalar_t upper = TH_CONVERT_ACCREAL_TO_REAL(upper_);
@@ -24,7 +24,8 @@ void THNN_(RReLU_updateOutput)(
       TH_TENSOR_APPLY2(scalar_t, input, scalar_t, noise,
         if (*input_data <= 0)
         {
-          const scalar_t r = (scalar_t)THRandom_uniform(generator, lower, upper);
+          std::uniform_real_distribution<double> uniform(lower, upper);
+          const scalar_t r = (scalar_t)uniform(generator->getCPUEngine());
           *input_data = (*input_data) * r;
           *noise_data = r;
         }
@@ -41,7 +42,8 @@ void THNN_(RReLU_updateOutput)(
       TH_TENSOR_APPLY3(scalar_t, input, scalar_t, output, scalar_t, noise,
         if (*input_data <= 0)
         {
-          const scalar_t r = (scalar_t)THRandom_uniform(generator, lower, upper);
+          std::uniform_real_distribution<double> uniform(lower, upper);
+          const scalar_t r = (scalar_t)uniform(generator->getCPUEngine());
           *output_data = (*input_data) * r;
           *noise_data = r;
         }

@@ -4,35 +4,55 @@
 #include "THCNumerics.cuh"
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorMathReduce.cuh"
-
-#include <curand_kernel.h>
+#include "ATen/cuda/PhiloxRNGEngine.h"
 
 #define MAX_NUM_BLOCKS 200
 #define BLOCK_SIZE 256
-/* Separate kernel because curand_log_normal gets extra parameters. */
 
 template <typename T>
-__global__ void generateLogNormal(curandStateMtgp32 *state, int size, T *result, double mean, double stddev)
+__global__ void generateLogNormal(std::pair<uint64_t, uint64_t> seeds, int size, T *result, double mean, double stddev)
 {
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
+  float2 normal_vals = make_float2(0,0);
+  int cached_normal = 0;
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
-    float x = curand_log_normal(&state[blockIdx.x], mean, stddev);
-    if (i < size) {
-      result[i] = ScalarConvert<float, T>::to(x);
+    if(cached_normal){
+      cached_normal = 0;
+      if (i < size) {
+        result[i] = ScalarConvert<float, T>::to(normal_vals.y);
+      }
+    }else{
+      normal_vals = static_cast<float2>(at::cuda::lognormal_distribution(engine, mean, stddev));
+      cached_normal = 1;
+      if (i < size) {
+        result[i] = ScalarConvert<float, T>::to(normal_vals.x);
+      }
     }
   }
 }
 
 template <>
-__global__ void generateLogNormal<double>(curandStateMtgp32 *state, int size, double *result, double mean, double stddev)
+__global__ void generateLogNormal<double>(std::pair<uint64_t, uint64_t> seeds, int size, double *result, double mean, double stddev)
 {
   int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
   int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
+  float2 normal_vals;
+  int cached_normal = 0;
   for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
-    double x = curand_log_normal_double(&state[blockIdx.x], mean, stddev);
-    if (i < size) {
-      result[i] = x;
+    if(cached_normal){
+      cached_normal = 0;
+      if (i < size) {
+        result[i] = static_cast<double>(normal_vals.y);
+      }
+    }else{
+      normal_vals = static_cast<float2>(at::cuda::lognormal_distribution(engine, mean, stddev));
+      cached_normal = 1;
+      if (i < size) {
+        result[i] = static_cast<double>(normal_vals.x);
+      }
     }
   }
 }
@@ -294,7 +314,7 @@ sampleMultinomialOnce(int64_t* dest,
 
 template <typename T>
 __global__ void
-sampleMultinomialWithReplacement(curandStateMtgp32* state,
+sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
                                  int totalSamples,
                                  int64_t* dest,
                                  int64_t distributions,
@@ -307,6 +327,8 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
   // call to update the generator state.
 
   // The block determines the distribution for which we generate a point
+  int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.x;                                              \
+  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
   for (int64_t curDist = blockIdx.x;
        curDist < distributions;
        curDist += gridDim.x) {
@@ -316,7 +338,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
       int sample = sampleBase + threadIdx.y;
 
       // All threads participate in this
-      T r = ScalarConvert<float, T>::to(curand_uniform(&state[blockIdx.x]));
+      T r = ScalarConvert<float, T>::to(at::cuda::standard_uniform_distribution(engine));
 
       if (threadIdx.x == 0 && sample < totalSamples) {
         // Find the bucket that a uniform sample lies in
@@ -334,7 +356,7 @@ sampleMultinomialWithReplacement(curandStateMtgp32* state,
 
 template <typename T>
 __global__ void
-sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
+sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
                                     int totalSamples,
                                     int sample,
                                     int64_t* dest,
@@ -350,6 +372,8 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
 
   // The block and warp determines the distribution for which we
   // generate a point
+  int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.x;                                          \
+  at::cuda::Philox4_32_10 engine(seeds.first, idx, seeds.second);
   for (int64_t curDistBase = blockIdx.x * blockDim.y;
        curDistBase < distributions;
        curDistBase += gridDim.x * blockDim.y) {
@@ -357,7 +381,7 @@ sampleMultinomialWithoutReplacement(curandStateMtgp32* state,
     int64_t curDist = curDistBase + threadIdx.y;
 
     // All threads must participate in this
-    T r = ScalarConvert<float, T>::to(curand_uniform(&state[blockIdx.x]));
+    T r = ScalarConvert<float, T>::to(at::cuda::standard_uniform_distribution(engine));
 
     if (threadIdx.x == 0 && curDist < distributions) {
       // Find the bucket that a uniform sample lies in

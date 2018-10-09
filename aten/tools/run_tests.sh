@@ -16,11 +16,12 @@ VALGRIND=${VALGRIND:=ON}
 ./native_test
 ./scalar_tensor_test
 ./undefined_tensor_test
+./cpu_generator_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi
-if [[ -x ./cuda_rng_test ]]; then
-  ./cuda_rng_test
+if [[ -x ./cuda_generator_test ]]; then
+  ./cuda_generator_test
 fi
 if [[ -x ./apply_test ]]; then
   ./apply_test

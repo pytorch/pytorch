@@ -3,7 +3,6 @@
 #include "THCGeneral.h"
 #include "THCBlas.h"
 #include "THCTensorCopy.h"
-#include "THCTensorRandom.h"
 #include "TH/THHalf.h"
 #include "THCApply.cuh"
 #include "THCReduce.cuh"

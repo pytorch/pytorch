@@ -1,4 +1,4 @@
-from torch import _C
+from torch._C import Generator, device as torch_device
 from . import _lazy_init, _lazy_call, device_count, device as device_ctx_manager
 
 
@@ -14,8 +14,14 @@ def get_rng_state(device=-1):
         This function eagerly initializes CUDA.
     """
     _lazy_init()
-    with device_ctx_manager(device):
-        return _C._cuda_getRNGState()
+    if device == -1:
+        device_string = "cuda"
+    else:
+        device_string = "cuda:" + str(device)
+    device_object = torch_device(device_string)
+    with device_ctx_manager(device_object):
+        default_generator = Generator(device=device_object, default=True)
+        return default_generator.get_state()
 
 
 def get_rng_state_all():
@@ -23,8 +29,7 @@ def get_rng_state_all():
 
     results = []
     for i in range(device_count()):
-        with device_ctx_manager(i):
-            results.append(get_rng_state())
+        results.append(get_rng_state(i))
     return results
 
 
@@ -34,7 +39,6 @@ def set_rng_state(new_state, device=-1):
     Args:
         new_state (torch.ByteTensor): The desired state
     """
-    new_state_copy = new_state.clone()
 
     # NB: What if device=-1?  You might be afraid that the "current"
     # device would change by the time we actually get around to invoking
@@ -43,8 +47,15 @@ def set_rng_state(new_state, device=-1):
     # initialize the state.  So then _lazy_call would execute cb
     # immediately.
     def cb():
-        with device_ctx_manager(device):
-            _C._cuda_setRNGState(new_state_copy)
+        new_state_copy = new_state.clone()
+        if device == -1:
+            device_string = "cuda"
+        else:
+            device_string = "cuda:" + str(device)
+        device_object = torch_device(device_string)
+        with device_ctx_manager(device_object):
+            default_generator = Generator(device=device_object, default=True)
+            default_generator.set_state(new_state_copy)
 
     _lazy_call(cb)
 
@@ -71,7 +82,12 @@ def manual_seed(seed):
         to get determinism.  To seed all GPUs, use :func:`manual_seed_all`.
     """
     seed = int(seed)
-    _lazy_call(lambda: _C._cuda_manualSeed(seed))
+
+    def cb():
+        default_generator = Generator(device='cuda', default=True)
+        default_generator.manual_seed(seed)
+
+    _lazy_call(cb)
 
 
 def manual_seed_all(seed):
@@ -83,7 +99,16 @@ def manual_seed_all(seed):
         seed (int): The desired seed.
     """
     seed = int(seed)
-    _lazy_call(lambda: _C._cuda_manualSeedAll(seed))
+
+    def cb():
+        for i in range(device_count()):
+            device_string = "cuda:" + str(i)
+            device_object = torch_device(device_string)
+            with device_ctx_manager(device_object):
+                default_generator = Generator(device=device_object, default=True)
+                default_generator.manual_seed(seed)
+
+    _lazy_call(cb)
 
 
 def seed():
@@ -95,7 +120,11 @@ def seed():
         If you are working with a multi-GPU model, this function will only initialize
         the seed on one GPU.  To initialize all GPUs, use :func:`seed_all`.
     """
-    _lazy_call(lambda: _C._cuda_seed())
+    def cb():
+        default_generator = Generator(device='cuda', default=True)
+        default_generator.seed()
+
+    _lazy_call(cb)
 
 
 def seed_all():
@@ -103,7 +132,23 @@ def seed_all():
     It's safe to call this function if CUDA is not available; in that
     case, it is silently ignored.
     """
-    _lazy_call(lambda: _C._cuda_seedAll())
+    def cb():
+        random_seed = 0
+        seeded = False
+        for i in range(device_count()):
+            device_string = "cuda:" + str(i)
+            device_object = torch_device(device_string)
+            with device_ctx_manager(device_object):
+                if not seeded:
+                    default_generator = Generator(device=device_object, default=True)
+                    default_generator.seed()
+                    random_seed = default_generator.initial_seed()
+                    seeded = True
+                else:
+                    default_generator = Generator(device=device_object, default=True)
+                    default_generator.manual_seed(random_seed)
+
+    _lazy_call(cb)
 
 
 def initial_seed():
@@ -113,4 +158,5 @@ def initial_seed():
         This function eagerly initializes CUDA.
     """
     _lazy_init()
-    return _C._cuda_initialSeed()
+    default_generator = Generator(device='cuda', default=True)
+    return default_generator.initial_seed()

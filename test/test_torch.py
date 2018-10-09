@@ -316,6 +316,7 @@ class _TestTorchMixin(object):
                 run_test(m, v2, v1, lambda x: x.transpose(0, 1))
 
     def test_addmv(self):
+        torch.manual_seed(0)
         types = {
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
@@ -3019,7 +3020,7 @@ class _TestTorchMixin(object):
         for args in [(3,), (1, 3)]:  # (low,) and (low, high)
             self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
             self.assertIs(torch.int64, torch.randint(*args, size=size, layout=torch.strided).dtype)
-            self.assertIs(torch.int64, torch.randint(*args, size=size, generator=torch.default_generator).dtype)
+            self.assertIs(torch.int64, torch.randint(*args, size=size).dtype)
             self.assertIs(torch.float32, torch.randint(*args, size=size, dtype=torch.float32).dtype)
             out = torch.empty(size, dtype=torch.float32)
             self.assertIs(torch.float32, torch.randint(*args, size=size, out=out).dtype)
@@ -4941,6 +4942,7 @@ class _TestTorchMixin(object):
     @staticmethod
     def _test_fft_ifft_rfft_irfft(self, device='cpu'):
         def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
+            torch.manual_seed(7393)
             x = prepro_fn(torch.randn(*sizes, device=device))
             for normalized in (True, False):
                 res = x.fft(signal_ndim, normalized=normalized)
@@ -5386,6 +5388,7 @@ class _TestTorchMixin(object):
 
     @staticmethod
     def _test_potrs_batched(self, cast):
+        torch.manual_seed(0)
         from common_utils import random_symmetric_pd_matrix
 
         def potrs_test_helper(A_dims, b_dims, cast, upper):
@@ -7703,6 +7706,7 @@ class _TestTorchMixin(object):
         self._test_bernoulli(self, torch.uint8, torch.float64, 'cpu')
 
     def test_normal(self):
+        torch.manual_seed(0)
         q = torch.Tensor(100, 100)
         q.normal_()
         self.assertEqual(q.mean(), 0, 0.2)
@@ -7746,6 +7750,63 @@ class _TestTorchMixin(object):
         self.assertEqual(r[50:].mean(), 1, 0.2)
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
+
+    def test_generator_cpu(self):
+        # tests Generator API
+        # manual_seed, seed, initial_seed, get_state, set_state
+        g1 = torch.Generator()
+        g2 = torch.Generator()
+        g1.manual_seed(12345)
+        g2.manual_seed(12345)
+        self.assertEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1.seed()
+        g2.seed()
+        self.assertNotEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1 = torch.Generator(default=True)
+        g2_state = g2.get_state()
+        g2_randn = torch.randn(1, generator=g2)
+        g1.set_state(g2_state)
+        g1_randn = torch.randn(1)
+        self.assertEqual(g1_randn, g2_randn)
+
+        default_state = torch.Generator(default=True).get_state()
+        q = torch.Tensor(100)
+        g1_normal = q.normal_()
+        g2 = torch.Generator()
+        g2.set_state(default_state)
+        g2_normal = q.normal_(generator=g2)
+        self.assertEqual(g1_normal, g2_normal)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_generator_cuda(self):
+        # tests CUDA Generator API
+        # manual_seed, seed, initial_seed, get_state, set_state
+        g1 = torch.Generator(device="cuda")
+        g2 = torch.Generator(device="cuda")
+        g1.manual_seed(12345)
+        g2.manual_seed(12345)
+        self.assertEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1.seed()
+        g2.seed()
+        self.assertNotEqual(g1.initial_seed(), g2.initial_seed())
+
+        g1 = torch.Generator(default=True, device="cuda")
+        g2_state = g2.get_state()
+        g2_randn = torch.randn(1, device="cuda", generator=g2)
+        g1.set_state(g2_state)
+        g1_randn = torch.randn(1, device="cuda")
+        self.assertEqual(g1_randn, g2_randn)
+
+        default_state = torch.Generator(default=True, device="cuda").get_state()
+        q = torch.Tensor(100).cuda()
+        g1_normal = q.normal_().cuda()
+        g2 = torch.Generator(device="cuda")
+        g2.set_state(default_state)
+        g2_normal = q.normal_(generator=g2)
+        self.assertEqual(g1_normal, g2_normal)
 
     def test_parsing_int64(self):
         # accepts integer arguments

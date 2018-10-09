@@ -4,8 +4,6 @@
 #include <type_traits>
 #include "ATen/Config.h"
 #include "ATen/Dispatch.h"
-#include "ATen/CPUGenerator.h"
-#include "ATen/CheckGenerator.h"
 #include "ATen/Generator.h"
 #include "ATen/cpu/vml.h"
 #include "ATen/CPUApplyUtils.h"
@@ -18,9 +16,6 @@
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
-
-#include "TH/THGenerator.hpp"
-#include <TH/THRandom.h>
 
 namespace at { namespace native {
 namespace {
@@ -124,11 +119,10 @@ void bernoulli_mkl_kernel(Tensor &output, const double p, Generator* gen) {
 }
 #else
 void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
-  THGenerator* generator = get_generator(gen);
+  Generator* generator = detail::checkGeneratorWithDefault(gen, &detail::getDefaultGenerator(kCPU));
   int64_t seed;
   {
-    std::lock_guard<std::mutex> lock(generator->mutex);
-    seed = THRandom_random(generator);
+    seed = generator->random64();
   }
   int64_t n = self.numel();
   bool contig = self.is_contiguous();

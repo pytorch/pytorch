@@ -49,9 +49,6 @@ Storage VariableType::storageWithAllocator(int64_t size, Allocator* allocator) c
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
 }
-std::unique_ptr<Generator> VariableType::generator() const {
-  return baseType->generator();
-}
 
 const char * VariableType::toString() const {
   return str.c_str();

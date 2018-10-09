@@ -42,7 +42,6 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   Storage storage(size_t size, bool resizable = false) const override;
   Storage storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
   Storage storageWithAllocator(int64_t size, at::Allocator* allocator) const override;
-  std::unique_ptr<at::Generator> generator() const override;
   const char * toString() const override;
   at::TypeID ID() const override;
   size_t elementSizeInBytes() const override;

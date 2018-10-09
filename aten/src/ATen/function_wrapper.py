@@ -213,7 +213,6 @@ TYPE_FORMAL_GENERIC = {
     'THDenseTensor*': 'Tensor &',
     'THDenseIndexTensor*': 'Tensor &',
     'THStorage*': 'Storage',
-    'THGenerator*': 'Generator *',
     'IntListSize': 'IntList',
     'accreal': 'Scalar',
     'real': 'Scalar',
@@ -229,7 +228,6 @@ DYNAMIC_TYPE = {
     'THDenseTensor*': 'Tensor',
     'THDenseIndexTensor*': 'IndexTensor',
     'THStorage*': 'Storage',
-    'THGenerator*': 'Generator*',
     'IntListSize': 'IntList',
     'accreal': 'accreal',
     'real': 'real',
@@ -297,9 +295,10 @@ CHECKED_CAST = {
             # We're punning here (Backend and DeviceType constructors coincide)
             # but DeviceType is the correct way to classify storages
             'DeviceType::${Backend}, at::scalarTypeToDataType(ScalarType::${ScalarName}))'),
-    'THGenerator*':
+    'Generator*':
         CodeTemplate(
-            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(device_type()))'),
+            'detail::checkGeneratorWithDefault(${arg_name}, '
+            '&globalContext().getDefaultGenerator(options().device().type(), options().device().index()))'),
     # This is a cast done via direct-construction
     'IntListStride': CodeTemplate('at::IntList ${result_name} = get_intlist_stride_th(${arg_name});'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
@@ -319,7 +318,7 @@ CHECKED_USE = {
     'THDenseTensor*': '{}_',
     'THDenseIndexTensor*': '{}_',
     'THStorage*': '{}_.unsafeGetStorageImpl()',
-    'THGenerator*': '{}_->generator',
+    'Generator*': '{}_',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
 
@@ -1213,11 +1212,6 @@ def create_derived(backend_type_env, declarations):
 
     is_cuda = 'CUDA' in backend_type_env['Backend']
 
-    def replace_with_null(argument):
-        # type: (THFormal) -> bool
-        return (argument['type'] == 'THGenerator*' and
-                backend_type_env['Backend'] == 'CUDA')
-
     def requires_checked_cast(argument):
         # type: (THFormal) -> bool
         if argument['type'] == 'IntList':
@@ -1234,9 +1228,7 @@ def create_derived(backend_type_env, declarations):
 
     def get_argument(argument, option):
         # type: (THFormal, FunctionOption) -> str
-        if replace_with_null(argument):
-            return 'NULL'
-        elif requires_checked_cast(argument):
+        if requires_checked_cast(argument):
             checked_use = CHECKED_USE.get(
                 argument['type'], '{}_').format(argument['name'])
             if nullable_argument(argument):
@@ -1270,8 +1262,7 @@ def create_derived(backend_type_env, declarations):
         # Devices are handled in the body of the function.
         if argument['name'] == 'device':
             return True
-        return 'CUDA' in backend_type_env['Backend'] and (
-            option['mode'] == 'TH' and argument['type'] == 'THGenerator*')
+        return False
 
     def get_arguments(arguments, option):
         # type: (List[THFormal], FunctionOption) -> List[str]
@@ -1453,7 +1444,7 @@ def create_derived(backend_type_env, declarations):
                         size=arg.get('size'))
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
-                if drop_argument(arg, option) or replace_with_null(arg):
+                if drop_argument(arg, option):
                     body.append(
                         "(void) {}_; //silence unused warning".format(arg['name']))
 

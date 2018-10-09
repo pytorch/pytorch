@@ -10,53 +10,49 @@
 
 #include <cpuinfo.h>
 
-#include "THGenerator.hpp"
-
-void THTensor_(random)(THTensor *self, THGenerator *_generator)
+void THTensor_(random)(THTensor *self, at::Generator *_generator)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
 #if defined(TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint8_t)(THRandom_random(_generator) % (UINT8_MAX + 1)););
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint8_t)(_generator->random64() % (UINT8_MAX + 1)););
 #elif defined(TH_REAL_IS_CHAR)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int8_t)(THRandom_random(_generator) % (INT8_MAX + 1)););
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int8_t)(_generator->random64() % (INT8_MAX + 1)););
 #elif defined(TH_REAL_IS_SHORT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int16_t)(THRandom_random(_generator) % (INT16_MAX + 1)););
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int16_t)(_generator->random64() % (INT16_MAX + 1)););
 #elif defined(TH_REAL_IS_INT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int32_t)(THRandom_random(_generator) % (INT32_MAX + 1UL)););
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (int32_t)(_generator->random64() % (INT32_MAX + 1UL)););
 #elif defined(TH_REAL_IS_LONG)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint64_t)(THRandom_random64(_generator) % (LONG_MAX + 1ULL)););
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (uint64_t)(_generator->random64() % (LONG_MAX + 1ULL)););
 #elif defined(TH_REAL_IS_FLOAT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(THRandom_random(_generator) % ((1ULL << FLT_MANT_DIG) + 1)););
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (float)(((uint32_t)(_generator->random64())) % ((1ULL << FLT_MANT_DIG) + 1)););
 #elif defined(TH_REAL_IS_DOUBLE)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(THRandom_random64(_generator) % ((1ULL << DBL_MANT_DIG) + 1)););
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (double)(_generator->random64() % ((1ULL << DBL_MANT_DIG) + 1)););
 #else
 #error "Unknown type"
 #endif
 
 }
 
-void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, int64_t min, int64_t max) {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
+void THTensor_(clampedRandom)(THTensor *self, at::Generator *_generator, int64_t min, int64_t max) {
   THArgCheck(max > min, 2, "max must be greater than min, but got: min = %lld, max = %lld", min, max);
   uint64_t range = max - min;
 #if defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     if (range >= 1ULL << 32) {
-      TH_TENSOR_APPLY(scalar_t, self, *self_data = static_cast<scalar_t>(static_cast<int64_t>((THRandom_random64(_generator) % range) + min));)
+      TH_TENSOR_APPLY(scalar_t, self, *self_data = static_cast<scalar_t>(static_cast<int64_t>((_generator->random64() % range) + min));)
       return;
     }
 #endif
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = static_cast<scalar_t>(static_cast<int64_t>((THRandom_random(_generator) % range) + min));)
+    TH_TENSOR_APPLY(scalar_t, self, *self_data = static_cast<scalar_t>(static_cast<int64_t>((((uint32_t)(_generator->random64())) % range) + min));)
 }
 
-void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, int64_t max) {
+void THTensor_(cappedRandom)(THTensor *self, at::Generator *_generator, int64_t max) {
   THArgCheck(max > 0, 1, "max must be positive, but got: max = %lld", max);
   THTensor_(clampedRandom)(self, _generator, 0, max);
 }
 
-void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
+void THTensor_(geometric)(THTensor *self, at::Generator *_generator, double p)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_geometric(_generator, p););
+  std::geometric_distribution<> geometric(p);
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)geometric(_generator->getCPUEngine()););
 }
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
@@ -67,37 +63,36 @@ void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
 #define TH_REAL_MIN DBL_MIN
 #endif
 
-void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
+void THTensor_(uniform)(THTensor *self, at::Generator *_generator, double a, double b)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
   #if defined(TH_REAL_IS_FLOAT)
-  TH_TENSOR_APPLY(scalar_t, self, *self_data =
-    (scalar_t)THRandom_uniformFloat(_generator, (scalar_t)a, (scalar_t)b););
+  std::uniform_real_distribution<float> uniform((float)a, (float)b);
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)uniform(_generator->getCPUEngine()););
   #else
-  TH_TENSOR_APPLY(scalar_t, self, *self_data =
-    (scalar_t)THRandom_uniform(_generator, a, b););
+  std::uniform_real_distribution<double> uniform(a, b);
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)uniform(_generator->getCPUEngine()););
   #endif
 }
 
-void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stddev)
+void THTensor_(normal)(THTensor *self, at::Generator *_generator, double mean, double stddev)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
   const int64_t size = THTensor_(numel)(self);
   if (size >= 16 && THTensor_(isContiguous)(self)) {
     THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)) + self->storage_offset(), size, _generator, mean, stddev);
   } else {
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_normal(_generator, mean, stddev););
+    std::normal_distribution<double> normal{mean, stddev};
+    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(_generator->getCPUEngine()););
   }
 }
 
-void THTensor_(normal_means)(THTensor *self, THGenerator *gen, THTensor *means, double stddev)
+void THTensor_(normal_means)(THTensor *self, at::Generator *gen, THTensor *means, double stddev)
 {
   THTensor_(resizeAs)(self, means);
   THTensor_(normal)(self, gen, 0, stddev);
   THTensor_(cadd)(self, self, 1, means);
 }
 
-void THTensor_(normal_stddevs)(THTensor *self, THGenerator *gen, double mean, THTensor *stddevs)
+void THTensor_(normal_stddevs)(THTensor *self, at::Generator *gen, double mean, THTensor *stddevs)
 {
   THTensor_(resizeAs)(self, stddevs);
   THTensor_(normal)(self, gen, 0, 1);
@@ -105,7 +100,7 @@ void THTensor_(normal_stddevs)(THTensor *self, THGenerator *gen, double mean, TH
   THTensor_(add)(self, self, mean);
 }
 
-void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, THTensor *means, THTensor *stddevs)
+void THTensor_(normal_means_stddevs)(THTensor *self, at::Generator *gen, THTensor *means, THTensor *stddevs)
 {
   THTensor_(resizeAs)(self, means);
   THTensor_(normal)(self, gen, 0, 1);
@@ -113,24 +108,24 @@ void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, THTensor 
   THTensor_(cadd)(self, self, 1, means);
 }
 
-void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lambda)
+void THTensor_(exponential)(THTensor *self, at::Generator *_generator, double lambda)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_exponential(_generator, lambda););
+  std::exponential_distribution<double> exponential(lambda);
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)exponential(_generator->getCPUEngine()););
 }
 
 #undef TH_REAL_MIN
 
-void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double median, double sigma)
+void THTensor_(cauchy)(THTensor *self, at::Generator *_generator, double median, double sigma)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_cauchy(_generator, median, sigma););
+  std::cauchy_distribution<double> cauchy(median, sigma);
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)cauchy(_generator->getCPUEngine()););
 }
 
-void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, double stdv)
+void THTensor_(logNormal)(THTensor *self, at::Generator *_generator, double mean, double stdv)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_logNormal(_generator, mean, stdv););
+  std::lognormal_distribution<double> logNormal(mean, stdv);
+  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)logNormal(_generator->getCPUEngine()););
 }
 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
@@ -220,9 +215,8 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THLongTensor_free(smaller);
   THLongTensor_free(larger);
 }
-void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THLongTensor *J, THTensor *q)
+void THTensor_(multinomialAliasDraw)(THLongTensor *self, at::Generator *_generator, THLongTensor *J, THTensor *q)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
   int64_t K = THLongTensor_nElement(J);
   int64_t output_nelem = THLongTensor_nElement(self);
   int64_t i = 0, _mask=0;
@@ -231,11 +225,12 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
 
   for (i=0; i < output_nelem; i++)
     {
-      rand_ind = THRandom_uniform(_generator, 0, K);
+      std::uniform_real_distribution<double> uniform(0, K);
+      rand_ind = uniform(_generator->getCPUEngine());
 
       _q = THTensor_(fastGet1d)(q, rand_ind);
-
-      _mask = THRandom_bernoulli(_generator, _q);
+      std::bernoulli_distribution bernoulli(_q);
+      _mask = static_cast<int64_t>(bernoulli(_generator->getCPUEngine()));
 
       J_sample = THLongTensor_fastGet1d(J, rand_ind);
 
@@ -244,9 +239,8 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
       THLongTensor_fastSet1d(self, i, sample_idx-1L);
     }
 }
-void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
+void THTensor_(multinomial)(THLongTensor *self, at::Generator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
   int64_t start_dim = THTensor_(nDimensionLegacyAll)(prob_dist);
   int64_t n_dist;
   int64_t n_categories;
@@ -331,7 +325,8 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     for (j=0; j<n_sample; j++)
     {
       /* sample a probability mass from a uniform distribution */
-      double uniform_sample = THRandom_uniform(_generator, 0, 1);
+      std::uniform_real_distribution<double> uniform(0, 1);
+      double uniform_sample = uniform(_generator->getCPUEngine());
       /* Do a binary search for the slot in which the prob falls
       ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
       int left_pointer = 0;
@@ -423,28 +418,30 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
 #endif
 
 #if defined(TH_REAL_IS_BYTE)
-void THTensor_(getRNGState)(THGenerator *_generator, THTensor *self)
+void THTensor_(getRNGState)(at::Generator *_generator, THTensor *self)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  static const size_t size = sizeof(THGeneratorState);
-  THGeneratorState *rng_state;
+  static const size_t size = sizeof(at::GeneratorState);
+  at::GeneratorState* rng_state;
   THTensor_(resize1d)(self, size);
   THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
-  rng_state = (THGeneratorState *)self->data<scalar_t>();
-  THGeneratorState_copy(rng_state, &_generator->gen_state);
+  rng_state = (at::GeneratorState*)self->data<scalar_t>();
+  *rng_state = *(_generator->getState());
 }
 
-void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self)
+void THTensor_(setRNGState)(at::Generator *_generator, THTensor *self)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  static const size_t size = sizeof(THGeneratorState);
-  THGeneratorState *rng_state;
+  static const size_t size = sizeof(at::GeneratorState);
+  at::GeneratorState* rng_state;
   THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
   THArgCheck(THTensor_(isContiguous)(self), 1, "RNG state needs to be contiguous");
-  rng_state = (THGeneratorState *)self->data<scalar_t>();
-  THArgCheck(THGeneratorState_isValid(rng_state), 1, "Invalid RNG state");
-  THGeneratorState_copy(&_generator->gen_state, rng_state);
+  rng_state = (at::GeneratorState*)self->data<scalar_t>();
+  int64_t is_valid = 0;
+  if (_generator->getState()->device_type == rng_state->device_type) {
+    is_valid = 1;
+  }
+  THArgCheck(is_valid, 1, "Invalid RNG state");
+  _generator->setState(rng_state);
 }
 #endif
 #endif

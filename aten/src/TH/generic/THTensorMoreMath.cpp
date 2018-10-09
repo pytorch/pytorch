@@ -3,7 +3,6 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
-#include <TH/THGenerator.hpp>
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
 {
@@ -649,9 +648,8 @@ void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
   TH_TENSOR_APPLY(scalar_t, r_, *r__data = xmin + (i++)*step;);
 }
 
-void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
+void THTensor_(randperm)(THTensor *r_, at::Generator *_generator, int64_t n)
 {
-  std::lock_guard<std::mutex> lock(_generator->mutex);
   scalar_t *r__data;
   int64_t r__stride_0;
   int64_t i;
@@ -667,7 +665,7 @@ void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
 
   for(i = 0; i < n-1; i++)
   {
-    int64_t z = THRandom_random(_generator) % (n-i);
+    int64_t z = _generator->random64() % (n-i);
     scalar_t sav = r__data[i*r__stride_0];
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
     r__data[(z+i)*r__stride_0] = sav;

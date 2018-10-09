@@ -33,17 +33,11 @@ def parse_default(s):
             return s
 
 
-def sanitize_type(typ):
-    if typ == 'Generator*':
-        return 'Generator *'
-    return typ
-
-
 def sanitize_types(types):
     # split tuples into constituent list
     if types[0] == '(' and types[-1] == ')':
-        return [sanitize_type(x.strip()) for x in types[1:-1].split(',')]
-    return [sanitize_type(types)]
+        return [x.strip() for x in types[1:-1].split(',')]
+    return [types]
 
 
 def parse_arguments(args, func_decl, func_name, func_return):
@@ -122,8 +116,7 @@ def parse_return_arguments(return_decl, inplace):
         else:
             t, name = type_and_maybe_name
 
-        typ = sanitize_type(t)
-        argument_dict = {'type': typ, 'name': name}
+        argument_dict = {'type': t, 'name': name}
         argument_dict['output'] = True
 
         arguments.append(argument_dict)

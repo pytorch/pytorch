@@ -6,7 +6,6 @@
 #include <ATen/detail/ComplexHooksInterface.h>
 
 #include "ATen/Allocator.h"
-#include "ATen/CPUGenerator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/Utils.h"

@@ -1,6 +1,5 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 
-#include <ATen/CUDAGenerator.h>
 #include <ATen/Context.h>
 #include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
@@ -76,11 +75,6 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
         if (p)
           THCState_free(p);
       });
-}
-
-std::unique_ptr<Generator> CUDAHooks::initCUDAGenerator(
-    Context* context) const {
-  return std::unique_ptr<Generator>(new CUDAGenerator(context));
 }
 
 bool CUDAHooks::hasCUDA() const {

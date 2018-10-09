@@ -3,6 +3,7 @@
 #else
 
 #include <THCUNN/common.h>
+#include "ATen/ATen.h"
 
 void THNN_(RReLU_updateOutput)(
            THCState *state,
@@ -16,7 +17,7 @@ void THNN_(RReLU_updateOutput)(
            void *generator)
 {
   THCUNN_assertSameGPU(state, 3, input, output, noise);
-  struct curandStateMtgp32* gen_states = THCRandom_generatorStates(state);
+  auto& gen = at::globalContext().getDefaultGenerator(at::kCUDA);
 
   if (train)
   {
@@ -25,18 +26,21 @@ void THNN_(RReLU_updateOutput)(
     scalar_t *input_data = THCTensor_(data)(state, input);
     scalar_t *noise_data = THCTensor_(data)(state, noise);
     ptrdiff_t n = THCTensor_(nElement)(state, input);
+    uint64_t num_blocks = NUM_BLOCKS(n);
     if (inplace)
     {
-      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, gen_states, input_data, noise_data, input_data, lower, upper);
+      rreluUpdateOutputTrain<<<num_blocks, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+        n, gen.incrementPhiloxOffset(n, num_blocks, BLOCK_SIZE, 1), 
+        input_data, noise_data, input_data, lower, upper);
       THCTensor_(set)(state, output, input);
     }
     else
     {
       THCTensor_(resizeAs)(state, output, input);
       scalar_t *output_data = THCTensor_(data)(state, output);
-      rreluUpdateOutputTrain<<<NUM_BLOCKS(n), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        n, gen_states, input_data, noise_data, output_data, lower, upper);
+      rreluUpdateOutputTrain<<<num_blocks, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+        n, gen.incrementPhiloxOffset(n, num_blocks, BLOCK_SIZE, 1), 
+        input_data, noise_data, output_data, lower, upper);
     }
     THCudaCheck(cudaGetLastError());
     THCTensor_(free)(state, input);

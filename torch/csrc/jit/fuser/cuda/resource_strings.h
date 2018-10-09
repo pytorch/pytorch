@@ -51,7 +51,7 @@ constexpr auto rand_support_literal = R"(
       counter.z = (unsigned int)(subsequence);
       counter.w = (unsigned int)(subsequence >> 32);
       STATE = 0;
-      incr_n(offset / 4);
+      incr_n(offset);
     }
 
     __device__ inline unsigned long operator()() {
@@ -85,11 +85,20 @@ constexpr auto rand_support_literal = R"(
       unsigned int nlo = (unsigned int)(n);
       unsigned int nhi = (unsigned int)(n >> 32);
       counter.x += nlo;
-      if (counter.x < nlo)
+      if (counter.x < nlo) {
         nhi++;
-      counter.y += nhi;
-      if (nhi <= counter.y)
-        return;
+        counter.y += nhi;
+        if(nhi != 0) {
+          if (nhi <= counter.y) {
+            return;
+          }
+        }
+      } else {
+        counter.y += nhi;
+        if (nhi <= counter.y) {
+          return;
+        }
+      }
       if (++counter.z)
         return;
       ++counter.w;
@@ -125,10 +134,8 @@ constexpr auto rand_support_literal = R"(
     static const unsigned long kPhiloxSB = 0xCD9E8D57;
   };
 
-  // Inverse of 2^32.
-  #define M_RAN_INVM32 2.3283064e-10f
   __device__  __inline__ float uniform(unsigned int x) {
-    return x * M_RAN_INVM32;
+    return (x & ((1ULL << 24) - 1)) * ::ldexp(1.0, -24);
   }
 )";
 

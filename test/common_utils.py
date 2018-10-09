@@ -44,7 +44,7 @@ torch.backends.cudnn.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)
-parser.add_argument('--seed', type=int, default=1234)
+parser.add_argument('--seed', type=int, default=123456)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
 SEED = args.seed

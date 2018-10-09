@@ -110,8 +110,6 @@ class FileManager(object):
 
 
 TEMPLATE_PATH = options.source_path + "/templates"
-GENERATOR_DERIVED = CodeTemplate.from_file(
-    TEMPLATE_PATH + "/GeneratorDerived.h")
 TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.cpp")
 SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDerived.cpp")
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
@@ -140,19 +138,6 @@ context->registerType(Backend::${backend}, ScalarType::${scalar_type}, new ${typ
 core_file_manager = FileManager(core_install_dir)
 file_manager = FileManager()
 cuda_file_manager = FileManager()
-
-generators = {
-    'CPUGenerator.h': {
-        'name': 'CPU',
-        'th_generator': 'THGenerator * generator;',
-        'header': 'TH/TH.h',
-    },
-    'CUDAGenerator.h': {
-        'name': 'CUDA',
-        'th_generator': '',
-        'header': 'THC/THC.h'
-    },
-}
 
 backends = ['CPU', 'CUDA']
 densities = ['Dense', 'Sparse']
@@ -275,7 +260,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['state'] = ['globalContext().getTHCState()']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
-        env['Generator'] = 'CUDAGenerator'
     else:
         env['th_headers'] = [
             '#include <TH/TH.h>',
@@ -291,7 +275,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['state'] = []
         env['isCUDA'] = 'false'
         env['storage_device'] = 'throw std::runtime_error("CPU storage has no device");'
-        env['Generator'] = 'CPUGenerator'
     env['AS_REAL'] = env['ScalarType']
     if scalar_name == "Half":
         env['SparseTensor'] = 'Tensor'
@@ -353,11 +336,6 @@ def declare_outputs():
     cuda_files = ['CUDACopy.cpp', 'RegisterCUDA.cpp', 'RegisterCUDA.h']
     for f in cuda_files:
         cuda_file_manager.will_write(f)
-    for fname in sorted(generators.keys()):
-        fm = file_manager
-        if generators[fname]['name'] == 'CUDA':
-            fm = cuda_file_manager
-        fm.will_write(fname)
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
         full_backend = "Sparse" + backend if density == "Sparse" else backend
@@ -393,11 +371,6 @@ def generate_outputs():
     declarations += nn_parse.run(nn_files)
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
-    for fname, env in generators.items():
-        fm = file_manager
-        if env['name'] == 'CUDA':
-            fm = cuda_file_manager
-        fm.write(fname, GENERATOR_DERIVED, env)
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends
