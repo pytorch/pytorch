@@ -96,8 +96,8 @@ struct FunctionSchema {
     if (is_mutable) {
       // Mutable schemas should have a world token as the first argument
       // and return.
-      JIT_ASSERT(arguments.at(0).type == WorldType::get());
-      JIT_ASSERT(returns.at(0).type == WorldType::get());
+      AT_ASSERT(arguments.at(0).type == WorldType::get());
+      AT_ASSERT(returns.at(0).type == WorldType::get());
     }
   }
 };
