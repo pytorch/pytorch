@@ -195,8 +195,6 @@ void initPythonIRBindings(PyObject * module_) {
     .def("copy",[](Graph &g) {
       return g.copy();
     })
-    .GS(advanceStage)
-    .GS(stage)
     .GS(eraseInput)
     .GS(registerOutput)
     .def("create",[](Graph & g, const char * str) {
@@ -251,8 +249,6 @@ void initPythonIRBindings(PyObject * module_) {
     .VS(unique)
     .VS(uniqueName)
     .VS(setUniqueName)
-    .VS(setStage)
-    .VS(stage)
     .VS(offset)
     .VS(uses)
     .VS(replaceAllUsesWith)
@@ -296,8 +292,6 @@ void initPythonIRBindings(PyObject * module_) {
       return n.outputs().size();
     })
     .NS(kind)
-    .NS(stage)
-    .NS(setStage)
     .def("inputs",[](Node &n) {
       return py::make_iterator(n.inputs().begin(), n.inputs().end());
     })

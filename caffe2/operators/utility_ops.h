@@ -1105,7 +1105,7 @@ class LengthsGatherOp : public Operator<Context> {
       CAFFE_ENFORCE_LT(idx, lengths.size());
       total_length += lengths_data[idx];
     }
-    auto shape = items.dims();
+    auto shape = items.dims().vec();
     shape[0] = total_length;
     output->Resize(shape);
 

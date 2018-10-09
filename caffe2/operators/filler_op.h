@@ -114,7 +114,7 @@ class UniformFillOp final : public FillerOp<Context> {
       min = *Input(1).template data<T>();
       max = *Input(2).template data<T>();
       if (min > max) {
-        auto shape = output->dims();
+        auto shape = output->dims().vec();
         shape[0] = 0;
         output->Resize(shape);
         output->template mutable_data<T>();

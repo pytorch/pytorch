@@ -86,7 +86,7 @@ vector<int64_t> GetTensorInfo(
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
   *capacity = tc->storage().capacity();
   tc->ExtractDeviceOption(device);
-  return tc->dims();
+  return tc->dims().vec();
 }
 
 // since we only have one tensor, probably need to remove this at some point?

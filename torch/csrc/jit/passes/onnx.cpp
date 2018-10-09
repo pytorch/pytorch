@@ -36,7 +36,6 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
   // Initialize context and environment
   for (auto input : old_block->inputs()) {
     auto n = ctx.block->addInput()->copyMetadata(input);
-    n->setStage(input->stage());
     env[input] = n;
   }
   // Put the new outputs in our environment map, and copy the type from the
@@ -180,8 +179,6 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
-    // Needed so that symbolic calls create nodes with correct stages.
-    auto stage_guard = ctx.block->owningGraph()->setStageTemporary(node->stage());
     IR_IFM(node, PythonOp)
       callPySymbolicMethod(value);
     IR_ELSE()
@@ -193,8 +190,6 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
     env.at(output)->setType(output->type());
   }
 
-  // Copy stage from original graph
-  ctx.block->owningGraph()->setStage(old_block->owningGraph()->stage());
   EliminateDeadCode(ctx.block);
 }
 
