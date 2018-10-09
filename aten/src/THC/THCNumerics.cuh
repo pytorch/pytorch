@@ -209,7 +209,7 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half round(at::Half a) { return ::round(a); }
 
   static inline __host__ __device__ at::Half frac(at::Half a) {
-    #ifdef __CUDA_ARCH__
+    #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
         return a - ::trunc(a);
     #else // __CUDA_ARCH__
         return a - ::floor(a);
