@@ -33,6 +33,21 @@
     }                                                                         \
   }()
 
+  #define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(TYPE, NAME, ...)                                \
+    [&] {                                                                                        \
+      const at::Type& the_type = TYPE;                                                           \
+      switch (the_type.scalarType()) {                                                           \
+        AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)                        \
+        AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                          \
+        AT_PRIVATE_CASE_TYPE(at::ScalarType::Half, at::Half, __VA_ARGS__)                        \
+        AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexDouble, std::complex<double>, __VA_ARGS__)   \
+        AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexFloat, std::complex<float>, __VA_ARGS__)     \
+        AT_PRIVATE_CASE_TYPE(at::ScalarType::ComplexHalf, std::complex<at::Half>, __VA_ARGS__)   \
+        default:                                                                                 \
+          AT_ERROR(#NAME, " not implemented for '", the_type.toString(), "'");                   \
+      }                                                                                          \
+    }()
+
 #define AT_DISPATCH_INTEGRAL_TYPES(TYPE, NAME, ...)                           \
   [&] {                                                                       \
     const at::Type& the_type = TYPE;                                          \

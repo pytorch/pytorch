@@ -49,7 +49,7 @@ PyObject* THPDTypeInfo_str(THPDTypeInfo* self) {
 PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "ScalarType(ScalarType type)",
+      "finfo(ScalarType type)",
   });
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -68,14 +68,14 @@ PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
 PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-      "ScalarType(ScalarType type)",
+      "iinfo(ScalarType type)",
   });
   torch::ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   AT_CHECK(r.idx == 0, "Not a type");
 
   at::ScalarType scalar_type = r.scalartype(0);
-  if (at::isFloatingType(scalar_type)) {
+  if (!at::isIntegralType(scalar_type)) {
     return PyErr_Format(
         PyExc_TypeError,
         "torch.iinfo() requires an integer input type. Use torch.finfo to handle '%s'",
@@ -91,78 +91,32 @@ static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
 }
 
 static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
-  switch (self->type) {
-    case at::ScalarType::Float:
-      return PyFloat_FromDouble(std::numeric_limits<float>::epsilon());
-    case at::ScalarType::Double:
-      return PyFloat_FromDouble(std::numeric_limits<double>::epsilon());
-    case at::ScalarType::Half:
-      return PyFloat_FromDouble(std::numeric_limits<at::Half>::epsilon());
-    case at::ScalarType::ComplexFloat:
-      return PyFloat_FromDouble(std::numeric_limits<float>::epsilon());
-    case at::ScalarType::ComplexDouble:
-      return PyFloat_FromDouble(std::numeric_limits<double>::epsilon());
-    case at::ScalarType::ComplexHalf:
-      return PyFloat_FromDouble(std::numeric_limits<at::Half>::epsilon());
-    default:
-      return Py_NotImplemented;
-  }
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      at::CPU(self->type), "epsilon", [] {
+        return PyFloat_FromDouble(
+            std::numeric_limits<
+                at::scalar_value_type<scalar_t>::type>::epsilon());
+      });
 }
 
 static PyObject* THPFInfo_max(THPFInfo* self, void*) {
-  switch (self->type) {
-    case at::ScalarType::Float:
-      return PyFloat_FromDouble(std::numeric_limits<float>::max());
-    case at::ScalarType::Double:
-      return PyFloat_FromDouble(std::numeric_limits<double>::max());
-    case at::ScalarType::Half:
-      return PyFloat_FromDouble(std::numeric_limits<at::Half>::max());
-    case at::ScalarType::ComplexFloat:
-      return PyFloat_FromDouble(std::numeric_limits<float>::max());
-    case at::ScalarType::ComplexDouble:
-      return PyFloat_FromDouble(std::numeric_limits<double>::max());
-    case at::ScalarType::ComplexHalf:
-      return PyFloat_FromDouble(std::numeric_limits<at::Half>::max());
-    default:
-      return Py_NotImplemented;
-  }
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(at::CPU(self->type), "max", [] {
+    return PyFloat_FromDouble(
+        std::numeric_limits<at::scalar_value_type<scalar_t>::type>::max());
+  });
 }
 
 static PyObject* THPIInfo_max(THPFInfo* self, void*) {
-  switch (self->type) {
-    case at::ScalarType::Byte:
-      return PyLong_FromLong(std::numeric_limits<unsigned char>::max());
-    case at::ScalarType::Char:
-      return PyLong_FromLong(std::numeric_limits<char>::max());
-    case at::ScalarType::Short:
-      return PyLong_FromLong(std::numeric_limits<short>::max());
-      break;
-    case at::ScalarType::Int:
-      return PyLong_FromLong(std::numeric_limits<int>::max());
-    case at::ScalarType::Long:
-      return PyLong_FromLong(std::numeric_limits<long>::max());
-    default:
-      return Py_NotImplemented;
-  }
+  return AT_DISPATCH_INTEGRAL_TYPES(at::CPU(self->type), "max", [] {
+    return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
+  });
 }
 
 static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
-  switch (self->type) {
-    case at::ScalarType::Float:
-      return PyFloat_FromDouble(std::numeric_limits<float>::min());
-    case at::ScalarType::Double:
-      return PyFloat_FromDouble(std::numeric_limits<double>::min());
-    case at::ScalarType::Half:
-      return PyFloat_FromDouble(std::numeric_limits<at::Half>::min());
-    case at::ScalarType::ComplexFloat:
-      return PyFloat_FromDouble(std::numeric_limits<float>::min());
-    case at::ScalarType::ComplexDouble:
-      return PyFloat_FromDouble(std::numeric_limits<double>::min());
-    case at::ScalarType::ComplexHalf:
-      return PyFloat_FromDouble(std::numeric_limits<at::Half>::min());
-    default:
-      return Py_NotImplemented;
-  }
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(at::CPU(self->type), "min", [] {
+    return PyFloat_FromDouble(
+        std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min());
+  });
 }
 
 static struct PyGetSetDef THPFInfo_properties[] = {
@@ -222,7 +176,6 @@ static struct PyGetSetDef THPIInfo_properties[] = {
     {nullptr}};
 
 static PyMethodDef THPIInfo_methods[] = {
-    //{"__reduce__", (PyCFunction)THPDTypeInfo_reduce, METH_NOARGS, nullptr},
     {nullptr} /* Sentinel */
 };
 
