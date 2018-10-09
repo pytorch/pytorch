@@ -128,24 +128,6 @@ class ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
 template <typename G>
 using BasicBlockType = typename ControlFlowGraphImpl<G>::bbType;
 
-/// \brief Converts graph to SSA representation.  Modifies the graph
-/// by inserting versions and phi nodes.
-template <typename Phi, typename G>
-void addSSA(G* dfg, ControlFlowGraph<G>* cfg) {
-  static_assert(
-      std::is_base_of<Instruction, Phi>::value,
-      "Phi type must be derived from Instruction.");
-  auto dfMap = dominanceFrontierMap(cfg);
-  for (auto pair : dfMap) {
-    for (auto n : pair.second) {
-      printf(
-          "%llu -> %llu\n",
-          (unsigned long long)pair.first,
-          (unsigned long long)n);
-    }
-  }
-}
-
 /// \brief Deletes a referenced node from the control flow graph.
 template <typename G>
 void deleteNode(ControlFlowGraph<G>* cfg, typename G::NodeRef node) {
