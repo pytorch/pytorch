@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/native/sparse/SparseUtils.h>
 
 #include <TH/THBlasUtils.h>
@@ -99,7 +100,7 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
     computed_indices_sizes.add_(1); // len = max_index + 1
     LongTensor cpu_computed_indices_sizes;
     if (computed_indices_sizes.is_cuda()) {
-      cpu_computed_indices_sizes = at::CPU(kLong).tensor(computed_indices_sizes.sizes());
+      cpu_computed_indices_sizes = at::empty(computed_indices_sizes.sizes(), at::initialTensorOptions().dtype(kLong));
       cpu_computed_indices_sizes.copy_(computed_indices_sizes);
     } else {
       cpu_computed_indices_sizes = computed_indices_sizes;
