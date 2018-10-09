@@ -2840,18 +2840,19 @@ class TestTorch(TestCase):
     def test_multinomial(self):
         self._test_multinomial(self, torch.FloatTensor)
 
-    def _spawn_method(self, method, arg):
+    def _spawn_method(self, method, *args):
         try:
             mp.set_start_method('spawn')
         except RuntimeError:
             pass
         with mp.Pool(1) as pool:
-            self.assertTrue(pool.map(method, [arg]))
+            self.assertTrue(pool.map(method, args))
 
     @staticmethod
     def _test_multinomial_invalid_probs(probs):
         try:
-            torch.multinomial(probs.to('cpu'), 1)
+            # n_sample = 1 is a special case, test n_sample=2 which is more general
+            torch.multinomial(probs.to('cpu'), 2)
             return False  # Should not be reached
         except RuntimeError as e:
             return 'invalid multinomial distribution' in str(e)
@@ -2864,10 +2865,11 @@ class TestTorch(TestCase):
                      but we need it for for testing failure case for CPU RNG on Windows")
     def test_multinomial_invalid_probs(self):
         test_method = TestTorch._test_multinomial_invalid_probs
-        self._spawn_method(test_method, torch.Tensor([0, -1]))
-        self._spawn_method(test_method, torch.Tensor([0, inf]))
-        self._spawn_method(test_method, torch.Tensor([0, -inf]))
-        self._spawn_method(test_method, torch.Tensor([0, nan]))
+        self._spawn_method(test_method, torch.Tensor([0, -1, 1]))
+        self._spawn_method(test_method, torch.Tensor([0, inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([0, -inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([0, 1, nan]))
+        self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
     @suppress_warnings
     def test_range(self):
