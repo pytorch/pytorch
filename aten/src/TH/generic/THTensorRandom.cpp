@@ -314,7 +314,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
                           THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                           2,
                           "invalid multinomial distribution (sum of probabilities <= 0)");
-    THArgCheckWithCleanup((n_categories - n_zeros >= n_sample),
+    THArgCheckWithCleanup((with_replacement || (n_categories - n_zeros >= n_sample)),
                           THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                           2,
                           "invalid multinomial distribution (with replacement=False, not enough non-negative category to sample)");
