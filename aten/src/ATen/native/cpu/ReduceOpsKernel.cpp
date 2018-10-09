@@ -220,6 +220,9 @@ struct NormReduction {
         int64_t i = bi % stride;
         const scalar_t* data = &data_[b * n * stride + i];
         out_[bi] = norm_reduce(data, n, stride, pval);
+        if (!(pval == 0 || std::isinf(pval))) {
+          out_[bi] = std::pow(out_[bi], 1.0/pval);
+        }
       }
     });
   }
@@ -238,9 +241,6 @@ struct NormReduction {
           const scalar_t* data = &data_[begin];
           int64_t n = end - begin;
           scalar_t result_local = norm_reduce(data, n, 1, pval);
-          if (pval != 0) {
-            result_local = std::pow(result_local, pval);
-          }
           return result_local;
         },
         std::plus<scalar_t>());
@@ -257,7 +257,7 @@ struct NormReduction {
       int64_t n_rounded = round_down(n, WIDTH);
       scalar_t result1 = norm_reduce128(data, n_rounded, pval);
       scalar_t result2 = norm_reduce_sequential(data + n_rounded, n - n_rounded, stride, pval);
-      result = std::pow(std::pow(result1, pval) + std::pow(result2, pval), 1.0/pval);
+      result = result1 + result2;
     } else {
       result = norm_reduce_sequential(data, n, stride, pval);
     }
@@ -278,22 +278,18 @@ struct NormReduction {
       for (int64_t k = 0; k < n; k++) {
         result += data[k * stride] * data[k * stride];
       }
-      result = std::sqrt(result);
     } else if (pval == 3) {
       for (int64_t k = 0; k < n; k++) {
         result += std::abs(data[k * stride] * data[k * stride] * data[k * stride]);
       }
-      result = std::pow(result, 1.0/3);
     } else if (std::isinf(pval)) {
       for (int64_t k = 0; k < n; k++) {
         result = std::abs(data[k * stride]) > result ? std::abs(data[k * stride]) : result;
       }
-      result = result;
     } else {
       for (int64_t k = 0; k < n; k++) {
         result += std::pow(std::abs(data[k * stride]), pval);
       }
-      result = std::pow(result, 1.0/pval);
     }
     return result;
   }
@@ -336,7 +332,6 @@ struct NormReduction {
     for (int i = 0; i < WIDTH; i++) {
       result += buf[i];
     }
-    result = std::pow(result, 1.0/pval);
     return result;
   }
 };
