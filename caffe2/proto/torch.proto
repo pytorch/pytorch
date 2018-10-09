@@ -39,6 +39,9 @@ message ModuleDef {
   // module specific data which cannot be store in the graph or torch_script
   optional bytes cpp_arena = 4;
 
+  // the parameters of this module
+  repeated caffe2.TensorProto parameters = 5;
+
   // the names of inputs and outputs of the module are inferred
   // from the main method.
 }
@@ -49,18 +52,16 @@ message ModelDef {
   // main module of the model
   optional ModuleDef main_module = 2;
 
-  repeated caffe2.TensorProto parameters = 3;
-  repeated caffe2.TensorProto value_infos = 4;
-
   // to distinguish whether exported from c2 or torch
-  optional string producer_name = 5;
+  optional string producer_name = 3;
 
   // put build version here
-  optional string producer_version = 6;
+  optional string producer_version = 4;
 
-  optional string name = 7;
+  optional string name = 5;
 
   // metadata
+  // for MetaNetDef:
   //   - project - string
   //   - model_class - string
   //   - internal_version - string
@@ -70,6 +71,6 @@ message ModelDef {
   //   - applicationSpecificInfo
   //   - publish_time - string
   //   - debug_info - string
-  repeated caffe2.Argument annotations = 9;
+  repeated caffe2.Argument annotations = 6;
 
 }
