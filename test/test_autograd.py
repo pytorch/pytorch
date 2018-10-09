@@ -2150,6 +2150,10 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
+    def test_pow_scalar_base(self):
+        a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
+        gradcheck(lambda a: torch.pow(2, a), (a,))
+
     @skipIfRocm
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
