@@ -11,7 +11,7 @@
 #include <ATen/core/context_base.h>
 #include <ATen/core/optional.h>
 
-#include <c10/util/Flags.h>
+#include "c10/util/Flags.h"
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
@@ -424,7 +424,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       CAFFE_ENFORCE_WITH_CALLER(
           src.is_contiguous(),
           "Right now only copy of contiguous source Tensor is supported.");
-      storage_ = at::Storage(device_type(), src.dtype());
+      storage_ = at::Storage(GetDevice(), src.dtype());
       data_type_ = src.dtype();
     }
     if (src.numel() == -1) {
@@ -432,7 +432,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       numel_ = -1;
       strides_.reset();
       is_contiguous_ = true;
-      storage_ = at::Storage(device_type(), caffe2::TypeMeta());
+      storage_ = at::Storage(GetDevice(), caffe2::TypeMeta());
       data_type_ = caffe2::TypeMeta();
       return;
     }
@@ -642,7 +642,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = at::Storage(storage_.device_type(), data_type_);
+    storage_ = at::Storage(storage_.device(), data_type_);
     storage_offset_ = 0;
   }
 
@@ -735,7 +735,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         storage_.set_dtype(meta);
       } else {
         if (data_type_ != meta) {
-          storage_ = at::Storage(storage_.device_type(), meta);
+          storage_ = at::Storage(storage_.device(), meta);
         }
       }
       data_type_ = meta;
@@ -762,10 +762,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         auto dtor = data_type_.dtor();
         auto data_ptr = allocator->allocate(numel_ * storage_.itemsize());
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
-            std::move(data_ptr),
-            dtor,
-            size,
-            at::Device(storage_.device_type())));
+            std::move(data_ptr), dtor, size, storage_.device()));
         data_type_.ctor()(storage_.data(), numel_);
       } else {
         // For fundamental type, new and delete is easier.

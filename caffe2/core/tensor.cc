@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-CAFFE_DEFINE_KNOWN_TYPE(Tensor);
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(12, Tensor);
 
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,

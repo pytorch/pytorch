@@ -32,6 +32,8 @@ class CAFFE2_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 
+  virtual Device device() const = 0;
+
   /* Sorry for the naming, will get rid of this in future diff */
   virtual DeviceType device_type() const = 0;
 
