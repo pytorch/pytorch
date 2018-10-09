@@ -463,13 +463,13 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   scalar_t *ru__data = NULL;
   scalar_t *rv__data = NULL;
 
+  rs__ = THTensor_(newContiguous)(rs_);
+  rs__data = rs__->data<scalar_t>();  
   if (*compute_uv != 'N') {
     /* guard against someone passing a correct size, but wrong stride */
     ru__ = THTensor_(newTransposedContiguous)(ru_);
-    rs__ = THTensor_(newContiguous)(rs_);
     rv__ = THTensor_(newContiguous)(rvf_);
 
-    rs__data = rs__->data<scalar_t>();  
     ru__data = ru__->data<scalar_t>();
     rv__data = rv__->data<scalar_t>();
 
@@ -506,6 +506,7 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   } else {
     THLapackCheckWithCleanup("Lapack Error %s : %d superdiagonals failed to converge.",
                              THCleanup(
+                                 c10::raw::intrusive_ptr::decref(rs__);
                                  c10::raw::intrusive_ptr::decref(ra__);
                                  c10::raw::intrusive_ptr::decref(work);
                                  c10::raw::intrusive_ptr::decref(iwork);),
@@ -513,6 +514,7 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   }
 
   THTensor_(freeCopyTo)(ra__, ra_);
+  THTensor_(freeCopyTo)(rs__, rs_);
   c10::raw::intrusive_ptr::decref(work);
   c10::raw::intrusive_ptr::decref(iwork);
 
@@ -521,7 +523,6 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
       THTensor_(narrow)(rv__,NULL,1,0,k);
 
     THTensor_(freeCopyTo)(ru__, ru_);
-    THTensor_(freeCopyTo)(rs__, rs_);
     THTensor_(freeCopyTo)(rv__, rvf_);
 
     if (jobz == 'S')

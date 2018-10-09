@@ -356,8 +356,8 @@ void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTens
   scalar_t *ru_data = NULL;
   scalar_t *rv_data = NULL;
   if (jobz != MagmaNoVec) {
-    scalar_t *ru_data = th_magma_malloc_pinned<scalar_t>(m * j);
-    scalar_t *rv_data = th_magma_malloc_pinned<scalar_t>(n * n);
+    ru_data = th_magma_malloc_pinned<scalar_t>(m * j);
+    rv_data = th_magma_malloc_pinned<scalar_t>(n * n);
   }
 
   scalar_t wkopt;
@@ -385,7 +385,7 @@ void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTens
     THError("MAGMA gesdd : Argument %d : illegal value", -info);
 
   THCTensor_(copyArray1d)(state, rs_, rs_data, k);
-  THCTensor_(copyArray2d)(state, ra_, a_data,  m, n);
+  THCTensor_(copyArray2d)(state, ra_, a_data, m, n);
   if (jobz != MagmaNoVec) {
     THCTensor_(copyArray2d)(state, rv_, rv_data, n, n);
     THCTensor_(transpose)(state, rv_, NULL, 0, 1);
