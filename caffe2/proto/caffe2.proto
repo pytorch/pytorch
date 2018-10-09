@@ -11,12 +11,29 @@ package caffe2;
 //     is mainly for backward compability purposes but we may consider using
 //     those in the future.
 
+// ExternalDataProto stores the pointer to the content of TensorProto
+message ExternalDataProto {
+  // type of the external storage type, can be the following:
+  //   - FILE, external file, id is the path to the file
+  //   - TORCH_WRAPPER, the wrapper in torch/csrc/jit/serialization.h is used,
+  //     id is the tag
+  //   - DB, id is the serialized DBReaderProto
+  // NEW type to be ADDED here
+  optional string type = 1;
+  // used together with type
+  optional bytes id = 2;
+  // the offset of the starting point, the content may be between multiple
+  // tensors.
+  optional int64 offset = 3;
+  // the strides of the content
+  repeated int64 strides = 4;
+}
+
 // TensorProto stores serialized Tensor objects.
 message TensorProto {
   // The dimensions in the tensor.
   repeated int64 dims = 1;
   // The strides of the tensor.
-  repeated int64 strides = 12;
 
   // Data type
   enum DataType {
@@ -38,27 +55,25 @@ message TensorProto {
     FLOAT16 = 12;  // at::Half
     DOUBLE = 13;   // double
 
-    // There are two use cases of this field:
-    //   1) to replace BlobProto
-    //   2) to enable the non-tensor storage
-    // If data_type == SPEICAL, special_type should be present
-    SPECIAL = 51;
     // When DataType is NO_CONTENT, we use TensorProto to store only type
     // and shape information. Reuse TensorProto to store type and shape
     // because we can just have one proto, not having another ValueInfoProto
-    NO_CONTENT = 52;
+    NO_CONTENT = 101;
   }
   optional DataType data_type = 2 [default = FLOAT];
-  // if data_type is SPECIAL, use this field to express the type info
-  optional SpecialType special_type = 13;
 
-  // Data storage
+  // data storage
   enum StorageType {
+    // the content is stored in typed field, for example, if the data_type is
+    // FLOAT, float_data is used to store the content.
     TYPED = 1;
+    // the content is serialized in field raw_data as little-endian
     RAW = 2;
+    // the pointer to the content is stored in field external_data
+    // the content is serialized as little-endian
     EXTERNAL = 3;
   }
-  optional StorageType storage_type = 14 [default = TYPED];
+  optional StorageType storage_type = 12 [default = TYPED];
   // For float
   repeated float float_data = 3 [packed = true];
   // For int32, uint8, int8, uint16, int16, bool, and float16
@@ -73,10 +88,10 @@ message TensorProto {
   repeated double double_data = 9 [packed = true];
   // For int64
   repeated int64 int64_data = 10 [packed = true];
-  // For raw data
-  optional bytes raw_data = 15;
-  // External data by file name
-  optional string external_data = 16;
+  // store the raw data, contents are serialized as little-endian
+  optional bytes raw_data = 13;
+  // store the pointer to the data
+  optional ExternalDataProto external_data = 14;
 
   // Optionally, a name for the tensor.
   optional string name = 7;
@@ -93,13 +108,6 @@ message TensorProto {
     required int64 end = 2;
   }
   optional Segment segment = 11;
-  optional string debug_info = 17;
-
-  // For PyTorch serialized tensor.
-  // When save Variable in PyTorch using TensorProto, we also need
-  // to store whether this Variable requires gradient, whether it's buffer.
-  optional bool require_gradient = 18;
-  optional bool is_buffer = 19;
 }
 
 message QTensorProto {
@@ -126,13 +134,6 @@ message TensorShape {
   repeated int32 unknown_dims = 3;
   optional bool unknown_shape = 4 [default = false];
   optional string name = 5;
-}
-
-// This is prepared for non-tensor types.
-// Right now, it only contains name, later we may add some native type
-// support in proto like ONNX.
-message SpecialType {
-  optional string name = 1;
 }
 
 message TensorShapes {
