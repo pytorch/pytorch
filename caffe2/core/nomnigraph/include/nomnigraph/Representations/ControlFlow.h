@@ -4,6 +4,7 @@
 #include "caffe2/core/common.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/Compiler.h"
+#include "nomnigraph/Support/Pointer.h"
 
 #include <unordered_map>
 
@@ -46,8 +47,11 @@ class BasicBlock {
     instructions_.emplace_back(node);
     trackNode(node);
   }
-  const std::vector<NodeRef>& getInstructions() {
+  const std::vector<NodeRef>& getInstructions() const {
     return instructions_;
+  }
+  std::vector<NodeRef>* getMutableInstructions() {
+    return &instructions_;
   }
 
   bool hasInstruction(NodeRef instr) const {
@@ -103,9 +107,15 @@ struct ControlFlowGraphImpl {
 
 template <typename T, typename... U>
 struct ControlFlowGraphImpl<Graph<T, U...>> {
-  using type = Graph<std::unique_ptr<BasicBlock<T, U...>>, int>;
+  using type = Graph<BasicBlock<T, U...>, int>;
   using bbType = BasicBlock<T, U...>;
 };
+
+/// \brief Helper for extracting the type of BasicBlocks given
+/// a graph (probably a dataflow graph).  TODO: refactor this
+/// to come from something like Graph::NodeDataType
+template <typename G>
+using BasicBlockType = typename ControlFlowGraphImpl<G>::bbType;
 
 /// \brief Control flow graph is a graph of basic blocks that
 /// can be used as an analysis tool.
@@ -120,13 +130,35 @@ class ControlFlowGraph : public ControlFlowGraphImpl<G>::type {
   ControlFlowGraph(ControlFlowGraph&&) = default;
   ControlFlowGraph& operator=(ControlFlowGraph&&) = default;
   ~ControlFlowGraph() {}
-};
+  std::unordered_map<
+      std::string,
+      typename ControlFlowGraphImpl<G>::type::SubgraphType>
+      functions;
+  using BasicBlockRef = typename ControlFlowGraphImpl<G>::type::NodeRef;
 
-/// \brief Helper for extracting the type of BasicBlocks given
-/// a graph (probably a dataflow graph).  TODO: refactor this
-/// to come from something like Graph::NodeDataType
-template <typename G>
-using BasicBlockType = typename ControlFlowGraphImpl<G>::bbType;
+  // Named functions are simply basic blocks stored in labeled Subgraphs
+  BasicBlockRef createNamedFunction(std::string name) {
+    assert(name != "anonymous" && "Reserved token anonymous cannot be used");
+    auto bb = this->createNode(BasicBlockType<G>());
+    assert(functions.count(name) == 0 && "Name already in use.");
+    typename ControlFlowGraphImpl<G>::type::SubgraphType sg;
+    sg.addNode(bb);
+    functions[name] = sg;
+    return bb;
+  }
+
+  // Anonymous functions are aggregated into a single Subgraph
+  BasicBlockRef createAnonymousFunction() {
+    if (!functions.count("anonymous")) {
+      functions["anonymous"] =
+          typename ControlFlowGraphImpl<G>::type::SubgraphType();
+    }
+
+    auto bb = this->createNode(BasicBlockType<G>());
+    functions["anonymous"].addNode(bb);
+    return bb;
+  }
+};
 
 /// \brief Deletes a referenced node from the control flow graph.
 template <typename G>
