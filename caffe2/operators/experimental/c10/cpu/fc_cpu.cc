@@ -56,7 +56,7 @@ void fc_op_cpu_impl(
   CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
   CAFFE_ENFORCE(N == b.size(), dimErrorString());
 
-  cache->Y_shape_cache_ = X.dims();
+  cache->Y_shape_cache_ = X.dims().vec();
   // This is an invariant of canonical_axis, so we can DCHECK.
   DCHECK_LE(canonical_axis + 1, cache->Y_shape_cache_.size());
   cache->Y_shape_cache_.resize(canonical_axis + 1);

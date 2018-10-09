@@ -162,7 +162,6 @@ function build() {
       # installed libraries instead
       ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DTorch_FOUND="1" \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
 		       -DCMAKE_C_FLAGS="$BUILD_C_FLAGS $USER_CFLAGS" \
@@ -226,7 +225,6 @@ function build_nccl() {
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
       ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
 		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DCMAKE_BUILD_TYPE=Release \
 		       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
 		       -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
@@ -238,10 +236,10 @@ function build_nccl() {
   ${CMAKE_INSTALL} -j"$MAX_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
   find lib -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "${INSTALL_DIR}/lib/"
-  if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
-    ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
-  fi
   popd
+  if [ -f "./nccl/nccl/src/nccl.h" ]; then
+    rm ./nccl/nccl/src/nccl.h
+  fi
 }
 
 # purposefully not using build() because we need Caffe2 to build the same
@@ -270,7 +268,6 @@ function build_caffe2() {
   if [[ $RERUN_CMAKE -eq 1 ]] || [ ! -f CMakeCache.txt ]; then
       ${CMAKE_VERSION} $BASE_DIR \
 		       ${CMAKE_GENERATOR} \
-		       -DCMAKE_INSTALL_MESSAGE="LAZY" \
 		       -DPYTHON_EXECUTABLE=$PYTORCH_PYTHON \
 		       -DBUILDING_WITH_TORCH_LIBS=ON \
 		       -DTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION" \
@@ -312,7 +309,7 @@ function build_caffe2() {
   fi
 
   # This is needed by the aten tests built with caffe2
-  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.1" ]; then
+  if [ -f "${INSTALL_DIR}/lib/libnccl.so" ] && [ ! -f "lib/libnccl.so.2" ]; then
       # $SYNC_COMMAND root/torch/lib/tmp_install/libnccl root/build/lib/libnccl
       find "${INSTALL_DIR}/lib" -name "libnccl.so*" | xargs -I {} $SYNC_COMMAND {} "lib/"
   fi

@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/operator.h"
 
 #include <ATen/ATen.h>
+#include <ATen/InitialTensorOptions.h>
 
 #include <unordered_map>
 #include <vector>
@@ -64,7 +65,7 @@ at::ScalarType DecoderBase::onnxTypeToATenType(onnx::TensorProto_DataType onnx_t
 }
 
 at::Tensor DecoderBase::buildTensor(const onnx::TensorProto& tensor_proto) {
-  at::Tensor tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor();
+  at::Tensor tensor = at::empty({0}, at::initialTensorOptions().dtype(onnxTypeToATenType(tensor_proto.data_type())));
   std::vector<int64_t> sizes = { tensor_proto.dims().begin(), tensor_proto.dims().end() };
   tensor.resize_(sizes);
 
@@ -270,7 +271,7 @@ TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {
   } else if (kind.find("TypeVar:") == 0) {
     return VarType::create(kind.substr(strlen("TypeVar:")));
   } else {
-    throw std::runtime_error("unexpected string for type kind");
+    throw std::runtime_error("unexpected string for type kind: " + kind);
   }
 }
 
