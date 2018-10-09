@@ -2840,13 +2840,13 @@ class TestTorch(TestCase):
     def test_multinomial(self):
         self._test_multinomial(self, torch.FloatTensor)
 
-    def _spawn_method(self, method, *args):
+    def _spawn_method(self, method, arg):
         try:
             mp.set_start_method('spawn')
         except RuntimeError:
             pass
         with mp.Pool(1) as pool:
-            self.assertTrue(pool.map(method, args))
+            self.assertTrue(pool.map(method, [arg]))
 
     @staticmethod
     def _test_multinomial_invalid_probs(probs):
