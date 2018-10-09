@@ -2,6 +2,7 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/opt/converter.h"
+#include "caffe2/opt/distributed.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/python/dlpack.h"
 #include "caffe2/python/pybind_state_registry.h"
@@ -98,6 +99,24 @@ void addNomnigraphMethods(pybind11::module& m) {
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
     return caffe2::convertToNNModule(proto);
   });
+
+  m.def(
+      "NNModuleFromProtobufDistributed",
+      [](py::bytes def, std::map<std::string, py::bytes> blobToDeviceMap) {
+        std::map<std::string, caffe2::DeviceOption> m;
+        for (const auto& el : blobToDeviceMap) {
+          caffe2::DeviceOption d;
+          CAFFE_ENFORCE(
+              ParseProtoFromLargeString(el.second.cast<std::string>(), &d));
+          m[el.first] = d;
+        }
+
+        caffe2::NetDef proto;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+
+        return caffe2::convertToNNModule(proto, m);
+      });
 
   py::class_<NNModule> nnmodule(m, "NNModule");
   nnmodule.def(py::init<>())

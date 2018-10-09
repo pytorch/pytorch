@@ -114,7 +114,7 @@ template <>
 bool MakeTwoClassOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  auto shape = X.dims();
+  auto shape = X.dims().vec();
   shape.push_back(2);
   CAFFE_ENFORCE_LT(X.size(), std::numeric_limits<int>::max() / 2);
   Y->Resize(shape);
@@ -132,7 +132,7 @@ template <>
 bool MakeTwoClassGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto* dX = Output(0);
-  auto shape = dY.dims();
+  auto shape = dY.dims().vec();
   CAFFE_ENFORCE_GE(shape.size(), 1);
   CAFFE_ENFORCE_EQ(shape.back(), 2);
   shape.pop_back();

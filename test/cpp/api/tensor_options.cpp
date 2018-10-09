@@ -119,16 +119,34 @@ TEST(TensorOptionsTest, OptionsGuard) {
 
 TEST(DeviceTest, ParsesCorrectlyFromString) {
   Device device("cpu:0");
-  ASSERT_EQ(device, Device(kCPU, 0));
+  ASSERT_EQ(device, Device(DeviceType::CPU, 0));
 
   device = Device("cpu");
-  ASSERT_EQ(device, Device(kCPU));
+  ASSERT_EQ(device, Device(DeviceType::CPU));
 
   device = Device("cuda:123");
-  ASSERT_EQ(device, Device(kCUDA, 123));
+  ASSERT_EQ(device, Device(DeviceType::CUDA, 123));
 
   device = Device("cuda");
-  ASSERT_EQ(device, Device(kCUDA));
+  ASSERT_EQ(device, Device(DeviceType::CUDA));
+
+  device = Device("mkldnn");
+  ASSERT_EQ(device, Device(DeviceType::MKLDNN));
+
+  device = Device("opengl");
+  ASSERT_EQ(device, Device(DeviceType::OPENGL));
+
+  device = Device("opencl");
+  ASSERT_EQ(device, Device(DeviceType::OPENCL));
+
+  device = Device("ideep");
+  ASSERT_EQ(device, Device(DeviceType::IDEEP));
+
+  device = Device("hip");
+  ASSERT_EQ(device, Device(DeviceType::HIP));
+
+  device = Device("hip:321");
+  ASSERT_EQ(device, Device(DeviceType::HIP, 321));
 
   std::vector<std::string> badnesses = {
       "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
