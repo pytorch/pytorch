@@ -426,14 +426,15 @@ void initJitScriptBindings(PyObject* module) {
           resolvers,
           std::make_shared<ModuleValue>(m));
 
-          // Stitch in default arguments for each Def if provided
-          auto defaults_it = defaults.begin();
-          auto defs_it = defs.begin();
-          while (defs_it != defs.end()) {
-            auto& method = m->get_method((*defs_it).name().name());
-            method.setSchema(
-                getSchemaWithDefaults(*defaults_it, method.getSchema()));
-            ++defaults_it;
+        // Stitch in default arguments for each Def if provided
+        auto defaults_it = defaults.begin();
+        auto defs_it = defs.begin();
+        while (defs_it != defs.end()) {
+          auto& method = m->get_method((*defs_it).name().name());
+          method.setSchema(
+              getSchemaWithDefaults(*defaults_it, method.getSchema()));
+          ++defs_it;
+          ++defaults_it;
         }
       })
       .def("_get_method",

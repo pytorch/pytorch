@@ -2032,12 +2032,14 @@ class TestJit(JitTestCase):
                     return x + a + b
 
     def test_module_default_values(self):
+        four = torch.tensor(4)
+
         class Test(torch.jit.ScriptModule):
             def __init__(self):
                 super(Test, self).__init__()
 
             @torch.jit.script_method
-            def forward(self, input, other=4):
+            def forward(self, input, other=four):
                 return input + other
 
         t = Test()
