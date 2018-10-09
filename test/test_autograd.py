@@ -727,28 +727,36 @@ class TestAutograd(TestCase):
 
     def test_no_grad(self):
         x = torch.ones(5, 5, requires_grad=True)
-        y = Variable(torch.ones(5, 5) * 4)
-        with torch.no_grad():
-            w = x + y
+        y = torch.ones(5, 5) * 4
 
-        @torch.no_grad()
         def adder(x, y):
             return x + y
 
-        z = adder(x, y)
+        def viewer(x, y):
+            return x[1]
 
-        self.assertFalse(w.requires_grad)
-        self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
-        self.assertIsNone(w.grad_fn)
-        self.assertFalse(z.requires_grad)
-        self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
-        self.assertIsNone(z.grad_fn)
+        for binary_op in (adder, viewer):
+            with torch.no_grad():
+                w = binary_op(x, y)
 
-        # test nested decorator and with-statement on no_grad
-        with torch.no_grad():
-            self.assertFalse(torch.is_grad_enabled())
-            w = adder(x, y)
-            self.assertFalse(torch.is_grad_enabled())
+            @torch.no_grad()
+            def decorated(x, y):
+                return binary_op(x, y)
+
+            z = decorated(x, y)
+
+            self.assertFalse(w.requires_grad)
+            self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
+            self.assertIsNone(w.grad_fn)
+            self.assertFalse(z.requires_grad)
+            self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+            self.assertIsNone(z.grad_fn)
+
+            # test nested decorator and with-statement on no_grad
+            with torch.no_grad():
+                self.assertFalse(torch.is_grad_enabled())
+                w = binary_op(x, y)
+                self.assertFalse(torch.is_grad_enabled())
 
     def test_no_grad_python_function(self):
         """Python Functions should respect grad mode."""

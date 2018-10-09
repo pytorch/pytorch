@@ -115,12 +115,6 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   return result;
 }
 
-Variable Variable::Impl::detach() const {
-  auto detached = make_variable(data_, /*requires_grad=*/false);
-  detached.set_version_counter(version_counter_);
-  return detached;
-}
-
 void Variable::Impl::detach_() {
   if (is_view_) {
     AT_ERROR("Can't detach views in-place. Use detach() instead");
