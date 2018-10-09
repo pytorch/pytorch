@@ -11,6 +11,10 @@
 #include <gloo/cuda_broadcast_one_to_all.h>
 #endif
 
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
+#include "gloo/transport/ibverbs/device.h"
+#endif
+
 #include <gloo/rendezvous/context.h>
 #include <gloo/transport/tcp/device.h>
 
@@ -296,7 +300,33 @@ ProcessGroupGloo::ProcessGroupGloo(
       cacheNumAlgorithmEntries_(options.cacheNumAlgorithmEntries) {
   auto& devices = options.devices;
   if (devices.empty()) {
-    throw std::runtime_error("No device(s) specified");
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
+
+    // This helper function automatically detects the IB device in the system
+    auto ibDeviceNames = ::gloo::transport::ibverbs::getDeviceNames();
+
+    // If there are IB devices, we will use IB
+    if (!ibDeviceNames.empty()) {
+      // Currently, gloo only supports a single IB device and will use the first
+      auto ibDeviceToUse = ibDeviceNames[0];
+
+      ::gloo::transport::ibverbs::attr attr = {
+          .name = ibDeviceToUse,
+          .port = 1,
+          .index = 0,
+      };
+
+      devices.push_back(::gloo::transport::ibverbs::CreateDevice(attr));
+
+      // Otherwise, fallback to use TCP instead
+    } else
+#endif
+
+    {
+      // Let gloo find the interface itself.
+      ::gloo::transport::tcp::attr attr;
+      devices.push_back(::gloo::transport::tcp::CreateDevice(attr));
+    }
   }
 
   for (auto& device : options.devices) {
@@ -425,20 +455,43 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
 
 #ifdef USE_CUDA
   if (backend == at::Backend::CUDA) {
-    if (getSize() < 16) {
-      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-          new ::gloo::CudaAllreduceRingChunked<T>(
-              context,
-              getDataPointers<T>(entry.src),
-              entry.src[0].numel(),
-              getStreamVector(entry)));
-    } else {
-      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-          new ::gloo::CudaAllreduceHalvingDoubling<T>(
-              context,
-              getDataPointers<T>(entry.src),
-              entry.src[0].numel(),
-              getStreamVector(entry)));
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
+    if (context->getDevice()->hasGPUDirect()) {
+      if (getSize() < 16) {
+        entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+            new ::gloo::
+                CudaAllreduceRingChunked<T, ::gloo::CudaDeviceWorkspace<T>>(
+                    context,
+                    getDataPointers<T>(entry.src),
+                    entry.src[0].numel(),
+                    getStreamVector(entry)));
+      } else {
+        entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+            new ::gloo::
+                CudaAllreduceHalvingDoubling<T, ::gloo::CudaDeviceWorkspace<T>>(
+                    context,
+                    getDataPointers<T>(entry.src),
+                    entry.src[0].numel(),
+                    getStreamVector(entry)));
+      }
+    } else
+#endif
+    {
+      if (getSize() < 16) {
+        entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+            new ::gloo::CudaAllreduceRingChunked<T>(
+                context,
+                getDataPointers<T>(entry.src),
+                entry.src[0].numel(),
+                getStreamVector(entry)));
+      } else {
+        entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+            new ::gloo::CudaAllreduceHalvingDoubling<T>(
+                context,
+                getDataPointers<T>(entry.src),
+                entry.src[0].numel(),
+                getStreamVector(entry)));
+      }
     }
     return;
   }
@@ -470,14 +523,28 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 
 #ifdef USE_CUDA
   if (backend == at::Backend::CUDA) {
-    entry.algorithm =
-        std::unique_ptr<::gloo::Algorithm>(new ::gloo::CudaBroadcastOneToAll<T>(
-            context,
-            getDataPointers<T>(entry.src),
-            entry.src[0].numel(),
-            key.srcRank,
-            key.srcTensor,
-            getStreamVector(entry)));
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
+    if (context->getDevice()->hasGPUDirect()) {
+      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+          new ::gloo::CudaBroadcastOneToAll<T, ::gloo::CudaDeviceWorkspace<T>>(
+              context,
+              getDataPointers<T>(entry.src),
+              entry.src[0].numel(),
+              key.srcRank,
+              key.srcTensor,
+              getStreamVector(entry)));
+    } else
+#endif
+    {
+      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+          new ::gloo::CudaBroadcastOneToAll<T>(
+              context,
+              getDataPointers<T>(entry.src),
+              entry.src[0].numel(),
+              key.srcRank,
+              key.srcTensor,
+              getStreamVector(entry)));
+    }
     return;
   }
 #endif
@@ -722,7 +789,7 @@ uint32_t checkTag(int32_t tag) {
   if (tag < 0) {
     throw std::runtime_error("Tag must be >= 0");
   }
-  return (uint32_t) tag;
+  return (uint32_t)tag;
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::send(
@@ -797,9 +864,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::barrier() {
   key.collectiveType = CollectiveType::BARRIER;
 
   auto entry = checkout(key);
-  entry->run = [=]() mutable {
-    entry->algorithm->run();
-  };
+  entry->run = [=]() mutable { entry->algorithm->run(); };
   return enqueue(entry);
 }
 
