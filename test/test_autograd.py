@@ -1990,7 +1990,6 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor)
 
-    @skipIfRocm
     def test_potrf(self):
         root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
 
@@ -2154,7 +2153,6 @@ class TestAutograd(TestCase):
         a = torch.arange(1, 13, dtype=torch.double).view(3, 4).requires_grad_()
         gradcheck(lambda a: torch.pow(2, a), (a,))
 
-    @skipIfRocm
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
         # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
@@ -2550,7 +2548,6 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
-    @skipIfRocm
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
@@ -3189,13 +3186,13 @@ method_tests = [
      'large', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), (random_fullrank_matrix_distinct_singular_value(S),), '', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S),),
-     'batched', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+     'batched', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (2, 3, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 3),),
-     'batched_dims', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+     'batched_dims', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (2, 2, S, S), (random_fullrank_matrix_distinct_singular_value(S, 1),),
-     'batched_broadcast_A', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+     'batched_broadcast_A', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (1, S, S), (random_fullrank_matrix_distinct_singular_value(S, 2, 2),),
-     'batched_broadcast_b', NO_ARGS, [skipIfNoLapack, skipIfRocm]),
+     'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t torch.tensor(1)
