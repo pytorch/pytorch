@@ -345,7 +345,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA)};
+        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::CUB:
         CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
         g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
@@ -354,16 +354,16 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA)};
+        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::THC:
         CUDA_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
         if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA)};
+        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
     }
-    return {nullptr, nullptr, &Delete, at::Device(CUDA)};
+    return {nullptr, nullptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
   }
 
   at::DeleterFnPtr raw_deleter() const override {

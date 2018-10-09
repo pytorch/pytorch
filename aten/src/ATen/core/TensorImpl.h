@@ -435,7 +435,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       CAFFE_ENFORCE_WITH_CALLER(
           src.is_contiguous(),
           "Right now only copy of contiguous source Tensor is supported.");
-      storage_ = at::Storage(device_type(), src.dtype());
+      storage_ = at::Storage(GetDevice(), src.dtype());
       data_type_ = src.dtype();
     }
     if (src.numel() == -1) {
@@ -443,7 +443,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       numel_ = -1;
       strides_.reset();
       is_contiguous_ = true;
-      storage_ = at::Storage(device_type(), caffe2::TypeMeta());
+      storage_ = at::Storage(GetDevice(), caffe2::TypeMeta());
       data_type_ = caffe2::TypeMeta();
       return;
     }
@@ -653,7 +653,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void FreeMemory() {
     // We'll detach from the old Storage and create a new one
-    storage_ = at::Storage(storage_.device_type(), data_type_);
+    storage_ = at::Storage(storage_.device(), data_type_);
     storage_offset_ = 0;
   }
 
