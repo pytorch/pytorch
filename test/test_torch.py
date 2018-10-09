@@ -2865,10 +2865,10 @@ class TestTorch(TestCase):
                      but we need it for for testing failure case for CPU RNG on Windows")
     def test_multinomial_invalid_probs(self):
         test_method = TestTorch._test_multinomial_invalid_probs
-        self._spawn_method(test_method, torch.Tensor([0, -1, 1]))
-        self._spawn_method(test_method, torch.Tensor([0, inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([0, -inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([0, 1, nan]))
+        self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
         self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
     @suppress_warnings

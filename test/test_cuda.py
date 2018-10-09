@@ -1597,17 +1597,6 @@ class TestCuda(TestCase):
         r = torch.multinomial(p, 1)
         self.assertNotEqual(r.min().item(), 0)
 
-        # multinomial without repeat but with less nonzero
-        # elements than draws
-        # the intention currently is to return 0 for those
-        # and match CPU behaviour, see issue #9062
-        p = torch.zeros(1, 5, device="cuda")
-        p[:, 1] = 1
-        r = torch.multinomial(p, 2, replacement=False)
-        expected = torch.zeros(1, 2, device="cuda", dtype=torch.long)
-        expected[:, 0] = 1
-        self.assertEqual(r, expected)
-
     @staticmethod
     def mute():
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
@@ -1638,10 +1627,10 @@ class TestCuda(TestCase):
                      but we need it for creating another process with CUDA")
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
-        self._spawn_method(test_method, torch.Tensor([0, -1, 1]))
-        self._spawn_method(test_method, torch.Tensor([0, inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([0, -inf, 1]))
-        self._spawn_method(test_method, torch.Tensor([0, 1, nan]))
+        self._spawn_method(test_method, torch.Tensor([1, -1, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, -inf, 1]))
+        self._spawn_method(test_method, torch.Tensor([1, 1, nan]))
         self._spawn_method(test_method, torch.Tensor([0, 1, 0]))
 
     @skipIfRocm
