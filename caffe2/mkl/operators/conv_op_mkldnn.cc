@@ -47,10 +47,10 @@ class ConvMKLDNNOp final : public ConvPoolOpBase<CPUContext> {
     // Pre-allocate Y so we can potentially share memory if applicable.
     Y->mutable_data<T>();
 
-    if (cached_input_dims_ != X.dims() ||
-        cached_filter_dims_ != filter.dims()) {
-      cached_input_dims_ = X.dims();
-      cached_filter_dims_ = filter.dims();
+    if (at::IntList(cached_input_dims_) != X.dims() ||
+        at::IntList(cached_filter_dims_) != filter.dims()) {
+      cached_input_dims_ = X.dims().vec();
+      cached_filter_dims_ = filter.dims().vec();
       // In order to create an internal layout, let's use convolution as
       // primitive.
       size_t dimension = 4;

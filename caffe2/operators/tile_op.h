@@ -72,7 +72,7 @@ class TileOp : public Operator<Context> {
     const auto axis = input.canonical_axis_index(axis_);
 
     // reshape output to be input tiled along the axis
-    vector<int64_t> output_dims(input.dims());
+    vector<int64_t> output_dims(input.dims().vec());
     output_dims[axis_] = output_dims[axis_] * tiles_;
     output->Resize(output_dims);
 
@@ -187,7 +187,7 @@ class TileGradientOp : public Operator<Context> {
     const auto axis = input.canonical_axis_index(axis_);
 
     // reshape output to be input "untiled" along the axis
-    vector<int64_t> output_dims(input.dims());
+    vector<int64_t> output_dims(input.dims().vec());
     output_dims[axis_] = output_dims[axis_] / tiles_;
     output->Resize(output_dims);
 

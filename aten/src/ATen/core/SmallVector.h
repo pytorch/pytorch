@@ -1015,6 +1015,19 @@ inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
   return X.capacity_in_bytes();
 }
 
+template <typename T, unsigned N>
+std::ostream& operator<<(std::ostream & out, const SmallVector<T, N>& list) {
+  int i = 0;
+  out << "[";
+  for(auto e : list) {
+    if (i++ > 0)
+      out << ", ";
+    out << e;
+  }
+  out << "]";
+  return out;
+}
+
 } // end namespace at
 
 namespace std {
