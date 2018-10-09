@@ -447,7 +447,6 @@ class TestConvolution(serial.SerializedTestCase):
                    or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
                     raise e
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
            stride=st.integers(1, 3),
            pad=st.integers(0, 3),
