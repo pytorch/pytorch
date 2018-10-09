@@ -755,4 +755,4 @@ def chain_matmul(*matrices):
     """
     if len(matrices) == 1 and isinstance(matrices[0], (list, tuple)):
         matrices = matrices[0]
-    return torch._C._VariableFunctions.chain_mm(matrices)
+    return torch._C._VariableFunctions.chain_matmul(matrices)
