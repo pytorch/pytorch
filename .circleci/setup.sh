@@ -33,7 +33,7 @@ else
     for compiler in "${compilers[@]}"; do
         (
             echo "#!/bin/sh"
-            echo "exec $(which sccache) $(which $compiler) \\\"\\\$@\\\""
+            echo "exec $(which sccache) $(which $compiler) \"\$@\""
         ) > "$SCCACHE_BIN_DIR/$compiler"
         chmod +x "$SCCACHE_BIN_DIR/$compiler"
     done
