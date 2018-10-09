@@ -1,6 +1,6 @@
 # NOTE: We only perform the merge in build step and not in test step, because
 # all source files will be shared from build to test
-merge_pull_request_onto_master: &merge_pull_request_onto_master
+merge_with_master: &merge_with_master
   name: Merge Onto Master
   command: |
     if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
@@ -21,217 +21,40 @@ merge_pull_request_onto_master: &merge_pull_request_onto_master
       git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
     fi
 
-linux_build_defaults: &linux_build_defaults
+linux_default: &linux_default
   resource_class: large
   machine:
     image: default
   steps:
   - checkout
   - run:
-      <<: *merge_pull_request_onto_master
+      <<: *merge_with_master
   - run:
-      name: Build
+      name: Build and Test
       no_output_timeout: "1h"
       command: |
         set -ex
-        sudo pip install awscli
-
-        sudo apt-get update
-        sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
-        sudo apt-get install linux-headers-$(uname -r)
-        sudo apt-get install linux-image-generic
-
-        curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-        echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        sudo apt-get update
-        sudo apt-get install -y nvidia-docker2
-
-        echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
-        echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
-        export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
-        export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
-        export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
-        echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
-
-        # This IAM user allows write access to S3 bucket for sccache
-        echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
-        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
-
-        # TODO: merge this into Caffe2 build.sh
-        cat >/home/circleci/project/ci_build_script.sh <<EOL
-        # =================== The following code will be executed inside Docker container ===================
-        set -ex
-
-        # Reinitialize submodules
-        git submodule sync && git submodule update --init --recursive
-
-        export TOP_DIR="$PWD"
-        export OS="$(uname)"
-
-        compilers=(
-            cc
-            c++
-            gcc
-            g++
-            x86_64-linux-gnu-gcc
-        )
-
-        # setup ccache
-        if [[ "$OS" == "Darwin" ]]; then
-            export PATH="/usr/local/opt/ccache/libexec:$PATH"
-        else
-            if ! hash sccache 2>/dev/null; then
-                echo "SCCACHE_BUCKET is set but sccache executable is not found"
-                exit 1
-            fi
-            export SCCACHE_BIN_DIR="$TOP_DIR/sccache"
-            mkdir -p "$SCCACHE_BIN_DIR"
-            for compiler in "${compilers[@]}"; do
-                (
-                    echo "#!/bin/sh"
-                    echo "exec $(which sccache) $(which $compiler) \\\"\\\$@\\\""
-                ) > "$SCCACHE_BIN_DIR/$compiler"
-                chmod +x "$SCCACHE_BIN_DIR/$compiler"
-            done
-            export PATH="$SCCACHE_BIN_DIR:$PATH"
-        fi
-
-        # setup virtualenv
-        VENV_DIR=/tmp/venv
-
-        PYTHON="$(which python)"
-        if [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\\.?[0-9]?\\.?[0-9]?) ]]; then
-            PYTHON=$(which "python${BASH_REMATCH[1]}")
-        fi
-
-        $PYTHON -m virtualenv "$VENV_DIR"
-
-        source "$VENV_DIR/bin/activate"
-        pip install -U pip setuptools
-
-        # TODO: add onnx build steps
-        ./scripts/onnx/install-develop.sh
-
-        # =================== The above code will be executed inside Docker container ===================
-        EOL
-        chmod +x /home/circleci/project/ci_build_script.sh
-
         sudo pkill -SIGHUP dockerd
-        # This IAM user only allows read-write access to ECR
+
         export AWS_ACCESS_KEY_ID=AKIAI43PKLK3PGLUWQMA
         export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE}
+
+        sudo pip install awscli
         eval $(aws ecr get-login --region us-east-1 --no-include-email)
         docker pull ${DOCKER_IMAGE}
-        export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
-        docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-        (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh') | docker exec -u jenkins -i "$id" bash
+        export pid=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+        docker cp /home/circleci/project/. "$pid:/var/lib/jenkins/workspace"
+        (echo 'sudo chown -R jenkins ./workspace && cd ./workspace && source .circleci/setup.sh && .circle/build.sh && .circleci/test.sh') | docker exec -u jenkins -i "$pid" bash
 
-        mkdir -p /home/circleci/project/onnx-ci-env
-        touch /home/circleci/project/onnx-ci-env/.tmp  # Dummy file so that the persist_to_workspace step won't complain about not finding any file
-
-        if [ -z "${BUILD_ONLY}" ]; then
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
-          docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-          docker push ${COMMIT_DOCKER_IMAGE}
-          echo "declare -x COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}" > /home/circleci/project/onnx-ci-env/COMMIT_DOCKER_IMAGE
-        fi
-  - persist_to_workspace:
-      root: /home/circleci/project/onnx-ci-env
-      paths:
-        - "*"
-
-linux_test_defaults: &linux_test_defaults
-  machine:
-    image: default
-  steps:
-  - run:
-      name: Prepare workspace
-      command: |
-        sudo mkdir -p /home/circleci/project/onnx-ci-env
-        sudo chmod -R 777 /home/circleci/project/onnx-ci-env
-  - attach_workspace:
-      at: /home/circleci/project/onnx-ci-env
-  - run:
-      name: Test
-      no_output_timeout: "1h"
-      command: |
-        set -x
-        sudo pip install awscli
-
-        sudo apt-get update
-        sudo apt-get remove linux-image-generic linux-headers-generic linux-generic
-        sudo apt-get install linux-headers-$(uname -r)
-        sudo apt-get install linux-image-generic
-
-        curl -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-        echo "deb https://nvidia.github.io/libnvidia-container/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        echo "deb https://nvidia.github.io/nvidia-container-runtime/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        echo "deb https://nvidia.github.io/nvidia-docker/ubuntu14.04/amd64 /" | sudo tee -a /etc/apt/sources.list.d/nvidia-docker.list
-        sudo apt-get update
-        sudo apt-get install -y nvidia-docker2
-
-        if [ -n "${CUDA_VERSION}" ]; then
-          wget 'https://s3.amazonaws.com/ossci-linux/nvidia_driver/NVIDIA-Linux-x86_64-396.26.run'
-          sudo /bin/bash ./NVIDIA-Linux-x86_64-396.26.run -s --no-drm
-        fi
-        sudo pkill -SIGHUP dockerd
-        if [ -n "${CUDA_VERSION}" ]; then
-          nvidia-smi
-        fi
-
-        cat >/home/circleci/project/ci_test_script.sh <<EOL
-        # =================== The following code will be executed inside Docker container ===================
-        set -ex
-
-        # setup virtualenv
-        VENV_DIR=/tmp/venv
-        source "$VENV_DIR/bin/activate"
-
-        #TODO: add onnx test steps here
-        ./scripts/onnx/test.sh
-
-        # =================== The above code will be executed inside Docker container ===================
-        EOL
-        chmod +x /home/circleci/project/ci_test_script.sh
-
-        source /home/circleci/project/onnx-ci-env/COMMIT_DOCKER_IMAGE
-        # This IAM user only allows read-write access to ECR
-        export AWS_ACCESS_KEY_ID=AKIAI43PKLK3PGLUWQMA
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE}
-        eval $(aws ecr get-login --region us-east-1 --no-include-email)
-        docker pull ${COMMIT_DOCKER_IMAGE}
-        if [ -n "${CUDA_VERSION}" ]; then
-          id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
-        else
-          id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
-        fi
-        docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
-
-        (echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh') | docker exec -u jenkins -i "$id" bash
-
-version: 2
 jobs:
-  py2_gcc5_ubuntu16_04_build:
+  py2_gcc5_ubuntu16_04:
     environment:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:206"
-      BUILD_ENVIRONMENT: "py2-gcc5-ubuntu16.04"
-      BUILD_ONLY: "1"
-    <<: *linux_build_defaults
-
-  py2_gcc5_ubuntu16_04_test:
-    environment:
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:206"
-      BUILD_ENVIRONMENT: "py2-gcc5-ubuntu16.04"
-    <<: *linux_test_defaults
+    <<: *linux_default
 
 workflows:
   version: 2
   build:
     jobs:
-      - py2_gcc5_ubuntu16_04_build
-      - py2_gcc5_ubuntu16_04_test:
-          requires:
-            - py2_gcc5_ubuntu16_04_build
+      - py2_gcc5_ubuntu16_04
