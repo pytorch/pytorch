@@ -831,7 +831,6 @@ class RecurrentNetworkParallelTest(TestCase):
 
         return workspace.FetchBlob("{}_0/partest/i2h_w".format(model._device_prefix))
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     def test_equiv_recurrent(self):
         '''
         Test that the model produces exactly same results given

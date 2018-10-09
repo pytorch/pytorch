@@ -26,6 +26,8 @@ void printValueRef(std::ostream & out, const Value * n) {
   out << "%" << n->uniqueName();
 }
 
+// NB: This overload will become ambiguous with the one Caffe2 provides in its
+// logging, if they ever intersect.
 template <typename T>
 std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
   out << at::ArrayRef<T>{nodes};
@@ -33,7 +35,7 @@ std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
 }
 
 template <typename T>
-std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
+std::ostream& printValueRefs(std::ostream & out, const at::ArrayRef<T> & nodes) {
   size_t i = 0;
   for(auto n : nodes) {
     if(i++ > 0)
@@ -41,6 +43,17 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
     printValueRef(out, n);
   }
   return out;
+}
+
+// Can't make these two overloads directly a template, it'll be ambiguous with
+// the global printer for operator<<.
+
+std::ostream& operator<<(std::ostream & out, const at::ArrayRef<const Value*> & nodes) {
+  return printValueRefs(out, nodes);
+}
+
+std::ostream& operator<<(std::ostream & out, const at::ArrayRef<Value*> & nodes) {
+  return printValueRefs(out, nodes);
 }
 
 struct const_value_list_with_types {
@@ -51,16 +64,11 @@ struct const_value_list_with_types {
 };
 std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
   size_t i = 0;
-  size_t prev_stage = 0;
   for(auto n : l.values) {
     if(i++ > 0) {
       if (l.use_newlines) {
         // TODO: Indent here is hard-coded for "graph(": un-hard-code it
         out << "\n      ";
-        if (n->stage() != prev_stage) {
-          out << "-------- stage " << n->stage() << " --------\n      ";
-          prev_stage = n->stage();
-        }
       } else {
         out << ", ";
       }
@@ -147,12 +155,7 @@ std::ostream& operator<<(std::ostream & out, const Node & n) {
 std::ostream& operator<<(std::ostream & out, const Graph & g) {
   out << "graph(" << const_value_list_with_types(g.inputs(), true) << ") {\n";
   std::vector<const Node*> groups;
-  size_t prev_stage = 0;
   for(auto n : g.nodes()) {
-    if (n->stage() != prev_stage) {
-      out << "  ---------------- stage " << n->stage() << " ----------------\n";
-      prev_stage = n->stage();
-    }
     printNode(out, 1, n, &groups);
   }
   out << "  return (" << g.outputs() << ");\n}\n";
@@ -217,7 +220,6 @@ void Node::lint() const {
   // Node invariants
   // - if node should live in list, nodes_iter is consistent
   // - Inputs are all marked as a use by the nodes they refer to
-  // - Stage is consistent (stage is >= all input stages)
   // - Owning graph is non-null and consistent
   // - The "Select" invariant, when the node is MultiReturn
   //
@@ -230,7 +232,6 @@ void Node::lint() const {
     for (auto input : inputs_) {
       // WARNING: O(n^2)
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
-      JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
       i++;
     }
@@ -418,12 +419,6 @@ void Graph::lint() const {
       for (auto kv : anticipated_uses) {
         JIT_ASSERT(kv.second == -1);
       }
-      // graph->stage() should be equal to max(node.stage for node in graph->nodes())
-      if (g.nodes().begin() == g.nodes().end()) {
-        JIT_ASSERT(g.stage() == 0);
-      } else {
-        JIT_ASSERT(g.stage() == g.nodes().rbegin()->stage());
-      }
       JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
     }
   };
@@ -449,20 +444,16 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
 
   auto graph = owningGraph();
   for(auto input : src->inputs()) {
-    local_map[input] = this->addInput()->copyMetadata(input)->setStage(input->stage());
-    graph->setStage(std::max(graph->stage(), input->stage()));
+    local_map[input] = this->addInput()->copyMetadata(input);
   }
 
   for(auto node : src->nodes()) {
     auto new_node = this->appendNode(graph->createClone(node, env));
-    new_node->setStage(node->stage());
-    graph->setStage(std::max(graph->stage(), node->stage()));
     for(size_t i = 0; i < node->outputs().size(); ++i) {
       auto oo = node->outputs()[i];
       auto no = new_node->outputs()[i];
       local_map[oo] = no;
       no->copyMetadata(oo);
-      no->setStage(oo->stage());
     }
   }
   for(auto output : src->outputs()) {
