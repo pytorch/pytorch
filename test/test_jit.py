@@ -5420,6 +5420,26 @@ a")
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
+    def test_script_module_export_blocks(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, n, m):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand(n, m))
+
+            @torch.jit.script_method
+            def forward(self, input):
+                if bool(input.sum() > 0):
+                    output = self.weight.mv(input)
+                else:
+                    output = self.weight + input
+                return output
+
+        m_orig = M(200, 200)
+        m_import = self.getExportImportCopy(m_orig)
+
+        t = torch.rand(200)
+        self.assertEqual(m_orig(t), m_import(t))
+
     def test_script_module_export_shared_storage(self):
         class M(torch.jit.ScriptModule):
 
