@@ -1485,7 +1485,11 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 //
 // This makes no assumption on the signs of sigma.
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-          bool some, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
+          bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
+  if (!compute_uv) {
+      throw std::runtime_error(std::string("Backward for SVD is not implemented, since the derivative ",
+                                           "requires singular matrices, which haven't been computed."));
+  }
   auto m = self.size(0);
   auto n = self.size(1);
   auto k = sigma.size(0);
@@ -1609,7 +1613,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
     auto gsigma = prod_backward(grad, sigma, det);
-    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
 
@@ -1622,7 +1626,7 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
     std::tie(u, sigma, v) = self.svd();
     // backward det = \sum log(sigma)
     auto gsigma = grad.div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
 
@@ -1640,7 +1644,7 @@ Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
     auto gsigma = grads[1].div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
 
