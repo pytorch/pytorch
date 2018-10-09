@@ -34,13 +34,13 @@ class AtomicFetchAddOp final : public Operator<CPUContext> {
     auto& b = Input(2);
     auto* c = Output(0);
     auto* d = Output(1);
-    c->Resize(std::vector<int64_t>());
-    d->Resize(std::vector<int64_t>());
+    std::lock_guard<std::mutex> lg(*mutex);
+    c->Resize();
+    d->Resize();
     auto* aPtr = a.data<int32_t>();
     auto* bPtr = b.data<int32_t>();
     auto* cPtr = c->template mutable_data<int32_t>();
     auto* dPtr = d->template mutable_data<int32_t>();
-    std::lock_guard<std::mutex> lg(*mutex);
     *dPtr = *aPtr;
     *cPtr = *aPtr + *bPtr;
     return true;

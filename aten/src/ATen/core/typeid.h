@@ -79,7 +79,7 @@ class CAFFE2_API TypeIdentifier final
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  CAFFE2_API static TypeIdentifier Get();
+  C10_IMPORT static TypeIdentifier Get();
 
  private:
   constexpr explicit TypeIdentifier(uint16_t id) : IdWrapper(id) {}
@@ -266,7 +266,7 @@ inline constexpr TypeMetaData::TypedDestructor* _PickDtor() {
 }
 
 template <class T>
-const char* __TypeName() noexcept;
+C10_IMPORT const char* __TypeName() noexcept;
 
 template <class T>
 const char* _TypeName() noexcept {
@@ -415,7 +415,7 @@ class CAFFE2_API TypeMeta {
   const detail::TypeMetaData* data_;
 
   template<class T>
-  CAFFE2_API static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
+  C10_IMPORT static const detail::TypeMetaData* _typeMetaDataInstance() noexcept;
 };
 
 template<>
@@ -461,18 +461,18 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
       _makeTypeMetaDataInstance<T>();                                     \
   }                                                                       \
   template<>                                                              \
-  CAFFE2_API const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
+  C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
     return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
   }
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  CAFFE2_API TypeIdentifier TypeIdentifier::Get<T>() {                    \
+  C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                    \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     return type_id;                                                       \
   }                                                                       \
   namespace detail {                                                      \
   template <>                                                             \
-  CAFFE2_API const char* __TypeName<T>() noexcept {                       \
+  C10_EXPORT const char* __TypeName<T>() noexcept {                       \
     return #T;                                                            \
   }                                                                       \
   }                                                                       \
