@@ -59,7 +59,7 @@ Value* insertConstant(
   return g.insertNode(n)->output();
 }
 
-// Implementation of constant node, computes and IValue
+// Implementation of constant node, computes an IValue
 Operation getConstantOperation(const Node * node) {
   JIT_ASSERT(node->kind() == prim::Constant);
   TypePtr type = node->outputs().at(0)->type();
@@ -128,23 +128,18 @@ RegisterOperators reg({
   Operator(
       prim::Constant,
       [](Node* node) -> Operation {
-        return getConstantOperation(const_cast<Node*>(node));
+        return getConstantOperation(node);
       }),
 });
 
 at::optional<IValue> toIValue(const Value* v) {
   if(v->node()->kind() != prim::Constant)
     return at::nullopt;
-  // use implemenation of prim::Constant to compute the output IValue
+  // use implementation of prim::Constant to compute the output IValue
   auto op = getConstantOperation(v->node());
   Stack stack;
   op(stack);
   return stack.back();
-}
-
-at::optional<IValue> toIValue(Value* v) {
-  const Value *const_v = const_cast<Value*>(v);
-  return toIValue(const_v);
 }
 
 }}
