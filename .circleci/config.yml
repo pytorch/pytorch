@@ -45,7 +45,7 @@ linux_default: &linux_default
 
         export pid=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         docker cp /home/circleci/project/. "$pid:/var/lib/jenkins/workspace"
-        (echo 'sudo chown -R jenkins ./workspace && cd ./workspace && source .circleci/setup.sh && .circle/build.sh && .circleci/test.sh') | docker exec -u jenkins -i "$pid" bash
+        (echo 'sudo chown -R jenkins ./workspace && cd ./workspace && source .circleci/setup.sh && .circleci/build.sh && .circleci/test.sh') | docker exec -u jenkins -i "$pid" bash
 
 jobs:
   py2_gcc5_ubuntu16_04:
