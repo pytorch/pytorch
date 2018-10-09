@@ -451,8 +451,8 @@ def marginrankingloss_reference(input1, input2, target, margin=0, reduction='ele
 
 # this directly follows Graves et al's paper, in contrast to the production implementation, it does not use log-space
 def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='elementwise_mean'):
-    input_lengths = torch.tensor(input_lengths, dtype=torch.long)
-    target_lengths = torch.tensor(target_lengths, dtype=torch.long)
+    input_lengths = torch.as_tensor(input_lengths, dtype=torch.long)
+    target_lengths = torch.as_tensor(target_lengths, dtype=torch.long)
     dt = log_probs.dtype
     log_probs = log_probs.double()  # we need the accuracy as we are not in logspace
     targets = targets.long()
