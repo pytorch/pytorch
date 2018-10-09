@@ -459,7 +459,6 @@ private:
     // Basic graph preprocessing to eliminate noise.
     EliminateDeadCode(graph);
     EliminateCommonSubexpression(graph);
-    ConstantPooling(graph);
 
     PeepholeOptimize(graph);
 
@@ -470,6 +469,7 @@ private:
 
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
+    ConstantPooling(graph);
 
     CheckInplace(graph);
   }

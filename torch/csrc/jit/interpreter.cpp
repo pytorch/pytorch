@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 
 #include <exception>
 #include <iostream>
@@ -292,6 +293,7 @@ struct PreprocessGraph {
     desugarTripCounts(graph->block());
     flattenIO(*graph);
     dropUnused(graph->block());
+    ConstantPooling(graph);
     // fill in move_flags by scanning blocks;
     move_flags = findLastUses(*graph);
     //TODO: desugar Loop trip counts, for now we drop trip counts
@@ -367,6 +369,7 @@ struct CodeImpl {
   CodeImpl(const std::shared_ptr<Graph>& graph_)
       : preprocess(*graph_) {
     graph = preprocess.graph;
+    fillConstantsArray();
     insertNodesFromBlock(graph->block());
   }
 
@@ -476,6 +479,8 @@ struct CodeImpl {
           createJumpFalse(cond_branch, instructions.size());
           createJumpTrue(cond_branch_end, entry);
         } break;
+        //do not emit instructions for constant node
+        case prim::Constant: break;
         default: {
           insertInstruction(node);
         } break;
@@ -573,6 +578,21 @@ struct CodeImpl {
     return r;
   }
 
+  void fillConstantsArray() {
+    auto graph_block = graph->block();
+    for (Node * n: graph_block->nodes()) {
+      //in preprocessing all constants are moved to the beginning of the graph
+      if (n->kind() != prim::Constant)
+        break;
+
+      getOrAllocateRegister(n->output());
+      auto ivalue = toIValue(n->output());
+      JIT_ASSERT(ivalue);
+
+      constants.emplace_back(n->output(), *ivalue);
+    }
+  }
+
   const std::vector<GraphExecutor*>& grad_executors() {
     if (!grad_executors_) {
       grad_executors_.emplace();
@@ -611,6 +631,13 @@ struct CodeImpl {
     writeUseList(inst.inputs);
   }
   void dump(std::ostream & out) const {
+    out << "Constants Array:\n";
+    for (auto constant: constants){
+      auto u = constant.first->unique();
+      auto ival_reg = unique_to_reg.find(u);
+      JIT_ASSERT(ival_reg != unique_to_reg.end());
+      out << "\t" << ival_reg->second << " = " << constant.second << "\n";
+    }
     for(size_t i = 0; i < instructions.size(); ++i) {
       dumpInstruction(out, i);
       out << "\n";
@@ -632,6 +659,10 @@ struct CodeImpl {
   std::vector<Instruction> instructions;
   int register_size = 0;
 
+  //we do not emit instructions for constant nodes. instead we hold their values
+  //here and copy them into the interpreter's registers when it is called
+  std::vector<std::pair<Value *, IValue>> constants;
+
   // all memory ArrayRef<int> are slices of this, to make sure
   // the interpreter is mostly linearly scanning through memory
   std::vector<int> int_data;
@@ -641,10 +672,20 @@ struct CodeImpl {
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code & code)
-  : function(code.pImpl),
-    int_data(function->int_data.data()),
-    bool_data(function->bool_data),
-    registers(function->register_size) {
+    : function(code.pImpl),
+      int_data(function->int_data.data()),
+      bool_data(function->bool_data),
+      registers(function->register_size) {
+    loadConstantsIntoRegisters();
+  }
+
+  void loadConstantsIntoRegisters() {
+    for (auto constant: function->constants) {
+      Value * val = constant.first;
+      IValue ivalue = constant.second;
+      int reg = function->getOrAllocateRegister(val, true);
+      registers[reg] = ivalue;
+    }
   }
 
  private:
