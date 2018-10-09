@@ -67,8 +67,8 @@ linux_build_defaults: &linux_build_defaults
         # Reinitialize submodules
         git submodule sync && git submodule update --init --recursive
 
-        TOP_DIR="$PWD"
-        OS="$(uname)"
+        export TOP_DIR="$PWD"
+        export OS="$(uname)"
 
         compilers=(
             cc
@@ -86,7 +86,7 @@ linux_build_defaults: &linux_build_defaults
                 echo "SCCACHE_BUCKET is set but sccache executable is not found"
                 exit 1
             fi
-            SCCACHE_BIN_DIR="$TOP_DIR/sccache"
+            export SCCACHE_BIN_DIR="$TOP_DIR/sccache"
             mkdir -p "$SCCACHE_BIN_DIR"
             for compiler in "${compilers[@]}"; do
                 (
