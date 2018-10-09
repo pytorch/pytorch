@@ -1,3 +1,4 @@
+#include <cmath>
 #include <limits>
 #include "caffe2/core/operator.h"
 #include "caffe2/core/stats.h"
@@ -14,6 +15,7 @@ struct TemplatePutOp : public Operator<CPUContext> {
             "stat_name",
             operator_def.input().Get(0))),
         magnitude_expand_(GetSingleArgument<int64_t>("magnitude_expand", 1)),
+        bound_(GetSingleArgument<bool>("bound", false)),
         stat_(given_name_) {}
 
   bool RunOnDevice() override {
@@ -31,12 +33,22 @@ struct TemplatePutOp : public Operator<CPUContext> {
 
   template <typename V>
   bool DoRunWithType() {
-    auto input = *Input(0).template data<V>();
+    V input = *Input(0).template data<V>();
 
-    CAFFE_ENFORCE(
-        static_cast<int64_t>(input + 1) <
-            std::numeric_limits<int64_t>::max() / magnitude_expand_,
-        "Input value is too large for the given magnitude expansion!");
+    int64_t bound_value =
+        std::numeric_limits<int64_t>::max() / magnitude_expand_;
+
+    if (bound_) {
+      if (input < -bound_value) {
+        input = -bound_value;
+      } else if (input > bound_value) {
+        input = bound_value;
+      }
+    } else {
+      CAFFE_ENFORCE(
+          std::abs(static_cast<int64_t>(input)) <= bound_value,
+          "Input value is too large for the given magnitude expansion!");
+    }
 
     int64_t int_value = input * magnitude_expand_;
 
@@ -48,6 +60,7 @@ struct TemplatePutOp : public Operator<CPUContext> {
  private:
   const std::string given_name_;
   const int64_t magnitude_expand_;
+  const bool bound_;
   T stat_;
 };
 } // namespace caffe2

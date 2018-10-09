@@ -439,7 +439,7 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     T* out_data = output->template mutable_data<T>();
@@ -560,7 +560,7 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
     const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     T* out_data = output->template mutable_data<T>();
@@ -682,7 +682,7 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
     const int64_t outputSize = lengthsInput.dim(0);
     int len_length = outputSize;
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
 
@@ -816,7 +816,7 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     T* out_data = output->template mutable_data<T>();
@@ -944,7 +944,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
 
     if (segment_ids.size() == 0 || data.size() == 0) {
       // Special handling for empty input
-      auto dims = data.dims();
+      auto dims = data.dims().vec();
       if (dims.size() > 0) {
         dims[0] = 0;
       }
@@ -993,7 +993,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
         sizeof(SIndex), K_tensor_.template data<SIndex>(), &K);
     context_.FinishDeviceComputation();
 
-    auto dims = data.dims();
+    auto dims = data.dims().vec();
     dims[0] = K + 1;
     output->Resize(dims);
 
@@ -1096,7 +1096,7 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
     int M = input.dim32(0);
     int N = input.size_from_dim(1);
     auto* output = Output(0);
-    auto dims = input.dims();
+    auto dims = input.dims().vec();
     SIndex K = 0;
     context_.CopyBytesToCPU(
         sizeof(SIndex),
@@ -1307,7 +1307,7 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims();
+    auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     dataGradsOutput->Resize(shape);
@@ -1386,7 +1386,7 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims();
+    auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     dataGradsOutput->Resize(shape);
@@ -1467,7 +1467,7 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims();
+    auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     dataGradsOutput->Resize(shape);
@@ -1615,7 +1615,7 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
     auto* prefix_sum_length_data =
         inclusive_scan_length_buffer_.template data<int>();
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     dataGradsOutput->Resize(shape);
 
     const T* in_data = segmentGradsInput.template data<T>();
@@ -1701,7 +1701,7 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims();
+    auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     dataGradsOutput->Resize(shape);

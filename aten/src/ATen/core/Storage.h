@@ -51,10 +51,6 @@ struct CAFFE2_API Storage {
             allocator,
             resizable)) {}
 
-  void reset() {
-    storage_impl_->reset();
-  }
-
   template <typename T>
   inline bool IsType() const {
     return storage_impl_->IsType<T>();
