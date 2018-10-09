@@ -106,7 +106,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 Tensor empty(IntList size, const TensorOptions& options) {
   // Note [Native bindings for legacy TH factory functions]
   // Can't call a factory function, because the buck stops with us!
-  return getFactoryType(options).tensor(size);
+  return getFactoryType(options)._tensor(size);
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
