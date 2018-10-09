@@ -207,7 +207,7 @@ class HIPContext final : public BaseContext {
   }
 
   static at::DataPtr New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+    return GetAllocator(HIP)->allocate(nbytes);
   }
 
   // Get a mutex to lock out hipMalloc / hipFree calls when
@@ -376,8 +376,6 @@ struct PinnedCPUAllocator final : public at::Allocator {
 
 class HIPStaticContext final : public BaseStaticContext {
  public:
-  at::DataPtr New(size_t nbytes) const override;
-
   DeviceType GetDeviceType() override {
     return HIP;
   }
@@ -388,9 +386,6 @@ class HIPStaticContext final : public BaseStaticContext {
   }
 
 };
-
-// Get the HIP Alloctor.
-CAFFE2_API at::Allocator* GetHIPAllocator();
 
 typedef Tensor TensorHIP;
 
