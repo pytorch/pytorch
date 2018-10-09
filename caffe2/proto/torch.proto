@@ -11,6 +11,9 @@ enum ProtoVersion {
 
 message MethodDef {
   // method name
+  // by default, we follow the naming convention below:
+  //   1) forward --> main method
+  //   2) init --> init method
   optional string name = 1; // method name
 
   // static graph
@@ -18,27 +21,8 @@ message MethodDef {
   // method is represented as torch script
   optional string torch_script = 3;
 
-  // the names of inputs and outputs
-  repeated string inputs = 4;
-  repeated string outputs = 5;
-
-  // method type, can be one of the following:
-  //   1) MAIN, the main method, by default is `forward` method
-  //   2) INIT, only run once for initialization
-  //   3) REGULAR, may run multiple times at runtime
-  enum MethodType {
-    MAIN = 1;
-    INIT = 2;
-    REGULAR = 3;
-  }
-
-  optional MethodType method_type = 6;
-
-  optional string debug_info = 7;
-
-  repeated caffe2.Argument annotations = 8;
+  // inputs and outputs are inferred from graph or script
 }
-
 
 message ModuleDef {
   repeated ModuleDef submodules = 1;
@@ -57,10 +41,6 @@ message ModuleDef {
 
   // the names of inputs and outputs of the module are inferred
   // from the main method.
-
-  optional string debug_info = 5;
-
-  repeated caffe2.Argument annotations = 6;
 }
 
 message ModelDef {
@@ -80,9 +60,16 @@ message ModelDef {
 
   optional string name = 7;
 
-  optional string debug_info = 8;
-
-  // annotations, it is used for MetaNetDef's metadata
+  // metadata
+  //   - project - string
+  //   - model_class - string
+  //   - internal_version - string
+  //   - predictor_type - string
+  //   - predictor_id - string
+  //   - execute_plan - string
+  //   - applicationSpecificInfo
+  //   - publish_time - string
+  //   - debug_info - string
   repeated caffe2.Argument annotations = 9;
 
 }
