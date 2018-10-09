@@ -61,6 +61,7 @@ message ModelDef {
   optional string name = 5;
 
   // metadata
+  //   - debug_info - string
   // for MetaNetDef:
   //   - project - string
   //   - model_class - string
@@ -70,7 +71,6 @@ message ModelDef {
   //   - execute_plan - string
   //   - applicationSpecificInfo
   //   - publish_time - string
-  //   - debug_info - string
   repeated caffe2.Argument annotations = 6;
 
 }
