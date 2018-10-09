@@ -29,6 +29,7 @@ namespace jit {
 namespace script {
 
 using ResolutionCallback = std::function<py::function(std::string)>;
+using FunctionDefaults = std::unordered_map<std::string, py::object>;
 
 // The visibility attribute is to avoid a warning about storing a field in the
 // struct that has a different visibility (from pybind) than the struct.
@@ -357,8 +358,8 @@ Resolver pythonResolver(ResolutionCallback rcb) {
 }
 
 FunctionSchema getSchemaWithDefaults(
-    std::unordered_map<std::string, py::object>& default_args,
-    FunctionSchema& schema) {
+    FunctionDefaults& default_args,
+    FunctionSchema schema) {
   std::vector<Argument> new_args;
   for (auto& arg : schema.arguments) {
     auto it = default_args.find(arg.name);
@@ -414,7 +415,7 @@ void initJitScriptBindings(PyObject* module) {
           std::shared_ptr<Module> m,
           const std::vector<Def>& defs,
           const std::vector<ResolutionCallback>& rcbs,
-          std::vector<std::unordered_map<std::string, py::object>>& defaults) {
+          std::vector<FunctionDefaults> defaults) {
         std::vector<Resolver> resolvers;
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
@@ -425,14 +426,14 @@ void initJitScriptBindings(PyObject* module) {
           resolvers,
           std::make_shared<ModuleValue>(m));
 
-        auto defaults_it = defaults.begin();
-        auto methods_it = m->get_methods().begin();
-        while (methods_it != m->get_methods().end()) {
-          auto old_schema = (*methods_it)->get()->getSchema();
-          (*methods_it)->get()->setSchema(
-              getSchemaWithDefaults(*defaults_it, old_schema));
-          ++defaults_it;
-          ++methods_it;
+          // Stitch in default arguments for each Def if provided
+          auto defaults_it = defaults.begin();
+          auto defs_it = defs.begin();
+          while (defs_it != defs.end()) {
+            auto& method = m->get_method((*defs_it).name().name());
+            method.setSchema(
+                getSchemaWithDefaults(*defaults_it, method.getSchema()));
+            ++defaults_it;
         }
       })
       .def("_get_method",
@@ -560,9 +561,10 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args, py::kwargs kwargs) {
       return self.graph_for(createStackForSchema(self.getSchema(), std::move(args), std::move(kwargs)));
     })
-    .def("forward_schema", [](Method &self, Def &def, std::unordered_map<std::string, py::object> defaults, bool is_method) {
-      auto schema = extractSchemaFromDef(def, is_method);
-      self.setSchema(getSchemaWithDefaults(defaults, schema));
+    .def("forward_schema", [](Method &self, Def &def, py::object defss, bool is_method) {
+      FunctionDefaults defaults = py::cast<FunctionDefaults>(defss);
+      self.setSchema(getSchemaWithDefaults(
+        defaults, extractSchemaFromDef(def, is_method)));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("pretty_print_schema", &Method::pretty_print_schema);
