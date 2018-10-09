@@ -478,7 +478,7 @@ class TestDataLoader(TestCase):
         scanned_data = torch.IntTensor([])
         for i in range(num_processes):
             s = DistributedSampler(data_set, num_processes, i)
-            d_loader = DataLoader(data_set, batch_size = int(num_batches/num_processes), drop_last=True, sampler=s)
+            d_loader = DataLoader(data_set, batch_size=int(num_batches / num_processes), drop_last=True, sampler=s)
             for k, data in enumerate(d_loader):
                 scanned_data = torch.cat((scanned_data, data), 0)
 
