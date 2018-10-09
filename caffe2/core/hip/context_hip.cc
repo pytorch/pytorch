@@ -348,7 +348,7 @@ struct DefaultHIPAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
           g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(HIP)};
+        return {ptr, ptr, &Delete, at::Device(HIP, CaffeHipGetDevice())};
     case HipMemoryPoolType::CUB:
         HIP_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
         g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
@@ -356,16 +356,16 @@ struct DefaultHIPAllocator final : public at::Allocator {
         if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
         }
-        return {ptr, ptr, &Delete, at::Device(HIP)};
+        return {ptr, ptr, &Delete, at::Device(HIP, CaffeHipGetDevice())};
     case HipMemoryPoolType::THC:
         HIP_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
         if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr]                = nbytes;
           g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(HIP)};
+        return {ptr, ptr, &Delete, at::Device(HIP, CaffeHipGetDevice())};
     }
-    return {nullptr, nullptr, &Delete, at::Device(HIP)};
+    return {nullptr, nullptr, &Delete, at::Device(HIP, CaffeHipGetDevice())};
   }
 
   static void Delete(void* ptr) {
@@ -429,12 +429,5 @@ struct DefaultHIPAllocator final : public at::Allocator {
 
 static DefaultHIPAllocator g_hip_alloc;
 REGISTER_ALLOCATOR(HIP, &g_hip_alloc);
-
-BaseStaticContext* GetHIPStaticContext() {
-  static HIPStaticContext context;
-  return &context;
-}
-
-REGISTER_STATIC_CONTEXT(HIP, GetHIPStaticContext());
 
 } // namespace caffe2

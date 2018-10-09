@@ -107,6 +107,16 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     }
   }
 
+  inline Tensor* Output(
+      int idx,
+      const vector<int64_t>& dims,
+      const at::TensorOptions& options) {
+    CAFFE_ENFORCE_WITH_CALLER(
+        options.device_opt() != at::nullopt,
+        "device must be provided in option.");
+    return BlobGetMutableTensor(outputs_.at(idx), dims, options);
+  }
+
   template <typename T>
   inline T* Output(int idx) {
     static_assert(
@@ -114,18 +124,6 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
         "You should use Output<Tensor>(int, DeviceType) for "
         "Tensor.");
     return outputs_.at(idx)->template GetMutable<T>();
-  }
-
-  Tensor* Output(
-      int idx,
-      const vector<int64_t>& dims,
-      const at::TensorOptions& options) {
-    if (options.device_opt() == at::nullopt) {
-      auto opt = options;
-      opt.device(context_.device());
-      return BlobGetMutableTensor(outputs_.at(idx), dims, opt);
-    }
-    return BlobGetMutableTensor(outputs_.at(idx), dims, options);
   }
 
   // TODO(jerryzh): Remove this template
@@ -464,6 +462,18 @@ class Operator : public OperatorBase {
       int idx,
       DeviceType type = Context::GetDeviceType()) {
     return OperatorBase::template Input<Tensor>(idx, type);
+  }
+
+  inline Tensor* Output(
+      int idx,
+      const vector<int64_t>& dims,
+      const at::TensorOptions& options) {
+    if (options.device_opt() == at::nullopt) {
+      auto opt = options;
+      opt.device(context_.device());
+      return OperatorBase::Output(idx, dims, opt);
+    }
+    return OperatorBase::Output(idx, dims, options);
   }
 
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {

@@ -121,6 +121,7 @@ struct Allocator {
   }
 };
 
+// Question: is this still needed?
 struct CAFFE2_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(
@@ -136,9 +137,14 @@ struct CAFFE2_API InefficientStdFunctionContext {
 
 namespace caffe2 {
 
-/** Set the allocator for DeviceType `t` without taking ownership to avoid
- *  invalidation when a user already hold the pointer to the previous
- *  allocator.
+/** Set the allocator for DeviceType `t`. The passed in allocator pointer is
+ *  expected to have static lifetime; this function does NOT take ownership
+ *  of the raw pointer. (The reason for this is to prevent existing pointers
+ *  to an allocator of a particular device from being invalidated when
+ *  SetAllocator is called.)
+ *
+ *  Also note that this is not thraed-safe, and we assume this function will
+ *  only be called during initialization.
  */
 CAFFE2_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
 CAFFE2_API at::Allocator* GetAllocator(const at::DeviceType& t);
