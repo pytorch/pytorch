@@ -1,15 +1,12 @@
 graph(%a : Dynamic) {
-  %1 : int = prim::Constant[value=2]()
-  %2 : Dynamic = aten::lt(%a, %1)
+  %2 : Dynamic = aten::lt(%a, 2)
   %3 : bool = prim::TensorToBool(%2)
   %c : int = prim::If(%3)
     block0() {
-      %5 : int = prim::Constant[value=5]()
-      -> (%5)
+      -> (5)
     }
     block1() {
-      %6 : int = prim::Constant[value=1]()
-      -> (%6)
+      -> (1)
     }
   return (%c);
 }
