@@ -57,7 +57,7 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
     int64_t dataToReduceSize = indicesInput.dim(0);
 
     const int* lengths = lengthsInput.template data<int>();
-    vector<int64_t> shape = dataInput.dims();
+    vector<int64_t> shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     const float* w = nullptr;

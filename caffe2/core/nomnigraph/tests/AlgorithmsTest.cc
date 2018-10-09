@@ -96,3 +96,31 @@ TEST(DominatorTree, Test2) {
   }
 }
 
+TEST(Subgraph, InduceEdges) {
+  auto g = createGraph();
+  auto sg = decltype(g)::SubgraphType();
+  for (const auto& node : g.getMutableNodes()) {
+    sg.addNode(node);
+  }
+
+  nom::algorithm::induceEdges(&sg);
+
+  for (const auto& edge : g.getMutableEdges()) {
+    EXPECT_TRUE(sg.hasEdge(edge));
+  }
+}
+
+TEST(Subgraph, InduceEdgesCycle) {
+  auto g = createGraphWithCycle();
+  auto sg = decltype(g)::SubgraphType();
+  for (const auto& node : g.getMutableNodes()) {
+    sg.addNode(node);
+  }
+
+  nom::algorithm::induceEdges(&sg);
+
+  for (const auto& edge : g.getMutableEdges()) {
+    EXPECT_TRUE(sg.hasEdge(edge));
+  }
+}
+

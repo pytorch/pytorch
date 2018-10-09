@@ -30,7 +30,7 @@ class MKLFullyConnectedOp final : public MKLOperator<T> {
       const int N = filter.dim32(0);
       CAFFE_ENFORCE(N == bias.dim32(0));
 
-      auto Y_shape = X.dims();
+      auto Y_shape = X.dims().vec();
       Y_shape[1] = N;
       Y_shape.resize(2);
 
