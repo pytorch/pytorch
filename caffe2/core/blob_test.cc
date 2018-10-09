@@ -1078,15 +1078,14 @@ TEST(BlobTest, CastingMessage) {
   }
 }
 
-TEST(TensorConstruction, UnitializedCopyTest) {
+TEST(TensorConstruction, UninitializedCopyTest) {
   Tensor x(CPU);
   Tensor y(x, CPU);
   Tensor z = x.Clone();
-  // should be uninitialized
-  EXPECT_EQ(x.size(), -1);
-  EXPECT_EQ(y.size(), -1);
+  EXPECT_EQ(x.size(), 1);
+  EXPECT_EQ(y.size(), 1);
   LOG(INFO) << "z.size()" << z.size();
-  EXPECT_EQ(z.size(), -1);
+  EXPECT_EQ(z.size(), 1);
 }
 
 TEST(TensorConstruction, CopyConstructorTest) {

@@ -433,6 +433,10 @@ class CAFFE2_API Tensor final {
   const Storage& storage() const {
     return impl_->storage();
   }
+
+  bool storage_initialized() const {
+    return impl_->storage_initialized();
+  }
 };
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
