@@ -1,6 +1,8 @@
 export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
 
+set -ex
+
 export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
 SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
