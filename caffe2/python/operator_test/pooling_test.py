@@ -10,7 +10,11 @@ import unittest
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.proto import caffe2_pb2
 
+def _run_in_hip(gc, dc):
+    return (gc.device_type == caffe2_pb2.HIP) or (
+        caffe2_pb2.HIP in {d.device_type for d in dc})
 
 class TestPooling(hu.HypothesisTestCase):
     # CUDNN does NOT support different padding values and we skip it
@@ -126,6 +130,9 @@ class TestPooling(hu.HypothesisTestCase):
                         batch_size, order, op_type, engine, gc, dc):
         assume(pad < kernel)
         assume(size + pad + pad >= kernel)
+        # Currently MIOpen Pooling only supports 2d pooling
+        if _run_in_hip(gc, dc):
+            assume(engine != "CUDNN")
         # some case here could be calculated with global pooling, but instead
         # calculated with general implementation, slower but should still
         # be corect.
@@ -159,6 +166,9 @@ class TestPooling(hu.HypothesisTestCase):
            **hu.gcs)
     def test_global_pooling_3d(self, kernel, size, input_channels,
                                batch_size, order, op_type, engine, gc, dc):
+        # Currently MIOpen Pooling only supports 2d pooling
+        if _run_in_hip(gc, dc):
+            assume(engine != "CUDNN")
         # pad and stride ignored because they will be infered in global_pooling
         op = core.CreateOperator(
             op_type,
@@ -276,6 +286,9 @@ class TestPooling(hu.HypothesisTestCase):
                      input_channels, batch_size,
                      order, op_type, engine, gc, dc):
         assume(pad < kernel)
+        if _run_in_hip(gc, dc) and engine == "CUDNN":
+            assume(order == "NCHW" and op_type != "LpPool")
+
         op = core.CreateOperator(
             op_type,
             ["X"],
@@ -306,6 +319,9 @@ class TestPooling(hu.HypothesisTestCase):
                             order, op_type, engine, gc, dc):
         # CuDNN 5 does not support deterministic max pooling.
         assume(workspace.GetCuDNNVersion() >= 6000 or op_type != "MaxPool")
+
+        if _run_in_hip(gc, dc) and engine == "CUDNN":
+            assume(order == "NCHW" and op_type != "LpPool")
         op = core.CreateOperator(
             op_type,
             ["X"],
