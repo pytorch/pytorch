@@ -559,6 +559,9 @@
   self: pow_backward_self(grad, self, exponent)
   exponent: pow_backward_exponent(grad, self, exponent)
 
+- name: pow(Scalar base, Tensor self)
+  self: pow_backward_exponent(grad, base, self)
+
 - name: _prod(Tensor self, int64_t dim, bool keepdim)
   self: prod_backward(grad, self, result, dim, keepdim)
 

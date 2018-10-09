@@ -11,7 +11,7 @@
 #include <ATen/core/context_base.h>
 #include <ATen/core/optional.h>
 
-#include "c10/util/Flags.h"
+#include <c10/util/Flags.h>
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
@@ -765,13 +765,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       CAFFE_ENFORCE(
           allocator == nullptr,
           "Allocator is not used within Caffe2 functions, please use StaticContext instead.");
+      allocator = caffe2::GetAllocator(storage_.device_type());
       if (meta.ctor()) {
         // For types that need placement new, we will call it, as well as
         // making sure that when the data is freed, it calls the right
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.dtor();
-        auto data_ptr = GetStaticContext()->New(
+        auto data_ptr = allocator->allocate(
             numel_ * storage_.itemsize()); // Removing this can get rid of
                                            // InefficientStdFunctionContext
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
@@ -783,7 +784,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       } else {
         // For fundamental type, new and delete is easier.
         storage_.set_data_ptr(
-            GetStaticContext()->New(numel_ * storage_.itemsize()));
+            allocator->allocate(numel_ * storage_.itemsize()));
       }
       storage_.set_numel(numel_);
       AT_ASSERT(storage_offset_ == 0); // because we just reallocated
