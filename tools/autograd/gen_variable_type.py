@@ -458,7 +458,8 @@ def emit_body(declaration):
         if 'Tensor' not in declaration['return_type']:
             return call
         elif is_view:
-            return 'as_view(self, {})'.format(call)
+            # See NOTE [ Autograd Variable Views ] in variable.h for details.
+            return 'as_view(self, {}, GradMode::is_enabled())'.format(call)
         else:
             return 'as_variable({})'.format(call)
 
