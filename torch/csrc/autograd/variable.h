@@ -63,6 +63,7 @@ struct Function;
 /// meaningful for `Variable` relations that are relevant to autograd. For
 /// example, if you hide your code from autograd using `.data`, the `Variable`s
 /// will not be registered as having view relations, even if they share storage.
+/// See NOTE [ Autograd Variable Views ] for more details.
 ///
 ///
 ///                               Interface
@@ -92,9 +93,13 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Creates a `Variable` that is a *view* of another (*base*) variable.
   /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
+  /// `potential_history_tracking` is a bool that specifies whether this view
+  /// relation should be considered by autograd.
+  /// See NOTE [ Autograd Variable Views ] for details.
   friend Variable make_variable_view(
       Variable base,
       at::Tensor data,
+      bool potential_history_tracking,
       Edge gradient_edge);
 
   /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be
@@ -327,7 +332,6 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
     return grad_;
   }
 
-  Variable detach() const;
   void detach_();
 
   void set_data(Tensor new_data);
@@ -372,10 +376,45 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 //                          Variable::ViewImpl
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// A Variable that is a view on another Variable. The base and view share the
-/// same version_counter. The grad_fn field of the Variable may become stale
-/// due to in-place modifications of the shared data. Accesses should go
-/// through get_grad_fn(). All other fields are always valid.
+/// NOTE [ Autograd Variable Views ]
+///
+/// A Variable that is a view of another Variable (called base Variable), i.e.,
+/// they share storage, **and** may potentially record gradient flow between the
+/// two Variables. Even if the base currently does not require grad, it is still
+/// important to record this view relation to support operations like:
+///
+///     # Have:
+///     #   base.requires_grad = False
+///     #   var.requires_grad = True
+///     base[1] = var
+///     torch.autograd.grad(base.sum(), var)  <- should return an all ones tensor
+///
+/// Above example is effectively base[1].copy_(var). To support this, in the
+/// rebase_history of base[1], we need to get the update the grad_fn of the base
+/// Variable. Therefore, we still record the view relation between base and
+/// base[1] even though they don't require gradients at creation time.
+///
+/// Another similar example is:
+///
+///     # Have:
+///     #   base.requires_grad = False
+///     #   var.requires_grad = True
+///     base.copy_(var)
+///     torch.autograd.grad(base[1].sum(), var)  <- should return an all ones tensor
+///
+///
+/// In a view relation, the base and view Variables share the same
+/// version_counter. The grad_fn field of the Variable may become stale due to
+/// in-place modifications of the shared data. Accesses should go through
+/// get_grad_fn(). All other fields are always valid.
+///
+/// NB: Some views will never require gradient history tracking, and will not be
+///     counted as views (i.e., having is_view() = true and using ViewImpl).
+///     Instead, they will be usual Variables and just sharing the version
+//      counters with the base Variables. Some examples are:
+///       1. views created from .detach(),
+///       2. views created when GradMode::enabled() = false.
+///     Relevant logic is implemented in make_variable_view.
 struct TORCH_API Variable::ViewImpl : public Variable::Impl {
   ViewImpl(Variable base, at::Tensor data, Edge gradient_edge);
 
@@ -411,13 +450,22 @@ struct TORCH_API Variable::ViewImpl : public Variable::Impl {
 // Factory Functions
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+// See NOTE [ Autograd Variable Views ] for details.
 inline Variable make_variable_view(
     Variable base,
     at::Tensor data,
+    bool potential_history_tracking = true,
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
-    return Variable(c10::make_intrusive<Variable::ViewImpl>(
-            std::move(base), std::move(data), std::move(gradient_edge)));
+    if (potential_history_tracking) {
+      return Variable(c10::make_intrusive<Variable::ViewImpl>(
+              std::move(base), std::move(data), std::move(gradient_edge)));
+    } else {
+      auto var = Variable(c10::make_intrusive<Variable::Impl>(
+              std::move(data), false, std::move(gradient_edge)));
+      var.set_version_counter(base.version_counter());
+      return var;
+    }
   }
   return Variable();
 }
@@ -497,7 +545,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 }
 
 inline Variable Variable::detach() const {
-  return get()->detach();
+  return make_variable_view(*this, get()->data_, /*potential_history_tracking=*/false);
 }
 
 inline void Variable::detach_() {
