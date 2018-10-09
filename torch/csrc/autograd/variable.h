@@ -93,13 +93,13 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Creates a `Variable` that is a *view* of another (*base*) variable.
   /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
-  /// `potential_history_tracking` is a bool that specifies whether this view
+  /// `potentially_tracks_history` is a bool that specifies whether this view
   /// relation should be considered by autograd.
   /// See NOTE [ Autograd Variable Views ] for details.
   friend Variable make_variable_view(
       Variable base,
       at::Tensor data,
-      bool potential_history_tracking,
+      bool potentially_tracks_history,
       Edge gradient_edge);
 
   /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be
@@ -454,10 +454,10 @@ struct TORCH_API Variable::ViewImpl : public Variable::Impl {
 inline Variable make_variable_view(
     Variable base,
     at::Tensor data,
-    bool potential_history_tracking = true,
+    bool potentially_tracks_history = true,
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
-    if (potential_history_tracking) {
+    if (potentially_tracks_history) {
       return Variable(c10::make_intrusive<Variable::ViewImpl>(
               std::move(base), std::move(data), std::move(gradient_edge)));
     } else {
@@ -545,7 +545,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 }
 
 inline Variable Variable::detach() const {
-  return make_variable_view(*this, get()->data_, /*potential_history_tracking=*/false);
+  return make_variable_view(*this, get()->data_, /*potentially_tracks_history=*/false);
 }
 
 inline void Variable::detach_() {
