@@ -27,6 +27,7 @@ _(IntType) \
 _(NoneType) \
 _(StringType) \
 _(GeneratorType) \
+_(BoolType) \
 _(VarType) \
 _(WorldType) \
 
@@ -343,6 +344,7 @@ struct TORCH_API CompleteTensorType : public TensorType {
     return prod;
   }
   static TypePtr fromNumberType(TypePtr typ);
+  static TypePtr fromBoolType();
 
 private:
   CompleteTensorType(const at::Tensor& tensor)
@@ -438,6 +440,7 @@ struct TORCH_API ListType : public Type {
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
+  static ListTypePtr ofBools();
 
   static const TypeKind Kind = TypeKind::ListType;
 private:
@@ -605,6 +608,31 @@ private:
   : Type(TypeKind::IntType) {}
 };
 
+struct BoolType;
+using BoolTypePtr = std::shared_ptr<BoolType>;
+// This node represents a Python bool value
+struct TORCH_API BoolType : public Type {
+  template<typename ... T>
+  static BoolTypePtr create( T&& ... all ) {
+    return BoolTypePtr(new BoolType(std::forward<T>(all)... ));
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "bool";
+  }
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *this == *rhs || rhs->kind() == TypeKind::BoolType;
+  }
+  static const TypeKind Kind = TypeKind::BoolType;
+  // global singleton
+  static BoolTypePtr get();
+private:
+  BoolType()
+  : Type(TypeKind::BoolType) {}
+};
+
 struct StringType;
 using StringTypePtr = std::shared_ptr<StringType>;
 // This node represents a Python string value
@@ -728,9 +756,16 @@ inline TypePtr CompleteTensorType::fromNumberType(TypePtr typ) {
     return CompleteTensorType::create(at::kLong, -1, {});
   } else if (typ->isSubtypeOf(FloatType::get())) {
     return CompleteTensorType::create(at::kFloat, -1, {});
+  } else if (typ->isSubtypeOf(BoolType::get())) {
+    return CompleteTensorType::create(at::kLong, -1, {});
   }
   AT_ERROR("unknown number type", typ->str());
 }
+
+inline TypePtr CompleteTensorType::fromBoolType() {
+  return CompleteTensorType::create(at::kLong, -1, {});
+}
+
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
 // nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
@@ -755,7 +790,7 @@ TypePtr getTypePtr() {
 template<> inline TypePtr getTypePtr<at::Tensor>() { return DynamicType::get(); }
 template<> inline TypePtr getTypePtr<double>() { return FloatType::get(); }
 template<> inline TypePtr getTypePtr<int64_t>() { return IntType::get(); }
-template<> inline TypePtr getTypePtr<bool>() { return IntType::get(); }
+template<> inline TypePtr getTypePtr<bool>() { return BoolType::get(); }
 template<> inline TypePtr getTypePtr<at::Scalar>() { return NumberType::get(); }
 template<> inline TypePtr getTypePtr<std::vector<at::Tensor>>() { return ListType::ofTensors(); }
 template<> inline TypePtr getTypePtr<std::vector<double>>() { return ListType::ofFloats(); }

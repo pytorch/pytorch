@@ -55,8 +55,8 @@ class IDEEPContext final : public BaseContext {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(CPU)->allocate(nbytes);
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
@@ -176,10 +176,6 @@ inline void IDEEPContext::CopyBytes<IDEEPContext, CPUContext>(
 
 class IDEEPStaticContext : public BaseStaticContext {
  public:
-  inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
-    return GetCPUAllocator()->New(nbytes);
-  }
-
   DeviceType GetDeviceType() override {
     return IDEEP;
   }

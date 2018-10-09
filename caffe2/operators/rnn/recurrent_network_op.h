@@ -9,7 +9,7 @@
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
-CAFFE2_DECLARE_bool(caffe2_rnn_executor);
+C10_DECLARE_bool(caffe2_rnn_executor);
 
 namespace caffe2 {
 namespace detail {
@@ -76,7 +76,7 @@ void applyOffsetAlias(
   auto* dst =
       BlobGetMutableTensor(ws->GetBlob(oc.dst), Context::GetDeviceType());
   auto timestep = src->size() / src->dim(0);
-  auto dims = src->dims();
+  auto dims = src->dims().vec();
   const int32_t startDstTimestep =
       oc.offset >= 0 ? oc.offset : src->dim(0) + oc.offset;
   const int32_t numDstTimesteps = src->dim(0) - startDstTimestep;
@@ -198,7 +198,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
     detail::AddApplyLinkOps(
         links_, timestep_, operator_def.device_option(), &stepNetDef_);
 
-    if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
+    if (c10::FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
       VLOG(1) << "Use RecurrentNetworkExecutor";
       auto recurrent_map = detail::GetRecurrentMapping(links_, false /* backward */);
       rnnExecutor_ =
@@ -434,7 +434,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         links_, timestep_, operator_def.device_option(), &stepNetDef_);
     AddParamGradientAccumulationOps(operator_def);
 
-    if (FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
+    if (c10::FLAGS_caffe2_rnn_executor && enable_rnn_executor_) {
       InitializeExecutor(operator_def);
     }
   }
@@ -905,7 +905,7 @@ class RNNApplyLinkOp : public Operator<Context> {
     const int64_t externalTimestepSize = external.size() / external.dim(0);
     auto* externalData = external_out->template mutable_data<T>() +
         (t + offset_) * externalTimestepSize;
-    auto internalDims = external_out->dims();
+    auto internalDims = external_out->dims().vec();
     internalDims[0] = window_;
 
     internal_out->Resize(internalDims);

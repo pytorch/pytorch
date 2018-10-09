@@ -51,7 +51,7 @@ class MIOpenSoftmaxOp final : public Operator<HIPContext> {
     if (dims_ != X.dims()) {
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           desc_, miopenTypeWrapper<T>::type, N, D, 1, 1));
-      dims_ = X.dims();
+      dims_ = X.dims().vec();
     }
     MIOPEN_ENFORCE(miopenSoftmaxForward(
         miopen_wrapper_.inline_miopen_handle(),
@@ -110,7 +110,7 @@ class MIOpenSoftmaxGradientOp final : public Operator<HIPContext> {
     if (dims_ != Y.dims()) {
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           desc_, miopenTypeWrapper<T>::type, N, D, 1, 1));
-      dims_ = Y.dims();
+      dims_ = Y.dims().vec();
     }
     MIOPEN_ENFORCE(miopenSoftmaxBackward(
         miopen_wrapper_.inline_miopen_handle(),

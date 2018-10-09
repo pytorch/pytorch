@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-CAFFE_DEFINE_KNOWN_TYPE(Tensor);
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(12, Tensor);
 
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,
@@ -86,7 +86,7 @@ vector<int64_t> GetTensorInfo(
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
   *capacity = tc->storage().capacity();
   tc->ExtractDeviceOption(device);
-  return tc->dims();
+  return tc->dims().vec();
 }
 
 // since we only have one tensor, probably need to remove this at some point?

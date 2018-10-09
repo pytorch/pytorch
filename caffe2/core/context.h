@@ -13,10 +13,10 @@
 #include "caffe2/core/typeid.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-#include "ATen/core/ATenCoreTest.h"
-#include "ATen/core/ArrayRef.h"
+#include <ATen/core/ATenCoreTest.h>
+#include <ATen/core/ArrayRef.h>
 
-CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
+C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {
 
@@ -85,8 +85,8 @@ class CAFFE2_API CPUContext final : public BaseContext {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetCPUAllocator()->allocate(nbytes);
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
@@ -185,14 +185,6 @@ inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
 // TODO(jerryzh): merge CPUStaticContext with Allocator
 class CAFFE2_API CPUStaticContext : public BaseStaticContext {
  public:
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
-    auto data_and_deleter = GetCPUAllocator()->New(nbytes);
-    if (FLAGS_caffe2_report_cpu_memory_usage) {
-      reporter_.New(data_and_deleter.first, nbytes);
-      data_and_deleter.second = ReportAndDelete;
-    }
-    return data_and_deleter;
-  }
 
   DeviceType GetDeviceType() override {
     return CPU;
@@ -204,14 +196,6 @@ class CAFFE2_API CPUStaticContext : public BaseStaticContext {
     device->set_device_type(TypeToProto(GetDeviceType()));
   }
 
- protected:
-  static MemoryAllocationReporter reporter_;
-
- private:
-  static void ReportAndDelete(void* ptr) {
-    reporter_.Delete(ptr);
-    GetCPUAllocator()->GetDeleter()(ptr);
-  }
 };
 
 }  // namespace caffe2

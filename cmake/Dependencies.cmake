@@ -136,11 +136,7 @@ list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 # ---[ gflags
 if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
-  if (TARGET gflags)
-    set(CAFFE2_USE_GFLAGS 1)
-    include_directories(SYSTEM ${GFLAGS_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS gflags)
-  else()
+  if (NOT TARGET gflags)
     message(WARNING
         "gflags is not found. Caffe2 will build without gflags support but "
         "it is strongly recommended that you install gflags. Suppress this "
@@ -386,9 +382,14 @@ if(BUILD_PYTHON)
   set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
-  find_package(NumPy REQUIRED)
-  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND AND NUMPY_FOUND)
-    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR} ${NUMPY_INCLUDE_DIR})
+  find_package(NumPy)
+  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
+    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
+    caffe2_update_option(USE_NUMPY OFF)
+    if(NUMPY_FOUND)
+      caffe2_update_option(USE_NUMPY ON)
+      include_directories(SYSTEM ${NUMPY_INCLUDE_DIR})
+    endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
   else()
@@ -1084,36 +1085,17 @@ if (NOT BUILD_ATEN_MOBILE)
     add_compile_options(-DUSE_GCC_GET_CPUID)
   ENDIF()
 
-  FIND_PACKAGE(SSE) # checks SSE, AVX and AVX2
-  IF (C_SSE2_FOUND)
-    MESSAGE(STATUS "SSE2 Found")
-    # TODO: Work out correct way to do this.  Note that C_SSE2_FLAGS is often
-    # empty, in which case it expands to " " flag which is bad
-    SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE2)
-  ENDIF()
-  IF (C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-    SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE4_1 -DUSE_SSE4_2)
-  ENDIF()
-  IF (C_SSE3_FOUND)
-    MESSAGE(STATUS "SSE3 Found")
-    SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE3)
-  ENDIF()
+  FIND_PACKAGE(AVX) # checks AVX and AVX2
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
   # however, we want to enable the AVX codepaths, so we still need to
   # add USE_AVX and USE_AVX2 macro defines
   IF (C_AVX_FOUND)
-    MESSAGE(STATUS "AVX Found")
+    MESSAGE(STATUS "AVX compiler support found")
     add_compile_options(-DUSE_AVX)
   ENDIF()
   IF (C_AVX2_FOUND)
-    MESSAGE(STATUS "AVX2 Found")
+    MESSAGE(STATUS "AVX2 compiler support found")
     add_compile_options(-DUSE_AVX2)
   ENDIF()
 

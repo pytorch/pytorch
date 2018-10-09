@@ -1365,7 +1365,6 @@ class TestJit(JitTestCase):
     # as all backwards functions of views are implemented
     # as a zero filled tensor with a gradient fill on the
     # viewed portion.
-    @unittest.expectedFailure
     def test_inplace_copy(self):
         x = torch.randn(4, 4, requires_grad=True)
 
@@ -1958,7 +1957,7 @@ class TestJit(JitTestCase):
                     c = 2
                 else:
                     c = 3
-            return a + 1
+            return a + 1 + c
 
         @torch.jit.script
         def loop_use_test(y):
@@ -1969,11 +1968,19 @@ class TestJit(JitTestCase):
                 z = x
             return x, z
 
+        def python_fn(x):
+            return x + 10
+
+        @torch.jit.script
+        def python_op_name_test(y):
+            return python_fn(y)
+
         self.assertExpected(if_test.graph.pretty_print(), "if_test")
         self.assertExpected(if_one.graph.pretty_print(), "if_one")
         self.assertExpected(while_test.graph.pretty_print(), "while_test")
         self.assertExpected(while_if_test.graph.pretty_print(), "while_if_test")
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
+        self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
 
 
 class TestBatched(TestCase):
@@ -3068,6 +3075,33 @@ a")
         y2 = torch.sum(x, dim=0)
         self.assertEqual(y, y2)
 
+    def test_constant_pooling(self):
+        def func(cond):
+            a = 1
+            b = 4
+            c = 0
+            d = "abc"
+            e = "bcd"
+            f = "abc"
+            x = torch.ones([2])
+            y = x * 4
+            z = torch.ones([2])
+            if bool(cond):
+                c = b - a
+            else:
+                y = torch.rand(0)
+                if bool(cond):
+                    y = torch.rand(1)
+                print(d, e, f, x, y, z)
+            b = b - a
+            return a, b, c, x
+
+        self.checkScript(func, torch.tensor([1]))
+        graph = torch.jit.script(func).graph
+        self.run_pass('constant_propagation', graph)
+        self.run_pass('constant_pooling', graph)
+        self.assertExpectedGraph(graph)
+
     def test_literal(self):
         def func1(a, b):
             c = a, b
@@ -3763,7 +3797,7 @@ a")
         self.checkScript(func, inputs, optimize=True)
 
     def test_explicit_bool_cast(self):
-        with self.assertRaisesRegex(RuntimeError, "expected an integer"):
+        with self.assertRaisesRegex(RuntimeError, "expected a boolean"):
             @torch.jit.script
             def test_bool_cast(a):
                 if a:
@@ -3987,18 +4021,38 @@ a")
             throwsAnd(t)
 
     def test_type_cast(self):
+        @torch.jit.script
         def test_int_to_float():
             b = float(2)
             return b + 1.0
 
+        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+            @torch.jit.script
+            def test_int_to_bool():
+                return bool(5)
+
+        @torch.jit.script
         def test_float_to_int():
-            b = int(2.0)
+            b = int(5.0)
             return b + 1
 
-        graph1 = torch.jit.script(test_int_to_float).graph
-        self.assertExpectedGraph(graph1, subname="int_to_float")
-        graph2 = torch.jit.script(test_float_to_int).graph
-        self.assertExpectedGraph(graph2, subname="float_to_int")
+        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+            @torch.jit.script
+            def test_float_to_bool():
+                return bool(5.0)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+            @torch.jit.script
+            def test_bool_to_float():
+                return float(True)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot cast type"):
+            @torch.jit.script
+            def test_bool_to_int():
+                return int(True)
+
+        self.assertExpectedGraph(test_int_to_float.graph, "test_int_to_float")
+        self.assertExpectedGraph(test_float_to_int.graph, "test_float_to_int")
 
     def test_multiple_assignment(self):
         def outer_func(x):
@@ -5341,6 +5395,8 @@ a")
         for type in [torch.float, torch.double]:
             m_orig = M(type)
             m_import = self.getExportImportCopy(m_orig)
+            # check to make sure the storage wasn't resized
+            self.assertTrue(m_orig.param.storage().size() == 25)
             self.assertEqual(m_orig.foo(), m_import.foo())
             self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
@@ -5358,9 +5414,31 @@ a")
 
         m_orig = M()
         m_import = self.getExportImportCopy(m_orig)
+        # check to make sure the storage wasn't resized
+        self.assertTrue(m_orig.param.storage().size() == 25)
         self.assertTrue(m_import.foo().device == torch.device('cpu'))
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
+
+    def test_script_module_export_blocks(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, n, m):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand(n, m))
+
+            @torch.jit.script_method
+            def forward(self, input):
+                if bool(input.sum() > 0):
+                    output = self.weight.mv(input)
+                else:
+                    output = self.weight + input
+                return output
+
+        m_orig = M(200, 200)
+        m_import = self.getExportImportCopy(m_orig)
+
+        t = torch.rand(200)
+        self.assertEqual(m_orig(t), m_import(t))
 
     def test_script_module_export_shared_storage(self):
         class M(torch.jit.ScriptModule):
@@ -7158,6 +7236,57 @@ a")
 
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
 
+    def test_weak_script_function(self):
+        outer_var = 10
+        outer_var2 = 11
+
+        def not_a_script_fn(x):
+            return x + 2
+
+        @torch.jit.script
+        def even_more_inner(x):
+            return x + 1
+
+        @torch.jit.script
+        def inner(x):
+            return not_a_script_fn(x) + x + even_more_inner(x)
+
+        @torch.jit.script
+        def strong_script_fn(x):
+            if bool(x.norm() > 2):
+                x = x + 3
+            return x + 4 + inner(x)
+
+        @torch.jit.weak_script
+        def weak_script_fn_inner(x):
+            return x + 6 + not_a_script_fn(x)
+
+        @torch.jit.weak_script
+        def weak_script_fn(x):
+            return x + 5 + weak_script_fn_inner(x) + weak_script_fn_inner(x)
+
+        def fn(x):
+            x = not_a_script_fn(x)
+            x = strong_script_fn(x)
+            return weak_script_fn(x)
+
+        scripted = torch.jit.script(fn)
+
+        input = torch.randn(3, 4, 5)
+        self.assertExpectedGraph(scripted.graph)
+        self.assertEqual(scripted(input), fn(input))
+
+    def test_python_op_exception(self):
+        def python_op(x):
+            raise Exception("bad!")
+
+        @torch.jit.script
+        def fn(x):
+            return python_op(x)
+
+        with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
+            fn(torch.tensor(4))
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -7757,27 +7886,6 @@ EXCLUDE_TYPE_CHECK = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-    # TODO: Fix var/std
-    # there are two schemas for var (and std):
-    # (1) var(Tensor, int, *, bool, bool, Tensor)
-    # (2) var(Tensor, *, bool)
-    #
-    # Right now, the following is happening:
-    # - Shorter schemas come before longer schemas
-    # - bool, int are treated as IntType rather than DynamicType like before
-    # So the schemas look like the following in operator:
-    # (2) var(DynamicType, IntType)
-    # (1) var(DynamicType, IntType, IntType, DynamicType)
-    # Now, when one calls torch.var(tensor, dim=1), the compiler mistakingly
-    # matches it with (2) instead of (1), which is a problem.
-    'test_std_dim',
-    'test_std_dim_1d',
-    'test_std_dim_1d_neg0',
-    'test_std_dim_neg0',
-    'test_var_dim',
-    'test_var_dim_1d',
-    'test_var_dim_1d_neg0',
-    'test_var_dim_neg0',
     'test_norm_fro',
     'test_norm_fro_default',
     'test_norm_nuc',

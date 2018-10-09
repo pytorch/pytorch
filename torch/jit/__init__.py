@@ -46,6 +46,9 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
+compiled_weak_fns = weakref.WeakKeyDictionary()
+COMPILATION_PENDING = object()
+COMPILED = object()
 
 
 @contextlib.contextmanager
@@ -602,12 +605,14 @@ def createResolutionCallback(frames_up=0):
         baz()
     """
     frame = inspect.stack()[1 + frames_up][0]
+    f_locals = frame.f_locals
+    f_globals = frame.f_globals
 
     def env(key):
-        if key in frame.f_locals:
-            return frame.f_locals[key]
-        elif key in frame.f_globals:
-            return frame.f_globals[key]
+        if key in f_locals:
+            return f_locals[key]
+        elif key in f_globals:
+            return f_globals[key]
         else:
             return None
 
@@ -631,12 +636,36 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def script(fn, optimize=True, _frames_up=0):
+def weak_script(fn, _frames_up=0):
+    compiled_weak_fns[fn] = {
+        "status": COMPILATION_PENDING,
+        "compiled_fn": None,
+        "rcb": createResolutionCallback(_frames_up + 1)
+    }
+    return fn
+
+
+def _try_compile_weak_script(fn):
+    entry = compiled_weak_fns.get(fn)
+    if entry is None:
+        return None
+    if entry["status"] == COMPILATION_PENDING:
+        compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
+        del entry["rcb"]
+        compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
+        entry["status"] = COMPILED
+        return compiled_fn
+    else:
+        return entry["compiled_fn"]
+
+
+def script(fn, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return fn
-    rcb = createResolutionCallback(_frames_up + 1)
+    if _rcb is None:
+        _rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
-    graph = _jit_script_compile(ast, rcb)
+    graph = _jit_script_compile(ast, _rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
     # TODO: refactor everything so we're not 1) creating a ScriptModule

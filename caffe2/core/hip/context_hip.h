@@ -206,8 +206,8 @@ class HIPContext final : public BaseContext {
     return hiprand_generator_;
   }
 
-  static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(HIP)->allocate(nbytes);
   }
 
   // Get a mutex to lock out hipMalloc / hipFree calls when
@@ -323,26 +323,28 @@ inline void CPUContext::CopyBytes<CPUContext, HIPContext>(
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  */
-struct PinnedCPUAllocator final : CPUAllocator {
+struct PinnedCPUAllocator final : public at::Allocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
+  at::DataPtr allocate(size_t nbytes) const override {
     void* data;
+    at::DataPtr data_ptr;
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
     if (IsNUMAEnabled()) {
-      auto ptr_and_deleter = baseAllocator_.New(nbytes);
-      data = ptr_and_deleter.first;
+      data_ptr = baseAllocator_.allocate(nbytes);
+      data = data_ptr.get();
       CAFFE_ENFORCE(data);
       HIP_ENFORCE(hipHostRegister(data, nbytes, hipHostRegisterDefault));
     } else {
       HIP_ENFORCE(hipHostMalloc(&data, nbytes));
+      data_ptr = {data, data, &Delete, at::Device(CPU)};
     }
     memset(data, 0, nbytes);
-    return {data, Delete};
+    return data_ptr;
   }
 
-  MemoryDeleter GetDeleter() override {
-    return Delete;
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
   }
 
  private:
@@ -374,8 +376,6 @@ struct PinnedCPUAllocator final : CPUAllocator {
 
 class HIPStaticContext final : public BaseStaticContext {
  public:
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
-
   DeviceType GetDeviceType() override {
     return HIP;
   }
@@ -385,8 +385,6 @@ class HIPStaticContext final : public BaseStaticContext {
     device->set_hip_gpu_id(GetGPUIDForPointer(data));
   }
 
- protected:
-  static void Delete(void* data);
 };
 
 typedef Tensor TensorHIP;

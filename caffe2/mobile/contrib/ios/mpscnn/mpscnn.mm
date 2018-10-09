@@ -311,7 +311,7 @@ utils::ConstTensorView<T> GetSubTensorView(
   auto st_idx = ComputeStartIndex(tensor, start_dims);
   auto ptr = tensor.data<T>() + st_idx;
 
-  auto& input_dims = tensor.dims();
+  auto input_dims = tensor.dims();
   std::vector<int> ret_dims(input_dims.begin() + 1, input_dims.end());
 
   utils::ConstTensorView<T> ret(ptr, ret_dims);

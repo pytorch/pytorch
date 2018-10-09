@@ -6,27 +6,26 @@ ModelProto {
     GraphProto {
       name: "torch-jit-export"
       inputs: [{name: "y.1", type:Tensor dims: 3 4 1}]
-      outputs: [{name: "5", type:Tensor dims: 3 4 4}]
+      outputs: [{name: "6", type:Tensor dims: 3 4 4}]
       initializers: []
       nodes: [
         Node {type: "Constant", inputs: [], outputs: [1], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
         Node {type: "Constant", inputs: [], outputs: [2], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
         Node {type: "Constant", inputs: [], outputs: [3], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
         Node {type: "Constant", inputs: [], outputs: [4], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
-        Node {type: "Loop", inputs: [3,4,y.1], outputs: [5], attributes: [{ name: 'body', type: graph, value:
+        Node {type: "Constant", inputs: [], outputs: [5], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
+        Node {type: "Loop", inputs: [3,2,y.1], outputs: [6], attributes: [{ name: 'body', type: graph, value:
             GraphProto {
               name: "torch-jit-export1"
-              inputs: [{name: "i", type:Tensor dims: },{name: "cond", type:Tensor dims: },{name: "8", type:Tensor dims: }]
-              outputs: [{name: "15", type:Tensor dims: },{name: "16", type:Tensor dims: }]
+              inputs: [{name: "i", type:Tensor dims: },{name: "cond", type:Tensor dims: },{name: "9", type:Tensor dims: }]
+              outputs: [{name: "2", type:Tensor dims: },{name: "15", type:Tensor dims: }]
               initializers: []
               nodes: [
-                Node {type: "Unsqueeze", inputs: [2], outputs: [9], attributes: [{ name: 'axes', type: ints, values: [0]}]},
-                Node {type: "Unsqueeze", inputs: [1], outputs: [10], attributes: [{ name: 'axes', type: ints, values: [0]}]},
-                Node {type: "Unsqueeze", inputs: [i], outputs: [11], attributes: [{ name: 'axes', type: ints, values: [0]}]},
-                Node {type: "Concat", inputs: [9,10,11], outputs: [12], attributes: [{ name: 'axis', type: int, value: 0}]},
-                Node {type: "Constant", inputs: [], outputs: [13], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
-                Node {type: "ATen", inputs: [y.1,12,13], outputs: [16], attributes: [{ name: 'operator', type: string, value: 'expand'}]},
-                Node {type: "Constant", inputs: [], outputs: [15], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]}
+                Node {type: "Unsqueeze", inputs: [4], outputs: [10], attributes: [{ name: 'axes', type: ints, values: [0]}]},
+                Node {type: "Unsqueeze", inputs: [5], outputs: [11], attributes: [{ name: 'axes', type: ints, values: [0]}]},
+                Node {type: "Unsqueeze", inputs: [i], outputs: [12], attributes: [{ name: 'axes', type: ints, values: [0]}]},
+                Node {type: "Concat", inputs: [10,11,12], outputs: [13], attributes: [{ name: 'axis', type: int, value: 0}]},
+                Node {type: "ATen", inputs: [y.1,13,1], outputs: [15], attributes: [{ name: 'operator', type: string, value: 'expand'}]}
               ]
             }
 

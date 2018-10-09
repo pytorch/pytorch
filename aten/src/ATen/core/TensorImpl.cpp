@@ -31,31 +31,32 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, bool is_variable
 
 TensorImpl::TensorImpl(Storage&& storage, TensorTypeId type_id, const caffe2::TypeMeta& data_type, bool is_variable)
     : storage_(std::move(storage)),
-      storage_offset_(0),
       sizes_{0},
-      strides_{1},
-      is_contiguous_(true),
+      storage_offset_(0),
       numel_(0),
-      type_id_(type_id),
       data_type_(data_type),
-      is_variable_(is_variable) {}
+      type_id_(type_id),
+      is_variable_(is_variable) {
+  strides_.reset(new int64_t[1]);
+  strides_[0] = 1;
+}
 
 IntList TensorImpl::sizes() const {
   return sizes_;
 }
 
 IntList TensorImpl::strides() const {
-  AT_ASSERTM(strides_.size() == sizes_.size(),
+  AT_ASSERTM(strides_,
              "Caffe2 tensors don't (yet) have meaningful strides and cannot "
              "be used in PyTorch.");
-  return strides_;
+  return IntList{strides_.get(), sizes_.size()};
 }
 
 bool TensorImpl::compute_contiguous() const {
   bool is_contiguous = true;
   if (is_empty())
     return is_contiguous;
-  if (strides_.empty()) {
+  if (!strides_) {
     // Special case for Caffe2 tensors which don't have strides set.
     return true;
   }
@@ -89,7 +90,7 @@ int64_t TensorImpl::size(int64_t d) const {
 }
 
 int64_t TensorImpl::stride(int64_t d) const {
-  AT_ASSERTM(strides_.size() == sizes_.size(),
+  AT_ASSERTM(strides_,
              "Caffe2 tensors don't (yet) have meaningful strides and cannot "
              "be used in PyTorch.");
   d = at::maybe_wrap_dim(d, dim(), false);
@@ -106,6 +107,22 @@ TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
 
 const Storage& TensorImpl::storage() const {
   return storage_;
+}
+
+static void deletePlacementDeleteContext(void* ptr) {
+  delete static_cast<PlacementDeleteContext*>(ptr);
+}
+
+at::DataPtr PlacementDeleteContext::makeDataPtr(
+    at::DataPtr&& data_ptr,
+    PlacementDtor placement_dtor,
+    size_t size,
+    at::Device device) {
+  auto* ptr = data_ptr.get();
+  return {ptr,
+          new PlacementDeleteContext(std::move(data_ptr), placement_dtor, size),
+          &deletePlacementDeleteContext,
+          device};
 }
 
 } // namespace at
