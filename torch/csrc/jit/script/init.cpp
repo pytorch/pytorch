@@ -360,18 +360,37 @@ static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const 
   }
 }
 
-Resolver pythonResolver(ResolutionCallback rcb) {
-  return [=](const std::string& name,
-             Method& m,
-             const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
+namespace {
+struct PythonResolver : public Resolver {
+  PythonResolver(ResolutionCallback rcb) : rcb(rcb) {}
+  virtual std::shared_ptr<SugaredValue> operator() (const std::string& name, Method& m, const SourceRange& loc) const override {
+    if (function_table.count(name)) {
+      return function_table.at(name);
+    }
+
     AutoGIL ag;
     py::object obj = rcb(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
-  };
-}
+  }
+
+  virtual void addEntry(const std::string& name, std::shared_ptr<SugaredValue> sv) override {
+    function_table[name] = sv;
+  }
+
+  virtual void clear() override {
+    function_table.clear();
+  }
+
+  virtual ~PythonResolver() {}
+
+ private:
+   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> function_table;
+   ResolutionCallback rcb;
+};
+}  // namespace
 
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -396,12 +415,12 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb, bool has_self) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
-            return defineMethodsInModule(*m, script, pythonResolver(rcb), self);
+            return defineMethodsInModule(*m, script, std::make_shared<PythonResolver>(rcb), self);
           })
       .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
-        std::vector<Resolver> resolvers;
+        std::vector<std::shared_ptr<Resolver>> resolvers;
         for(auto & callback : rcbs) {
-          resolvers.push_back(pythonResolver(callback));
+          resolvers.push_back(std::make_shared<PythonResolver>(callback));
         }
         defineMethodsInModule(
           *m,
@@ -542,7 +561,7 @@ void initJitScriptBindings(PyObject* module) {
     .def("pretty_print_schema", &Method::pretty_print_schema);
 
   m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
-    return compileFunction(def, pythonResolver(rcb));
+    return compileFunction(def, std::make_shared<PythonResolver>(rcb));
   });
 
   m.def("parse_type_comment", [](const std::string& comment) {
