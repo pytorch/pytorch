@@ -126,7 +126,6 @@ test_torchvision() {
   # See https://github.com/pytorch/pytorch/issues/7525
   #time python setup.py install
   pip install --user .
-  python test/run_test.py --include utils --verbose -- TestHub
   popd
 }
 
