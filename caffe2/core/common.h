@@ -179,7 +179,7 @@ inline Dst dynamic_cast_if_rtti(Src ptr) {
 #ifdef __GXX_RTTI
   return dynamic_cast<Dst>(ptr);
 #else
-  return reinterpret_cast<Dst>(ptr);
+  return static_cast<Dst>(ptr);
 #endif
 }
 

@@ -54,7 +54,7 @@ class MIOPENReluOp final : public Operator<HIPContext> {
     // See if we need to reshape.
     if (X.dims() != miopen_input_dims_) {
       VLOG(1) << "Setting descriptors.";
-      miopen_input_dims_ = X.dims();
+      miopen_input_dims_ = X.dims().vec();
       int C = 1, H = 1, W = 1;
       if (X.ndim() == 4) {
         // Normal 4-dimensional tensors for images.
@@ -144,7 +144,7 @@ class MIOPENReluGradientOp final : public Operator<HIPContext> {
     // See if we need to reshape.
     if (Y.dims() != miopen_input_dims_) {
       VLOG(1) << "Setting descriptors.";
-      miopen_input_dims_ = Y.dims();
+      miopen_input_dims_ = Y.dims().vec();
       int C = 1, H = 1, W = 1;
       if (Y.ndim() == 4) {
         // Normal 4-dimensional tensors for images.

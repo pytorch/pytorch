@@ -271,6 +271,7 @@ const char* __TypeName() noexcept;
 template <class T>
 const char* _TypeName() noexcept {
 #ifdef __GXX_RTTI
+  std::ignore = __TypeName<T>(); // don't complain about unused __TypeName<T>() function
   static const std::string name = at::demangle(typeid(T).name());
   return name.c_str();
 #else
