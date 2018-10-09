@@ -35,9 +35,9 @@ class MKLSumOp final : public MKLOperator<T> {
           X0.layout(),
           coefficients_.data());
       if (Y != &X0) {
-        Y->Reset(X0.dims(), primitive_, dnnResourceDst);
+        Y->Reset(X0.dims().vec(), primitive_, dnnResourceDst);
       }
-      buffer_.Reset(X0.dims(), primitive_, dnnResourceDst, true);
+      buffer_.Reset(X0.dims().vec(), primitive_, dnnResourceDst, true);
     }
     input_views_.resize(this->InputSize());
     for (auto i = 0; i < this->InputSize(); ++i) {

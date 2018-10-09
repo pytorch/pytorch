@@ -233,7 +233,8 @@ class PyTorchStreamWriter {
   }
 
   void writePad(const size_t num_bytes) {
-    static std::vector<char> pad_buffer(kPadValue, kFieldAlignment);
+    static std::vector<char> pad_buffer(/*count=*/kFieldAlignment,
+                                        /*value=*/kPadValue);
     out.write(pad_buffer.data(), num_bytes);
     cursor += num_bytes;
   }

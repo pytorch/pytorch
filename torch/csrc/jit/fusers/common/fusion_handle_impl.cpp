@@ -393,8 +393,8 @@ at::optional<std::vector<int64_t>> FusionHandleImpl::getMapSize(
 }
 
 void FusionHandleImpl::runFallback(Stack& stack) {
-  InterpreterState(fallback_code).runOneStage(stack);
+  InterpreterState(fallback_code).run(stack);
 }
 
-} // namespace jit 
+} // namespace jit
 } // namespace torch

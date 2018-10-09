@@ -215,7 +215,7 @@ TEST_F(ParallelTest, DataParallelUsesAllAvailableCUDADevices_CUDA) {
   struct M : torch::nn::Cloneable<M> {
     void reset() override {}
     torch::Tensor forward(torch::Tensor input) {
-      return torch::tensor(torch::DefaultTensorOptions::get().device().index());
+      return torch::tensor(torch::getDefaultTensorOptions().device().index());
     }
   };
 
