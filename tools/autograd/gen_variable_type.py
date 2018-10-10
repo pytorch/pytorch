@@ -450,6 +450,8 @@ def emit_body(declaration):
         if 'Tensor' not in declaration['return_type']:
             return call
         elif is_view:
+            # If `GradMode::is_enabled()` is False, this is a non-differentiable
+            # view. Gradients should not flow through.
             # See NOTE [ Autograd Variable Views ] in variable.h for details.
             return 'as_view(self, {}, GradMode::is_enabled())'.format(call)
         else:

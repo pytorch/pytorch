@@ -61,8 +61,9 @@ struct Function;
 /// `Variable`. You can determine whether `Variable` is in fact a view by
 /// probing its `is_view()` method. Note that the *view* semantics are only
 /// meaningful for `Variable` relations that are relevant to autograd. For
-/// example, if you hide your code from autograd using `.data`, the `Variable`s
-/// will not be registered as having view relations, even if they share storage.
+/// example, if you hide your code from autograd using `.no_grad()`, the
+/// `Variable`s will not be registered as having view relations, even if they
+/// share storage.
 /// See NOTE [ Autograd Variable Views ] for more details.
 ///
 ///
@@ -414,15 +415,17 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 ///
 /// Such view Variables have is_view() = true and use ViewImpl.
 ///
-/// However, some outputs, although sharing storage, will **never** require
-/// gradient history tracking, and thus will not register the above view
-/// relation in autograd using ViewImpl. Instead, they will be usual Variables
-/// and just share the version counters with the base Variables.
+/// However, outputs of some functions, although sharing storage with inputs,
+/// will **never** require gradient history tracking, and thus will not register
+/// the above view relation in autograd using ViewImpl. Instead, they will be
+/// usual Variables and just share the version counters with the base Variables.
 /// Some examples are:
 ///   1. Variables created from .detach(),
 ///   2. Variables created when GradMode::enabled() = false.
-/// Relevant logic is implemented in make_variable_view below, and
-/// wrap_output of gen_variable_type.py.
+/// We call these non-differentiable views as the gradients do not flow through
+/// the view relation.
+/// Relevant logic for non-differentiable views is implemented in
+/// make_variable_view below, and wrap_output of gen_variable_type.py.
 struct TORCH_API Variable::ViewImpl : public Variable::Impl {
   ViewImpl(Variable base, at::Tensor data, Edge gradient_edge);
 
