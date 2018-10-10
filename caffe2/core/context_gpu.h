@@ -184,7 +184,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     }
   }
 
-  inline int cuda_gpu_id() const {
+  inline int device_id() const {
     return gpu_id_;
   }
 
@@ -224,7 +224,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   }
 
   inline static at::DataPtr New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+    return GetAllocator(CUDA)->allocate(nbytes);
   }
 
   // Get a mutex to lock out cudaMalloc / cudaFree calls when
@@ -283,7 +283,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   }
 
   static bool IsStreamFree(const DeviceOption& option, int stream_id) {
-    auto stream = CUDAContext::cuda_stream(option.cuda_gpu_id(), stream_id);
+    auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
     return cudaStreamQuery(stream) == cudaSuccess;
   }
 
@@ -387,8 +387,6 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
 
 class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
  public:
-  at::DataPtr New(size_t nbytes) const override;
-
   DeviceType GetDeviceType() override {
     return CUDA;
   }
@@ -396,13 +394,10 @@ class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
   void ExtractDeviceOption(DeviceOption* device, const void* data) override {
     CAFFE_ENFORCE(data, "data cannot be nullptr");
     device->set_device_type(TypeToProto(GetDeviceType()));
-    device->set_cuda_gpu_id(GetGPUIDForPointer(data));
+    device->set_device_id(GetGPUIDForPointer(data));
   }
 
 };
-
-// Get the CUDA Alloctor.
-CAFFE2_API at::Allocator* GetCUDAAllocator();
 
 using TensorCUDA = Tensor;
 

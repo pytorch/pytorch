@@ -1085,36 +1085,17 @@ if (NOT BUILD_ATEN_MOBILE)
     add_compile_options(-DUSE_GCC_GET_CPUID)
   ENDIF()
 
-  FIND_PACKAGE(SSE) # checks SSE, AVX and AVX2
-  IF (C_SSE2_FOUND)
-    MESSAGE(STATUS "SSE2 Found")
-    # TODO: Work out correct way to do this.  Note that C_SSE2_FLAGS is often
-    # empty, in which case it expands to " " flag which is bad
-    SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE2)
-  ENDIF()
-  IF (C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-    SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE4_1 -DUSE_SSE4_2)
-  ENDIF()
-  IF (C_SSE3_FOUND)
-    MESSAGE(STATUS "SSE3 Found")
-    SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE3)
-  ENDIF()
+  FIND_PACKAGE(AVX) # checks AVX and AVX2
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
   # however, we want to enable the AVX codepaths, so we still need to
   # add USE_AVX and USE_AVX2 macro defines
   IF (C_AVX_FOUND)
-    MESSAGE(STATUS "AVX Found")
+    MESSAGE(STATUS "AVX compiler support found")
     add_compile_options(-DUSE_AVX)
   ENDIF()
   IF (C_AVX2_FOUND)
-    MESSAGE(STATUS "AVX2 Found")
+    MESSAGE(STATUS "AVX2 compiler support found")
     add_compile_options(-DUSE_AVX2)
   ENDIF()
 
