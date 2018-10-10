@@ -33,6 +33,14 @@ merge_pull_request_onto_master: &merge_pull_request_onto_master
       git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
     fi
 
+install_official_git_client: &install_official_git_client
+  name: Install Official Git Client
+  no_output_timeout: "1h"
+  command: |
+    set -ex
+    sudo apt-get update
+    sudo apt-get install -y openssh-client git
+
 setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment
   no_output_timeout: "1h"
@@ -88,6 +96,8 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
   resource_class: large
   working_directory: /var/lib/jenkins/workspace
   steps:
+  - run:
+      <<: *install_official_git_client
   - checkout
   - run:
       <<: *merge_pull_request_onto_master
@@ -113,6 +123,8 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
   machine:
     image: default
   steps:
+  - run:
+      <<: *install_official_git_client
   - checkout
   - run:
       <<: *merge_pull_request_onto_master
@@ -182,6 +194,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
   machine:
     image: default
   steps:
+  - run:
+      <<: *install_official_git_client
   - checkout
   - run:
       <<: *merge_pull_request_onto_master
