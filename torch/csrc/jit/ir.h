@@ -817,115 +817,24 @@ public:
     return block_->registerOutput(n);
   }
 
-  Node * create(NodeKind kind, size_t num_outputs=1) {
-    // NB: Node constructor adds node to all_nodes
-    auto n = new Node(this, kind);
-    for(size_t i = 0; i < num_outputs; i++)
-      n->addOutput();
-    return n;
-  }
+  Node * create(NodeKind kind, size_t num_outputs=1);
+  Node * create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs=1);
 
-  Node * create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs=1) {
-    auto n = create(kind, num_outputs);
-    for(auto i : inputs)
-      n->addInput(i);
-    return n;
-  }
-
-  Node * createUndefined() {
-    return create(prim::Undefined);
-  }
-  Node * createNoneGenerator() {
-    auto n = create(prim::NoneGenerator);
-    n->output()->setType(GeneratorType::get());
-    return n;
-  }
-  Node * createFusionGroup(int device) {
-    auto n = create(prim::FusionGroup, 0);
-    n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
-    n->i_(attr::device, device);
-    return n;
-  }
-  Node* createTuple(at::ArrayRef<Value*> values) {
-    auto types = fmap(values, [](Value* v) { return v->type(); });
-    auto tt = TupleType::create(std::move(types));
-    auto n = create(prim::TupleConstruct, values);
-    n->output()->setType(tt);
-    return n;
-  }
-  Node* createTupleUnpack(Value * v) {
-    TupleTypePtr tt = v->type()->expect<TupleType>();
-    auto n = create(prim::TupleUnpack, {v}, 0);
-    for(auto & element : tt->elements()) {
-      n->addOutput()->setType(element);
-    }
-    return n;
-  }
-  Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
-    auto n = create(prim::ListConstruct, values);
-    for(const auto & v : values) {
-      JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
-    }
-    n->output()->setType(ListType::create(elem_type));
-    return n;
-  }
-  Node * createListUnpack(Value *v, size_t size) {
-    ListTypePtr list_type = v->type()->expect<ListType>();
-    TypePtr elem_type = list_type->getElementType();
-    auto n = create(prim::ListUnpack, {v}, 0);
-    for (size_t i = 0; i < size; ++i) {
-      n->addOutput()->setType(elem_type);
-    }
-    return n;
-  }
-  Node* createNumToTensor(Value* value) {
-    auto typ = value->type();
-    Node * result = create(prim::NumToTensor, {value});
-    result->output()->setType(CompleteTensorType::fromNumberType(typ));
-    return result;
-  }
-  Node* createBoolToTensor(Value* value) {
-    auto typ = value->type();
-    Node * result = create(prim::BoolToTensor, {value});
-    if (!typ->isSubtypeOf(BoolType::get())) {
-      AT_ERROR("Cannot create bool type from ", typ->str());
-    }
-    result->output()->setType(CompleteTensorType::fromBoolType());
-    return result;
-  }
-  Node* createTensorToNum(const TypePtr& type, Value* value) {
-    auto* result = create(prim::TensorToNum, {value});
-    result->output()->setType(type);
-    return result;
-  }
-  Node* createImplicitTensorToNum(const TypePtr& type, Value* value) {
-    auto* result = create(prim::ImplicitTensorToNum, {value});
-    result->output()->setType(type);
-    return result;
-  }
-  Node* createTensorToBool(Value* value) {
-    auto* result = create(prim::TensorToBool, {value});
-    result->output()->setType(BoolType::get());
-    return result;
-  }
-  Node* createIntToFloat(Value* value) {
-    JIT_ASSERT(*value->type() == *IntType::get());
-    auto* result = create(prim::IntToFloat, {value});
-    result->output()->setType(FloatType::get());
-    return result;
-  }
-  Node* createFloatToInt(Value* value) {
-    JIT_ASSERT(*value->type() == *FloatType::get());
-    auto* result = create(prim::FloatToInt, {value});
-    result->output()->setType(IntType::get());
-    return result;
-  }
-  Node* createStringToFloat(Value* value) {
-    JIT_ASSERT(*value->type() == *StringType::get());
-    auto* result = create(prim::StringToFloat, {value});
-    result->output()->setType(FloatType::get());
-    return result;
-  }
+  Node * createUndefined();
+  Node * createNoneGenerator();
+  Node * createFusionGroup(int device);
+  Node* createTuple(at::ArrayRef<Value*> values);
+  Node* createTupleUnpack(Value * v);
+  Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values);
+  Node * createListUnpack(Value *v, size_t size);
+  Node* createNumToTensor(Value* value);
+  Node* createBoolToTensor(Value* value);
+  Node* createTensorToNum(const TypePtr& type, Value* value);
+  Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
+  Node* createTensorToBool(Value* value);
+  Node* createIntToFloat(Value* value);
+  Node* createFloatToInt(Value* value);
+  Node* createStringToFloat(Value* value);
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -934,35 +843,13 @@ public:
   // use node_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
   // this node contains.
-  Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true) {
-    //n can be from a different graph
-    Node * r = n->allocNewInstance(this);
-    for(auto o : n->outputs()) {
-      r->addOutput()->copyMetadata(o);
-    }
-    r->cloneFrom(n);
-    for(auto i : n->inputs()) {
-      r->addInput(value_map(i));
-    }
-    if(copy_blocks) {
-      for(auto b : n->blocks()) {
-        r->addBlock()->cloneFrom(b, value_map);
-      }
-    }
-    return r;
-  }
+  Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true);
 
   Value* insertConstant(
       IValue val,
-      c10::optional<SourceRange> loc = c10::nullopt) {
-    return jit::insertConstant(*this, std::move(val), loc);
-  }
+      c10::optional<SourceRange> loc = c10::nullopt);
 
-  Value* insertDummyWorld() {
-    auto node = create(prim::DummyWorld, 1);
-    node->output()->setType(WorldType::get());
-    return insertNode(node)->output();
-  }
+  Value* insertDummyWorld();
 
   // schema-driven insert
   // this inserts a node into the graph with inputs determined from args and kwargs using Python
@@ -1014,20 +901,9 @@ public:
   // for use in debugger
   TORCH_API void dump() const;
 
-  ~Graph() {
-    for (const Node * n : all_nodes)
-      delete n;
-    for (const Value * v : all_values)
-      delete v;
-    for (const Block * b : all_blocks)
-      delete b;
-  }
+  ~Graph();
 
-  std::string toString() const {
-    std::ostringstream oss;
-    oss << *this;
-    return oss.str();
-  }
+  std::string toString() const;
 
   friend TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
 
@@ -1038,25 +914,9 @@ public:
 
 private:
 
-  void freeNode(Node * n) {
-    auto it = all_nodes.find(n);
-    JIT_ASSERT(it != all_nodes.end());
-    delete *it;
-    all_nodes.erase(it);
-  }
-  void freeValue(Value * v) {
-    v->setUniqueName("");
-    auto it = all_values.find(v);
-    JIT_ASSERT(it != all_values.end());
-    delete *it;
-    all_values.erase(it);
-  }
-  void freeBlock(Block * b) {
-    auto it = all_blocks.find(b);
-    JIT_ASSERT(it != all_blocks.end());
-    delete *it;
-    all_blocks.erase(it);
-  }
+  void freeNode(Node * n);
+  void freeValue(Value * v);
+  void freeBlock(Block * b);
 };
 
 struct WithInsertPoint : public ResourceGuard {
@@ -1214,18 +1074,6 @@ struct PythonOp : public Node {
 // patched in when python bindings are loaded
 TORCH_API PythonOp* allocPythonOp(Graph* g);
 TORCH_API void setAllocPythonOp(PythonOp* (*v)(Graph* g));
-
-inline Node* Graph::createPythonOp(
-    THPObjectPtr&& pyobj,
-    const std::string& cconv,
-    pyobj_list&& scalar_args) {
-  auto op = allocPythonOp(this);
-  return op->init(
-      std::move(pyobj),
-      cconv,
-      std::move(scalar_args));
-}
-
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 
 }} // namespace torch::jit

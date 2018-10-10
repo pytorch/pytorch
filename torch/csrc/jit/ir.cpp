@@ -847,6 +847,204 @@ Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<
   return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
 }
 
+Node* Graph::create(NodeKind kind, size_t num_outputs) {
+  // NB: Node constructor adds node to all_nodes
+  auto n = new Node(this, kind);
+  for(size_t i = 0; i < num_outputs; i++)
+    n->addOutput();
+  return n;
+}
+
+Node* Graph::create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs) {
+  auto n = create(kind, num_outputs);
+  for(auto i : inputs)
+    n->addInput(i);
+  return n;
+}
+
+Node* Graph::createUndefined() {
+  return create(prim::Undefined);
+}
+
+Node * Graph::createNoneGenerator() {
+  auto n = create(prim::NoneGenerator);
+  n->output()->setType(GeneratorType::get());
+  return n;
+}
+
+Node * Graph::createFusionGroup(int device) {
+  auto n = create(prim::FusionGroup, 0);
+  n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
+  n->i_(attr::device, device);
+  return n;
+}
+
+Node* Graph::createTuple(at::ArrayRef<Value*> values) {
+  auto types = fmap(values, [](Value* v) { return v->type(); });
+  auto tt = TupleType::create(std::move(types));
+  auto n = create(prim::TupleConstruct, values);
+  n->output()->setType(tt);
+  return n;
+}
+
+Node* Graph::createTupleUnpack(Value * v) {
+  TupleTypePtr tt = v->type()->expect<TupleType>();
+  auto n = create(prim::TupleUnpack, {v}, 0);
+  for(auto & element : tt->elements()) {
+    n->addOutput()->setType(element);
+  }
+  return n;
+}
+
+Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+  auto n = create(prim::ListConstruct, values);
+  for(const auto & v : values) {
+    JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
+  }
+  n->output()->setType(ListType::create(elem_type));
+  return n;
+}
+Node* Graph::createListUnpack(Value *v, size_t size) {
+  ListTypePtr list_type = v->type()->expect<ListType>();
+  TypePtr elem_type = list_type->getElementType();
+  auto n = create(prim::ListUnpack, {v}, 0);
+  for (size_t i = 0; i < size; ++i) {
+    n->addOutput()->setType(elem_type);
+  }
+  return n;
+}
+
+Node* Graph::createNumToTensor(Value* value) {
+  auto typ = value->type();
+  Node * result = create(prim::NumToTensor, {value});
+  result->output()->setType(CompleteTensorType::fromNumberType(typ));
+  return result;
+}
+
+Node* Graph::createBoolToTensor(Value* value) {
+  auto typ = value->type();
+  Node * result = create(prim::BoolToTensor, {value});
+  if (!typ->isSubtypeOf(BoolType::get())) {
+    AT_ERROR("Cannot create bool type from ", typ->str());
+  }
+  result->output()->setType(CompleteTensorType::fromBoolType());
+  return result;
+}
+Node* Graph::createTensorToNum(const TypePtr& type, Value* value) {
+  auto* result = create(prim::TensorToNum, {value});
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
+  auto* result = create(prim::ImplicitTensorToNum, {value});
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createTensorToBool(Value* value) {
+  auto* result = create(prim::TensorToBool, {value});
+  result->output()->setType(BoolType::get());
+  return result;
+}
+
+Node* Graph::createIntToFloat(Value* value) {
+  JIT_ASSERT(*value->type() == *IntType::get());
+  auto* result = create(prim::IntToFloat, {value});
+  result->output()->setType(FloatType::get());
+  return result;
+}
+
+Node* Graph::createFloatToInt(Value* value) {
+  JIT_ASSERT(*value->type() == *FloatType::get());
+  auto* result = create(prim::FloatToInt, {value});
+  result->output()->setType(IntType::get());
+  return result;
+}
+
+Node* Graph::createStringToFloat(Value* value) {
+  JIT_ASSERT(*value->type() == *StringType::get());
+  auto* result = create(prim::StringToFloat, {value});
+  result->output()->setType(FloatType::get());
+  return result;
+}
+
+Node* Graph::createPythonOp(
+    THPObjectPtr&& pyobj,
+    const std::string& cconv,
+    pyobj_list&& scalar_args) {
+  auto op = allocPythonOp(this);
+  return op->init(
+      std::move(pyobj),
+      cconv,
+      std::move(scalar_args));
+}
+
+Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks) {
+  //n can be from a different graph
+  Node * r = n->allocNewInstance(this);
+  for(auto o : n->outputs()) {
+    r->addOutput()->copyMetadata(o);
+  }
+  r->cloneFrom(n);
+  for(auto i : n->inputs()) {
+    r->addInput(value_map(i));
+  }
+  if(copy_blocks) {
+    for(auto b : n->blocks()) {
+      r->addBlock()->cloneFrom(b, value_map);
+    }
+  }
+  return r;
+}
+
+Value* Graph::insertConstant(
+    IValue val,
+    c10::optional<SourceRange> loc) {
+  return jit::insertConstant(*this, std::move(val), loc);
+}
+
+Value* Graph::insertDummyWorld() {
+  auto node = create(prim::DummyWorld, 1);
+  node->output()->setType(WorldType::get());
+  return insertNode(node)->output();
+}
+
+std::string Graph::toString() const {
+  std::ostringstream oss;
+  oss << *this;
+  return oss.str();
+}
+
+Graph::~Graph() {
+  for (const Node * n : all_nodes)
+    delete n;
+  for (const Value * v : all_values)
+    delete v;
+  for (const Block * b : all_blocks)
+    delete b;
+}
+
+void Graph::freeNode(Node * n) {
+  auto it = all_nodes.find(n);
+  JIT_ASSERT(it != all_nodes.end());
+  delete *it;
+  all_nodes.erase(it);
+}
+void Graph::freeValue(Value * v) {
+  v->setUniqueName("");
+  auto it = all_values.find(v);
+  JIT_ASSERT(it != all_values.end());
+  delete *it;
+  all_values.erase(it);
+}
+void Graph::freeBlock(Block * b) {
+  auto it = all_blocks.find(b);
+  JIT_ASSERT(it != all_blocks.end());
+  delete *it;
+  all_blocks.erase(it);
+}
+
 PythonOp* defaultAllocPythonOp(Graph*g) {
   throw std::runtime_error("Trying to allocate a Python object without python bindings loaded");
 }
