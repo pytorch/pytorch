@@ -100,13 +100,6 @@ __global__ void col2im_kernel(const int64_t n, const Dtype* data_col,
   }
 }
 
-template <typename Dtype, typename Acctype>
-void col2im(cudaStream_t stream, const Dtype* data_col, const int64_t channels,
-            const int64_t height, const int64_t width,
-            const int64_t output_height, const int64_t output_width,
-            const int64_t patch_h, const int64_t patch_w, const int64_t pad_h,
-            const int64_t pad_w, const int64_t stride_h, const int64_t stride_w,
-            const int64_t dilation_h, const int64_t dilation_w, Dtype* data_im);
 
 template <typename Dtype, typename Acctype>
 void col2im(cudaStream_t stream, const Dtype* data_col, const int64_t channels,
