@@ -126,6 +126,8 @@ static detail::DynamicDAG<Node*> make_dependency_graph(Block * block) {
             JIT_ASSERT(owning_node != nullptr);
             continue;
           }
+          // NB: DynamicDAG is a simple graph (no multi-edges).
+          // addEdge is a no-op if the edge already exists.
           dag.addEdge(node_to_vertex[node], search->second);
           break;
         }
@@ -150,6 +152,12 @@ static void find_differentiable_groups(
   // ord indices. For a certain ord, we attempt to merge the vertex at that ord
   // with each of its parents. If the vertex at the ord cannot be merged with any
   // of its parents, then we move on to a smaller ord and repeat.
+  //
+  // Each contractEdge call is effectively constant because we limit the size
+  // of the affected region (via the distance_threshold) and the fan in/fan out
+  // via producer_edge_threshold.
+  // In addition, each sort of in_edges is bounded by producer_edge threshold.
+  // This makes the complexity of find_differential_groups effectively O(V + E).
 
   // Iterate in reverse topological order
   int64_t ord = dep_graph.max_size() - 1;

@@ -10,7 +10,7 @@
 
 namespace torch { namespace jit { namespace detail {
 
-// DynamicDAG is a simple dynamic acyclic graph that dynamically maintains a
+// DynamicDAG is a simple directed acyclic graph that dynamically maintains a
 // topological order as edges/vertices are added and removed.
 //
 // [Example applications]
@@ -140,7 +140,6 @@ struct DynamicDAG {
   size_t max_size() const { return vertices_.size(); };
   at::optional<Vertex<T>*> at(size_t ord) const;
 
-  void sort(vertex_list<T>& delta);
   std::string toString();
 
   // Use for debugging. Don't call these often.
@@ -150,6 +149,7 @@ struct DynamicDAG {
  private:
   void mergeProducerIntoConsumer(Vertex<T>* producer, Vertex<T>* consumer);
   void mergeConsumerIntoProducer(Vertex<T>* producer, Vertex<T>* consumer);
+  void sort(vertex_list<T>& delta);
   void reorder(visited_list<T> deltaF, visited_list<T> deltaB);
   bool contractionProducesCycle(Vertex<T>* producer, Vertex<T>* consumer);
   bool dfsSearch(
@@ -298,10 +298,14 @@ IOEdges<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
  * This produces th graph shown on the right.
  *
  * [Analysis]
- * This is O(|AR|) which is the same thing as O(ord(consumer) - ord(producer))
+ * This is O(|AR| log |AR|). |AR| is equal to ord(consumer) - ord(producer).
  * AR is the "affected region": { v s.t. ord(v) in [ord(producer), ord(consumer)] }
- * consisting of the only verticies that can possibly be moved around due
- * to this edge addition.
+ * consisting of the only vertices that can possibly be moved around due to this
+ * edge addition.
+ *
+ * NB: Pearce and Kelly give a complexity bound of <<delta>> where
+ * delta = union(deltaF, deltaB) and <<S>> on a set S is
+ * <<S>> = |S| + |edges out of vertices of S| + |edges into vertices of S|.
  */
 template <typename T>
 void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
@@ -344,7 +348,7 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 // These are the only vertices that can possibly be moved around
 // during edge contraction.
 //
-// contractEdge is O(|AR| * min(|out_edges(producer)|, |in_edges(consumer)|))
+// contractEdge is O(|AR| log |AR| * min(|out_edges(producer)|, |in_edges(consumer)|))
 template <typename T>
 bool DynamicDAG<T>::contractEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   JIT_ASSERT(producer != consumer);
@@ -380,7 +384,7 @@ void DynamicDAG<T>::mergeProducerIntoConsumer(Vertex<T>* producer, Vertex<T>* co
   }
 
   // NB: each addEdge call is linear in (ord(consumer) - ord(child)).
-  // This makes this function O(|out_edges(producer)| * |AR|).
+  // This makes this function O(|out_edges(producer)| * |AR| log |AR|).
   for (auto* child : edges.out_edges) {
     addEdge(consumer, child);
   }
@@ -399,7 +403,7 @@ void DynamicDAG<T>::mergeConsumerIntoProducer(Vertex<T>* producer, Vertex<T>* co
   }
 
   // NB: each addEdge call is linear in (ord(producer) - ord(parent)).
-  // This makes this function O(|in_edges(consumer)| * |AR|).
+  // This makes this function O(|in_edges(consumer)| * |AR| log |AR|).
   for (auto* parent : edges.in_edges) {
     addEdge(parent, producer);
   }
@@ -437,7 +441,7 @@ static bool is_within_bound(DFSDirection direction, size_t value, size_t bound) 
 
 // Searches for a path from start to end via a forward or backward dfs.
 // Returns if a path exists from start to end.
-// In addition, dfsSearch marks vertices as visited and inserts them into visited.
+// In addition, dfsSearch inserts visited vertices into the visited list.
 template <typename T>
 bool DynamicDAG<T>::dfsSearch(
     DFSDirection direction,
