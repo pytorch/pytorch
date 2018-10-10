@@ -489,6 +489,20 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   }
 }
 
+void Block::destroy() {
+  // we cannot destroy the output because it is used as the sentinel
+  // for the nodes() list and has to remain valid for the loop
+  output_->removeAllInputs();
+  for(auto it = this->nodes().reverse().begin(),
+      end = this->nodes().reverse().end();
+      it != end; ++it) {
+    it.destroyCurrent();
+  }
+  output_->destroy();
+  input_->destroy();
+  graph_->freeBlock(this);
+}
+
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value* v) -> Value* {
@@ -967,17 +981,6 @@ Node* Graph::createStringToFloat(Value* value) {
   auto* result = create(prim::StringToFloat, {value});
   result->output()->setType(FloatType::get());
   return result;
-}
-
-Node* Graph::createPythonOp(
-    THPObjectPtr&& pyobj,
-    const std::string& cconv,
-    pyobj_list&& scalar_args) {
-  auto op = allocPythonOp(this);
-  return op->init(
-      std::move(pyobj),
-      cconv,
-      std::move(scalar_args));
 }
 
 Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks) {
