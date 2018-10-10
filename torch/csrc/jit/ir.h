@@ -220,13 +220,7 @@ public:
   //          %5 = h(%6, %6)
   void replaceAllUsesWith(Value * newValue);
 
-  Value* copyMetadata(Value * from) {
-    setType(from->type());
-    if (from->hasUniqueName())
-      setUniqueName(from->uniqueName());
-    return this;
-  }
-
+  Value* copyMetadata(Value * from);
 };
 
 struct Node : public Attributes<Node> {
@@ -1114,20 +1108,6 @@ inline Graph * Value::owningGraph() {
 
 inline const Graph * Value::owningGraph() const {
   return node()->owningGraph();
-}
-
-inline void Value::replaceFirstUseWith(Value * newValue) {
-  JIT_ASSERT(owningGraph() == newValue->owningGraph());
-  auto u = uses()[0];
-  u.user->inputs_[u.offset] = newValue;
-  newValue->uses_.push_back(u);
-  uses_.erase(uses_.begin());
-}
-
-inline void Value::replaceAllUsesWith(Value * newValue) {
-  while (!uses().empty()) {
-    replaceFirstUseWith(newValue);
-  }
 }
 
 inline Block::Block(Graph* graph_, Node* node_)

@@ -542,6 +542,27 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
+Value* Value::copyMetadata(Value * from) {
+  setType(from->type());
+  if (from->hasUniqueName())
+    setUniqueName(from->uniqueName());
+  return this;
+}
+
+void Value::replaceFirstUseWith(Value * newValue) {
+  JIT_ASSERT(owningGraph() == newValue->owningGraph());
+  auto u = uses()[0];
+  u.user->inputs_[u.offset] = newValue;
+  newValue->uses_.push_back(u);
+  uses_.erase(uses_.begin());
+}
+
+void Value::replaceAllUsesWith(Value * newValue) {
+  while (!uses().empty()) {
+    replaceFirstUseWith(newValue);
+  }
+}
+
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
   for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
