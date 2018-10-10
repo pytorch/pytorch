@@ -472,9 +472,11 @@ inline Variable make_variable_view(
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
     if (potentially_tracks_history) {
+      /// Differentiable view. Track history with ViewImpl.
       return Variable(c10::make_intrusive<Variable::ViewImpl>(
               std::move(base), std::move(data), std::move(gradient_edge)));
     } else {
+      /// Non-differentiable view. Just share version counter.
       auto var = Variable(c10::make_intrusive<Variable::Impl>(
               std::move(data), false, std::move(gradient_edge)));
       var.set_version_counter(base.version_counter());
