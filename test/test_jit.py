@@ -7289,10 +7289,12 @@ a")
 
     def test_trace_contiguous(self):
         def foo(x):
-            return x[0].contiguous().view(3, 4)
+            return x.contiguous()
 
-        traced = torch.jit.trace(foo, (torch.rand(2, 3, 4),))
-        self.assertExpectedGraph(traced.graph)
+        x = torch.rand(2, 3, 4)
+        traced = torch.jit.trace(foo, (x,))
+        y = traced(x)
+        self.assertNotEqual(x.storage().data_ptr(), y.storage().data_ptr())
 
 
 class MnistNet(nn.Module):
