@@ -10,8 +10,8 @@
 
 namespace torch { namespace jit { namespace detail {
 
-// DynamicDAG is a DAG that dynamically maintains a topological order as
-// edges/vertices are added and removed.
+// DynamicDAG is a simple dynamic acyclic graph that dynamically maintains a
+// topological order as edges/vertices are added and removed.
 //
 // [Example applications]
 // - Let's say you have a DAG where each vertex is black or red. How do we
@@ -38,32 +38,47 @@ template <typename T> using unique_vertex = std::unique_ptr<Vertex<T>>;
 
 enum DFSDirection {forward, backward};
 
-// Some helper functions
-template <typename T>
-struct vertex_collection {
-  static void insert(vertex_list<T>& lst, Vertex<T>* v) {
-    lst.push_back(v);
-  }
-
-  static void erase(vertex_list<T>& lst, Vertex<T>* v) {
-    lst.erase(std::find(lst.begin(), lst.end(), v));
-  }
-
-  static bool contains(vertex_list<T>& lst, Vertex<T>* v) {
-    return std::find(lst.begin(), lst.end(), v) != lst.end();
-  }
-};
-
+// Used to represent adjacency lists in DynamicDAG.
+// NOT a multiset.
 // Because our graphs shouldn't fan out or in very much,
 // we use std::vector<Vertex<T>*> to record edges.
 // In all of the complexity analysis it is assumed that
 // inserting, erasing, and finding take constant time.
 template <typename T>
-struct EdgeData {
-  // These are both sorted in topological order because iterating
-  // in topological order is useful.
-  vertex_list<T> in_edges;
-  vertex_list<T> out_edges;
+struct ordered_vertex_set {
+  using iterator = typename vertex_list<T>::iterator;
+  using reverse_iterator = typename vertex_list<T>::reverse_iterator;
+
+  void insert(Vertex<T>* v) {
+    data_.push_back(v);
+  }
+  void erase(Vertex<T>* v) {
+    // NB: DynamicDAG does not have multiedges, so data_ has unique elements
+    data_.erase(std::find(data_.begin(), data_.end(), v));
+  }
+  bool contains(Vertex<T>* v) const {
+    // NB: DynamicDAG does not have multiedges, so data_ has unique elements
+    return std::find(data_.begin(), data_.end(), v) != data_.end();
+  }
+  void sort() {
+    std::sort(data_.begin(), data_.end(), [](Vertex<T>* a, Vertex<T>* b) {
+      return a->ord < b->ord;
+    });
+  }
+  size_t size() const { return data_.size(); }
+  iterator begin() { return data_.begin(); }
+  iterator end() { return data_.end(); }
+  reverse_iterator rbegin() { return data_.rbegin(); }
+  reverse_iterator rend() { return data_.rend(); }
+
+ private:
+  std::vector<Vertex<T>*> data_;
+};
+
+template <typename T>
+struct IOEdges {
+  ordered_vertex_set<T> in_edges;
+  ordered_vertex_set<T> out_edges;
 };
 
 // Simple RAII wrapper around a vertex_list<T>.
@@ -98,14 +113,14 @@ struct Vertex {
   size_t ord; // unique topological index
 
   std::string toString();
-  vertex_list<T>& in_edges() { return edges_.in_edges; }
-  vertex_list<T>& out_edges() { return edges_.out_edges; }
-  EdgeData<T>&& move_edges() { return std::move(edges_); }
+  ordered_vertex_set<T>& in_edges() { return edges_.in_edges; }
+  ordered_vertex_set<T>& out_edges() { return edges_.out_edges; }
+  IOEdges<T>&& move_edges() { return std::move(edges_); }
 
   bool visited() { return visited_; }
 
 private:
-  EdgeData<T> edges_;
+  IOEdges<T> edges_;
 
   friend visited_list<T>;
   bool visited_; // If this vertex has been visited
@@ -114,7 +129,7 @@ private:
 template <typename T>
 struct DynamicDAG {
   Vertex<T>* newVertex(T datum);
-  EdgeData<T> removeVertex(Vertex<T>* v);
+  IOEdges<T> removeVertex(Vertex<T>* v);
 
   void addEdge(Vertex<T>* producer, Vertex<T>* consumer);
   void removeEdge(Vertex<T>* producer, Vertex<T>* consumer);
@@ -135,7 +150,7 @@ struct DynamicDAG {
  private:
   void mergeProducerIntoConsumer(Vertex<T>* producer, Vertex<T>* consumer);
   void mergeConsumerIntoProducer(Vertex<T>* producer, Vertex<T>* consumer);
-  void reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB);
+  void reorder(visited_list<T> deltaF, visited_list<T> deltaB);
   bool contractionProducesCycle(Vertex<T>* producer, Vertex<T>* consumer);
   bool dfsSearch(
       DFSDirection direction,
@@ -176,10 +191,10 @@ void DynamicDAG<T>::sort(vertex_list<T>& delta) {
 template <typename T>
 void DynamicDAG<T>::removeEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   JIT_ASSERT(producer != consumer);
-  JIT_ASSERT(vertex_collection<T>::contains(producer->out_edges(), consumer));
-  JIT_ASSERT(vertex_collection<T>::contains(consumer->in_edges(), producer));
-  vertex_collection<T>::erase(producer->out_edges(), consumer);
-  vertex_collection<T>::erase(consumer->in_edges(), producer);
+  JIT_ASSERT(producer->out_edges().contains(consumer));
+  JIT_ASSERT(consumer->in_edges().contains(producer));
+  producer->out_edges().erase(consumer);
+  consumer->in_edges().erase(producer);
 }
 
 template <typename T>
@@ -209,12 +224,12 @@ at::optional<Vertex<T>*> DynamicDAG<T>::at(size_t ord) const {
 }
 
 template <typename T>
-EdgeData<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
+IOEdges<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
   for (auto* parent : v->in_edges()) {
-    vertex_collection<T>::erase(parent->out_edges(), v);
+    parent->out_edges().erase(v);
   }
   for (auto* child : v->out_edges()) {
-    vertex_collection<T>::erase(child->in_edges(), v);
+    child->in_edges().erase(v);
   }
   auto edges = v->move_edges();
   vertices_[v->ord] = nullptr;
@@ -265,8 +280,22 @@ EdgeData<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
  * We find all children of y in the affected region. deltaF = {y, a, b}
  * We find all parents of x via DFS. deltaB = {c, d, x}
  *
- * Now, we reorder all vertices in deltaB to come before deltaF.
- * result = {c, d, x, y, a, b}, and we assign these {1, 2, 3, 4, 5, 6}.
+ * Now, we reorder all vertices in deltaB to come before deltaF. This is
+ * a little involved and happens in four steps:
+ *
+ * 1) sort all vertices in deltaB, and all vertices in deltaF.
+ * deltaB (sorted) = {c(2), d(4), x(6)}. deltaB ords = { 2, 4, 6 }
+ * deltaF (sorted) = {y(1), a(3), b(5)}. deltaF ords = { 1, 3, 5 }
+ *
+ * 2) append the two lists: the result is the order we want these vertices to have.
+ * L = {c(2), d(4), x(6), y(1), a(3), b(5)}.
+ *
+ * 3) Merge the sorted ords: R = { 1, 2, 3, 4, 5, 6 }.
+ *
+ * 4) Reassign the vertices with the sorted ords.
+ * L = { c(1), d(2), x(3), y(4) a(5), b(6) }
+ *
+ * This produces th graph shown on the right.
  *
  * [Analysis]
  * This is O(|AR|) which is the same thing as O(ord(consumer) - ord(producer))
@@ -277,9 +306,12 @@ EdgeData<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
 template <typename T>
 void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   JIT_ASSERT(producer != consumer);
-  if (vertex_collection<T>::contains(producer->out_edges(), consumer)) return;
-  vertex_collection<T>::insert(producer->out_edges(), consumer);
-  vertex_collection<T>::insert(consumer->in_edges(), producer);
+
+  // NB: DynamicDAG is a simple graph
+  if (producer->out_edges().contains(consumer)) return;
+
+  producer->out_edges().insert(consumer);
+  consumer->in_edges().insert(producer);
 
   if (producer->ord <= consumer->ord) {
     // topological ordering is already consistent, no need to update.
@@ -304,7 +336,7 @@ void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
 
   // Reorder the vertices that are reachable from consumer to occur BEFORE
   // the vertices that can reach producer.
-  reorder(deltaF.vector(), deltaB.vector());
+  reorder(std::move(deltaF), std::move(deltaB));
 }
 
 // Define the affected region for contractEdge(producer, consumer) as
@@ -426,7 +458,7 @@ bool DynamicDAG<T>::dfsSearch(
     auto* vertex = stack.back();
     stack.pop_back();
 
-    vertex_list<T>& next_edges = (direction == DFSDirection::forward) ?
+    ordered_vertex_set<T>& next_edges = (direction == DFSDirection::forward) ?
       vertex->out_edges() :
       vertex->in_edges();
 
@@ -447,41 +479,43 @@ bool DynamicDAG<T>::dfsSearch(
 
 // Reorder deltaB vertices to occur before deltaF vertices.
 template <typename T>
-void DynamicDAG<T>::reorder(vertex_list<T>& deltaF, vertex_list<T>& deltaB) {
-  sort(deltaB);
-  sort(deltaF);
+void DynamicDAG<T>::reorder(visited_list<T> deltaF, visited_list<T> deltaB) {
+  auto deltaB_ = deltaB.vector();
+  auto deltaF_ = deltaF.vector();
 
-  size_t num_affected = deltaB.size() + deltaF.size();
+  sort(deltaB_);
+  sort(deltaF_);
+
+  size_t num_affected = deltaB_.size() + deltaF_.size();
 
   // Gather vertices in the desired order. They don't have correct ords yet.
   std::vector<unique_vertex<T>> desired_vertex_ordering;
   desired_vertex_ordering.reserve(num_affected);
-  for (auto it = deltaB.begin(); it != deltaB.end(); ++it) {
+  for (auto it = deltaB_.begin(); it != deltaB_.end(); ++it) {
     desired_vertex_ordering.push_back(std::move(vertices_.at((*it)->ord)));
   }
-  for (auto it = deltaF.begin(); it != deltaF.end(); ++it) {
+  for (auto it = deltaF_.begin(); it != deltaF_.end(); ++it) {
     desired_vertex_ordering.push_back(std::move(vertices_.at((*it)->ord)));
   }
 
   // Sort the ords by merging two already sorted lists into a large sorted list.
   // input (example): deltaB = { v(1), v(4), v(7) } , deltaF = { v(0), v(2), v(5) }.
-  // output: { 0, 1, 2, 5, 7 }.
-  std::vector<size_t> sorted_ords;
-  sorted_ords.reserve(num_affected);
-
-  // Use deltaB to hold the concatenation of deltaB and deltaF.
-  auto middle = deltaB.size();
-  deltaB.insert(deltaB.end(), deltaF.begin(), deltaF.end());
-  std::inplace_merge(deltaB.begin(), deltaB.begin() + middle, deltaB.end(),
-      [](Vertex<T>* x, Vertex<T>* y) { return x->ord < y->ord; });
-  for (auto* v : deltaB) {
-    sorted_ords.push_back(v->ord);
+  // output: { 0, 1, 2, 4, 5, 7 }.
+  std::vector<size_t> gathered_ords;
+  gathered_ords.reserve(num_affected);
+  for (const auto* v : deltaB_) {
+    gathered_ords.push_back(v->ord);
   }
+  auto middle = gathered_ords.size();
+  for (const auto* v : deltaF_) {
+    gathered_ords.push_back(v->ord);
+  }
+  std::inplace_merge(gathered_ords.begin(), gathered_ords.begin() + middle, gathered_ords.end());
 
   // Return the vertices back into the vertices_ storage.
   for (size_t i = 0; i < num_affected; ++i) {
-    desired_vertex_ordering[i]->ord = sorted_ords[i];
-    vertices_[sorted_ords[i]] = std::move(desired_vertex_ordering[i]);
+    desired_vertex_ordering[i]->ord = gathered_ords[i];
+    vertices_[gathered_ords[i]] = std::move(desired_vertex_ordering[i]);
   }
 }
 

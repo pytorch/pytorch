@@ -166,7 +166,7 @@ static void find_differentiable_groups(
     // sort is performed once per ord in dep_graph and once per contraction.
     // There can be at most dep_graph.max_size() contractions, so
     // we do at most 2 * dep_graph.max_size() sorts.
-    dep_graph.sort(consumer->in_edges());
+    consumer->in_edges().sort();
 
     for (auto it = consumer->in_edges().rbegin(); it != consumer->in_edges().rend(); ++it) {
       auto * producer = *it;
