@@ -552,6 +552,22 @@ class TestDataLoader(TestCase):
 
         self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, num_samples=0))
 
+    def test_duplicating_data_with_drop_last(self):
+
+        from torch.utils.data.distributed import DistributedSampler
+
+        num_processes = 4
+        num_batches = 9
+        data_set = torch.IntTensor(range(num_batches))
+        scanned_data = torch.IntTensor([])
+        for i in range(num_processes):
+            s = DistributedSampler(data_set, num_processes, i)
+            d_loader = DataLoader(data_set, batch_size=int(num_batches / num_processes), drop_last=True, sampler=s)
+            for k, data in enumerate(d_loader):
+                scanned_data = torch.cat((scanned_data, data), 0)
+
+        self.assertEqual(scanned_data.size(), scanned_data.unique().size())
+
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_batch_sampler(self):
