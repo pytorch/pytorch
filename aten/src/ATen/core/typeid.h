@@ -489,6 +489,10 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   namespace detail {                                                          \
   CAFFE2_API extern const TypeMetaData                                        \
       MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id);                  \
+  }                                                                           \
+  template<>                                                                  \
+  C10_EXPORT inline const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept { \
+    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, Id);    \
   }
 #define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)              \
   template <>                                                                 \
@@ -507,10 +511,6 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   CAFFE2_API const TypeMetaData                                               \
     MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id)                     \
       = _makeTypeMetaDataInstance<T>();                                       \
-  }                                                                           \
-  template<>                                                                  \
-  C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept { \
-    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, Id);    \
   }
 #else // _MSC_VER
 #define _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(Id, T)    \
