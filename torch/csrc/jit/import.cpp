@@ -372,8 +372,7 @@ ModuleDecoder::ModuleDecoder(
 void import_ir_module(
     ModuleLookup module_lookup,
     std::istream& in) {
-  ModuleDecoder decoder(module_lookup, in);
-  (void)decoder;
+  ModuleDecoder(module_lookup, in);
 }
 
 void import_ir_module(
@@ -381,8 +380,7 @@ void import_ir_module(
     const std::string& filename) {
   std::ifstream in(filename, std::ios_base::binary);
 
-  ModuleDecoder decoder(module_lookup, in);
-  (void)decoder;
+  ModuleDecoder(module_lookup, in);
 }
 
 std::shared_ptr<script::Module> load(std::istream& in) {
@@ -399,8 +397,7 @@ std::shared_ptr<script::Module> load(std::istream& in) {
     return curr;
   };
 
-  ModuleDecoder decoder(module_lookup, in);
-  (void)decoder;
+  ModuleDecoder(module_lookup, in);
 
   return module;
 }
