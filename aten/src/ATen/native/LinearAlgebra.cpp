@@ -87,27 +87,6 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
-<<<<<<< HEAD
-=======
-Tensor inverse(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::inverse_out(result, self);
-}
-
-Tensor& inverse_out(Tensor &result, const Tensor &self) {
-  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "tensor should have CPU or CUDA backend");
-  AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
-  AT_CHECK(self.size(0) == self.size(1), "tensor should be square");
-  AT_CHECK(at::isFloatingType(self.type().scalarType()), "tensor should be of floating-point type");
-  if (self.size(0) == 0) {
-    return result.resize_({0, 0});
-  } else {
-    return at::_getri_out(result, self);
-  }
-}
-
->>>>>>> e25b8869f799e7eaa789656675a1e8aeb3480f9f
 Tensor pinverse(const Tensor& self, double rcond) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
