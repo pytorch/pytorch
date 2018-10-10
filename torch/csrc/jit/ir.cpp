@@ -198,7 +198,7 @@ Scope* Scope::getRoot() {
   return current;
 }
 
-std::string Scope::namesFromRoot(const std::string& separator="/") {
+std::string Scope::namesFromRoot(const std::string& separator) {
   // TODO: I think the answer is we shouldn't have used Symbol here
   std::string out = this->name_.toUnqualString();
   if (this->isRoot()) {
@@ -577,10 +577,8 @@ void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema();
 }
 
-namespace {
-
-const OperatorSet& nondeterminstic_aten_ops() {
-  static OperatorSet nondeterministic_ops = {
+bool Node::isNondeterministic() const {
+  static const OperatorSet nondeterministic_ops = {
     "aten::dropout(Tensor input, float p, bool train) -> Tensor",
     "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
     "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
@@ -607,13 +605,8 @@ const OperatorSet& nondeterminstic_aten_ops() {
     "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
     "aten::randperm(int n, *, int dtype, int layout, int[] device) -> Tensor"
   };
-  return nondeterministic_ops;
-}
 
-}  // namespace
-
-bool Node::isNondeterministic() const {
-  if (nondeterminstic_aten_ops().find(this) == nullptr) {
+  if (nondeterministic_ops.find(this) == nullptr) {
     return false;
   }
   // Dropout with train = False is deterministic
@@ -621,6 +614,207 @@ bool Node::isNondeterministic() const {
     return false;
   }
   return true;
+}
+
+Node::Node(Graph * graph_, NodeKind kind_) :
+  kind_(kind_),
+  graph_(graph_),
+  owning_block_(nullptr),
+  scope_(graph_->current_scope_),
+  schema_(nullptr) {
+  graph_->all_nodes.emplace(this);
+}
+
+void Node::eraseOutput(size_t i) {
+  JIT_ASSERT(i < outputs_.size());
+  JIT_ASSERT(outputs_[i]->uses().empty());
+  schema_ = nullptr;
+  Value * n = outputs_[i];
+  outputs_.erase(outputs_.begin() + i);
+  owningGraph()->freeValue(n);
+  for(size_t j = i; j < outputs_.size(); j++) {
+    outputs_[j]->offset_--;
+  }
+}
+
+Block * Node::addBlock() {
+  schema_ = nullptr;
+  blocks_.push_back(new Block(owningGraph(), this));
+  return blocks_.back();
+}
+
+void Node::eraseBlock(size_t i) {
+  JIT_ASSERT(i < blocks_.size());
+  schema_ = nullptr;
+  Block * n = blocks_[i];
+  blocks_.erase(blocks_.begin() + i);
+  n->destroy();
+}
+
+void Node::destroy() {
+  while(!outputs().empty())
+    eraseOutput(outputs().size() - 1);
+  while(!blocks().empty())
+    eraseBlock(blocks().size() - 1);
+  removeAllInputs();
+  if(inBlockList())
+    removeFromList();
+  graph_->freeNode(this);
+}
+
+void Node::cloneFrom(Node * s) {
+	setSourceLocation(s->getSourceLocation());
+	if (s->owningGraph()->scope_root_ == owningGraph()->scope_root_) {
+		scope_ = s->scope_;
+	}
+	copyAttributes(*s);
+}
+
+void Node::replaceAllUsesWith(Node * n) {
+  JIT_ASSERT(outputs().size() == n->outputs().size());
+  size_t nOutputs = outputs().size();
+  for(size_t i = 0; i < nOutputs; i++) {
+    outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
+  }
+}
+
+Value* Node::insertInput(size_t i, Value* value) {
+  JIT_ASSERT(graph_ == value->owningGraph());
+  schema_ = nullptr;
+  // First we update the offsets for all existing inputs that will reside
+  // after the one we're inserting. Concretely, these are the inputs at
+  // indices [i, # input). Since we're inserting one input before all of
+  // these inputs, increment their use offsets for this value by 1
+  for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
+    // See Note [User node does not uniquely identify use]
+    auto use = findUseForInput(use_itr);
+    use->offset += 1;
+  }
+  // Insert the actual input at the specified index
+  inputs_.insert(inputs_.begin() + i, value);
+  // Register the new use of the value we're inserted as an input.
+  value->uses_.emplace_back(this, i);
+  return value;
+}
+
+Value* Node::addInput(Value * value) {
+  JIT_ASSERT(graph_ == value->owningGraph());
+  schema_ = nullptr;
+  value->uses_.emplace_back(this, inputs_.size());
+  inputs_.push_back(value);
+  return value;
+}
+
+Value* Node::replaceInput(size_t i, Value * newValue) {
+  JIT_ASSERT(newValue->owningGraph() == graph_);
+  schema_ = nullptr;
+  Value * old = dropInput(i);
+  inputs_[i] = newValue;
+  newValue->uses_.emplace_back(this, i);
+  return old;
+}
+
+void Node::replaceInputWith(Value * from, Value * to) {
+  JIT_ASSERT(from->owningGraph() == graph_);
+  JIT_ASSERT(to->owningGraph() == graph_);
+  schema_ = nullptr;
+  size_t i = 0;
+  for(auto input : inputs()) {
+    if(input == from)
+      replaceInput(i, to);
+    i++;
+  }
+}
+
+Value* Node::addOutput() {
+  outputs_.push_back(new Value(this, outputs_.size()));
+  schema_ = nullptr;
+  return outputs_.back();
+}
+
+Value* Node::insertOutput(size_t i) {
+  schema_ = nullptr;
+  outputs_.insert(outputs_.begin() + i, new Value(this, i));
+  for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
+    outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
+  }
+  return outputs_.at(i);
+}
+
+Node* Node::insertBefore(Node * n) {
+  JIT_ASSERT(n->inBlockList());
+  insertAfter(n->prev());
+  return this;
+}
+
+Node* Node::insertAfter(Node * n) {
+  JIT_ASSERT(!inBlockList() && n->inBlockList());
+  JIT_ASSERT(n->owningBlock());
+  this->owning_block_ = n->owningBlock();
+  Node * next = n->next();
+  n->next() = this;
+  this->prev() = n;
+  this->next() = next;
+  next->prev() = this;
+  return this;
+}
+
+void Node::moveAfter(Node * n) {
+  removeFromList();
+  insertAfter(n);
+}
+
+void Node::moveBefore(Node * n) {
+  removeFromList();
+  insertBefore(n);
+}
+
+void Node::removeInput(size_t i) {
+  schema_ = nullptr;
+  dropInput(i);
+  // everything after this input shifts left,
+  // so we need to update their use offsets to match
+  for(size_t j = i+1; j < inputs_.size(); j++) {
+    auto it = findUseForInput(j);
+    it->offset--;
+  }
+  inputs_.erase(inputs_.begin() + i);
+}
+
+void Node::removeAllInputs() {
+  schema_ = nullptr;
+  for(size_t i = 0; i < inputs().size(); ++i)
+    dropInput(i);
+  inputs_.clear();
+}
+
+use_list::iterator Node::findUseForInput(size_t i) {
+  auto & input_uses = inputs_[i]->uses_;
+  // O(N) on the use list, but unless we get nodes with +100 uses
+  // vector traversal still is probably faster than linked list
+  auto use_it = std::find(input_uses.begin(), input_uses.end(), Use(this, i));
+  JIT_ASSERT(use_it != input_uses.end());
+  return use_it;
+}
+
+Value* Node::dropInput(size_t i) {
+  JIT_ASSERT(i < inputs_.size());
+  auto input_node = inputs_[i];
+  auto use_it = findUseForInput(i);
+  input_node->uses_.erase(use_it);
+  inputs_[i] = nullptr;
+  return input_node;
+}
+
+void Node::removeFromList() {
+  JIT_ASSERT(inBlockList());
+  this->owning_block_ = nullptr;
+  Node * next = this->next();
+  Node * prev = this->prev();
+  prev->next() = next;
+  next->prev() = prev;
+  this->next() = nullptr;
+  this->prev() = nullptr;
 }
 
 inline const SourceRange& fakeRange() {

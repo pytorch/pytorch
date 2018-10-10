@@ -345,13 +345,9 @@ public:
     }
     return false;
   }
-  void replaceAllUsesWith(Node * n) {
-    JIT_ASSERT(outputs().size() == n->outputs().size());
-    size_t nOutputs = outputs().size();
-    for(size_t i = 0; i < nOutputs; i++) {
-      outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
-    }
-  }
+
+  void replaceAllUsesWith(Node * n);
+
   // lots of things like chunk have a single input or single output, so we have a
   // helper to make accessing it easier
   Value * input() {
@@ -409,34 +405,11 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.addInput(%4)
   // Result:  %3 = f(%1, %2, %4)
-  Value* addInput(Value * value) {
-    JIT_ASSERT(graph_ == value->owningGraph());
-    schema_ = nullptr;
-    value->uses_.emplace_back(this, inputs_.size());
-    inputs_.push_back(value);
-    return value;
-  }
+  Value* addInput(Value * value);
 
   // Add 'value' as an input to 'this' at the specified position in the
   // arguments. Returns the added value for ease of chaining.
-  Value* insertInput(size_t i, Value* value) {
-    JIT_ASSERT(graph_ == value->owningGraph());
-    schema_ = nullptr;
-    // First we update the offsets for all existing inputs that will reside
-    // after the one we're inserting. Concretely, these are the inputs at
-    // indices [i, # input). Since we're inserting one input before all of
-    // these inputs, increment their use offsets for this value by 1
-    for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
-      // See Note [User node does not uniquely identify use]
-      auto use = findUseForInput(use_itr);
-      use->offset += 1;
-    }
-    // Insert the actual input at the specified index
-    inputs_.insert(inputs_.begin() + i, value);
-    // Register the new use of the value we're inserted as an input.
-    value->uses_.emplace_back(this, i);
-    return value;
-  }
+  Value* insertInput(size_t i, Value* value);
 
   // Replace the input of 'this' at position 'i' with
   // 'newValue', returning the old node.
@@ -444,14 +417,7 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.replaceInput(1, %4)
   // Result:  %3 = f(%1, %4)
-  Value * replaceInput(size_t i, Value * newValue) {
-    JIT_ASSERT(newValue->owningGraph() == graph_);
-    schema_ = nullptr;
-    Value * old = dropInput(i);
-    inputs_[i] = newValue;
-    newValue->uses_.emplace_back(this, i);
-    return old;
-  }
+  Value * replaceInput(size_t i, Value * newValue);
 
   // Replace all occurrences of 'from' in the inputs of this
   // node with 'to'. Corresponds to llvm's replaceUsesOfWith.
@@ -459,32 +425,11 @@ public:
   // Given:   %3 = f(%1, %2, %1)
   // Execute: %3.replaceInputWith(%1, %4)
   // Result:  %3 = f(%4, %2, %4)
-  void replaceInputWith(Value * from, Value * to) {
-    JIT_ASSERT(from->owningGraph() == graph_);
-    JIT_ASSERT(to->owningGraph() == graph_);
-    schema_ = nullptr;
-    size_t i = 0;
-    for(auto input : inputs()) {
-      if(input == from)
-        replaceInput(i, to);
-      i++;
-    }
-  }
+  void replaceInputWith(Value * from, Value * to);
 
-  Value* addOutput() {
-    outputs_.push_back(new Value(this, outputs_.size()));
-    schema_ = nullptr;
-    return outputs_.back();
-  }
+  Value* addOutput();
 
-  Value* insertOutput(size_t i) {
-    schema_ = nullptr;
-    outputs_.insert(outputs_.begin() + i, new Value(this, i));
-    for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
-      outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
-    }
-    return outputs_.at(i);
-  }
+  Value* insertOutput(size_t i);
 
   void eraseOutput(size_t i);
 
@@ -526,11 +471,7 @@ public:
   // Result:  %3 = f(%1, %2)
   //          %5 = h(%1)
   //          %4 = g(%3)
-  Node* insertBefore(Node * n) {
-    JIT_ASSERT(n->inBlockList());
-    insertAfter(n->prev());
-    return this;
-  }
+  Node* insertBefore(Node * n);
 
   // Insert unattached 'this' node after 'n' in the topological order.
   // Returns this (for chaining).
@@ -542,17 +483,7 @@ public:
   // Result:  %3 = f(%1, %2)
   //          %4 = g(%3)
   //          %5 = h(%1)
-  Node* insertAfter(Node * n) {
-    JIT_ASSERT(!inBlockList() && n->inBlockList());
-    JIT_ASSERT(n->owningBlock());
-    this->owning_block_ = n->owningBlock();
-    Node * next = n->next();
-    n->next() = this;
-    this->prev() = n;
-    this->next() = next;
-    next->prev() = this;
-    return this;
-  }
+  Node* insertAfter(Node * n);
 
   // Move 'this' (already in the graph) after 'n' in the topological order.
   //
@@ -562,10 +493,7 @@ public:
   // Result: %3 = g(%1)
   //         %2 = f(%1)
   //
-  void moveAfter(Node * n) {
-    removeFromList();
-    insertAfter(n);
-  }
+  void moveAfter(Node * n);
 
   // Move a node 'n' (already in the graph) before 'this' in the topological order.
   //
@@ -574,10 +502,7 @@ public:
   // Execute: %3.moveBefore(%2)
   // Result: %3 = g(%1)
   //         %2 = f(%1)
-  void moveBefore(Node * n) {
-    removeFromList();
-    insertBefore(n);
-  }
+  void moveBefore(Node * n);
 
   // Remove the input at 'i' from this node.
   //
@@ -587,36 +512,29 @@ public:
   // Given: %3 = f(%1, %2)
   // Execute: %3.removeInput(1)
   // Result: %3 = f(%1)
-  void removeInput(size_t i) {
-    schema_ = nullptr;
-    dropInput(i);
-    // everything after this input shifts left,
-    // so we need to update their use offsets to match
-    for(size_t j = i+1; j < inputs_.size(); j++) {
-      auto it = findUseForInput(j);
-      it->offset--;
-    }
-    inputs_.erase(inputs_.begin() + i);
-  }
+  void removeInput(size_t i);
 
   // Remove all inputs from a node.
   //
   // Given: %3 = f(%1, %2)
   // Execute: %3.removeAllInputs()
   // Result: %3 = f()
-  void removeAllInputs() {
-    schema_ = nullptr;
-    for(size_t i = 0; i < inputs().size(); ++i)
-      dropInput(i);
-    inputs_.clear();
-  }
+  void removeAllInputs();
 
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
-  graph_node_list_iterator iterator();
-  graph_node_list_iterator reverseIterator();
-  const_graph_node_list_iterator iterator() const;
-  const_graph_node_list_iterator reverseIterator() const;
+  inline graph_node_list_iterator iterator() {
+    return {this, 0};
+  }
+  inline graph_node_list_iterator reverseIterator() {
+    return iterator().reverse();
+  }
+  inline const_graph_node_list_iterator iterator() const {
+    return {this, 0};
+  }
+  inline const_graph_node_list_iterator reverseIterator() const {
+    return iterator().reverse();
+  }
 
   // Remove 'this' from the instruction list and deallocate it.
   //
@@ -665,26 +583,12 @@ private:
   std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_
-  use_list::iterator findUseForInput(size_t i) {
-    auto & input_uses = inputs_[i]->uses_;
-    // O(N) on the use list, but unless we get nodes with +100 uses
-    // vector traversal still is probably faster than linked list
-    auto use_it = std::find(input_uses.begin(), input_uses.end(), Use(this, i));
-    JIT_ASSERT(use_it != input_uses.end());
-    return use_it;
-  }
+  use_list::iterator findUseForInput(size_t i);
 
   // remove the use of input i, this sets input i to nullptr, but
   // is only used internally to Node before setting it to a new value
   // or erasing the entry from the list.
-  Value* dropInput(size_t i) {
-    JIT_ASSERT(i < inputs_.size());
-    auto input_node = inputs_[i];
-    auto use_it = findUseForInput(i);
-    input_node->uses_.erase(use_it);
-    inputs_[i] = nullptr;
-    return input_node;
-  }
+  Value* dropInput(size_t i);
 
   bool inBlockList() const {
     if(next() == nullptr) {
@@ -692,16 +596,8 @@ private:
     }
     return next() != nullptr;
   }
-  void removeFromList() {
-    JIT_ASSERT(inBlockList());
-    this->owning_block_ = nullptr;
-    Node * next = this->next();
-    Node * prev = this->prev();
-    prev->next() = next;
-    next->prev() = prev;
-    this->next() = nullptr;
-    this->prev() = nullptr;
-  }
+
+  void removeFromList();
   void lint() const;
 protected:
   // subclasses must override
@@ -1234,60 +1130,6 @@ inline void Value::replaceAllUsesWith(Value * newValue) {
   }
 }
 
-inline Node::Node(Graph * graph_, NodeKind kind_) :
-  kind_(kind_),
-  graph_(graph_),
-  owning_block_(nullptr),
-  scope_(graph_->current_scope_),
-  schema_(nullptr) {
-  graph_->all_nodes.emplace(this);
-}
-
-inline void Node::eraseOutput(size_t i) {
-  JIT_ASSERT(i < outputs_.size());
-  JIT_ASSERT(outputs_[i]->uses().empty());
-  schema_ = nullptr;
-  Value * n = outputs_[i];
-  outputs_.erase(outputs_.begin() + i);
-  owningGraph()->freeValue(n);
-  for(size_t j = i; j < outputs_.size(); j++) {
-    outputs_[j]->offset_--;
-  }
-}
-
-inline Block * Node::addBlock() {
-  schema_ = nullptr;
-  blocks_.push_back(new Block(owningGraph(), this));
-  return blocks_.back();
-}
-
-inline void Node::eraseBlock(size_t i) {
-  JIT_ASSERT(i < blocks_.size());
-  schema_ = nullptr;
-  Block * n = blocks_[i];
-  blocks_.erase(blocks_.begin() + i);
-  n->destroy();
-}
-
-inline void Node::destroy() {
-  while(!outputs().empty())
-    eraseOutput(outputs().size() - 1);
-  while(!blocks().empty())
-    eraseBlock(blocks().size() - 1);
-  removeAllInputs();
-  if(inBlockList())
-    removeFromList();
-  graph_->freeNode(this);
-}
-
-inline void Node::cloneFrom(Node * s) {
-	setSourceLocation(s->getSourceLocation());
-	if (s->owningGraph()->scope_root_ == owningGraph()->scope_root_) {
-		scope_ = s->scope_;
-	}
-	copyAttributes(*s);
-}
-
 inline Block::Block(Graph* graph_, Node* node_)
     : graph_(graph_),
       output_(initOutput(graph_->create(prim::Return, 0))),
@@ -1402,19 +1244,6 @@ inline Node* Graph::createPythonOp(
       std::move(pyobj),
       cconv,
       std::move(scalar_args));
-}
-
-inline graph_node_list_iterator Node::iterator() {
-  return {this, 0};
-}
-inline graph_node_list_iterator Node::reverseIterator() {
-  return iterator().reverse();
-}
-inline const_graph_node_list_iterator Node::iterator() const {
-  return {this, 0};
-}
-inline const_graph_node_list_iterator Node::reverseIterator() const {
-  return iterator().reverse();
 }
 
 TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
