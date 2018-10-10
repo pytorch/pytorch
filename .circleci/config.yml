@@ -37,7 +37,7 @@ install_official_git_client: &install_official_git_client
   name: Install Official Git Client
   no_output_timeout: "1h"
   command: |
-    set -ex
+    set -e
     sudo apt-get update
     sudo apt-get install -y openssh-client git
 
@@ -45,7 +45,7 @@ setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment
   no_output_timeout: "1h"
   command: |
-    set -ex
+    set -e
     sudo pip install awscli
 
     sudo apt-get update
@@ -203,7 +203,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
       name: Build
       no_output_timeout: "1h"
       command: |
-        set -ex
+        set -e
         sudo pip install awscli
 
         sudo apt-get update
@@ -316,7 +316,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
       name: Test
       no_output_timeout: "1h"
       command: |
-        set -x
+        set -e
         sudo pip install awscli
 
         sudo apt-get update
@@ -411,7 +411,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
         name: Build
         no_output_timeout: "1h"
         command: |
-          set -ex
+          set -e
 
           export IN_CIRCLECI=1
 
@@ -685,7 +685,7 @@ jobs:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
           no_output_timeout: "1h"
           command: |
-            set -ex
+            set -e
 
             export IN_CIRCLECI=1
 
@@ -728,7 +728,7 @@ jobs:
           no_output_timeout: "1h"
           command: |
             # TODO: need to share source files from build to test, when macOS builds are enabled
-            set -ex
+            set -e
             export IN_CIRCLECI=1
             chmod a+x .jenkins/pytorch/macos-test.sh
             .jenkins/pytorch/macos-test.sh
@@ -747,7 +747,7 @@ jobs:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3
           no_output_timeout: "1h"
           command: |
-            set -ex
+            set -e
 
             export IN_CIRCLECI=1
 
