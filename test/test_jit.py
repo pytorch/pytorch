@@ -7287,6 +7287,15 @@ a")
         with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
             fn(torch.tensor(4))
 
+    def test_trace_contiguous(self):
+        def foo(x):
+            return x.contiguous()
+
+        x = torch.rand(2, 3, 4)
+        traced = torch.jit.trace(foo, (x,))
+        y = traced(x)
+        self.assertNotEqual(x.storage().data_ptr(), y.storage().data_ptr())
+
 
 class MnistNet(nn.Module):
     def __init__(self):

@@ -92,9 +92,6 @@ inline Tensor Tensor::masked_select(const Tensor & mask) const {
 inline Tensor Tensor::nonzero() const {
     return type().nonzero(*this);
 }
-inline Tensor Tensor::contiguous() const {
-    return type().contiguous(*this);
-}
 inline Tensor Tensor::view(IntList size) const {
     return type().view(*this, size);
 }
@@ -649,6 +646,9 @@ inline Tensor Tensor::clamp_min(Scalar min) const {
 }
 inline Tensor & Tensor::clamp_min_(Scalar min) {
     return type().clamp_min_(*this, min);
+}
+inline Tensor Tensor::contiguous() const {
+    return type().contiguous(*this);
 }
 inline Tensor Tensor::cos() const {
     return type().cos(*this);

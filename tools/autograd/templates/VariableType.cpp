@@ -459,14 +459,6 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
   return self;
 }
 
-Tensor VariableType::contiguous(const Tensor & self) const {
-  unpack(self, "self", 0);
-  if (self.is_contiguous()) {
-    return self;
-  }
-  return self.clone();
-}
-
 Tensor VariableType::detach(const Tensor & self) const {
   profiler::RecordFunction profiler("detach");
   torch::jit::Node* node = nullptr;
