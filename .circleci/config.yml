@@ -63,6 +63,7 @@ setup_ci_environment: &setup_ci_environment
 
     if [[ "${JOB_BASE_NAME}" == *-build ]]; then
       echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
+      echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH}" >> /home/circleci/project/env
       echo "declare -x PYTHON_VERSION=${PYTHON_VERSION}" >> /home/circleci/project/env
       echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
       if [ -n "${CUDA_VERSION}" ]; then
@@ -95,6 +96,7 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
       no_output_timeout: "1h"
       command: |
         export IN_CIRCLECI=1
+        export COMMIT_SOURCE=${CIRCLE_BRANCH}
         export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
         export SCCACHE_MAX_JOBS=`expr $(nproc) - 1`
         export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
