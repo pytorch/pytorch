@@ -63,7 +63,7 @@
 // and export.
 
 // This one is being used by libc10.so
-#ifdef C10_BUILD_MAIN_DLL
+#ifdef C10_BUILD_MAIN_LIB
 #define C10_API C10_EXPORT
 #else
 #define C10_API C10_IMPORT

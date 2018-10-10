@@ -108,4 +108,20 @@ std::string GetExceptionString(const std::exception& e) {
 #endif // __GXX_RTTI
 }
 
+std::function<std::string(void)>* GetFetchStackTrace() {
+  static std::function<std::string(void)> func = []() { return ""; };
+  return &func;
+};
+
+void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller) 
+{
+  at::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+  throw e;
+}
+
 } // namespace at
