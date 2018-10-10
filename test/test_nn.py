@@ -751,12 +751,12 @@ class TestNN(NNTestCase):
             self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
     def test_invalid_conv2d(self):
-        module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
+        module = nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
         input = torch.empty(1, 1, 4, 4)
         self.assertRaises(RuntimeError, lambda: module(input))
 
     def test_invalid_conv3d(self):
-        module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)
+        module = nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)
         input = torch.empty(1, 1, 4, 4, 4)
         self.assertRaises(RuntimeError, lambda: module(input))
 
@@ -1668,19 +1668,19 @@ class TestNN(NNTestCase):
         expected_output = m(input)
 
         # add weight normalization
-        m = torch.nn.utils.weight_norm(m)
+        m = nn.utils.weight_norm(m)
         self.assertEqual(m.weight_v.size(), m.weight.size())
         self.assertEqual(m.weight_g.size(), (7, 1))
         self.assertEqual(m(input), expected_output)
 
         # remove weight norm
-        m = torch.nn.utils.remove_weight_norm(m)
+        m = nn.utils.remove_weight_norm(m)
         self.assertFalse(hasattr(m, 'weight_g'))
         self.assertFalse(hasattr(m, 'weight_v'))
         self.assertEqual(m(input), expected_output)
 
         # test with dim=1
-        m = torch.nn.utils.weight_norm(m, dim=1)
+        m = nn.utils.weight_norm(m, dim=1)
         self.assertEqual(m.weight_v.size(), m.weight.size())
         self.assertEqual(m.weight_g.size(), (1, 5))
         self.assertEqual(m(input), expected_output)
@@ -1688,18 +1688,18 @@ class TestNN(NNTestCase):
         # test with dim=None
         m = nn.Linear(5, 7)
         expected_output = m(input)
-        m = torch.nn.utils.weight_norm(m, dim=None)
+        m = nn.utils.weight_norm(m, dim=None)
         self.assertEqual(m(input), expected_output)
 
     def test_weight_norm_pickle(self):
-        m = torch.nn.utils.weight_norm(nn.Linear(5, 7))
+        m = nn.utils.weight_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
     def test_spectral_norm(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
-        m = torch.nn.utils.spectral_norm(m)
+        m = nn.utils.spectral_norm(m)
 
         self.assertEqual(m.weight_u.size(), torch.Size([m.weight.size(0)]))
         # weight_orig should be trainable
@@ -1716,7 +1716,7 @@ class TestNN(NNTestCase):
         self.assertEqual(m.weight_orig.size(), m.weight.size())
         self.assertEqual(m.weight_orig.stride(), m.weight.stride())
 
-        m = torch.nn.utils.remove_spectral_norm(m)
+        m = nn.utils.remove_spectral_norm(m)
         self.assertFalse(hasattr(m, 'weight_orig'))
         self.assertFalse(hasattr(m, 'weight_u'))
         # weight should be converted back as a parameter
@@ -1726,7 +1726,7 @@ class TestNN(NNTestCase):
     def test_spectral_norm_eval_remove(self):
         inp = torch.randn(3, 5)
         m = nn.Linear(5, 7)
-        m = torch.nn.utils.spectral_norm(m)
+        m = nn.utils.spectral_norm(m)
         x0 = m(inp)
         m.eval()
         # test that eval mode and removing / adding+removing doesn't change weight and output
@@ -1740,26 +1740,26 @@ class TestNN(NNTestCase):
         x1 = m(inp)
         x1.sum().backward()
         # test removing
-        m = torch.nn.utils.remove_spectral_norm(m)
+        m = nn.utils.remove_spectral_norm(m)
         x3 = m(inp)
         self.assertEqual(x0, x3)
-        m = torch.nn.utils.spectral_norm(m)
-        m = torch.nn.utils.remove_spectral_norm(m)
+        m = nn.utils.spectral_norm(m)
+        m = nn.utils.remove_spectral_norm(m)
         x4 = m(inp)
         self.assertEqual(x0, x4)
         # check that removing after train doesn't change output
         m.train()
-        m = torch.nn.utils.spectral_norm(m)
+        m = nn.utils.spectral_norm(m)
         for i in range(5):
             x0 = m(inp)
-        m = torch.nn.utils.remove_spectral_norm(m)
+        m = nn.utils.remove_spectral_norm(m)
         x1 = m(inp)
         self.assertEqual(x0, x1)
 
     def test_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
         m = nn.ConvTranspose2d(3, 4, (5, 6))
-        m = torch.nn.utils.spectral_norm(m)
+        m = nn.utils.spectral_norm(m)
         # this should not run into incompatible shapes
         x = m(inp)
         # check that u refers to the same dimension
@@ -1768,7 +1768,7 @@ class TestNN(NNTestCase):
     def test_spectral_norm_forward(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
-        m = torch.nn.utils.spectral_norm(m)
+        m = nn.utils.spectral_norm(m)
         # naive forward
         _weight, _bias, _u = m.weight_orig, m.bias, m.weight_u
         _weight_mat = _weight.view(_weight.size(0), -1)
@@ -1777,12 +1777,12 @@ class TestNN(NNTestCase):
         _u = torch.mv(_weight_mat, _v)
         _u = F.normalize(_u, dim=0, eps=1e-12)
         _weight.data /= torch.dot(_u, torch.matmul(_weight_mat, _v))
-        out_hat = torch.nn.functional.linear(input, _weight, _bias)
+        out_hat = F.linear(input, _weight, _bias)
         expect_out = m(input)
         self.assertAlmostEqual(expect_out, out_hat)
 
     def test_spectral_norm_pickle(self):
-        m = torch.nn.utils.spectral_norm(nn.Linear(5, 7))
+        m = nn.utils.spectral_norm(nn.Linear(5, 7))
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
@@ -1883,7 +1883,7 @@ class TestNN(NNTestCase):
         ], dtype=torch.long)
         embeddings = torch.rand(4, 3, requires_grad=True)
 
-        embed_old = torch.nn.Embedding(4, 3)
+        embed_old = nn.Embedding(4, 3)
         embed_old.weight.data = embeddings.data
         res_old = embed_old(a)
 
@@ -1919,7 +1919,7 @@ class TestNN(NNTestCase):
         logits = torch.tensor([[0.2, 0.8, 0.1]])
         if dtype != torch.half:
             logits = logits.to(dtype)
-        logits_softmax = torch.nn.functional.softmax(logits, 1)
+        logits_softmax = F.softmax(logits, 1)
         y_draws = torch.zeros(num_draws, K)
         preds = torch.zeros(num_draws)
 
@@ -1931,7 +1931,7 @@ class TestNN(NNTestCase):
         exceed_limits = 0
         for draw in range(num_draws):
             logits_var = logits.detach().requires_grad_()
-            y_draw = torch.nn.functional.gumbel_softmax(
+            y_draw = F.gumbel_softmax(
                 logits_var,
                 hard=True)
             assert y_draw.size() == logits.size()
@@ -3402,9 +3402,9 @@ class TestNN(NNTestCase):
         inputs = Variable(torch.randn(4, 1, 7, 7).float())
         weights = Variable(torch.randn(1, 1, 3, 3).double())
         # inconsistent types should raise an exception
-        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+        self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights))
         # but it should work with the same type
-        nn.functional.conv2d(inputs.float(), weights.float())
+        F.conv2d(inputs.float(), weights.float())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_inconsistent_types_on_GPU_without_cudnn(self):
@@ -3414,11 +3414,11 @@ class TestNN(NNTestCase):
 
         with torch.backends.cudnn.flags(enabled=False):
             # inconsistent types should raise an exception
-            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
-            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+            self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights))
+            self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights.float(), bias))
 
             # but it should work with the same type
-            nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+            F.conv2d(inputs.float(), weights.float(), bias.float())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -3430,11 +3430,11 @@ class TestNN(NNTestCase):
 
         with torch.backends.cudnn.flags(enabled=True):
             # inconsistent types should raise an exception
-            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
-            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+            self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights))
+            self.assertRaises(RuntimeError, lambda: F.conv2d(inputs, weights.float(), bias))
 
             # but it should work with the same type
-            nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+            F.conv2d(inputs.float(), weights.float(), bias.float())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -3443,8 +3443,8 @@ class TestNN(NNTestCase):
     def test_Conv2d_deterministic_cudnn(self, dtype=torch.float):
         inputs = torch.randn(2, 3, 5, 5, device="cuda", dtype=dtype, requires_grad=True)
         with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
-            conv1 = torch.nn.Conv2d(3, 3, 3).to("cuda", dtype)
-            conv2 = torch.nn.Conv2d(3, 3, 3).to("cuda", dtype)
+            conv1 = nn.Conv2d(3, 3, 3).to("cuda", dtype)
+            conv2 = nn.Conv2d(3, 3, 3).to("cuda", dtype)
             conv2.bias.data.copy_(conv1.bias.data)
             conv2.weight.data.copy_(conv1.weight.data)
             out1 = conv1(inputs)
@@ -3481,7 +3481,7 @@ class TestNN(NNTestCase):
 
         def run_test(benchmark):
             with torch.backends.cudnn.flags(benchmark=benchmark):
-                conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).to("cuda", dtype)
+                conv = nn.Conv2d(256, 256, kernel_size=3, padding=1).to("cuda", dtype)
                 for size in sizes:
                     x = torch.randn(size, device="cuda", dtype=dtype)
                     out = conv(x.detach().clone().requires_grad_())
@@ -3738,10 +3738,10 @@ class TestNN(NNTestCase):
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
         log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
-        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        res = F.ctc_loss(log_probs, targets, input_lengths, target_lengths)
         expected = ctcloss_reference(log_probs, targets.cuda(), input_lengths, target_lengths).float()
         with torch.backends.cudnn.flags(enabled=False):
-            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
+            res2 = F.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
         self.assertEqual(res, expected)
         self.assertEqual(res2, res)
 
@@ -5469,12 +5469,12 @@ class TestNN(NNTestCase):
                 mode='nearest',
                 prefilter=False)
 
-            affine_tensor = torch.nn.functional.affine_grid(
+            affine_tensor = F.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = torch.nn.functional.grid_sample(
+            gridsample_ary = F.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
@@ -5515,12 +5515,12 @@ class TestNN(NNTestCase):
             assert np.abs(scipy_ary[-1, -1] - input_ary[0, 0, -1, 0]).max() < 1e-6
             assert np.abs(scipy_ary[-1, 0] - input_ary[0, 0, 0, 0]).max() < 1e-6
 
-            affine_tensor = torch.nn.functional.affine_grid(
+            affine_tensor = F.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = torch.nn.functional.grid_sample(
+            gridsample_ary = F.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
@@ -5555,12 +5555,12 @@ class TestNN(NNTestCase):
                 mode='nearest',
                 prefilter=False)
 
-            affine_tensor = torch.nn.functional.affine_grid(
+            affine_tensor = F.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = torch.nn.functional.grid_sample(
+            gridsample_ary = F.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
@@ -5597,12 +5597,12 @@ class TestNN(NNTestCase):
                 mode='nearest',
                 prefilter=False)
 
-            affine_tensor = torch.nn.functional.affine_grid(
+            affine_tensor = F.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = torch.nn.functional.grid_sample(
+            gridsample_ary = F.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
@@ -5649,12 +5649,12 @@ class TestNN(NNTestCase):
                 mode='nearest',
                 prefilter=False)
 
-            affine_tensor = torch.nn.functional.affine_grid(
+            affine_tensor = F.affine_grid(
                 transform_tensor,
                 torch.Size(output_size)
             )
 
-            gridsample_ary = torch.nn.functional.grid_sample(
+            gridsample_ary = F.grid_sample(
                 torch.tensor(input_ary, device=device).to(device),
                 affine_tensor,
                 padding_mode='border'
@@ -6161,6 +6161,11 @@ class TestNN(NNTestCase):
         x = torch.randn(2, 16)
         self.assertEqual(F.softmin(x, 1), F.softmax(-x, 1))
         self.assertEqual(F.softmin(x, 0), F.softmax(-x, 0))
+
+    def test_log_softmax(self):
+        x_small = torch.ones(1, 2, dtype=torch.float32)
+        x_big = x_small * 1e16
+        self.assertEqual(F.log_softmax(x_small, -1), F.log_softmax(x_big, -1))
 
     def test_adaptive_log_softmax(self):
         # args validation
