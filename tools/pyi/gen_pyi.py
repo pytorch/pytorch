@@ -8,31 +8,31 @@ needed_modules = set()
 
 def type_to_python(typename):
     typename = {'int64_t': 'int',
-                'Scalar': 'float',
+                'Scalar': 'Union[float, int]',
                 'ScalarType': 'dtype',
                 'Device': 'Union[device, str, None]',
-                'IntList': 'Tuple[int, ...]',
+                'IntList': 'Union[Tuple[int, ...], List[int, ...]]',
                 'Tensor?': 'Optional[Tensor]',
                 'Tensor': 'Tensor',
                 'bool': 'bool',
                 'double': 'float',
                 'Generator *': 'Generator',
                 'Generator*': 'Generator',
-                'std::vector<Tensor>': 'Tuple[Tensor, ...]',
-                'TensorList': 'Tuple[Tensor, ...]',
+                'std::vector<Tensor>': 'Union[Tuple[Tensor, ...],List[Tensor, ...]]',
+                'TensorList': 'Union[Tuple[Tensor, ...],List[Tensor, ...]]',
                 'Storage': 'Storage',  # inaccurate (FloatStorage...)
                 'SparseTensorRef': 'Tensor',
                 'void': 'None',
                 'Layout': 'layout',
                 'void*': 'int',  # dataptr
                 'std::string': 'str',
-                'real': 'float',
-                'accreal': 'float',
-                'Union[int, Tuple[int, ...]]': 'Union[int, Tuple[int, ...]]',
+                'real': 'Union[float, int]',
+                'accreal': 'Union[float, int]',
                 'IntegerTensor': 'Tensor',
                 'BoolTensor': 'Tensor',
                 'IndexTensor': 'Tensor',
                 }[typename]
+    # handle IntList[]
     return typename
 
 
@@ -74,7 +74,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
                     python_args.append('*')
                 python_args += ["dtype: dtype=None",
                                 "layout: layout=torch.strided",
-                                "device: device=None",
+                                "device: Optional[device]=None",
                                 "requires_grad:bool=False"]
             python_args_s = ', '.join(python_args)
             python_returns = [type_to_python(r['dynamic_type']) for r in decl['returns']]
@@ -219,13 +219,26 @@ def do_gen_py(build_lib_path):
          for s in tensor_type_hints]) + '\n\n'
 
     header = """
-from typing import Tuple, Optional, Union
+from typing import Tuple, Optional, Union, Any
+
+class dtype: ...
+
+class layout: ...
+
+class device: ...
+
 """
     header += '\n'.join(["import " + m for m in needed_modules])
+    footer = """
+@overload
+def tensor(data: Any, dtype: Optional[dtype]=None, device: Union[device, str, None]=None, requires_grad: bool=False) -> Tensor: ...
+"""
+
     with open(os.path.join(build_lib_path, 'torch', '__init__.pyi'), 'w') as f:
         print(header, file=f)
         print(tensor_type_hints_s, file=f)
         print(type_hints_s, file=f)
+        print(footer, file=f)
 
 
 def gen_pyi(build_lib_path):
