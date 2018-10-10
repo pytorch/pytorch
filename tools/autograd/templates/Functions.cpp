@@ -1486,10 +1486,9 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 // This makes no assumption on the signs of sigma.
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
-  if (!compute_uv) {
-      throw std::runtime_error(std::string("Backward for SVD is not implemented, since the derivative "
-                                           "requires singular matrices, which haven't been computed."));
-  }
+  AT_CHECK(compute_uv,
+           "cannot compute backward for SVD without computing the singular matrices in the forward pass");
+
   auto m = self.size(0);
   auto n = self.size(1);
   auto k = sigma.size(0);
@@ -1569,15 +1568,13 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
+    AT_CHECK(eigenvectors,
+             "cannot compute backward without computing eigenvectors in forward pass");
+
     auto glambda = grads[0];
     auto gv = grads[1];
 
     auto vt = v.t();
-
-    if (!eigenvectors) {
-        throw std::runtime_error(std::string("cannot compute backward without "
-                                             "computing eigenvectors in forward pass"));
-    }
 
     Tensor result;
     if (gv.defined()) {
