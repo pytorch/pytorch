@@ -169,7 +169,7 @@ class HIPContext final : public BaseContext {
     }
   }
 
-  inline int hip_gpu_id() const {
+  inline int device_id() const {
     return gpu_id_;
   }
 
@@ -267,7 +267,7 @@ class HIPContext final : public BaseContext {
   }
 
   static bool IsStreamFree(const DeviceOption& option, int stream_id) {
-    auto stream = HIPContext::hip_stream(option.hip_gpu_id(), stream_id);
+    auto stream = HIPContext::hip_stream(option.device_id(), stream_id);
     return hipStreamQuery(stream) == hipSuccess;
   }
 
@@ -383,7 +383,6 @@ class HIPStaticContext final : public BaseStaticContext {
   DeviceType GetDeviceType() override {
     return HIP;
   }
-
 };
 
 typedef Tensor TensorHIP;
