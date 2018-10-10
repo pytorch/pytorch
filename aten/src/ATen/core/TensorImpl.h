@@ -11,7 +11,7 @@
 #include <ATen/core/context_base.h>
 #include <ATen/core/optional.h>
 
-#include <c10/util/Flags.h>
+#include "c10/util/Flags.h"
 
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
