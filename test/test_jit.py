@@ -7236,6 +7236,16 @@ a")
 
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
 
+    def test_addmm_fusion(self):
+        class AddmmWrapper(torch.nn.Module):
+            def forward(self, x, y, c):
+                return torch.mm(x, y) + c
+
+        # Test addmm fusion is disabled for normal Jit
+        x, y, c = torch.rand(3, 4), torch.rand(4, 5), torch.rand(3, 5)
+        traced = torch.jit.trace(AddmmWrapper(), (x, y, c))
+        print(traced.graph)
+
     def test_weak_script_function(self):
         outer_var = 10
         outer_var2 = 11
