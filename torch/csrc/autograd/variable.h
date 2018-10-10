@@ -94,13 +94,13 @@ struct TORCH_API Variable : public at::Tensor {
 
   /// Creates a `Variable` that is a *view* of another (*base*) variable.
   /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
-  /// `potentially_tracks_history` is a bool that specifies whether this view
-  /// relation should be considered by autograd.
+  /// `is_differentiable` is a bool that specifies whether this view is
+  /// differentiable, i.e., whether the relation should be tracked by autograd.
   /// See NOTE [ Autograd Variable Views ] for details.
   friend Variable make_variable_view(
       Variable base,
       at::Tensor data,
-      bool potentially_tracks_history,
+      bool is_differentiable,
       Edge gradient_edge);
 
   /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be
@@ -269,7 +269,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// and the `get()` method which exposes it shall forever remain private and
   /// never be exposed to the public interface of this class.
   struct Impl;
-  struct ViewImpl;
+  struct DifferentiableViewImpl;
 
   // Private Methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -377,30 +377,38 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//                          Variable::ViewImpl
+//                     Variable::DifferentiableViewImpl
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// NOTE [ Autograd Variable Views ]
 ///
 /// Many operations return Variable that shares storage with an input Variable.
 /// The returned Varaible is called a **view** Variable on the input **base**
-/// Variable. Variable::ViewImple is created to support gradient tracking of
-/// potential **in-place** operations on either of these two Variables. Note
-/// that even if the base currently does not require grad, it is still important
-/// to record this view relation to support operations like:
+/// Variable.
+///
+/// In PyTorch, we have two types of views: differentiable views, and
+/// non-differentiable views. In either type, to support proper version
+/// checking, the base and view Variables always share the same version_counter.
+///
+///
+/// Differentiable Views
+/// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/// Differentiable views are the view variables you still want gradients to flow
+/// back to the base variables. Out-of-place operations on views are quite
+/// straightforward, but in-place ones on views are very tricky. Even if the
+/// base variable may not require grad when we create the view, we still need to
+/// track the view relation because future in-place ops may require back-proping
+/// through it. We need to support autograd through
+///
+///   (1) in-place operation on view, e.g.,
 ///
 ///     # Have:
 ///     #   base.requires_grad = False
 ///     #   var.requires_grad = True
-///     base[1] = var
+///     base[1] = var  # i.e., base[1].copy_(var)
 ///     torch.autograd.grad(base.sum(), var)  <- should return an all ones tensor
 ///
-/// Above example is effectively base[1].copy_(var). To support this, in the
-/// rebase_history of base[1], we need to update the grad_fn of base. Therefore,
-/// we still record the view relation between base and base[1] even though they
-/// don't require gradients at creation time.
-///
-/// A similar example but with in-place operation on base is:
+///   (2) in-place operation on base after view is created, e.g.,
 ///
 ///     # Have:
 ///     #   base.requires_grad = False
@@ -411,26 +419,33 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 ///                                              var[1] filled with all ones and
 ///                                              zeros everywhere else
 ///
-/// In a view relation, the base and view Variables share the same
-/// version_counter. The grad_fn field of the Variable may become stale due to
-/// in-place modifications of the shared data. Accesses should go through
-/// get_grad_fn(). All other fields are always valid.
+/// Variable::DifferentiableViewImpl is created to support gradient tracking of
+/// such **in-place** operations. In particular,
+///   + if an in-place op is done on base, the grad_fn field of the view may
+///     become stale. So accesses should go through get_grad_fn(), whcih
+///     reconstruct an updated grad_fn if the version_counter had incremented.
+///     All other fields are always valid.
+///   + if an in-place op is done on view, in rebase_history() of view, which is
+///     called after every in-place op in VariableType.cpp, the grad_fn of base
+///     is updated.
 ///
-/// Such view Variables have is_view() = true and use ViewImpl.
 ///
-/// However, outputs of some functions, although sharing storage with inputs,
-/// will **never** require gradient history tracking, and thus will not register
-/// the above view relation in autograd using ViewImpl. Instead, they will be
-/// usual Variables and just share the version counters with the base Variables.
+/// Non-Differentiable Views
+/// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/// In certain cases, although function outputs share storage with inputs, they
+/// will **never** require gradient history tracking. Instead of registering the
+/// view relation via DifferentiableViewImpl in autograd, the views will be
+/// using usual Varaible::Impl and just share the version counters with the base
+/// Variables.
 /// Some examples are:
-///   1. Variables created from .detach(),
-///   2. Variables created when GradMode::enabled() = false.
-/// We call these non-differentiable views as the gradients do not flow through
-/// the view relation.
+///   1. Views created from .detach(),
+///   2. Views created when GradMode::enabled() = false.
+/// These are called non-differentiable views as the gradients do not flow
+/// through the view relation.
 /// Relevant logic for non-differentiable views is implemented in
 /// make_variable_view below, and wrap_output of gen_variable_type.py.
-struct TORCH_API Variable::ViewImpl : public Variable::Impl {
-  ViewImpl(Variable base, at::Tensor data, Edge gradient_edge);
+struct TORCH_API Variable::DifferentiableViewImpl : public Variable::Impl {
+  DifferentiableViewImpl(Variable base, at::Tensor data, Edge gradient_edge);
 
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
   /// re-create the grad_fn to express the up-to-date view relationship between
@@ -468,12 +483,12 @@ struct TORCH_API Variable::ViewImpl : public Variable::Impl {
 inline Variable make_variable_view(
     Variable base,
     at::Tensor data,
-    bool potentially_tracks_history = true,
+    bool is_differentiable = true,
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
-    if (potentially_tracks_history) {
-      /// Differentiable view. Track history with ViewImpl.
-      return Variable(c10::make_intrusive<Variable::ViewImpl>(
+    if (is_differentiable) {
+      /// Differentiable view. Track history with DifferentiableViewImpl.
+      return Variable(c10::make_intrusive<Variable::DifferentiableViewImpl>(
               std::move(base), std::move(data), std::move(gradient_edge)));
     } else {
       /// Non-differentiable view. Just share version counter.
@@ -561,7 +576,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 }
 
 inline Variable Variable::detach() const {
-  return make_variable_view(*this, get()->data_, /*potentially_tracks_history=*/false);
+  return make_variable_view(*this, get()->data_, /*is_differentiable=*/false);
 }
 
 inline void Variable::detach_() {
