@@ -7289,7 +7289,7 @@ a")
 
     def test_trace_contiguous(self):
         def foo(x):
-            return x[:,:,::2].view(12).contiguous()
+            return x[:, :, ::2].view(12).contiguous()
 
         x = torch.rand(2, 3, 4)
         traced = torch.jit.trace(foo, (x,))
