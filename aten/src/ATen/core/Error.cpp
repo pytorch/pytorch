@@ -100,4 +100,12 @@ void Warning::print_warning(
 
 Warning::handler_t Warning::warning_handler_ = &Warning::print_warning;
 
+std::string GetExceptionString(const std::exception& e) {
+#ifdef __GXX_RTTI
+  return at::demangle(typeid(e).name()) + ": " + e.what();
+#else
+  return std::string("Exception (no RTTI available): ") + e.what();
+#endif // __GXX_RTTI
+}
+
 } // namespace at

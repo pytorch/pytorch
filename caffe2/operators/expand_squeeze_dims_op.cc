@@ -96,7 +96,10 @@ expanded.shape: (1, 1, 100, 100)
 )DOC")
     .Input(0, "data", "Input tensor of data to be operated on.")
     .Output(0, "expanded", "Reshaped tensor with same data as input.")
-    .Arg("dims", "*(type: [int])* List of dimensions of *data* to add single dimensional entry.");
+    .Arg(
+        "dims",
+        "*(type: [int])* List of dimensions of *data* to add single dimensional entry.")
+    .InheritOnnxSchema("ExpandDims");
 
 OPERATOR_SCHEMA(Squeeze)
     .NumInputs(1)

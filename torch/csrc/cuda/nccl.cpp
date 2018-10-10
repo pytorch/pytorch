@@ -28,7 +28,7 @@ struct NcclCommList {
   int ndevices;
   NcclCommList(const std::vector<int>& devices)
     : comms(new ncclComm_t[devices.size()]), ndevices(devices.size()) {
-    CHECK(ncclCommInitAll(comms.get(), devices.size(), devices.data()));
+    NCCL_CHECK(ncclCommInitAll(comms.get(), devices.size(), devices.data()));
   }
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {
@@ -219,7 +219,7 @@ void broadcast(TensorList tensors, const stream_list& streams, const comm_list& 
     AT_CHECK(static_cast<uint64_t>(numel) <= static_cast<uint64_t>(count_max),
              "Broadcast tensor has ", numel, " elements, which exceeds the "
              "maximum NCCL supports (", count_max, ")");
-    CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
+    NCCL_CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
   }
 #else
   throw std::runtime_error("PyTorch built without NCCL support");

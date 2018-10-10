@@ -114,9 +114,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     auto schema = getSchema(inputs.size(), n_binders);
 
     std::stringstream failure_messages;
-    at::optional<std::vector<Value*>> all_inputs =
+    at::optional<MatchedSchema> matched_schema =
       tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
-    if (!all_inputs)
+    if (!matched_schema)
       throw ErrorReport(loc) << failure_messages.str();
 
     // Release the function object so we can wrap it in a PythonOp
@@ -125,12 +125,12 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     Node* new_node = m.graph()->insertNode(m.graph()->createPythonOp(
       THPObjectPtr(func.release().ptr()), cconv, {}));
     new_node->setSourceLocation(std::make_shared<SourceRange>(loc));
-    for(auto &i : *all_inputs)
+    for(auto &i : matched_schema->inputs)
       new_node->addInput(i);
 
     std::vector<Value*> outputs;
-    for(auto & ret_arg : schema.returns) {
-      outputs.push_back(new_node->addOutput()->setType(ret_arg.type));
+    for(auto & ret_arg : matched_schema->return_types) {
+      outputs.push_back(new_node->addOutput()->setType(ret_arg));
     }
     return std::make_shared<SimpleValue>(packOutputs(*m.graph(), outputs));
   }
@@ -278,12 +278,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   //   f = f + 1
   auto& g = *m.graph();
   if (is_constant) {
-    if (py::isinstance<py::int_>(obj)) {
+    if (py::isinstance<py::bool_>(obj)) {
+      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
+    } else if (py::isinstance<py::int_>(obj)) {
       return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
       return toSimple(g.insertConstant(py::cast<float>(obj), loc));
-    } else if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = (THPDevice*)obj.ptr();
       std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
@@ -316,10 +316,20 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   }
+
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
         Symbol::fromQualString(py::str(builtin_name)), at::nullopt);
+  }
+
+  if (py::isinstance<py::function>(obj)) {
+    auto compiled_fn =
+        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
+    if (!compiled_fn.is(py::none())) {
+      auto mod = py::cast<std::shared_ptr<Module>>(compiled_fn);
+      return std::make_shared<ModuleValue>(mod);
+    }
   }
   return std::make_shared<PythonValue>(obj);
 }
@@ -371,7 +381,14 @@ void initJitScriptBindings(PyObject* module) {
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
-      .def("save", &Module::save)
+      .def("save", [](std::shared_ptr<Module> m, const std::string& filename) {
+          m->save(filename);
+      })
+      .def("save_to_buffer", [](std::shared_ptr<Module> m) {
+          std::ostringstream buf;
+          m->save(buf);
+          return py::bytes(buf.str());
+      })
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
@@ -487,6 +504,12 @@ void initJitScriptBindings(PyObject* module) {
         }
         throw std::runtime_error("Attempted to call get_debug_state on a Module without a compiled forward()");
       })
+      .def("debug_disable_autodiff_subgraph_inlining", [](Module& self) {
+        if (self.find_method("forward")) {
+          Method & m = self.get_method("forward");
+          m.debugDisableAutodiffSubgraphInlining();
+        }
+      })
       .def("forward", [](Module& self, py::args args, py::kwargs kwargs) {
         // We implement this in C++ to avoid incurring the pybind11 dispatch
         // overhead twice: once to call into the method lookup for "forward"
@@ -515,6 +538,7 @@ void initJitScriptBindings(PyObject* module) {
       auto schema = extractSchemaFromDef(def, is_method);
       self.setSchema(schema);
     })
+    .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("pretty_print_schema", &Method::pretty_print_schema);
 
   m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
@@ -527,7 +551,13 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
-  m.def("import_ir_module", import_ir_module);
+  m.def("import_ir_module", [](ModuleLookup module_lookup, const std::string& filename) {
+    import_ir_module(module_lookup, filename);
+  });
+  m.def("import_ir_module_from_buffer", [](ModuleLookup module_lookup, const std::string& buffer) {
+    std::istringstream in(buffer);
+    import_ir_module(module_lookup, in);
+  });
 }
 
 } // namespace script

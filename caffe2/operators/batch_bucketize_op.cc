@@ -26,21 +26,21 @@ bool BatchBucketizeOp<CPUContext>::RunOnDevice() {
   auto feature_dim = feature.dim(1);
   auto output_dim = indices.size();
 
-  TIndex length_sum = 0;
-  for (TIndex i = 0; i < lengths.size(); i++) {
+  int64_t length_sum = 0;
+  for (int64_t i = 0; i < lengths.size(); i++) {
     CAFFE_ENFORCE_GE(feature_dim, indices_data[i]);
     length_sum += lengths_data[i];
   }
   CAFFE_ENFORCE_EQ(length_sum, boundaries.size());
 
-  TIndex lower_bound = 0;
+  int64_t lower_bound = 0;
   output->Resize(batch_size, output_dim);
   auto* output_data = output->template mutable_data<int32_t>();
 
-  for (TIndex i = 0; i < batch_size; i++) {
+  for (int64_t i = 0; i < batch_size; i++) {
     lower_bound = 0;
-    for (TIndex j = 0; j < output_dim; j++) {
-      for (TIndex k = 0; k <= lengths_data[j]; k++) {
+    for (int64_t j = 0; j < output_dim; j++) {
+      for (int64_t k = 0; k <= lengths_data[j]; k++) {
         if (k == lengths_data[j] ||
             feature_data[i * feature_dim + indices_data[j]] <=
                 boundaries_data[lower_bound + k]) {

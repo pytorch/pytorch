@@ -56,7 +56,7 @@ class MKLBNOp final : public Operator<MKLContext> {
 
     bool dims_changed;
     CHECK_INPUT_DIMS(X, dims_changed);
-    if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
+    if (dims_changed || c10::FLAGS_caffe2_mkl_memonger_in_use) {
       // Create main primitive.
       if (is_test_) {
         primitive_.Reset(
@@ -133,7 +133,7 @@ class MKLBNOp final : public Operator<MKLContext> {
       }
     }
     buffer_.CopyTo(Y, primitive_, dnnResourceDst);
-    if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+    if (c10::FLAGS_caffe2_mkl_memonger_in_use && !shared) {
       buffer_.Reset();
     }
     return true;
@@ -146,7 +146,7 @@ class MKLBNOp final : public Operator<MKLContext> {
   const StorageOrder order_;
   const int num_batches_;
 
-  vector<TIndex> cached_input_dims_;
+  vector<int64_t> cached_input_dims_;
   LayoutWrapper<T> scale_bias_layout_;
   LayoutWrapper<T> saved_mean_layout_;
   LayoutWrapper<T> saved_var_layout_;

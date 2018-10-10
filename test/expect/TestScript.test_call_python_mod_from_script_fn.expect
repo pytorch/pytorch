@@ -1,7 +1,6 @@
 graph(%x : Dynamic) {
   %2 : int = prim::Constant[value=1]()
   %1 : Dynamic = ^<python_value>()(%x)
-  %3 : int = prim::Constant[value=1]()
-  %4 : Dynamic = aten::add(%1, %2, %3)
+  %4 : Dynamic = aten::add(%1, %2, %2)
   return (%4);
 }

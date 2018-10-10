@@ -24,11 +24,6 @@
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
 
-#ifdef USE_CUDA
-// Forward declaration
-struct THCState;
-#endif
-
 namespace c10d {
 
 // AlgorithmKey is a const identifier for a Gloo algorithm.
@@ -389,11 +384,6 @@ class ProcessGroupGloo : public ProcessGroup {
   std::mutex queueMutex_;
   std::condition_variable queueProduceCV_;
   std::condition_variable queueConsumeCV_;
-
-#ifdef USE_CUDA
-  // Store copy of pointer to THCState retrieved from ::at::globalContext().
-  THCState* thcState_;
-#endif
 };
 
 } // namespace c10d

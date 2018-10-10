@@ -3,8 +3,8 @@ producer_name: "pytorch"
 producer_version: "0.4"
 graph {
   node {
-    input: "1"
     input: "0"
+    input: "1"
     output: "2"
     op_type: "Less"
   }

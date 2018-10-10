@@ -29,7 +29,7 @@ namespace matcher {
  */
 
 template <typename NodeMatchCriteria>
-class CAFFE2_API MatchNode {
+class MatchNode {
  public:
   static const int kStarCount = -1;
 

@@ -59,107 +59,6 @@ void THTensor_(geometric)(THTensor *self, THGenerator *_generator, double p)
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_geometric(_generator, p););
 }
 
-#ifdef TH_BLAS_MKL
-#define BERNOULLI_OMP 800
-#define TH_OMP_OVERHEAD_THRESHOLD_COPY 20000
-
-void THTensor_(iBernoulli_generate_copy)(THTensor *self, THGenerator *_generator, const double p)
-{
-  int64_t seed = THRandom_random(_generator);
-  int64_t n = THTensor_(nElement)(self);
-  int contig = THTensor_(isContiguous)(self);
-  int *tmp = NULL;
-  THIntTensor* intTensor = NULL;
-
-  if (contig) {
-#ifdef TH_REAL_IS_INT
-    tmp = THIntTensor_data(self);
-#else
-    tmp = (int*)THAlloc(n*sizeof(int));
-#endif
-  } else {
-    intTensor = THIntTensor_new();
-    THIntTensor_resizeNd(intTensor, self->dim(), THTensor_getSizePtr(self), nullptr);
-    tmp = THIntTensor_data(intTensor);
-  }
-
-#ifdef _OPENMP
-  size_t nthr = !omp_in_parallel() && n >= BERNOULLI_OMP ? omp_get_num_threads() : 1;
-#pragma omp parallel num_threads(nthr) firstprivate(nthr)
-  {
-    size_t tid = omp_get_thread_num();
-    int64_t seg_len_tmp = n / nthr;
-    int64_t line_index_offset = tid * seg_len_tmp;
-    int64_t line_seg_len = (tid == nthr - 1)? (n-line_index_offset) : seg_len_tmp;
-#else
-  {
-    int64_t line_index_offset = 0;
-    int64_t line_seg_len = n;
-#endif
-
-    if (line_seg_len > 0) {
-      VSLStreamStatePtr stream;
-      vslNewStream(&stream, VSL_BRNG_MCG31, seed);
-      vslSkipAheadStream(stream, line_index_offset);
-      viRngBernoulli(VSL_RNG_METHOD_BERNOULLI_ICDF, stream, line_seg_len,
-        tmp + line_index_offset, p);
-      vslDeleteStream(&stream);
-
-#ifndef TH_REAL_IS_INT
-      if (contig) {
-        scalar_t* self_seg = self->data<scalar_t>() + line_index_offset;
-        int* tmp_seg = tmp + line_index_offset;
-        THVector_(cvtFromInt)(self_seg, tmp_seg, line_seg_len);
-      }
-#endif
-    }
-  }
-
-  if(contig) {
-#ifndef TH_REAL_IS_INT
-    THFree(tmp);
-#endif
-  } else {
-#ifdef _OPENMP
-    TH_TENSOR_APPLY2_OMP(n, 1, 0, int, intTensor, scalar_t, self, *self_data = *intTensor_data;, TH_OMP_OVERHEAD_THRESHOLD_COPY)
-#else
-    TH_TENSOR_APPLY2(int, intTensor, scalar_t, self, *self_data = *intTensor_data;)
-#endif
-    THIntTensor_free(intTensor);
-  }
-
-}
-
-#endif
-
-void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p)
-{
-#ifdef TH_BLAS_MKL
-  if(cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
-    std::lock_guard<std::mutex> lock(_generator->mutex);
-    THTensor_(iBernoulli_generate_copy)(self, _generator, p);
-  } else {
-    std::lock_guard<std::mutex> lock(_generator->mutex);
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_bernoulli(_generator, p););
-  }
-#else
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_bernoulli(_generator, p););
-#endif
-}
-
-void THTensor_(bernoulli_FloatTensor)(THTensor *self, THGenerator *_generator, THFloatTensor *p)
-{
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY2(scalar_t, self, float, p, *self_data = (scalar_t)THRandom_bernoulli(_generator, (double)*p_data););
-}
-
-void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, THDoubleTensor *p)
-{
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY2(scalar_t, self, double, p, *self_data = (scalar_t)THRandom_bernoulli(_generator, (double)*p_data););
-}
-
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 #if defined(TH_REAL_IS_FLOAT)
@@ -167,15 +66,6 @@ void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, 
 #elif defined(TH_REAL_IS_DOUBLE)
 #define TH_REAL_MIN DBL_MIN
 #endif
-
-void THTensor_(bernoulli_Tensor)(THTensor *self, THGenerator *_generator, THTensor* p)
-{
-#if defined(TH_REAL_IS_FLOAT)
-  THTensor_(bernoulli_FloatTensor)(self, _generator, p);
-#else
-  THTensor_(bernoulli_DoubleTensor)(self, _generator, p);
-#endif
-}
 
 void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
 {

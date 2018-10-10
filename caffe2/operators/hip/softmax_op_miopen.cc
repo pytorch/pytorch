@@ -51,7 +51,7 @@ class MIOpenSoftmaxOp final : public Operator<HIPContext> {
     if (dims_ != X.dims()) {
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           desc_, miopenTypeWrapper<T>::type, N, D, 1, 1));
-      dims_ = X.dims();
+      dims_ = X.dims().vec();
     }
     MIOPEN_ENFORCE(miopenSoftmaxForward(
         miopen_wrapper_.inline_miopen_handle(),
@@ -65,13 +65,13 @@ class MIOpenSoftmaxOp final : public Operator<HIPContext> {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t desc_;
-  vector<TIndex> dims_;
+  vector<int64_t> dims_;
   const int axis_;
   const float alpha_;
   const float beta_;
@@ -110,7 +110,7 @@ class MIOpenSoftmaxGradientOp final : public Operator<HIPContext> {
     if (dims_ != Y.dims()) {
       MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
           desc_, miopenTypeWrapper<T>::type, N, D, 1, 1));
-      dims_ = Y.dims();
+      dims_ = Y.dims().vec();
     }
     MIOPEN_ENFORCE(miopenSoftmaxBackward(
         miopen_wrapper_.inline_miopen_handle(),
@@ -126,7 +126,7 @@ class MIOpenSoftmaxGradientOp final : public Operator<HIPContext> {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
  protected:
@@ -135,7 +135,7 @@ class MIOpenSoftmaxGradientOp final : public Operator<HIPContext> {
   const float alpha_;
   const float beta_;
   miopenTensorDescriptor_t desc_;
-  vector<TIndex> dims_;
+  vector<int64_t> dims_;
 };
 
 namespace {

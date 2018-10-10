@@ -32,8 +32,8 @@ template<int N>
 using Shape = std::array<int, N>;
 
 template<int N>
-const std::vector<TIndex>& shape(Shape<N> vs) {
-  static thread_local std::vector<TIndex> cache;
+const std::vector<int64_t>& shape(Shape<N> vs) {
+  static thread_local std::vector<int64_t> cache;
   cache.resize(vs.size());
   for (auto i = 0; i < vs.size(); ++i) {
     cache[i] = vs[i];
@@ -41,11 +41,11 @@ const std::vector<TIndex>& shape(Shape<N> vs) {
   return cache;
 }
 
-inline const std::vector<TIndex>& shape(int i) {
+inline const std::vector<int64_t>& shape(int i) {
   return shape<1>(Shape<1>({i}));
 }
 
-inline const std::vector<TIndex>& shape(int i, int j) {
+inline const std::vector<int64_t>& shape(int i, int j) {
   return shape<2>(Shape<2>({i, j}));
 }
 

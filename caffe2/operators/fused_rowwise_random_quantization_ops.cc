@@ -1,5 +1,5 @@
 #include "caffe2/operators/fused_rowwise_random_quantization_ops.h"
-#include "caffe2/core/registry.h"
+#include "c10/util/Registry.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -38,8 +38,8 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   size_t data_per_byte = 8 / bitwidth_;
   // How many bytes in the output
   size_t segment_size = (input_columns + data_per_byte - 1) / data_per_byte;
-  const std::vector<TIndex> output_dimensions = {
-      input_rows, 10 + static_cast<TIndex>(segment_size)};
+  const std::vector<int64_t> output_dimensions = {
+      input_rows, 10 + static_cast<int64_t>(segment_size)};
   output->Resize(output_dimensions);
 
   const auto* input_data = input.template data<float>();
@@ -92,8 +92,8 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
       "Unsupported bitwidth");
   const size_t tail = input_data[1];
   const size_t output_columns = (input_columns - 10) * (8 / bitwidth) - tail;
-  const std::vector<TIndex> output_dimensions = {
-      input_rows, static_cast<TIndex>(output_columns)};
+  const std::vector<int64_t> output_dimensions = {
+      input_rows, static_cast<int64_t>(output_columns)};
   output->Resize(output_dimensions);
   auto* output_data = output->template mutable_data<float>();
   for (size_t row = 0; row < input_rows; ++row) {

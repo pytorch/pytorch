@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace, test_util
+from caffe2.proto import caffe2_pb2
 import caffe2.python.nomnigraph as ng
 
 from hypothesis import given
@@ -174,3 +175,81 @@ class TestBindings(test_util.TestCase):
             assert a == b
         for a, b in zip(new_netdef.external_output, net.Proto().external_output):
             assert a == b
+
+    def test_node_interactions(self):
+        nn = ng.NNModule()
+        dfg = nn.dataFlow
+        test1 = dfg.createNode(ng.Operator("test1"))
+        test2 = dfg.createNode(ng.Operator("test2"))
+        x = dfg.createNode(ng.Data("x"))
+        dfg.createEdge(test1, x)
+        dfg.createEdge(x, test2)
+        p = test2.getOperatorPredecessors()
+        assert len(p) == 1
+        assert p[0] == test1
+
+        # Add another node
+        test3 = dfg.createNode(ng.Operator("test3"))
+        y = dfg.createNode(ng.Data("y"))
+        dfg.createEdge(test3, y)
+        dfg.createEdge(y, test2)
+        p = test2.getOperatorPredecessors()
+        assert len(p) == 2
+        assert test1 in p
+        assert test3 in p
+
+        # Successors
+        assert len(test2.getOperatorSuccessors()) == 0
+        assert len(test1.getOperatorSuccessors()) == 1
+        assert test1.getOperatorSuccessors()[0] == test2
+
+        # Check all the nodes are valid (pybind ownership test)
+        for node in [test1, test2, test3]:
+            assert node.isOperator()
+        for node in [x, y]:
+            assert node.isTensor()
+
+    def test_annotation_basic(self):
+        annot = ng.Annotation()
+        annot.setDevice("woot")
+        assert annot.getDevice() == "woot"
+        annot.setDeviceType(7)
+        assert annot.getDeviceType() == 7
+
+    def test_annotation_from_graph(self):
+        nn = ng.NNModule()
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+        annot = node.getAnnotation()
+        annot.setDeviceType(7)
+        node.setAnnotation(annot)
+        new_annot = node.getAnnotation()
+        assert new_annot.getDeviceType() == 7
+
+    def test_distributed_annotations(self):
+        nn = ng.NNModule()
+        key = nn.dataFlow.createNode(ng.NeuralNetData("key"))
+        length = nn.dataFlow.createNode(ng.NeuralNetData("length"))
+        node = nn.dataFlow.createNode(ng.NeuralNetOperator("TestOp"))
+
+        annot = ng.Annotation()
+        annot.setKeyNode(key)
+        annot.setLengthNode(length)
+        annot.setComponentLevels(["", "test", "woot"])
+
+        node.setAnnotation(annot)
+
+        new_annot = node.getAnnotation()
+        #assert new_annot.getLengthNode() == length
+        assert new_annot.getKeyNode() == key
+        assert len(new_annot.getComponentLevels()) == 3
+        assert new_annot.getComponentLevels()[0] == ""
+        assert new_annot.getComponentLevels()[2] == "woot"
+
+    def test_distributed_device_map(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        d = caffe2_pb2.DeviceOption()
+        nn = ng.NNModule(net, {"X": d, "W": d})
+
+        with self.assertRaises(Exception):
+            nn = ng.NNModule(net, {"X": d, "Fake": d})

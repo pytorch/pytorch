@@ -22,6 +22,10 @@ static magma_queue_t createMagmaQueue(const Tensor& tensor) {
   return magma_queue;
 }
 
+static void destroyMagmaQueue(magma_queue_t& existing_queue) {
+  magma_queue_destroy(existing_queue);
+}
+
 static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
   auto result = static_cast<magma_int_t>(value);
   if (static_cast<int64_t>(result) != value) {

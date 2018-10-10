@@ -14,7 +14,7 @@ import numpy as np
 
 class TestWeightedSumOp(serial.SerializedTestCase):
 
-    @serial.given_and_seeded(
+    @serial.given(
         n=st.integers(1, 8), m=st.integers(1, 10), d=st.integers(1, 4),
         in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
         seed=st.integers(min_value=0, max_value=65535),

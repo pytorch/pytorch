@@ -72,7 +72,7 @@ public:
       for (int idx = 0; idx < size; idx++) {
 	PyObject* obj = tuple ? PyTuple_GET_ITEM(source, idx) : PyList_GET_ITEM(source, idx);
 	if (THPVariable_Check(obj)) {
-	  v_value[idx] = THPVariable_Unpack(obj).toCLong();
+	  v_value[idx] = THPVariable_Unpack(obj).item<int64_t>();
 	} else if (PyLong_Check(obj)) {
 	  // use THPUtils_unpackLong after it is safe to include python_numbers.h
 	  v_value[idx] = THPUtils_unpackLong(obj);

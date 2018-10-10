@@ -7,14 +7,16 @@ from caffe2.python import recurrent, workspace
 from caffe2.python.model_helper import ModelHelper
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python.test_util import IN_CIRCLECI_FLAKY_ENV
+import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 
-import unittest
 import os
+import unittest
 
-class RecurrentNetworkTest(hu.HypothesisTestCase):
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
+class RecurrentNetworkTest(serial.SerializedTestCase):
+    @unittest.skipIf(IN_CIRCLECI_FLAKY_ENV, "FIXME: flaky test in CircleCI")
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
@@ -34,7 +36,7 @@ class RecurrentNetworkTest(hu.HypothesisTestCase):
         self.simple_rnn(T, n, d, model, step, input_t, output_t, output_t_prev,
                         input_blob, initial_input_blob)
 
-    @given(T=st.integers(1, 4),
+    @serial.given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
     def test_mul(self, T, n, d):

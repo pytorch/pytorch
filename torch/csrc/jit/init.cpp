@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
@@ -14,6 +15,8 @@
 #include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
+#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
@@ -62,7 +65,13 @@ bool loadPythonClasses() {
 
 } // anonymous namespace
 
-extern std::string runJITCPPTests();
+#if defined(_WIN32)
+std::string runJITCPPTests() {
+  AT_ERROR("JIT tests not yet supported on Windows");
+}
+#else
+std::string runJITCPPTests();
+#endif
 
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
@@ -80,16 +89,24 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
      return EliminateCommonSubexpression(g); // overload resolution
    })
+   .def("_jit_pass_constant_pooling", ConstantPooling)
    .def("_jit_pass_peephole", PeepholeOptimize)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
    .def("_jit_pass_lint", LintGraph)
-   .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     PropagateInputShapes(graph, ArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+   .def("_jit_pass_shape_analysis", [](Graph& graph, std::vector<at::Tensor> inputs, bool with_grad) {
+     setInputTypes(graph, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+     PropagateInputShapes(graph);
    })
    .def("_jit_pass_complete_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     PropagateInputShapes(graph, CompleteArgumentSpec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs())));
+     CompleteArgumentSpec spec(with_grad, evilDeprecatedBadCreateStackDoNotUse(inputs, graph.inputs()));
+     auto graph_inputs = graph.inputs();
+     JIT_ASSERT(spec.size() == graph_inputs.size());
+     for (size_t i = 0; i < graph_inputs.size(); ++i) {
+       graph_inputs[i]->setType(spec.at(i));
+     }
+     PropagateInputShapes(graph);
    })
    .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
@@ -99,6 +116,9 @@ void initJITBindings(PyObject *module) {
      return ConstantPropagation(g);
    })
    .def("_jit_pass_erase_shape_information", EraseShapeInformation)
+   .def("_jit_pass_create_autodiff_subgraphs", [](Graph& graph) {
+     CreateAutodiffSubgraphs(graph);
+   })
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
@@ -215,7 +235,6 @@ void initJITBindings(PyObject *module) {
         }
         return createPyObjectForStack(std::move(stack));
       });
-
 
     py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())

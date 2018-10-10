@@ -69,11 +69,11 @@ Tensor dirac_(Tensor tensor) {
   return tensor;
 }
 
-Tensor eye_(Tensor tensor) {
+Tensor eye_(Tensor matrix) {
   NoGradGuard guard;
   AT_CHECK(
-      tensor.ndimension() == 2, "Only tensors with 2 dimensions are supported");
-  return torch::eye_out(tensor, tensor.size(0), tensor.size(1));
+      matrix.ndimension() == 2, "Only tensors with 2 dimensions are supported");
+  return torch::eye_out(matrix, matrix.size(0), matrix.size(1));
 }
 
 Tensor normal_(Tensor tensor, double mean, double std) {

@@ -156,7 +156,7 @@ static double dispatch_to_CDouble(const Tensor & self) {
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
-  return self.toCDouble();
+  return self.item<double>();
 }
 
 static std::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
@@ -165,7 +165,7 @@ static std::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
-  return self.toCComplexDouble();
+  return self.item<std::complex<double>>();
 }
 
 static int64_t dispatch_to_CLong(const Tensor & self) {
@@ -174,7 +174,7 @@ static int64_t dispatch_to_CLong(const Tensor & self) {
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
   }
-  return self.toCLong();
+  return self.item<int64_t>();
 }
 
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
@@ -190,7 +190,7 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   jit::tracer::warn("Converting a tensor to a Python integer", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (isFloatingType(self_.type().scalarType())) {
-    // we can't dispatch to toCLong here because we want to avoid ATen overflow checks;
+    // we can't dispatch to item<int64_t> here because we want to avoid ATen overflow checks;
     // the python integral type (long in python2) can't overflow.
     return THPUtils_packDoubleAsInt(dispatch_to_CDouble(self_));
   } else {

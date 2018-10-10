@@ -11,11 +11,11 @@ namespace caffe2 {
 // TODO(dzhulgakov): remove _STR when all lengths ops are off generic version.
 
 using SparseLengthsSumOp =
-    CPUSparseLengthsReductionOp<float, TensorTypes<float, float16>, 0, 0>;
+    CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 0, 0>;
 using SparseLengthsWeightedSumOp =
-    CPUSparseLengthsReductionOp<float, TensorTypes<float, float16>, 1, 0>;
+    CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 1, 0>;
 using SparseLengthsMeanOp =
-    CPUSparseLengthsReductionOp<float, TensorTypes<float, float16>, 0, 1>;
+    CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 0, 1>;
 REGISTER_CPU_OPERATOR(SparseLengthsSum, SparseLengthsSumOp);
 REGISTER_CPU_OPERATOR(SparseLengthsWeightedSum, SparseLengthsWeightedSumOp);
 REGISTER_CPU_OPERATOR(SparseLengthsMean, SparseLengthsMeanOp);
@@ -52,7 +52,7 @@ SparseWeightedSum
 
 REGISTER_CPU_OPERATOR_STR(
     "SparseLengthsPositionalWeightedSum",
-    CPUSparseLengthsReductionOp<float, TensorTypes<float, float16>, 1, 0, 1>);
+    CPUSparseLengthsReductionOp<float, TensorTypes<float, at::Half>, 1, 0, 1>);
 
 template <typename Def>
 string FormatDoc() {
@@ -79,7 +79,8 @@ OPERATOR_SCHEMA(SparseLengthsSum)
         SparseLengthsSumOp::LENGTHS)
     .SetDoc(FormatDoc<SparseLengthsSumDef>())
     .Output(0, "OUTPUT", "Aggregated tensor")
-    .FillUsing(SparseLengthsSumDef::PopulateSchema);
+    .FillUsing(SparseLengthsSumDef::PopulateSchema)
+    .InheritOnnxSchema("SparseLengthsSum");
 REGISTER_CPU_OPERATOR(
     SparseLengthsSumGradient,
     SparseLengthsSumDef::BackwardOp);

@@ -130,9 +130,13 @@ AT_ERROR("gesv: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * n];
   }
 
+  magma_queue_t gesv_magma_queue = createMagmaQueue(b);
+
   magmaGesvBatched<scalar_t>(
       n, nrhs, A_array, n, ipiv_array, b_array, n,
-      info_array, batch_size, createMagmaQueue(b));
+      info_array, batch_size, gesv_magma_queue);
+
+  destroyMagmaQueue(gesv_magma_queue);
 
   for (int64_t i = 0; i < batch_size; i++) {
     infos[i] = info_array[i];
@@ -184,6 +188,8 @@ AT_ERROR("inverse: MAGMA library not found in "
   magmaGetriBatched<scalar_t>(
     n, self_array, n, ipiv_array, self_inv_array,
     n, info_array, batch_size, inverse_magma_queue);
+
+  destroyMagmaQueue(inverse_magma_queue);
 
   for (int64_t i = 0; i < batch_size; i++) {
     infos[i] = info_array[i];

@@ -14,7 +14,7 @@ package torch;
 //
 // This document describes the syntax of models and their computation graphs,
 // as well as the standard data types. Together, they are referred to as the ONNX
-// Intermediate Representation, or 'IR' for short. 
+// Intermediate Representation, or 'IR' for short.
 //
 // The normative semantic specification of the ONNX IR is found in docs/IR.md.
 // Definitions of the built-in neural network operators may be found in docs/Operators.md.
@@ -101,7 +101,7 @@ message AttributeProto {
 
   // The name field MUST be present for this version of the IR.
   optional string name = 1;           // namespace Attribute
- 
+
   // if ref_attr_name is not empty, ref_attr_name is the attribute name in parent function.
   // In this case, this AttributeProto does not contain data, and it's a reference of attribute
   // in parent scope.
@@ -151,7 +151,7 @@ message ValueInfoProto {
 // Computation graphs are made up of a DAG of nodes, which represent what is
 // commonly called a "layer" or "pipeline stage" in machine learning frameworks.
 //
-// For example, it can be a node of type "Conv" that takes in an image, a filter 
+// For example, it can be a node of type "Conv" that takes in an image, a filter
 // tensor and a bias tensor, and produces the convolved output.
 message NodeProto {
   repeated string input = 1;    // namespace Value
@@ -170,6 +170,7 @@ message NodeProto {
   repeated AttributeProto attribute = 5;
 
   // A human-readable documentation for this node. Markdown is allowed.
+  // Equivalent to string debug_info
   optional string doc_string = 6;
 
   // Additional annotations, attributes are defined in Schema
@@ -177,7 +178,6 @@ message NodeProto {
   //    string engine
   //    string list control_input
   //    int64 is_gradient_op
-  //    string debug_info
   repeated AttributeProto annotations = 8;
 
   // Besides the node type, PyTorhc also serialize ATen function signature
@@ -278,7 +278,7 @@ message StringStringEntryProto {
 
 // Graphs
 //
-// A graph defines the computational logic of a model and is comprised of a parameterized 
+// A graph defines the computational logic of a model and is comprised of a parameterized
 // list of nodes that form a directed acyclic graph based on their inputs and outputs.
 // This is the equivalent of the "network" or "graph" in many deep learning
 // frameworks.
@@ -383,7 +383,7 @@ message TensorProto {
   // When this field is present, the data_type field MUST be FLOAT or COMPLEX64.
   repeated float float_data = 4 [packed = true];
 
-  // For int32, uint8, int8, uint16, int16, bool, and float16 values
+  // For int32, uint8, int8, uint16, int16, bool, and Half values
   // float16 values must be bit-wise converted to an uint16_t prior
   // to writing to the buffer.
   // When this field is present, the data_type field MUST be
@@ -527,8 +527,8 @@ message TypeProto {
     SpecialBlob special_type = 51;
   }
 
-  // An optional denotation can be used to denote the whole 
-  // type with a standard semantic description as to what is 
+  // An optional denotation can be used to denote the whole
+  // type with a standard semantic description as to what is
   // stored inside. Refer to https://github.com/onnx/onnx/blob/master/docs/TypeDenotation.md#type-denotation-definition
   // for pre-defined type denotations.
   optional string denotation = 6;

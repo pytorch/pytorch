@@ -164,7 +164,13 @@ TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> valu
 // if it returns nullopt, then failure_messages contains a good error report
 // set convert_tensor_to_num to true if ImplicitTensorToNums should be inserted to
 // match the schema
-TORCH_API at::optional<std::vector<Value*>> tryMatchSchema(
+
+struct MatchedSchema {
+  std::vector<Value*> inputs;
+  std::vector<TypePtr> return_types;
+};
+
+TORCH_API at::optional<MatchedSchema> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
   Graph& graph,

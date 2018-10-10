@@ -12,7 +12,7 @@ bool AccuracyOp<float, CPUContext>::RunOnDevice() {
   int D = X.dim32(1);
   CAFFE_ENFORCE_EQ(label.ndim(), 1);
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
-  Y->Resize(vector<TIndex>());
+  Y->Resize(vector<int64_t>());
   const auto* Xdata = X.data<float>();
   const auto* labelData = label.data<int>();
   const int top_k = top_k_;

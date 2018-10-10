@@ -252,6 +252,24 @@ void testBroadcast(const std::string& path, const at::Backend b) {
   }
 }
 
+void testBarrier(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  // Kick off work
+  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  for (auto i = 0; i < size; i++) {
+    work[i] = tests[i].getProcessGroup().barrier();
+  }
+
+  // Wait for work to complete
+  for (auto i = 0; i < size; i++) {
+    if (!work[i]->wait()) {
+      throw work[i]->exception();
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   {
     TemporaryFile file;
@@ -290,6 +308,11 @@ int main(int argc, char** argv) {
     testBroadcast(file.path, at::Backend::CUDA);
   }
 #endif
+
+  {
+    TemporaryFile file;
+    testBarrier(file.path);
+  }
 
   std::cout << "Test successful" << std::endl;
   return 0;

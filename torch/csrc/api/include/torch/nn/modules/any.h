@@ -184,11 +184,13 @@ class AnyModule {
   bool is_empty() const noexcept;
 
  private:
+  /// \internal
   /// The static type of the object we store in the `AnyModule`, which erases
   /// the actual type, but allows us to call `forward()` on the underlying
   /// module.
   struct Placeholder;
 
+  /// \internal
   /// The dynamic type of the object stored in the `AnyModule`. It contains the
   /// concrete instance to which all calls are forwarded. It is parameterized
   /// over the concrete type of the module, and the types of the arguments the
@@ -289,6 +291,7 @@ class AnyModule::Value {
   explicit Value(autograd::Variable variable)
       : Value(Tensor(std::move(variable))) {}
 
+  /// \internal
   /// The static type of the object we store in the `Value`, which erases the
   /// actual object's type, allowing us only to check the `type_info` of the
   /// type stored in the dynamic type.
@@ -299,6 +302,7 @@ class AnyModule::Value {
     const std::type_info& type_info;
   };
 
+  /// \internal
   /// The dynamic type of the object we store in the `Value`, which hides the
   /// actual object we have erased in this `Value`.
   template <typename T>
@@ -337,6 +341,7 @@ struct AnyModule::Placeholder : public AnyModule::Value::Placeholder {
 
 template <typename ModuleType, typename... ArgumentTypes>
 struct AnyModule::Holder : public AnyModule::Placeholder {
+  /// \internal
   struct CheckedGetter {
     template <typename T>
     decay_t<T>&& operator()(size_t index) {
@@ -356,6 +361,7 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
     std::vector<Value>& arguments_;
   };
 
+  /// \internal
   struct InvokeForward {
     template <typename... Ts>
     Value operator()(Ts&&... ts) {

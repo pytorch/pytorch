@@ -21,8 +21,10 @@
 #include "rocksdb/db.h"
 #include "rocksdb/utilities/leveldb_options.h"
 
-CAFFE2_DEFINE_int(caffe2_rocksdb_block_size, 65536,
-                  "The caffe2 rocksdb block size when writing a rocksdb.");
+C10_DEFINE_int(
+    caffe2_rocksdb_block_size,
+    65536,
+    "The caffe2 rocksdb block size when writing a rocksdb.");
 
 namespace caffe2 {
 namespace db {
@@ -67,14 +69,14 @@ class RocksDBTransaction : public Transaction {
   rocksdb::DB* db_;
   std::unique_ptr<rocksdb::WriteBatch> batch_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(RocksDBTransaction);
+  C10_DISABLE_COPY_AND_ASSIGN(RocksDBTransaction);
 };
 
 class RocksDB : public DB {
  public:
   RocksDB(const string& source, Mode mode) : DB(source, mode) {
     rocksdb::LevelDBOptions options;
-    options.block_size = FLAGS_caffe2_rocksdb_block_size;
+    options.block_size = c10::FLAGS_caffe2_rocksdb_block_size;
     options.write_buffer_size = 268435456;
     options.max_open_files = 100;
     options.error_if_exists = mode == NEW;

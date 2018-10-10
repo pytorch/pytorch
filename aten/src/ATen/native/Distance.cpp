@@ -26,7 +26,7 @@ Tensor _pdist_forward(const Tensor& self, const double p) {
   AT_CHECK(self.is_contiguous(), "_pdist_forward requires contiguous input");
   auto device = self.type().device_type();
   AT_CHECK(device == kCPU || device == kCUDA, "_pdist_forward only supports CPU and CUDA devices, got: ", device);
-  Tensor result = self.type().tensor();
+  Tensor result = at::empty({0}, self.options());
   if (self.size(0) <= 1) {
     result.resize_({0});
   } else {

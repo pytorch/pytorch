@@ -184,7 +184,7 @@ static inline Tensor _run_cufft(
   auto& ctx = at::globalContext();
 
   // set output
-  auto output = input.type().tensor(output_sizes);
+  auto output = at::empty(output_sizes, input.options());
 
   // set to current stream
   CUFFT_CHECK(cufftSetStream(plan, at::cuda::getCurrentCUDAStream()));

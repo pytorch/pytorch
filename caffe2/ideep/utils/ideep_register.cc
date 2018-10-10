@@ -4,11 +4,14 @@
 #include <ideep_pin_singletons.hpp>
 #include "ideep_context.h"
 
+namespace at {
+REGISTER_CONTEXT(DeviceType::IDEEP, caffe2::IDEEPContext);
+} // namespace at
 namespace caffe2 {
 
 CAFFE_KNOWN_TYPE(ideep::tensor);
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     IDEEPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
@@ -27,7 +30,7 @@ REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(IDEEP, EventErrorMessageCPU);
 REGISTER_EVENT_SET_FINISHED_FUNCTION(IDEEP, EventSetFinishedCPU);
 REGISTER_EVENT_RESET_FUNCTION(IDEEP, EventResetCPU);
 
-BaseStaticContext* GetIDEEPStaticContext() {
+C10_EXPORT BaseStaticContext* GetIDEEPStaticContext() {
   static IDEEPStaticContext context;
   return &context;
 }

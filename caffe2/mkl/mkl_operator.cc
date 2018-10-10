@@ -1,7 +1,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_mkl_memonger_in_use,
     false,
     "Turn on if memonger is used to force reallocate intermediate "
@@ -9,7 +9,7 @@ CAFFE2_DEFINE_bool(
 
 namespace caffe2 {
 
-CAFFE_DEFINE_REGISTRY(
+C10_DEFINE_REGISTRY(
     MKLOperatorRegistry,
     OperatorBase,
     const OperatorDef&,

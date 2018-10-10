@@ -60,7 +60,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
 
-  auto result = grad.type().tensor(base.sizes(), base.strides());
+  auto result = at::empty_strided(base.sizes(), base.strides(), grad.options());
   result.copy_(grad);
 
   auto offset = view.storage_offset() - base.storage_offset();

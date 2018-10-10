@@ -919,6 +919,31 @@ class TestCaffe2Backend(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_tensor_factories(self):
+        class TensorFactory(torch.nn.Module):
+            def forward(self, x):
+                return torch.zeros(x.size()) + torch.ones(x.size())
+
+        x = torch.randn(2, 3, 4)
+        self.run_model_test(TensorFactory(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_where_functional(self):
+        class WhereFunctional(torch.nn.Module):
+            def forward(self, x):
+                return torch.where(x > 2.0, x, torch.neg(x))
+
+        x = torch.randn(3, 4)
+        self.run_model_test(WhereFunctional(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_where_method(self):
+        class WhereMethod(torch.nn.Module):
+            def forward(self, x):
+                return x.where(x > 2.0, torch.neg(x))
+
+        x = torch.randn(3, 4)
+        self.run_model_test(WhereMethod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+
 # a bit of metaprogramming to set up all the rnn tests
 
 

@@ -6,11 +6,11 @@
 namespace torch { namespace autograd { namespace profiler {
 
 ProfilerState state = ProfilerState::Disabled;
-uint32_t next_thread_id = 0;
+uint16_t next_thread_id = 0;
 std::mutex all_event_lists_mutex;
 std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 thread_local std::shared_ptr<RangeEventList> event_list;
-thread_local int32_t thread_id;
+thread_local uint16_t thread_id;
 
 RangeEventList& getEventList() {
   if (!event_list) {
@@ -23,6 +23,9 @@ RangeEventList& getEventList() {
 }
 
 void mark(std::string name, bool include_cuda /* = true */) {
+  if (state == ProfilerState::Disabled) {
+    return;
+  }
   if (state == ProfilerState::NVTX) {
 #ifdef USE_CUDA
     nvtxMarkA(name.c_str());
@@ -39,7 +42,12 @@ void mark(std::string name, bool include_cuda /* = true */) {
   }
 }
 
-void pushRange(std::string name, const char* msg/*= ""*/, int64_t sequence_nr/*= -1*/) {
+const char* c_str(const char *str) { return str; }
+// NB: non-const to disallow temporaries (lifetime issues)
+const char* c_str(std::string& str) { return str.c_str(); }
+
+template<typename T>
+void pushRangeImpl(T name, const char* msg="", int64_t sequence_nr=-1) {
   if (state == ProfilerState::Disabled) {
     return;
   }
@@ -49,9 +57,9 @@ void pushRange(std::string name, const char* msg/*= ""*/, int64_t sequence_nr/*=
       std::stringstream s;
       s << name << msg << sequence_nr;
       nvtxRangePushA(s.str().c_str());
-    } 
-    else
-      nvtxRangePushA(name.c_str());
+    } else {
+      nvtxRangePushA(c_str(name));
+    }
 #else
     throw std::logic_error(
         "pushRange called with NVTX tracing, but compiled without CUDA");
@@ -63,6 +71,10 @@ void pushRange(std::string name, const char* msg/*= ""*/, int64_t sequence_nr/*=
         thread_id,
         state == ProfilerState::CUDA);
   }
+}
+
+void pushRange(std::string name) {
+  pushRangeImpl(std::move(name));
 }
 
 void popRange() {
@@ -79,45 +91,30 @@ void popRange() {
   } else {
     getEventList().record(
         EventKind::PopRange,
-        std::string(),
+        "",
         thread_id,
         state == ProfilerState::CUDA);
   }
 }
 
 RecordFunction::RecordFunction(Function* fn) {
-  if (state == ProfilerState::Disabled)
-    return;
-  pushFunctionRange(fn);
+  // NB: we don't use fn->name() here, because it will unnecessarily allocate
+  // a string. We will run a demangler on all the names anyway, so it's ok to
+  // avoid doing it now.
+  pushRangeImpl(typeid(*fn).name(), ", stashed seq=", fn->sequence_nr());
 }
 
 RecordFunction::RecordFunction(std::string name) {
-  if (state == ProfilerState::Disabled)
-    return;
-  pushRange(std::move(name));
+  pushRangeImpl(std::move(name));
 }
 
 RecordFunction::RecordFunction(const char* name) {
-  if (state == ProfilerState::Disabled)
-    return;
-  pushRange(name);
+  pushRangeImpl<const char*>(name);
 }
 
-RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr) 
+RecordFunction::RecordFunction(const char* name, int64_t current_sequence_nr)
 {
-  if (state == ProfilerState::Disabled)
-    return;
-  pushRange(name, ", seq=", current_sequence_nr);
-}
-
-RecordFunction::~RecordFunction() {
-  if (state == ProfilerState::Disabled)
-    return;
-  popRange();
-}
-
-void RecordFunction::pushFunctionRange(Function* fn) {
-  pushRange(fn->name(), ", stashed seq=", fn->sequence_nr());
+  pushRangeImpl<const char*>(name, ", seq=", current_sequence_nr);
 }
 
 #ifdef USE_CUDA

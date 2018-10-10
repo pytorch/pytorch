@@ -284,7 +284,7 @@ struct ParameterHelper final {
   }
 };
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     C10OperatorRegistry,
     OperatorBase,
     const OperatorDef&,
@@ -293,14 +293,14 @@ CAFFE_DECLARE_REGISTRY(
 // TODO Currently we only register the CPU variant. This is going to be fixed
 //      once the tensor detemplatization lands.
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH(OpSchemaDef, State, Name) \
-  CAFFE_REGISTER_CLASS(                                                     \
+  C10_REGISTER_CLASS(                                                       \
       C10OperatorRegistry,                                                  \
       Name,                                                                 \
       C10OperatorWrapper<OpSchemaDef, CPUContext, State, false, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_PARAMETERS( \
     OpSchemaDef, State, Name, ...)                                 \
-  CAFFE_REGISTER_CLASS(                                            \
+  C10_REGISTER_CLASS(                                              \
       C10OperatorRegistry,                                         \
       Name,                                                        \
       C10OperatorWrapper<                                          \
@@ -312,14 +312,14 @@ CAFFE_DECLARE_REGISTRY(
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT( \
     OpSchemaDef, State, Name)                                       \
-  CAFFE_REGISTER_CLASS(                                             \
+  C10_REGISTER_CLASS(                                               \
       C10OperatorRegistry,                                          \
       Name,                                                         \
       C10OperatorWrapper<OpSchemaDef, CPUContext, State, true, std::tuple<>>)
 
 #define REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_WITH_ARRAY_INPUT_AND_PARAMETERS( \
     OpSchemaDef, State, Name, ...)                                                 \
-  CAFFE_REGISTER_CLASS(                                                            \
+  C10_REGISTER_CLASS(                                                              \
       C10OperatorRegistry,                                                         \
       Name,                                                                        \
       C10OperatorWrapper<                                                          \

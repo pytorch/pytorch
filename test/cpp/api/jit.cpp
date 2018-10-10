@@ -1,13 +1,12 @@
-#include <catch.hpp>
+#include <gtest/gtest.h>
 
 #include <torch/jit.h>
 #include <torch/tensor.h>
 
 #include <string>
 
-TEST_CASE("torch script") {
-  SECTION("multiple functions") {
-    auto module = torch::jit::compile(R"JIT(
+TEST(TorchScriptTest, CanCompileMultipleFunctions) {
+  auto module = torch::jit::compile(R"JIT(
       def test_mul(a, b):
         return a * b
       def test_relu(a, b):
@@ -18,14 +17,13 @@ TEST_CASE("torch script") {
           i += 1
         return a
     )JIT");
-    auto a = torch::ones(1);
-    auto b = torch::ones(1);
+  auto a = torch::ones(1);
+  auto b = torch::ones(1);
 
-    REQUIRE(1 == module->run_method("test_mul", a, b).toTensor().toCLong());
+  ASSERT_EQ(1, module->run_method("test_mul", a, b).toTensor().item<int64_t>());
 
-    REQUIRE(2 == module->run_method("test_relu", a, b).toTensor().toCLong());
+  ASSERT_EQ(2, module->run_method("test_relu", a, b).toTensor().item<int64_t>());
 
-    REQUIRE(
-        0x200 == module->run_method("test_while", a, b).toTensor().toCLong());
-  }
+  ASSERT_TRUE(
+      0x200 == module->run_method("test_while", a, b).toTensor().item<int64_t>());
 }

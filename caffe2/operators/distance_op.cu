@@ -49,7 +49,7 @@ bool SquaredL2DistanceOp<float, CUDAContext>::RunOnDevice() {
   }
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   int D = X.size() / N;
-  distance->Resize(vector<TIndex>(size_t(1), N));
+  distance->Resize(vector<int64_t>(size_t(1), N));
   SquaredL2DistanceKernel<<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
@@ -164,7 +164,7 @@ bool L1DistanceOp<float, CUDAContext>::RunOnDevice() {
   }
   const int N = X.ndim() > 0 ? X.dim32(0) : 1;
   const int D = N > 0 ? X.size() / N : 0;
-  distance->Resize(vector<TIndex>(size_t(1), N));
+  distance->Resize(vector<int64_t>(size_t(1), N));
   L1DistanceKernel<<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,

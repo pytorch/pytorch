@@ -6,24 +6,24 @@
 #include "caffe2/mkl/utils/mkl_memory.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DECLARE_bool(caffe2_mkl_memonger_in_use);
+C10_DECLARE_bool(caffe2_mkl_memonger_in_use);
 
 namespace caffe2 {
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     MKLOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
 #define REGISTER_MKL_OPERATOR_CREATOR(key, ...) \
-  CAFFE_REGISTER_CREATOR(MKLOperatorRegistry, key, __VA_ARGS__)
+  C10_REGISTER_CREATOR(MKLOperatorRegistry, key, __VA_ARGS__)
 #define REGISTER_MKL_OPERATOR(name, ...) \
-  CAFFE_REGISTER_CLASS(MKLOperatorRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(MKLOperatorRegistry, name, __VA_ARGS__)
 #define REGISTER_MKL_OPERATOR_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(MKLOperatorRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(MKLOperatorRegistry, str_name, __VA_ARGS__)
 
 #define REGISTER_MKL_OPERATOR_WITH_ENGINE(name, engine, ...) \
-  CAFFE_REGISTER_CLASS(MKLOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
+  C10_REGISTER_CLASS(MKLOperatorRegistry, name##_ENGINE_##engine, __VA_ARGS__)
 
 namespace mkl {
 // MKLOperator is the base scaffolding of the operators that uses MKLDNN. It
@@ -97,7 +97,7 @@ class MKLOperator : public OperatorBase {
   // The primitive used in the operator.
   PrimitiveWrapper<T> primitive_;
   // Size cache for all the input sizes.
-  vector<vector<TIndex>> input_size_cache_;
+  vector<vector<int64_t>> input_size_cache_;
   // An internal MKLMemory buffer. This is usually handy when we have a
   // single output from the operator. If your operator has multiple outputs
   // then you should allocate your own buffer.

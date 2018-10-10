@@ -91,7 +91,8 @@ TEST_MKL = torch.backends.mkl.is_available()
 # TODO: allow Py2 when librosa 0.6.2 releases
 TEST_LIBROSA = _check_module_exists('librosa') and PY3
 
-NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
+# Python 2.7 doesn't have spawn
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1' or sys.version_info[0] == 2
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
@@ -593,3 +594,68 @@ def find_free_port():
     sockname = sock.getsockname()
     sock.close()
     return sockname[1]
+
+
+# Methods for matrix generation
+# Used in test_autograd.py and test_torch.py
+def prod_single_zero(dim_size):
+    result = torch.randn(dim_size, dim_size)
+    result[0, 1] = 0
+    return result
+
+
+def random_square_matrix_of_rank(l, rank):
+    assert rank <= l
+    A = torch.randn(l, l)
+    u, s, v = A.svd()
+    for i in range(l):
+        if i >= rank:
+            s[i] = 0
+        elif s[i] == 0:
+            s[i] = 1
+    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+
+
+def random_symmetric_matrix(l):
+    A = torch.randn(l, l)
+    for i in range(l):
+        for j in range(i):
+            A[i, j] = A[j, i]
+    return A
+
+
+def random_symmetric_psd_matrix(l):
+    A = torch.randn(l, l)
+    return A.mm(A.transpose(0, 1))
+
+
+def random_symmetric_pd_matrix(l, eps=1e-5):
+    A = torch.randn(l, l)
+    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
+
+
+def make_nonzero_det(A, sign=None, min_singular_value=0.1):
+    u, s, v = A.svd()
+    s[s < min_singular_value] = min_singular_value
+    A = u.mm(torch.diag(s)).mm(v.t())
+    det = A.det().item()
+    if sign is not None:
+        if (det < 0) ^ (sign < 0):
+            A[0, :].neg_()
+    return A
+
+
+def random_fullrank_matrix_distinct_singular_value(l, *batches):
+    if len(batches) == 0:
+        A = torch.randn(l, l)
+        u, _, v = A.svd()
+        s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+        return u.mm(torch.diag(s)).mm(v.t())
+    else:
+        all_matrices = []
+        for _ in range(0, torch.prod(torch.as_tensor(batches)).item()):
+            A = torch.randn(l, l)
+            u, _, v = A.svd()
+            s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
+            all_matrices.append(u.mm(torch.diag(s)).mm(v.t()))
+        return torch.stack(all_matrices).reshape(*(batches + (l, l)))

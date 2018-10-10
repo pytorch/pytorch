@@ -31,7 +31,7 @@ bool ConditionalOp<CPUContext>::RunOnDevice() {
   // perform conditional op along first dimension
   const auto* ptrT = (char*)dataT.raw_data();
   const auto* ptrF = (char*)dataF.raw_data();
-  for (TIndex i = 0; i < condition.size(); i++) {
+  for (int64_t i = 0; i < condition.size(); i++) {
     auto* dst = outPtr + i * innerSizeBytes;
     if (condPtr[i]) {
       context_.CopyItemsSameDevice(

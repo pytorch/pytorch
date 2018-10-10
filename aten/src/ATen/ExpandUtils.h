@@ -9,9 +9,12 @@
 
 namespace at {
 
-AT_API std::vector<int64_t> infer_size(IntList a, IntList b);
-AT_API std::tuple<std::vector<int64_t>, std::vector<int64_t> > inferExpandGeometry(
-    IntList tensor_sizes, IntList tensor_strides, IntList sizes);
+CAFFE2_API std::vector<int64_t> infer_size(IntList a, IntList b);
+CAFFE2_API std::tuple<std::vector<int64_t>, std::vector<int64_t>>
+inferExpandGeometry(
+    IntList tensor_sizes,
+    IntList tensor_strides,
+    IntList sizes);
 
 // avoid copy-construction of Tensor by using a reference_wrapper.
 inline void check_defined(std::initializer_list<std::reference_wrapper<const Tensor>> tensors, const char *api_name) {

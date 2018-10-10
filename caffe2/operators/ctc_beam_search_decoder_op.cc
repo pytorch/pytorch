@@ -5,7 +5,7 @@ namespace caffe2 {
 namespace {
 
 const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
-  const auto& dims = tensor.dims();
+  const auto dims = tensor.dims();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
   int offset = (t * dims[1] + n) * dims[2];
   CAFFE_ENFORCE_LT(offset, tensor.size());
@@ -23,7 +23,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
   // shape: sum over all decoded_length
   auto* values = Output(VALUES);
 
-  const auto& inputs_dims = inputs.dims();
+  const auto inputs_dims = inputs.dims();
   int32_t max_activation_length = inputs_dims[0];
   int32_t batch_size = inputs_dims[1];
   int32_t alphabet_size = inputs_dims[2];
@@ -32,7 +32,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
       (InputSize() == 2) ? Input(SEQ_LEN).data<int>() : nullptr;
 
   vector<int32_t> values_cache;
-  output_len->Resize(vector<TIndex>{batch_size});
+  output_len->Resize(vector<int64_t>{batch_size});
   int* output_len_data = output_len->mutable_data<int>();
 
   for (int32_t i = 0; i < batch_size; ++i) {
@@ -121,7 +121,7 @@ bool CTCBeamSearchDecoderOp<CPUContext>::RunOnDevice() {
   }
 
   int32_t cache_size = values_cache.size();
-  values->Resize(vector<TIndex>{cache_size});
+  values->Resize(vector<int64_t>{cache_size});
   int* values_data = values->mutable_data<int>();
   for (int i = 0; i < values_cache.size(); ++i) {
     values_data[i] = values_cache.at(i);

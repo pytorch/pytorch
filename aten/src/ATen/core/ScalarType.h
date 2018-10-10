@@ -59,7 +59,7 @@ _(int64_t,Long,i) \
 _(float,Float,d) \
 _(double,Double,d)
 
-enum class ScalarType {
+enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1,n,_2) \
   n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ENUM)
@@ -69,8 +69,9 @@ enum class ScalarType {
 };
 
 static inline DataType scalarTypeToDataType(ScalarType scalar_type) {
-#define DEFINE_CASE(ctype,name,_) \
-  case ScalarType:: name : return caffe2::TypeMeta::Id<ctype>();
+#define DEFINE_CASE(ctype, name, _) \
+  case ScalarType::name:            \
+    return caffe2::TypeIdentifier::Get<ctype>();
 
   switch(scalar_type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
@@ -93,9 +94,9 @@ static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 }
 
 static inline ScalarType dataTypeToScalarType(DataType dtype) {
-#define DEFINE_IF(ctype,name,_) \
-  if (dtype == caffe2::TypeMeta::Id<ctype>()) { \
-    return ScalarType:: name; \
+#define DEFINE_IF(ctype, name, _)                      \
+  if (dtype == caffe2::TypeIdentifier::Get<ctype>()) { \
+    return ScalarType::name;                           \
   }
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_IF)
 #undef DEFINE_IF
@@ -178,18 +179,17 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
             /* u1  i1  i2  i4  i8  f2  f4  f8 */
     /* u1 */ { u1, i2, i2, i4, i8, f2, f4, f8 },
     /* i1 */ { i2, i1, i2, i4, i8, f2, f4, f8 },
-    /* i2 */ { i2, i2, i2, i4, i8, f4, f4, f8 },
-    /* i4 */ { i4, i4, i4, i4, i8, f8, f4, f8 },
-    /* i8 */ { i8, i8, i8, i8, i8, f8, f4, f8 },
-    /* f2 */ { f2, f2, f4, f8, f8, f2, f4, f8 },
+    /* i2 */ { i2, i2, i2, i4, i8, f2, f4, f8 },
+    /* i4 */ { i4, i4, i4, i4, i8, f2, f4, f8 },
+    /* i8 */ { i8, i8, i8, i8, i8, f2, f4, f8 },
+    /* f2 */ { f2, f2, f2, f2, f2, f2, f4, f8 },
     /* f4 */ { f4, f4, f4, f4, f4, f4, f4, f8 },
     /* f8 */ { f8, f8, f8, f8, f8, f8, f8, f8 },
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }
 
-struct Tensor;
-typedef ArrayRef<int64_t> IntList;
+class Tensor;
 typedef ArrayRef<Tensor> TensorList;
 
 inline std::ostream& operator<<(

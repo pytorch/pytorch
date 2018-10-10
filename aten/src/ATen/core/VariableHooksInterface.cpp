@@ -24,6 +24,9 @@ namespace detail {
 
 }
 
-AT_DEFINE_REGISTRY(VariableHooksRegistry, VariableHooksInterface, VariableHooksArgs)
+C10_DEFINE_REGISTRY(
+    VariableHooksRegistry,
+    VariableHooksInterface,
+    VariableHooksArgs)
 
 } // namespace at::detail

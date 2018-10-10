@@ -122,13 +122,13 @@ std::tuple<Tensor, Tensor> RoiPooling2d_forward_cuda(
   auto inputWidth = input.size(3);
 
   // Output Tensor is (num_rois, C, pooledHeight, pooledWidth)
-  auto output = input.type().tensor({proposals, inputChannels, pooledHeight, pooledWidth});
+  auto output = at::empty({proposals, inputChannels, pooledHeight, pooledWidth}, input.options());
 
   // TODO: need some mechanism for determining train vs. test
 
   // During training, we need to store the argmaxes for the pooling operation, so
   // the argmaxes Tensor should be the same size as the output Tensor
-  auto argmaxes = input.type().toScalarType(kInt).tensor({proposals, inputChannels, pooledHeight, pooledWidth});
+  auto argmaxes = at::empty({proposals, inputChannels, pooledHeight, pooledWidth}, input.options().dtype(kInt));
 
   AT_CHECK(input.is_contiguous(), "input must be contiguous");
   AT_CHECK(rois.is_contiguous(), "rois must be contiguous");
@@ -198,7 +198,7 @@ Tensor RoiPooling2d_backward_cuda(
   auto inputHeight = input.size(2);
   auto inputWidth = input.size(3);
 
-  auto gradInput = input.type().tensor(input.sizes());
+  auto gradInput = at::empty(input.sizes(), input.options());
 
   dim3 block(512);
   dim3 grid((gradInput.numel() + 512 - 1) / 512);

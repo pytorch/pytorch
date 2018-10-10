@@ -4,7 +4,6 @@
 
 using caffe2::BaseContext;
 using caffe2::Tensor;
-using caffe2::TIndex;
 using std::vector;
 
 namespace caffe2 {
@@ -18,7 +17,7 @@ void batch_gather_op_cpu_impl(
     BaseContext* context) {
   CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
 
-  vector<TIndex> shape;
+  vector<int64_t> shape;
   shape.push_back(data.dim(0));
   shape.insert(shape.end(), indices.dims().begin(), indices.dims().end());
   shape.insert(shape.end(), data.dims().begin() + 2, data.dims().end());

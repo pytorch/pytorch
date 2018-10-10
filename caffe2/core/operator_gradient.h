@@ -1,8 +1,8 @@
 #ifndef CAFFE2_CORE_OPERATOR_GRADIENT_H_
 #define CAFFE2_CORE_OPERATOR_GRADIENT_H_
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
@@ -295,16 +295,16 @@ struct GradientNotImplementedYet : public GradientMakerBase {
   }
 };
 
-CAFFE_DECLARE_REGISTRY(
+C10_DECLARE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
     const OperatorDef&,
     const vector<GradientWrapper>&);
 
 #define REGISTER_GRADIENT(name, ...) \
-  CAFFE_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
+  C10_REGISTER_CLASS(GradientRegistry, name, __VA_ARGS__)
 #define REGISTER_GRADIENT_STR(str_name, ...) \
-  CAFFE_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
+  C10_REGISTER_TYPED_CLASS(GradientRegistry, str_name, __VA_ARGS__)
 
 // NO_GRADIENT means that the operator does not need any gradient computation.
 #define NO_GRADIENT(name) REGISTER_GRADIENT(name, NoGradient)

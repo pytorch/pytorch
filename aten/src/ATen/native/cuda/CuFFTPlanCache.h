@@ -346,6 +346,7 @@ private:
 //     be fine for now.
 // TODO: When CUDA 10 comes out, check if the bug is fixed or if we need another
 //       number for CUDA 10.
+// Update: bug related to cuFFT plan cache max size has been fixed in CUDA 10.
 constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
 static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(),
               "CUFFT_MAX_PLAN_NUM not in size_t range");
@@ -389,12 +390,17 @@ public:
 
     // Miss
     // remove if needed
+    // bug related to cuFFT plan cache max size has been fixed
+    // in CUDA 10. Hence, when compiling with CUDA 10, just
+    // don't do the erase.
+    #if CUDA_VERSION < 10000
     if (_usage_list.size() >= _max_size) {
       auto last = _usage_list.end();
       last--;
       _cache_map.erase(last->first);
       _usage_list.pop_back();
     }
+    #endif
 
     // construct new plan at list front, then insert into _cache_map
     _usage_list.emplace_front(std::piecewise_construct,
@@ -414,7 +420,8 @@ public:
 
   void resize(int64_t new_size) {
     _set_max_size(new_size);
-
+    // no-op when compiling with CUDA 10.
+    #if CUDA_VERSION < 10000
     auto cur_size = _usage_list.size();
     if (cur_size > _max_size) {
       auto delete_it = _usage_list.end();
@@ -424,17 +431,26 @@ public:
       }
       _usage_list.erase(delete_it, _usage_list.end());
     }
+    #endif
   }
 
   size_t size() const { return _cache_map.size(); }
 
-  size_t max_size() const noexcept { return _max_size; }
+  size_t max_size() const noexcept {
+    #if CUDA_VERSION < 10000
+      return _max_size;
+    #else
+      return size();
+    #endif
+  }
 
 private:
   // Only sets size and does value check. Does not resize the data structures.
   void _set_max_size(int64_t new_size) {
+    #if CUDA_VERSION < 10000
     AT_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
              "cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
+    #endif
     AT_CHECK(new_size >= 0,
              "cuFFT plan cache size must be non-negative, but got ", new_size);
     _max_size = static_cast<size_t>(new_size);

@@ -237,7 +237,7 @@ vector<TensorShape> TensorInferenceForDotProduct(
     const vector<TensorShape>& in) {
   CAFFE_ENFORCE_GT(in.size(), 0);
 
-  vector<TIndex> dims(1);
+  vector<int64_t> dims(1);
   dims[0] = in[0].dims().size() > 0 ? in[0].dims(0) : 1;
   return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
 }
@@ -590,11 +590,15 @@ Z:
 
 )DOC")
     .Input(0, "X", "*(type: Tensor`<float>`)* 1D or 2D input tensor.")
-    .Input(1, "Y", "*(type: Tensor`<float>`)* 1D or 2D input tensor (must have the same shape as X).")
+    .Input(
+        1,
+        "Y",
+        "*(type: Tensor`<float>`)* 1D or 2D input tensor (must have the same shape as X).")
     .Output(0, "Z", "*(type: Tensor`<float>`)* 1D output tensor.")
     .TensorInferenceFunction(TensorInferenceForDotProduct)
     .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct));
+        OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct))
+    .InheritOnnxSchema("DotProduct");
 
 OPERATOR_SCHEMA(DotProductGradient).NumInputs(3).NumOutputs(2);
 

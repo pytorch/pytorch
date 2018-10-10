@@ -1,6 +1,7 @@
 #ifndef THC_NUMERICS_INC
 #define THC_NUMERICS_INC
 
+#include <cstdlib>
 #include <limits>
 #include <cuda.h>
 #include <assert.h>

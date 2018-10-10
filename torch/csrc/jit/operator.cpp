@@ -57,13 +57,20 @@ struct SchemaParser {
       {"str", StringType::get() },
       {"float", FloatType::get() },
       {"int", IntType::get() },
-      {"bool", IntType::get() }, // TODO: add separate bool type
+      {"bool", BoolType::get() },
+      {"World", WorldType::get() },
     };
     auto tok = L.expect(TK_IDENT);
     auto text = tok.text();
     auto it = type_map.find(text);
-    if(it == type_map.end())
+    if(it == type_map.end()) {
+      if(text.size() > 0 && islower(text[0])) {
+        // lower case identifiers that are not otherwise valid types
+        // are treated as type variables
+        return VarType::create(text);
+      }
       throw ErrorReport(tok.range) << "unknown type specifier";
+    }
     return it->second;
   }
   void parseArgumentType(std::vector<Argument>& arguments) {
@@ -155,6 +162,10 @@ struct SchemaParser {
           return fmap(vs, [](IValue v) {
             return v.toInt();
           });
+        case TypeKind::BoolType:
+          return fmap(vs, [](IValue v) {
+            return v.toBool();
+          });
         default:
           throw ErrorReport(range) << "lists are only supported for float or int types.";
       }
@@ -184,6 +195,7 @@ struct SchemaParser {
       }  break;
       case TypeKind::NumberType:
       case TypeKind::IntType:
+      case TypeKind::BoolType:
       case TypeKind::FloatType:
         arg.default_value = parseSingleConstant(arg.type->kind());
         break;
@@ -358,9 +370,16 @@ bool Operator::matches(const Node* node) const {
   if(actuals.size() < formals.size())
     return false;
 
+
+  TypeEnv type_env;
   for(size_t i = 0; i < formals.size(); ++i) {
-    // mismatched input type
-    if (!actuals[i]->type()->isSubtypeOf(formals[i].type)) {
+    try {
+      TypePtr formal = matchTypeVariables(formals[i].type, actuals[i]->type(), type_env);
+      // mismatched input type
+      if (!actuals[i]->type()->isSubtypeOf(formal)) {
+        return false;
+      }
+    } catch(TypeMatchError& err) {
       return false;
     }
   }

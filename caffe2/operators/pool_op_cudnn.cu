@@ -220,7 +220,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     if (cudnn_input_dims_ != X.dims()) {
       // Dimensions changed; we will need to re-initialize things.
       VLOG(1) << "Changing the cudnn descriptor configurations.";
-      cudnn_input_dims_ = X.dims();
+      cudnn_input_dims_ = X.dims().vec();
       setTensorDescriptor<T>(X.ndim(), order_, N, C, H, W, D, bottom_desc_);
       setTensorDescriptor<T>(
           Y->ndim(), order_, N, C, H_out, W_out, D_out, top_desc_);
@@ -276,8 +276,8 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
 
     if (X.IsType<float>()) {
       return DoRunWithType<float, float>();
-    } else if (X.IsType<float16>()) {
-      return DoRunWithType<float16, float>();
+    } else if (X.IsType<at::Half>()) {
+      return DoRunWithType<at::Half, float>();
     } else {
       LOG(FATAL) << "Unsupported input types";
     }
@@ -285,7 +285,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
   }
 
  protected:
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t bottom_desc_;
@@ -423,7 +423,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     if (cudnn_input_dims_ != X.dims()) {
       // Dimensions changed; we will need to re-initialize things.
       VLOG(1) << "Changing the cudnn descriptor configurations.";
-      cudnn_input_dims_ = X.dims();
+      cudnn_input_dims_ = X.dims().vec();
       setTensorDescriptor<T>(X.ndim(), order_, N, C, H, W, D, bottom_desc_);
       setTensorDescriptor<T>(
           Y.ndim(), order_, N, C, H_out, W_out, D_out, top_desc_);
@@ -489,8 +489,8 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
 
     if (X.IsType<float>()) {
       return DoRunWithType<float, float>();
-    } else if (X.IsType<float16>()) {
-      return DoRunWithType<float16, float>();
+    } else if (X.IsType<at::Half>()) {
+      return DoRunWithType<at::Half, float>();
     } else {
       LOG(FATAL) << "Unsupported input types";
     }
@@ -498,7 +498,7 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
   }
 
  protected:
-  vector<TIndex> cudnn_input_dims_;
+  vector<int64_t> cudnn_input_dims_;
 
   CuDNNWrapper cudnn_wrapper_;
   cudnnTensorDescriptor_t bottom_desc_;

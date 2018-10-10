@@ -11,17 +11,14 @@ std::shared_ptr<Graph> Canonicalize(const std::shared_ptr<Graph>& graph) {
   for (auto* input : graph->inputs()) {
     auto* r_input = r->addInput();
     r_input->copyMetadata(input);
-    r_input->setStage(input->stage());
     rn_env[input] = r_input;
   }
   for (auto* node : graph->nodes()) {
     auto* r_node = r->createClone(node, rn_fn);
-    r_node->setStage(node->stage());
     r->appendNode(r_node);
     auto outputs = node->outputs();
     auto r_outputs = r_node->outputs();
     for (size_t i = 0; i < outputs.size(); i++) {
-      r_outputs.at(i)->setStage(outputs.at(i)->stage());
       rn_env[outputs.at(i)] = r_outputs.at(i);
     }
     if (node->hasAttribute(attr::Subgraph)) {
@@ -31,7 +28,6 @@ std::shared_ptr<Graph> Canonicalize(const std::shared_ptr<Graph>& graph) {
   for (auto* output : graph->outputs()) {
     r->registerOutput(rn_fn(output));
   }
-  r->setStage(graph->stage());
 
   return r;
 

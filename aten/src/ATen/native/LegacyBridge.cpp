@@ -136,7 +136,7 @@ Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta
 
 Tensor tensor(const Type& dtype) {
   if (_type_has_native(dtype)) {
-    return at::getType(dtype.options()).native_tensor();
+    return at::getType(dtype.options()).native_tensor({0});
   } else {
     return at::getType(dtype.options()).th_tensor();
   }
@@ -150,16 +150,27 @@ Tensor tensor(const Type& dtype, ArrayRef<int64_t> size) {
   }
 }
 
-Tensor sparse_coo_tensor(const Type& dtype, ArrayRef<int64_t> size) {
-  return at::getType(dtype.options().layout(at::kSparse)).native_sparse_coo_tensor(size);
-}
-
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values) {
   return at::getType(values.options().layout(at::kSparse)).native_sparse_coo_tensor(indices, values);
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {
   return at::getType(values.options().layout(at::kSparse)).native_sparse_coo_tensor(indices, values, size);
+}
+
+Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
+  TensorOptions toptions = options;
+  return at::getType(toptions.layout(at::kSparse)).native_sparse_coo_tensor(size);
+}
+
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, const TensorOptions& options) {
+  TensorOptions toptions = options;
+  return at::getType(toptions.layout(at::kSparse)).native_sparse_coo_tensor(indices, values);
+}
+
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size, const TensorOptions& options) {
+  TensorOptions toptions = options;
+  return at::getType(toptions.layout(at::kSparse)).native_sparse_coo_tensor(indices, values, size);
 }
 
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {

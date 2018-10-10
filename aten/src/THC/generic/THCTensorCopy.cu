@@ -2,8 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCTensorCopy.cu"
 #else
 
-THC_API void
-THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
+void THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
   if (dst == src) return;
   THC_copyTensor<scalar_t, scalar_t>(state, dst, src);
 }
@@ -51,16 +50,14 @@ void THCTensor_copyIgnoringOverlaps<scalar_t>(THCState* state, THCTensor* dst, T
     ReadOnly);
 }
 
-THC_API void
-THCTensor_(copyIgnoringOverlaps)(THCState* state, THCTensor* dst, THCTensor* src) {
+void THCTensor_(copyIgnoringOverlaps)(THCState* state, THCTensor* dst, THCTensor* src) {
   THCTensor_copyIgnoringOverlaps<scalar_t>(state, dst, src);
 }
 
 #define IMPLEMENT_THC_CUDA_TENSOR_COPY(TYPEC, TYPECUDA, SCALARC)        \
-  THC_API void                                                          \
-  THCTensor_(copyCuda##TYPEC)(THCState *state,                          \
-                              THCTensor *self,                          \
-                              THCuda##TYPECUDA##Tensor *src) {          \
+  void THCTensor_(copyCuda##TYPEC)(THCState *state,                     \
+                                   THCTensor *self,                     \
+                                   THCuda##TYPECUDA##Tensor *src) {     \
     THC_copyTensor<scalar_t, SCALARC>(state, self, src); \
   }
 

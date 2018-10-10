@@ -11,6 +11,10 @@ Correct code for this case is generated, however, nvrtc does not know how to han
 so typedefs help it handle those cases*/
 
 auto type_declarations_template = CodeTemplate(R"(
+
+#define POS_INFINITY INFINITY
+#define NEG_INFINITY -INFINITY
+
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {

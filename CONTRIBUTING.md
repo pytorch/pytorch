@@ -262,9 +262,9 @@ than Linux, which are worth keeping in mind when fixing these problems.
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
    `__declspec(dllimport)`.  We have codified this pattern into a set of macros
-   which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
-   shared library needs a unique macro name, because symbol visibility is on a per
-   shared library basis.)
+   which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
+   (Every separate shared library needs a unique macro name, because symbol visibility
+   is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
    The upshot is if you see an "unresolved external" error in your Windows build, this
    is probably because you forgot to mark a function with `*_API`.  However, there is
@@ -353,6 +353,36 @@ static_assert(std::is_same(A*, decltype(A::singelton()))::value, "hmm");
 * The compiler will run out of heap if you attempt to compile files that
   are too large.  Splitting such files into separate files helps.
   (Example: `THTensorMath`, `THTensorMoreMath`, `THTensorEvenMoreMath`.)
+
+### Running Clang-Tidy
+
+[Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
+linter and static analysis tool based on the clang compiler. We run clang-tidy
+in our CI to make sure that new C++ code is safe, sane and efficient. See our
+[.travis.yml](https://github.com/pytorch/pytorch/blob/master/.travis.yml) file
+for the simple commands we use for this.
+
+To run clang-tidy locally, follow these steps:
+
+1. Install clang-tidy. First, check if you already have clang-tidy by simply
+writing `clang-tidy` in your terminal. If you don't yet have clang-tidy, you
+should be able to install it easily with your package manager, e.g. by writing
+`apt-get install clang-tidy` on Ubuntu. See https://apt.llvm.org for details on
+how to install the latest version. Note that newer versions of clang-tidy will
+have more checks than older versions. In our CI, we run clang-tidy-6.0.
+
+2. Use our driver script to run clang-tidy over any changes relative to some
+   git revision (you may want to replace `HEAD~1` with `HEAD` to pick up
+   uncommitted changes). Changes are picked up based on a `git diff` with the
+   given revision:
+  ```sh
+  $ python tools/clang_tidy.py -d build -p torch/csrc -r HEAD~1
+  ```
+
+Above, it is assumed you are in the PyTorch root folder. `path/to/build` should
+be the path to where you built PyTorch from source, e.g. `build` in the PyTorch
+root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
+to change the clang-tidy this script uses.
 
 ## Caffe2 notes
 

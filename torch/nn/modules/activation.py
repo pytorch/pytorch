@@ -641,14 +641,24 @@ class PReLU(Module):
     .. note::
         weight decay should not be used when learning :math:`a` for good performance.
 
+    .. note::
+        Channel dim is the 2nd dim of input. When input has dims < 2, then there is
+        no channel dim and the number of channels = 1.
+
     Args:
-        num_parameters: number of :math:`a` to learn. Default: 1
-        init: the initial value of :math:`a`. Default: 0.25
+        num_parameters (int): number of :math:`a` to learn.
+            Although it takes an int as input, there is only two values are legitimate:
+            1, or the number of channels at input. Default: 1
+        init (float): the initial value of :math:`a`. Default: 0.25
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    Attributes:
+        weight (Tensor): the learnable weights of shape (attr:`num_parameters`).
+            The attr:`dtype` is default to
 
     .. image:: scripts/activation_images/PReLU.png
 

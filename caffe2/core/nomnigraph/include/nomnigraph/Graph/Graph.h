@@ -39,7 +39,7 @@ class Node;
 
 // \brief Edge within a Graph.
 template <typename T, typename... U>
-class CAFFE2_API Edge : public StorageType<U...> {
+class Edge : public StorageType<U...> {
  public:
   using NodeRef = typename Graph<T, U...>::NodeRef;
   Edge(NodeRef tail, NodeRef head, U... args)
@@ -73,7 +73,7 @@ class CAFFE2_API Edge : public StorageType<U...> {
 
 // \brief Node within a Graph.
 template <typename T, typename... U>
-class CAFFE2_API Node : public StorageType<T>, public Notifier<Node<T, U...>> {
+class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
  public:
   using NodeRef = typename Graph<T, U...>::NodeRef;
   using EdgeRef = typename Graph<T, U...>::EdgeRef;
@@ -152,7 +152,7 @@ class CAFFE2_API Node : public StorageType<T>, public Notifier<Node<T, U...>> {
 /// for example.
 ///
 template <typename T, typename... U>
-class CAFFE2_API Subgraph {
+class Subgraph {
  public:
   Subgraph() {
     DEBUG_PRINT("Creating instance of Subgraph: %p\n", this);
@@ -219,7 +219,7 @@ class CAFFE2_API Subgraph {
 /// Everything is owned by the graph to simplify storage concerns.
 ///
 template <typename T, typename... U>
-class CAFFE2_API Graph {
+class Graph {
  public:
   using SubgraphType = Subgraph<T, U...>;
   using NodeRef = Node<T, U...>*;
@@ -242,6 +242,104 @@ class CAFFE2_API Graph {
 
   NodeRef createNode() {
     return createNodeInternal(Node<T, U...>());
+  }
+
+  // Note:
+  // The move functions below are unsafe.  Use them with caution
+  // and be sure to call isValid() after each use.
+
+  // Move a node from this graph to the destGraph
+  void moveNode(NodeRef node, Graph<T, U...>* destGraph) {
+    assert(hasNode(node));
+    for (auto it = nodes_.begin(); it != nodes_.end(); ++it) {
+      if (&(*it) == node) {
+        std::list<Node<T, U...>>& destNodes = destGraph->nodes_;
+        destNodes.splice(destNodes.end(), nodes_, it);
+        nodeRefs_.erase(node);
+        destGraph->nodeRefs_.insert(node);
+        break;
+      }
+    }
+  }
+
+  // Move an edge from this graph to the destGraph
+  void moveEdge(EdgeRef edge, Graph<T, U...>* destGraph) {
+    assert(hasEdge(edge));
+    assert(destGraph->hasNode(edge->tail()));
+    assert(destGraph->hasNode(edge->head()));
+    std::list<Edge<T, U...>>& destEdges = destGraph->edges_;
+    for (auto it = edges_.begin(); it != edges_.end(); ++it) {
+      if (&(*it) == edge) {
+        destEdges.splice(destEdges.end(), edges_, it);
+        break;
+      }
+    }
+  }
+
+  // Move entire subgraph to destGraph.
+  // Be sure to delete in/out edges from this graph first.
+  void moveSubgraph(
+      const Subgraph<T, U...>& subgraph,
+      Graph<T, U...>* destGraph) {
+    auto sg = subgraph; // Copy to check that all nodes and edges are matched
+    std::list<Edge<T, U...>>& destEdges = destGraph->edges_;
+    for (auto it = nodes_.begin(); it != nodes_.end(); ++it) {
+      auto node = &(*it);
+      if (sg.hasNode(node)) {
+        std::list<Node<T, U...>>& destNodes = destGraph->nodes_;
+        destNodes.splice(destNodes.end(), nodes_, it--);
+        nodeRefs_.erase(node);
+        destGraph->nodeRefs_.insert(node);
+        sg.removeNode(node);
+      }
+    }
+    for (auto it = edges_.begin(); it != edges_.end(); ++it) {
+      auto edge = &(*it);
+      if (sg.hasEdge(edge)) {
+        assert(destGraph->hasNode(edge->tail()));
+        assert(destGraph->hasNode(edge->head()));
+        destEdges.splice(destEdges.end(), edges_, it--);
+        sg.removeEdge(edge);
+      }
+    }
+    assert(sg.getNodes().size() == 0);
+    assert(sg.getEdges().size() == 0);
+  }
+
+  // Validates the graph.  Returns true if the graph is valid
+  // and false if any node or edge referenced in the graph
+  // is not actually present in the graph.
+  bool isValid() {
+    for (auto& node : getMutableNodes()) {
+      for (auto& inEdge : node->getInEdges()) {
+        if (!hasEdge(inEdge)) {
+          DEBUG_PRINT("Invalid inEdge %p on node %p\n", inEdge, node);
+          return false;
+        }
+      }
+      for (auto& outEdge : node->getOutEdges()) {
+        if (!hasEdge(outEdge)) {
+          DEBUG_PRINT("invalid outEdge %p on node %p\n", outEdge, node);
+          return false;
+        }
+      }
+      // Check validity of nodeRefs_
+      if (!hasNode(node)) {
+        DEBUG_PRINT("Invalid node %p\n", node);
+        return false;
+      }
+    }
+    for (auto& edge : getMutableEdges()) {
+      if (!hasNode(edge->tail())) {
+        DEBUG_PRINT("Invalid tail on edge %p\n", edge);
+        return false;
+      }
+      if (!hasNode(edge->head())) {
+        DEBUG_PRINT("Invalid head on edge %p\n", edge);
+        return false;
+      }
+    }
+    return true;
   }
 
   // Swap two nodes.
@@ -332,6 +430,15 @@ class CAFFE2_API Graph {
   /// \brief Returns true if there is an edge between the given two nodes.
   bool hasEdge(NodeRef tail, NodeRef head) const {
     return getEdgeIfExists(tail, head);
+  }
+
+  bool hasEdge(EdgeRef e) const {
+    for (auto& edge : edges_) {
+      if (e == &edge) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// \brief Get a reference to the edge between two nodes if it exists.

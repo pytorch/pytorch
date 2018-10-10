@@ -1,26 +1,36 @@
 #include <ATen/core/OptionsGuard.h>
 #include <ATen/core/optional.h>
+#include <ATen/core/Layout.h>
 
 namespace at {
 
+// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
+// thread_local is not supported.  In that case, we don't provide
+// an OptionsGuard; and force you to pass around options manually.
 #if !AT_MOBILE && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
-thread_local at::optional<TensorOptions> DefaultTensorOptions::options_;
-
-TensorOptions& DefaultTensorOptions::get() {
-  if (!options_) {
-    options_.emplace(
-        /*use_thread_local_default_options=*/false);
+DefaultTensorOptions& mutateDefaultTensorOptions() {
+  static thread_local at::optional<DefaultTensorOptions> options;
+  /// This is an optional because of compiler bugs that mis-initialize static
+  /// thread local variables. The workaround is lazy initialization, i.e.
+  /// `getDefaultTensorOptions()` will initialize the `options` to a proper
+  /// value upon first invocation.
+  /// https://gcc.gnu.org/ml/gcc-bugs/2013-12/msg00026.html
+  if (!options) {
+    options.emplace();
   }
-  return *options_;
+  return *options;
+}
+
+const DefaultTensorOptions& getDefaultTensorOptions() {
+  return mutateDefaultTensorOptions();
 }
 
 #else
 
-TensorOptions DefaultTensorOptions::options_(/*use_thread_local_default_options=*/false);
-
-const TensorOptions& DefaultTensorOptions::get() {
-  return options_;
+const DefaultTensorOptions& getDefaultTensorOptions() {
+  static DefaultTensorOptions options;
+  return options;
 }
 
 #endif

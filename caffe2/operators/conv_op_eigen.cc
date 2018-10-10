@@ -42,10 +42,10 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(filter.dim32(2) == kernel_h());
   CAFFE_ENFORCE(filter.dim32(3) == kernel_w());
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
-  Eigen::array<TIndex, 4> kernel_shuffles
-      { {TIndex(2), TIndex(3), TIndex(1), TIndex(0)} };
-  Eigen::array<TIndex, 4> input_shuffles
-      { {TIndex(0), TIndex(2), TIndex(3), TIndex(1)} };
+  Eigen::array<int64_t, 4> kernel_shuffles
+      { {int64_t(2), int64_t(3), int64_t(1), int64_t(0)} };
+  Eigen::array<int64_t, 4> input_shuffles
+      { {int64_t(0), int64_t(2), int64_t(3), int64_t(1)} };
 
   Eigen::Tensor<T, 4, Eigen::RowMajor> filter_tensor =
       Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>>(
@@ -109,14 +109,14 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNCHW() {
     // It seems that the bias broadcast is still slower so let's do the
     // following for now.
     EigenArrayMap<T> Y_arr(
-        Y_tensor.data(), static_cast<TIndex>(M), Y->size() / M);
+        Y_tensor.data(), static_cast<int64_t>(M), Y->size() / M);
     ConstEigenVectorArrayMap<T> bias_arr(bias.template data<T>(), M);
     Y_arr = Y_arr.colwise() + bias_arr;
   }
 
   // Do a last transpose.
-  Eigen::array<TIndex, 4> output_shuffles
-      { {TIndex(0), TIndex(3), TIndex(1), TIndex(2) } };
+  Eigen::array<int64_t, 4> output_shuffles
+      { {int64_t(0), int64_t(3), int64_t(1), int64_t(2) } };
 
   Eigen::TensorMap<Eigen::Tensor<T, 4, Eigen::RowMajor>>(
       Y->template mutable_data<T>(), N, M, Y->dim32(2), Y->dim32(3)) =
@@ -204,7 +204,7 @@ bool EigenConvOp<T>::RunOnDeviceWithOrderNHWC() {
     // It seems that the bias broadcast is still slower so let's do the
     // following for now.
     EigenArrayMap<T> Y_arr(
-        Y->template mutable_data<T>(), static_cast<TIndex>(M), Y->size() / M);
+        Y->template mutable_data<T>(), static_cast<int64_t>(M), Y->size() / M);
     ConstEigenVectorArrayMap<T> bias_arr(bias.template data<T>(), M);
     Y_arr = Y_arr.colwise() + bias_arr;
   }

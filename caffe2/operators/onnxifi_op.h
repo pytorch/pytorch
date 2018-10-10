@@ -38,7 +38,7 @@ class OnnxifiOp final : public Operator<Context> {
       const std::string key = MakeString("output_size_hint_", output_idx);
       auto output_size_hint = this->template GetRepeatedArgument<int>(key);
       if (!output_size_hint.empty()) {
-        std::vector<TIndex> dims;
+        std::vector<int64_t> dims;
         for (const auto v : output_size_hint) {
           dims.push_back(v);
         }
@@ -127,7 +127,7 @@ class OnnxifiOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  private:
-  void SetOutputShape(int output_idx, std::vector<TIndex>* dims) {
+  void SetOutputShape(int output_idx, std::vector<int64_t>* dims) {
     const auto it = output_size_hints_.find(output_idx);
     if (it != output_size_hints_.end()) {
       *dims = it->second;
@@ -163,7 +163,7 @@ class OnnxifiOp final : public Operator<Context> {
   std::vector<std::vector<uint64_t>> output_shapes_;
 
   // output shape hints
-  std::unordered_map<int, std::vector<TIndex>> output_size_hints_;
+  std::unordered_map<int, std::vector<int64_t>> output_size_hints_;
 };
 
 } // namespace caffe2

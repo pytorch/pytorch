@@ -35,9 +35,9 @@ class Cloneable : public virtual Module {
   /// original module.
   std::shared_ptr<Module> clone(
       at::optional<Device> device = at::nullopt) const override {
-    auto options = DefaultTensorOptions::get();
-    OptionsGuard options_guard(
-        options.device(device.value_or(options.device())));
+    TensorOptions options;
+    if (device) { options.device(*device); }
+    OptionsGuard options_guard(options);
 
     NoGradGuard no_grad;
 

@@ -3,9 +3,8 @@
 #else
 
 
-THC_API void
-THCTensor_(maskedFill)(THCState* state,
-                       THCTensor *tensor, THCudaByteTensor *mask, scalar_t value)
+void THCTensor_(maskedFill)(THCState* state,
+                            THCTensor *tensor, THCudaByteTensor *mask, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, mask));
   THArgCheck(THCTensor_(nElement)(state, tensor) ==
@@ -20,9 +19,8 @@ THCTensor_(maskedFill)(THCState* state,
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API void
-THCTensor_(maskedFillByte)(THCState* state,
-                           THCTensor *tensor, THByteTensor *mask, scalar_t value)
+void THCTensor_(maskedFillByte)(THCState* state,
+                                THCTensor *tensor, THByteTensor *mask, scalar_t value)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
@@ -31,9 +29,8 @@ THCTensor_(maskedFillByte)(THCState* state,
   THCudaByteTensor_free(state, maskCuda);
 }
 
-THC_API void
-THCTensor_(maskedCopy)(THCState* state,
-                       THCTensor *tensor, THCudaByteTensor *mask, THCTensor *src)
+void THCTensor_(maskedCopy)(THCState* state,
+                            THCTensor *tensor, THCudaByteTensor *mask, THCTensor *src)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   ptrdiff_t maskSize = THCudaByteTensor_nElement(state, mask);
@@ -98,9 +95,8 @@ THCTensor_(maskedCopy)(THCState* state,
   THCudaCheck(cudaGetLastError());
 }
 
-THC_API void
-THCTensor_(maskedCopyByte)(THCState* state,
-                           THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
+void THCTensor_(maskedCopyByte)(THCState* state,
+                                THCTensor *tensor, THByteTensor *mask, THCTensor *src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});
   THCudaByteTensor_copyByte(state, maskCuda, mask);
@@ -108,9 +104,8 @@ THCTensor_(maskedCopyByte)(THCState* state,
   THCudaByteTensor_free(state, maskCuda);
 }
 
-THC_API void
-THCTensor_(maskedSelect)(THCState* state,
-                         THCTensor* tensor, THCTensor* src, THCudaByteTensor* mask) {
+void THCTensor_(maskedSelect)(THCState* state,
+                              THCTensor* tensor, THCTensor* src, THCudaByteTensor* mask) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, tensor, src, mask));
   THArgCheck(THCudaByteTensor_nElement(state, mask) ==
              THCTensor_(nElement)(state, src),
@@ -171,9 +166,8 @@ THCTensor_(maskedSelect)(THCState* state,
 }
 
 // FIXME: remove now that we have THCudaByteTensor?
-THC_API void
-THCTensor_(maskedSelectByte)(THCState* state,
-                             THCTensor *tensor, THCTensor *src, THByteTensor *mask)
+void THCTensor_(maskedSelectByte)(THCState* state,
+                                  THCTensor *tensor, THCTensor *src, THByteTensor *mask)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCudaByteTensor* maskCuda = THCudaByteTensor_newWithSize(state, mask->sizes(), {});

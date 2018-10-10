@@ -37,7 +37,7 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
       math::Set<T, CPUContext>(
           M, 0.0, cpu_zero_bias.template mutable_data<float>(), &ctx);
 
-      zero_bias_.reset(new MKLMemory<T>(std::vector<TIndex>{M}));
+      zero_bias_.reset(new MKLMemory<T>(at::IntList{M}));
       zero_bias_->CopyFrom(cpu_zero_bias);
     }
     const auto& bias = InputSize() == 2
@@ -51,7 +51,7 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
 
     bool dims_changed;
     CHECK_INPUT_FILTER_DIMS(X, filter, dims_changed);
-    if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
+    if (dims_changed || c10::FLAGS_caffe2_mkl_memonger_in_use) {
       CAFFE_ENFORCE(
           C == filter.dim32(1) * group_,
           "Convolution op: input channels does not match: # of input channels ",
@@ -130,11 +130,11 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
     if (group_ > 1) {
       // Explicitly reformat the buffer.
       MKLMemory<float> group_filter(
-          std::vector<TIndex>{TIndex(group_),
-                              TIndex(filter.dim32(0) / group_),
-                              TIndex(filter.dim32(1)),
-                              TIndex(filter.dim32(2)),
-                              TIndex(filter.dim32(3))},
+          at::IntList{int64_t(group_),
+                      int64_t(filter.dim32(0) / group_),
+                      int64_t(filter.dim32(1)),
+                      int64_t(filter.dim32(2)),
+                      int64_t(filter.dim32(3))},
           nullptr,
           dnnResourceFilter,
           /*share_memory_if_possible=*/true);
@@ -152,7 +152,7 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
 
     MKLDNN_SAFE_CALL(mkl::dnnExecute<T>(primitive_, resources_));
     buffer_.CopyTo(Y, primitive_, dnnResourceDst);
-    if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+    if (c10::FLAGS_caffe2_mkl_memonger_in_use && !shared) {
       // buffer_ is not shared with Y. Free memory since it'll
       // be re-allocated in the next run anyway due to memonger in use.
       buffer_.Reset();
@@ -168,8 +168,8 @@ class MKLConvOp final : public ConvPoolOpBase<MKLContext> {
   // Input: X, W, b
   // Output: Y
   std::unique_ptr<MKLMemory<T>> zero_bias_;
-  vector<TIndex> cached_input_dims_;
-  vector<TIndex> cached_filter_dims_;
+  vector<int64_t> cached_input_dims_;
+  vector<int64_t> cached_filter_dims_;
   PrimitiveWrapper<T> primitive_;
   LayoutWrapper<T> input_layout_;
   LayoutWrapper<T> filter_layout_;

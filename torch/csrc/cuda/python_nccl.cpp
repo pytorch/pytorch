@@ -26,7 +26,7 @@ PyObject * THCPModule_nccl_version(PyObject *self, PyObject *args) {
 PyObject * THCPModule_nccl_unique_id(PyObject *self, PyObject *args) {
   HANDLE_TH_ERRORS
   ncclUniqueId id;
-  CHECK(ncclGetUniqueId(&id));
+  NCCL_CHECK(ncclGetUniqueId(&id));
   return PyBytes_FromStringAndSize((char*)&id, NCCL_UNIQUE_ID_BYTES);
   END_HANDLE_TH_ERRORS
 }
@@ -109,7 +109,7 @@ PyObject * THCPModule_nccl_init_rank(PyObject *self, PyObject *args) {
   memcpy(&commId, id, NCCL_UNIQUE_ID_BYTES);
   ncclComm_t comm;
   with_no_gil([&]{
-    CHECK(ncclCommInitRank(&comm, nranks, commId, rank));
+    NCCL_CHECK(ncclCommInitRank(&comm, nranks, commId, rank));
   });
   return PyCapsule_New(comm, COMM_CAPSULE_NAME, &destroy_nccl_comm);
   END_HANDLE_TH_ERRORS
@@ -149,7 +149,7 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
       auto stream = (streams[i] == nullptr) ? nullptr : THCStream_stream(streams[i]);
-      CHECK(ncclReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
+      NCCL_CHECK(ncclReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
            count, data_type, (ncclRedOp_t) op, root, comms[i], stream));
     }
   });
@@ -191,7 +191,7 @@ PyObject * THCPModule_nccl_all_reduce(PyObject *self, PyObject *args) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
       auto stream = (streams[i] == nullptr) ? nullptr : THCStream_stream(streams[i]);
-      CHECK(ncclAllReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
+      NCCL_CHECK(ncclAllReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));
     }
   });
@@ -255,10 +255,10 @@ PyObject * THCPModule_nccl_all_gather(PyObject *self, PyObject *args) {
       device_guard.set_index(device);
       auto stream = (streams[i] == nullptr) ? nullptr : THCStream_stream(streams[i]);
     #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-      CHECK(ncclAllGather(inputs[i].data_ptr(), outputs[i].data_ptr(),
+      NCCL_CHECK(ncclAllGather(inputs[i].data_ptr(), outputs[i].data_ptr(),
         count, data_type, comms[i], stream));
     #else
-      CHECK(ncclAllGather(inputs[i].data_ptr(), count, data_type,
+      NCCL_CHECK(ncclAllGather(inputs[i].data_ptr(), count, data_type,
         outputs[i].data_ptr(), comms[i], stream));
     #endif
     }
@@ -299,7 +299,7 @@ PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
       auto stream = (streams[i] == nullptr) ? nullptr : THCStream_stream(streams[i]);
-      CHECK(ncclReduceScatter(inputs[i].data_ptr(), outputs[i].data_ptr(),
+      NCCL_CHECK(ncclReduceScatter(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));
     }
   });

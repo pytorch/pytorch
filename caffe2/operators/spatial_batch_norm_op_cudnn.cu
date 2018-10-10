@@ -93,7 +93,7 @@ class CuDNNSpatialBNOp final : public SpatialBNOp<CUDAContext> {
     if (num_batches_ > 1 || order_ == StorageOrder::NHWC) {
       return SpatialBNOp<CUDAContext>::RunOnDevice();
     }
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -259,7 +259,7 @@ class CuDNNSpatialBNGradientOp final : public SpatialBNGradientOp<CUDAContext> {
     if (num_batches_ > 1 || order_ == StorageOrder::NHWC) {
       return SpatialBNGradientOp<CUDAContext>::RunOnDevice();
     }
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>

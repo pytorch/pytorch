@@ -9,15 +9,4 @@ at::Backend ATenOp<CUDAContext>::backend() const {
   return at::Backend::CUDA;
 }
 
-namespace math {
-template <>
-void Set<at::Half, CUDAContext>(
-    const size_t /*N*/,
-    const at::Half h,
-    at::Half* v,
-    CUDAContext* c) {
-  Set(0, h.x, (uint16_t*) v, c);
-}
-}
-
 }

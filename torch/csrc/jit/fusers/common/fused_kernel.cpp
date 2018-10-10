@@ -24,6 +24,7 @@
 #include <sstream>
 #include <cstdint>
 #include <vector>
+#include <cmath>
 
 namespace torch { namespace jit {
 
@@ -221,7 +222,7 @@ void FusedKernel::launch(
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
-    outputs.push_back(ref_type.toScalarType(od.scalar_type).tensor());
+    outputs.push_back(at::empty({0}, ref_type.options().dtype(od.scalar_type)));
   }
 
   launch_with_tensors(inputs, outputs);
@@ -235,9 +236,22 @@ static std::string scalarValue(int64_t v) {
   return std::to_string(v);
 }
 
+// Note: The NAN, NEG_INFINITY and POS_INFINITY strings map to device-specific
+// implementations of these special values. These macros are found in the 
+// resource strings for each device.
 static std::string scalarValue(double v) {
   std::ostringstream out;
-  out << std::scientific << v << "f";
+  if (std::isnan(v)) {
+    out << "NAN";
+  } else if (std::isinf(v)) {
+    if (v < 0) {
+      out << "NEG_INFINITY";
+    } else {
+      out << "POS_INFINITY";
+    }
+  } else {
+    out << std::scientific << v << "f";
+  }
   return out.str();
 }
 
@@ -296,6 +310,7 @@ static std::string encodeRHS(Node* n) {
     // TODO: some of these ops will not get generated because
     // we only work on float inputs/outputs, but they are here to record
     // that they are valid mappable ops once we handle more type
+
     {aten::__and__, "${0} && ${1}"},
     {aten::__lshift__, "${0} << ${1}"},
     {aten::__or__, "${0} || ${1}"},
@@ -318,6 +333,12 @@ static std::string encodeRHS(Node* n) {
     {aten::add, "${0} + ${2}*${1}"},
     {aten::sub, "(${0} - ${2}*${1})"},
     {aten::rand_like, "uniform(rnd())"},
+
+    // min, max
+    // It may seem unusual to have the bounds as the first case below,
+    // this is so that if min or max is NaN, they are "ignored"
+    // and when the input is NaN, the output is, too
+    {aten::clamp, "(${0}<${1}?${1}:(${0}>${2}?${2}:${0}))"},
 
     // simple derivatives
     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},

@@ -59,7 +59,7 @@ static inline uint64_t NextPowerOf2(uint64_t A) {
 } // namespace detail
 
 /// This is all the non-templated stuff common to all SmallVectors.
-class AT_CORE_API SmallVectorBase {
+class CAFFE2_API SmallVectorBase {
  protected:
   void *BeginX, *EndX, *CapacityX;
 
@@ -1013,6 +1013,19 @@ class SmallVector : public SmallVectorImpl<T> {
 template <typename T, unsigned N>
 inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
   return X.capacity_in_bytes();
+}
+
+template <typename T, unsigned N>
+std::ostream& operator<<(std::ostream & out, const SmallVector<T, N>& list) {
+  int i = 0;
+  out << "[";
+  for(auto e : list) {
+    if (i++ > 0)
+      out << ", ";
+    out << e;
+  }
+  out << "]";
+  return out;
 }
 
 } // end namespace at

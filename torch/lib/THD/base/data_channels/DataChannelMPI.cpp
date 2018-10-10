@@ -153,7 +153,7 @@ at::Tensor DataChannelMPI::_newLikeFlat(std::vector<at::Tensor>& tensors) const 
   at::DeviceGuard gpu_guard(t.is_cuda() ? t.get_device() : -1);
   std::vector<int64_t> sizes { static_cast<int64_t>(tensors.size()) };  // sizes = [output.size()] + input.sizes()
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  return t.type().tensor(sizes);
+  return at::empty(sizes, t.options());
 }
 
 

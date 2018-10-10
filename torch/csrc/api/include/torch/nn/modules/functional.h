@@ -18,7 +18,8 @@ namespace nn {
 /// `Sequential`.
 ///
 /// \rst
-/// .. code-block::
+/// .. code-block:: cpp
+///
 ///   Sequential sequential(
 ///     Linear(3, 4),
 ///     Functional(torch::relu),
@@ -31,11 +32,18 @@ namespace nn {
 /// these have to be bound *at construction time*. For example, if
 /// you want to wrap `torch::leaky_relu`, which accepts a `slope` scalar as its
 /// second argument, with a particular value for its `slope` in a `Functional`
-/// module, you could write `Functional(torch::leaky_relu, /*slope=*/0.5)`. The
-/// value of `0.5` is then stored within the `Functional` object and supplied to
-/// the function call at invocation time. Note that such bound values are
+/// module, you could write
+///
+/// \rst
+/// .. code-block:: cpp
+///
+///   Functional(torch::leaky_relu, /*slope=*/0.5)
+/// \endrst
+///
+/// The value of `0.5` is then stored within the `Functional` object and supplied
+/// to the function call at invocation time. Note that such bound values are
 /// evaluated eagerly and stored a single time. See the documentation of
-/// [`std::bind`](https://en.cppreference.com/w/cpp/utility/functional/bind) for
+/// [std::bind](https://en.cppreference.com/w/cpp/utility/functional/bind) for
 /// more information on the semantics of argument binding.
 ///
 /// \rst

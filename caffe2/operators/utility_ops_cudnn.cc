@@ -16,7 +16,7 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
       : Operator<CUDAContext>(operator_def, ws), cudnn_wrapper_(&context_) {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&data_desc_));
     CUDNN_ENFORCE(cudnnCreateOpTensorDescriptor(&add_desc_));
-    // Both float and float16 require opTensorCompType to be CUDNN_DATA_FLOAT.
+    // Both float and at::Half require opTensorCompType to be CUDNN_DATA_FLOAT.
     CUDNN_ENFORCE(cudnnSetOpTensorDescriptor(
         add_desc_, CUDNN_OP_TENSOR_ADD, CUDNN_DATA_FLOAT, CUDNN_PROPAGATE_NAN));
   }
@@ -27,15 +27,15 @@ class CuDNNWeightedSumOp : public Operator<CUDAContext> {
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
   bool DoRunWithType() {
-    if (std::is_same<T, float16>::value) {
+    if (std::is_same<T, at::Half>::value) {
       LOG(WARNING)
           << "CuDNN only support same type for data and weight, "
-             "so the weight will be cast to float16 when data type is float16.";
+             "so the weight will be cast to at::Half when data type is Half.";
     }
     const int num_inputs = InputSize();
     CAFFE_ENFORCE_EQ(num_inputs % 2, 0);

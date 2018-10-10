@@ -3,10 +3,10 @@
 
 #include <vector>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/net.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
@@ -48,7 +48,7 @@ class CAFFE2_API SimpleNet : public NetBase {
 
   vector<unique_ptr<OperatorBase>> operators_;
 
-  AT_DISABLE_COPY_AND_ASSIGN(SimpleNet);
+  C10_DISABLE_COPY_AND_ASSIGN(SimpleNet);
 };
 
 } // namespace caffe2

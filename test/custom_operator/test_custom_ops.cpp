@@ -1,4 +1,4 @@
-#include <torch/op.h>
+#include <torch/script.h>
 
 #include "op.h"
 

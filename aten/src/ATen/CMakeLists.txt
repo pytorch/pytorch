@@ -20,8 +20,8 @@ CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 CONFIGURE_FILE(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
 
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
-FILE(GLOB base_h "*.h" "detail/*.h")
-FILE(GLOB base_cpp "*.cpp" "detail/*.cpp")
+FILE(GLOB base_h "*.h" "detail/*.h" "cpu/*.h")
+FILE(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
 add_subdirectory(core)
 FILE(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 FILE(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
@@ -158,6 +158,16 @@ if(NOT MSVC AND NOT EMSCRIPTEN)
   set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
   set(CMAKE_CXX_FLAGS)
 
+  # Bump up optimization level for sleef to -O1, since at -O0 the compiler
+  # excessively spills intermediate vector registers to the stack
+  # and makes things run impossibly slowly
+  set(OLD_CMAKE_C_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG})
+  IF(${CMAKE_C_FLAGS_DEBUG} MATCHES "-O0")
+    string(REGEX REPLACE "-O0" "-O1" CMAKE_C_FLAGS_DEBUG ${OLD_CMAKE_C_FLAGS_DEBUG})
+  ELSE()
+    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O1")
+  ENDIF()
+
   set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build sleef static" FORCE)
   set(BUILD_DFT OFF CACHE BOOL "Don't build sleef DFT lib" FORCE)
   set(BUILD_GNUABI_LIBS OFF CACHE BOOL "Don't build sleef gnuabi libs" FORCE)
@@ -168,6 +178,7 @@ if(NOT MSVC AND NOT EMSCRIPTEN)
   link_directories(${CMAKE_BINARY_DIR}/sleef/lib)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS sleef)
 
+  set(CMAKE_C_FLAGS_DEBUG ${OLD_CMAKE_C_FLAGS_DEBUG})
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 
   # Set these back. TODO: Use SLEEF_ to pass these instead

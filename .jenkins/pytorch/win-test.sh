@@ -45,7 +45,7 @@ curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
 call conda install -y -q numpy mkl cffi pyyaml boto3
 
-pip install ninja
+pip install ninja future
 
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
 

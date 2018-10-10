@@ -54,7 +54,7 @@ __global__ void rowwise_max_gradient_kernel(
 
 template <>
 bool SumSqrElementsOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
 }
 
 

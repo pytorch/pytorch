@@ -6,7 +6,6 @@ using caffe2::BaseContext;
 using caffe2::CPUContext;
 using caffe2::Tensor;
 using caffe2::TensorCPU;
-using caffe2::TIndex;
 using std::vector;
 
 namespace caffe2 {
@@ -19,7 +18,7 @@ void concat_op_cpu_impl(
     int axis,
     int add_axis,
     BaseContext* context) {
-  split->Resize(vector<TIndex>(1, inputs.size()));
+  split->Resize(vector<int64_t>(1, inputs.size()));
   int* axis_data = split->template mutable_data<int>();
   int adj_size = inputs[0]->ndim() + (add_axis ? 1 : 0);
   int canonical_axis = caffe2::canonical_axis_index_(axis, adj_size);
@@ -36,7 +35,7 @@ void concat_op_cpu_impl(
   }
 
   int before = 1, after = 1;
-  vector<TIndex> output_dims(inputs[0]->dims());
+  vector<int64_t> output_dims(inputs[0]->dims().vec());
   for (int i = 0; i < inputs[0]->ndim(); ++i) {
     if (i == canonical_axis && !add_axis) {
       continue;

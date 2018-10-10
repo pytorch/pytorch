@@ -146,7 +146,7 @@ void addCUDAObjectMethods(py::module& m) {
           [](const DLPackWrapper<CUDAContext>& t) { return t.tensor->dims(); })
       .def(
           "_reshape",
-          [](DLPackWrapper<CUDAContext>* t, std::vector<TIndex> dims) {
+          [](DLPackWrapper<CUDAContext>* t, std::vector<int64_t> dims) {
             t->tensor->Resize(dims);
           });
 }

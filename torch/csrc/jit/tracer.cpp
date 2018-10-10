@@ -199,6 +199,10 @@ const char * WARN_CONSTRUCTOR =
   "warning if you use this function to create tensors out of constant variables "
   "that would be the same every time you call this function. In any other case, "
   "this might cause the trace to be incorrect.";
+const char * WARN_RESIZE =
+  " can't be represented in the JIT at the moment, so we won't connect any uses of "
+  "this value with its current trace. If you happen to use it again, it will show "
+  "up as a constant in the graph.";
 
 // XXX: _kind can be a nullptr
 void _do_warn(const char * _reason, const char * _kind) {

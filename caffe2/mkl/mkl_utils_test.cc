@@ -23,10 +23,10 @@ TEST(MKLDNNTest, SimpleConvolutionTest) {
   int pads[2] = {0, 0};
 
   // Creating Input and output tensors
-  Tensor X(vector<TIndex>{16, 8, 32, 32}, CPU);
-  Tensor W(vector<TIndex>{64, 8, 3, 3}, CPU);
-  Tensor b(vector<TIndex>{64}, CPU);
-  Tensor Y(vector<TIndex>{16, 64, 30, 30}, CPU);
+  Tensor X(vector<int64_t>{16, 8, 32, 32}, CPU);
+  Tensor W(vector<int64_t>{64, 8, 3, 3}, CPU);
+  Tensor b(vector<int64_t>{64}, CPU);
+  Tensor Y(vector<int64_t>{16, 64, 30, 30}, CPU);
 
   float* data = X.mutable_data<float>();
   for (int i = 0; i < X.size(); ++i) {
@@ -91,7 +91,7 @@ TEST(MKLDNNTest, MKLMemoryCopyTest) {
   // the buffer size being empty for both - former in dnnAllocateBuffer and
   // the latter in dnnConversionExecute (likely due to some difference in
   // layout?). Test both cases.
-  vector<vector<TIndex>> dims_list{{10, 3, 20, 20}, {0}, {0, 10}};
+  vector<vector<int64_t>> dims_list{{10, 3, 20, 20}, {0}, {0, 10}};
   for (const auto& dims : dims_list) {
     auto X_cpu_in = caffe2::make_unique<Tensor>(dims, CPU);
     CPUContext ctx;

@@ -9,7 +9,7 @@ namespace torch { namespace jit {
 struct Graph;
 struct ArgumentSpec;
 
-TORCH_API void PropagateRequiresGrad(std::shared_ptr<Graph>& graph, const ArgumentSpec & spec);
+TORCH_API void PropagateRequiresGrad(std::shared_ptr<Graph>& graph);
 
 }}
 

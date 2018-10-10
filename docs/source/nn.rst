@@ -1173,6 +1173,11 @@ Distance functions
 
 .. autofunction:: cosine_similarity
 
+:hidden:`pdist`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pdist
+
 
 Loss functions
 --------------

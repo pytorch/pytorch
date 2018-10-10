@@ -258,7 +258,7 @@ Tensor _bincount_cuda_template(
     AT_ERROR("input and weights should have the same length");
   }
 
-  auto nbins = self.max().toCLong() + 1L;
+  auto nbins = self.max().item<int64_t>() + 1L;
   nbins = std::max(nbins, minlength);
   // alloc output counter on GPU
   Tensor output;

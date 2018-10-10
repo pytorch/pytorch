@@ -3,7 +3,6 @@
 #include <structmember.h>
 #include <pybind11/pybind11.h>
 
-#include "torch/csrc/torch.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
@@ -17,6 +16,7 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_types.h"
+#include "torch/csrc/variable_tensor_functions.h"
 
 #include <ATen/ATen.h>
 

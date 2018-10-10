@@ -4,5 +4,5 @@
 
 namespace at {
 
-AT_CORE_API int CoreTest();
+CAFFE2_API int CoreTest();
 }

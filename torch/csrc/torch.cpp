@@ -3,15 +3,15 @@
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch {
-at::Type& getVariableType(at::Backend backend, at::ScalarType type) {
+at::TypeExtendedInterface& getVariableType(at::Backend backend, at::ScalarType type) {
   return *autograd::VariableType::getVariableTypeFromBaseType(at::getNonVariableType(backend, type));
 }
 
-at::Type& CPU(at::ScalarType type) {
+at::TypeExtendedInterface& CPU(at::ScalarType type) {
   return torch::getVariableType(at::Backend::CPU, type);
 }
 
-at::Type& CUDA(at::ScalarType type) {
+at::TypeExtendedInterface& CUDA(at::ScalarType type) {
   return torch::getVariableType(at::Backend::CUDA, type);
 }
 

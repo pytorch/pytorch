@@ -227,7 +227,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
 
   // Very likely, we could be more clever here, e.g. learning (or genralizing and reusing) from SoftMax.cu...
-  constexpr int max_threads = 1024;
+  constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 896; // we need 72 or so 32 bit registers for double
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;
@@ -247,6 +247,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
                       log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
                       tg_batch_offsets.data<int64_t>(), tg_target_stride,
                       batch_size, BLANK);
+  THCudaCheck(cudaGetLastError()); // catch launch errors
   return std::make_tuple(neg_log_likelihood, log_alpha);
 }
 
@@ -452,7 +453,7 @@ __global__ void ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ grad
     scalar_t& res = gradient_data[gr_batch_offset + t * gr_input_stride + gr_char_stride * c];
     if (t < input_length) {
       scalar_t lp = log_probs_data[lp_batch_offset + t * lp_input_stride + lp_char_stride * c];
-      res = std::exp(lp)-std::exp(res + nll - lp) * gr;
+      res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
     }
     else {
       res = 0.;
@@ -505,7 +506,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   Tensor grad = at::full_like(log_probs, neginf); // initialization for log(sum (alpha beta))
 
   // As above, there may be better configurations to use.
-  constexpr int max_threads = 1024;
+  constexpr int max_threads = std::is_same<scalar_t, float>::value ? 1024 : 896; // we need 72 or so 32 bit registers for double
   int threads_target = max_threads;
   while (threads_target / 2 >= 2*max_target_length+1) {
     threads_target /= 2;
@@ -526,6 +527,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.data<int64_t>(), tg_target_stride,
        batch_size, BLANK);
+    THCudaCheck(cudaGetLastError()); // catch launch errors
   }
 
   // Very crude heuristic for what is a small problem., based on linearly regressing problem dimensions on
@@ -550,7 +552,10 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
 		   .sub_(log_probs.narrow(2, BLANK, 1))
 		   .exp_()
 		   );
-    // Tor the non-blank characters, we use a kernel to compute the subtrahend.
+    // scale by output gradient (blanks and first summand of non-blanks)
+    grad *= grad_out.view({1, batch_size, 1});
+
+    // For the non-blank characters, we use a kernel to compute the subtrahend.
     // Again we might configure block and grid in a better way.
     int threads_target = max_threads;
     while (threads_target / 2 >= max_target_length) {
@@ -572,6 +577,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.data<int64_t>(), tg_target_stride,
        batch_size, num_labels, BLANK);
+    THCudaCheck(cudaGetLastError()); // catch launch errors
   } else { // small problem, use naive algorithm
     // Still no block/grid configuration guru...
     int threads_input = max_threads;
@@ -595,6 +601,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.data<int64_t>(), tg_target_stride,
        batch_size, num_labels, BLANK);
+    THCudaCheck(cudaGetLastError()); // catch launch errors
   }
   return grad;
 }

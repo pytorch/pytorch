@@ -349,7 +349,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   // FIXME: thrust::unique only removes consecutive elements that are equal.
   // We have race conditions when indices contain duplicates which are not
   // adjacent
-  auto unique_indices = indices.type().tensor(indices.numel());
+  auto unique_indices = at::empty(indices.numel(), indices.options());
   auto unique_data = device_ptr(unique_indices.data<int64_t>());
   auto end = thrust::unique_copy(policy, indices_data, indices_data + num_indices, unique_data);
   auto num_unique_indices = static_cast<int>(end - unique_data);

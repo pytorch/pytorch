@@ -62,7 +62,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     auto itemsize = data.meta().itemsize();
 
     auto batchSize = ranges.dim(0);
-    vector<TIndex> outputDims{batchSize, 0};
+    vector<int64_t> outputDims{batchSize, 0};
     vector<char*> outputRawData;
     for (int i = 0; i < OutputSize(); ++i) {
       auto* output = Output(i);

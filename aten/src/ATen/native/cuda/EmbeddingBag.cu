@@ -73,14 +73,22 @@ __global__ void EmbeddingBag_updateOutputKernel(
         }
       }
       if (mode == MODE_MEAN) {
-        weightFeatSum = weightFeatSum / static_cast<accscalar_t>(bag_size_);
-        bag_size[bag] = bag_size_;
+        if (end == begin) {
+          bag_size[bag] = 0;
+        } else {
+          weightFeatSum = weightFeatSum / static_cast<accscalar_t>(bag_size_);
+          bag_size[bag] = bag_size_;
+        }
       }
 
       if (mode == MODE_MEAN || mode == MODE_SUM) {
         output[bag * featureSize + featureDim] = static_cast<scalar_t>(weightFeatSum);
       }
       else if (mode == MODE_MAX) {
+        if (end == begin) {
+          // If bag is empty, set output to 0.
+          weightFeatMax = 0;
+        }
         max_indices[bag * featureSize + featureDim] = maxWord;
         output[bag * featureSize + featureDim] = weightFeatMax;
       }
@@ -268,8 +276,10 @@ __global__ void EmbeddingBag_accGradParametersKernel_max(
       int64_t bag = chunk / chunksPerBag;
 
       int64_t word_idx = max_indices[bag * stride + featureDim];
-
-      atomicAdd(&(gradWeight[word_idx * stride + featureDim]), gradOutput[bag * stride + featureDim]);
+      if (word_idx >= 0) {
+        // If bag is empty, we have max_indices[idx] set to -1 in forward.
+        atomicAdd(&(gradWeight[word_idx * stride + featureDim]), gradOutput[bag * stride + featureDim]);
+      }
     }
   }
 }

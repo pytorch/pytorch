@@ -144,7 +144,7 @@ private:
   }
   template <typename T>
   void assignToValue(Tensor* dst, T v) {
-    dst->Resize(std::vector<TIndex>());
+    dst->Resize(std::vector<int64_t>());
     math::Set(1, v, dst->template mutable_data<T>(), &context_);
   }
   int findImplementation(const OperatorDef& operator_def) {
@@ -212,7 +212,7 @@ private:
     #define DEFINE_IF(type,aten) \
       if(#type == name) \
         return at::k##aten;
-    DEFINE_IF(float16, Half)
+    DEFINE_IF(at::Half, Half)
     DEFINE_IF(float, Float)
     DEFINE_IF(double, Double)
     DEFINE_IF(uint8, Byte)

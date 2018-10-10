@@ -177,11 +177,11 @@ bool VariableType::isVariableType(const at::Type& type) {
   return type.is_variable();
 }
 
-at::Type* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
+at::TypeExtendedInterface* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
   auto id = static_cast<size_t>(baseType.ID());
   if(id >= type_to_variable_type.size())
     return nullptr;
-  return type_to_variable_type[id].get();
+  return static_cast<at::TypeExtendedInterface*>(type_to_variable_type[id].get());
 }
 
 namespace {
@@ -416,7 +416,9 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
       grad_fn->src_device = src.get_device();
     }
   }
-  baseType->s_copy_(self_, src_, non_blocking);
+  if (self.is_sparse() && src.is_sparse()) baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
+  else if (!self.is_sparse() && !src.is_sparse()) baseType->s_copy_(self_, src_, non_blocking);
+  else AT_ERROR("copy_() between dense and sparse Tensors is not implemented! Found self type = ", self.type(), " and src type = ", src.type());
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
   if(torch::jit::tracer::isTracing()) {
@@ -434,6 +436,11 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
+  if (torch::jit::tracer::isTracing()) {
+    jit::tracer::ArgumentStash::popIntList("size");
+    jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
+    jit::tracer::delValueTrace(self);
+  }
   baseType->resize_(self_, size);
   return self;
 }
@@ -443,6 +450,10 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
+  }
+  if (torch::jit::tracer::isTracing()) {
+    jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
+    jit::tracer::delValueTrace(self);
   }
   baseType->resize_as_(self_, the_template_);
   return self;

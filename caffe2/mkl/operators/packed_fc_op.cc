@@ -85,7 +85,7 @@ class PackedFCOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(packed_matrix->n_, N);
     // Do we want to check the other flags as well?
 
-    Y_shape_cache_ = X.dims();
+    Y_shape_cache_ = X.dims().vec();
     // This is an invariant of canonical_axis, so we can DCHECK.
     DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
     Y_shape_cache_.resize(canonical_axis + 1);
@@ -141,7 +141,7 @@ class PackedFCOp final : public Operator<CPUContext> {
   }
   size_t axis_{1};
   uint32_t hash_{0};
-  vector<TIndex> Y_shape_cache_;
+  vector<int64_t> Y_shape_cache_;
   Tensor bias_multiplier_{CPU};
   std::unique_ptr<MKLPackedMatrix> local_packed_matrix_;
 };

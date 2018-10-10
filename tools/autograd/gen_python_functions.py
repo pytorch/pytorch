@@ -29,7 +29,8 @@ SKIP_PYTHON_BINDINGS = [
     'arange.*', 'range.*', '_gesv.*', '_getri.*', '_inverse.*', 'slice',
     'randint(_out)?',
     '_local_scalar', '_local_scalar_dense',
-    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to'
+    'max_pool1d', 'max_pool2d', 'max_pool3d', 'linear', 'to',
+    'copy_sparse_to_sparse_'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -397,7 +398,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
                     if not has_tensor_options:
                         # add type, device formals and corresponding actuals.
-                        # The type actual isthe ATen type mapped from (ScalarType, Layout, Device)
+                        # The type actual is the ATen type mapped from (ScalarType, Layout, Device)
                         # The device actual is the corresponding AutoGPU index for the Device.
                         formal_args.append(parsed_type_args[1])
                         formal_args.append(device_type)

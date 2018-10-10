@@ -14,15 +14,15 @@ bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
   CAFFE_ENFORCE_EQ(indices.ndim(), 1);
 
-  const TIndex* lengths_data = lengths.template data<TIndex>();
-  const TIndex* indices_data = indices.template data<TIndex>();
+  const int64_t* lengths_data = lengths.template data<int64_t>();
+  const int64_t* indices_data = indices.template data<int64_t>();
   const T* values_data = values.template data<T>();
-  TIndex batch_size = lengths.size();
-  TIndex lengths_sum = 0;
-  math::Sum<TIndex, Context>(batch_size, lengths_data, &lengths_sum, &context_);
+  int64_t batch_size = lengths.size();
+  int64_t lengths_sum = 0;
+  math::Sum<int64_t, Context>(batch_size, lengths_data, &lengths_sum, &context_);
   CAFFE_ENFORCE_EQ(lengths_sum, indices.size());
 
-  vector<TIndex> output_shape = {batch_size};
+  vector<int64_t> output_shape = {batch_size};
   if (InputSize() == 4) {
     auto& shaper = Input(3);
     CAFFE_ENFORCE_EQ(shaper.ndim(), 2);
@@ -42,9 +42,9 @@ bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
   math::Set(
       output->size(), static_cast<T>(default_value_), output_data, &context_);
 
-  TIndex k = 0;
-  for (TIndex i = 0; i < batch_size; ++i) {
-    for (TIndex j = 0; j < lengths_data[i]; ++j) {
+  int64_t k = 0;
+  for (int64_t i = 0; i < batch_size; ++i) {
+    for (int64_t j = 0; j < lengths_data[i]; ++j) {
       CAFFE_ENFORCE(
           indices_data[k] < dense_last_dim_,
           "An indice (",
@@ -69,24 +69,24 @@ bool BatchDenseToSparseOp<T, Context>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1);
   CAFFE_ENFORCE_EQ(indices.ndim(), 1);
   CAFFE_ENFORCE_EQ(dense.ndim(), 2);
-  const TIndex* lengths_data = lengths.template data<TIndex>();
-  const TIndex* indices_data = indices.template data<TIndex>();
+  const int64_t* lengths_data = lengths.template data<int64_t>();
+  const int64_t* indices_data = indices.template data<int64_t>();
   const T* dense_data = dense.template data<T>();
 
-  TIndex batch_size = lengths.size();
-  TIndex lengths_sum = 0;
-  math::Sum<TIndex, Context>(batch_size, lengths_data, &lengths_sum, &context_);
+  int64_t batch_size = lengths.size();
+  int64_t lengths_sum = 0;
+  math::Sum<int64_t, Context>(batch_size, lengths_data, &lengths_sum, &context_);
   CAFFE_ENFORCE_EQ(lengths_sum, indices.size());
 
   CAFFE_ENFORCE_EQ(batch_size, dense.dim(0));
   dense_last_dim_ = dense.dim(1);
-  vector<TIndex> output_shape = indices.dims();
+  vector<int64_t> output_shape = indices.dims().vec();
   output->Resize(output_shape);
   T* output_data = output->template mutable_data<T>();
 
-  TIndex k = 0;
-  for (TIndex i = 0; i < batch_size; ++i) {
-    for (TIndex j = 0; j < lengths_data[i]; ++j) {
+  int64_t k = 0;
+  for (int64_t i = 0; i < batch_size; ++i) {
+    for (int64_t j = 0; j < lengths_data[i]; ++j) {
       CAFFE_ENFORCE(
           indices_data[k] < dense.dim(1),
           "An indice (",

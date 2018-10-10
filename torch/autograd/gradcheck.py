@@ -23,7 +23,7 @@ def make_jacobian(input, num_out):
         if not input.requires_grad:
             return None
         return torch.zeros(input.nelement(), num_out, dtype=input.dtype)
-    elif isinstance(input, container_abcs.Iterable):
+    elif isinstance(input, container_abcs.Iterable) and not isinstance(input, str):
         jacobians = list(filter(
             lambda x: x is not None, (make_jacobian(elem, num_out) for elem in input)))
         if not jacobians:
@@ -37,7 +37,7 @@ def iter_tensors(x, only_requiring_grad=False):
     if isinstance(x, torch.Tensor):
         if x.requires_grad or not only_requiring_grad:
             yield x
-    elif isinstance(x, container_abcs.Iterable):
+    elif isinstance(x, container_abcs.Iterable) and not isinstance(x, str):
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
                 yield result

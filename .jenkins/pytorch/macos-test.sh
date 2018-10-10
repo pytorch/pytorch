@@ -15,7 +15,7 @@ if [ ! -d "${PYTORCH_ENV_DIR}/miniconda3" ]; then
 fi
 export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
 source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
-conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
+conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja future six
 if [ -z "${IN_CIRCLECI}" ]; then
   rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 fi

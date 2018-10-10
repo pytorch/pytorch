@@ -3,13 +3,13 @@ from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import numpy as np
-import unittest
+from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
 import hypothesis.strategies as st
-
-import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core
+import unittest
+import numpy as np
 
 
 def get_op(input_len, output_len, args):
@@ -64,8 +64,8 @@ def gen_multiple_boxes(centers, scores, count, num_classes):
     return ret_box, ret_scores
 
 
-class TestBoxWithNMSLimitOp(hu.HypothesisTestCase):
-    @given(**HU_CONFIG)
+class TestBoxWithNMSLimitOp(serial.SerializedTestCase):
+    @serial.given(**HU_CONFIG)
     def test_simple(self, gc):
         in_centers = [(0, 0), (20, 20), (50, 50)]
         in_scores = [0.9, 0.8, 0.6]

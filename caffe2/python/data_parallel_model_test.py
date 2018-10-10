@@ -448,10 +448,16 @@ class DataParallelModelTest(TestCase):
         self.assertEqual(transform.call_count, 1)
 
     @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
-    def test_multi_device_spatial_bn_cpu(self, seed, batch_size):
-        self._spatial_bn_check("cpu", seed, batch_size)
+    def test_multi_device_bn_op_level(self, seed, batch_size):
+        self._bn_check_op_level("cpu", seed, batch_size)
 
-    def _spatial_bn_check(self, device_type, seed, batch_size):
+    def _bn_check_op_level(self, device_type, seed, batch_size):
+        '''
+        Test multi device batch normalization at the operation level. This is
+        done by checking the outputs of batch normalization and its gradient
+        operator. We compare values produced with our manually calculated
+        batch normalization values and gradients.
+        '''
         devices = [0, 1, 2]
         epsilon = 1e-3
         tolerance = 1e-3
@@ -465,7 +471,7 @@ class DataParallelModelTest(TestCase):
                 x_hat = (x_i - mean) / (np.sqrt(var + epsilon))
                 expected_out = scale * x_hat + bias
                 spatial_out = workspace.FetchBlob(
-                    "{}_{}/sp_out".format(device_type, device))
+                    "{}_{}/bn_out".format(device_type, device))
                 rel_error = np.linalg.norm(spatial_out - expected_out) \
                             / np.linalg.norm(expected_out)
                 self.assertTrue(rel_error < 0.005)
@@ -476,22 +482,22 @@ class DataParallelModelTest(TestCase):
             dGamma_arr = []
             num_devices = len(devices)
             mean = np.array(workspace.FetchBlob(
-                "{}_0/sp_out_sm".format(device_type)), dtype=np.float32)
+                "{}_0/bn_out_sm".format(device_type)), dtype=np.float32)
             inv_var = np.array(workspace.FetchBlob(
-                "{}_0/sp_out_siv".format(device_type)), dtype=np.float32)
+                "{}_0/bn_out_siv".format(device_type)), dtype=np.float32)
 
             # dBias
             # Sum dBias values over all devices to find the average gradient
             for device in devices:
                 dY_blob = workspace.FetchBlob(
-                    "{}_{}/sp_out_grad".format(device_type, device))
+                    "{}_{}/bn_out_grad".format(device_type, device))
                 dY = np.array(dY_blob, dtype=np.float32)
                 dY_arr.append(dY)
                 dBias_arr.append(np.array(np.sum(dY, axis=0), dtype=np.float32))
             dBias = np.sum(dBias_arr, dtype=np.float32)
             dBias_avg = dBias / num_devices
             for device in devices:
-                dBiasActual = np.sum(workspace.FetchBlob("{}_{}/sp_out_b_grad"
+                dBiasActual = np.sum(workspace.FetchBlob("{}_{}/bn_out_b_grad"
                     .format(device_type, device)), dtype=np.float32)
                 self.assertTrue(np.isclose([dBiasActual], [dBias], atol=tolerance))
 
@@ -505,7 +511,7 @@ class DataParallelModelTest(TestCase):
             dGamma_avg = dGamma / num_devices
             for device in devices:
                 dGammaActual = workspace.FetchBlob(
-                    "{}_{}/sp_out_s_grad".format(device_type, device))
+                    "{}_{}/bn_out_s_grad".format(device_type, device))
                 self.assertTrue(np.isclose([dGamma], [dGammaActual], atol=tolerance))
 
             # dX
@@ -524,8 +530,8 @@ class DataParallelModelTest(TestCase):
 
         def add_model_ops(model, loss_scale):
             model.Tanh("data", "tanh")
-            model.SpatialBN("tanh", "sp_out", 1, epsilon=epsilon, is_test=False)
-            model.Sqr("sp_out", "sqr")
+            model.SpatialBN("tanh", "bn_out", 1, epsilon=epsilon, is_test=False)
+            model.Sqr("bn_out", "sqr")
             loss = model.SumElements("sqr", "loss")
             return [loss]
 
@@ -550,8 +556,8 @@ class DataParallelModelTest(TestCase):
         )
 
         workspace.RunNetOnce(model.param_init_net)
-        scale = workspace.FetchBlob("{}_0/sp_out_s".format(device_type))
-        bias = workspace.FetchBlob("{}_0/sp_out_b".format(device_type))
+        scale = workspace.FetchBlob("{}_0/bn_out_s".format(device_type))
+        bias = workspace.FetchBlob("{}_0/bn_out_b".format(device_type))
         workspace.RunNetOnce(model.net)
 
         x = []
@@ -562,6 +568,149 @@ class DataParallelModelTest(TestCase):
 
         _test_forward_pass(x, devices, device_type, scale, bias, epsilon)
         _test_backward_pass(x, devices, device_type, scale, tolerance)
+
+    @given(seed=st.integers(0, 65535), batch_size=st.integers(1, 20))
+    def test_multi_device_bn_net_lvl_cpu(self, seed, batch_size):
+        if batch_size % 2 == 1:
+            batch_size += 1
+        self._test_multi_device_bn_net_lvl("cpu", seed, batch_size)
+
+    def _test_multi_device_bn_net_lvl(self, device_type, seed, batch_size):
+        '''
+        Test multi device batch normalization at the net level. This is done
+        by verifying that the final batch normalization outputs and the
+        gradient outputs from multiple devices are the same as those produced
+        from a single device
+        '''
+
+        # Verify that the gradients calculated over multiple devices are the
+        # same as the gradients calculated over one device. These values should
+        # be equivalent because combine_spatial_bn sums values over all devices
+        def _verify_bn_outputs(
+            devices,
+            device_type,
+            tolerance,
+            single_device_bn_out,
+            two_device_bn_out_vals,
+            single_device_grads,
+            two_device_grads,
+        ):
+            two_device_bn_out = np.concatenate(two_device_bn_out_vals)
+            self.assertTrue(np.isclose(
+                [single_device_bn_out], [two_device_bn_out], atol=tolerance).all())
+
+            # Scalar and Bias gradients should be the same across devices
+            gradient_names = ["bn_out_s_grad", "bn_out_b_grad"]
+            for name in gradient_names:
+                expected_grad = single_device_grads[name]
+                for device in devices:
+                    actual_grad = two_device_grads[device][name]
+                    self.assertTrue(
+                        np.isclose([actual_grad], [expected_grad], atol=tolerance))
+
+            # Expected tanh_grad should be the combined tanh_grad vectors
+            # across the devices
+            first_grad = two_device_grads[0]["tanh_grad"]
+            second_grad = two_device_grads[1]["tanh_grad"]
+            actual_grad = np.concatenate([first_grad, second_grad])
+            expected_grad = single_device_grads["tanh_grad"]
+            rel_error = np.linalg.norm(actual_grad - expected_grad) \
+                / np.linalg.norm(expected_grad)
+            self.assertTrue(rel_error < 1e-3)
+
+        def _create_model(multiple_devices):
+            def add_input_ops_no_combine(model):
+                workspace.FeedBlob("{}_0/data".format(device_type), data)
+
+            def add_input_ops_combine(model):
+                half = int(batch_size / 2)
+                workspace.FeedBlob("{}_0/data".format(device_type), data[:half])
+                workspace.FeedBlob("{}_1/data".format(device_type), data[half:])
+
+            def add_model_ops(model, loss_scale):
+                model.Tanh("data", "tanh")
+                model.SpatialBN("tanh", "bn_out", 1, epsilon=epsilon, is_test=False)
+                model.Sqr("bn_out", "sqr")
+                loss = model.SumElements("sqr", "loss")
+                return [loss]
+
+            def add_optimizer(model):
+                return optimizer.build_sgd(model, 0.1)
+
+            if multiple_devices:
+                input_fun = add_input_ops_combine
+                devices = [0, 1]
+                combine_spatial_bn = True
+            else:
+                input_fun = add_input_ops_no_combine
+                devices = [0]
+                combine_spatial_bn = False
+            model = cnn.CNNModelHelper(
+                order="NCHW",
+                name="test"
+            )
+            data_parallel_model.Parallelize(
+                model,
+                input_builder_fun=input_fun,
+                forward_pass_builder_fun=add_model_ops,
+                optimizer_builder_fun=add_optimizer,
+                devices=devices,
+                cpu_device=device_type == "cpu",
+                shared_model=False,
+                combine_spatial_bn=combine_spatial_bn,
+            )
+            return model
+
+        devices = [0, 1]
+        epsilon = 1e-3
+        tolerance = 1e-3
+        # We are generating random data
+        np.random.seed(seed)
+        data = np.random.rand(batch_size, 1, 1, 1).astype(np.float32)
+        data = np.reshape(data, (batch_size, 1, 1, 1))
+
+        # Get values calculated without combine_spatial_bn
+        workspace.ResetWorkspace()
+        model_no_combine = _create_model(multiple_devices=False)
+        workspace.RunNetOnce(model_no_combine.param_init_net)
+        workspace.RunNetOnce(model_no_combine.net)
+        single_device_bn_out = workspace.FetchBlob("{}_0/bn_out".format(device_type))
+        single_device_grads = {}
+        single_device_grads["bn_out_s_grad"] = workspace.FetchBlob(
+            "{}_0/bn_out_s_grad".format(device_type))
+        single_device_grads["bn_out_b_grad"] = workspace.FetchBlob(
+            "{}_0/bn_out_b_grad".format(device_type))
+        single_device_grads["tanh_grad"] = workspace.FetchBlob(
+            "{}_0/tanh_grad".format(device_type))
+
+        # Get values calculated over multiple devices with combine_spatial_bn true
+        workspace.ResetWorkspace()
+        model_combine = _create_model(multiple_devices=True)
+        workspace.RunNetOnce(model_combine.param_init_net)
+        workspace.RunNetOnce(model_combine.net)
+        two_device_bn_out_vals = []
+        two_device_grads = {}
+        for device in devices:
+            bn_out_blob = "{}_{}/bn_out".format(device_type, device)
+            two_device_bn_out_vals.append(workspace.FetchBlob(bn_out_blob))
+            two_device_grads[device] = {}
+            two_device_grads[device]["bn_out_s_grad"] = workspace.FetchBlob(
+                "{}_{}/bn_out_s_grad".format(device_type, device))
+            two_device_grads[device]["bn_out_b_grad"] = workspace.FetchBlob(
+                "{}_{}/bn_out_b_grad".format(device_type, device))
+            two_device_grads[device]["tanh_grad"] = workspace.FetchBlob(
+                "{}_{}/tanh_grad".format(device_type, device))
+
+        # Check to see if the combined values are equivalent
+        _verify_bn_outputs(
+            devices,
+            device_type,
+            tolerance,
+            single_device_bn_out,
+            two_device_bn_out_vals,
+            single_device_grads,
+            two_device_grads
+        )
 
 class RecurrentNetworkParallelTest(TestCase):
 

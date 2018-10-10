@@ -63,7 +63,7 @@ class Sequential(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return Sequential(OrderedDict(list(self._modules.items())[idx]))
+            return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
             return self._get_item_by_idx(self._modules.values(), idx)
 
@@ -132,7 +132,7 @@ class ModuleList(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return ModuleList(list(self._modules.values())[idx])
+            return self.__class__(list(self._modules.values())[idx])
         else:
             return self._modules[self._get_abs_string_index(idx)]
 
@@ -163,6 +163,17 @@ class ModuleList(Module):
         keys = super(ModuleList, self).__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
+
+    def insert(self, index, module):
+        r"""Insert a given module before a given index in the list.
+
+        Arguments:
+            index (int): index to insert.
+            module (nn.Module): module to insert
+        """
+        for i in range(len(self._modules), index, -1):
+            self._modules[str(i)] = self._modules[str(i - 1)]
+        self._modules[str(index)] = module
 
     def append(self, module):
         r"""Appends a given module to the end of the list.
@@ -334,7 +345,7 @@ class ParameterList(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return ParameterList(list(self._parameters.values())[idx])
+            return self.__class__(list(self._parameters.values())[idx])
         else:
             idx = operator.index(idx)
             if not (-len(self) <= idx < len(self)):

@@ -192,7 +192,7 @@ void pdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const dim3 grid(grid_x, grid_y);
   const dim3 block(block_x, block_y);
 
-  Tensor buffer = result.type().tensor({n - 1, result.size(0), result.size(1)});
+  Tensor buffer = at::empty({n - 1, result.size(0), result.size(1)}, result.options());
   AT_DISPATCH_FLOATING_TYPES(self.type(), "pdist_cuda_backward", [&] {
     if (p == 1.0) {
       pdist_backward_kernel_cuda_impl<scalar_t, dists<scalar_t>::one><<<grid, block>>>(buffer.data<scalar_t>(), grad.data<scalar_t>(), self.data<scalar_t>(), dist.data<scalar_t>(), grad.stride(0), n, m, dist.numel(), p);

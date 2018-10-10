@@ -33,8 +33,6 @@ using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
 
-TORCH_API extern size_t deleteFunctionMaxRecursionDepth;
-
 // Custom deleter to prevent stack overflows.
 void deleteFunction(Function* function);
 
@@ -303,16 +301,6 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// NOTE: this value matters only if is_traceable() returns false.
   virtual bool passes_state_transparently() {
     return false;
-  }
-
-  /// Returns `Variable`s saved by this `Function`.
-  /// This let's the JIT find inputs to apply that are not present explicitly
-  /// in arguments. Required only for functions that are not traceable, don't
-  /// pass state to backward transparently, and are not backwards closures of
-  /// functions that don't pass the state transparently. Which means that
-  /// hopefully they will hardly ever need to be implemented :)
-  virtual std::unique_ptr<saved_variable_list> saved_variables() {
-    return nullptr;
   }
 
   static uint64_t peek_at_next_sequence_nr();

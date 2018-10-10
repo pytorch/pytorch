@@ -60,7 +60,7 @@ static THCTensor* THCTensor_(newColumnMajor)(THCState *state, THCTensor *self, T
 }
 
 
-THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
+void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
@@ -98,8 +98,8 @@ THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 #endif
 }
 
-THC_API void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_,
-                               const char *uplo, const char *trans, const char *diag)
+void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_,
+                       const char *uplo, const char *trans, const char *diag)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
@@ -135,7 +135,7 @@ THC_API void THCTensor_(trtrs)(THCState *state, THCTensor *rb_, THCTensor *ra_, 
 #endif
 }
 
-THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
+void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
@@ -182,7 +182,7 @@ THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 #endif
 }
 
-THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a, const char *jobzs, const char *uplos)
+void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a, const char *jobzs, const char *uplos)
 {
 #ifdef USE_MAGMA
   int64_t n = THTensor_sizeLegacyNoScalars(a, 0);
@@ -247,7 +247,7 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 #endif
 }
 
-THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, const char *jobvrs)
+void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, const char *jobvrs)
 {
 #ifdef USE_MAGMA
   THArgCheck(a_->dim() == 2, 3, "A should be 2 dimensional");
@@ -321,7 +321,7 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 #endif
 }
 
-THC_API void THCTensor_(gesdd)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *a, const char *jobu)
+void THCTensor_(gesdd)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *a, const char *jobu)
 {
 #ifdef USE_MAGMA
   THCTensor *ra_ = THCTensor_(new)(state);
@@ -332,7 +332,7 @@ THC_API void THCTensor_(gesdd)(THCState *state, THCTensor *ru_, THCTensor *rs_, 
 #endif
 }
 
-THC_API void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a, const char *jobus)
+void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a, const char *jobus)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
@@ -396,7 +396,7 @@ THC_API void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
 #endif
 }
 
-THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
+void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
 {
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
   THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
@@ -524,7 +524,7 @@ __global__ void THCTensor_(copyLowerSymmetric)(scalar_t *input, int n, int len)
   }
 }
 
-THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
+void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
@@ -564,7 +564,7 @@ THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, co
 #endif
 }
 
-THC_API void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
+void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be (non-empty) 2 dimensional");
@@ -600,7 +600,7 @@ THC_API void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, co
 #endif
 }
 
-THC_API void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor *a, const char *uplo)
+void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, THCTensor *a, const char *uplo)
 {
 #ifdef USE_MAGMA
   THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
@@ -632,7 +632,7 @@ THC_API void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, TH
 #endif
 }
 
-THC_API void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTensor *a_)
+void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 2, "A should be non-empty 2 dimensional");
@@ -669,7 +669,7 @@ THC_API void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_
 #endif
 }
 
-THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THCTensor *a_)
+void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THCTensor *a_)
 {
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 2, "A should be non-empty 2 dimensional");
