@@ -648,6 +648,13 @@ jobs:
           source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
           docker pull ${COMMIT_DOCKER_IMAGE}
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+
+          docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
+          # This IAM user allows write access to S3 bucket for perf test numbers
+          echo "declare -x AWS_ACCESS_KEY_ID=AKIAIKUCKAAULNJNWFWA" >> /home/circleci/project/env
+          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET}" >> /home/circleci/project/env
+          docker cp /home/circleci/project/env $id:/var/lib/jenkins/workspace/env
+
           (echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh') | docker exec -u jenkins -i "$id" bash
 
   pytorch_macos_10_13_py3_build:
