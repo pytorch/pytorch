@@ -7,9 +7,9 @@ merge_with_master: &merge_with_master
       git config --global user.email "circleci.ossci@gmail.com"
       git config --global user.name "CircleCI"
 
-      git config remote.origin.url https://github.com/pytorch/pytorch.git
+      git config remote.origin.url "$CIRCLE_REPOSITORY_URL"
       git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-      git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=50 --quiet
+      git fetch --tags --progress "$CIRCLE_REPOSITORY_URL" +refs/heads/master:refs/remotes/origin/master --depth=50 --quiet
 
       export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
       echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
