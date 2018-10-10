@@ -181,7 +181,6 @@ struct CAFFE2_API Type {
   virtual Tensor s_masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor nonzero(const Tensor & self) const = 0;
-  virtual Tensor contiguous(const Tensor & self) const = 0;
   virtual Tensor view(const Tensor & self, IntList size) const = 0;
   virtual Tensor index_select(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
   virtual Tensor take(const Tensor & self, const Tensor & index) const = 0;
@@ -408,6 +407,7 @@ struct CAFFE2_API Type {
   virtual Tensor & clamp_max_(Tensor & self, Scalar max) const = 0;
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
   virtual Tensor & clamp_min_(Tensor & self, Scalar min) const = 0;
+  virtual Tensor contiguous(const Tensor & self) const = 0;
   virtual Tensor cos(const Tensor & self) const = 0;
   virtual Tensor & cos_(Tensor & self) const = 0;
   virtual Tensor cosh(const Tensor & self) const = 0;
