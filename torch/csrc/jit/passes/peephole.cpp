@@ -14,6 +14,13 @@ namespace torch { namespace jit {
 //    - Simply x.t().t() to x
 //
 // TODO: Decide what kind of fixed point strategy we will have
+//
+// The parameter `addmm_fusion_enabled` exists because, as it is today, fusing
+// add + mm has no benefit within PyTorch running ATen ops. However, we rely on
+// seeing the fused version of addmm for ONNX export, since after ONNX translation
+// we would see redundant Gemm ops with sub-optimal inputs. This flag is exposed
+// so that ONNX export can pass `true` to get the fused behavior, but normal
+// JIT peephole optimization is left alone.
 void PeepholeOptimize(Block * block, bool addmm_fusion_enabled) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto* node = *it;
