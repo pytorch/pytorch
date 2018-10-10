@@ -728,8 +728,9 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None):
 def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
-    of arithmetic operations (`[CLRS]`_). Note that since is a function to compute the product, :math:`N`
+    of arithmetic operations (`[CLRS]`_). Note that since this is a function to compute the product, :math:`N`
     needs to be greater than or equal to 2; if equal to 2 then a trivial matrix-matrix product is returned.
+    If :math:`N` is 1, then this is a no-op - the original matrix is returned as is.
 
 
     Args:
@@ -753,6 +754,4 @@ def chain_matmul(*matrices):
 
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
-    if len(matrices) == 1 and isinstance(matrices[0], (list, tuple)):
-        matrices = matrices[0]
     return torch._C._VariableFunctions.chain_matmul(matrices)

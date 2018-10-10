@@ -2186,8 +2186,10 @@ class TestAutograd(TestCase):
 
         gradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
         gradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
+        gradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
         gradgradcheck(torch.chain_matmul, gen_matrices([5, 10, 15, 5]))
         gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
+        gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
 
     def test_profiler(self):
         x = torch.randn(10, 10)
