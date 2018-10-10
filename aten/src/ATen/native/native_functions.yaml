@@ -1901,9 +1901,6 @@
     SparseCPU: new_with_size_sparse
     SparseCUDA: new_with_size_sparse
 
-- func: tensor(Type dtype) -> Tensor
-  variants: []
-
 - func: tensor(Type dtype, IntList size) -> Tensor
   variants: []
 
