@@ -287,6 +287,10 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return cudaStreamQuery(stream) == cudaSuccess;
   }
 
+  at::Device device() const override {
+    return at::Device(CUDA, gpu_id_);
+  }
+
   DeviceType device_type() const override {
     return CUDA;
   }
@@ -390,13 +394,6 @@ class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
   DeviceType GetDeviceType() override {
     return CUDA;
   }
-
-  void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    CAFFE_ENFORCE(data, "data cannot be nullptr");
-    device->set_device_type(TypeToProto(GetDeviceType()));
-    device->set_device_id(GetGPUIDForPointer(data));
-  }
-
 };
 
 using TensorCUDA = Tensor;

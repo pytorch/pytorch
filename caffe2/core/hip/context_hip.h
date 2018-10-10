@@ -271,6 +271,10 @@ class HIPContext final : public BaseContext {
     return hipStreamQuery(stream) == hipSuccess;
   }
 
+  at::Device device() const override {
+    return at::Device(HIP, gpu_id_);
+  }
+
   DeviceType device_type() const override {
     return HIP;
   }
@@ -378,11 +382,6 @@ class HIPStaticContext final : public BaseStaticContext {
  public:
   DeviceType GetDeviceType() override {
     return HIP;
-  }
-
-  void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-    device->set_hip_gpu_id(GetGPUIDForPointer(data));
   }
 
 };
