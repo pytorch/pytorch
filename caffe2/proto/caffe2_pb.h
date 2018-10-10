@@ -136,4 +136,11 @@ inline CAFFE2_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
   return at::Device(ProtoToType(type), id);
 }
 
+inline void ExtractDeviceOption(
+    DeviceOption* device_option,
+    const at::Device& device) {
+  AT_ASSERT(device_option);
+  device_option->CopyFrom(DeviceToOption(device));
+}
+
 } // namespace caffe2
