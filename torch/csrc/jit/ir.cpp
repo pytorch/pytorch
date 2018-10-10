@@ -185,6 +185,34 @@ void Graph::dumpPretty() {
   PrettyPrint(std::cout, *this);
 }
 
+Scope* Scope::push(Symbol name) {
+  children_.push_back(std::unique_ptr<Scope>(new Scope(this, name)));
+  return children_.back().get();
+}
+
+Scope* Scope::getRoot() {
+  Scope* current = this;
+  while (current->parent_) {
+    current = current->parent_;
+  }
+  return current;
+}
+
+std::string Scope::namesFromRoot(const std::string& separator="/") {
+  // TODO: I think the answer is we shouldn't have used Symbol here
+  std::string out = this->name_.toUnqualString();
+  if (this->isRoot()) {
+    return out;
+  }
+  Scope* parent = this->parent_;
+  while (!parent->isRoot()) {
+    // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+    out = std::string(parent->name_.toUnqualString()) + separator + out;
+    parent = parent->parent_;
+  }
+  return out;
+}
+
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;

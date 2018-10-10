@@ -118,10 +118,8 @@ public:
     name_ = name;
     parent_ = parent;
   }
-  Scope* push(Symbol name) {
-    children_.push_back(std::unique_ptr<Scope>(new Scope(this, name)));
-    return children_.back().get();
-  }
+  Scope* push(Symbol name);
+
   Scope* parent() {
     if (parent_ == nullptr) {
       throw std::runtime_error("Cannot get parent from Scope with no parent");
@@ -131,30 +129,14 @@ public:
   bool isRoot() {
     return parent_ == nullptr;
   }
-  Scope* getRoot() {
-    Scope* current = this;
-    while (current->parent_) {
-      current = current->parent_;
-    }
-    return current;
-  }
+
+  Scope* getRoot();
+
   Symbol name() {
     return name_;
   }
-  std::string namesFromRoot(const std::string& separator="/") {
-    // TODO: I think the answer is we shouldn't have used Symbol here
-    std::string out = this->name_.toUnqualString();
-    if (this->isRoot()) {
-      return out;
-    }
-    Scope* parent = this->parent_;
-    while (!parent->isRoot()) {
-      // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      out = std::string(parent->name_.toUnqualString()) + separator + out;
-      parent = parent->parent_;
-    }
-    return out;
-  }
+
+  std::string namesFromRoot(const std::string& separator="/");
 };
 
 // the list types are intentionally simple, but we type-def
