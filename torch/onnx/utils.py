@@ -128,6 +128,10 @@ def _optimize_graph(graph, operator_export_type):
     # into a trace where we previously recorded constants
     # use constant prop to maintain our current level of onnx support
     # without implementing symbolics for all of them
+
+    # remove implicit expand op to avoid using static size in ONNX graph
+    torch._C._jit_pass_remove_expands(graph)
+
     torch._C._jit_pass_constant_propagation(graph)
     _split_tensor_list_constants(graph, graph)
     # run dce to eliminate dead parts of the graph that might have been

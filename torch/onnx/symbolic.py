@@ -333,9 +333,10 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
-# There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size, implicit):
-    return None
+    # we don't deal with implict expand since we don't want static size
+    # to appear in ONNX graph, and it is removed from the graph when exporting
+    return g.op("Expand", self, size)
 
 
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
