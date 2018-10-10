@@ -122,7 +122,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   // avoids touching the GIL or current device if self is already contiguous
-  if (self_.is_contiguous()) {
+  if (self_.is_contiguous() && !jit::tracer::isTracing()) {
     Py_INCREF(self);
     return self;
   }

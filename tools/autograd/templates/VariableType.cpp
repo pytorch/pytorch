@@ -461,10 +461,8 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
 
 Tensor VariableType::contiguous(const Tensor & self) const {
   unpack(self, "self", 0);
-  if (self.is_contiguous()) {
-    return self;
-  }
-  return self.clone();
+  auto result = self.is_contiguous() && !jit::tracer::isTracing() ? self : self.clone();
+  return result;
 }
 
 Tensor VariableType::detach(const Tensor & self) const {
