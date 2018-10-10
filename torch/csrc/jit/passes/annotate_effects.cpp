@@ -259,7 +259,7 @@ class AnnotateEffectsImpl {
   Value* addFenceForNode(Node* node, Value* curToken) {
     // Add a start fence
     auto startFence =
-        node->owningGraph()->create(prim::MemoryFence, /*outputs=*/0);
+        node->owningGraph()->create(prim::MemoryFence, /*num_outputs=*/0);
 
     // Add world tokens as the first input and output
     startFence->addInput(curToken);
@@ -282,7 +282,7 @@ class AnnotateEffectsImpl {
 
     // Add an end fence
     auto endFence =
-        node->owningGraph()->create(prim::MemoryFence, /*outputs=*/0);
+        node->owningGraph()->create(prim::MemoryFence, /*num_outputs=*/0);
 
     // Add world tokens as the first input and output
     endFence->addInput(curToken);
