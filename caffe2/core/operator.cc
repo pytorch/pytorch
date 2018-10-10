@@ -56,6 +56,13 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   type_ = operator_def.type();
 }
 
+OperatorBase::OperatorBase(
+    const torch::jit::FunctionSchema* fn_schema,
+    const std::vector<const torch::jit::IValue*>& inputs,
+    const std::vector<torch::jit::IValue*>& outputs)
+    : fn_schema_(fn_schema), ivalue_inputs_(inputs), ivalue_outputs_(outputs) {}
+
+
 vector<TensorShape> OperatorBase::InputTensorShapes() const {
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
@@ -312,6 +319,15 @@ unique_ptr<OperatorBase> CreateOperator(
   }
 }
 
+void RunOperator(
+    const std::string& name,
+    std::vector<const torch::jit::IValue*> inputs,
+    std::vector<torch::jit::IValue*> outputs) {
+  const auto schema = GET_NEW_API_OPERATOR_SCHEMA(name);
+  auto schema_ref = &schema;
+  NewAPIOperatorRegistry()->Create(name, schema_ref, inputs, outputs)->Run();
+}
+
 std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
   static std::map<DeviceType, OperatorRegistry*> g_device_type_registry;
   return &g_device_type_registry;
@@ -343,6 +359,14 @@ C10_DEFINE_REGISTRY(
     GradientMakerBase,
     const OperatorDef&,
     const vector<GradientWrapper>&);
+
+C10_DEFINE_REGISTRY(
+    NewAPIOperatorRegistry,
+    OperatorBase,
+    const torch::jit::FunctionSchema*,
+    const std::vector<const torch::jit::IValue*>&,
+    const std::vector<torch::jit::IValue*>&);
+C10_DEFINE_REGISTRY(NewAPIOperatorSchemaRegistry, NewAPIOperatorSchemaBase);
 
 GradientOpsMeta GetGradientForOp(
     const OperatorDef& def, const vector<GradientWrapper>& g_output) {

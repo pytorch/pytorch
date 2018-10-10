@@ -595,4 +595,83 @@ TEST(IsTestArg, non_standard) {
       "JustTestWithNonStandardIsTestArg");
 }
 
+class NewAPITestOperator final : public Operator<CPUContext> {
+ public:
+  NewAPITestOperator(const OperatorDef& def, Workspace* ws)
+      : Operator<CPUContext>(def, ws) {}
+
+  NewAPITestOperator(
+      const torch::jit::FunctionSchema* f,
+      const std::vector<const torch::jit::IValue*>& i,
+      const std::vector<torch::jit::IValue*>& o)
+      : Operator<CPUContext>(f, i, o) {
+    if (HasArgument("test_arg")) {
+      test_arg_ =
+          static_cast<float>(this->GetSingleArgument<float>("test_arg", 0.01));
+    }
+  }
+
+  bool RunOnDevice() override {
+    auto out = Output(0);
+    out->mutable_data<float>()[0] = test_arg_;
+    return true;
+  }
+
+ private:
+  float test_arg_ = 0;
+};
+
+REGISTER_CPU_OPERATOR(NewAPITest, NewAPITestOperator);
+OPERATOR_SCHEMA(NewAPITestOperator)
+    .NumInputs(0, 1)
+    .NumOutputs(0, 1)
+    .Arg("test_arg", "this arg is required", true);
+
+// The new API registers the schema simultaneously
+REGISTER_NEW_API_OPERATOR(
+    NewAPITest,
+    {torch::jit::Argument("test_arg")},
+    {torch::jit::Argument("output")},
+    NewAPITestOperator);
+
+TEST(NewAPI, Functor) {
+  nom::NeuralNet nn;
+  float test_val = 1337.0;
+  auto i0 = nn.dataFlow.createNode(torch::jit::IValue(test_val));
+
+  auto schema = GET_NEW_API_OPERATOR_SCHEMA("NewAPITest");
+  auto op = nn.dataFlow.createNode(std::move(schema));
+  nn.dataFlow.createEdge(i0, op);
+
+  // Faked allocator run
+  caffe2::Tensor a(caffe2::CPU);
+  a.Resize(1, 1);
+  Blob a_blob;
+  *a_blob.GetMutable<Tensor>() = a;
+  auto o0 = nn.dataFlow.createNode(torch::jit::IValue(std::move(a_blob)));
+  nn.dataFlow.createEdge(op, o0);
+
+  // Operator instantiation and run from IR node
+  auto test = caffe2::make_unique<NewAPITestOperator>(
+      nom::getOperatorSchema(op), nom::getInputs(op), nom::getOutputs(op));
+  test->Run();
+  EXPECT_EQ(a.data<float>()[0], test_val);
+}
+
+TEST(NewAPI, Function) {
+  // Input
+  float test_val = 1337.0;
+  // Output
+  caffe2::Tensor out(caffe2::CPU);
+  out.Resize(1, 1);
+  Blob out_blob;
+  *out_blob.GetMutable<Tensor>() = out;
+
+  auto in_ival = torch::jit::IValue(test_val);
+  auto out_ival = torch::jit::IValue(std::move(out_blob));
+  RunOperator("NewAPITest", {&in_ival}, {&out_ival});
+
+  EXPECT_EQ(out.data<float>()[0], test_val);
+}
+
 }  // namespace caffe2

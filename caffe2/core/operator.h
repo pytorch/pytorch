@@ -22,6 +22,9 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
 
+#include <ATen/core/ir.h>
+#include <ATen/core/optional.h>
+
 namespace caffe2 {
 
 class CAFFE2_API OperatorBase;
@@ -30,23 +33,52 @@ typedef ObserverBase<OperatorBase> OperatorObserver;
 class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
  public:
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
+  explicit OperatorBase(
+      const torch::jit::FunctionSchema*,
+      const std::vector<const torch::jit::IValue*>&,
+      const std::vector<torch::jit::IValue*>&);
   virtual ~OperatorBase() noexcept {}
+
+  bool isLegacyOperator() const {
+    return !fn_schema_.has_value();
+  }
+
+  const torch::jit::FunctionSchema* getFunctionSchema() const {
+    CAFFE_ENFORCE(!isLegacyOperator());
+    return fn_schema_.value();
+  }
 
   /** @brief Checks if the operator has an argument of the given name.
    */
   inline bool HasArgument(const string& name) const {
-    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-    return ArgumentHelper::HasArgument(*operator_def_, name);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+      return ArgumentHelper::HasArgument(*operator_def_, name);
+    }
+    return getFunctionSchema()->argumentIndexWithName(name).has_value();
   }
 
   // Functions that deal with arguments. Basically, this allows us to map an
   // argument name to a specific type of argument that we are trying to access.
   template <typename T>
   inline T GetSingleArgument(const string& name, const T& default_value) const {
-    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
-    return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
-        *operator_def_, name, default_value);
+    if (isLegacyOperator()) {
+      CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+      return ArgumentHelper::GetSingleArgument<OperatorDef, T>(
+          *operator_def_, name, default_value);
+    }
+    auto index = fn_schema_.value()->argumentIndexWithName(name);
+    CAFFE_ENFORCE(index.has_value(), "Couldn't get index for argument!", name);
+    const auto& value = ivalue_inputs_[index.value()];
+    return value->template to<T>();
   }
+
+
+  template <>
+  inline string GetSingleArgument<string>(
+      const string& name,
+      const string& default_value) const;
+
   template <typename T>
   inline bool HasSingleArgumentOfType(const string& name) const {
     CAFFE_ENFORCE(operator_def_, "operator_def was null!");
@@ -122,7 +154,13 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     static_assert(
         std::is_same<T, Tensor>::value,
         "Output(int, DeviceType) is only available for Tensor");
-    return BlobGetMutableTensor(outputs_.at(idx), type);
+    if (isLegacyOperator()) {
+      return BlobGetMutableTensor(outputs_.at(idx), type);
+    }
+    auto& ival = ivalue_outputs_[idx];
+    CAFFE_ENFORCE(
+        ival->isBlob(), "Tensors must be stored in blobs if used in IValues");
+    return ival->toBlob().GetMutable<caffe2::Tensor>();
   }
 
   template <typename T>
@@ -370,6 +408,9 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
   std::string type_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
+  at::optional<const torch::jit::FunctionSchema*> fn_schema_;
+  vector<const torch::jit::IValue*> ivalue_inputs_;
+  vector<torch::jit::IValue*> ivalue_outputs_;
 
   int net_position_{kNoNetPositionSet};
 
@@ -399,6 +440,32 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
 
   C10_DISABLE_COPY_AND_ASSIGN(OperatorBase);
 };
+
+template <>
+inline string OperatorBase::GetSingleArgument<string>(
+    const string& name,
+    const string& default_value) const {
+  if (isLegacyOperator()) {
+    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+    return ArgumentHelper::GetSingleArgument<OperatorDef, string>(
+        *operator_def_, name, default_value);
+  }
+  CAFFE_THROW("Cannot get strings from IValue");
+  return "";
+}
+
+template <>
+inline NetDef OperatorBase::GetSingleArgument<NetDef>(
+    const string& name,
+    const NetDef& default_value) const {
+  if (isLegacyOperator()) {
+    CAFFE_ENFORCE(operator_def_, "operator_def was null!");
+    return ArgumentHelper::GetSingleArgument<OperatorDef, NetDef>(
+        *operator_def_, name, default_value);
+  }
+  CAFFE_THROW("Cannot get NetDefs from IValue");
+  return NetDef();
+}
 
 // If your operator does not need any specialized contructor or destructor,
 // you can simply use this to save two lines of code.
@@ -441,6 +508,15 @@ class Operator : public OperatorBase {
  public:
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
       : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
+    // In the constructor, we switch to the device so that the child class
+    // constructors will run on that device.
+    context_.SwitchToDevice(0);
+  }
+  explicit Operator(
+      const torch::jit::FunctionSchema* fn_schema,
+      const std::vector<const torch::jit::IValue*>& inputs,
+      const std::vector<torch::jit::IValue*>& outputs)
+      : OperatorBase(fn_schema, inputs, outputs) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
     context_.SwitchToDevice(0);
@@ -882,6 +958,34 @@ C10_DECLARE_REGISTRY(
 #define REGISTER_MIOPEN_OPERATOR(name, ...) \
   REGISTER_HIP_OPERATOR_WITH_ENGINE(name, MIOPEN, __VA_ARGS__)
 
+C10_DECLARE_REGISTRY(
+    NewAPIOperatorRegistry,
+    OperatorBase,
+    const torch::jit::FunctionSchema*,
+    const std::vector<const torch::jit::IValue*>&,
+    const std::vector<torch::jit::IValue*>&);
+
+struct NewAPIOperatorSchemaBase {
+  NewAPIOperatorSchemaBase() {}
+  virtual torch::jit::FunctionSchema getDefaultSchema() = 0;
+  virtual ~NewAPIOperatorSchemaBase() {}
+};
+
+C10_DECLARE_REGISTRY(NewAPIOperatorSchemaRegistry, NewAPIOperatorSchemaBase);
+
+#define REGISTER_NEW_API_OPERATOR(name, inputs, outputs, impl)              \
+  C10_REGISTER_CLASS(NewAPIOperatorRegistry, name, impl)                    \
+  struct NewAPIOperatorSchemaBase##name : public NewAPIOperatorSchemaBase { \
+    torch::jit::FunctionSchema getDefaultSchema() override {                \
+      return torch::jit::FunctionSchema(#name, inputs, outputs);            \
+    }                                                                       \
+  };                                                                        \
+  C10_REGISTER_CLASS(                                                       \
+      NewAPIOperatorSchemaRegistry, name, NewAPIOperatorSchemaBase##name)
+
+#define GET_NEW_API_OPERATOR_SCHEMA(name) \
+  NewAPIOperatorSchemaRegistry()->Create(name)->getDefaultSchema()
+
 // StaticLinkingProtector is a helper class that ensures that the Caffe2
 // library is linked correctly with whole archives (in the case of static
 // linking). What happens is that when CreateOperator is called for the first
@@ -942,6 +1046,11 @@ CAFFE2_API unique_ptr<OperatorBase> CreateOperator(
 CAFFE2_API const std::string OpRegistryKey(
     const std::string& op_type,
     const std::string& engine = "");
+
+CAFFE2_API void RunOperator(
+    const std::string& name,
+    std::vector<const torch::jit::IValue*> inputs,
+    std::vector<torch::jit::IValue*> outputs);
 
 // User can set the preferred engines as a list of engine names, in
 // descending order of preference.
