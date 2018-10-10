@@ -129,6 +129,10 @@ class MKLContext : public BaseContext {
     return true;
   }
 
+  at::Device device() const override {
+    return at::Device(MKLDNN);
+  }
+
   DeviceType device_type() const override {
     return MKLDNN;
   }
@@ -157,10 +161,6 @@ class MKLStaticContext : public BaseStaticContext {
     return MKLDNN;
   }
 
-  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
-      override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-  }
 };
 
 } // namespace caffe2

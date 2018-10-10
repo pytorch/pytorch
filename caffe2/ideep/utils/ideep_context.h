@@ -121,6 +121,10 @@ class IDEEPContext final : public BaseContext {
     return true;
   }
 
+  at::Device device() const override {
+    return at::Device(IDEEP);
+  }
+
   DeviceType device_type() const override {
     return IDEEP;
   }
@@ -180,10 +184,6 @@ class IDEEPStaticContext : public BaseStaticContext {
     return IDEEP;
   }
 
-  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
-      override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-  }
 };
 
 } // namespace caffe2
