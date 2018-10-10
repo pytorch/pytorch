@@ -1459,9 +1459,8 @@ narrow_copy(dimension, start, length) -> Tensor
 
 Same as :func:`torch.narrow` except that :meth:`~FloatTensor.narrow_copy` is a Tensor method
 and it returns a copy rather than shared storage. This is primarily for sparse tensors, which
-do not have a shared-storage narrow method. Calling :meth:`~FloatTensor.narrow_copy`
-with ``dimemsion > self._sparseDims()`` will return a copy with the
-relevant dense dimension narrowed, and ``self.shape`` updated accordingly.
+do not have a shared-storage narrow method. :meth:`~FloatTensor.narrow_copy` can be applied on
+both of ``sparse_dim`` and ``dense_dim``.
 """)
 
 add_docstr_all('ndimension',
