@@ -381,10 +381,12 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 
 /// NOTE [ Autograd Variable Views ]
 ///
-/// A Variable that is a view of another Variable (called base Variable), i.e.,
-/// they share storage, **and** may potentially record gradient flow between the
-/// two Variables. Even if the base currently does not require grad, it is still
-/// important to record this view relation to support operations like:
+/// Many operations return Variable that shares storage with an input Variable.
+/// The returned Varaible is called a **view** Variable on the input **base**
+/// Variable. Variable::ViewImple is created to support gradient tracking of
+/// potential **in-place** operations on either of these two Variables. Note
+/// that even if the base currently does not require grad, it is still important
+/// to record this view relation to support operations like:
 ///
 ///     # Have:
 ///     #   base.requires_grad = False
@@ -393,31 +395,37 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 ///     torch.autograd.grad(base.sum(), var)  <- should return an all ones tensor
 ///
 /// Above example is effectively base[1].copy_(var). To support this, in the
-/// rebase_history of base[1], we need to get the update the grad_fn of the base
-/// Variable. Therefore, we still record the view relation between base and
-/// base[1] even though they don't require gradients at creation time.
+/// rebase_history of base[1], we need to update the grad_fn of base. Therefore,
+/// we still record the view relation between base and base[1] even though they
+/// don't require gradients at creation time.
 ///
-/// Another similar example is:
+/// A similar example but with in-place operation on base is:
 ///
 ///     # Have:
 ///     #   base.requires_grad = False
 ///     #   var.requires_grad = True
+///     view = base[1]
 ///     base.copy_(var)
-///     torch.autograd.grad(base[1].sum(), var)  <- should return an all ones tensor
-///
+///     torch.autograd.grad(view.sum(), var)  <- should return a tensor with
+///                                              var[1] filled with all ones and
+///                                              zeros everywhere else
 ///
 /// In a view relation, the base and view Variables share the same
 /// version_counter. The grad_fn field of the Variable may become stale due to
 /// in-place modifications of the shared data. Accesses should go through
 /// get_grad_fn(). All other fields are always valid.
 ///
-/// NB: Some views will never require gradient history tracking, and will not be
-///     counted as views (i.e., having is_view() = true and using ViewImpl).
-///     Instead, they will be usual Variables and just sharing the version
-//      counters with the base Variables. Some examples are:
-///       1. views created from .detach(),
-///       2. views created when GradMode::enabled() = false.
-///     Relevant logic is implemented in make_variable_view.
+/// Such view Variables have is_view() = true and use ViewImpl.
+///
+/// However, some outputs, although sharing storage, will **never** require
+/// gradient history tracking, and thus will not register the above view
+/// relation in autograd using ViewImpl. Instead, they will be usual Variables
+/// and just share the version counters with the base Variables.
+/// Some examples are:
+///   1. Variables created from .detach(),
+///   2. Variables created when GradMode::enabled() = false.
+/// Relevant logic is implemented in make_variable_view below, and
+/// wrap_output of gen_variable_type.py.
 struct TORCH_API Variable::ViewImpl : public Variable::Impl {
   ViewImpl(Variable base, at::Tensor data, Edge gradient_edge);
 
