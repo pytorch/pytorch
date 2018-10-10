@@ -7,7 +7,6 @@
 #include "torch/csrc/jit/operator.h"
 
 #include <ATen/ATen.h>
-#include <ATen/InitialTensorOptions.h>
 
 #include <unordered_map>
 #include <vector>
@@ -22,26 +21,47 @@ namespace onnx = ::ONNX_NAMESPACE;
 
 // IR graph construction
 
-class DecoderBase {
- protected:
-  virtual std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto);
+class ModuleDecoder {
+ public:
+  ModuleDecoder(ModuleLookup module_lookup,
+                std::istream& in);
+
+ private:
+  std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto);
 
   void buildBlock(const onnx::GraphProto& graph_proto, Block* block,
-                   std::unordered_map<std::string, Value*>& value_map);
+                  std::unordered_map<std::string, Value*>& value_map);
 
   void buildBlocks(const std::vector<onnx::GraphProto>& graphs_, Node* node,
                    std::unordered_map<std::string, Value*>& value_map);
 
-  virtual void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) {};
+  void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto);
 
-  virtual void buildIntermediateValue(Value* value, const std::string& name) {};
+  void buildIntermediateValue(Value* value, const std::string& name);
 
   at::ScalarType onnxTypeToATenType(onnx::TensorProto_DataType tensor_proto);
 
-  virtual at::Tensor buildTensor(const onnx::TensorProto& tensor_proto);
+  at::Tensor buildTensor(const onnx::TensorProto& tensor_proto);
+
+  TypePtr buildType(const onnx::TypeProto& type_proto);
+
+  at::Tensor buildParameter(const onnx::TensorProto& tensor_proto);
+
+  at::Tensor buildTensorCommon(const onnx::TensorProto& tensor_proto,
+                               const uint64_t record_number,
+                               const int64_t storage_offset,
+                               const std::vector<int64_t>& strides);
+
+  std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
+      ModuleLookup module_lookup,
+      const std::string fullname);
+
+  PyTorchStreamReader stream_reader_;
+  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
+  std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
 };
 
-at::ScalarType DecoderBase::onnxTypeToATenType(onnx::TensorProto_DataType onnx_type) {
+at::ScalarType ModuleDecoder::onnxTypeToATenType(onnx::TensorProto_DataType onnx_type) {
   switch(onnx_type) {
     case onnx::TensorProto_DataType_UINT8:
       return at::kByte;
@@ -64,21 +84,7 @@ at::ScalarType DecoderBase::onnxTypeToATenType(onnx::TensorProto_DataType onnx_t
   }
 }
 
-at::Tensor DecoderBase::buildTensor(const onnx::TensorProto& tensor_proto) {
-  at::Tensor tensor = at::empty({0}, at::initialTensorOptions().dtype(onnxTypeToATenType(tensor_proto.data_type())));
-  std::vector<int64_t> sizes = { tensor_proto.dims().begin(), tensor_proto.dims().end() };
-  tensor.resize_(sizes);
-
-  JIT_ASSERT(
-      tensor.storage().size() *
-          tensor.storage().elementSize() ==
-      tensor_proto.raw_data().size());
-
-  std::memcpy(tensor.data_ptr(), tensor_proto.raw_data().data(), tensor_proto.raw_data().size());
-  return tensor;
-}
-
-void DecoderBase::buildBlocks(
+void ModuleDecoder::buildBlocks(
     const std::vector<onnx::GraphProto>& graphs_, Node* node,
     std::unordered_map<std::string, Value*>& value_map) {
   for (auto g_ : graphs_) {
@@ -87,7 +93,7 @@ void DecoderBase::buildBlocks(
   }
 }
 
-std::shared_ptr<Graph> DecoderBase::buildGraph(const onnx::GraphProto& graph_proto) {
+std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx::GraphProto& graph_proto) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> value_map;
 
@@ -96,8 +102,11 @@ std::shared_ptr<Graph> DecoderBase::buildGraph(const onnx::GraphProto& graph_pro
   return graph;
 }
 
-void DecoderBase::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
+void ModuleDecoder::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
                 std::unordered_map<std::string, Value*>& value_map) {
+  for (auto &subtype : graph_proto.value_info()) {
+    value_type_map_[subtype.name()] = &subtype.type();
+  }
 
   for (auto & input : graph_proto.input()) {
     auto value = block->addInput();
@@ -178,45 +187,6 @@ void DecoderBase::buildBlock(const onnx::GraphProto& graph_proto, Block* block,
     buildValue(v, output);
     block->registerOutput(v);
   }
-}
-
-class ModuleDecoder : DecoderBase {
- public:
-  ModuleDecoder(ModuleLookup module_lookup,
-                std::istream& in);
-
- private:
-  virtual std::shared_ptr<Graph> buildGraph(const onnx::GraphProto& graph_proto) override;
-
-  virtual at::Tensor buildTensor(const onnx::TensorProto& tensor_proto) override;
-
-  TypePtr buildType(const onnx::TypeProto& type_proto);
-
-  virtual void buildValue(Value* value, const onnx::ValueInfoProto& valueinfo_proto) override;
-
-  virtual void buildIntermediateValue(Value* value, const std::string& name) override;
-
-  at::Tensor buildParameter(const onnx::TensorProto& tensor_proto);
-
-  at::Tensor buildTensorCommon(const onnx::TensorProto& tensor_proto,
-                               const uint64_t record_number,
-                               const int64_t storage_offset,
-                               const std::vector<int64_t>& strides);
-
-  std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
-      ModuleLookup module_lookup,
-      const std::string fullname);
-
-  PyTorchStreamReader stream_reader_;
-  std::unordered_map<uint64_t, std::shared_ptr<at::Storage>> storage_map_;
-  std::unordered_map<std::string, const onnx::TypeProto*> value_type_map_;
-};
-
-std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx::GraphProto& graph_proto) {
-  for (auto &subtype : graph_proto.value_info()) {
-    value_type_map_[subtype.name()] = &subtype.type();
-  }
-  return DecoderBase::buildGraph(graph_proto);
 }
 
 TypePtr ModuleDecoder::buildType(const onnx::TypeProto& type_proto) {

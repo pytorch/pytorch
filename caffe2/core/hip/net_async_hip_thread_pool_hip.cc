@@ -23,7 +23,7 @@ C10_DEFINE_int(
 
 namespace caffe2 {
 
-std::shared_ptr<TaskThreadPool>
+std::shared_ptr<TaskThreadPoolBase>
 GetAsyncNetHIPThreadPool(int hip_gpu_id, int pool_size, bool create_new) {
   // For GPU, use per device thread pools of predefined constant size
   if (pool_size != c10::FLAGS_caffe2_threads_per_hip_gpu) {

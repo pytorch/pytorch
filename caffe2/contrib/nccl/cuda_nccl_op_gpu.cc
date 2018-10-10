@@ -11,7 +11,7 @@ nccl::NCCLExecution getNCCLElements(
   // We either do an N-N op, or an N-1 op.
   CAFFE_ENFORCE(op->InputSize() == op->OutputSize() || op->OutputSize() == 1);
   nccl::NCCLExecution ex;
-  ex.stream_gpu_id = context.cuda_gpu_id();
+  ex.stream_gpu_id = context.device_id();
   ex.stream = context.cuda_stream();
   ex.root = op->template GetSingleArgument<int>("root", 0);
   ex.elements.resize(op->InputSize());
@@ -204,7 +204,7 @@ std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>> ncclOpDevInfer(
   for (int i = 0; i < def.input().size(); ++i) {
     DeviceOption dev;
     dev.set_device_type(1);
-    dev.set_cuda_gpu_id(i);
+    dev.set_device_id(i);
     opt.push_back(dev);
   }
   return std::make_pair(opt, opt);

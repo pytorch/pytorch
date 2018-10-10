@@ -3075,6 +3075,33 @@ a")
         y2 = torch.sum(x, dim=0)
         self.assertEqual(y, y2)
 
+    def test_constant_pooling(self):
+        def func(cond):
+            a = 1
+            b = 4
+            c = 0
+            d = "abc"
+            e = "bcd"
+            f = "abc"
+            x = torch.ones([2])
+            y = x * 4
+            z = torch.ones([2])
+            if bool(cond):
+                c = b - a
+            else:
+                y = torch.rand(0)
+                if bool(cond):
+                    y = torch.rand(1)
+                print(d, e, f, x, y, z)
+            b = b - a
+            return a, b, c, x
+
+        self.checkScript(func, torch.tensor([1]))
+        graph = torch.jit.script(func).graph
+        self.run_pass('constant_propagation', graph)
+        self.run_pass('constant_pooling', graph)
+        self.assertExpectedGraph(graph)
+
     def test_literal(self):
         def func1(a, b):
             c = a, b
@@ -5392,6 +5419,26 @@ a")
         self.assertTrue(m_import.foo().device == torch.device('cpu'))
         self.assertEqual(m_orig.foo(), m_import.foo())
         self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
+
+    def test_script_module_export_blocks(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, n, m):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand(n, m))
+
+            @torch.jit.script_method
+            def forward(self, input):
+                if bool(input.sum() > 0):
+                    output = self.weight.mv(input)
+                else:
+                    output = self.weight + input
+                return output
+
+        m_orig = M(200, 200)
+        m_import = self.getExportImportCopy(m_orig)
+
+        t = torch.rand(200)
+        self.assertEqual(m_orig(t), m_import(t))
 
     def test_script_module_export_shared_storage(self):
         class M(torch.jit.ScriptModule):

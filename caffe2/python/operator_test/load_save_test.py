@@ -91,7 +91,7 @@ class TestLoadSaveBase(test_util.TestCase):
                     self.assertEqual(proto.tensor.device_detail.device_type,
                                      device_type)
                     if device_type == caffe2_pb2.CUDA:
-                        self.assertEqual(proto.tensor.device_detail.cuda_gpu_id,
+                        self.assertEqual(proto.tensor.device_detail.device_id,
                                          gpu_id)
 
             blobs = [str(i) for i in range(len(arrays))]
