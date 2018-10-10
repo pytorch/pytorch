@@ -67,8 +67,8 @@ CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(23, char*)
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(24, int*)
 
 // see typeid.h for details.
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(25, detail::_maybe_long<long>);
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(26, detail::_maybe_long<std::vector<long>>);
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(25, detail::_guard_long_unique<long>);
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(26, detail::_guard_long_unique<std::vector<long>>);
 
 CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
 
