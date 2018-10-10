@@ -46,7 +46,7 @@ linux_default: &linux_default
         sudo pkill -SIGHUP dockerd
         export pid=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         docker cp /home/circleci/project/. "$pid:/var/lib/jenkins/workspace"
-        (echo 'sudo chown -R jenkins ./workspace && cd ./workspace && git submodule sync && git submodule update --recursive --init && source .circleci/setup.sh && .circleci/build.sh && .circleci/test.sh') | docker exec -u jenkins -i "$pid" -e SCCACHE_BUCKET=${SCCACHE_BUCKET} -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} bash
+        (echo 'sudo chown -R jenkins ./workspace && cd ./workspace && git submodule sync && git submodule update --recursive --init && source .circleci/setup.sh && .circleci/build.sh && .circleci/test.sh') | docker exec -e SCCACHE_BUCKET=${SCCACHE_BUCKET} -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} -u jenkins -i "$pid" bash
 
 jobs:
   py2_gcc5_ubuntu16_04:
