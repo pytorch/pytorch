@@ -1600,6 +1600,10 @@ class TestTorch(TestCase):
         for i in range(num_batches):
             r = torch.mm(b1[i], b2[i])
             self.assertEqual(r, res[i])
+        if torch.cuda.is_available():
+            # check that mixed arguments are rejected
+            self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cuda()))
+            self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cuda(), b2))
 
     def test_addbmm(self):
         # num_batches = 10
@@ -6577,6 +6581,7 @@ class TestTorch(TestCase):
             self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     # functions that operate over a dimension but don't reduce.
+    @skipIfRocm
     def test_dim_function_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:

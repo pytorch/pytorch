@@ -168,11 +168,22 @@ class C10_EXPORT MKLMemory {
   // storage.
   template <typename IndexType>
   explicit MKLMemory(
-      const vector<IndexType>& dims,
+      at::ArrayRef<IndexType> dims,
       const dnnPrimitive_t primitive = nullptr,
       const dnnResourceType_t type = dnnResourceNumber,
       bool share_mem_if_possible = false) {
     Reset(dims, primitive, type, share_mem_if_possible);
+  }
+
+  // Initialize an MKLMemory, with the given dimension assuming a C-contiguous
+  // storage.
+  template <typename IndexType>
+  explicit MKLMemory(
+      const std::vector<IndexType>& dims,
+      const dnnPrimitive_t primitive = nullptr,
+      const dnnResourceType_t type = dnnResourceNumber,
+      bool share_mem_if_possible = false) {
+    Reset(at::ArrayRef<IndexType>(dims), primitive, type, share_mem_if_possible);
   }
 
   // Initialize an MKLMemory with the given size, strides, dnn
@@ -213,7 +224,18 @@ class C10_EXPORT MKLMemory {
   // storage.
   template <typename IndexType>
   void Reset(
-      const vector<IndexType>& dims,
+      const std::vector<IndexType>& dims,
+      const dnnPrimitive_t primitive = nullptr,
+      const dnnResourceType_t type = dnnResourceNumber,
+      bool share_mem_if_possible = false) {
+    Reset(at::ArrayRef<IndexType>(dims), primitive, dnnResourceNumber, share_mem_if_possible);
+  }
+
+  // Initialize an MKLMemory, with the given dimension assuming a C-contiguous
+  // storage.
+  template <typename IndexType>
+  void Reset(
+      at::ArrayRef<IndexType> dims,
       const dnnPrimitive_t primitive = nullptr,
       const dnnResourceType_t type = dnnResourceNumber,
       bool share_mem_if_possible = false) {
@@ -313,7 +335,7 @@ class C10_EXPORT MKLMemory {
   void CopyFrom(const TensorCPU& tensor) {
     CAFFE_ENFORCE_EQ(
         tensor.dims(),
-        dims_,
+        at::IntList(dims_),
         "Dims does not match the expected dims of the resource.");
     CopyFrom(tensor.template data<T>());
   }
@@ -321,7 +343,7 @@ class C10_EXPORT MKLMemory {
   void CopyFrom(const MKLMemory<T>& other) {
     CAFFE_ENFORCE_EQ(
         other.dims(),
-        dims_,
+        at::IntList(dims_),
         "Dims does not match the expected dims of the resource.");
 
     if (share_mem_if_possible_ && dnnLayoutCompare<T>(other.layout_, layout_)) {
@@ -456,7 +478,7 @@ class C10_EXPORT MKLMemory {
     return buffer_.get();
   }
 
-  inline const vector<int64_t>& dims() const {
+  inline at::IntList dims() const {
     return dims_;
   }
 

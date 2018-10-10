@@ -647,11 +647,8 @@ struct GraphFuser {
 
   graph_node_list::iterator scanNodeForChunks(Node * consumer) {
     if (consumer->kind() == prim::FusionGroup) {
-      auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
       auto inputs = sortReverseTopological(consumer->inputs());
       for(auto producer : inputs) {
-        // Don't fuse accross stage boundaries
-        if (producer->stage() != consumer->stage()) continue;
         if (!canFuseChunk(consumer, producer)) {
           continue;
         }
@@ -796,7 +793,6 @@ struct GraphFuser {
 
   // returns where to continue scanning, and whether any fusion was made
   std::pair<graph_node_list::iterator, bool> scanNode(Node * consumer) {
-    auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
     if(isFusableAsExitNode(consumer)) {
       auto consumer_inputs = consumer->kind() == aten::cat ?
         consumer->namedInput(attr::tensors)->node()->inputs() :
@@ -806,8 +802,6 @@ struct GraphFuser {
       // the f-a fusion before the f-(a+b) fusion first.
       auto inputs = sortReverseTopological(consumer_inputs);
       for(auto producer : inputs) {
-        // Don't fuse accross stage boundaries
-        if (producer->stage() != consumer->stage()) continue;
         // Don't fuse if producer must come from a FusionGroup exit node
         if (mustRemainAsFusionGroupOutput(producer)) continue;
         if(tryToMoveChunk(consumer,producer)) {

@@ -179,8 +179,18 @@ inline Dst dynamic_cast_if_rtti(Src ptr) {
 #ifdef __GXX_RTTI
   return dynamic_cast<Dst>(ptr);
 #else
-  return reinterpret_cast<Dst>(ptr);
+  return static_cast<Dst>(ptr);
 #endif
+}
+
+template< class T, class U >
+std::shared_ptr<T> dynamic_pointer_cast_if_rtti( const std::shared_ptr<U>& r ) noexcept
+{
+  if (auto p = dynamic_cast_if_rtti<typename std::shared_ptr<T>::element_type*>(r.get())) {
+    return std::shared_ptr<T>(r, p);
+  } else {
+    return std::shared_ptr<T>();
+  }
 }
 
 // SkipIndices are used in operator_fallback_gpu.h and operator_fallback_mkl.h

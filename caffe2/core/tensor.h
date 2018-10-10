@@ -44,8 +44,7 @@ class CAFFE2_API Tensor final {
    * Note that the actual data allocation is not going to be carried out until
    * the first time mutable_data() is called.
    */
-  explicit Tensor(const vector<int64_t>& dims, DeviceType type)
-      : Tensor(Storage(type)) {
+  explicit Tensor(at::IntList dims, DeviceType type) : Tensor(Storage(type)) {
     // TODO: here, we create a Storage
     // and immediately discard it in Resize() since
     // reset_tensor will be true and FreeMemory will be called,
@@ -342,8 +341,8 @@ class CAFFE2_API Tensor final {
     return impl_->numel() * itemsize();
   }
 
-  inline const vector<int64_t>& dims() const {
-    return impl_.get()->dims();
+  inline at::IntList dims() const {
+    return impl_.get()->sizes();
   }
 
   inline int64_t size_from_dim(int k) const {
@@ -435,6 +434,8 @@ class CAFFE2_API Tensor final {
     return impl_->storage();
   }
 };
+
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
 
 using TensorCPU = Tensor;
 

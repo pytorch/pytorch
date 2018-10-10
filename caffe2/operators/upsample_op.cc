@@ -77,7 +77,7 @@ bool UpsampleBilinearGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(1);
   auto* dX = Output(0);
 
-  const auto& inputDims = dY.dims();
+  const auto inputDims = dY.dims();
   CAFFE_ENFORCE_EQ(4, inputDims.size());
   const int batch_size = dY.dim32(0);
   const int num_channels = dY.dim32(1);

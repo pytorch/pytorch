@@ -69,7 +69,7 @@ class FullyConnectedOp final : public Operator<Context> {
     CAFFE_ENFORCE(N == b.dim32(0), dimErrorString());
     CAFFE_ENFORCE(N == b.size(), dimErrorString());
 
-    Y_shape_cache_ = X.dims();
+    Y_shape_cache_ = X.dims().vec();
     // This is an invariant of canonical_axis, so we can DCHECK.
     DCHECK_LE(canonical_axis + 1, Y_shape_cache_.size());
     Y_shape_cache_.resize(canonical_axis + 1);

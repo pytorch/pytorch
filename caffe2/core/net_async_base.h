@@ -75,7 +75,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
       const std::vector<int>& wait_task_ids) const;
   bool run(int task_id, int stream_id);
   int stream(int task_id);
-  TaskThreadPool* pool(const DeviceOption& device_option);
+  TaskThreadPoolBase* pool(const DeviceOption& device_option);
 
   void finishTasks(const std::unordered_set<int>& task_ids);
   void finalizeEvents();
@@ -98,7 +98,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   // first int key - device id, second - pool size, one pool per (device, size)
   typedef std::unordered_map<
       int,
-      std::unordered_map<int, std::shared_ptr<TaskThreadPool>>>
+      std::unordered_map<int, std::shared_ptr<TaskThreadPoolBase>>>
       PoolsMap;
   PoolsMap cpu_pools_;
   PoolsMap gpu_pools_;
@@ -132,7 +132,7 @@ class CAFFE2_API AsyncNetBase : public NetBase {
  private:
   void storeExceptionPtr();
 
-  TaskThreadPool*
+  TaskThreadPoolBase*
   poolGetter(PoolsMap& pools, int device_type, int device_id, int pool_size);
 
   std::unique_ptr<AsyncNetExecutorHelper> helper_;
@@ -141,12 +141,17 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   friend class tracing::Tracer;
 };
 
-C10_DECLARE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int, bool);
+C10_DECLARE_SHARED_REGISTRY(
+    ThreadPoolRegistry,
+    TaskThreadPoolBase,
+    int,
+    int,
+    bool);
 
 class AsyncNetExecutorHelper : public ExecutorHelper {
  public:
   explicit AsyncNetExecutorHelper(AsyncNetBase* net) : net_(net) {}
-  TaskThreadPool* GetPool(const DeviceOption& option) const override {
+  TaskThreadPoolBase* GetPool(const DeviceOption& option) const override {
     return net_->pool(option);
   }
 
@@ -154,8 +159,51 @@ class AsyncNetExecutorHelper : public ExecutorHelper {
   AsyncNetBase* net_;
 };
 
-std::shared_ptr<TaskThreadPool>
-GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new);
+template <class TaskThreadPoolImpl>
+std::shared_ptr<TaskThreadPoolBase>
+GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new) {
+  // Note: numa_node_id = -1 corresponds to no NUMA used
+  static std::unordered_map<
+      int,
+      std::unordered_map<int, std::weak_ptr<TaskThreadPoolBase>>>
+      pools;
+  static std::mutex pool_mutex;
+
+  if (pool_size <= 0) {
+    if (c10::FLAGS_caffe2_net_async_cpu_pool_size > 0) {
+      pool_size = c10::FLAGS_caffe2_net_async_cpu_pool_size;
+      LOG(INFO) << "Using default CPU pool size: " << pool_size
+                << "; NUMA node id: " << numa_node_id;
+    } else {
+      auto num_cores = std::thread::hardware_concurrency();
+      CAFFE_ENFORCE(num_cores > 0, "Failed to get number of CPU cores");
+      LOG(INFO) << "Using estimated CPU pool size: " << num_cores
+                << "; NUMA node id: " << numa_node_id;
+      pool_size = num_cores;
+    }
+  } else {
+    LOG(INFO) << "Using specified CPU pool size: " << pool_size
+              << "; NUMA node id: " << numa_node_id;
+  }
+
+  if (create_new) {
+    LOG(INFO) << "Created new CPU pool, size: " << pool_size
+              << "; NUMA node id: " << numa_node_id;
+    return std::make_shared<TaskThreadPoolImpl>(pool_size, numa_node_id);
+  } else {
+    std::lock_guard<std::mutex> lock(pool_mutex);
+
+    auto shared_pool = pools[numa_node_id][pool_size].lock();
+    if (!shared_pool) {
+      LOG(INFO) << "Created shared CPU pool, size: " << pool_size
+                << "; NUMA node id: " << numa_node_id;
+      shared_pool =
+          std::make_shared<TaskThreadPoolImpl>(pool_size, numa_node_id);
+      pools[numa_node_id][pool_size] = shared_pool;
+    }
+    return shared_pool;
+  }
+}
 
 } // namespace caffe2
 

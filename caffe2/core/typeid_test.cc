@@ -127,8 +127,7 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
   // gtest seems to have some problem with function pointers and
   // clang right now... Disabling it.
   // TODO: figure out the real cause.
-  EXPECT_EQ(meta_b.copy(),
-            &(TypeMeta::_CopyNotAllowed<ClassNoAssignment>));
+  EXPECT_EQ(meta_b.copy(), &(detail::_CopyNotAllowed<ClassNoAssignment>));
 #endif
 }
 

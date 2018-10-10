@@ -45,7 +45,7 @@ class MKLConcatOp final : public MKLOperator<T> {
 
     bool dims_changed = (input_size_cache_.size() != nInputs);
     for (int i = 0; i < nInputs && !dims_changed; ++i) {
-      dims_changed = (input_size_cache_[i] != Input(i).dims());
+      dims_changed = (at::IntList(input_size_cache_[i]) != Input(i).dims());
     }
 
     if (dims_changed || c10::FLAGS_caffe2_mkl_memonger_in_use) {
@@ -68,11 +68,11 @@ class MKLConcatOp final : public MKLOperator<T> {
               " has dimension mismatch at axis ",
               j);
         }
-        input_size_cache_[i] = Xi.dims();
+        input_size_cache_[i] = Xi.dims().vec();
         output_channels += Xi.dim32(canonical_axis);
         input_layouts[i] = Xi.layout();
       }
-      cached_output_dims_ = X0.dims();
+      cached_output_dims_ = X0.dims().vec();
       cached_output_dims_[canonical_axis] = output_channels;
 
       primitive_.Reset(
