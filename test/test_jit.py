@@ -7243,8 +7243,13 @@ a")
 
         # Test addmm fusion is disabled for normal Jit
         x, y, c = torch.rand(3, 4), torch.rand(4, 5), torch.rand(3, 5)
-        traced = torch.jit.trace(AddmmWrapper(), (x, y, c))
-        print(traced.graph)
+        f = io.BytesIO()
+        pretty = torch.onnx.export_to_pretty_string(AddmmWrapper(), (x, y, c), f)
+        self.assertExpected(pretty, 'onnx')
+
+        jit_trace = torch.jit.trace(AddmmWrapper(), (x, y, c))
+        ge_graph = jit_trace.__getattr__('forward').graph_for(x, y, c)
+        self.assertExpectedGraph(ge_graph, 'jit')
 
     def test_weak_script_function(self):
         outer_var = 10
