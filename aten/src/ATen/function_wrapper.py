@@ -1163,6 +1163,8 @@ def create_generic(top_env, declarations):
 
     output_declarations = []  # type: List[OutputDeclaration]
     for declaration in declarations:
+        if declaration['name'] == 'contiguous':
+            print('^^^^^', declaration)
         output_options = []  # type: List[OutputDeclaration]
         for option in declaration['options']:
             try:
