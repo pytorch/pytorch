@@ -585,11 +585,15 @@ struct CodeImpl {
       if (n->kind() != prim::Constant)
         break;
 
-      getOrAllocateRegister(n->output());
+      size_t reg = getOrAllocateRegister(n->output());
+
+      //constants are at the beginning of the registers
+      JIT_ASSERT(reg == constants.size());
+
       auto ivalue = toIValue(n->output());
       JIT_ASSERT(ivalue);
 
-      constants.emplace_back(n->output(), *ivalue);
+      constants.push_back(*ivalue);
     }
   }
 
@@ -632,11 +636,9 @@ struct CodeImpl {
   }
   void dump(std::ostream & out) const {
     out << "Constants Array:\n";
-    for (auto constant: constants){
-      auto u = constant.first->unique();
-      auto ival_reg = unique_to_reg.find(u);
-      JIT_ASSERT(ival_reg != unique_to_reg.end());
-      out << "\t" << ival_reg->second << " = " << constant.second << "\n";
+    //constants index == registers index
+    for (size_t i = 0; i < constants.size(); ++i) {
+      out << "\t" << i << " = " << constants[i] << "\n";
     }
     for(size_t i = 0; i < instructions.size(); ++i) {
       dumpInstruction(out, i);
@@ -661,7 +663,7 @@ struct CodeImpl {
 
   //we do not emit instructions for constant nodes. instead we hold their values
   //here and copy them into the interpreter's registers when it is called
-  std::vector<std::pair<Value *, IValue>> constants;
+  std::vector<IValue> constants;
 
   // all memory ArrayRef<int> are slices of this, to make sure
   // the interpreter is mostly linearly scanning through memory
@@ -680,12 +682,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void loadConstantsIntoRegisters() {
-    for (auto constant: function->constants) {
-      Value * val = constant.first;
-      IValue ivalue = constant.second;
-      int reg = function->getOrAllocateRegister(val, true);
-      registers[reg] = ivalue;
-    }
+    auto constants = function->constants;
+    std::copy(constants.begin(), constants.end(), registers.begin());
   }
 
  private:
