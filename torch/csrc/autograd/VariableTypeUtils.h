@@ -104,23 +104,23 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd Variable Views ] for details.
-inline Tensor as_view(const Tensor & base, Tensor tensor, bool potentially_tracks_history = true) {
+inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable = true) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
-  return make_variable_view(std::move(base_var), std::move(tensor), potentially_tracks_history);
+  return make_variable_view(std::move(base_var), std::move(tensor), is_differentiable);
 }
 
 // See NOTE [ Autograd Variable Views ] for details.
 inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors,
-                                   bool potentially_tracks_history = true) {
+                                   bool is_differentiable = true) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
   for(Tensor &tensor : tensors) {
-    tensor = make_variable_view(base_var, std::move(tensor), potentially_tracks_history);
+    tensor = make_variable_view(base_var, std::move(tensor), is_differentiable);
   }
   return tensors;
 }

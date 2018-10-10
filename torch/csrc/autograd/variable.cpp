@@ -166,7 +166,7 @@ void Variable::Impl::release_resources() {
   hooks_.clear();
 }
 
-Variable::ViewImpl::ViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
+Variable::DifferentiableViewImpl::DifferentiableViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
     : Variable::Impl(std::move(data), false, std::move(gradient_edge)),
       base_(std::move(base)) {
   AT_CHECK(base_.defined(), "base is undefined");
@@ -178,7 +178,7 @@ Variable::ViewImpl::ViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
   attr_version = version_counter_.current_version();
 }
 
-std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
+std::shared_ptr<Function>& Variable::DifferentiableViewImpl::get_grad_fn() {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!grad_fn_ && !base_.requires_grad()) {
     return grad_fn_;
@@ -202,7 +202,7 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
   return grad_fn_;
 }
 
-void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
+void Variable::DifferentiableViewImpl::rebase_history(Edge gradient_edge) {
   AT_ASSERT(gradient_edge.input_nr == 0);
   AT_ASSERT(gradient_edge.function);
   AT_CHECK(
@@ -215,7 +215,7 @@ void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
   get_grad_fn(); // trigger an update to the view's grad_fn
 }
 
-void Variable::ViewImpl::release_resources() {
+void Variable::DifferentiableViewImpl::release_resources() {
   Variable::Impl::release_resources();
   base_.reset();
 }
@@ -223,7 +223,7 @@ void Variable::ViewImpl::release_resources() {
 void Variable::rebase_history(Edge gradient_edge) {
   AT_ASSERT(gradient_edge.function != nullptr);
   if (is_view()) {
-    auto& impl = static_cast<Variable::ViewImpl&>(*get());
+    auto& impl = static_cast<Variable::DifferentiableViewImpl&>(*get());
     impl.rebase_history(std::move(gradient_edge));
   } else {
     set_gradient_edge(std::move(gradient_edge));
