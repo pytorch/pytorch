@@ -38,6 +38,25 @@ class RemovableHandle(object):
         self.remove()
 
 
+class BackwardHook():
+    def __init__(self, module, user_hook):
+        self.grad_outputs = None
+        self.user_hook = user_hook
+        self.module = module
+
+    def get_input_hook(self):
+        def hook(grad_input, _):
+            return self.user_hook(self.module, grad_input, self.grad_output)
+        # Make error message more user-friendly
+        hook.__name__ = self.user_hook.__name__
+        return hook
+
+    def get_output_hook(self):
+        def hook(_, grad_output):
+            self.grad_output = grad_output
+        return hook
+
+
 def unserializable_hook(f):
     """
     Decorator which marks a function as an unserializable hook.

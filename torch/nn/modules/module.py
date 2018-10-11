@@ -6,7 +6,7 @@ import torch
 from ..backends.thnn import backend as thnn_backend
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
-
+from torch.autograd._functions import Noop
 
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
@@ -18,6 +18,39 @@ def _addindent(s_, numSpaces):
     s = '\n'.join(s)
     s = first + '\n' + s
     return s
+
+def _check_same_shape(base, new, caller_name):
+    if not isinstance(base, tuple):
+        base = (base,)
+        new = (new,)
+    if type(base) != type(new):
+        raise RuntimeError("{} returned invalid type {} "
+            "expected {}".format(caller_name, type(new).__name__, type(base).__name__))
+    if not len(base) == len(new):
+        raise RuntimeError("{} return an incorrect number of "
+            "results {}, expected {}".format(caller_name, len(new), len(base)))
+    for arg_index, (base_el, new_el) in enumerate(zip(base, new)):
+        if type(base_el) != type(new_el):
+            raise RuntimeError("{} returned invalid type for element {}: {}"
+                ", expected {}".format(caller_name, arg_index, type(new_el).__name__, type(base_el).__name__))
+        if torch.is_tensor(base_el) and not base_el.size() == new_el.size():
+            raise RuntimeError("{} returned invalid size for element {}:"
+                " expected {} got {}".format(caller_name,
+                    arg_index, base_el.size(), new_el.size()))
+
+def _get_prev_function(var):
+    while not isinstance(var, torch.Tensor):
+        if isinstance(var, dict):
+            var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
+        else:
+            var = var[0]
+    return var.grad_fn
+
+def _ensure_tuple(obj):
+    if isinstance(obj, tuple):
+        return False, obj
+    else:
+        return True, (obj,)
 
 
 class Module(object):
@@ -384,13 +417,12 @@ class Module(object):
         The hook will be called every time the gradients with respect to module
         inputs are computed. The hook should have the following signature::
 
-            hook(module, grad_input, grad_output) -> Tensor or None
+            hook(module, grad_input, grad_output) -> tuple or None
 
-        The :attr:`grad_input` and :attr:`grad_output` may be tuples if the
-        module has multiple inputs or outputs. The hook should not modify its
-        arguments, but it can optionally return a new gradient with respect to
-        input that will be used in place of :attr:`grad_input` in subsequent
-        computations.
+        The :attr:`grad_input` and :attr:`grad_output` are tuples. The hook
+        should not modify its arguments, but it can optionally return a new
+        tuple of gradients that will be used in place of attr:`grad_input`
+        in subsequent computations.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -407,9 +439,11 @@ class Module(object):
         The hook will be called every time before :func:`forward` is invoked.
         It should have the following signature::
 
-            hook(module, input) -> None
+            hook(module, input) -> tuple or None
 
-        The hook should not modify the input.
+        The :attr:`input` is a tuple. The hook should not modify its arguments,
+        but it can optionally return a new tuple that will be used in place of
+        attr:`input` in subsequent computations.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -426,9 +460,11 @@ class Module(object):
         The hook will be called every time after :func:`forward` has computed an output.
         It should have the following signature::
 
-            hook(module, input, output) -> None
+            hook(module, input, output) -> tuple or None
 
-        The hook should not modify the input or output.
+        The :attr:`input` and :attr:`output` are tuples. The hook should not modify
+        its arguments, but it can optionally return a new tuple that will be used in
+        place of attr:`output` in subsequent computations.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -468,32 +504,65 @@ class Module(object):
             tracing_state._traced_module_stack.pop()
         return result
 
+    def _validate_backward_hook_args(self, position, args):
+        for i, element in enumerate(args):
+            if not torch.is_tensor(element):
+                raise RuntimeError("Backward hooks on nn.Module only works for Modules"
+                " that only use Tensors and the {}th {} of {} is of type {}"
+                "".format(i, position, self.__class__.__name__, type(element).__name__))
+
+    def _get_backward_hooks(self):
+        backward_hooks = []
+        for user_hook in self._backward_hooks.values():
+            backward_hooks.append(hooks.BackwardHook(self, user_hook))
+        return backward_hooks
+
     def __call__(self, *input, **kwargs):
+        if len(self._backward_hooks) > 0:
+            backward_hooks = self._get_backward_hooks()
+
+            self._validate_backward_hook_args("input", input)
+            input = Noop.apply(*input)
+
+            noop_fn = _get_prev_function(input)
+            if noop_fn is not None:
+                for hook in backward_hooks:
+                    noop_fn.register_hook(hook.get_input_hook())
+
         for hook in self._forward_pre_hooks.values():
-            hook(self, input)
+            hook_result = hook(self, input)
+            if hook_result is not None:
+                _check_same_shape(input, hook_result, "forward pre hook '{}'".format(hook))
+                input = hook_result
         if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)
-        for hook in self._forward_hooks.values():
-            hook_result = hook(self, input, result)
-            if hook_result is not None:
-                raise RuntimeError(
-                    "forward hooks should never return any values, but '{}'"
-                    "didn't return None".format(hook))
+
+        if len(self._forward_hooks) > 0:
+            unpack_tuple, result = _ensure_tuple(result)
+
+            for hook in self._forward_hooks.values():
+                hook_result = hook(self, input, result)
+                if hook_result is not None:
+                    _check_same_shape(result, hook_result, "forward hook '{}'".format(hook))
+                    result = hook_result
+
+            if unpack_tuple:
+                result = result[0]
+
         if len(self._backward_hooks) > 0:
-            var = result
-            while not isinstance(var, torch.Tensor):
-                if isinstance(var, dict):
-                    var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
-                else:
-                    var = var[0]
-            grad_fn = var.grad_fn
-            if grad_fn is not None:
-                for hook in self._backward_hooks.values():
-                    wrapper = functools.partial(hook, self)
-                    functools.update_wrapper(wrapper, hook)
-                    grad_fn.register_hook(wrapper)
+            unpack_tuple, result = _ensure_tuple(result)
+
+            self._validate_backward_hook_args("output", result)
+            result = Noop.apply(*result)
+            if unpack_tuple:
+                result = result[0]
+
+            noop_fn = _get_prev_function(result)
+            if noop_fn is not None:
+                for hook in backward_hooks:
+                    noop_fn.register_hook(hook.get_output_hook())
         return result
 
     def __setstate__(self, state):

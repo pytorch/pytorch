@@ -638,13 +638,26 @@ class TestNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
+    def test_hook_backward_size(self):
+        module = nn.Linear(5, 10)
+        input = torch.randn(5, 5, requires_grad=True)
+
+        def bw_hook(module, grad_input, grad_output):
+            self.assertEqual(len(grad_input), 1)
+            self.assertEqual(grad_input[0].size(), torch.Size([5, 5]))
+            self.assertEqual(len(grad_output), 1)
+            self.assertEqual(grad_output[0].size(), torch.Size([5, 10]))
+
+        with module.register_backward_hook(bw_hook):
+            module(input).sum().backward()
+
     def test_hook_cpp(self):
         counter = [0]
         bn = nn.BatchNorm1d(5)
 
         def hook(module, grad_inputs, grad_outputs):
             counter[0] += 1
-            self.assertEqual(len(grad_inputs), 3)
+            self.assertEqual(len(grad_inputs), 1)
             self.assertEqual(len(grad_outputs), 1)
             self.assertEqual(module, bn)
 
@@ -654,13 +667,24 @@ class TestNN(NNTestCase):
 
     def test_hook_fail(self):
         module = nn.Sigmoid()
+        class ModuleMoreArgs(nn.Module):
+            def forward(self, arg1, arg2):
+                return arg1.clone(), arg2.clone()
+        module_more_args = ModuleMoreArgs()
+
         input = torch.randn(5, 5, requires_grad=True)
 
         def fw_fail1(self, input, output):
-            return output
+            return 1
 
-        def fw_fail2(self, input, output):
-            return input
+        def fw_fail2(self, inputs, outputs):
+            return (1, 2, 3)
+
+        def fw_fail3(self, inputs, outputs):
+            return (inputs[0], 1)
+
+        def fw_fail4(self, inputs, outputs):
+            return inputs[0][:-1], None
 
         def bw_fail1(self, grad_input, grad_output):
             return grad_input[:-1]
@@ -671,19 +695,34 @@ class TestNN(NNTestCase):
         with module.register_forward_hook(fw_fail1):
             with self.assertRaises(RuntimeError) as err:
                 module(input)
-            self.assertIn("fw_fail", err.exception.args[0])
-            self.assertIn("didn't return None", err.exception.args[0])
+            self.assertIn("fw_fail1", err.exception.args[0])
+            self.assertIn("invalid type", err.exception.args[0])
+            self.assertIn("int", err.exception.args[0])
 
-        with module.register_forward_hook(fw_fail2):
+        with module_more_args.register_forward_hook(fw_fail2):
             with self.assertRaises(RuntimeError) as err:
-                module(input)
+                module_more_args(input, input)
             self.assertIn("fw_fail2", err.exception.args[0])
-            self.assertIn("didn't return None", err.exception.args[0])
+            self.assertIn("incorrect number of results 3", err.exception.args[0])
+            self.assertIn("expected 2", err.exception.args[0])
+
+        with module_more_args.register_forward_hook(fw_fail3):
+            with self.assertRaises(RuntimeError) as err:
+                module_more_args(input, input)
+            self.assertIn("fw_fail3", err.exception.args[0])
+            self.assertIn("invalid type for element 1", err.exception.args[0])
+
+        with module_more_args.register_forward_hook(fw_fail4):
+            with self.assertRaises(RuntimeError) as err:
+                module_more_args(input, input)
+            self.assertIn("fw_fail4", err.exception.args[0])
+            self.assertIn("invalid size for element 0", err.exception.args[0])
+            self.assertIn("expected torch.Size([5, 5])", err.exception.args[0])
 
         with module.register_backward_hook(bw_fail1):
             with self.assertRaises(RuntimeError) as err:
                 module(input).sum().backward()
-            self.assertIn("bw_fail", err.exception.args[0])
+            self.assertIn("bw_fail1", err.exception.args[0])
             self.assertIn("got 0, but expected 1", err.exception.args[0])
 
         with module.register_backward_hook(bw_fail2):
@@ -703,10 +742,27 @@ class TestNN(NNTestCase):
                 self.assertTrue(isinstance(grad, torch.Tensor))
             return tuple(gi * 2 for gi in grad_input)
 
-        module.register_backward_hook(bw_hook)
-        module(input).backward(torch.ones(5, 5))
-        expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
-        self.assertEqual(input.grad.data, expected_grad)
+        def fw_pre_hook(module, input):
+            return (3*input[0],)
+
+        def fw_hook(module, input, output):
+            return 2*output
+
+        with module.register_backward_hook(bw_hook):
+            module(input).backward(torch.ones(5, 5))
+            expected_grad = torch.ones(5, 5).mm(module.weight.data) * 2
+            self.assertEqual(input.grad.data, expected_grad)
+
+        expected_out = module(input)
+        with module.register_forward_hook(fw_hook):
+            out = module(input)
+            self.assertEqual(out, expected_out * 2)
+
+        expected_out = module(3*input)
+        with module.register_forward_pre_hook(fw_pre_hook):
+            out = module(input)
+            self.assertEqual(out, expected_out)
+
 
     def test_to(self):
         m = nn.Linear(3, 5)
@@ -881,23 +937,34 @@ class TestNN(NNTestCase):
             ['0.dummy_buf', '0.l1.layer_dummy_buf'])
 
     def test_call_supports_python_dict_output(self):
+        def pre_fw_hook(mod, inp):
+            mod.pre_fw_hook = True
+            return inp
+        def fw_hook(mod, inp, ouput):
+            mod.fw_hook = True
+            return ouput
+
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
                 self.l1 = nn.Linear(10, 20)
-                self.register_backward_hook(self.hook)
-                self.check_backward_hook_flag = False
-
-            def hook(self, module, grad_out, grad_in):
-                self.check_backward_hook_flag = True
+                self.fw_hook = False
+                self.pre_fw_hook = False
+                self.register_forward_pre_hook(pre_fw_hook)
+                self.register_forward_hook(fw_hook)
 
             def forward(self, inputs):
                 return {"output": self.l1(inputs).sum()}
 
         net = Net()
-        model_output = net(torch.randn([5, 10]))
+        inp = torch.randn([5, 10], requires_grad=True)
+        model_output = net(inp)
+        self.assertTrue(net.pre_fw_hook)
+        self.assertTrue(net.fw_hook)
+
         model_output["output"].backward()
-        self.assertTrue(net.check_backward_hook_flag)
+        self.assertIsNotNone(inp.grad)
+        self.assertTrue(inp.grad.ne(0).all())
 
     def test_children(self):
         l1 = nn.Linear(2, 2)

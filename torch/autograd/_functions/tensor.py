@@ -21,6 +21,15 @@ class Type(Function):
                 return grad_output.type(ctx.input_type), None
 
 
+class Noop(Function):
+    @staticmethod
+    def forward(ctx, *inputs):
+        return inputs
+
+    @staticmethod
+    def backward(ctx, *grad_outputs):
+        return Noop.apply(*grad_outputs)
+
 # TODO: deprecate this
 class Resize(Function):
 
