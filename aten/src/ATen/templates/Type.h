@@ -121,12 +121,10 @@ struct CAFFE2_API Type {
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int32_t device_index = -1) const {
-    TensorOptions r;
-    r.dtype(scalarType());
-    r.device({backendToDeviceType(backend()), device_index});
-    r.layout(layout());
-    r.is_variable(is_variable());
-    return r;
+    return TensorOptions().dtype(scalarType())
+                          .device({backendToDeviceType(backend()), device_index})
+                          .layout(layout())
+                          .is_variable(is_variable());
   }
 
   operator TensorOptions() const {
