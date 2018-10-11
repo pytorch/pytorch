@@ -393,7 +393,7 @@
   device_guard: false
 
 - func: contiguous(Tensor self) -> Tensor
-  variants: function, method
+  variants: method
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups) -> Tensor
 
