@@ -691,8 +691,8 @@ void ModuleEncoder::EncodeTensor(
       t = at::getType(tensor).tensor(
           tensor.storage(),
           /* storageOffset = */ 0,
-          /* size = */ { static_cast<int64_t>(tensor.type().elementSizeInBytes() * tensor.storage().size()) },
-          /* strides = */ { 1 })
+          /* size = */ { static_cast<int64_t>(tensor.storage().size()) },
+          /* stride = */ { 1 })
         .cpu();
     }
 

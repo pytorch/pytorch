@@ -226,7 +226,7 @@ bool RecurrentOp<T>::RunOnDevice() {
         Output(OUTPUT),
         Output(HIDDEN_OUTPUT),
         Output(CELL_OUTPUT));
-    cachedInputDims_ = Input(INPUT).dims();
+    cachedInputDims_ = Input(INPUT).dims().vec();
   }
 
   // Validation checks
@@ -314,7 +314,7 @@ bool RecurrentGradientOp<T>::RunOnDevice() {
   const int seqLength = Input(INPUT).dim32(0);
   if (Input(INPUT).dims() != cachedInputDims_) {
     initialize(Input(INPUT), Output(DROPOUT_STATES));
-    cachedInputDims_ = Input(INPUT).dims();
+    cachedInputDims_ = Input(INPUT).dims().vec();
   }
   CUDNN_ENFORCE(cudnnGetRNNTrainingReserveSize(
       cudnn_wrapper_.inline_cudnn_handle(),
@@ -458,13 +458,13 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
     if (mode == SET_PARAM) {
       CAFFE_ENFORCE_EQ(
           biasDims[0] * biasDims[1] * biasDims[2], Input(2).size());
-      context_.template CopySameDevice<T>(
+      this->context_.template CopySameDevice<T>(
           biasDims[0] * biasDims[1] * biasDims[2],
           Input(2).template data<T>(),
           static_cast<T*>(bias));
     } else {
       Output(0)->Resize(biasDims);
-      context_.template CopySameDevice<T>(
+      this->context_.template CopySameDevice<T>(
           biasDims[0] * biasDims[1] * biasDims[2],
           static_cast<T*>(bias),
           Output(0)->template mutable_data<T>());
@@ -495,13 +495,13 @@ bool RecurrentParamAccessOp<T, mode>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(numDims, 3);
     if (mode == SET_PARAM) {
       CAFFE_ENFORCE_EQ(matDims[0] * matDims[1] * matDims[2], Input(2).size());
-      context_.template CopySameDevice<T>(
+      this->context_.template CopySameDevice<T>(
           matDims[0] * matDims[1] * matDims[2],
           Input(2).template data<T>(),
           static_cast<T*>(pmatrix));
     } else {
       Output(0)->Resize(matDims);
-      context_.template CopySameDevice<T>(
+      this->context_.template CopySameDevice<T>(
           matDims[0] * matDims[1] * matDims[2],
           static_cast<T*>(pmatrix),
           Output(0)->template mutable_data<T>());

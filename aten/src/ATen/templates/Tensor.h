@@ -290,6 +290,17 @@ struct CAFFE2_API WeakTensor {
 private:
   c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl> weak_impl_;
 };
+
+namespace detail {
+// Helper creator for Tensor clas which doesn't requires the users to pass
+// in an intrusive_ptr instead it just converts the argument passed to
+// requested intrusive_ptr type.
+template <typename T, typename... Args>
+Tensor make_tensor(Args&&... args) {
+  return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
+}
+} // namespace detail
+
 } // namespace at
 
 #include "ATen/core/TensorMethods.h"

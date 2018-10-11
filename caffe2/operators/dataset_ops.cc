@@ -156,7 +156,7 @@ void TreeWalker::advance() {
 }
 
 std::vector<int64_t> TreeWalker::fieldDim(int fieldId) const {
-  auto tensorDim = input(fieldId).dims();
+  auto tensorDim = input(fieldId).dims().vec();
   tensorDim[0] = sizes_[lengthIdx(fieldId)];
   return tensorDim;
 }
@@ -427,7 +427,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(numTensors, OutputSize());
 
     for (int i = 0; i < numTensors; ++i) {
-      outputDims[i] = inputZero->at(i).dims();
+      outputDims[i] = inputZero->at(i).dims().vec();
       outputDims[i][0] = 0;
       metas[i] = &inputZero->at(i).meta();
     }
@@ -441,7 +441,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(numTensors, OutputSize());
     for (int i = 0; i < numTensors; ++i) {
       const auto& input = Input(i + 1);
-      outputDims[i] = input.dims();
+      outputDims[i] = input.dims().vec();
       outputDims[i][0] = 0;
       metas[i] = &input.meta();
     }
@@ -508,7 +508,7 @@ class ReadNextBatchOp : public Operator<CPUContext> {
       auto offset = offsets[lengthIdx];
       auto& in = Input(i + 1);
       auto innerSize = in.size_from_dim(1);
-      outDim = in.dims();
+      outDim = in.dims().vec();
       outDim[0] = size;
       auto* out = Output(i);
       out->Resize(outDim);
@@ -674,7 +674,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
     auto& offsetsmat = Input(2);
     CAFFE_ENFORCE(InputSize() == cursor->it.fields().size() + 3);
     auto idxvec = idxblob.template data<int64_t>();
-    auto& offsetdim = offsetsmat.dims();
+    auto offsetdim = offsetsmat.dims();
     // gather data
     std::vector<int64_t> outDim;
     int64_t idx;
@@ -697,7 +697,7 @@ class ReadRandomBatchOp : public Operator<CPUContext> {
     for (int i = 0; i < cursor->it.fields().size(); ++i) {
       auto lengthIdx = cursor->it.fields()[i].lengthFieldId + 1;
       auto& in = Input(i + 3);
-      outDim = in.dims();
+      outDim = in.dims().vec();
       outDim.at(0) = 0;
       auto idxbegin = idx;
       for (int j = 0; j < batchSize_; ++j) {
@@ -883,7 +883,7 @@ class ConcatTensorVectorOp final : public Operator<Context> {
     auto* tensor = Output(TENSOR);
     CAFFE_ENFORCE(!tensorVector->empty());
 
-    vector<int64_t> outputDims(tensorVector->at(0).dims());
+    vector<int64_t> outputDims(tensorVector->at(0).dims().vec());
     CAFFE_ENFORCE(outputDims.size() > 0);
     for (int i = 1; i < tensorVector->size(); i++) {
       // the tensor shapes are the same except for the first dimension

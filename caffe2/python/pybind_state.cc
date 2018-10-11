@@ -399,7 +399,11 @@ void addObjectMethods(py::module& m) {
           "_shape",
           [](const DLPackWrapper<CPUContext>& t) {
             auto* tensor = t.tensor;
-            return tensor->dims();
+            // TODO: This is marginally less efficient than it could
+            // be, since we're doing an extra allocation we didn't
+            // need to do.  But I don't remember how to clue in
+            // pybind11 how to convert ArrayRef to vector.
+            return tensor->dims().vec();
           })
       .def(
           "_reshape",
@@ -457,7 +461,7 @@ void addObjectMethods(py::module& m) {
           "Initialize this tensor to given shape and data type. "
           "Fail if the given data type cannot be accessed from python.")
       .def_property_readonly(
-          "_shape", [](const TensorCPU& t) { return t.dims(); })
+          "_shape", [](const TensorCPU& t) { return t.dims().vec(); })
       .def("_reshape", [](TensorCPU* t, std::vector<int64_t> dims) {
         t->Resize(dims);
       });

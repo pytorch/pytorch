@@ -648,7 +648,6 @@ class TestCaffe2End2End(TestCase):
     def test_bvlc_reference_caffenet(self):
         self._test_net('bvlc_reference_caffenet')
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     def test_bvlc_reference_rcnn_ilsvrc13(self):
         self._test_net('bvlc_reference_rcnn_ilsvrc13')
 

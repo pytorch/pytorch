@@ -76,7 +76,7 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     context_.CopyToCPU(1, numOfOutputData, &numOfOutput);
 
     indices_.Resize(numOfOutput);
-    std::vector<int64_t> dims = src.dims();
+    std::vector<int64_t> dims = src.dims().vec();
     dims[0] = numOfOutput;
     dest->Resize(dims);
     auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());

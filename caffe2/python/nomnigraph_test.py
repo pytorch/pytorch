@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace, test_util
+from caffe2.proto import caffe2_pb2
 import caffe2.python.nomnigraph as ng
 
 from hypothesis import given
@@ -224,7 +225,7 @@ class TestBindings(test_util.TestCase):
         new_annot = node.getAnnotation()
         assert new_annot.getDeviceType() == 7
 
-    def test_distribute_annotations(self):
+    def test_distributed_annotations(self):
         nn = ng.NNModule()
         key = nn.dataFlow.createNode(ng.NeuralNetData("key"))
         length = nn.dataFlow.createNode(ng.NeuralNetData("length"))
@@ -243,3 +244,12 @@ class TestBindings(test_util.TestCase):
         assert len(new_annot.getComponentLevels()) == 3
         assert new_annot.getComponentLevels()[0] == ""
         assert new_annot.getComponentLevels()[2] == "woot"
+
+    def test_distributed_device_map(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        d = caffe2_pb2.DeviceOption()
+        nn = ng.NNModule(net, {"X": d, "W": d})
+
+        with self.assertRaises(Exception):
+            nn = ng.NNModule(net, {"X": d, "Fake": d})

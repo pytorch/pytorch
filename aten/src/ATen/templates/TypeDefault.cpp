@@ -30,8 +30,8 @@ Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device>
   }
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   Tensor r;
-  if (is_sparse()) r = this->native_tensor();
-  else r = this->tensor(src.sizes());
+  if (is_sparse()) r = this->native_tensor({0});
+  else r = at::empty(src.sizes(), this->options());
   r.copy_(src, non_blocking);
   return r;
 }
@@ -118,7 +118,7 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
 
 
 Tensor TypeDefault::scalarTensor(Scalar s) const {
-  return tensor({}).fill_(s);
+  return at::empty({}, this->options()).fill_(s);
 }
 
 ${type_method_definitions}

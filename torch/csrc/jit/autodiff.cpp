@@ -150,8 +150,8 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       return {grads.at(0) / inputs.at(1), nullptr};
 
     } else if (node->matches("aten::sigmoid(Tensor self) -> Tensor")) {
-      // TODO: The order of operations matter in this case. This 
-      // works for ppc64le and x86_64. Need to look at why the 
+      // TODO: The order of operations matter in this case. This
+      // works for ppc64le and x86_64. Need to look at why the
       // order matters.
       return {(1 - outputs.at(0)) * outputs.at(0) * grads.at(0)};
 
@@ -309,7 +309,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         returned_grad = returned_grad.unsqueeze(*it);
       return {returned_grad};
 
-    } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const=*/attr::dim)) {
+    } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
       int64_t dim = *node->get<int64_t>(attr::dim);
       const auto& sizes = inputs.at(0).sizes();
       wrapDim(dim, sizes);
@@ -318,7 +318,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       }
       return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim), nullptr};
 
-    } else if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*const=*/attr::dim)) {
+    } else if (node->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
       int dim = *node->get<int64_t>(attr::dim);
       auto tensor_inputs = inputs; tensor_inputs.pop_back();
       const auto& first_sizes = tensor_inputs.at(0).sizes();
@@ -550,11 +550,9 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     }
   };
   for (Value * input : graph.inputs()) {
-    if (input->stage() != 0) break;
     check_uses(input);
   }
   for (Node * node : graph.nodes()) {
-    if (node->stage() != 0) break;
     for (Value * output : node->outputs())
       check_uses(output);
   }

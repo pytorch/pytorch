@@ -641,6 +641,10 @@ def le(g, input, other):
     return g.op("Not", gt(g, input, _if_scalar_type_as(g, other, input)))
 
 
+def where(g, condition, self, other):
+    return g.op("ATen", condition, self, other, operator_s="where")
+
+
 @parse_args('v', 'i')
 def log_softmax(g, input, dim=None):
     # PyTorch dim and ONNX axis have different meanings.
