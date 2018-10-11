@@ -460,7 +460,7 @@ def emit_body(declaration):
         elif is_view:
             # If `GradMode::is_enabled()` is False, this is a non-differentiable
             # view. Gradients should not flow through.
-            # See NOTE [ Autograd Variable Views ] in variable.h for details.
+            # See NOTE [ Autograd View Variables ] in variable.h for details.
             return 'as_view(self, {}, GradMode::is_enabled())'.format(call)
         else:
             return 'as_variable({})'.format(call)
