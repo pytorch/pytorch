@@ -184,11 +184,13 @@ goto:eof
                   -DBUILD_CAFFE2_OPS=%BUILD_CAFFE2_OPS% ^
                   -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
+                  -DUSE_NUMPY=%USE_NUMPY% ^
                   -DUSE_CUDNN=OFF ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
                   -DUSE_LMDB=%USE_LMDB% ^
                   -DUSE_OPENCV=%USE_OPENCV% ^
+                  -DUSE_FFMPEG=%USE_FFMPEG% ^
                   -DUSE_GLOG=OFF ^
                   -DUSE_GFLAGS=OFF ^
                   -DUSE_SYSTEM_EIGEN_INSTALL=OFF ^
@@ -201,7 +203,6 @@ goto:eof
                   -DMKLDNN_LIBRARY="%MKLDNN_LIBRARY%" ^
                   -DATEN_NO_CONTRIB=1 ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
-                  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
                   -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
                   -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
                   -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^

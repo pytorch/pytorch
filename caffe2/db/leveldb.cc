@@ -4,8 +4,10 @@
 #include "leveldb/db.h"
 #include "leveldb/write_batch.h"
 
-CAFFE2_DEFINE_int(caffe2_leveldb_block_size, 65536,
-                  "The caffe2 leveldb block size when writing a leveldb.");
+C10_DEFINE_int(
+    caffe2_leveldb_block_size,
+    65536,
+    "The caffe2 leveldb block size when writing a leveldb.");
 
 namespace caffe2 {
 namespace db {
@@ -58,7 +60,7 @@ class LevelDB : public DB {
  public:
   LevelDB(const string& source, Mode mode) : DB(source, mode) {
     leveldb::Options options;
-    options.block_size = FLAGS_caffe2_leveldb_block_size;
+    options.block_size = c10::FLAGS_caffe2_leveldb_block_size;
     options.write_buffer_size = 268435456;
     options.max_open_files = 100;
     options.error_if_exists = mode == NEW;

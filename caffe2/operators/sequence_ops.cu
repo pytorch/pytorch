@@ -250,7 +250,7 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
 
   auto* out = Output(0);
   {
-    auto out_dims = in.dims();
+    auto out_dims = in.dims().vec();
     out_dims[0] -= (startPaddingWidth_ + endPaddingWidth_) * lengths_size;
     out->Resize(std::move(out_dims));
   }

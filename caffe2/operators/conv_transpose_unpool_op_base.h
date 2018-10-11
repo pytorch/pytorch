@@ -9,7 +9,7 @@
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/math.h"
 
-CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
+C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -126,7 +126,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
-    if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+    if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
       createSharedBuffer<Context>(ws_);
     }
   }

@@ -7,6 +7,8 @@
 # one to link against a specific protobuf version.
 
 # ---[ Configure macro file.
+set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
+set(C10_USE_GLOG ${USE_GLOG}) # used in cmake_macros.h.in
 set(C10_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/macros/cmake_macros.h.in
@@ -26,6 +28,15 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
 if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
+endif()
+
+# ---[ Dependency of c10
+if (${USE_GFLAGS})
+   target_link_libraries(c10 PUBLIC gflags)
+endif()
+
+if (${USE_GLOG})
+    target_link_libraries(c10 PUBLIC glog::glog)
 endif()
 
 target_include_directories(

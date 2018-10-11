@@ -41,6 +41,10 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
       auto to_tensor_node = res_graph->createNumToTensor(input);
       res_graph->insertNode(to_tensor_node);
       new_inputs[i] = to_tensor_node->output();
+    } else if(input->type() == BoolType::get()) {
+      auto to_tensor_node = res_graph->createBoolToTensor(input);
+      res_graph->insertNode(to_tensor_node);
+      new_inputs[i] = to_tensor_node->output();
     }
   }
 
@@ -58,8 +62,11 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
       else if(n->outputs()[0]->type() == FloatType::get()){
         to_scalar_node = res_graph->createTensorToNum(FloatType::get(), outputs[0]);
       }
+      else if(n->outputs()[0]->type() == BoolType::get()){
+        to_scalar_node = res_graph->createTensorToBool(outputs[0]);
+      }
       else{
-        throw std::runtime_error("NYI: scalar type other than int, float is not supported yet");
+        throw std::runtime_error("NYI: scalar types other than int, float, and bool are not supported yet");
       }
       res_graph->insertNode(to_scalar_node);
       rn_env[n->outputs()[0]] = to_scalar_node->output();
@@ -81,7 +88,6 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
 void ToBatch::visitConstant(Node* n, Block* block, Block* res_block){
   auto res_graph = res_block->owningGraph();
   auto* r_node = res_graph->createClone(n, rn_fn);
-  r_node->setStage(n->stage());
   res_block->appendNode(r_node);
   rn_env[n->output()] = r_node->output();
 }
@@ -90,7 +96,6 @@ void ToBatch::visitConstant(Node* n, Block* block, Block* res_block){
 void ToBatch::visitNumToTensor(Node* n, Block* block, Block* res_block){
   auto res_graph = res_block->owningGraph();
   auto* r_node = res_graph->createClone(n, rn_fn);
-  r_node->setStage(n->stage());
   res_block->appendNode(r_node);
   auto outputs = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("batch_from_scalar_tensor"), r_node->outputs());
   batch_map[n->output()] = outputs;
@@ -103,7 +108,6 @@ void ToBatch::visitTensorToNum(Node* n, Block* block, Block* res_block){
     rn_env[n->input()] = batch_map.at(n->input())[0];
   }
   auto* r_node = res_graph->createClone(n, rn_fn);
-  r_node->setStage(n->stage());
   res_block->appendNode(r_node);
   rn_env[n->output()] = r_node->output();
   batch_map[n->output()] = batch_map.at(n->input());
@@ -127,11 +131,9 @@ void ToBatch::visitListConstruct(Node* n, Block* block, Block* res_block){
       }
     }
     auto* r_node = res_graph->createClone(n, rn_fn);
-    r_node->setStage(n->stage());
     res_block->appendNode(r_node);
     // transform int[] to tensor
     auto to_tensor_node = res_graph->create(Symbol::fromQualString("aten::_list_to_tensor"));
-    to_tensor_node->setStage(n->stage());
     to_tensor_node->addInput(r_node->output());
     res_block->appendNode(to_tensor_node);
     rn_env[n->output()] = to_tensor_node->output();
@@ -348,9 +350,10 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
   if(cond_is_tensor){
     auto cond = batch_map.at(n->inputs()[1]);
     auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
-    auto to_int_node = res_graph->createTensorToNum(IntType::get(), cond_any[0]);
-    res_graph->insertNode(to_int_node);
-    rn_env[n->inputs()[1]] = to_int_node->output();
+    auto to_bool_node =
+        res_graph->createTensorToBool(cond_any[0]);
+    res_graph->insertNode(to_bool_node);
+    rn_env[n->inputs()[1]] = to_bool_node->output();
   }
   for(size_t i = 2; i < n->inputs().size(); i++){
     auto input = n->inputs()[i];
@@ -370,7 +373,6 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
       r_node->insertInput((i - 2) * EXP_BTENSOR_SIZE + EXP_BTENSOR_SIZE * cond_is_tensor + 2 + j, batch_map.at(n->inputs()[i])[j]);
     }
   }
-  r_node->setStage(n->stage());
   res_block->appendNode(r_node);
 
   // create block for Loop node in res_block
@@ -432,9 +434,10 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
   if(cond_is_tensor){
     auto cond = batch_map.at(n->blocks()[0]->outputs()[0]);
     auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
-    auto to_int_node = res_graph->createTensorToNum(IntType::get(), cond_any[0]);
-    res_graph->insertNode(to_int_node);
-    loop_block->insertOutput(0, to_int_node->output());
+    auto to_bool_node =
+        res_graph->createTensorToBool(cond_any[0]);
+    res_graph->insertNode(to_bool_node);
+    loop_block->insertOutput(0, to_bool_node->output());
     for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
       loop_block->insertOutput(i + 1, cond[i]);
     }
@@ -491,6 +494,7 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
         case prim::NumToTensor:
           visitNumToTensor(n, block, res_block);
           break;
+        case prim::TensorToBool:
         case prim::TensorToNum:
           visitTensorToNum(n, block, res_block);
           break;

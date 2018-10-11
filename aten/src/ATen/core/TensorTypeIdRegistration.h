@@ -86,7 +86,7 @@ inline at::TensorTypeId TensorTypeIdRegistrar::id() const noexcept {
 }
 
 #define AT_DECLARE_TENSOR_TYPE(TensorName) \
-  CAFFE2_API at::TensorTypeId TensorName();
+  CAFFE2_API at::TensorTypeId TensorName()
 
 #define AT_DEFINE_TENSOR_TYPE(TensorName)           \
   at::TensorTypeId TensorName() {                   \

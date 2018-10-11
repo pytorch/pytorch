@@ -74,6 +74,7 @@ struct C10_EXPORT Tuple : public List<IValue> {
 using IntList = List<int64_t>;
 using TensorList = List<at::Tensor>;
 using DoubleList = List<double>;
+using BoolList = List<bool>;
 using GenericList = List<IValue>;
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -88,9 +89,11 @@ using GenericList = List<IValue>;
   _(Tensor) \
   _(Double) \
   _(Int) \
+  _(Bool) \
   _(Tuple) \
   _(IntList) \
   _(DoubleList) \
+  _(BoolList) \
   _(String) \
   _(TensorList) \
   _(Blob) \
@@ -224,14 +227,23 @@ struct CAFFE2_API IValue final {
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i)
   : IValue(static_cast<int64_t>(i)) {}
-  IValue(bool b)
-  : IValue(static_cast<int64_t>(b)) {}
 
   bool isInt() const { return Tag::Int == tag; }
 
   int64_t toInt() const {
     AT_ASSERT(isInt());
     return payload.as_int;
+  }
+
+  // Bool
+  IValue(bool b)
+  : tag(Tag::Bool), is_intrusive_ptr(false) {
+    payload.as_bool = b;
+  }
+   bool isBool() const { return Tag::Bool == tag; }
+   bool toBool() const {
+    AT_ASSERT(isBool());
+    return payload.as_bool;
   }
 
   // IntList
@@ -251,6 +263,7 @@ struct CAFFE2_API IValue final {
 
   const std::vector<int64_t>& toIntListRef() const;
   const std::vector<double>& toDoubleListRef() const;
+  const std::vector<bool>& toBoolListRef() const;
   const std::vector<at::Tensor>& toTensorListRef() const;
   const std::vector<IValue>& toGenericListRef() const;
 
@@ -278,6 +291,19 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<DoubleList> toDoubleList() const & {
     AT_ASSERT(isDoubleList());
     return toIntrusivePtr<DoubleList>();
+  }
+
+  // BoolList
+  IValue(c10::intrusive_ptr<BoolList> v);
+  IValue(std::vector<bool> v);
+  bool isBoolList() const { return Tag::BoolList == tag; }
+  c10::intrusive_ptr<BoolList> toBoolList() && {
+    AT_ASSERT(isBoolList());
+    return moveToIntrusivePtr<BoolList>();
+  }
+  c10::intrusive_ptr<BoolList> toBoolList() const & {
+    AT_ASSERT(isBoolList());
+    return toIntrusivePtr<BoolList>();
   }
 
   //TensorList
@@ -323,15 +349,16 @@ struct CAFFE2_API IValue final {
     }
   }
   bool isScalar() {
-    return isDouble() || isInt();
+    return isDouble() || isInt() || isBool();
   }
   at::Scalar toScalar() const {
     if(isDouble())
       return toDouble();
     else if(isInt())
       return toInt();
-    else
-      throw std::runtime_error("IValue is not a Scalar");
+    else if (isBool())
+      return int(toBool());
+    throw std::runtime_error("IValue is not a Scalar");
   }
 
   // for debugging
@@ -396,6 +423,7 @@ struct CAFFE2_API IValue final {
   union {
     int64_t as_int;
     double as_double;
+    bool as_bool;
     c10::intrusive_ptr_target* as_intrusive_ptr;
     World as_world;
   } payload;
@@ -419,15 +447,16 @@ DEFINE_TO(at::Tensor, toTensor)
 DEFINE_TO(c10::intrusive_ptr<Tuple>, toTuple)
 DEFINE_TO(double, toDouble)
 DEFINE_TO(int64_t, toInt)
+DEFINE_TO(bool, toBool)
 DEFINE_TO(c10::intrusive_ptr<DoubleList>, toDoubleList)
 DEFINE_TO(c10::intrusive_ptr<IntList>, toIntList)
 DEFINE_TO(c10::intrusive_ptr<TensorList>, toTensorList)
 DEFINE_TO(c10::intrusive_ptr<GenericList>, toGenericList)
 DEFINE_TO(c10::intrusive_ptr<ConstantString>, toString)
 DEFINE_TO(at::Scalar, toScalar)
-DEFINE_TO(bool, toInt)
 DEFINE_TO(std::vector<int64_t>, toIntListRef)
 DEFINE_TO(std::vector<double>, toDoubleListRef)
+DEFINE_TO(std::vector<bool>, toBoolListRef)
 DEFINE_TO(std::vector<at::Tensor>, toTensorListRef)
 DEFINE_TO(std::vector<IValue>, toGenericListRef)
 DEFINE_TO(World, toWorld)
@@ -490,6 +519,13 @@ inline IValue::IValue(c10::intrusive_ptr<DoubleList> v)
 inline IValue::IValue(std::vector<double> v)
 : IValue(DoubleList::create(std::move(v))) {}
 
+inline IValue::IValue(c10::intrusive_ptr<BoolList> v)
+: tag(Tag::BoolList), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
+inline IValue::IValue(std::vector<bool> v)
+: IValue(BoolList::create(std::move(v))) {}
+
 inline IValue::IValue(c10::intrusive_ptr<TensorList> v)
 : tag(Tag::TensorList), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -515,6 +551,10 @@ inline const std::vector<double>& IValue::toDoubleListRef() const {
 
 inline const std::vector<at::Tensor>& IValue::toTensorListRef() const {
   return toTensorList()->elements();
+}
+
+inline const std::vector<bool>& IValue::toBoolListRef() const {
+  return toBoolList()->elements();
 }
 
 inline const std::vector<IValue>& IValue::toGenericListRef() const {

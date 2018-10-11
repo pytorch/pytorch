@@ -154,7 +154,8 @@ OPERATOR_SCHEMA(FCTransposed)
     .SetDoc(R"DOC(
 Same as FC, but weight matrix is supposed to be already pretransposed.
 FCTransposed stands for calling blass with no noTrans, noTrans
-)DOC");
+)DOC")
+    .InheritOnnxSchema("FCTransposed");
 
 OPERATOR_SCHEMA(FC)
     .NumInputs(3)

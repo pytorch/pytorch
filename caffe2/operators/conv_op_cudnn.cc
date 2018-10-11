@@ -580,12 +580,12 @@ bool CudnnConvOp::DoRunWithType() {
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims();
+      cudnn_input_dims_ = X.dims().vec();
       SetTensorNdDescriptorWithGroup<T_X>(
           X.ndim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims();
+      cudnn_filter_dims_ = filter.dims().vec();
       if (kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;
@@ -936,12 +936,12 @@ bool CudnnConvGradientOp::DoRunWithType() {
   if (input_changed || filter_changed) {
     VLOG(1) << "Changing the cudnn descriptor configurations.";
     if (input_changed) {
-      cudnn_input_dims_ = X.dims();
+      cudnn_input_dims_ = X.dims().vec();
       SetTensorNdDescriptorWithGroup<T_X>(
           X.ndim(), bottom_desc_, N, C, H, W, D);
     }
     if (filter_changed) {
-      cudnn_filter_dims_ = filter.dims();
+      cudnn_filter_dims_ = filter.dims().vec();
       if (kernel_.size() == 2) {
 #if CUDNN_VERSION_MIN(7, 0, 0)
         const int MM = M;

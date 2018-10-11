@@ -107,6 +107,8 @@ inline IValue toIValue(py::handle obj, const TypePtr& type) {
         return py::cast<int64_t>(obj);
       case TypeKind::NoneType:
         return {};
+      case TypeKind::BoolType:
+        return py::cast<bool>(obj);
       case TypeKind::TupleType: {
         if(!PyTuple_Check(obj.ptr()))
           throw py::cast_error(); // note: the py::cast does not throw cast_error
@@ -196,10 +198,14 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::cast(ivalue.toDouble());
   } else if (ivalue.isInt()) {
     return py::cast(ivalue.toInt());
+  }else if (ivalue.isBool()) {
+    return py::cast(ivalue.toBool());
   } else if (ivalue.isIntList()) {
     return py::cast(ivalue.toIntListRef());
   } else if (ivalue.isDoubleList()) {
     return py::cast(ivalue.toDoubleListRef());
+  } else if (ivalue.isBoolList()) {
+    return py::cast(ivalue.toBoolListRef());
   } else if (ivalue.isTensorList()) {
     return py::cast(ivalue.toTensorListRef());
   } else if (ivalue.isGenericList()) {

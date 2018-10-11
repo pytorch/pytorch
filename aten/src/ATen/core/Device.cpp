@@ -2,23 +2,37 @@
 #include <ATen/core/Error.h>
 #include <ATen/core/Macros.h>
 
+#include <algorithm>
+#include <array>
 #include <exception>
 #include <ostream>
 #include <string>
 #include <tuple>
+#include <vector>
 
 namespace at {
 namespace {
-std::pair<Device::Type, size_t> parse_type(const std::string& device_string) {
-  auto position = device_string.find("cpu");
-  if (position != std::string::npos) {
-    return {Device::Type::CPU, 3};
+DeviceType parse_type(const std::string& device_string) {
+  static const std::array<std::pair<std::string, DeviceType>, 7> types = {{
+      {"cpu", DeviceType::CPU},
+      {"cuda", DeviceType::CUDA},
+      {"mkldnn", DeviceType::MKLDNN},
+      {"opengl", DeviceType::OPENGL},
+      {"opencl", DeviceType::OPENCL},
+      {"ideep", DeviceType::IDEEP},
+      {"hip", DeviceType::HIP},
+  }};
+  auto device = std::find_if(
+      types.begin(),
+      types.end(),
+      [device_string](const std::pair<std::string, DeviceType>& p) {
+        return p.first == device_string;
+      });
+  if (device != types.end()) {
+    return device->second;
   }
-  position = device_string.find("cuda");
-  if (position != std::string::npos) {
-    return {Device::Type::CUDA, 4};
-  }
-  AT_ERROR("Expected 'cpu' or 'cuda' device type at start of device string");
+  AT_ERROR(
+      "Expected one of cpu, cuda, mkldnn, opengl, opencl, ideep, or hip device type at start of device string");
 }
 } // namespace
 
@@ -47,28 +61,23 @@ std::pair<Device::Type, size_t> parse_type(const std::string& device_string) {
 // }
 Device::Device(const std::string& device_string) : Device(Type::CPU) {
   AT_CHECK(!device_string.empty(), "Device string must not be empty");
-
-  size_t position;
-  std::tie(type_, position) = parse_type(device_string);
-
-  // e.g. 'cuda', 'cpu'.
-  if (position == device_string.size()) {
+  int index = device_string.find(":");
+  if (index == std::string::npos) {
+    type_ = parse_type(device_string);
     return;
+  } else {
+    std::string s;
+    s = device_string.substr(0, index);
+    AT_CHECK(!s.empty(), "Device string must not be empty");
+    type_ = parse_type(s);
   }
-
-  AT_CHECK(
-      device_string[position] == ':',
-      "Expected ':' to separate device type from index in device string");
-  // Skip the colon.
-  position += 1;
-
-  const auto index_string = device_string.substr(position);
+  std::string device_index = device_string.substr(index + 1);
   try {
-    index_ = at::stoi(index_string);
+    index_ = at::stoi(device_index);
   } catch (const std::exception&) {
     AT_ERROR(
         "Could not parse device index '",
-        index_string,
+        device_index,
         "' in device string '",
         device_string,
         "'");

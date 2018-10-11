@@ -77,7 +77,7 @@ change the way your network behaves arbitrarily with zero lag or overhead. Our i
 from several research papers on this topic, as well as current and past work such as
 [torch-autograd](https://github.com/twitter/torch-autograd),
 [autograd](https://github.com/HIPS/autograd),
-[Chainer](http://chainer.org), etc.
+[Chainer](https://chainer.org), etc.
 
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
@@ -88,7 +88,7 @@ You get the best of speed and flexibility for your crazy research.
 
 PyTorch is not a Python binding into a monolithic C++ framework.
 It is built to be deeply integrated into Python.
-You can use it naturally like you would use NumPy / SciPy / scikit-learn etc.
+You can use it naturally like you would use [NumPy](http://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](http://scikit-learn.org) etc.
 You can write your new neural network layers in Python itself, using your favorite libraries
 and use packages such as Cython and Numba.
 Our goal is to not reinvent the wheel where appropriate.
@@ -104,7 +104,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 ### Fast and Lean
 
 PyTorch has minimal framework overhead. We integrate acceleration libraries
-such as Intel MKL and NVIDIA (cuDNN, NCCL) to maximize speed.
+such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA (cuDNN, NCCL) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
 (TH, THC, THNN, THCUNN) are mature and have been tested for years.
 
@@ -121,10 +121,10 @@ Writing new neural network modules, or interfacing with PyTorch's Tensor API was
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
-[or your favorite NumPy-based libraries such as SciPy](http://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
+[or your favorite NumPy-based libraries such as SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
 If you want to write your layers in C/C++, we provide a convenient extension API that is efficient and with minimal boilerplate.
-There is no wrapper code that needs to be written. You can see [a tutorial here](http://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
+There is no wrapper code that needs to be written. You can see [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
 
 
 ## Installation
@@ -132,7 +132,7 @@ There is no wrapper code that needs to be written. You can see [a tutorial here]
 ### Binaries
 Commands to install from binaries via Conda or pip wheels are on our website:
 
-[http://pytorch.org](http://pytorch.org)
+[https://pytorch.org](https://pytorch.org)
 
 ### From Source
 
@@ -210,7 +210,7 @@ python setup.py install
 
 ### Docker image
 
-Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass -e PYTHON_VERSION=x.y flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. You can pass `-e PYTHON_VERSION=x.y` flag to specificy which python to be used by Miniconda, or leave it unset to use the default. Build as usual
 ```
 docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```
@@ -226,7 +226,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 ### Building the Documentation
 
-To build documentation in various formats, you will need Sphinx and the
+To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
 readthedocs theme.
 
 ```
@@ -239,7 +239,7 @@ You can then build the documentation by running ``make <format>`` from the
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](http://pytorch.org/previous-versions).
+on [our website](https://pytorch.org/previous-versions).
 
 
 ## Getting Started
@@ -247,13 +247,13 @@ on [our website](http://pytorch.org/previous-versions).
 Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
-- [The API Reference](http://pytorch.org/docs/)
+- [The API Reference](https://pytorch.org/docs/)
 
 ## Communication
-* forums: discuss implementations, research, etc. http://discuss.pytorch.org
+* forums: discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * Slack: general chat, online discussions, collaboration etc. https://pytorch.slack.com/ . Our slack channel is invite-only to promote a healthy balance between power-users and beginners. If you need a slack invite, ping us at slack@pytorch.org
-* newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: http://eepurl.com/cbG0rv
+* newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: https://eepurl.com/cbG0rv
 
 ## Releases and Contributing
 

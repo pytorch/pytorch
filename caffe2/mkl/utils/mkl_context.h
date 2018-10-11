@@ -10,8 +10,6 @@
 
 namespace caffe2 {
 
-BaseStaticContext* GetMKLStaticContext();
-
 /**
  * The MKL Context, which is largely the same as the CPUContext. We instantiate
  * this mainly in order to have a first-class MKL device.
@@ -34,14 +32,6 @@ class MKLContext : public BaseContext {
 
   ~MKLContext() override {}
 
-  BaseStaticContext* GetStaticContext() const override {
-    return GetMKLStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetMKLStaticContext();
-  }
-
   inline void SwitchToDevice(int /*stream_id*/ = 0) override {}
 
   inline void WaitEvent(const Event& ev) override {
@@ -62,8 +52,8 @@ class MKLContext : public BaseContext {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(CPU)->allocate(nbytes);
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
@@ -129,6 +119,10 @@ class MKLContext : public BaseContext {
     return true;
   }
 
+  at::Device device() const override {
+    return at::Device(MKLDNN);
+  }
+
   DeviceType device_type() const override {
     return MKLDNN;
   }
@@ -150,22 +144,6 @@ inline void MKLContext::CopyBytes<MKLContext, MKLContext>(
     void* dst) {
   memcpy(dst, src, nbytes);
 }
-
-class MKLStaticContext : public BaseStaticContext {
- public:
-  inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
-    return GetCPUAllocator()->New(nbytes);
-  }
-
-  DeviceType GetDeviceType() override {
-    return MKLDNN;
-  }
-
-  void ExtractDeviceOption(DeviceOption* device, const void* /*data*/)
-      override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-  }
-};
 
 } // namespace caffe2
 

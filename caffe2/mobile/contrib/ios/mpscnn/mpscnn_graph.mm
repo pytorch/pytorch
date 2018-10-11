@@ -46,34 +46,6 @@ Analysis analyzeNet(const NetDef& net) {
   return analysis;
 }
 
-static void rewriteInput(OperatorDef* op, int i) {
-  auto input = op->input(i);
-  op->set_input(i, input + "_I");
-}
-
-static void rewriteOutput(OperatorDef* op, int i) {
-  auto output = op->output(i);
-  op->set_output(i, output + "_M");
-}
-
-static void insertInputCopyToMPSCNNOp(
-    NetDef& predictNet,
-    const std::string& cpu_blob) {
-  auto* op = predictNet.add_op();
-  op->set_type("CopyToMPSCNN");
-  op->add_input(cpu_blob);
-  op->add_output(cpu_blob + "_I");
-}
-
-static void insertOutputCopyFromMPSCNNOp(
-    NetDef& predictNet,
-    const std::string& cpu_blob) {
-  auto* op = predictNet.add_op();
-  op->set_type("CopyFromMPSCNN");
-  op->add_input(cpu_blob + "_M");
-  op->add_output(cpu_blob);
-}
-
 NetDef insertInputOutputCopyOps(const NetDef& def) {
   // Do some validation of the outputs. For this version, we require:
   // - a single input (first element of external_input()) is consumed by the
@@ -110,8 +82,6 @@ NetDef insertInputOutputCopyOps(const NetDef& def) {
     op.add_output("__METAL_INPUT_COPY__");
   }
 
-  std::unordered_set<std::string> output_set;
-
   for (auto i = 0; i < def.op_size(); ++i) {
     const auto& ogOp = def.op(i);
     auto op = mdef.add_op();
@@ -120,29 +90,17 @@ NetDef insertInputOutputCopyOps(const NetDef& def) {
       CAFFE_ENFORCE_EQ(op->input(0), def.external_input(0));
       op->set_input(0, "__METAL_INPUT_COPY__");
     }
-    // rewrite input
-    for (auto j = 0; j < op->input_size(); ++j) {
-      if (output_set.find(op->input(j)) != output_set.end()) {
-        insertInputCopyToMPSCNNOp(mdef, op->input(j));
-        rewriteInput(op, j);
-      }
-    }
-
-    // if the output is in external output, copy from metal when necessary
-    for (auto j = 0; j < op->output_size(); ++j) {
-      for (auto k = 0; k < def.external_output_size(); ++k) {
-        // Assuming external output blob has unique name, e.g. only version 0
-        // of the blob is used as the output
-        if (op->output(j) == def.external_output(k)) {
-          output_set.insert(op->output(j));
-          insertOutputCopyFromMPSCNNOp(mdef, op->output(j));
-          // rewrite output to output_M for the operator
-          rewriteOutput(op, j);
-        }
-      }
+    if (i == def.op_size() - 1) {
+      CAFFE_ENFORCE_EQ(op->output(0), def.external_output(0));
+      op->set_output(0, "__METAL_OUTPUT_COPY__");
     }
   }
-
+  {
+    auto& op = *(mdef.add_op());
+    op.set_type("CopyFromMPSCNN");
+    op.add_input("__METAL_OUTPUT_COPY__");
+    op.add_output(def.external_output(0));
+  }
   return mdef;
 }
 

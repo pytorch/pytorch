@@ -43,13 +43,10 @@ private:
 
 struct InterpreterState {
   InterpreterState(const Code & code);
-  // advance the interpreter state by running one stage. Returning the
-  // outputs for that stage, suspending the computation.
-  // Call this function again continues computation where it left off.
-  void runOneStage(Stack & stack);
+  void run(Stack & stack);
   ~InterpreterState();
   // create a copy of InterpreterState with its current state
-  // used when retain_graph=True so that stages can be re-run
+  // used when retain_graph=True
   InterpreterState clone() const;
 private:
   InterpreterState(InterpreterStateImpl * pImpl);

@@ -568,27 +568,28 @@ class Caffe2Backend(Backend):
         assert ops[0][0].type == 'If'
         if_op = ops[0][0]
         then_net = else_net = None
+        control_inputs = []
         for arg in if_op.arg:
             if arg.name == 'then_net':
                 then_net = arg.n
             if arg.name == 'else_net':
                 else_net = arg.n
+            if arg.name == '__control_inputs':
+                control_inputs = arg.strings
+
         assert then_net and else_net
         then_net_outs = then_net.external_output
         else_net_outs = else_net.external_output
         op_outputs = if_op.output
         assert len(then_net_outs) == len(else_net_outs)
         assert len(else_net_outs) == len(op_outputs)
-        then_net_remap = {}
-        else_net_remap = {}
-        # Un-SSA branch outputs - since we're emitting everything into the same
-        # namespace we don't need the graph output names and the op output
-        # names to be unique
-        for then_name, else_name, op_name in zip(then_net_outs, else_net_outs, op_outputs):
-            then_net_remap[then_name] = op_name
-            else_net_remap[else_name] = op_name
-        cls._remove_ssa(then_net, then_net_remap)
-        cls._remove_ssa(else_net, else_net_remap)
+
+        for arg in if_op.arg:
+            if arg.name == 'then_net':
+                arg.n.external_input.extend(control_inputs)
+            if arg.name == 'else_net':
+                arg.n.external_input.extend(control_inputs)
+
         return ops
 
     @classmethod

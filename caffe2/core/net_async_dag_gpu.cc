@@ -17,20 +17,20 @@
 #include <nvToolsExt.h>
 #endif
 
-CAFFE2_DEFINE_bool(caffe2_use_nvtx, false, "Use NVTX ranges for profiling");
+C10_DEFINE_bool(caffe2_use_nvtx, false, "Use NVTX ranges for profiling");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_async_dag_use_multiple_streams,
     false,
     "Use multiple streams per thread");
 
-CAFFE2_DECLARE_bool(caffe2_dag_net_collect_stats);
+C10_DECLARE_bool(caffe2_dag_net_collect_stats);
 
-CAFFE2_DECLARE_bool(caffe2_net_async_finish_chain);
+C10_DECLARE_bool(caffe2_net_async_finish_chain);
 
-CAFFE2_DECLARE_int(caffe2_streams_per_gpu);
+C10_DECLARE_int(caffe2_streams_per_gpu);
 
-CAFFE2_DECLARE_bool(caffe2_net_async_check_stream_status);
+C10_DECLARE_bool(caffe2_net_async_check_stream_status);
 
 namespace caffe2 {
 
@@ -48,7 +48,7 @@ constexpr Color kWaitColor = 0x0066FF33; // green
 class ProfiledRange {
  public:
   ProfiledRange(const OperatorDef& def, Color color) {
-    if (!FLAGS_caffe2_use_nvtx) {
+    if (!c10::FLAGS_caffe2_use_nvtx) {
       return;
     }
     nvtxEventAttributes_t eventAttrib = {0};
@@ -63,7 +63,7 @@ class ProfiledRange {
   }
 
   ~ProfiledRange() {
-    if (!FLAGS_caffe2_use_nvtx) {
+    if (!c10::FLAGS_caffe2_use_nvtx) {
       return;
     }
     nvtxRangeEnd(range_);
@@ -119,8 +119,8 @@ int AsyncDAGNet::stream(const DeviceOption& device_option) {
     }
     do {
       stream_id = stream_counters_[gpu_id]++;
-      stream_counters_[gpu_id] %= FLAGS_caffe2_streams_per_gpu;
-    } while (FLAGS_caffe2_net_async_check_stream_status &&
+      stream_counters_[gpu_id] %= c10::FLAGS_caffe2_streams_per_gpu;
+    } while (c10::FLAGS_caffe2_net_async_check_stream_status &&
              !CUDAContext::IsStreamFree(device_option, stream_id));
   }
   return stream_id;
@@ -141,7 +141,7 @@ bool AsyncDAGNet::RunAt(int chain_id, const std::vector<int>& chain) {
       "None of the parent is recorded for an event.");
 
   int stream_id = 0;
-  if (FLAGS_caffe2_async_dag_use_multiple_streams) {
+  if (c10::FLAGS_caffe2_async_dag_use_multiple_streams) {
     stream_id = stream(
         operator_nodes_[source_idx].operator_->event().GetDeviceOption());
   }
@@ -158,7 +158,7 @@ bool AsyncDAGNet::RunAt(int chain_id, const std::vector<int>& chain) {
     operator_nodes_[source_idx].operator_->WaitEvents(parent_events, stream_id);
   }
 
-  if (FLAGS_caffe2_dag_net_collect_stats) {
+  if (c10::FLAGS_caffe2_dag_net_collect_stats) {
     const auto& device_option =
         operator_nodes_[source_idx].operator_->event().GetDeviceOption();
     CAFFE_EVENT(
@@ -184,7 +184,7 @@ bool AsyncDAGNet::RunAt(int chain_id, const std::vector<int>& chain) {
   }
 
   const auto& sink_idx = chain.back();
-  if (success && FLAGS_caffe2_net_async_finish_chain) {
+  if (success && c10::FLAGS_caffe2_net_async_finish_chain) {
     operator_nodes_[sink_idx].operator_->event().Finish();
   }
   CAFFE_ENFORCE(
@@ -194,7 +194,7 @@ bool AsyncDAGNet::RunAt(int chain_id, const std::vector<int>& chain) {
       " should not be recorded.");
   eventRecorded_[sink_idx] = 1;
 
-  if (FLAGS_caffe2_dag_net_collect_stats) {
+  if (c10::FLAGS_caffe2_dag_net_collect_stats) {
     const auto& device_option =
         operator_nodes_[source_idx].operator_->event().GetDeviceOption();
     CAFFE_EVENT(

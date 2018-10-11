@@ -120,8 +120,6 @@ class ThreadLocalHIPObjects {
   vector<miopenHandle_t> miopen_handles_[CAFFE2_COMPILE_TIME_MAX_HIP_GPUS];
 };
 
-BaseStaticContext* GetHIPStaticContext();
-
 class HIPContext final : public BaseContext {
  public:
   // The default HIP context constructor.
@@ -135,14 +133,6 @@ class HIPContext final : public BaseContext {
       HIPRAND_CHECK(hiprandDestroyGenerator(hiprand_generator_));
     }
     FinishDeviceComputation();
-  }
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetHIPStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetHIPStaticContext();
   }
 
   inline void SwitchToDevice(int stream_id) override {
@@ -169,7 +159,7 @@ class HIPContext final : public BaseContext {
     }
   }
 
-  inline int hip_gpu_id() const {
+  inline int device_id() const {
     return gpu_id_;
   }
 
@@ -206,8 +196,8 @@ class HIPContext final : public BaseContext {
     return hiprand_generator_;
   }
 
-  static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(HIP)->allocate(nbytes);
   }
 
   // Get a mutex to lock out hipMalloc / hipFree calls when
@@ -267,8 +257,12 @@ class HIPContext final : public BaseContext {
   }
 
   static bool IsStreamFree(const DeviceOption& option, int stream_id) {
-    auto stream = HIPContext::hip_stream(option.hip_gpu_id(), stream_id);
+    auto stream = HIPContext::hip_stream(option.device_id(), stream_id);
     return hipStreamQuery(stream) == hipSuccess;
+  }
+
+  at::Device device() const override {
+    return at::Device(HIP, gpu_id_);
   }
 
   DeviceType device_type() const override {
@@ -323,26 +317,28 @@ inline void CPUContext::CopyBytes<CPUContext, HIPContext>(
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  */
-struct PinnedCPUAllocator final : CPUAllocator {
+struct PinnedCPUAllocator final : public at::Allocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
+  at::DataPtr allocate(size_t nbytes) const override {
     void* data;
+    at::DataPtr data_ptr;
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
     if (IsNUMAEnabled()) {
-      auto ptr_and_deleter = baseAllocator_.New(nbytes);
-      data = ptr_and_deleter.first;
+      data_ptr = baseAllocator_.allocate(nbytes);
+      data = data_ptr.get();
       CAFFE_ENFORCE(data);
       HIP_ENFORCE(hipHostRegister(data, nbytes, hipHostRegisterDefault));
     } else {
       HIP_ENFORCE(hipHostMalloc(&data, nbytes));
+      data_ptr = {data, data, &Delete, at::Device(CPU)};
     }
     memset(data, 0, nbytes);
-    return {data, Delete};
+    return data_ptr;
   }
 
-  MemoryDeleter GetDeleter() override {
-    return Delete;
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
   }
 
  private:
@@ -370,23 +366,6 @@ struct PinnedCPUAllocator final : CPUAllocator {
   }
 
   DefaultCPUAllocator baseAllocator_;
-};
-
-class HIPStaticContext final : public BaseStaticContext {
- public:
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
-
-  DeviceType GetDeviceType() override {
-    return HIP;
-  }
-
-  void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-    device->set_hip_gpu_id(GetGPUIDForPointer(data));
-  }
-
- protected:
-  static void Delete(void* data);
 };
 
 typedef Tensor TensorHIP;

@@ -283,6 +283,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
   TensorArg self_arg(self_or_result, is_bmm_out ? "self" : "result", 0);
   TensorArg b1_arg(batch1, "batch1", 1);
   TensorArg b2_arg(batch2, "batch2", 2);
+  checkBackend(c, {self_or_result, batch1, batch2}, Backend::CPU);
   checkDim(c, b1_arg, 3);
   checkDim(c, b2_arg, 3);
 

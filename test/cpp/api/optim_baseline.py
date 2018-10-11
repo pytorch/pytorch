@@ -18,7 +18,7 @@ namespace expected_parameters {
 
 FOOTER = "} // namespace expected_parameters"
 
-PARAMETERS = "static std::vector<std::vector<torch::Tensor>> {} = {{"
+PARAMETERS = "inline std::vector<std::vector<torch::Tensor>> {}() {{"
 
 OPTIMIZERS = {
     "Adam": lambda p: torch.optim.Adam(p, 1.0),
@@ -86,13 +86,15 @@ def emit(optimizer_parameter_map):
     print(HEADER)
     for optimizer_name, parameters in optimizer_parameter_map.items():
         print(PARAMETERS.format(optimizer_name))
+        print("  return {")
         for sample in parameters:
-            print("  {")
+            print("    {")
             for parameter in sample:
                 parameter_values = "{{{}}}".format(", ".join(map(str, parameter)))
                 print("      torch::tensor({}),".format(parameter_values))
-            print("  },")
-        print("};\n")
+            print("    },")
+        print("  };")
+        print("}\n")
     print(FOOTER)
 
 

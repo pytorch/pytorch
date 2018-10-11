@@ -11,7 +11,7 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_handle_executor_threads_exceptions,
     false,
     "If used we will handle exceptions in executor threads. "
@@ -422,7 +422,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
               LOG(ERROR) << "Parallel worker exception:\n" << first_exception;
             }
             compiledStep->gotFailure = true;
-            if (!FLAGS_caffe2_handle_executor_threads_exceptions) {
+            if (!c10::FLAGS_caffe2_handle_executor_threads_exceptions) {
               // In complex plans other threads might get stuck if another
               // one fails. So we let exception to go out of thread which
               // causes SIGABRT. In local setup one might use this flag

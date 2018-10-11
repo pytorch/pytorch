@@ -258,7 +258,7 @@ template <>
 bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  auto shape = X.dims();
+  auto shape = X.dims().vec();
   shape.push_back(2);
   int64_t N = X.size();
   Y->Resize(shape);
@@ -277,7 +277,7 @@ template <>
 bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   auto& dY = Input(0);
   auto* dX = Output(0);
-  auto shape = dY.dims();
+  auto shape = dY.dims().vec();
   CAFFE_ENFORCE_GE(shape.size(), 1);
   CAFFE_ENFORCE_EQ(shape.back(), 2);
   shape.pop_back();

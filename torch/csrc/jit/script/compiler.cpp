@@ -1,6 +1,7 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
 #include "torch/csrc/jit/passes/annotate_effects.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
@@ -74,6 +75,8 @@ static Value* typeCast(const SourceRange& loc, Value* value, TypePtr dst) {
     n = graph.createNumToTensor(value);
   } else if (dst->isSubtypeOf(NumberType::get()) && orig->isSubtypeOf(DynamicType::get())) {
     n = graph.createTensorToNum(dst, value);
+  } else if (dst->isSubtypeOf(BoolType::get()) && orig->isSubtypeOf(DynamicType::get())) {
+    n = graph.createTensorToBool(value);
   } else if(dst->isSubtypeOf(IntType::get()) && orig->isSubtypeOf(FloatType::get())) {
     n = graph.createFloatToInt(value);
   } else if(dst->isSubtypeOf(FloatType::get()) && orig->isSubtypeOf(IntType::get())) {
@@ -324,7 +327,7 @@ struct Environment {
         {"print", std::make_shared<PrintValue>()},
         {"float", std::make_shared<CastValue>(FloatType::get())},
         {"int", std::make_shared<CastValue>(IntType::get())},
-        {"bool", std::make_shared<CastValue>(IntType::get())},
+        {"bool", std::make_shared<CastValue>(BoolType::get())},
         // todo(zach): remove when we can correctly export torch.full via ONNX
         // or we have implicit conversion that can convert numbers to tensors
         {"_to_tensor", std::make_shared<CastValue>(DynamicType::get()) },
@@ -901,6 +904,7 @@ struct to_ir {
     AnnotateEffects(graph);
     // remove any uses of tuples that we inserted that are not needed
     LowerSimpleTuples(graph);
+    ConstantPooling(graph);
   }
 
 private:
@@ -1048,9 +1052,9 @@ private:
 
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond);
-    if (!v->type()->isSubtypeOf(IntType::get())) {
+    if (!v->type()->isSubtypeOf(BoolType::get())) {
       ErrorReport error(cond);
-      error << "expected an integer expression for condition but found "
+      error << "expected a boolean expression for condition but found "
             << v->type()->str();
       if (v->type()->isSubtypeOf(DynamicType::get())) {
         error << ", to use a tensor in a boolean"
@@ -1928,6 +1932,7 @@ const std::unordered_map<std::string, TypePtr> &ident_to_type_lut() {
     {"Tensor", DynamicType::get()},
     {"int", IntType::get()},
     {"float", FloatType::get()},
+    {"bool", BoolType::get()},
   };
   return map;
 }

@@ -13,9 +13,9 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/simple_queue.h"
 
-CAFFE2_DECLARE_int(caffe2_tensor_chunk_size);
-CAFFE2_DECLARE_int(caffe2_max_tensor_serializer_threads);
-CAFFE2_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
+C10_DECLARE_int(caffe2_tensor_chunk_size);
+C10_DECLARE_int(caffe2_max_tensor_serializer_threads);
+C10_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 
 namespace caffe2 {
 

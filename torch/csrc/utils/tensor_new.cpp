@@ -17,6 +17,7 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <ATen/ATen.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/optional.h>
 
@@ -231,7 +232,7 @@ Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt
 
   auto sizes = compute_sizes(data);
   ScalarType scalarType = type_inference ? infer_scalar_type(data) : type.scalarType();
-  auto tensor = autograd::make_variable(CPU(scalarType).tensor(sizes), /*requires_grad=*/false);
+  auto tensor = autograd::make_variable(at::empty(sizes, at::initialTensorOptions().dtype(scalarType)), /*requires_grad=*/false);
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       scalarType, tensor.type().elementSizeInBytes(), data);

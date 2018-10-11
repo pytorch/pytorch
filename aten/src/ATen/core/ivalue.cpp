@@ -6,9 +6,11 @@
   _(Tensor) \
   _(Double) \
   _(Int) \
+  _(Bool) \
   _(Tuple) \
   _(IntList) \
   _(DoubleList) \
+  _(BoolList) \
   _(String) \
   _(TensorList) \
   _(Blob) \

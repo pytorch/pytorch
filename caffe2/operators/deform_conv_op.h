@@ -6,7 +6,7 @@
 #include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 
-CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
+C10_DECLARE_bool(caffe2_force_shared_col_buffer);
 
 namespace caffe2 {
 
@@ -24,21 +24,21 @@ class DeformConvOpBase : public ConvPoolOpBase<Context> {
   void DeformableIm2col(
       const T* data_im,
       const T* data_offset,
-      const std::vector<int64_t>& im_shape,
-      const std::vector<int64_t>& col_shape,
+      at::IntList im_shape,
+      at::IntList col_shape,
       T* data_col);
   void DeformableCol2im(
       const T* data_col,
       const T* data_offset,
-      const std::vector<int64_t>& im_shape,
-      const std::vector<int64_t>& col_shape,
+      at::IntList im_shape,
+      at::IntList col_shape,
       T* grad_im);
   void DeformableCol2imCoord(
       const T* data_col,
       const T* data_im,
       const T* data_offset,
-      const std::vector<int64_t>& im_shape,
-      const std::vector<int64_t>& col_shape,
+      at::IntList im_shape,
+      at::IntList col_shape,
       T* grad_offset);
 
  protected:
@@ -61,7 +61,7 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
       : DeformConvOpBase<T, Context>(operator_def, ws) {
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
-    if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+    if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
       createSharedBuffer<Context>(ws_);
     }
   }

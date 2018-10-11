@@ -6,7 +6,7 @@
 #include "caffe2/mkl/utils/mkl_memory.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-CAFFE2_DECLARE_bool(caffe2_mkl_memonger_in_use);
+C10_DECLARE_bool(caffe2_mkl_memonger_in_use);
 
 namespace caffe2 {
 

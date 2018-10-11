@@ -40,7 +40,7 @@ void test(Type& type, IntList shape, int64_t a = 0, int64_t b = 1) {
   auto a1 = at::empty({0}, type.options());
   auto a2 = at::empty({0}, type.options());
   auto a3 = at::empty({0}, type.options());
-  auto a4 = CPU(kDouble).tensor();
+  auto a4 = at::empty({0}, at::TensorOptions(kCPU).dtype(kDouble));
 
   std::vector<Tensor> tensors({a0, a1, a2, a3, a4});
   for (size_t i = 0; i < tensors.size(); i++) {

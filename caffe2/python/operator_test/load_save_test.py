@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import errno
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, assume
 import numpy as np
 import os
 import shutil
@@ -42,6 +42,8 @@ class TestLoadSaveBase(test_util.TestCase):
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
         arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
                   for T in dtypes]
+        assume(src_device_type == caffe2_pb2.CUDA or src_gpu_id == 0)
+        assume(dst_device_type == caffe2_pb2.CUDA or dst_gpu_id == 0)
         src_device_option = core.DeviceOption(
             src_device_type, src_gpu_id)
         dst_device_option = core.DeviceOption(

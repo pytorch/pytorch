@@ -43,12 +43,18 @@ class DataPtr {
   void* release_context() {
     return ptr_.release_context();
   }
+  std::unique_ptr<void, DeleterFnPtr>&& move_context() {
+    return ptr_.move_context();
+  }
   operator bool() const {
     return static_cast<bool>(ptr_);
   }
   template <typename T>
   T* cast_context(DeleterFnPtr expected_deleter) const {
     return ptr_.cast_context<T>(expected_deleter);
+  }
+  DeleterFnPtr get_deleter() const {
+    return ptr_.get_deleter();
   }
   Device device() const {
     return device_;
@@ -115,6 +121,7 @@ struct Allocator {
   }
 };
 
+// Question: is this still needed?
 struct CAFFE2_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(
@@ -127,3 +134,31 @@ struct CAFFE2_API InefficientStdFunctionContext {
 };
 
 } // namespace at
+
+namespace caffe2 {
+
+/** Set the allocator for DeviceType `t`. The passed in allocator pointer is
+ *  expected to have static lifetime; this function does NOT take ownership
+ *  of the raw pointer. (The reason for this is to prevent existing pointers
+ *  to an allocator of a particular device from being invalidated when
+ *  SetAllocator is called.)
+ *
+ *  Also note that this is not thraed-safe, and we assume this function will
+ *  only be called during initialization.
+ */
+CAFFE2_API void SetAllocator(at::DeviceType t, at::Allocator* alloc);
+CAFFE2_API at::Allocator* GetAllocator(const at::DeviceType& t);
+
+template <at::DeviceType t>
+struct AllocatorRegisterer {
+  explicit AllocatorRegisterer(at::Allocator* alloc) {
+    SetAllocator(t, alloc);
+  }
+};
+
+#define REGISTER_ALLOCATOR(t, f)                    \
+  namespace {                                       \
+  static AllocatorRegisterer<t> g_allocator_##d(f); \
+  }
+
+} // namespace caffe2

@@ -70,6 +70,17 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::TensorToBool,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            at::DeviceGuard guard(a);
+            push(stack, a.item<int64_t>() != 0);
+            return 0;
+          };
+        }),
+    Operator(
         prim::TensorToNum,
         [](Node* node) -> Operation {
           if(node->output()->type() == IntType::get()) {
@@ -120,6 +131,18 @@ RegisterOperators reg({
             at::Scalar s;
             pop(stack, s);
             push(stack, autograd::make_variable(at::scalar_to_tensor(s)));
+            return 0;
+          };
+        }),
+    Operator(
+        prim::BoolToTensor,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            bool b;
+            pop(stack, b);
+            push(
+                stack,
+                autograd::make_variable(at::scalar_to_tensor(b)));
             return 0;
           };
         }),
@@ -446,25 +469,25 @@ RegisterOperators reg({
 });
 
 // define implementations for primitive number ops
-#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, float_result)          \
-  Operator(                                                                 \
-      #aten_op "(int a, int b) -> int",                                     \
-      [](Node* node) {                                                      \
-        return [=](Stack& stack) {                                          \
-          int64_t a, b;                                                     \
-          pop(stack, a, b);                                                 \
-          push(stack, int_op);                                                  \
-          return 0;                                                         \
-        };                                                                  \
-      }),                                                                   \
-  Operator(                                                                 \
-      #aten_op "(float a, float b) -> " #float_result, [](Node* node) {     \
-        return [=](Stack& stack) {                                          \
-          double a, b;                                                      \
-          pop(stack, a, b);                                                 \
-          push(stack, float_op);                                                  \
-          return 0;                                                         \
-        };                                                                  \
+#define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
+  Operator(                                                                    \
+      #aten_op "(int a, int b) -> " #int_result,                               \
+      [](Node* node) {                                                         \
+        return [=](Stack& stack) {                                             \
+          int64_t a, b;                                                        \
+          pop(stack, a, b);                                                    \
+          push(stack, int_op);                                                 \
+          return 0;                                                            \
+        };                                                                     \
+      }),                                                                      \
+  Operator(                                                                    \
+      #aten_op "(float a, float b) -> " #float_result, [](Node* node) {        \
+        return [=](Stack& stack) {                                             \
+          double a, b;                                                         \
+          pop(stack, a, b);                                                    \
+          push(stack, float_op);                                               \
+          return 0;                                                            \
+        };                                                                     \
       }),
 
 #define DEFINE_INT_OP(aten_op, op)                            \
@@ -477,8 +500,19 @@ RegisterOperators reg({
     };                                                        \
   }),
 
-#define DEFINE_BINARY_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, float)
-#define DEFINE_COMPARISON_OP(aten_op, op) DEFINE_GENERIC_OP(aten_op, op, op, int)
+#define DEFINE_BINARY_OP(aten_op, op) \
+  DEFINE_GENERIC_OP(aten_op, op, op, int, float)
+#define DEFINE_COMPARISON_OP(aten_op, op) \
+  DEFINE_GENERIC_OP(aten_op, op, op, bool, bool)
+#define DEFINE_BOOL_OP(aten_op, op)                              \
+  Operator(#aten_op "(bool a, bool b) -> bool", [](Node* node) { \
+    return [=](Stack& stack) {                                   \
+      bool a, b;                                                 \
+      pop(stack, a, b);                                          \
+      push(stack, op);                                           \
+      return 0;                                                  \
+    };                                                           \
+  }),
 
 // Convert an python index (which may be negative) into an index usable for a
 // C++ container
@@ -663,7 +697,7 @@ RegisterOperators reg2({
     // Pass in two ops for handling int and float separately as % in C++ only works for int
     // The modulus calculation is different between C++ and Python (on negative), we preserve
     // the python behavior as it's more common and match python syntax, hence the conversion.
-    DEFINE_GENERIC_OP(aten::remainder, (b + (a % b)) % b, fmod((b + fmod(a, b)), b), float)
+    DEFINE_GENERIC_OP(aten::remainder, (b + (a % b)) % b, fmod((b + fmod(a, b)), b), int, float)
 
     // TODO: Support python floordiv (//)
     // Right now aten::floordiv is only used by loop unrolling
@@ -696,8 +730,8 @@ RegisterOperators reg2({
     DEFINE_COMPARISON_OP(aten::le, a <= b)
     DEFINE_COMPARISON_OP(aten::ge, a >= b)
 
-    DEFINE_INT_OP(aten::__and__, a&& b)
-    DEFINE_INT_OP(aten::__or__, a || b)
+    DEFINE_BOOL_OP(aten::__and__, a && b)
+    DEFINE_BOOL_OP(aten::__or__, a || b)
 
     Operator("aten::_construct_empty_int_list() -> int[]",
         [](Node* node) -> Operation {

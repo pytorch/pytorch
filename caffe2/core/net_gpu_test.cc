@@ -5,7 +5,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/scope_guard.h"
 
-CAFFE2_DECLARE_bool(caffe2_disable_chaining);
+C10_DECLARE_bool(caffe2_disable_chaining);
 
 namespace caffe2 {
 
@@ -79,9 +79,9 @@ void checkChainingAndRun(
   CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
-    auto old = FLAGS_caffe2_disable_chaining;
-    auto g = MakeGuard([&]() { FLAGS_caffe2_disable_chaining = old; });
-    FLAGS_caffe2_disable_chaining = false;
+    auto old = c10::FLAGS_caffe2_disable_chaining;
+    auto g = MakeGuard([&]() { c10::FLAGS_caffe2_disable_chaining = old; });
+    c10::FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
