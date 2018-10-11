@@ -39,7 +39,7 @@ bool isDifferentiable(Node * n) {
     "aten::exp(Tensor self) -> Tensor",
     "aten::t(Tensor self) -> Tensor",
     "aten::neg(Tensor self) -> Tensor",
-    "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
+    "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
     "aten::type_as(Tensor self, Tensor other) -> Tensor",
     "aten::unsqueeze(Tensor self, int dim) -> Tensor",
     "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
@@ -161,7 +161,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     } else if (node->matches("aten::relu(Tensor self) -> Tensor")) {
       return {grads.at(0) * (outputs.at(0) > at::Scalar(0)).type_as(outputs.at(0))};
 
-    } else if (node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor")) {
+    } else if (node->matches("aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor")) {
       // we do two type_as and "*" in lieu of boolean "and"
       // the "! (val > min)" is chosen such that the gradient is 0 on the
       // boundary and the factor is 1 when the boundary is NaN

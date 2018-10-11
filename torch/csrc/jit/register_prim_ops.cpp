@@ -223,6 +223,14 @@ RegisterOperators reg({
           };
         }),
     Operator(
+      prim::None,
+      [](Node* node) {
+        return [](Stack& stack) {
+          stack.push_back(IValue());
+          return 0;
+        };
+      }),
+    Operator(
         prim::NoneGenerator,
         [](Node* node) {
           return [](Stack& stack) {

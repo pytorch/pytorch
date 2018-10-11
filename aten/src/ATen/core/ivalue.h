@@ -386,6 +386,9 @@ struct CAFFE2_API IValue final {
   template<typename T>
   T to() const &;
 
+  template<typename T>
+  optional<T> toOptional();
+
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const IValue& v);
@@ -565,6 +568,13 @@ inline const std::vector<IValue>& IValue::toGenericListRef() const {
 
 inline const std::string& IValue::toStringRef() const {
   return toString()->string();
+
+template<typename T>
+inline optional<T> IValue::toOptional() {
+  if (this->isNone()) {
+    return nullopt;
+  }
+  return this->to<T>();
 }
 
 } // namespace c10

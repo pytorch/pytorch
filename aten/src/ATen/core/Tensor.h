@@ -443,8 +443,8 @@ public:
   Tensor ceil() const;
   Tensor & ceil_();
   std::vector<Tensor> chunk(int64_t chunks, int64_t dim=0) const;
-  Tensor clamp(Scalar min, Scalar max) const;
-  Tensor & clamp_(Scalar min, Scalar max);
+  Tensor clamp(optional<Scalar> min=nullopt, optional<Scalar> max=nullopt) const;
+  Tensor & clamp_(optional<Scalar> min=nullopt, optional<Scalar> max=nullopt);
   Tensor clamp_max(Scalar max) const;
   Tensor & clamp_max_(Scalar max);
   Tensor clamp_min(Scalar min) const;

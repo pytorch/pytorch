@@ -438,7 +438,7 @@ bool PropagateTensorShapeOnNode(Node * node, bool insert_expands) {
     "aten::contiguous(Tensor self) -> Tensor",
     "aten::bernoulli(Tensor self, *, Generator generator) -> Tensor",
     "aten::celu(Tensor self, Scalar alpha) -> Tensor",
-    "aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor",
+    "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor",
     "aten::clamp_max(Tensor self, Scalar max) -> Tensor",
     "aten::clamp_min(Tensor self, Scalar min) -> Tensor",
     "aten::alpha_dropout(Tensor input, float p, bool train) -> Tensor",

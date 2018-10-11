@@ -28,6 +28,7 @@ _(NoneType) \
 _(StringType) \
 _(GeneratorType) \
 _(BoolType) \
+_(OptionalType) \
 _(VarType) \
 _(WorldType) \
 
@@ -144,6 +145,63 @@ public:
 inline bool operator!=(const Type & lhs, const Type & rhs) {
   return !(lhs == rhs);
 }
+
+struct OptionalType;
+using OptionalTypePtr = std::shared_ptr<OptionalType>;
+
+struct OptionalType: public Type {
+  // It's not exactly a singleton, but there should be exactly once instance of
+  // Optional[T] for every T
+  static constexpr bool is_singleton = true;
+  friend struct Type;
+  template<typename ... T>
+  static OptionalTypePtr create( T&& ... all ) {
+    return OptionalTypePtr(new OptionalType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    if(auto rhs_ = rhs.cast<OptionalType>()) {
+      return *getElementType() == *rhs_->getElementType();
+    }
+    return false;
+  }
+  bool requires_grad() const override {
+    return elem->requires_grad();
+  }
+
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return getElementType()->isSubtypeOf(rhs_->getElementType());
+    }
+    return false;
+  }
+
+  std::string str() const override {
+    std::stringstream ss;
+    ss << getElementType()->str() << "?";
+    return ss.str();
+  }
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "Optional[" << getElementType()->python_str() << "]";
+    return ss.str();
+  }
+  TypePtr getElementType() const {
+    return elem;
+  }
+  bool hasFreeVariables() const override {
+    return has_free_variables_;
+  }
+
+  static const TypeKind Kind = TypeKind::OptionalType;
+private:
+  OptionalType(TypePtr elem)
+  : Type(TypeKind::OptionalType)
+  , elem(std::move(elem))
+  , has_free_variables_(getElementType()->hasFreeVariables()) {}
+  TypePtr elem;
+  bool has_free_variables_;
+
+};
 
 struct DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
@@ -572,6 +630,9 @@ struct TORCH_API FloatType : public Type {
     return "float";
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
     return *this == *rhs || rhs->kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::FloatType;
@@ -598,6 +659,9 @@ struct TORCH_API IntType : public Type {
     return "int";
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
     return *this == *rhs || rhs->kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::IntType;
@@ -649,6 +713,9 @@ struct TORCH_API StringType : public Type {
     return "string";
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
+    if(auto rhs_ = rhs->cast<OptionalType>()) {
+      return this->isSubtypeOf(rhs_->getElementType());
+    }
     return *this == *rhs;
   }
   static const TypeKind Kind = TypeKind::StringType;
@@ -661,7 +728,7 @@ private:
 
 struct NoneType;
 using NoneTypePtr = std::shared_ptr<NoneType>;
-// This node represents a Python int number value
+// This node represents a Python None value
 struct NoneType : public Type {
   static constexpr bool is_singleton = true;
   template<typename ... T>
@@ -671,6 +738,12 @@ struct NoneType : public Type {
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
+
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return rhs->kind() == TypeKind::NoneType ||
+           rhs->kind() == TypeKind::OptionalType;
+  }
+
   std::string str() const override {
     return "None";
   }

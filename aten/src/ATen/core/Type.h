@@ -406,8 +406,8 @@ struct CAFFE2_API Type {
   virtual Tensor ceil(const Tensor & self) const = 0;
   virtual Tensor & ceil_(Tensor & self) const = 0;
   virtual std::vector<Tensor> chunk(const Tensor & self, int64_t chunks, int64_t dim) const = 0;
-  virtual Tensor clamp(const Tensor & self, Scalar min, Scalar max) const = 0;
-  virtual Tensor & clamp_(Tensor & self, Scalar min, Scalar max) const = 0;
+  virtual Tensor clamp(const Tensor & self, optional<Scalar> min, optional<Scalar> max) const = 0;
+  virtual Tensor & clamp_(Tensor & self, optional<Scalar> min, optional<Scalar> max) const = 0;
   virtual Tensor clamp_max(const Tensor & self, Scalar max) const = 0;
   virtual Tensor & clamp_max_(Tensor & self, Scalar max) const = 0;
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
