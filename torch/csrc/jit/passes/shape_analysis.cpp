@@ -1177,7 +1177,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return true;
   } else if (node->matches("aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
-                           /*with_const=*/{attr::dim, attr::length})) {
+                           /*const_inputs=*/{attr::dim, attr::length})) {
     auto tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     int64_t dim = node->get<int64_t>(attr::dim).value();
@@ -1190,7 +1190,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     node->output()->setType(tensor_types.at(0)->withSizes({}));
     return true;
   } else if (node->matches("aten::sum(Tensor self, int[] dim, bool keepdim) -> Tensor",
-             /*with_const=*/{attr::dim, attr::keepdim})) {
+             /*const_inputs=*/{attr::dim, attr::keepdim})) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto dims = node->get<std::vector<int64_t>>(attr::dim).value();
@@ -1206,7 +1206,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     }
     node->output()->setType(tp->withSizes(sizes));
     return true;
-  } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*with_const=*/attr::dim)) {
+  } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto strides = tp->strides();
@@ -1218,7 +1218,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     }
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return true;
-  } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor", /*with_const=*/attr::dim)) {
+  } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor", /*const_inputs=*/attr::dim)) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto strides = tp->strides();
@@ -1229,7 +1229,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     strides.insert(strides.begin() + dim, new_stride);
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return true;
-  } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*with_const=*/attr::size)) {
+  } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*const_inputs=*/attr::size)) {
     auto sizes = node->get<std::vector<int64_t>>(attr::size).value();
     bool inferred = false;
     size_t inferred_idx;
@@ -1263,7 +1263,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     }
     return true;
   } else if (node->matches("aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
-             /*with_const=*/attr::size)) {
+             /*const_inputs=*/attr::size)) {
     auto tp = tensor_types.at(0);
     std::vector<int64_t> sizes, strides;
     std::tie(sizes, strides) = at::inferExpandGeometry(
@@ -1271,7 +1271,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return true;
   } else if (node->matches("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor",
-             /*with_const=*/attr::dim)) {
+             /*const_inputs=*/attr::dim)) {
     auto ten = tensor_types.at(0);
     auto index = tensor_types.at(1);
     int64_t dim = node->get<int64_t>(attr::dim).value();
@@ -1282,7 +1282,7 @@ bool PropagateCompleteShapeOnNode(Node * node, bool insert_expands,
     node->output()->setType(ten->withSizes(sizes));
     return true;
   } else if (node->matches("aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
-                           /*with_const=*/{attr::chunks, attr::dim})) {
+                           /*const_inputs=*/{attr::chunks, attr::dim})) {
     auto input_type = tensor_types.at(0);
     auto sizes = input_type->sizes();
     const auto & strides = input_type->strides();

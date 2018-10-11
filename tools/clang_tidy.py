@@ -13,6 +13,7 @@ glob or regular expressions.
 """
 
 import argparse
+import collections
 import fnmatch
 import json
 import os.path
@@ -20,6 +21,9 @@ import re
 import shlex
 import subprocess
 import sys
+
+
+Patterns = collections.namedtuple("Patterns", "positive, negative")
 
 
 # NOTE: Clang-tidy cannot lint headers directly, because headers are not
@@ -46,25 +50,47 @@ def run_shell_command(arguments):
     return output
 
 
+def split_negative_from_positive_patterns(patterns):
+    """Separates negative patterns (that start with a dash) from positive patterns"""
+    positive, negative = [], []
+    for pattern in patterns:
+        if pattern.startswith("-"):
+            negative.append(pattern[1:])
+        else:
+            positive.append(pattern)
+
+    return Patterns(positive, negative)
+
+
 def get_file_patterns(globs, regexes):
     """Returns a list of compiled regex objects from globs and regex pattern strings."""
     # fnmatch.translate converts a glob into a regular expression.
     # https://docs.python.org/2/library/fnmatch.html#fnmatch.translate
-    regexes += [fnmatch.translate(glob) for glob in globs]
-    return [re.compile(regex) for regex in regexes] or [DEFAULT_FILE_PATTERN]
+    glob = split_negative_from_positive_patterns(globs)
+    regexes = split_negative_from_positive_patterns(regexes)
+
+    positive_regexes = regexes.positive + [fnmatch.translate(g) for g in glob.positive]
+    negative_regexes = regexes.negative + [fnmatch.translate(g) for g in glob.negative]
+
+    positive_patterns = [re.compile(regex) for regex in positive_regexes] or [
+        DEFAULT_FILE_PATTERN
+    ]
+    negative_patterns = [re.compile(regex) for regex in negative_regexes]
+
+    return Patterns(positive_patterns, negative_patterns)
 
 
 def filter_files(files, file_patterns):
     """Returns all files that match any of the patterns."""
+    if VERBOSE:
+        print("Filtering with these file patterns: {}".format(file_patterns))
     for file in files:
-        has_match = False
-        for pattern in file_patterns:
-            if pattern.match(file):
+        if not any(n.match(file) for n in file_patterns.negative):
+            if any(p.match(file) for p in file_patterns.positive):
                 yield file
-                has_match = True
-        if not has_match and VERBOSE:
-            message = "{} does not match any file pattern in {{{}}}"
-            print(message.format(file, ", ".join(map(str, file_patterns))))
+                continue
+        if VERBOSE:
+            print("{} ommitted due to file filters".format(file))
 
 
 def get_changed_files(revision, paths):
@@ -135,17 +161,19 @@ def parse_options():
     parser.add_argument(
         "-g",
         "--glob",
-        nargs="+",
+        action="append",
         default=[],
         help="Only lint files that match these glob patterns "
-        "(see documentation for `fnmatch` for supported syntax)",
+        "(see documentation for `fnmatch` for supported syntax)."
+        "If a pattern starts with a - the search is negated for that pattern.",
     )
     parser.add_argument(
         "-x",
         "--regex",
-        nargs="+",
+        action="append",
         default=[],
-        help="Only lint files that match these regular expressions (from the start of the filename)",
+        help="Only lint files that match these regular expressions (from the start of the filename). "
+        "If a pattern starts with a - the search is negated for that pattern.",
     )
     parser.add_argument(
         "-c",

@@ -692,7 +692,7 @@ void ModuleEncoder::EncodeTensor(
           tensor.storage(),
           /* storageOffset = */ 0,
           /* size = */ { static_cast<int64_t>(tensor.storage().size()) },
-          /* strides = */ { 1 })
+          /* stride = */ { 1 })
         .cpu();
     }
 

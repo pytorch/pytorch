@@ -110,10 +110,10 @@ class TensorFetcher : public BlobFetcherBase {
   // of `tensor`
   bool NeedsCopy(const Tensor* tensor, const TypeMeta& meta) const {
 #ifdef USE_NUMPY
-    return tensor->GetStaticContext() != GetCPUStaticContext() ||
+    return tensor->GetDeviceType() != CPU ||
         CaffeToNumpyType(meta) == NPY_OBJECT;
 #else
-    return tensor->GetStaticContext() != GetCPUStaticContext();
+    return tensor->GetDeviceType() != CPU;
 #endif // USE_NUMPY
   }
 
