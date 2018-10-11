@@ -645,7 +645,7 @@ Tensor chain_matmul(TensorList matrices) {
     // parenthesizing matrices A_{i} to A_{j}. By this definition m[i, i] = 0 for all i
     // m[i, j] is filled using the substructure property of the algorithm, meaning:
     // m[i, j] = min_{i <= k < j} m[i, k] + m[k, j] + p_{i-1}p_{k}p_{j}
-    std::vector<std::vector<int64_t>> m(n, std::vector<int64_t>(n, std::numeric_limits<int64_t>::max()));
+    std::vector<std::vector<int64_t>> m(n, std::vector<int64_t>(n, 0));
 
     // Auxiliary table for constructing the order
     // s[i, j] stores the index k at which the optimal split is obtained
@@ -654,11 +654,10 @@ Tensor chain_matmul(TensorList matrices) {
     // j and q are used repetitively in the algorithm below
     int64_t j, q;
 
-    m[0][0] = 0;
     for (int64_t l = 1; l < n; l++) {
-      m[l][l] = 0;
       for (int64_t i = 0; i < n - l; i++) {
         j = i + l;
+        m[i][j] = std::numeric_limits<int64_t>::max();
         for (int64_t k = i; k < j; k++) {
           q = m[i][k] + m[k + 1][j] + p[i] * p[k + 1] * p[j + 1];
           if (q < m[i][j]) {
