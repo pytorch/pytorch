@@ -66,11 +66,11 @@ struct NamedValue {
   }
 
 private:
-  at::optional<SourceRange> loc_;
-  at::optional<std::string> name_;
-  Value* value_;
-  // only valid if value_ == nullptr;
-  IValue ivalue_;
+ c10::optional<SourceRange> loc_;
+ c10::optional<std::string> name_;
+ Value* value_;
+ // only valid if value_ == nullptr;
+ IValue ivalue_;
 };
 
 }}

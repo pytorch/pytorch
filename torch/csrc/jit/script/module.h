@@ -12,7 +12,7 @@
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
 #include <ATen/core/ArrayRef.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <functional>
 #include <memory>
@@ -395,18 +395,17 @@ struct Module {
   bool optimize;
 };
 
-// returns at::nullopt and fills in failure_messages if the callee does not
+// returns c10::nullopt and fills in failure_messages if the callee does not
 // match the functions schema
-at::optional<std::vector<Value*>> try_emit_call_to(
+c10::optional<std::vector<Value*>> try_emit_call_to(
     Graph& graph,
     SourceRange loc,
     Method& callee,
     ArrayRef<NamedValue> args,
     ArrayRef<NamedValue> kwargs,
     std::stringstream& failure_messages,
-    // when callee uses no parameters (e.g. it is a function in a compilation unit,
-    // and not a method), then nullptr can be passed as caller.
+    // when callee uses no parameters (e.g. it is a function in a compilation
+    // unit, and not a method), then nullptr can be passed as caller.
     Method* caller,
     bool conv_tensors_to_nums);
-
 }}}

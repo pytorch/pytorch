@@ -1,5 +1,6 @@
-#include <ATen/core/Backtrace.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Backtrace.h"
+#include "c10/util/Optional.h"
+#include "c10/util/Type.h"
 
 #include <functional>
 #include <memory>
@@ -7,61 +8,19 @@
 #include <string>
 #include <vector>
 
-#if defined(__ANDROID__)
-#define AT_CORE_MOBILE 1
-#elif (                   \
-    defined(__APPLE__) && \
-    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE))
-#define AT_CORE_MOBILE 1
-#else
-#define AT_CORE_MOBILE 0
-#endif
-
-#if !AT_CORE_MOBILE && !defined(_WIN32) && !defined(__EMSCRIPTEN__)
-#define SUPPORTS_BACKTRACE 1
-#else
+#if (defined(__ANDROID__)) ||                                                 \
+    (defined(__APPLE__) &&                                                    \
+     (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)) || \
+    defined(_WIN32) || defined(__EMSCRIPTEN__)
+// No backtrace on mobile, windows and emscripten platforms.
 #define SUPPORTS_BACKTRACE 0
-#endif
-
-#if SUPPORTS_BACKTRACE
+#else
+#define SUPPORTS_BACKTRACE 1
 #include <cxxabi.h>
 #include <execinfo.h>
-#endif // !defined(_WIN32)
-
-namespace at {
-
-#if SUPPORTS_BACKTRACE
-std::string demangle(const char* name) {
-  int status = -1;
-
-  // This function will demangle the mangled function name into a more human
-  // readable format, e.g. _Z1gv -> g().
-  // More information:
-  // https://github.com/gcc-mirror/gcc/blob/master/libstdc%2B%2B-v3/libsupc%2B%2B/cxxabi.h
-  // NOTE: `__cxa_demangle` returns a malloc'd string that we have to free
-  // ourselves.
-  std::unique_ptr<char, std::function<void(char*)>> demangled(
-      abi::__cxa_demangle(
-          name,
-          /*__output_buffer=*/nullptr,
-          /*__length=*/0,
-          &status),
-      /*deleter=*/free);
-
-  // Demangling may fail, for example when the name does not follow the
-  // standard C++ (Itanium ABI) mangling scheme. This is the case for `main`
-  // or `clone` for example, so the mangled name is a fine default.
-  if (status == 0) {
-    return demangled.get();
-  } else {
-    return name;
-  }
-}
-#else
-std::string demangle(const char* name) {
-  return std::string(name);
-}
 #endif
+
+namespace c10 {
 
 // TODO: This backtrace retrieval can be implemented on Windows via the Windows
 // API using `CaptureStackBackTrace` and `SymFromAddr`.
@@ -86,12 +45,11 @@ struct FrameInformation {
 };
 
 bool is_python_frame(const FrameInformation& frame) {
-  return frame.object_file == "python" ||
-         frame.object_file == "python3" ||
+  return frame.object_file == "python" || frame.object_file == "python3" ||
       (frame.object_file.find("libpython") != std::string::npos);
 }
 
-at::optional<FrameInformation> parse_frame_information(
+c10::optional<FrameInformation> parse_frame_information(
     const std::string& frame_string) {
   FrameInformation frame;
 
@@ -107,19 +65,19 @@ at::optional<FrameInformation> parse_frame_information(
 
   auto function_name_start = frame_string.find("(");
   if (function_name_start == std::string::npos) {
-    return at::nullopt;
+    return c10::nullopt;
   }
   function_name_start += 1;
 
   auto offset_start = frame_string.find('+', function_name_start);
   if (offset_start == std::string::npos) {
-    return at::nullopt;
+    return c10::nullopt;
   }
   offset_start += 1;
 
   const auto offset_end = frame_string.find(')', offset_start);
   if (offset_end == std::string::npos) {
-    return at::nullopt;
+    return c10::nullopt;
   }
 
   frame.object_file = frame_string.substr(0, function_name_start - 1);
@@ -143,7 +101,7 @@ at::optional<FrameInformation> parse_frame_information(
       skip >> frame.offset_into_function;
 #else
 #warning Unknown standard library, backtraces may have incomplete debug information
-  return at::nullopt;
+  return c10::nullopt;
 #endif // defined(__GLIBCXX__)
 
   // Some system-level functions don't have sufficient debug information, so
@@ -241,4 +199,4 @@ std::string get_backtrace(
 #endif // SUPPORTS_BACKTRACE
 }
 
-} // namespace at
+} // namespace c10

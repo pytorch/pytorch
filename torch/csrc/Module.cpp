@@ -499,7 +499,9 @@ PyMethodDef* THCUDNN_methods() {
 #endif
 
 // ATen warning handler for Python
-static void warning_handler(const at::SourceLocation& source_location, const char* msg) {
+static void warning_handler(
+    const c10::SourceLocation& source_location,
+    const char* msg) {
   AutoGIL gil;
   if (PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1) < 0) {
     throw python_error();
@@ -605,12 +607,10 @@ static PyObject* initModule() {
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
 
-
-  py::reinterpret_borrow<py::module>(module)
-    .def("_demangle", &at::demangle);
+  py::reinterpret_borrow<py::module>(module).def("_demangle", &c10::demangle);
 
   // Set ATen warnings to issue Python warnings
-  at::Warning::set_warning_handler(&warning_handler);
+  ::c10::Warning::set_warning_handler(&warning_handler);
 
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
