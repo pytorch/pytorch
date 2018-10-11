@@ -659,7 +659,6 @@ Tensor chain_matmul(TensorList matrices) {
       m[l][l] = 0;
       for (int64_t i = 0; i < n - l; i++) {
         j = i + l;
-        m[i][j] = std::numeric_limits<int64_t>::max();
         for (int64_t k = i; k < j; k++) {
           q = m[i][k] + m[k + 1][j] + p[i] * p[k + 1] * p[j + 1];
           if (q < m[i][j]) {
