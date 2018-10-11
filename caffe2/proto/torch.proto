@@ -26,6 +26,7 @@ message MethodDef {
 
   // static graph
   optional caffe2.NetDef graph = 2;
+
   // method is represented as torch script
   optional string torch_script = 3;
 
