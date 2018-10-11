@@ -152,11 +152,11 @@ private:
 //      the IR API, but for now we choose to pessimisitically create inputs and
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
-  Environment(Method & method, const Resolver& resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
+  Environment(Method & method, std::shared_ptr<Resolver> resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
       : method(method), resolver(resolver), b(b), next(next) {}
 
   Method & method;
-  const Resolver& resolver;
+  std::shared_ptr<Resolver> resolver;
   std::vector<std::string> captured_inputs;
   std::unordered_map<std::string, std::string> error_messages;
   Block* b;
@@ -319,10 +319,6 @@ struct Environment {
     auto retval = createCapturedInputIfNeeded(range, ident);
 
     if(!retval) {
-      retval = resolver(ident, method, range);
-    }
-
-    if(!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
         {"print", std::make_shared<PrintValue>()},
         {"float", std::make_shared<CastValue>(FloatType::get())},
@@ -335,6 +331,10 @@ struct Environment {
       auto it = globals.find(ident);
       if(it != globals.end())
         retval = it->second;
+    }
+
+    if(!retval) {
+      retval = (*resolver)(ident, method, range);
     }
 
     if (!retval && required) {
@@ -804,14 +804,12 @@ inline bool isSupportedListElementType(TypePtr type) {
 struct to_ir {
   to_ir(
       Def def,
-      FunctionTable& function_table,
-      const Resolver& resolver,
+      std::shared_ptr<Resolver> resolver,
       SugaredValuePtr self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
       , def(def)
-      , function_table(function_table)
       , resolver(resolver)
       , environment_stack(nullptr) {
     pushFrame(graph->block());
@@ -911,8 +909,7 @@ private:
   Method& method;
   std::shared_ptr<Graph> graph;
   Def def;
-  FunctionTable& function_table;
-  const Resolver& resolver;
+  std::shared_ptr<Resolver> resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
 
@@ -1488,23 +1485,13 @@ private:
     return getValues(trees.tree()->trees(), maybe_unpack);
   }
 
-  // special rules apply when we directly call foo(a,b) when foo is an ident
-  std::shared_ptr<SugaredValue> emitApplyIdent(Ident ident, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
-    auto it = function_table.find(ident.name());
-    if (it != function_table.end()) {
-      return std::make_shared<SimpleValue>(packOutputs(*graph, method.emit_call_to(ident.range(), it->second, inputs, attributes)));
-    }
-    if(auto result = emitBuiltinCall(ident.range(), *method.graph(), Symbol::aten(ident.name()), inputs, attributes, false)) {
-      return std::make_shared<SimpleValue>(result);
-    }
-    // it wasn't known built in, so treat it like standard apply
-    return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, n_binders);
-  }
-
-  std::shared_ptr<SugaredValue> emitApplyExpr(Expr callee, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
-    // otherwise we evaluate the callee and then desugar it
-    auto sv = emitSugaredExpr(callee, 1);
-    return sv->call(callee.range(), method, inputs, attributes, n_binders);
+  std::shared_ptr<SugaredValue> emitApplyExpr(Apply &apply, size_t n_binders) {
+    auto sv = emitSugaredExpr(apply.callee(), 1);
+    auto inputs = getNamedValues(apply.inputs(), true);
+    auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
+      return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
+    });
+    return sv->call(apply.callee().range(), method, inputs, attributes, n_binders);
   }
 
   Value* emitExpr(Expr tree) {
@@ -1537,15 +1524,7 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        auto inputs = getNamedValues(apply.inputs(), true);
-        auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
-          return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value()));
-        });
-        // the apply is directly an identifier 'foo'
-        if(apply.callee().kind() == TK_VAR) {
-          return emitApplyIdent(Var(apply.callee()).name(), inputs, attributes, n_binders);
-        }
-        return emitApplyExpr(apply.callee(), inputs, attributes, n_binders);
+        return emitApplyExpr(apply, n_binders);
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
@@ -1872,13 +1851,6 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, con
       Symbol::aten(field), NamedValue(loc, "self", value));
 }
 
-std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc) {
-  if (name == "torch") {
-    return std::make_shared<BuiltinModule>(name);
-  }
-  return nullptr;
-}
-
 std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs) {
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
@@ -1901,29 +1873,58 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
-  FunctionTable table;
+struct FunctionValue : public SugaredValue {
+  FunctionValue(Method &method) : method(method) {}
+
+  virtual std::string kind() const override {
+    return "function";
+  }
+
+  // call it like a function, e.g. `outputs = this(inputs)`
+  virtual std::shared_ptr<SugaredValue> call(
+      SourceRange loc,
+      Method & caller,
+      // note: names for args will be 'argument 0', 'argument 1', etc..
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) {
+    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
+  }
+
+  virtual ~FunctionValue() {}
+private:
+  Method &method;
+};
+
+void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<std::shared_ptr<Resolver>>& resolvers, SugaredValuePtr self) {
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
   for(Def def : definitions) {
     const std::string& name = def.name().name();
-    Resolver resolver = *resolver_it++;
-    auto creator = [def, &table, resolver, self](Method& method) {
-      to_ir(def, table, resolver, self,  method);
+    auto resolver = *resolver_it++;
+    auto creator = [def, resolver, self](Method& method) {
+      to_ir(def, resolver, self,  method);
     };
     Method& method = m.create_method(name, creator);
     // if self is defined, then these are methods and do not go into the global namespace
     // otherwise, they get defined together so we add them to the function table
     // so the methods can see each other
     if(!self) {
-      auto result = table.emplace(name, method);
-      JIT_ASSERT(result.second);
+      for (auto r : resolvers) {
+        r->addEntry(name, std::make_shared<FunctionValue>(method));
+      }
     }
     methods.push_back(&method);
   }
   for(Method* method : methods) {
     method->ensure_defined();
+  }
+  // Method& references stored in the Resolvers are now stale and will go out of scope.
+  // NOTE: this is actually pessimistic. Technically we can resolve functions if we
+  // call defineMethodsInModule on the same m again.
+  for (auto r : resolvers) {
+    r->clear();
   }
 }
 
@@ -2032,10 +2033,10 @@ FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
     return FunctionSchema(name, args, returns, false, is_varret);
 }
 
-void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::string& source, const std::shared_ptr<Resolver> resolver, SugaredValuePtr self) {
   Parser p(source);
   std::vector<Def> definitions;
-  std::vector<Resolver> resolvers;
+  std::vector<std::shared_ptr<Resolver>> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
     definitions.push_back(def);
@@ -2044,7 +2045,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   defineMethodsInModule(m, definitions, resolvers, self);
 }
 
-std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
+std::shared_ptr<Graph> compileFunction(Def def, const std::shared_ptr<Resolver> resolver) {
   Module m;
   defineMethodsInModule(m, {def}, {resolver}, nullptr);
   return m.get_method(def.name().name()).graph();
