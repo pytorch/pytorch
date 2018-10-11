@@ -431,6 +431,56 @@ void run(InterpreterState & interp, const std::vector<at::Tensor> & inputs, std:
   }
 }
 
+void testGraphEquality() {
+  {
+    // Two trivially equal graphs
+    const auto a = build_lstm();
+    const auto b = build_lstm();
+    ASSERT_TRUE(a->equals(b));
+  }
+  {
+    // Two trivially non-equal graphs
+    const auto a = build_lstm();
+    auto b = std::make_shared<Graph>();
+    b->addInput()->setType(IntType::get());
+    b->insertConstant(5);
+    ASSERT_FALSE(a->equals(b));
+  }
+  {
+    auto a = std::make_shared<Graph>();
+    auto b = std::make_shared<Graph>();
+    a->insertConstant(5);
+    b->insertConstant(5);
+    ASSERT_TRUE(a->equals(b));
+
+    // Check that mutation will make the graph unequal
+    a->insertConstant("foo");
+    ASSERT_FALSE(a->equals(b));
+  }
+  {
+    // Check arguments with different types are not considered equivalent
+    auto a = std::make_shared<Graph>();
+    auto b = std::make_shared<Graph>();
+    a->addInput()->setType(IntType::get());
+    b->addInput()->setType(DynamicType::get());
+    ASSERT_FALSE(a->equals(b));
+  }
+  {
+    // Check nodes with different kinds but the same arguments
+    auto a = std::make_shared<Graph>();
+    auto b = std::make_shared<Graph>();
+
+    auto aInput1 = a->addInput()->setType(DynamicType::get());
+    auto aInput2 = a->addInput()->setType(DynamicType::get());
+    a->insertNode(a->create(aten::add, {aInput1, aInput2}));
+
+    auto bInput1 = b->addInput()->setType(DynamicType::get());
+    auto bInput2 = b->addInput()->setType(DynamicType::get());
+    b->insertNode(b->create(aten::sub, {bInput1, bInput2}));
+    ASSERT_FALSE(a->equals(b));
+  }
+}
+
 void testInterp() {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;

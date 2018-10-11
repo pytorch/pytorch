@@ -23,6 +23,44 @@ static inline const char * toString(AttributeKind kind) {
   return names[int(kind)];
 }
 
+// Helper template for equality comparison, since at::Tensor doesn't behave like
+// a regular type.
+namespace detail {
+template <typename T>
+inline bool equal(const T& a, const T& b) {
+  return a == b;
+}
+
+template <>
+inline bool equal(const at::Tensor& a, const at::Tensor& b) {
+  return a.equal(b);
+}
+template <>
+inline bool equal(
+    const std::vector<at::Tensor>& a,
+    const std::vector<at::Tensor>& b) {
+  return a.size() == b.size() &&
+      std::equal(
+             a.cbegin(),
+             a.cend(),
+             b.cbegin(),
+             [](const at::Tensor& a, const at::Tensor& b) {
+               return a.equal(b);
+             });
+}
+
+// TODO(suo). This hack is necessary because torch.clamp uses `nan` to represent
+// undefined values. Once the schema supports optional types, we can remove
+// this.
+template <>
+inline bool equal(const double& a, const double& b) {
+  if (std::isnan(a) && std::isnan(b)) {
+    return true;
+  }
+  return a == b;
+}
+}
+
 struct AttributeValue {
   AttributeValue(Symbol name)
   : name(name) {}
@@ -30,55 +68,47 @@ struct AttributeValue {
   Symbol name;
   virtual AttributeKind kind() const = 0;
   virtual Ptr clone() const = 0;
+  virtual bool operator==(const AttributeValue& rhs) const = 0;
   virtual ~AttributeValue() = default;
 };
 
 template<typename T, AttributeKind Kind>
-struct ScalarAttributeValue : public AttributeValue {
+struct AttributeValueImpl : public AttributeValue {
   using ConstructorType = T;
   using ValueType = T;
-  ScalarAttributeValue(Symbol name, ConstructorType value_)
+  AttributeValueImpl(Symbol name, ConstructorType value_)
   : AttributeValue(name), value_(std::move(value_)) {}
   ValueType & value() {
     return value_;
   }
   Ptr clone() const override {
-    return Ptr(new ScalarAttributeValue(name, value_));
+    return Ptr(new AttributeValueImpl(name, value_));
   }
   AttributeKind kind() const override { return Kind; }
+
+  bool operator==(const AttributeValue& rhs) const override {
+    const auto casted = dynamic_cast<const AttributeValueImpl<T, Kind>*>(&rhs);
+    if (casted == nullptr) {
+      return false;
+    }
+    return name == casted->name && detail::equal(value_, casted->value_);
+  }
+
 private:
   ValueType value_;
 };
 
-template<typename T, AttributeKind Kind>
-struct VectorAttributeValue : public AttributeValue {
-  using ConstructorType = std::vector<T>;
-  using ValueType = std::vector<T>;
-  VectorAttributeValue(Symbol name, ConstructorType value_)
-  : AttributeValue(name), value_(std::move(value_)) {}
-  ValueType & value() {
-    return value_;
-  }
-  AttributeKind kind() const override { return Kind; }
-  std::unique_ptr<AttributeValue> clone() const override {
-    auto copy = value_;
-    return Ptr(new VectorAttributeValue(name, std::move(copy)));
-  }
-private:
-  ValueType value_;
-};
-
-using FloatAttr = ScalarAttributeValue<double,AttributeKind::f>;
-using FloatsAttr = VectorAttributeValue<double,AttributeKind::fs>;
-using IntAttr = ScalarAttributeValue<int64_t,AttributeKind::i>;
-using IntsAttr = VectorAttributeValue<int64_t,AttributeKind::is>;
-using StringAttr = ScalarAttributeValue<std::string,AttributeKind::s>;
-using StringsAttr = VectorAttributeValue<std::string,AttributeKind::ss>;
-using TensorAttr = ScalarAttributeValue<at::Tensor,AttributeKind::t>;
-using TensorsAttr = VectorAttributeValue<at::Tensor,AttributeKind::ts>;
+using FloatAttr = AttributeValueImpl<double,AttributeKind::f>;
+using FloatsAttr = AttributeValueImpl<std::vector<double>,AttributeKind::fs>;
+using IntAttr = AttributeValueImpl<int64_t,AttributeKind::i>;
+using IntsAttr = AttributeValueImpl<std::vector<int64_t>,AttributeKind::is>;
+using StringAttr = AttributeValueImpl<std::string,AttributeKind::s>;
+using StringsAttr = AttributeValueImpl<std::vector<std::string>,AttributeKind::ss>;
+using TensorAttr = AttributeValueImpl<at::Tensor,AttributeKind::t>;
+using TensorsAttr = AttributeValueImpl<std::vector<at::Tensor>,AttributeKind::ts>;
 struct Graph;
-using GraphAttr = ScalarAttributeValue<std::shared_ptr<Graph>,AttributeKind::g>;
-using GraphsAttr = VectorAttributeValue<std::shared_ptr<Graph>,AttributeKind::gs>;
+using GraphAttr = AttributeValueImpl<std::shared_ptr<Graph>,AttributeKind::g>;
+using GraphsAttr = AttributeValueImpl<std::vector<std::shared_ptr<Graph>>,AttributeKind::gs>;
 
 struct AttributeError : public std::exception {
   AttributeError(Symbol name, bool defined) {
@@ -145,6 +175,16 @@ struct Attributes {
   }
   size_t numAttributes() const {
     return values_.size();
+  }
+  bool attributesEqual(const Attributes& rhs) const {
+    return values_.size() == rhs.values_.size() &&
+        std::equal(
+               values_.cbegin(),
+               values_.cend(),
+               rhs.values_.cbegin(),
+               [](const AVPtr& a, const AVPtr& b) {
+                 return *a == *b;
+               });
   }
   // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {

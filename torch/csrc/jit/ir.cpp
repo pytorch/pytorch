@@ -461,6 +461,96 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   }
 }
 
+bool Value::equals(const Value* other) const {
+  return *this->type_ == *other->type_;
+}
+
+// Equivalent to C++14's std::equal on two ranges.
+template <typename T>
+static bool equal(
+    const at::ArrayRef<T> a,
+    const at::ArrayRef<T> b,
+    std::function<bool(T, T)> predicate) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+
+  return std::equal(a.cbegin(), a.cend(), b.cbegin(), predicate);
+}
+
+bool Block::equals(
+    const Block* other,
+    std::unordered_map<const Value*, const Value*>& selfToOther) const {
+  // Define some lambdas to perform equivalence checking.
+  const std::function<bool(const Value*, const Value*)> checkValuesMatch =
+      [&](const Value* a, const Value* b) { return selfToOther.at(a) == b; };
+
+  const std::function<bool(const Value*, const Value*)> matchValues =
+      [&](const Value* a, const Value* b) {
+        if (!a->equals(b)) {
+          return false;
+        }
+        selfToOther[a] = b;
+        return true;
+      };
+
+  const std::function<bool(const Block*, const Block*)> matchBlocks =
+      [&](const Block* a, const Block* b) { return a->equals(b, selfToOther); };
+
+  // Map graph inputs to each other
+  if (!equal(this->inputs(), other->inputs(), matchValues)) {
+    return false;
+  }
+
+  // For each node in the graph...
+  auto otherIter = other->nodes().begin();
+  for (auto selfNode : this->nodes()) {
+    if (otherIter == other->nodes().end()) {
+      // otherNodes.size() < selfNodes.size()
+      return false;
+    }
+
+    auto otherNode = *otherIter;
+    // Check the node type is the same
+    if (selfNode->kind() != otherNode->kind()) {
+      return false;
+    }
+
+    // Check that node inputs are equivalent
+    if (!equal(selfNode->inputs(), otherNode->inputs(), checkValuesMatch)) {
+      return false;
+    }
+
+    // Check blocks are equivalent
+    if (!equal(selfNode->blocks(), otherNode->blocks(), matchBlocks)) {
+      return false;
+    }
+
+    // Check attributes are equivalent
+    if (!selfNode->attributesEqual(*otherNode)) {
+      return false;
+    }
+
+    // Map outputs to each other
+    if (!equal(selfNode->outputs(), otherNode->outputs(), matchValues)) {
+      return false;
+    }
+
+    ++otherIter;
+  }
+
+  if (otherIter != other->nodes().end()) {
+    // otherNodes.size() > selfNodes.size()
+    return false;
+  }
+
+  // Check outputs are equivalent
+  if (!equal(this->outputs(), other->outputs(), checkValuesMatch)) {
+    return false;
+  }
+  return true;
+}
+
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value* v) -> Value* {
@@ -468,6 +558,10 @@ std::shared_ptr<Graph> Graph::copy() {
         "Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
+
+#ifndef NDEBUG
+  JIT_ASSERT(this->equals(new_g));
+#endif
   return new_g;
 }
 
