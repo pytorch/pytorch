@@ -383,7 +383,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 /// NOTE [ Autograd View Variables ]
 ///
 /// Many operations return Variable that shares storage with an input Variable.
-/// The returned Varaible is called a **view** Variable on the input **base**
+/// The returned Variable is called a **view** Variable on the input **base**
 /// Variable.
 ///
 /// In PyTorch, we have two types of views: differentiable views, and
@@ -401,7 +401,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 /// track the view relation because future in-place ops may require back-proping
 /// through it. For example, we need to support
 ///
-///   (1) in-place operation on view like
+///   (1) in-place operation on view, e.g.,
 ///
 ///     # Have:
 ///     #   base.requires_grad = False
@@ -409,7 +409,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 ///     base[1] = var  # i.e., base[1].copy_(var)
 ///     torch.autograd.grad(base.sum(), var)  <- should return an all ones tensor
 ///
-///   (2) in-place operation on base after view is created like
+///   (2) in-place operation on base after view is created, e.g.,
 ///
 ///     # Have:
 ///     #   base.requires_grad = False
@@ -440,7 +440,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 /// Variables.
 /// Some examples are:
 ///   1. Views created from .detach(),
-///   2. Views created when GradMode::enabled() = false.
+///   2. Views created when GradMode::is_enabled() = false.
 /// These are called non-differentiable views as the gradients do not flow
 /// through the view relation.
 /// Relevant logic for non-differentiable views is implemented in
