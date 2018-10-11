@@ -190,6 +190,7 @@ goto:eof
                   -DUSE_LEVELDB=%USE_LEVELDB% ^
                   -DUSE_LMDB=%USE_LMDB% ^
                   -DUSE_OPENCV=%USE_OPENCV% ^
+                  -DUSE_FFMPEG=%USE_FFMPEG% ^
                   -DUSE_GLOG=OFF ^
                   -DUSE_GFLAGS=OFF ^
                   -DUSE_SYSTEM_EIGEN_INSTALL=OFF ^
