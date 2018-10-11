@@ -8,6 +8,7 @@ from ..parameter import Parameter
 import torch.utils.hooks as hooks
 from torch.autograd._functions import Noop
 
+
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
     # don't do anything for single-line stuff
@@ -19,24 +20,27 @@ def _addindent(s_, numSpaces):
     s = first + '\n' + s
     return s
 
+
 def _check_same_shape(base, new, caller_name):
     if not isinstance(base, tuple):
         base = (base,)
         new = (new,)
     if type(base) != type(new):
         raise RuntimeError("{} returned invalid type {} "
-            "expected {}".format(caller_name, type(new).__name__, type(base).__name__))
+                           "expected {}".format(caller_name, type(new).__name__, type(base).__name__))
     if not len(base) == len(new):
         raise RuntimeError("{} return an incorrect number of "
-            "results {}, expected {}".format(caller_name, len(new), len(base)))
+                           "results {}, expected {}".format(caller_name, len(new), len(base)))
     for arg_index, (base_el, new_el) in enumerate(zip(base, new)):
         if type(base_el) != type(new_el):
             raise RuntimeError("{} returned invalid type for element {}: {}"
-                ", expected {}".format(caller_name, arg_index, type(new_el).__name__, type(base_el).__name__))
+                               ", expected {}".format(caller_name, arg_index, type(new_el).__name__,
+                                                      type(base_el).__name__))
         if torch.is_tensor(base_el) and not base_el.size() == new_el.size():
             raise RuntimeError("{} returned invalid size for element {}:"
-                " expected {} got {}".format(caller_name,
-                    arg_index, base_el.size(), new_el.size()))
+                               " expected {} got {}".format(caller_name, arg_index, base_el.size(),
+                                                            new_el.size()))
+
 
 def _get_prev_function(var):
     while not isinstance(var, torch.Tensor):
@@ -45,6 +49,7 @@ def _get_prev_function(var):
         else:
             var = var[0]
     return var.grad_fn
+
 
 def _ensure_tuple(obj):
     if isinstance(obj, tuple):
@@ -508,8 +513,8 @@ class Module(object):
         for i, element in enumerate(args):
             if not torch.is_tensor(element):
                 raise RuntimeError("Backward hooks on nn.Module only works for Modules"
-                " that only use Tensors and the {}th {} of {} is of type {}"
-                "".format(i, position, self.__class__.__name__, type(element).__name__))
+                                   " that only use Tensors and the {}th {} of {} is of type {}"
+                                   "".format(i, position, self.__class__.__name__, type(element).__name__))
 
     def _get_backward_hooks(self):
         backward_hooks = []

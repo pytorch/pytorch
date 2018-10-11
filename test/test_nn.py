@@ -667,6 +667,7 @@ class TestNN(NNTestCase):
 
     def test_hook_fail(self):
         module = nn.Sigmoid()
+
         class ModuleMoreArgs(nn.Module):
             def forward(self, arg1, arg2):
                 return arg1.clone(), arg2.clone()
@@ -743,10 +744,10 @@ class TestNN(NNTestCase):
             return tuple(gi * 2 for gi in grad_input)
 
         def fw_pre_hook(module, input):
-            return (3*input[0],)
+            return (3 * input[0],)
 
         def fw_hook(module, input, output):
-            return 2*output
+            return 2 * output
 
         with module.register_backward_hook(bw_hook):
             module(input).backward(torch.ones(5, 5))
@@ -758,11 +759,10 @@ class TestNN(NNTestCase):
             out = module(input)
             self.assertEqual(out, expected_out * 2)
 
-        expected_out = module(3*input)
+        expected_out = module(3 * input)
         with module.register_forward_pre_hook(fw_pre_hook):
             out = module(input)
             self.assertEqual(out, expected_out)
-
 
     def test_to(self):
         m = nn.Linear(3, 5)
@@ -940,6 +940,7 @@ class TestNN(NNTestCase):
         def pre_fw_hook(mod, inp):
             mod.pre_fw_hook = True
             return inp
+
         def fw_hook(mod, inp, ouput):
             mod.fw_hook = True
             return ouput

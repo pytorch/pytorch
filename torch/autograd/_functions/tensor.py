@@ -30,6 +30,7 @@ class Noop(Function):
     def backward(ctx, *grad_outputs):
         return Noop.apply(*grad_outputs)
 
+
 # TODO: deprecate this
 class Resize(Function):
 
