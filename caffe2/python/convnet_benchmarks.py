@@ -587,7 +587,8 @@ def Resnet50(args):
                                                  "data",
                                                  num_input_channels=3,
                                                  num_labels=num_labels,
-                                                 label="label", )
+                                                 label="label",
+                                                 no_bias=True, )
         prefix = model.net.Proto().name
         loss = model.net.Scale(loss, prefix + "_loss", scale=loss_scale)
         brew.accuracy(model, [softmax, "label"], prefix + "_accuracy")
