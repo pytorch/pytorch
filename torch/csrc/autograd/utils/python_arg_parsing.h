@@ -17,7 +17,7 @@ parse_to_conversion(PyObject *args, PyObject *kwargs) {
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return std::make_tuple(r.deviceOptional(0), r.scalartypeOptional(1), r.toBool(2), r.toBool(4));
+    return std::make_tuple(r.deviceOptional(0), r.scalartypeOptional(1), r.toBool(2), r.toBool(3));
   } else if (r.idx == 1) {
     return std::make_tuple(at::nullopt, r.scalartype(0), r.toBool(1), r.toBool(2));
   } else {
