@@ -331,7 +331,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
             elif dispatch_type == 'const Device &':
-                dispatch_type = 'at::optional<int32_t>'
+                dispatch_type = 'c10::optional<int32_t>'
             formal = '{} {}'.format(dispatch_type, name)
             return expr, formal
 

@@ -176,6 +176,7 @@ function build() {
 		       -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
 		       -DTH_LIB_PATH="$INSTALL_DIR/lib" \
 		       -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
+		       -DC10_LIBRARIES="$INSTALL_DIR/lib/libc10$LD_POSTFIX" \
 		       -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
 		       -DCAFFE2_STATIC_LINK_CUDA=$CAFFE2_STATIC_LINK_CUDA \
 		       -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \

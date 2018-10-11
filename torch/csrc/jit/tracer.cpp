@@ -28,7 +28,10 @@ void genericAddInput(Node *n, T value) {
 
 template<typename T>
 void badArgType(const T& v) {
-  AT_ERROR("Found an unsupported argument type in the JIT tracer: ", at::demangle_type<T>(), ". File a bug report.");
+  AT_ERROR(
+      "Found an unsupported argument type in the JIT tracer: ",
+      c10::demangle_type<T>(),
+      ". File a bug report.");
 }
 
 thread_local std::shared_ptr<TracingState> tracing_state;
@@ -187,7 +190,9 @@ void setRecordSourceLocation(void (*v)(Node*)) {
   record_source_location.store(v);
 }
 
-void defaultWarn(const std::string& str) { AT_WARN(str); }
+void defaultWarn(const std::string& str) {
+  AT_WARN(str);
+}
 std::atomic<warn_fn_type> warn_callback { defaultWarn };
 
 const char * WARN_PYTHON_DATAFLOW =

@@ -1,6 +1,6 @@
 #include <ATen/core/OptionsGuard.h>
-#include <ATen/core/optional.h>
 #include <ATen/core/Layout.h>
+#include "c10/util/Optional.h"
 
 namespace at {
 

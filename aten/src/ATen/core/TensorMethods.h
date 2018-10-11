@@ -42,7 +42,7 @@ inline TensorOptions Tensor::options() const {
 }
 
 inline void Tensor::backward(
-    at::optional<Tensor> gradient,
+    c10::optional<Tensor> gradient,
     bool keep_graph,
     bool create_graph) {
   type().backward(*this, std::move(gradient), keep_graph, create_graph);

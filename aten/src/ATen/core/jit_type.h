@@ -780,7 +780,7 @@ TypePtr getTypePtr() {
 #define TYPE_STR(Type) #Type, " ",
   AT_ERROR(
       "Type ",
-      at::demangle_type<T>(),
+      c10::demangle_type<T>(),
       " could not be converted to any of the known types { ",
       TH_FORALL_TYPES(TYPE_STR) "}");
 #undef TYPE_STR
