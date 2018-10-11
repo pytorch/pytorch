@@ -1202,17 +1202,17 @@ inline std::vector<Tensor> Tensor::unbind(int64_t dim) const {
 inline int64_t Tensor::get_device() const {
     return type().get_device(*this);
 }
-inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking) const {
-    return type().to(*this, device, dtype, non_blocking);
+inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking, bool copy) const {
+    return type().to(*this, device, dtype, non_blocking, copy);
 }
-inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) const {
-    return type().to(*this, dtype, non_blocking);
+inline Tensor Tensor::to(ScalarType dtype, bool non_blocking, bool copy) const {
+    return type().to(*this, dtype, non_blocking, copy);
 }
-inline Tensor Tensor::to(Device device, bool non_blocking) const {
-    return type().to(*this, device, non_blocking);
+inline Tensor Tensor::to(Device device, bool non_blocking, bool copy) const {
+    return type().to(*this, device, non_blocking, copy);
 }
-inline Tensor Tensor::to(const Tensor & other, bool non_blocking) const {
-    return type().to(*this, other, non_blocking);
+inline Tensor Tensor::to(const Tensor & other, bool non_blocking, bool copy) const {
+    return type().to(*this, other, non_blocking, copy);
 }
 inline Scalar Tensor::_local_scalar() const {
     return type()._local_scalar(*this);
