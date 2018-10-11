@@ -36,28 +36,33 @@ template <typename T> struct DynamicDAG;
 template <typename T> using vertex_list = std::vector<Vertex<T>*>;
 template <typename T> using unique_vertex = std::unique_ptr<Vertex<T>>;
 
-enum DFSDirection {forward, backward};
+enum class DFSDirection {forward, backward};
 
 // Used to represent adjacency lists in DynamicDAG.
-// NOT a multiset.
+// Has set semantics: stores distinct elements.
+//
 // Because our graphs shouldn't fan out or in very much,
 // we use std::vector<Vertex<T>*> to record edges.
 // In all of the complexity analysis it is assumed that
 // inserting, erasing, and finding take constant time.
 template <typename T>
-struct ordered_vertex_set {
+struct vertex_set {
   using iterator = typename vertex_list<T>::iterator;
   using reverse_iterator = typename vertex_list<T>::reverse_iterator;
 
-  void insert(Vertex<T>* v) {
-    data_.push_back(v);
+  // returns if we inserted v into the set.
+  bool insert(Vertex<T>* v) {
+    if (contains(v)) {
+      return false;
+    } else {
+      data_.push_back(v);
+      return true;
+    }
   }
   void erase(Vertex<T>* v) {
-    // NB: DynamicDAG does not have multiedges, so data_ has unique elements
     data_.erase(std::find(data_.begin(), data_.end(), v));
   }
   bool contains(Vertex<T>* v) const {
-    // NB: DynamicDAG does not have multiedges, so data_ has unique elements
     return std::find(data_.begin(), data_.end(), v) != data_.end();
   }
   void sort() {
@@ -77,8 +82,8 @@ struct ordered_vertex_set {
 
 template <typename T>
 struct IOEdges {
-  ordered_vertex_set<T> in_edges;
-  ordered_vertex_set<T> out_edges;
+  vertex_set<T> in_edges;
+  vertex_set<T> out_edges;
 };
 
 // Simple RAII wrapper around a vertex_list<T>.
@@ -113,8 +118,8 @@ struct Vertex {
   size_t ord; // unique topological index
 
   std::string toString();
-  ordered_vertex_set<T>& in_edges() { return edges_.in_edges; }
-  ordered_vertex_set<T>& out_edges() { return edges_.out_edges; }
+  vertex_set<T>& in_edges() { return edges_.in_edges; }
+  vertex_set<T>& out_edges() { return edges_.out_edges; }
   IOEdges<T>&& move_edges() { return std::move(edges_); }
 
   bool visited() { return visited_; }
@@ -292,7 +297,8 @@ IOEdges<T> DynamicDAG<T>::removeVertex(Vertex<T>* v) {
  *
  * 3) Merge the sorted ords: R = { 1, 2, 3, 4, 5, 6 }.
  *
- * 4) Reassign the vertices with the sorted ords.
+ * 4) Reassign the vertices in L in order with the sorted ords.
+ * We always use the vertices in deltaB, then deltaF, in that order.
  * L = { c(1), d(2), x(3), y(4) a(5), b(6) }
  *
  * This produces th graph shown on the right.
@@ -311,11 +317,11 @@ template <typename T>
 void DynamicDAG<T>::addEdge(Vertex<T>* producer, Vertex<T>* consumer) {
   JIT_ASSERT(producer != consumer);
 
-  // NB: DynamicDAG is a simple graph
-  if (producer->out_edges().contains(consumer)) return;
-
-  producer->out_edges().insert(consumer);
-  consumer->in_edges().insert(producer);
+  // NB: DynamicDAG is a simple graph. If an edge exists already, don't do anything.
+  bool is_distinct = producer->out_edges().insert(consumer);
+  if (!is_distinct) return;
+  is_distinct = consumer->in_edges().insert(producer);
+  JIT_ASSERT(is_distinct);
 
   if (producer->ord <= consumer->ord) {
     // topological ordering is already consistent, no need to update.
@@ -462,7 +468,7 @@ bool DynamicDAG<T>::dfsSearch(
     auto* vertex = stack.back();
     stack.pop_back();
 
-    ordered_vertex_set<T>& next_edges = (direction == DFSDirection::forward) ?
+    auto& next_edges = (direction == DFSDirection::forward) ?
       vertex->out_edges() :
       vertex->in_edges();
 
