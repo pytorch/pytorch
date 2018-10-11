@@ -25,7 +25,7 @@ struct CopyBackwards : public Function {
 // When an in-place operation is done on a differentiable view, the base's
 // grad_fn is updated to become a `CopySlice` wrapping the backward of the
 // in-place operation.
-// See NOTE [ Autograd Variable Views ].
+// See NOTE [ Autograd View Variables ].
 struct CopySlices : public Function {
   CopySlices(
       const Variable& base_var,

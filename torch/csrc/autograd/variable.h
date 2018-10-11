@@ -64,7 +64,7 @@ struct Function;
 /// example, if you hide your code from autograd using `.no_grad()`, the
 /// `Variable`s will not be registered as having view relations, even if they
 /// share storage.
-/// See NOTE [ Autograd Variable Views ] for more details.
+/// See NOTE [ Autograd View Variables ] for more details.
 ///
 ///
 ///                               Interface
@@ -96,7 +96,7 @@ struct TORCH_API Variable : public at::Tensor {
   /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
   /// `is_differentiable` is a bool that specifies whether this view is
   /// differentiable, i.e., whether the relation should be tracked by autograd.
-  /// See NOTE [ Autograd Variable Views ] for details.
+  /// See NOTE [ Autograd View Variables ] for details.
   friend Variable make_variable_view(
       Variable base,
       at::Tensor data,
@@ -377,7 +377,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 //                     Variable::DifferentiableViewImpl
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// NOTE [ Autograd Variable Views ]
+/// NOTE [ Autograd View Variables ]
 ///
 /// Many operations return Variable that shares storage with an input Variable.
 /// The returned Varaible is called a **view** Variable on the input **base**
@@ -477,7 +477,7 @@ struct TORCH_API Variable::DifferentiableViewImpl : public Variable::Impl {
 // Factory Functions
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// See NOTE [ Autograd Variable Views ] for details.
+// See NOTE [ Autograd View Variables ] for details.
 inline Variable make_variable_view(
     Variable base,
     at::Tensor data,

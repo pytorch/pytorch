@@ -14,7 +14,7 @@ import yaml
 from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
-# See NOTE [ Autograd Variable Views ] in variable.h for details.
+# See NOTE [ Autograd View Variables ] in variable.h for details.
 VIEW_FUNCTIONS = {
     'alias', 'as_strided', 'diagonal', 'expand', 'narrow', 'permute', 'select', 'slice',
     'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view', 'unbind',

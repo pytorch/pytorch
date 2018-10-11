@@ -103,7 +103,7 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
   return out; // RVO
 }
 
-// See NOTE [ Autograd Variable Views ] for details.
+// See NOTE [ Autograd View Variables ] for details.
 inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable = true) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
@@ -112,7 +112,7 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
   return make_variable_view(std::move(base_var), std::move(tensor), is_differentiable);
 }
 
-// See NOTE [ Autograd Variable Views ] for details.
+// See NOTE [ Autograd View Variables ] for details.
 inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors,
                                    bool is_differentiable = true) {
   auto base_var = Variable(base);
