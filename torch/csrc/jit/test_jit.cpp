@@ -913,7 +913,7 @@ void testAddEdgeBasic() {
 
   JIT_ASSERT(b->in_edges().size() == 1);
   JIT_ASSERT(b->out_edges().size() == 1);
-  JIT_ASSERT((b->in_edges().contains(a));
+  JIT_ASSERT(b->in_edges().contains(a));
   JIT_ASSERT(b->out_edges().contains(c));
 
   JIT_ASSERT(c->in_edges().size() == 2);
