@@ -327,6 +327,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return std::make_shared<ModuleValue>(mod);
     }
   }
+
+  if (py::hasattr(obj, "_jit_script_module")) {
+    auto mod = py::cast<std::shared_ptr<Module>>(
+        py::getattr(obj, "_jit_script_module"));
+    return std::make_shared<ModuleValue>(mod);
+  }
+
   return std::make_shared<PythonValue>(obj);
 }
 
