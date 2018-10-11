@@ -190,23 +190,6 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
 // anticipating we will eventually need to replace Module with a py::object
 // holding the actual nn.Module class.
 
-// defines how a method obtained from a module behaves in script
-struct MethodValue : public SugaredValue {
-  MethodValue(std::shared_ptr<Module> module, Method& method)
-  : module(std::move(module)) //insurance that method stays alive
-  , method(method) {}
-  std::string kind() const override {
-    return "method";
-  }
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
-  }
-private:
-  std::shared_ptr<Module> module;
-  Method& method;
-
-};
-
 
 struct ModuleValue : public SugaredValue {
   ModuleValue(std::shared_ptr<Module> module)

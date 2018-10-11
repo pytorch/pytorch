@@ -1888,29 +1888,6 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-struct FunctionValue : public SugaredValue {
-  FunctionValue(Method &method) : method(method) {}
-
-  virtual std::string kind() const override {
-    return "function";
-  }
-
-  // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
-      Method & caller,
-      // note: names for args will be 'argument 0', 'argument 1', etc..
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) {
-    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
-  }
-
-  virtual ~FunctionValue() {}
-private:
-  Method &method;
-};
-
 void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<std::shared_ptr<Resolver>>& resolvers, SugaredValuePtr self) {
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
@@ -1927,7 +1904,7 @@ void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, cons
     // so the methods can see each other
     if(!self) {
       for (auto r : resolvers) {
-        r->addEntry(name, std::make_shared<FunctionValue>(method));
+        r->addEntry(name, std::make_shared<MethodValue>(nullptr, method));
       }
     }
     methods.push_back(&method);
