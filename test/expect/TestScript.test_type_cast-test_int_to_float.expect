@@ -1,5 +1,5 @@
 graph() {
   %b : float = prim::IntToFloat(2)
-  %3 : float = aten::add(%b, 1.0)
+  %3 : float = aten::add(%b, 1)
   return (%3);
 }

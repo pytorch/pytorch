@@ -4,6 +4,6 @@ graph(%0 : Double(2, 2, 2, 2)
       %3 : Double(2)
       %4 : Double(2)
       %5 : Long()) {
-  %10 : Double(2, 2, 2, 2) = aten::batch_norm(%0, %1, %2, %3, %4, True, 0.1, 1e-05, True), scope: BatchNorm2d
+  %10 : Double(2, 2, 2, 2) = aten::batch_norm(%0, %1, %2, %3, %4, 1, 0.1, 1e-05, 1), scope: BatchNorm2d
   return (%10);
 }

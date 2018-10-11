@@ -1,11 +1,11 @@
 graph() {
-  %b.3 : int = prim::Loop(2147483647, True, 0)
+  %b.3 : int = prim::Loop(2147483647, 1, 0)
     block0(%7 : int, %8 : int) {
-      -> (True, 1)
+      -> (1, 1)
     }
-  %b : int = prim::Loop(2147483647, False, %b.3)
+  %b : int = prim::Loop(2147483647, 0, %b.3)
     block0(%10 : int, %11 : int) {
-      -> (False, 2)
+      -> (0, 2)
     }
   return (%b);
 }

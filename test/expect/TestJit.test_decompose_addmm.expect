@@ -7,7 +7,7 @@ graph(%mat : Dynamic
   %10 : Dynamic = aten::add(%mat, %8, 1)
   %11 : Dynamic = aten::mm(%mat1, %mat2)
   %13 : Dynamic = aten::add(%mat, %11, 1)
-  %c : Dynamic = aten::addmm(%mat, %mat1, %mat2, 2.0, 4.2)
+  %c : Dynamic = aten::addmm(%mat, %mat1, %mat2, 2, 4.2)
   %15 : int = prim::TensorToNum(%alpha)
   %16 : int = prim::TensorToNum(%beta)
   %d : Dynamic = aten::addmm(%mat, %mat1, %mat2, %16, %15)

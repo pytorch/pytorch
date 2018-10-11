@@ -1,21 +1,21 @@
 graph(%t : Dynamic) {
-  %5 : bool = prim::If(False)
+  %5 : bool = prim::If(0)
     block0() {
       %6 : Dynamic = aten::select(%t, 0, 1)
       %7 : bool = prim::TensorToBool(%6)
       -> (%7)
     }
     block1() {
-      -> (False)
+      -> (0)
     }
   %8 : bool = prim::If(%5)
     block0() {
       -> (%5)
     }
     block1() {
-      %9 : bool = prim::If(True)
+      %9 : bool = prim::If(1)
         block0() {
-          -> (True)
+          -> (1)
         }
         block1() {
           %10 : Dynamic = aten::select(%t, 0, 1)

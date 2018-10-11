@@ -1,6 +1,6 @@
 graph(%a : Dynamic) {
-   = prim::Print(%a, 'a
+   = prim::Print(%a, a
 	b
-', 2, 'aa')
+, 2, aa)
   return (%a);
 }

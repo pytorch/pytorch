@@ -1,11 +1,11 @@
 graph(%x : Dynamic) {
-  %y : int = prim::Loop(10, True, 0)
+  %y : int = prim::Loop(10, 1, 0)
     block0(%i : int, %6 : int) {
       %7 : int = prim::TensorToNum(%x)
       %10 : int = aten::floordiv(%7, 8)
       %12 : int = aten::mul(%10, 8)
       %13 : int = aten::sub(%7, %12)
-      %14 : Dynamic, %y.4 : int = prim::Loop(%10, True, 0, %6)
+      %14 : Dynamic, %y.4 : int = prim::Loop(%10, 1, 0, %6)
         block0(%j.1 : int, %17 : int, %18 : int) {
           %y.13 : int = aten::add(%18, %17)
           %21 : int = aten::add(%17, 1)
@@ -23,15 +23,15 @@ graph(%x : Dynamic) {
           %39 : int = aten::add(%36, 1)
           %y.12 : int = aten::add(%y.11, %39)
           %42 : int = aten::add(%39, 1)
-          -> (True, %42, %y.12)
+          -> (1, %42, %y.12)
         }
-      %43 : Dynamic, %y.3 : int = prim::Loop(%13, True, %14, %y.4)
+      %43 : Dynamic, %y.3 : int = prim::Loop(%13, 1, %14, %y.4)
         block0(%j : int, %46 : int, %47 : int) {
           %y.5 : int = aten::add(%47, %46)
           %50 : int = aten::add(%46, 1)
-          -> (True, %50, %y.5)
+          -> (1, %50, %y.5)
         }
-      -> (True, %y.3)
+      -> (1, %y.3)
     }
   return (%y);
 }

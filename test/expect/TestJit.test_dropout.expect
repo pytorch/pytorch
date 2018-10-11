@@ -1,4 +1,4 @@
 graph(%0 : Double(2, 2)) {
-  %3 : Double(2, 2) = aten::dropout(%0, 0.6, True), scope: Dropout
+  %3 : Double(2, 2) = aten::dropout(%0, 0.6, 1), scope: Dropout
   return (%3);
 }

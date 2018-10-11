@@ -3,7 +3,7 @@ graph(%0 : Double(100)
       %2 : Double(1, 1, 1, 4)) {
   %4 : int[] = prim::ListConstruct(4)
   %5 : Double(4) = aten::view(%2, %4)
-  %7 : Long(4) = aten::_cast_Long(%1, False)
+  %7 : Long(4) = aten::_cast_Long(%1, 0)
   %8 : Dynamic[] = prim::ListConstruct(%7)
   %9 : Double(100) = aten::index_put(%0, %8, %5)
   return (%9);

@@ -4,7 +4,7 @@ graph(%x.1_data : Dynamic
       %y_data : Dynamic
       %y_mask : Dynamic
       %y_dims : Dynamic) {
-  %x : Dynamic, %10 : Dynamic, %11 : Dynamic = prim::Loop(10, True, %x.1_data, %x.1_mask, %x.1_dims)
+  %x : Dynamic, %10 : Dynamic, %11 : Dynamic = prim::Loop(10, 1, %x.1_data, %x.1_mask, %x.1_dims)
     block0(%loop_num : int, %5_data : Dynamic, %5_mask : Dynamic, %5_dims : Dynamic) {
       %16 : Long() = prim::NumToTensor(1)
       %alpha : float = prim::TensorToNum(%16)
@@ -12,7 +12,7 @@ graph(%x.1_data : Dynamic
       %mask : Dynamic = aten::mul(%5_mask, %y_mask)
       %dims : Dynamic = aten::__or__(%5_dims, %y_dims)
       %data : Dynamic = aten::where(%mask, %data.1, %5_data)
-      -> (True, %data, %mask, %dims)
+      -> (1, %data, %mask, %dims)
     }
   return (%x, %10, %11);
 }

@@ -26,11 +26,11 @@ graph(%a.1_data : Dynamic
     block0() {
       %31 : int = aten::dim(%data.1)
       %32 : int = aten::sub(%31, 1)
-      %data.3 : Dynamic = prim::Loop(%32, True, %cond_mask.1)
+      %data.3 : Dynamic = prim::Loop(%32, 1, %cond_mask.1)
         block0(%_ : int, %35 : Dynamic) {
           %36 : int = aten::dim(%35)
           %data.2 : Dynamic = aten::unsqueeze(%35, %36)
-          -> (True, %data.2)
+          -> (1, %data.2)
         }
       %cond_data.1 : Dynamic = aten::expand_as(%data.3, %data.1)
       %cond_mask.2 : Dynamic = aten::expand_as(%data.3, %mask.1)

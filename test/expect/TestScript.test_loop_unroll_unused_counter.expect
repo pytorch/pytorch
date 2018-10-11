@@ -3,7 +3,7 @@ graph(%x : Dynamic) {
   %6 : int = aten::floordiv(%4, 8)
   %8 : int = aten::mul(%6, 8)
   %9 : int = aten::sub(%4, %8)
-  %y.3 : int = prim::Loop(%6, True, 0)
+  %y.3 : int = prim::Loop(%6, 1, 0)
     block0(%i.1 : int, %12 : int) {
       %y.12 : int = aten::add(%12, 1)
       %y.5 : int = aten::add(%y.12, 1)
@@ -13,12 +13,12 @@ graph(%x : Dynamic) {
       %y.9 : int = aten::add(%y.8, 1)
       %y.10 : int = aten::add(%y.9, 1)
       %y.11 : int = aten::add(%y.10, 1)
-      -> (True, %y.11)
+      -> (1, %y.11)
     }
-  %y : int = prim::Loop(%9, True, %y.3)
+  %y : int = prim::Loop(%9, 1, %y.3)
     block0(%i : int, %23 : int) {
       %y.4 : int = aten::add(%23, 1)
-      -> (True, %y.4)
+      -> (1, %y.4)
     }
   return (%y);
 }

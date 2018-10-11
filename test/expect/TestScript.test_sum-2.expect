@@ -1,5 +1,5 @@
 graph(%x : Double(*, *, *, *, *)) {
   %3 : int[] = prim::ListConstruct(4)
-  %4 : Dynamic = aten::sum(%x, %3, False)
+  %4 : Dynamic = aten::sum(%x, %3, 0)
   return (%4);
 }

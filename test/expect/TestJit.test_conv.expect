@@ -5,6 +5,6 @@ graph(%0 : Double(20, 16, 50, 40)
   %8 : int[] = prim::ListConstruct(0, 0), scope: Conv2d
   %11 : int[] = prim::ListConstruct(1, 1), scope: Conv2d
   %15 : int[] = prim::ListConstruct(0, 0), scope: Conv2d
-  %20 : Double(20, 13, 48, 38) = aten::_convolution(%0, %1, %2, %5, %8, %11, False, %15, 1, False, False, True), scope: Conv2d
+  %20 : Double(20, 13, 48, 38) = aten::_convolution(%0, %1, %2, %5, %8, %11, 0, %15, 1, 0, 0, 1), scope: Conv2d
   return (%20);
 }

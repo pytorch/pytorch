@@ -3,9 +3,7 @@ graph(%x : Float(*, *)) {
   return (%1);
 }
 with prim::FusionGroup_0 = graph(%0 : Float(*, *)) {
-  %z : float = prim::Constant[value=3]()
-  %2 : int = prim::Constant[value=1]()
-  %y : Float(*, *) = aten::add(%0, %z, %2)
+  %y : Float(*, *) = aten::add(%0, 3, 1)
   %4 : Float(*, *) = aten::mul(%0, %y)
   return (%4);
 }
