@@ -47,6 +47,9 @@ _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 compiled_weak_fns = weakref.WeakKeyDictionary()
+weak_script_methods = dict()
+# weak_script_methods = weakref.WeakKeyDictionary()
+weak_modules = weakref.WeakKeyDictionary()
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -701,6 +704,14 @@ def script_method(fn):
     return ScriptMethodStub(rcb, ast, fn)
 
 
+def weak_script_method(fn):
+    # weak_script_methods[fn] = True
+    weak_script_methods[fn.__qualname__] = {
+        "fn": fn
+    }
+    return fn
+
+
 def batch(batch_size=1, optimize=True, _frames_up=0):
     def decorator(fn):
         if not _enabled:
@@ -907,9 +918,15 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             # run this once, before the most-derived __init__ is called
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
+            other = False
+            stubs = methods
+            if 'new_stubs' in kwargs:
+                other = True
+                stubs = kwargs['new_stubs']
+                del kwargs['new_stubs']
             original_init(self, *args, **kwargs)
-            defs = [m.def_ for m in methods]
-            rcbs = [m.resolution_callback for m in methods]
+            defs = [m.def_ for m in stubs]
+            rcbs = [m.resolution_callback for m in stubs]
             self._create_methods(defs, rcbs)
 
         cls.__init__ = init_then_register
@@ -1051,9 +1068,13 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
+                if isinstance(value, Module) and weak_modules.get(value.__class__) is not None:
+                    # Weak script module
+                    _make_strong(value)
                 return super(ScriptModule, self).__setattr__(attr, value)
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
+
             if isinstance(value, ModuleList):
                 # special case for list of modules. Modules need to be registered with their
                 # parent module. To do this, we create a ConstModuleList, which is itself a module, that
@@ -1079,8 +1100,41 @@ if _enabled:
             # we add 1 to get to the proper surrounding scope.
             rcb = createResolutionCallback(frames_up=1)
             self._define(lang, rcb, True)
+
+    class WeakScriptModuleProxy(ScriptModule):
+        def __init__(self, original):
+            WeakScriptModuleProxy.__setattr__ = object.__setattr__
+            self._original_methods = {}
+            methods = []
+            original.__class__._jit_script_module = self
+            for item in dir(original):
+                func = getattr(original, item)
+                if not callable(func) or not isinstance(func, types.MethodType):
+                    continue
+                if func.__qualname__ in weak_script_methods:
+                    fn = weak_script_methods[func.__qualname__]["fn"]
+                    stub = script_method(fn)
+                    methods.append(stub)
+
+            original_init = getattr(original, '__init__', lambda self: None)
+
+            del WeakScriptModuleProxy.__setattr__
+
+            super(WeakScriptModuleProxy, self).__init__(new_stubs=methods)
+
 else:
     ScriptModule = torch.nn.Module
+
+
+def weak_module(mod):
+    weak_modules[mod] = True
+    return mod
+
+
+def _make_strong(obj):
+    if hasattr(obj, "_jit_script_module"):
+        return obj._jit_script_module
+    obj._jit_script_module = WeakScriptModuleProxy(obj)
 
 
 def _get_methods(cls):
