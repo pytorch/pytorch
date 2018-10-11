@@ -13,7 +13,7 @@ message ParameterDef {
   optional bool keep_in_opt = 2;
 
   // tensor type parameter
-  caffe2.TensorProto tensor = 3;
+  optional caffe2.TensorProto tensor = 3;
   // objects other than tensors will be added here
 }
 
