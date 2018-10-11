@@ -7,8 +7,8 @@ docker_config_defaults: &docker_config_defaults
   user: jenkins
   aws_auth:
     # This IAM user only allows read-write access to ECR
-    aws_access_key_id: AKIAI43PKLK3PGLUWQMA
-    aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE}
+    aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V2}
+    aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V2}
 
 # NOTE: We only perform the merge in build step and not in test step, because
 # all source files will be shared from build to test
@@ -37,7 +37,7 @@ install_official_git_client: &install_official_git_client
   name: Install Official Git Client
   no_output_timeout: "1h"
   command: |
-    set -ex
+    set -e
     sudo apt-get update
     sudo apt-get install -y openssh-client git
 
@@ -45,7 +45,7 @@ setup_ci_environment: &setup_ci_environment
   name: Set Up CI Environment
   no_output_timeout: "1h"
   command: |
-    set -ex
+    set -e
     sudo pip install awscli
 
     sudo apt-get update
@@ -83,13 +83,13 @@ setup_ci_environment: &setup_ci_environment
       echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
 
       # This IAM user allows write access to S3 bucket for sccache
-      echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
-      echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
+      echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}" >> /home/circleci/project/env
+      echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}" >> /home/circleci/project/env
     fi
 
     # This IAM user only allows read-write access to ECR
-    export AWS_ACCESS_KEY_ID=AKIAI43PKLK3PGLUWQMA
-    export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE}
+    export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V2}
+    export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V2}
     eval $(aws ecr get-login --region us-east-1 --no-include-email)
 
 pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
@@ -112,8 +112,8 @@ pytorch_linux_cpu_build_test_defaults: &pytorch_linux_cpu_build_test_defaults
         export MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
         export MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
         # This IAM user allows write access to S3 bucket for sccache
-        export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
+        export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
+        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
         git submodule sync && git submodule update --init
         .jenkins/pytorch/build.sh
         .jenkins/pytorch/test.sh
@@ -203,7 +203,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
       name: Build
       no_output_timeout: "1h"
       command: |
-        set -ex
+        set -e
         sudo pip install awscli
 
         sudo apt-get update
@@ -229,8 +229,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         echo "declare -x MAX_JOBS=${MAX_JOBS}" >> /home/circleci/project/env
 
         # This IAM user allows write access to S3 bucket for sccache
-        echo "declare -x AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA" >> /home/circleci/project/env
-        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}" >> /home/circleci/project/env
+        echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}" >> /home/circleci/project/env
+        echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}" >> /home/circleci/project/env
 
         # TODO: merge this into Caffe2 build.sh
         cat >/home/circleci/project/ci_build_script.sh <<EOL
@@ -278,8 +278,8 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
         sudo pkill -SIGHUP dockerd
         # This IAM user only allows read-write access to ECR
-        export AWS_ACCESS_KEY_ID=AKIAI43PKLK3PGLUWQMA
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE}
+        export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V2}
+        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V2}
         eval $(aws ecr get-login --region us-east-1 --no-include-email)
         docker pull ${DOCKER_IMAGE}
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
@@ -316,7 +316,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
       name: Test
       no_output_timeout: "1h"
       command: |
-        set -x
+        set -e
         sudo pip install awscli
 
         sudo apt-get update
@@ -387,8 +387,8 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
 
         source /home/circleci/project/caffe2-ci-env/COMMIT_DOCKER_IMAGE
         # This IAM user only allows read-write access to ECR
-        export AWS_ACCESS_KEY_ID=AKIAI43PKLK3PGLUWQMA
-        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE}
+        export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_ECR_READ_WRITE_V2}
+        export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_ECR_READ_WRITE_V2}
         eval $(aws ecr get-login --region us-east-1 --no-include-email)
         docker pull ${COMMIT_DOCKER_IMAGE}
         if [ -n "${CUDA_VERSION}" ]; then
@@ -411,7 +411,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
         name: Build
         no_output_timeout: "1h"
         command: |
-          set -ex
+          set -e
 
           export IN_CIRCLECI=1
 
@@ -446,8 +446,8 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
           export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
 
           # This IAM user allows write access to S3 bucket for sccache
-          export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
-          export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
+          export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
+          export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
 
           export SCCACHE_BIN=${PWD}/sccache_bin
           mkdir -p ${SCCACHE_BIN}
@@ -665,8 +665,8 @@ jobs:
 
           docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
           # This IAM user allows write access to S3 bucket for perf test numbers
-          echo "declare -x AWS_ACCESS_KEY_ID=AKIAIKUCKAAULNJNWFWA" >> /home/circleci/project/env
-          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET}" >> /home/circleci/project/env
+          echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_PERF_TEST_S3_BUCKET_V2}" >> /home/circleci/project/env
+          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET_V2}" >> /home/circleci/project/env
           docker cp /home/circleci/project/env $id:/var/lib/jenkins/workspace/env
 
           (echo "export JOB_BASE_NAME=${JOB_BASE_NAME}" && echo "source ./workspace/env" && echo 'sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh') | docker exec -u jenkins -i "$id" bash
@@ -685,7 +685,7 @@ jobs:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-py3
           no_output_timeout: "1h"
           command: |
-            set -ex
+            set -e
 
             export IN_CIRCLECI=1
 
@@ -695,8 +695,8 @@ jobs:
 
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
-            export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
 
             git submodule sync && git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
@@ -728,7 +728,7 @@ jobs:
           no_output_timeout: "1h"
           command: |
             # TODO: need to share source files from build to test, when macOS builds are enabled
-            set -ex
+            set -e
             export IN_CIRCLECI=1
             chmod a+x .jenkins/pytorch/macos-test.sh
             .jenkins/pytorch/macos-test.sh
@@ -747,7 +747,7 @@ jobs:
             BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3
           no_output_timeout: "1h"
           command: |
-            set -ex
+            set -e
 
             export IN_CIRCLECI=1
 
@@ -772,8 +772,8 @@ jobs:
             sudo chmod +x /usr/local/bin/sccache
             export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2
             # This IAM user allows write access to S3 bucket for sccache
-            export AWS_ACCESS_KEY_ID=AKIAJJZUW4G2ASX5W7KA
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET}
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V2}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V2}
 
             git submodule sync && git submodule update --init
             chmod a+x .jenkins/pytorch/macos-build.sh
