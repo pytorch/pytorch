@@ -120,8 +120,6 @@ class ThreadLocalHIPObjects {
   vector<miopenHandle_t> miopen_handles_[CAFFE2_COMPILE_TIME_MAX_HIP_GPUS];
 };
 
-BaseStaticContext* GetHIPStaticContext();
-
 class HIPContext final : public BaseContext {
  public:
   // The default HIP context constructor.
@@ -135,14 +133,6 @@ class HIPContext final : public BaseContext {
       HIPRAND_CHECK(hiprandDestroyGenerator(hiprand_generator_));
     }
     FinishDeviceComputation();
-  }
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetHIPStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetHIPStaticContext();
   }
 
   inline void SwitchToDevice(int stream_id) override {
@@ -376,13 +366,6 @@ struct PinnedCPUAllocator final : public at::Allocator {
   }
 
   DefaultCPUAllocator baseAllocator_;
-};
-
-class HIPStaticContext final : public BaseStaticContext {
- public:
-  DeviceType GetDeviceType() override {
-    return HIP;
-  }
 };
 
 typedef Tensor TensorHIP;

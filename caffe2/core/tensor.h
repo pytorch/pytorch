@@ -115,10 +115,6 @@ class CAFFE2_API Tensor final {
     return x;
   }
 
-  BaseStaticContext* GetStaticContext() const {
-    return impl_.get()->GetStaticContext();
-  }
-
   DeviceType GetDeviceType() const {
     return impl_->device_type();
   }
