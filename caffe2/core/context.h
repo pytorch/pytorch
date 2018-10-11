@@ -20,8 +20,6 @@ C10_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {
 
-CAFFE2_API BaseStaticContext* GetCPUStaticContext();
-
 /**
  * A function to generate a random number seed that is unique in a best-effort
  * basis, using an ever-incrementing seed and the current time.
@@ -54,14 +52,6 @@ class CAFFE2_API CPUContext final : public BaseContext {
       : CPUContext(DeviceToOption(device)) {}
 
   ~CPUContext() noexcept override {}
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetCPUStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetCPUStaticContext();
-  }
 
   inline void SwitchToDevice(int /*stream_id*/) override {}
 
@@ -186,16 +176,6 @@ inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
   CAFFE_ENFORCE(dst);
   memcpy(dst, src, nbytes);
 }
-
-// TODO(jerryzh): merge CPUStaticContext with Allocator
-class CAFFE2_API CPUStaticContext : public BaseStaticContext {
- public:
-
-  DeviceType GetDeviceType() override {
-    return CPU;
-  }
-
-};
 
 }  // namespace caffe2
 

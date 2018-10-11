@@ -424,19 +424,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
   }
 };
 
-at::Allocator* GetCUDAAllocator() {
-  return GetAllocator(CUDA);
-}
-
 static DefaultCUDAAllocator g_cuda_alloc;
-
 REGISTER_ALLOCATOR(CUDA, &g_cuda_alloc);
-
-BaseStaticContext* GetCUDAStaticContext() {
-  static CUDAStaticContext context;
-  return &context;
-}
-
-REGISTER_STATIC_CONTEXT(CUDA, GetCUDAStaticContext());
 
 }  // namespace caffe2
