@@ -217,17 +217,18 @@ void AsyncSchedulingNet::finishRun() {
 
 bool AsyncSchedulingNet::RunAsync() {
   try {
-    std::unique_lock<std::mutex> lock(running_mutex_);
-    if (running_) {
-      LOG(ERROR) << "Detected concurrent runs";
-      return false;
+    {
+      std::unique_lock<std::mutex> lock(running_mutex_);
+      if (running_) {
+        LOG(ERROR) << "Detected concurrent runs";
+        return false;
+      }
+      running_ = true;
+      reset();
+
+      StartAllObservers();
+      tracing::startIter(tracer_);
     }
-    running_ = true;
-    reset();
-
-    StartAllObservers();
-    tracing::startIter(tracer_);
-
     for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
       if (parents(task_id).empty()) {
         schedule(task_id);
