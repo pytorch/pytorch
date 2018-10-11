@@ -801,7 +801,7 @@ const static auto cf_examples = R"JIT(
 )JIT";
 void testControlFlow() {
   script::Module cu;
-  script::defineMethodsInModule(cu, cf_examples, torch::jit::script::nativeResolver, nullptr);
+  script::defineMethodsInModule(cu, cf_examples, std::make_shared<torch::jit::script::NativeResolver>(), nullptr);
   auto run = [&](const std::string & name, std::vector<IValue> stack) {
     auto graph = cu.get_method(name).graph();
     Code code(graph);
