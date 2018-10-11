@@ -19,14 +19,16 @@ message ExternalDataProto {
   enum SourceType {
     // use external file to store the data, id is the path to the file, and
     // POSIX file format is used
-    FILE = 1;
+    FILE = 0;
     // the wrapper defined in torch/csrc/jit/serialization.h is used,
     // and id is the tag to help the runtime identify the data
-    TORCH_WRAPPER = 2;
+    // this type of storage is set as DEFAULT and recommended for external
+    // data storage
+    TORCH_WRAPPER = 1;
     // (de)serialze the data using DB, id is the serialized DBReaderProto
-    DB = 3;
+    DB = 2;
   }
-  optional SourceType source_type = 1;
+  optional SourceType source_type = 1 [default = TORCH_WRAPPER];
   // used together with type, default encoding is utf-8
   optional bytes id = 2;
   // the offset of the starting point, the content may be between multiple
