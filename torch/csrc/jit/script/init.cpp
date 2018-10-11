@@ -1,5 +1,8 @@
 #include "torch/csrc/jit/script/init.h"
 
+#include "torch/csrc/Device.h"
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/Layout.h"
 #include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/script/compiler.h"
 
@@ -276,14 +279,28 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   //   f = f + 1
   auto& g = *m.graph();
   if (is_constant) {
-    if (py::isinstance<py::tuple>(obj)) {
+    if (py::isinstance<py::bool_>(obj)) {
+      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
+    } else if (py::isinstance<py::int_>(obj)) {
+      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
+    } else if (py::isinstance<py::float_>(obj)) {
+      return toSimple(g.insertConstant(py::cast<float>(obj), loc));
+    } else if (THPDevice_Check(obj.ptr())) {
+      auto device = (THPDevice*)obj.ptr();
+      std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()),
+                                device->device.index()};
+      return toSimple(g.insertConstant(std::move(v)));
+    } else if (THPLayout_Check(obj.ptr())) {
+      auto layout = (THPLayout*)obj.ptr();
+      const auto v = static_cast<int64_t>(layout->layout);
+      return toSimple(g.insertConstant(v, loc));
+    } else if (THPDtype_Check(obj.ptr())) {
+      auto dtype = (THPDtype*)(obj.ptr());
+      const auto v = static_cast<int64_t>(dtype->scalar_type);
+      return toSimple(g.insertConstant(v, loc));
+    } else if (py::isinstance<py::tuple>(obj)) {
      return std::make_shared<ConstantPythonTupleValue>(obj);
-   } else {
-     auto val = constantToIValue(obj);
-     if (val) {
-       return toSimple(g.insertConstant(*val, loc));
-     }
-   }
+    }
   }
   if (py::isinstance<Module>(obj)) {
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
@@ -358,8 +375,9 @@ Resolver pythonResolver(ResolutionCallback rcb) {
 }
 
 FunctionSchema getSchemaWithDefaults(
-    FunctionDefaults& default_args,
-    FunctionSchema schema) {
+    const FunctionDefaults& default_args,
+    const FunctionSchema schema,
+    const Def& def) {
   std::vector<Argument> new_args;
   for (auto& arg : schema.arguments) {
     auto it = default_args.find(arg.name);
@@ -369,7 +387,7 @@ FunctionSchema getSchemaWithDefaults(
         new_args.push_back(
             Argument(arg.name, arg.type, arg.N, value, arg.kwarg_only));
       } catch (py::cast_error& e) {
-        throw ErrorReport()
+        throw ErrorReport(def.range())
             << "Expected a default value of type " << arg.type->str()
             << " on parameter \"" << arg.name << "\"";
       }
@@ -415,7 +433,7 @@ void initJitScriptBindings(PyObject* module) {
           std::shared_ptr<Module> m,
           const std::vector<Def>& defs,
           const std::vector<ResolutionCallback>& rcbs,
-          std::vector<FunctionDefaults> defaults) {
+          const std::vector<FunctionDefaults>& defaults) {
         std::vector<Resolver> resolvers;
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
@@ -431,8 +449,8 @@ void initJitScriptBindings(PyObject* module) {
         auto defs_it = defs.begin();
         while (defs_it != defs.end()) {
           auto& method = m->get_method((*defs_it).name().name());
-          method.setSchema(
-              getSchemaWithDefaults(*defaults_it, method.getSchema()));
+          method.setSchema(getSchemaWithDefaults(
+              *defaults_it, method.getSchema(), *defs_it));
           ++defs_it;
           ++defaults_it;
         }
@@ -562,10 +580,9 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args, py::kwargs kwargs) {
       return self.graph_for(createStackForSchema(self.getSchema(), std::move(args), std::move(kwargs)));
     })
-    .def("forward_schema", [](Method &self, Def &def, py::object defss, bool is_method) {
-      FunctionDefaults defaults = py::cast<FunctionDefaults>(defss);
+    .def("forward_schema", [](Method &self, Def &def, FunctionDefaults defaults, bool is_method) {
       self.setSchema(getSchemaWithDefaults(
-        defaults, extractSchemaFromDef(def, is_method)));
+        defaults, extractSchemaFromDef(def, is_method), def));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("pretty_print_schema", &Method::pretty_print_schema);
