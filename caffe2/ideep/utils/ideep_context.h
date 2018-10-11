@@ -8,8 +8,6 @@
 
 namespace caffe2 {
 
-BaseStaticContext* GetIDEEPStaticContext();
-
 class IDEEPContext final : public BaseContext {
  public:
   typedef std::mt19937 rand_gen_type;
@@ -24,14 +22,6 @@ class IDEEPContext final : public BaseContext {
       : IDEEPContext(DeviceToOption(device)) {}
 
   ~IDEEPContext() noexcept override {}
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetIDEEPStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetIDEEPStaticContext();
-  }
 
   inline void SwitchToDevice(int /*stream_id*/) {}
   using BaseContext::SwitchToDevice;
@@ -177,13 +167,5 @@ inline void IDEEPContext::CopyBytes<IDEEPContext, CPUContext>(
   CAFFE_ENFORCE(dst);
   memcpy(dst, src, nbytes);
 }
-
-class IDEEPStaticContext : public BaseStaticContext {
- public:
-  DeviceType GetDeviceType() override {
-    return IDEEP;
-  }
-
-};
 
 } // namespace caffe2

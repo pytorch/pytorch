@@ -412,17 +412,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * The static context of a tensor intuitively represents the device
-   * type of a tensor; e.g., a CPU tensor is associated with the
-   * GetCPUStaticContext().  This method replaces the former Context template
-   * parameter which was previously used to identify the device type
-   * of a tensor.
-   */
-  at::BaseStaticContext* GetStaticContext() const {
-    return ::caffe2::get_static_context(device_type());
-  }
-
-  /**
    * @brief Copies the data from a source tensor, with a contex provided to
    * carry out the underlying memcpy operation.  This method respects
    * caffe2_keep_on_shrink.
@@ -761,10 +750,11 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         return storage_.data();
       }
       const at::Allocator* allocator = storage_.allocator();
-      // TODO: Get rid of StaticContext
       AT_ENFORCE(
           allocator == nullptr,
-          "Allocator is not used within Caffe2 functions, please use StaticContext instead.");
+          "Allocator in storage_ is not used within Caffe2 functions. \
+           we are using global function to get the allocator based on device \
+           type.");
       allocator = caffe2::GetAllocator(storage_.device_type());
       if (meta.ctor()) {
         // For types that need placement new, we will call it, as well as
@@ -772,9 +762,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         // destruction procedure.
         auto size = numel_;
         auto dtor = data_type_.dtor();
-        auto data_ptr = allocator->allocate(
-            numel_ * storage_.itemsize()); // Removing this can get rid of
-                                           // InefficientStdFunctionContext
+        auto data_ptr = allocator->allocate(numel_ * storage_.itemsize());
         storage_.set_data_ptr(PlacementDeleteContext::makeDataPtr(
             std::move(data_ptr), dtor, size, storage_.device()));
         data_type_.ctor()(storage_.data(), numel_);
