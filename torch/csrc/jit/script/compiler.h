@@ -136,21 +136,48 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   }
 };
 
-using Resolver = std::function<std::shared_ptr<
-    SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
+struct Resolver {
+  virtual std::shared_ptr<SugaredValue> operator() (const std::string& name, Method& m, const SourceRange& loc) const = 0;
+  virtual void addEntry(const std::string& name, std::shared_ptr<SugaredValue> sv) = 0;
+  virtual void clear() = 0;
+  virtual ~Resolver() {}
+};
 
-std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc);
+struct NativeResolver : public Resolver {
+  virtual std::shared_ptr<SugaredValue> operator() (const std::string& name, Method& m, const SourceRange& loc) const override {
+    if (function_table.count(name)) {
+      return function_table.at(name);
+    }
+    if (name == "torch") {
+      return std::make_shared<BuiltinModule>(name);
+    }
+    return nullptr;
+  }
+
+  virtual void addEntry(const std::string& name, std::shared_ptr<SugaredValue> sv) override {
+    function_table[name] = sv;
+  }
+
+  virtual void clear() override {
+    function_table.clear();
+  }
+
+  virtual ~NativeResolver() {}
+
+ private:
+   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> function_table;
+};
 
 TORCH_API void defineMethodsInModule(
   Module & m,
   const std::vector<Def>& definitions,
-  const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
+  const std::vector<std::shared_ptr<Resolver>>& resolvers, /* determines how we handle free variables in each definition*/
   std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
 );
 
 // same as above but parse the definitions from source
-TORCH_API void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
-TORCH_API std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
+TORCH_API void defineMethodsInModule(Module & m, const std::string& source, std::shared_ptr<Resolver> resolver, std::shared_ptr<SugaredValue> self);
+TORCH_API std::shared_ptr<Graph> compileFunction(Def def, std::shared_ptr<Resolver> resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.

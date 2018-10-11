@@ -192,20 +192,6 @@ def _trace(*args, **kwargs):
     return wrapper
 
 
-# Python equivalents for the empty list construction builtins. We need
-# these otherwise the tests won't execute in regular Python mode.
-def _construct_empty_int_list():
-    return []
-
-
-def _construct_empty_float_list():
-    return []
-
-
-def _construct_empty_tensor_list():
-    return []
-
-
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
         torch._C._jit_override_can_fuse_on_cpu(True)
@@ -3267,7 +3253,7 @@ a")
 
         @torch.jit.script
         def foo2(x):
-            return torch.cat(_construct_empty_tensor_list(), dim=1)
+            return torch.cat(torch.jit._construct_empty_tensor_list(), dim=1)
 
         @torch.jit.script
         def foo3(x):
@@ -3302,13 +3288,13 @@ a")
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
-            x = _construct_empty_int_list()
+            x = torch.jit._construct_empty_int_list()
             if True:
                 x = [1, 2, 3]
-            y = _construct_empty_float_list()
+            y = torch.jit._construct_empty_float_list()
             if True:
                 y = [1.0, 2.0, 3.0]
-            z = _construct_empty_tensor_list()
+            z = torch.jit._construct_empty_tensor_list()
             if True:
                 z = [torch.randn([1])]
             return
@@ -3323,7 +3309,7 @@ a")
             self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
-            x = _construct_empty_int_list()
+            x = torch.jit._construct_empty_int_list()
             if True:
                 x = [1, 2, 3]
                 if True:
@@ -3367,7 +3353,7 @@ a")
         self.checkScript(func, ())
 
         def func2():
-            a = _construct_empty_tensor_list()
+            a = torch.jit._construct_empty_tensor_list()
             return len(a) == 0
 
         self.checkScript(func2, ())
@@ -3423,7 +3409,7 @@ a")
 
         def test_list_add_empty():
             a = [1, 2, 3]
-            b = _construct_empty_int_list()
+            b = torch.jit._construct_empty_int_list()
             c = a + b
             return c == [1, 2, 3]
 
@@ -3480,7 +3466,7 @@ a")
 
         def test_backward_slice():
             a = [0, 1, 2, 3, 4]
-            return a[3:2] == _construct_empty_int_list()
+            return a[3:2] == torch.jit._construct_empty_int_list()
         self.checkScript(test_backward_slice, ())
 
         def test_over_slice():
@@ -3521,7 +3507,7 @@ a")
         self.checkScript(test_append_if_else, ())
 
         def test_append_loop():
-            a = _construct_empty_int_list()
+            a = torch.jit._construct_empty_int_list()
             for i in range(5):
                 a.append(i)
 
@@ -3529,7 +3515,7 @@ a")
         self.checkScript(test_append_loop, ())
 
         def test_append_loop_if():
-            a = _construct_empty_int_list()
+            a = torch.jit._construct_empty_int_list()
             for i in range(5):
                 if i > 3:
                     a.append(i)
@@ -3540,7 +3526,7 @@ a")
         self.checkScript(test_append_loop_if, ())
 
         def test_nested_loop():
-            a = _construct_empty_int_list()
+            a = torch.jit._construct_empty_int_list()
             for i in range(2):
                 for j in range(2):
                     a.append(i + j)
@@ -3584,7 +3570,7 @@ a")
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
         def test_view_shape_prop(a):
-            return view(a, size=[-1])
+            return a.view(size=[-1])
         ''')
         inputs = [torch.zeros(10, 10)]
         outputs = torch.zeros(100)
@@ -3619,9 +3605,9 @@ a")
         def test_fuser_multiple_blocks(this, that, theother, meme):
             i = 0
             while i < 20:
-                this = cat([this, meme], dim=0)
-                that = cat([that, meme], dim=0)
-                theother = cat([theother, meme], dim=0)
+                this = torch.cat([this, meme], dim=0)
+                that = torch.cat([that, meme], dim=0)
+                theother = torch.cat([theother, meme], dim=0)
                 i = i + 1
             return this, that, theother
         ''')
@@ -5737,7 +5723,7 @@ a")
                 # because we are testing if we emit `if` statement correctly
                 # we cannot use `True` as the condition. Constant prop
                 # would remove the `if` statements.
-                c = sum(x) > 4
+                c = torch.sum(x) > 4
                 if bool(c):
                     if bool(c):
                         y = self.m(x)
@@ -7236,6 +7222,21 @@ a")
 
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
 
+    def test_addmm_fusion(self):
+        class AddmmWrapper(torch.nn.Module):
+            def forward(self, x, y, c):
+                return torch.mm(x, y) + c
+
+        # Test addmm fusion is disabled for normal Jit
+        x, y, c = torch.rand(3, 4), torch.rand(4, 5), torch.rand(3, 5)
+        f = io.BytesIO()
+        pretty = torch.onnx.export_to_pretty_string(AddmmWrapper(), (x, y, c), f)
+        self.assertExpected(pretty, 'onnx')
+
+        jit_trace = torch.jit.trace(AddmmWrapper(), (x, y, c))
+        ge_graph = jit_trace.__getattr__('forward').graph_for(x, y, c)
+        self.assertExpectedGraph(ge_graph, 'jit')
+
     def test_weak_script_function(self):
         outer_var = 10
         outer_var2 = 11
@@ -8112,6 +8113,163 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
         if g2 is None and g2_ge is None:
             continue
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
+
+
+# NB: torch.jit.script, when used as a function, uses the current scope
+# to resolve variable names. This function cannot be made local to
+# TestAutodiffSubgraphSlicing because those tests call torch.jit.script on functions
+# in a different scope than they are defined in.
+def pyfn(a, b):
+    return a * b
+
+
+class TestAutodiffSubgraphSlicing(JitTestCase):
+    # TODO: It is better if we can test directly on graphs instead of the current
+    # end-to-end fashion.
+    def _perform_ad_subgraph_slicing(self, fn, *input_sizes):
+        ge = torch.jit.script(fn)
+        ge.debug_disable_autodiff_subgraph_inlining()
+        inputs = [torch.randn(size, requires_grad=True) for size in input_sizes]
+        ge(*inputs)
+        return ge.graph_for(*inputs)
+
+    def assertGraphContains(self, graph, kind, num_kind_nodes, consider_subgraphs=False):
+        if consider_subgraphs:
+            raise NotSupportedError("NYI: assertGraphHas consider_subgraphs=T")
+        nodes = [node for node in graph.nodes()
+                 if node.kind() == kind]
+        self.assertEqual(len(nodes), num_kind_nodes)
+
+    def assertGraphSize(self, graph, size):
+        self.assertEqual(len(list(graph.nodes())), size)
+
+    def test_simple_merge(self):
+        # o --> o
+        def fn(x, y, z):
+            a = x * y
+            b = a * z
+            return b
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 1)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_simple_no_merge(self):
+        # o: autodiff supported. x: not autodiff supported.
+        # o --> x
+        def fn(x, y, z):
+            a = x * y
+            b = pyfn(a, z)
+            return b
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_does_not_merge_unrelated(self):
+        # o  o
+        def fn(w, x, y, z):
+            a = x * y
+            b = w * z
+            return a, b
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_merges_without_cycles(self):
+        # o --> o --> o
+        # |           ^
+        #  \_________/
+        def fn(w, x, y):
+            a = w * x
+            b = a * y
+            c = a * b
+            return c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 1)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_merges_dense(self):
+        #   o      o
+        #   |\    /|
+        #   | \  / |
+        #   |  /\  |
+        #   vv    vv
+        #   o      o
+        def fn(x, y):
+            a, b = x.chunk(2)
+            c, d = y.chunk(2)
+            return a + c, b + d
+
+        graph = self._perform_ad_subgraph_slicing(fn, 2, 2)
+
+        self.assertGraphSize(graph, 1)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_does_not_create_cycles(self):
+        # o --> x --> o
+        # |           ^
+        #  \_________/
+        def fn(w, x, y):
+            a = w * x
+            b = pyfn(a, y)
+            c = a * b
+            return c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 3)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_merges_up(self):
+        # o --> x     o
+        # |           ^
+        #  \_________/
+        def fn(w, x, y, z):
+            a = w * x
+            b = pyfn(a, y)
+            c = a * z
+            return b, c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_merges_down(self):
+        # o     x --> o
+        # |           ^
+        #  \_________/
+        def fn(v, w, x, y):
+            a = v * w
+            b = pyfn(x, y)
+            c = b * a
+            return a, c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_respects_lexical_scoping(self):
+        def fn(x, k):
+            y = x * 1.1
+            if bool(k):
+                k += y
+            z = y * k
+            return z, k
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1)
+
+        # We should not have combined the two multiplications into
+        # the same group; they should each be a separate DiffGraph
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
 
 
 class TestJitGenerated(JitTestCase):

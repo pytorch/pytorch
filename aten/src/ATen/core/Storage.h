@@ -33,10 +33,12 @@ struct CAFFE2_API Storage {
             resizable)) {}
 
   Storage(at::DeviceType device_type)
-      : storage_impl_(c10::make_intrusive<StorageImpl>(device_type)) {}
-  Storage(at::DeviceType device_type, caffe2::TypeMeta data_type)
       : storage_impl_(
-            c10::make_intrusive<StorageImpl>(device_type, data_type)) {}
+            c10::make_intrusive<StorageImpl>(at::Device(device_type))) {}
+  Storage(at::Device device)
+      : storage_impl_(c10::make_intrusive<StorageImpl>(device)) {}
+  Storage(at::Device device, caffe2::TypeMeta data_type)
+      : storage_impl_(c10::make_intrusive<StorageImpl>(device, data_type)) {}
 
   Storage(
       caffe2::TypeMeta data_type,
