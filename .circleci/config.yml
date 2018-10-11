@@ -142,6 +142,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
       command: |
         set -e
         # Pull Docker image and run build
+        echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
         docker pull ${DOCKER_IMAGE}
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
@@ -185,6 +186,7 @@ pytorch_linux_test_defaults: &pytorch_linux_test_defaults
       command: |
         set -e
         source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
+        echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE}
         if [ -n "${CUDA_VERSION}" ]; then
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -258,6 +260,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
         EOL
         chmod +x /home/circleci/project/ci_build_script.sh
 
+        echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
         docker pull ${DOCKER_IMAGE}
         export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
         docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
@@ -342,6 +345,7 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         chmod +x /home/circleci/project/ci_test_script.sh
 
         source /home/circleci/project/caffe2-ci-env/COMMIT_DOCKER_IMAGE
+        echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
         docker pull ${COMMIT_DOCKER_IMAGE}
         if [ -n "${CUDA_VERSION}" ]; then
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -614,6 +618,7 @@ jobs:
         command: |
           set -e
           source /home/circleci/project/pytorch-ci-env/COMMIT_DOCKER_IMAGE
+          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           docker pull ${COMMIT_DOCKER_IMAGE}
           id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
