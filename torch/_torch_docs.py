@@ -4448,8 +4448,8 @@ of shape :math:`(n \times n)` and :math:`(m \times m)` respectively. :attr:`some
           and ``V[:, min(n, m):]`` will be ignored in backward as those vectors
           can be arbitrary bases of the subspaces.
 
-.. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since ``U`` and ``V`` are
-          from the forward pass is required for the backward pass.
+.. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since ``U`` and ``V``
+          from the forward pass is required for the backward operation.
 
 Args:
     input (Tensor): the input 2-D tensor
