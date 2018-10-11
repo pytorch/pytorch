@@ -103,14 +103,14 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // Cache the flattened weight and bias vector.
   flat_weights_ = flat_weights();
 
-  if (!cudnn_mode_ || !torch::cudnn_is_acceptable(/*sample=*/w_ih.at(0))) {
+  if (!cudnn_mode_ || !torch::cudnn_is_acceptable(w_ih.at(0))) {
     return;
   }
 
   NoGradGuard no_grad;
   torch::_cudnn_rnn_flatten_weight(
       flat_weights_,
-      /*weight_stride=*/options.with_bias_ ? 4 : 2,
+      /*weight_stride0=*/options.with_bias_ ? 4 : 2,
       options.input_size_,
       static_cast<int64_t>(*cudnn_mode_),
       options.hidden_size_,
