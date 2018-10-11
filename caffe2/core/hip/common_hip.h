@@ -25,6 +25,12 @@
  */
 #define CAFFE2_HIP_MAX_PEER_SIZE 8
 
+#if CUDA_VERSION >= 10000
+  #define CAFFE2_HIP_PTRATTR_MEMTYPE type
+#else
+  #define CAFFE2_HIP_PTRATTR_MEMTYPE memoryType
+#endif
+
 namespace caffe2 {
 
 /**
