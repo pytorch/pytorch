@@ -10,8 +10,6 @@
 
 namespace caffe2 {
 
-BaseStaticContext* GetMKLStaticContext();
-
 /**
  * The MKL Context, which is largely the same as the CPUContext. We instantiate
  * this mainly in order to have a first-class MKL device.
@@ -33,14 +31,6 @@ class MKLContext : public BaseContext {
       : MKLContext(DeviceToOption(device)) {}
 
   ~MKLContext() override {}
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetMKLStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetMKLStaticContext();
-  }
 
   inline void SwitchToDevice(int /*stream_id*/ = 0) override {}
 
@@ -154,14 +144,6 @@ inline void MKLContext::CopyBytes<MKLContext, MKLContext>(
     void* dst) {
   memcpy(dst, src, nbytes);
 }
-
-class MKLStaticContext : public BaseStaticContext {
- public:
-  DeviceType GetDeviceType() override {
-    return MKLDNN;
-  }
-
-};
 
 } // namespace caffe2
 
