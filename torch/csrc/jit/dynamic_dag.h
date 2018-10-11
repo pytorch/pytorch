@@ -103,7 +103,13 @@ struct visited_list {
     data_.push_back(elt);
   }
 
-  vertex_list<T>& vector() { return data_; }
+  void sort() {
+    std::sort(data_.begin(), data_.end(), [](Vertex<T>* a, Vertex<T>* b) {
+      return a->ord < b->ord;
+    });
+  }
+
+  const vertex_list<T>& vector() { return data_; }
 
  private:
   vertex_list<T> data_;
@@ -154,7 +160,6 @@ struct DynamicDAG {
  private:
   void mergeProducerIntoConsumer(Vertex<T>* producer, Vertex<T>* consumer);
   void mergeConsumerIntoProducer(Vertex<T>* producer, Vertex<T>* consumer);
-  void sort(vertex_list<T>& delta);
   void reorder(visited_list<T> deltaF, visited_list<T> deltaB);
   bool contractionProducesCycle(Vertex<T>* producer, Vertex<T>* consumer);
   bool dfsSearch(
@@ -184,13 +189,6 @@ template <typename T>
 Vertex<T>* DynamicDAG<T>::newVertex(T datum) {
   vertices_.emplace_back(new Vertex<T>(vertices_.size(), datum));
   return vertices_.back().get();
-}
-
-template <typename T>
-void DynamicDAG<T>::sort(vertex_list<T>& delta) {
-  std::sort(delta.begin(), delta.end(), [](Vertex<T>* a, Vertex<T>* b) {
-    return a->ord < b->ord;
-  });
 }
 
 template <typename T>
@@ -490,11 +488,11 @@ bool DynamicDAG<T>::dfsSearch(
 // Reorder deltaB vertices to occur before deltaF vertices.
 template <typename T>
 void DynamicDAG<T>::reorder(visited_list<T> deltaF, visited_list<T> deltaB) {
-  auto deltaB_ = deltaB.vector();
-  auto deltaF_ = deltaF.vector();
+  deltaB.sort();
+  deltaF.sort();
 
-  sort(deltaB_);
-  sort(deltaF_);
+  const auto& deltaB_ = deltaB.vector();
+  const auto& deltaF_ = deltaF.vector();
 
   size_t num_affected = deltaB_.size() + deltaF_.size();
 
