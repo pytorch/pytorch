@@ -148,7 +148,7 @@ namespace torch { namespace jit {
 RegisterOperators reg_fused_operators({
   Operator(
     prim::FusedConcat,
-    [](Node* node) {
+    [](const Node* node) {
       int64_t dim = node->i(attr::dim);
       int64_t num_inputs = node->inputs().size();
       return [dim, num_inputs](Stack& stack) {

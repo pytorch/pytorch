@@ -380,6 +380,10 @@ public:
     JIT_ASSERT(outputs_.size() == 1);
     return outputs_.at(0);
   }
+  const  Value * output() const {
+    JIT_ASSERT(outputs_.size() == 1);
+    return outputs_.at(0);
+  }
   const  Value * input() const {
     JIT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);

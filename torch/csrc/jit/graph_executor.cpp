@@ -252,7 +252,7 @@ void packGradient(Gradient gradient, Node *dnode) {
        ->is_(attr::df_output_vjps, fmap<int64_t>(gradient.df_output_vjps));
 }
 
-Gradient getGradient(Node *n) {
+Gradient getGradient(const Node *n) {
   JIT_ASSERT(n->kind() == prim::DifferentiableGraph);
   Gradient grad;
   grad.f = n->g(attr::Subgraph);
@@ -270,7 +270,7 @@ Gradient getGradient(Node *n) {
 RegisterOperators reg_graph_executor_ops({
   Operator(
     prim::DifferentiableGraph,
-    [](Node *n) -> Operation {
+    [](const Node *n) -> Operation {
       return DifferentiableGraphOp(getGradient(n));
     })
 });

@@ -30,7 +30,7 @@ namespace jit {
 
 namespace {
 
-Operation noop(Node* n) {
+Operation noop(const Node* n) {
   return [](Stack& stack) { return 0; };
 }
 
@@ -54,24 +54,25 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
 RegisterOperators reg({
     Operator(
         prim::MemoryFence,
-        [](Node* node) {
+        [](const Node* node) {
           return [](Stack& stack) {
             return 0;
           };
         }),
     Operator(
         prim::FusionGroup,
-        [](Node* node) {
-          auto handle = getFusionHandle(node);
-          return [handle](Stack& stack) {
-            autograd::profiler::RecordFunction record("FusionGroup");
-            handle->run(stack);
+        [](const Node* node) {
+          // return Noop;
+          // auto handle = getFusionHandle(node);
+          return [](Stack& stack) {
+            // autograd::profiler::RecordFunction record("FusionGroup");
+            // handle->run(stack);
             return 0;
           };
         }),
     Operator(
         prim::TensorToBool,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor a;
             pop(stack, a);
@@ -82,7 +83,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::TensorToNum,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           if(node->output()->type() == IntType::get()) {
             return [](Stack& stack) {
               at::Tensor a;
@@ -103,7 +104,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::ImplicitTensorToNum,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           if(node->output()->type() == IntType::get()) {
             return [](Stack& stack) {
               at::Tensor a;
@@ -126,7 +127,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::NumToTensor,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Scalar s;
             pop(stack, s);
@@ -136,7 +137,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::BoolToTensor,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             bool b;
             pop(stack, b);
@@ -148,7 +149,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::IntToFloat,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             int64_t i;
             pop(stack, i);
@@ -158,7 +159,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::FloatToInt,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             double d;
             pop(stack, d);
@@ -168,7 +169,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::StringToFloat,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto s = pop(stack).toString();
             if (s->string() != "inf") {
@@ -183,7 +184,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::Undefined,
-        [](Node* node) {
+        [](const Node* node) {
           return [](Stack& stack) {
             stack.push_back(at::Tensor());
             return 0;
@@ -191,7 +192,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::NoneGenerator,
-        [](Node* node) {
+        [](const Node* node) {
           return [](Stack& stack) {
             stack.emplace_back();
             return 0;
@@ -199,7 +200,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::Print,
-        [](Node* node) {
+        [](const Node* node) {
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
             bool first = true;
@@ -227,7 +228,7 @@ RegisterOperators reg({
 
     Operator(
         prim::Drop,
-        [](Node* node) {
+        [](const Node* node) {
           auto N = node->inputs().size();
           return [=](Stack& stack) {
             drop(stack, N);
@@ -236,7 +237,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::LoadWorld,
-        [](Node* node) {
+        [](const Node* node) {
           return [](Stack& stack) {
             push(stack, World{0});
             return 0;
@@ -244,7 +245,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::StoreWorld,
-        [](Node* node) {
+        [](const Node* node) {
           return [](Stack& stack) {
             drop(stack, 1);
             return 0;
@@ -252,7 +253,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::DummyWorld,
-        [](Node* node) {
+        [](const Node* node) {
           return [](Stack& stack) {
             AT_ERROR("Encountered a dummy world during graph execution.");
             return 0;
@@ -260,7 +261,7 @@ RegisterOperators reg({
         }),
     Operator(
         onnx::Reshape,
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor input, shape;
             pop(stack, input, shape);
@@ -273,7 +274,7 @@ RegisterOperators reg({
         }),
     Operator(
         onnx::Shape,
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             auto t = pop(stack).toTensor();
             at::IntList sizes = t.sizes();
@@ -290,7 +291,7 @@ RegisterOperators reg({
 
     Operator(
         prim::AnyDefined,
-        [](Node* node) {
+        [](const Node* node) {
           size_t num_inputs = node->inputs().size();
           return [=](Stack& stack) {
             bool result = false;
@@ -308,7 +309,7 @@ RegisterOperators reg({
 
     Operator(
         prim::AutogradAdd,
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor a, b;
             pop(stack, a, b);
@@ -323,7 +324,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::TupleUnpack,
-        [](Node* node) {
+        [](const Node* node) {
           size_t num_elems = node->outputs().size();
           return [=](Stack& stack) {
             auto t = pop(stack).toTuple();
@@ -337,7 +338,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::TupleConstruct,
-        [](Node* node) {
+        [](const Node* node) {
           size_t num_inputs = node->inputs().size();
           return [=](Stack& stack) {
             std::vector<IValue> elems {
@@ -351,10 +352,13 @@ RegisterOperators reg({
         }),
     Operator(
         prim::ConstantChunk,
-        [](Node* node) {
+        [](const Node* node) {
           int64_t chunks = node->i(attr::chunks);
           int64_t dim = node->i(attr::dim);
-          auto outputs_used = fmap(node->outputs(), [](Value *v) { return v->uses().size() > 0; });
+          std::vector<bool> outputs_used;
+          for (auto out: node->outputs())
+              outputs_used.push_back(out->uses().size() > 0);
+
           return [=](Stack& stack) {
             autograd::profiler::RecordFunction record("chunk");
             at::Tensor t;
@@ -381,7 +385,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::ListUnpack,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           size_t num_outputs = node->outputs().size();
           ListTypePtr lt = node->input()->type()->expect<ListType>();
           if (lt->getElementType() == IntType::get()) {
@@ -417,7 +421,7 @@ RegisterOperators reg({
         }),
     Operator(
         prim::ListConstruct,
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
           ListTypePtr lt = node->output()->type()->expect<ListType>();
           if(IntType::get() == lt->getElementType()) {
@@ -472,7 +476,7 @@ RegisterOperators reg({
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
   Operator(                                                                    \
       #aten_op "(int a, int b) -> " #int_result,                               \
-      [](Node* node) {                                                         \
+      [](const Node* node) {                                                         \
         return [=](Stack& stack) {                                             \
           int64_t a, b;                                                        \
           pop(stack, a, b);                                                    \
@@ -481,7 +485,7 @@ RegisterOperators reg({
         };                                                                     \
       }),                                                                      \
   Operator(                                                                    \
-      #aten_op "(float a, float b) -> " #float_result, [](Node* node) {        \
+      #aten_op "(float a, float b) -> " #float_result, [](const Node* node) {        \
         return [=](Stack& stack) {                                             \
           double a, b;                                                         \
           pop(stack, a, b);                                                    \
@@ -491,7 +495,7 @@ RegisterOperators reg({
       }),
 
 #define DEFINE_INT_OP(aten_op, op)                            \
-  Operator(#aten_op "(int a, int b) -> int", [](Node* node) { \
+  Operator(#aten_op "(int a, int b) -> int", [](const Node* node) { \
     return [=](Stack& stack) {                                \
       int64_t a, b;                                           \
       pop(stack, a, b);                                       \
@@ -505,7 +509,7 @@ RegisterOperators reg({
 #define DEFINE_COMPARISON_OP(aten_op, op) \
   DEFINE_GENERIC_OP(aten_op, op, op, bool, bool)
 #define DEFINE_BOOL_OP(aten_op, op)                              \
-  Operator(#aten_op "(bool a, bool b) -> bool", [](Node* node) { \
+  Operator(#aten_op "(bool a, bool b) -> bool", [](const Node* node) { \
     return [=](Stack& stack) {                                   \
       bool a, b;                                                 \
       pop(stack, a, b);                                          \
@@ -525,7 +529,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 }
 
 template <typename TList, typename TElement>
-Operation listAppend(Node* node) {
+Operation listAppend(const Node* node) {
   return [](Stack& stack) {
     TList a;
     TElement el;
@@ -538,7 +542,7 @@ Operation listAppend(Node* node) {
 }
 
 template <typename T>
-Operation listSelect(Node* node) {
+Operation listSelect(const Node* node) {
   return [=](Stack& stack) {
     T list;
     int64_t idx;
@@ -556,7 +560,7 @@ Operation listSelect(Node* node) {
 }
 
 template <typename T>
-Operation listLen(Node* node) {
+Operation listLen(const Node* node) {
   return [=](Stack& stack) {
     T a;
     pop(stack, a);
@@ -567,7 +571,7 @@ Operation listLen(Node* node) {
 }
 
 template <typename T>
-Operation listEq(Node* node) {
+Operation listEq(const Node* node) {
   return [=](Stack& stack) {
     T a;
     T b;
@@ -579,7 +583,7 @@ Operation listEq(Node* node) {
 
 // Specialization for at::Tensor, since it doesn't define operator==
 template <>
-Operation listEq<Shared<TensorList>>(Node* node) {
+Operation listEq<Shared<TensorList>>(const Node* node) {
   return [=](Stack& stack) {
     Shared<TensorList> a;
     Shared<TensorList> b;
@@ -608,7 +612,7 @@ Operation listEq<Shared<TensorList>>(Node* node) {
 }
 
 template <class TList, class TElement>
-Operation listAdd(Node* node) {
+Operation listAdd(const Node* node) {
   return [=](Stack& stack) {
     TList a;
     TList b;
@@ -630,7 +634,7 @@ Operation listAdd(Node* node) {
 }
 
 template <typename TList, typename TElement>
-Operation listSlice(Node* node) {
+Operation listSlice(const Node* node) {
   return [](Stack& stack) {
     TList list;
     int64_t start;
@@ -705,7 +709,7 @@ RegisterOperators reg2({
 
     // NB: This is the python truediv operation
     Operator("aten::div(int a, int b) -> float",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             int64_t a, b;
             pop(stack, a, b);
@@ -714,7 +718,7 @@ RegisterOperators reg2({
           };
         }),
     Operator("aten::div(float a, float b) -> float",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             double a, b;
             pop(stack, a, b);
@@ -734,21 +738,21 @@ RegisterOperators reg2({
     DEFINE_BOOL_OP(aten::__or__, a || b)
 
     Operator("aten::_construct_empty_int_list() -> int[]",
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [=](Stack& stack){
             push(stack, std::vector<int64_t>());
             return 0;
         };
       }),
     Operator("aten::_construct_empty_float_list() -> float[]",
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [=](Stack& stack){
             push(stack, std::vector<double>());
             return 0;
         };
       }),
     Operator("aten::_construct_empty_tensor_list() -> Tensor[]",
-        [](Node* node) -> Operation {
+        [](const Node* node) -> Operation {
           return [=](Stack& stack){
             push(stack, std::vector<at::Tensor>());
             return 0;
@@ -756,7 +760,7 @@ RegisterOperators reg2({
       }),
     Operator(
         "aten::neg(int a) -> int",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             push(stack, -pop(stack).toInt());
             return 0;
@@ -764,7 +768,7 @@ RegisterOperators reg2({
         }),
     Operator(
         "aten::neg(float a) -> float",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             push(stack, -pop(stack).toDouble());
             return 0;
@@ -772,7 +776,7 @@ RegisterOperators reg2({
         }),
     Operator(
         "aten::__not__(int a) -> int",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             push(stack, !pop(stack).toInt());
             return 0;
@@ -780,7 +784,7 @@ RegisterOperators reg2({
         }),
     Operator(
         "aten::_tensor_to_list(Tensor a) -> int[]",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             at::Tensor t;
             pop(stack, t);
@@ -794,7 +798,7 @@ RegisterOperators reg2({
         }),
     Operator(
         "aten::_list_to_tensor(int[] a) -> Tensor",
-        [](Node* node) {
+        [](const Node* node) {
           return [=](Stack& stack) {
             std::vector<int64_t> l;
             pop(stack, l);

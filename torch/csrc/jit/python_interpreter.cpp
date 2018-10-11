@@ -27,8 +27,9 @@ namespace torch { namespace jit {
 
 namespace {
 
-Operation createPythonOperation(Node* op_) {
+Operation createPythonOperation(const Node* const_op_) {
   AutoGIL gil;
+  Node * op_ = const_cast<Node*>(const_op_);
   PythonOp* op = static_cast<PythonOp*>(op_);
   py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
   size_t num_inputs = 0;

@@ -31,7 +31,7 @@ struct CPUFusionCompiler {
   ~CPUFusionCompiler() = default;
 
   std::shared_ptr<FusionHandle> getFusionHandle(Node* fusion_group);
-  
+
   std::vector<at::Tensor> debugLaunchGraph(
     Graph& graph
   , int device
@@ -49,7 +49,7 @@ private:
 CPUFusionCompiler& getFusionCompiler();
 
 } // namespace cudafuser
-} // namespace jit 
+} // namespace jit
 } // namespace torch
 
 #endif // USE_CPU_FUSER
