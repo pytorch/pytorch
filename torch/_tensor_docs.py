@@ -2196,7 +2196,7 @@ See :func:`torch.sum`
 
 add_docstr_all('svd',
                r"""
-svd(some=True) -> (Tensor, Tensor, Tensor)
+svd(some=True, compute_uv=True) -> (Tensor, Tensor, Tensor)
 
 See :func:`torch.svd`
 """)
