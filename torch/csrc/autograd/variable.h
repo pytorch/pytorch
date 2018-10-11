@@ -388,19 +388,20 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 ///
 /// In PyTorch, we have two types of views: differentiable views, and
 /// non-differentiable views. In either type, to support proper version
-/// checking, the base and view Variables always share the same version_counter.
+/// checking, the base and view Variables must always share the same
+/// version_counter.
 ///
 ///
 /// Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// Differentiable views are the view variables you still want gradients to flow
+/// Differentiable views are the view variables where you want gradients to flow
 /// back to the base variables. Out-of-place operations on views are quite
-/// straightforward, but in-place ones on views are very tricky. Even if the
-/// base variable may not require grad when we create the view, we still need to
+/// straightforward, but in-place ones are very tricky. Even if the base
+/// variable may not require grad when we create the view, we still need to
 /// track the view relation because future in-place ops may require back-proping
-/// through it. We need to support autograd through
+/// through it. For example, we need to support
 ///
-///   (1) in-place operation on view, e.g.,
+///   (1) in-place operation on view like
 ///
 ///     # Have:
 ///     #   base.requires_grad = False
@@ -408,7 +409,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 ///     base[1] = var  # i.e., base[1].copy_(var)
 ///     torch.autograd.grad(base.sum(), var)  <- should return an all ones tensor
 ///
-///   (2) in-place operation on base after view is created, e.g.,
+///   (2) in-place operation on base after view is created like
 ///
 ///     # Have:
 ///     #   base.requires_grad = False
@@ -422,8 +423,8 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 /// Variable::DifferentiableViewImpl is created to support gradient tracking of
 /// such **in-place** operations. In particular,
 ///   + if an in-place op is done on base, the grad_fn field of the view may
-///     become stale. So accesses should go through get_grad_fn(), whcih
-///     reconstruct an updated grad_fn if the version_counter had incremented.
+///     become stale. So accesses should always go through get_grad_fn(), which
+///     reconstructs an updated grad_fn if the version_counter has incremented.
 ///     All other fields are always valid.
 ///   + if an in-place op is done on view, in rebase_history() of view, which is
 ///     called after every in-place op in VariableType.cpp, the grad_fn of base
