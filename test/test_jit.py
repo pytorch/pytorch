@@ -8115,6 +8115,163 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
 
+# NB: torch.jit.script, when used as a function, uses the current scope
+# to resolve variable names. This function cannot be made local to
+# TestAutodiffSubgraphSlicing because those tests call torch.jit.script on functions
+# in a different scope than they are defined in.
+def pyfn(a, b):
+    return a * b
+
+
+class TestAutodiffSubgraphSlicing(JitTestCase):
+    # TODO: It is better if we can test directly on graphs instead of the current
+    # end-to-end fashion.
+    def _perform_ad_subgraph_slicing(self, fn, *input_sizes):
+        ge = torch.jit.script(fn)
+        ge.debug_disable_autodiff_subgraph_inlining()
+        inputs = [torch.randn(size, requires_grad=True) for size in input_sizes]
+        ge(*inputs)
+        return ge.graph_for(*inputs)
+
+    def assertGraphContains(self, graph, kind, num_kind_nodes, consider_subgraphs=False):
+        if consider_subgraphs:
+            raise NotSupportedError("NYI: assertGraphHas consider_subgraphs=T")
+        nodes = [node for node in graph.nodes()
+                 if node.kind() == kind]
+        self.assertEqual(len(nodes), num_kind_nodes)
+
+    def assertGraphSize(self, graph, size):
+        self.assertEqual(len(list(graph.nodes())), size)
+
+    def test_simple_merge(self):
+        # o --> o
+        def fn(x, y, z):
+            a = x * y
+            b = a * z
+            return b
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 1)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_simple_no_merge(self):
+        # o: autodiff supported. x: not autodiff supported.
+        # o --> x
+        def fn(x, y, z):
+            a = x * y
+            b = pyfn(a, z)
+            return b
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_does_not_merge_unrelated(self):
+        # o  o
+        def fn(w, x, y, z):
+            a = x * y
+            b = w * z
+            return a, b
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_merges_without_cycles(self):
+        # o --> o --> o
+        # |           ^
+        #  \_________/
+        def fn(w, x, y):
+            a = w * x
+            b = a * y
+            c = a * b
+            return c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 1)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_merges_dense(self):
+        #   o      o
+        #   |\    /|
+        #   | \  / |
+        #   |  /\  |
+        #   vv    vv
+        #   o      o
+        def fn(x, y):
+            a, b = x.chunk(2)
+            c, d = y.chunk(2)
+            return a + c, b + d
+
+        graph = self._perform_ad_subgraph_slicing(fn, 2, 2)
+
+        self.assertGraphSize(graph, 1)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_does_not_create_cycles(self):
+        # o --> x --> o
+        # |           ^
+        #  \_________/
+        def fn(w, x, y):
+            a = w * x
+            b = pyfn(a, y)
+            c = a * b
+            return c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 3)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_merges_up(self):
+        # o --> x     o
+        # |           ^
+        #  \_________/
+        def fn(w, x, y, z):
+            a = w * x
+            b = pyfn(a, y)
+            c = a * z
+            return b, c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_merges_down(self):
+        # o     x --> o
+        # |           ^
+        #  \_________/
+        def fn(v, w, x, y):
+            a = v * w
+            b = pyfn(x, y)
+            c = b * a
+            return a, c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_respects_lexical_scoping(self):
+        def fn(x, k):
+            y = x * 1.1
+            if bool(k):
+                k += y
+            z = y * k
+            return z, k
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1)
+
+        # We should not have combined the two multiplications into
+        # the same group; they should each be a separate DiffGraph
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+
+
 class TestJitGenerated(JitTestCase):
     pass
 
