@@ -114,8 +114,7 @@ struct Method {
     for (at::Tensor* inp : member_inputs) {
       stack.push_back(*inp);
     }
-    const auto size = stack.size();
-    setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
+    setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), stack.size()));
     PropagateInputShapes(*retval);
     return retval;
   }
