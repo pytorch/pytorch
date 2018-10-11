@@ -1491,7 +1491,8 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
   AT_CHECK(compute_uv,
-           "cannot compute backward for SVD without computing the singular matrices in the forward pass");
+           "Setting compute_uv to false doesn't compute singular matrices, and hence we cannot compute backward ",
+           "for SVD without the singular matrices in the forward pass.");
 
   auto m = self.size(0);
   auto n = self.size(1);
