@@ -7,6 +7,7 @@ import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
+import builtins
 import sys
 import warnings
 import itertools
@@ -613,6 +614,8 @@ def createResolutionCallback(frames_up=0):
             return f_locals[key]
         elif key in f_globals:
             return f_globals[key]
+        elif hasattr(builtins, key):
+            return getattr(builtins, key)
         else:
             return None
 
@@ -1248,6 +1251,32 @@ def _register_builtin(fn, op):
 
 def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
+
+
+# Python equivalents for the empty list construction builtins. We need
+# these otherwise the tests won't execute in regular Python mode.
+def _construct_empty_int_list():
+    return []
+
+
+_register_builtin(_construct_empty_int_list, 'aten::_construct_empty_int_list')
+
+
+def _construct_empty_float_list():
+    return []
+
+
+_register_builtin(_construct_empty_float_list, 'aten::_construct_empty_float_list')
+
+
+def _construct_empty_tensor_list():
+    return []
+
+
+_register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_list')
+
+
+_register_builtin(len, 'aten::len')
 
 
 class _disable_tracing(object):

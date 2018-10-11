@@ -151,7 +151,7 @@ int GetGPUIDForPointer(const void* ptr)
     // Otherwise, there must be no error
     HIP_ENFORCE(err);
 
-    if(attr.memoryType == hipMemoryTypeHost)
+    if(attr.CAFFE2_HIP_PTRATTR_MEMTYPE == hipMemoryTypeHost)
     {
         return -1;
     }

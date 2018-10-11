@@ -28,11 +28,4 @@ uint32_t RandomNumberSeed() {
       kPrime2 * tv_sec + kPrime3 * tv_usec;
 }
 
-BaseStaticContext* GetCPUStaticContext() {
-  static CPUStaticContext context;
-  return &context;
-}
-
-REGISTER_STATIC_CONTEXT(CPU, GetCPUStaticContext());
-
 } // namespace caffe2
