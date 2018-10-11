@@ -142,6 +142,7 @@ struct TensorImplOptions {
                     : is_variable_(is_variable),
                       has_storage_(has_storage),
                       has_strides_(has_strides) {};
+  TensorImplOptions() = delete;
 };
 
 /**
