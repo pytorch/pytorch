@@ -389,17 +389,12 @@ public:
 
     // Miss
     // remove if needed
-    // bug related to cuFFT plan cache max size has been fixed
-    // in CUDA 10. Hence, when compiling with CUDA 10, just
-    // don't do the erase.
-    #if CUDA_VERSION < 10000
-      if (_usage_list.size() >= _max_size) {
-        auto last = _usage_list.end();
-        last--;
-        _cache_map.erase(last->first);
-        _usage_list.pop_back();
-      }
-    #endif
+    if (_usage_list.size() >= _max_size) {
+      auto last = _usage_list.end();
+      last--;
+      _cache_map.erase(last->first);
+      _usage_list.pop_back();
+    }
 
     // construct new plan at list front, then insert into _cache_map
     _usage_list.emplace_front(std::piecewise_construct,
@@ -419,19 +414,15 @@ public:
 
   void resize(int64_t new_size) {
     _set_max_size(new_size);
-    // no-op when compiling with CUDA 10 since we don't have to
-    // do the workaround with the 1024th cufft plan bug
-    #if CUDA_VERSION < 10000
-      auto cur_size = _usage_list.size();
-      if (cur_size > _max_size) {
-        auto delete_it = _usage_list.end();
-        for (size_t i = 0; i < cur_size - _max_size; i++) {
-          delete_it--;
-          _cache_map.erase(delete_it->first);
-        }
-        _usage_list.erase(delete_it, _usage_list.end());
+    auto cur_size = _usage_list.size();
+    if (cur_size > _max_size) {
+      auto delete_it = _usage_list.end();
+      for (size_t i = 0; i < cur_size - _max_size; i++) {
+        delete_it--;
+        _cache_map.erase(delete_it->first);
       }
-    #endif
+      _usage_list.erase(delete_it, _usage_list.end());
+    }
   }
 
   size_t size() const { return _cache_map.size(); }
