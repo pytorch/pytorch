@@ -4,11 +4,6 @@ import "caffe2/proto/caffe2.proto";
 
 package torch;
 
-enum ProtoVersion {
-  _START_VERSION = 0;
-  IR_VERSION_NEWEST = 0x0000000000000101;
-}
-
 message ParameterDef {
   // whether we compute the gradient for the parameter
   optional bool require_gradient = 1;
@@ -59,8 +54,16 @@ message ModuleDef {
   // from the main method.
 }
 
+enum ProtoVersion {
+  PROTO_VERSION_NEWEST = 0x0000000000000001;
+}
+
 message ModelDef {
-  optional int64 ir_version = 1;
+  // for the proto version, to keep both backward and forward
+  // compatibility, please bump the proto_version when we add any
+  // change in the proto. runtime decides whether accept the
+  // model based on the ir_version.
+  optional int64 proto_version = 1;
 
   // main module of the model
   optional ModuleDef main_module = 2;
@@ -74,6 +77,8 @@ message ModelDef {
   optional string name = 5;
 
   // metadata
+  //   - exporter - string (either "CAFFE2" or "PYTORCH"),
+  //     to help the runtime understand who exports the model
   //   - debug_info - string
   // for MetaNetDef:
   //   - project - string

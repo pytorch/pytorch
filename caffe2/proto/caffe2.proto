@@ -12,15 +12,22 @@ package caffe2;
 //     those in the future.
 
 // ExternalDataProto stores the pointer to the content of TensorProto
+// Later, we can use it to replace BlobProto
 message ExternalDataProto {
   // type of the external storage type, can be the following:
-  //   - FILE, external file, id is the path to the file
-  //   - TORCH_WRAPPER, the wrapper in torch/csrc/jit/serialization.h is used,
-  //     id is the tag
-  //   - DB, id is the serialized DBReaderProto
   // NEW type to be ADDED here
-  optional string type = 1;
-  // used together with type
+  enum SourceType {
+    // use external file to store the data, id is the path to the file, and
+    // POSIX file format is used
+    FILE = 1;
+    // the wrapper defined in torch/csrc/jit/serialization.h is used,
+    // and id is the tag to help the runtime identify the data
+    TORCH_WRAPPER = 2;
+    // (de)serialze the data using DB, id is the serialized DBReaderProto
+    DB = 3;
+  }
+  optional SourceType source_type = 1;
+  // used together with type, default encoding is utf-8
   optional bytes id = 2;
   // the offset of the starting point, the content may be between multiple
   // tensors.
@@ -33,7 +40,6 @@ message ExternalDataProto {
 message TensorProto {
   // The dimensions in the tensor.
   repeated int64 dims = 1;
-  // The strides of the tensor.
 
   // Data type
   enum DataType {
@@ -54,11 +60,6 @@ message TensorProto {
     INT64 = 10;    // int64_t
     FLOAT16 = 12;  // at::Half
     DOUBLE = 13;   // double
-
-    // When DataType is NO_CONTENT, we use TensorProto to store only type
-    // and shape information. Reuse TensorProto to store type and shape
-    // because we can just have one proto, not having another ValueInfoProto
-    NO_CONTENT = 101;
   }
   optional DataType data_type = 2 [default = FLOAT];
 
@@ -72,6 +73,10 @@ message TensorProto {
     // the pointer to the content is stored in field external_data
     // the content is serialized as little-endian
     EXTERNAL = 3;
+    // When StorageType is NO_CONTENT, we use TensorProto to store only type
+    // and shape information. Reuse TensorProto to store type and shape
+    // because we can just have one proto, not having another ValueInfoProto
+    NO_CONTENT = 4;
   }
   optional StorageType storage_type = 12 [default = TYPED];
   // For float
@@ -201,22 +206,7 @@ message DeviceOption {
 // Operator Definition.
 message OperatorDef {
   repeated string input = 1; // the name of the input blobs
-  // we plan to support named inputs in schema, and this extension is for the
-  // named inputs
-  // if inputs are positional, just leave mapped_inputs empty
-  // if (some) inputs are named in the schema, the positional inputs have
-  // empty string as place holder in mapped_inputs, and the named inputs
-  // have their schema input names at the correponding postition in
-  // mapped_inputs
-  repeated string mapped_inputs = 11;
   repeated string output = 2; // the name of output top blobs
-  // we plan to support named outputs in schema, and this extension is for the
-  // named outputs
-  // if outputs are positional, just leave mapped_outputs empty
-  // if (some) outputs are named, the positional outputs have empty string
-  // as place holder in mapped_outputs, and the named inputs have names
-  // in mapped_outputs
-  repeated string mapped_outputs = 12;
   optional string name = 3; // the operator name. This is optional.
   // the operator type. This is needed to create the object from the operator
   // registry. the domain and concrete aten function are also embedded here.
@@ -252,23 +242,32 @@ message OperatorDef {
   // operators can be constructed in any language.
   optional string debug_info = 10;
 
-  // place for additional information
+  // annotation is a list of named values for additional information
   // for example, for some training platform, if they want to tag the
   // operator for placing strategy, component info and parallel strategy,
   // such information is not about the model/operator itself, but about
   // the runtime/platform.
   // existing solution is saving extra info in device option,
-  // however, it's more natural to keep the information here
-  // existing usage: https://fb.quip.com/yAiuAXkRXZGx
-  repeated Argument annotations = 13;
+  // however, it's more natural to keep the information here.
+  // please ADD new annotations in comments
+  repeated Argument annotations = 11;
 
+  // the domain of the operator
+  // to support legacy operator libs, we use domain to distinguish which
+  // operator lib we refer to:
+  //   - "CAFFE2" means this uses Caffe2 operator library
+  //   - "ATEN" means this uses ATen operator library
+  //   - "C10" is for the fused library
+  //   - if the domain is missing or empty, we use "CAFFE2", this is for
+  //     legacy models
+  optional string domain = 12;
   // each operator is has its own version number.
   // operator version information
   // each time, we change the API or semantics of the operator,
   // we bump the version for the operator.
   // the runtime system should check the op_version of each OperatorDef
   // and decide it should reject or accept the model
-  optional string op_version = 15;
+  optional int64 op_version = 13;
 }
 
 // Network definition.
