@@ -14,12 +14,19 @@ namespace torch { namespace jit {
 //    - Simply x.t().t() to x
 //
 // TODO: Decide what kind of fixed point strategy we will have
-void PeepholeOptimize(Block * block) {
+//
+// The parameter `addmm_fusion_enabled` exists because, as it is today, fusing
+// add + mm has no benefit within PyTorch running ATen ops. However, we rely on
+// seeing the fused version of addmm for ONNX export, since after ONNX translation
+// we would see redundant Gemm ops with sub-optimal inputs. This flag is exposed
+// so that ONNX export can pass `true` to get the fused behavior, but normal
+// JIT peephole optimization is left alone.
+void PeepholeOptimize(Block * block, bool addmm_fusion_enabled) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto* node = *it;
 
     for (Block * sub_block : node->blocks()) {
-      PeepholeOptimize(sub_block);
+      PeepholeOptimize(sub_block, addmm_fusion_enabled);
     }
 
     // XXX: remember that if you want to simplify an expression by combining multiple nodes
@@ -60,7 +67,6 @@ void PeepholeOptimize(Block * block) {
       // and because it works out of place on C, we're only trading off an explicit add for
       // a copy inside the addmm function. Note that it doesn't even result in fewer reads,
       // because mm won't even load C (because beta == 0 for it).
-      static constexpr bool addmm_fusion_enabled = false;
       if (addmm_fusion_enabled && node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
         // Look for mm from both sides of the add
         for (size_t mm_side = 0; mm_side < 2; mm_side++) {
@@ -123,8 +129,8 @@ void PeepholeOptimize(Block * block) {
   }
 }
 
-void PeepholeOptimize(std::shared_ptr<Graph>& graph) {
-  PeepholeOptimize(graph->block());
+void PeepholeOptimize(std::shared_ptr<Graph>& graph, bool addmm_fusion_enabled) {
+  PeepholeOptimize(graph->block(), addmm_fusion_enabled);
   // Eliminate dead code created by any peephole passes we've just done
   EliminateDeadCode(graph->block());
 }
