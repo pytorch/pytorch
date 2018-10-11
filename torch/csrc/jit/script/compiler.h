@@ -140,6 +140,7 @@ struct Resolver {
   virtual std::shared_ptr<SugaredValue> operator() (const std::string& name, Method& m, const SourceRange& loc) const = 0;
   virtual void addEntry(const std::string& name, std::shared_ptr<SugaredValue> sv) = 0;
   virtual void clear() = 0;
+  virtual ~Resolver() {}
 };
 
 struct NativeResolver : public Resolver {
