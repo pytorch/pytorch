@@ -25,7 +25,6 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
-
 # JIT C++ extensions require ninja.
 git clone https://github.com/ninja-build/ninja --quiet
 pushd ninja
