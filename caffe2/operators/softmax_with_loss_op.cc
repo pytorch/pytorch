@@ -163,12 +163,6 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   D = X.size_from_dim(canonical_axis);
   P->ResizeLike(X);
 
-  if (sum_multiplier_.size() != D) {
-    sum_multiplier_.Resize(D);
-    math::Set<float, CPUContext>(
-        D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
-  }
-
   float* Pdata = P->template mutable_data<float>();
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
 
