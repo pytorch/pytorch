@@ -738,7 +738,7 @@ TEST(TensorTest, TensorFactory) {
   EXPECT_NE(a.data<float>(), nullptr);
   a.mutable_data<float>()[0] = 3.0;
   Tensor b = empty({1, 2, 3}, at::device(CPU).data_type<int>());
-  EXPECT_NE(a.data<int>(), nullptr);
+  EXPECT_NE(b.data<int>(), nullptr);
   b.mutable_data<int>()[0] = 3;
 }
 
