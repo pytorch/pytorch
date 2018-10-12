@@ -338,6 +338,7 @@ class TestDataLoader(TestCase):
         self.assertEqual(len(dataloader_shuffle), 5)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_sequential_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for input, target in loader:
@@ -475,6 +476,7 @@ class TestDataLoader(TestCase):
         self._test_batch_sampler(num_workers=4)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for input, target in loader:
@@ -679,6 +681,7 @@ class TestStringDataLoader(TestCase):
         self.dataset = StringDataset()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for batch_ndx, (s, n) in enumerate(loader):
@@ -722,6 +725,7 @@ class TestDictDataLoader(TestCase):
             self.assertEqual(n[1], idx + 1)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfRocm
     def test_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
         for batch_ndx, sample in enumerate(loader):

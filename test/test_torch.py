@@ -8183,6 +8183,7 @@ class TestTorch(TestCase):
             self.assertEqual(torch.empty_like(a).type(), a.type())
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    @skipIfRocm
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
