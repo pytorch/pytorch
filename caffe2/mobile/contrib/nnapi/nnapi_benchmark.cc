@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
@@ -43,14 +43,14 @@ static double benchmark_conv_caffe2(
     ws = &localWs;
   }
   {
-    auto* t = ws->CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    auto* t = BlobGetMutableTensor(ws->CreateBlob("X_cpu"), CPU);
     t->Resize(N, C, H, W);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
         t->size(), 0, 30, t->mutable_data<float>(), &ctx);
   }
   {
-    auto* t = ws->CreateBlob("W")->GetMutable<TensorCPU>();
+    auto* t = BlobGetMutableTensor(ws->CreateBlob("W"), CPU);
     if (group == 1) {
       t->Resize(K, C, kernel, kernel);
     } else {
@@ -61,7 +61,7 @@ static double benchmark_conv_caffe2(
         t->size(), 0, 30, t->mutable_data<float>(), &ctx);
   }
   {
-    auto* t = ws->CreateBlob("B")->GetMutable<TensorCPU>();
+    auto* t = BlobGetMutableTensor(ws->CreateBlob("B"), CPU);
     t->Resize(K);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
@@ -129,14 +129,14 @@ static double benchmark_conv_nnapi(
     ws = &localWs;
   }
   {
-    auto* t = ws->CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    auto* t = BlobGetMutableTensor(ws->CreateBlob("X_cpu"), CPU);
     t->Resize(N, H, W, C);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
         t->size(), 0, 30, t->mutable_data<float>(), &ctx);
   }
   {
-    auto* t = ws->CreateBlob("W")->GetMutable<TensorCPU>();
+    auto* t = BlobGetMutableTensor(ws->CreateBlob("W"), CPU);
     if (group > 1) {
       CAFFE_ENFORCE_EQ(C, group);
       t->Resize(1, kernel, kernel, C);
@@ -148,7 +148,7 @@ static double benchmark_conv_nnapi(
         t->size(), 0, 30, t->mutable_data<float>(), &ctx);
   }
   {
-    auto* t = ws->CreateBlob("B")->GetMutable<TensorCPU>();
+    auto* t = BlobGetMutableTensor(ws->CreateBlob("B"), CPU);
     t->Resize(K);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(
@@ -190,7 +190,7 @@ static double benchmark_conv_nnapi(
   NetDef initNet;
   NNApi model(initNet, netdef, ws);
   std::vector<TensorCPU*> inputs, outputs;
-  inputs.push_back(ws->GetBlob("X_cpu")->GetMutable<TensorCPU>());
+  inputs.push_back(BlobGetMutableTensor(ws->GetBlob("X_cpu"), CPU));
   CAFFE_ENFORCE(model.run(inputs, &outputs));
 
   for (int i = 0; i < warmup; i++) {
@@ -220,14 +220,14 @@ static double benchmark_conv_nnapi_int8(
     ws = &localWs;
   }
   {
-    auto* t = ws->CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+    auto* t = BlobGetMutableTensor(ws->CreateBlob("X_cpu"), CPU);
     t->Resize(N, H, W, C);
     for (int i = 0; i < t->size(); i++) {
       t->mutable_data<uint8_t>()[i] = rand() % 10;
     }
   }
   {
-    auto* t = ws->CreateBlob("W")->GetMutable<TensorCPU>();
+    auto* t = BlobGetMutableTensor(ws->CreateBlob("W"), CPU);
     if (group > 1) {
       CAFFE_ENFORCE_EQ(C, group);
       t->Resize(1, kernel, kernel, C);
@@ -243,7 +243,7 @@ static double benchmark_conv_nnapi_int8(
   // should be of ANEURALNETWORKS_TENSOR_INT32, with zeroPoint of 0 and
   // bias_scale == input_scale * filter_scale.
   {
-    auto* t = ws->CreateBlob("B")->GetMutable<TensorCPU>();
+    auto* t = BlobGetMutableTensor(ws->CreateBlob("B"), CPU);
     t->Resize(K);
     for (int i = 0; i < t->size(); i++) {
       t->mutable_data<int32_t>()[i] = rand() % 10;
@@ -322,7 +322,7 @@ static double benchmark_conv_nnapi_int8(
   NetDef initNet;
   NNApi model(initNet, netdef, ws);
   std::vector<TensorCPU*> inputs, outputs;
-  inputs.push_back(ws->GetBlob("X_cpu")->GetMutable<TensorCPU>());
+  inputs.push_back(BlobGetMutableTensor(ws->GetBlob("X_cpu"), CPU));
   CAFFE_ENFORCE(model.run(inputs, &outputs));
 
   for (int i = 0; i < warmup; i++) {

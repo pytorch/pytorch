@@ -83,6 +83,15 @@ class TestWorkspace(unittest.TestCase):
             workspace.RunPlan(plan.Proto().SerializeToString()), True)
         self.assertEqual(workspace.HasBlob("testblob"), True)
 
+    def testRunPlanInBackground(self):
+        plan = core.Plan("test-plan")
+        plan.AddStep(core.ExecutionStep("test-step", self.net))
+        background_plan = workspace.RunPlanInBackground(plan)
+        while not background_plan.is_done():
+            pass
+        self.assertEqual(background_plan.is_succeeded(), True)
+        self.assertEqual(workspace.HasBlob("testblob"), True)
+
     def testConstructPlanFromSteps(self):
         step = core.ExecutionStep("test-step-as-plan", self.net)
         self.assertEqual(workspace.RunPlan(step), True)

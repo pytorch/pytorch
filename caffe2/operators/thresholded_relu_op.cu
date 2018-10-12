@@ -30,7 +30,7 @@ bool ThresholdedReluOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), X.data<float>(), Y->mutable_data<float>(), alpha_);
+      X.size(), X.data<float>(), Y->template mutable_data<float>(), alpha_);
   return true;
 }
 
@@ -47,7 +47,10 @@ bool ThresholdedReluGradientOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      Y.size(), Y.data<float>(), dY.data<float>(), dX->mutable_data<float>());
+      Y.size(),
+      Y.data<float>(),
+      dY.data<float>(),
+      dX->template mutable_data<float>());
   return true;
 }
 

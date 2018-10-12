@@ -13,7 +13,7 @@
 #include "caffe2/utils/math.h"
 #include "nnpack.h"
 
-CAFFE2_DEFINE_bool(caffe2_profile_nnpack, false, "");
+C10_DEFINE_bool(caffe2_profile_nnpack, false, "");
 namespace caffe2 {
 
 void initNNPACK() {
@@ -197,7 +197,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   initNNPACK();
   pthreadpool_t pool = reinterpret_cast<pthreadpool_t>(ws_->GetThreadPool());
 
-  runWithSharedBuffer<CPUContext>(ws_, [&](Tensor<CPUContext>* buffer) {
+  runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
     if (transformStrategy_ == nnp_convolution_transform_strategy_precompute) {
       transformedFilters_.resize(group_);
 
@@ -231,11 +231,12 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             (transformedFilterSize + sizeof(float) - 1) / sizeof(float);
 
         for (auto g = 0; g < group_; g++) {
-          transformedFilters_[g] =
+          transformedFilters_[g] = BlobGetMutableTensor(
               ws_->CreateBlob(
-                     "__transformed_kernel_" +
-                     to_string(__sync_fetch_and_add(&precomputed_transform_id, 1)))
-                  ->GetMutable<TensorCPU>();
+                  "__transformed_kernel_" +
+                  to_string(
+                      __sync_fetch_and_add(&precomputed_transform_id, 1))),
+              CPU);
           transformedFilters_[g]->Resize(transformedFilterElements);
 
           status = nnp_convolution_inference(
@@ -320,7 +321,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             activation_,
             nullptr /* activation parameter */,
             pool,
-            FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
+            c10::FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
         if (status == nnp_status_insufficient_buffer) {
           /* Query required workspace size, increase buffer, and try again */
           status = nnp_convolution_inference(
@@ -374,7 +375,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
                 activation_,
                 nullptr /* activation parameter */,
                 pool,
-                FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
+                c10::FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
           }
         }
 
@@ -382,7 +383,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
         CAFFE_ENFORCE(
             nnp_status_success == status,
             "NNPACK convolution computation returned error");
-        if (FLAGS_caffe2_profile_nnpack) {
+        if (c10::FLAGS_caffe2_profile_nnpack) {
           char buffer[1024];
           const double gmacs =
               double(

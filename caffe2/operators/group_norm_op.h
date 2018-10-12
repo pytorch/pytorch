@@ -19,7 +19,7 @@ class GroupNormOp final : public Operator<Context> {
         OP_SINGLE_ARG(int, "group", group_, 32),
         OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))) {
+            this->template GetSingleArgument<std::string>("order", "NCHW"))) {
     CAFFE_ENFORCE_NE(
         order_,
         StorageOrder::UNKNOWN,
@@ -90,7 +90,7 @@ class GroupNormGradientOp final : public Operator<Context> {
       : Operator<Context>(def, ws),
         OP_SINGLE_ARG(int, "group", group_, 32),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))) {
+            this->template GetSingleArgument<std::string>("order", "NCHW"))) {
     CAFFE_ENFORCE_NE(
         order_,
         StorageOrder::UNKNOWN,
@@ -152,8 +152,8 @@ class GroupNormGradientOp final : public Operator<Context> {
   const int group_;
   const StorageOrder order_;
 
-  Tensor<Context> ds_;
-  Tensor<Context> db_;
+  Tensor ds_{Context::GetDeviceType()};
+  Tensor db_{Context::GetDeviceType()};
 
   // Input: dY, X, gamma, beta, mu, inv_sig
   // Output: dX, dgamma, dbeta

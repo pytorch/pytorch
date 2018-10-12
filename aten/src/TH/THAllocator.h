@@ -1,6 +1,6 @@
 #pragma once
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #ifdef __cplusplus
 #include <ATen/Allocator.h>
@@ -32,8 +32,8 @@ TH_API THAllocator* getTHDefaultAllocator(void);
 // the non-file descriptor constructor
 enum WithFd { WITH_FD };
 
-class AT_API THMapAllocator {
-public:
+class CAFFE2_API THMapAllocator {
+ public:
   THMapAllocator(const char *filename, int flags, size_t size);
   THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
   THMapAllocator(const THMapAllocator&) = delete;
@@ -82,12 +82,14 @@ protected:
 };
 
 // Base-from-member idiom
-struct AT_API THRefcountedMapAllocatorArgCheck {
+struct CAFFE2_API THRefcountedMapAllocatorArgCheck {
   THRefcountedMapAllocatorArgCheck(int flags);
 };
 
-class AT_API THRefcountedMapAllocator : private THRefcountedMapAllocatorArgCheck, public THMapAllocator {
-public:
+class CAFFE2_API THRefcountedMapAllocator
+    : private THRefcountedMapAllocatorArgCheck,
+      public THMapAllocator {
+ public:
   THRefcountedMapAllocator(const char *filename, int flags, size_t size);
   THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
 

@@ -44,6 +44,8 @@ def split_name_params(prototype):
 def uninplace_api_name(api_name):
     if api_name.endswith('_') and not api_name.endswith('__'):
         api_name = api_name[:-1]
+    if api_name.endswith('_out'):
+        api_name = api_name[:-4]
     return api_name
 
 

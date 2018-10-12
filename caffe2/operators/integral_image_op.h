@@ -28,7 +28,7 @@ class IntegralImageGradientOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  Tensor<Context> row_pass_buffer_;
+  Tensor row_pass_buffer_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

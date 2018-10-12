@@ -12,13 +12,14 @@
 #include "caffe2/core/numa.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
 enum class HipMemoryPoolType {
   NONE = 0,
   CUB = 1,
+  THC = 2,
 };
 
 /**
@@ -51,7 +52,7 @@ class ThreadLocalHIPObjects {
 
   hipStream_t GetStream(int gpu, int stream_id) {
     vector<hipStream_t>& gpu_streams = hip_streams_[gpu];
-    if (gpu_streams.size() <= stream_id) {
+    if (gpu_streams.size() <= (unsigned)stream_id) {
       gpu_streams.resize(stream_id + 1, nullptr);
     }
     if (!gpu_streams[stream_id]) {
@@ -65,7 +66,7 @@ class ThreadLocalHIPObjects {
   rocblas_handle GetHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<rocblas_handle>& gpu_handles = rocblas_handles_[gpu];
-    if (gpu_handles.size() <= stream_id) {
+    if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {
@@ -84,7 +85,7 @@ class ThreadLocalHIPObjects {
   miopenHandle_t GetMiopenHandle(int gpu, int stream_id) {
     DeviceGuard guard(gpu);
     vector<miopenHandle_t>& gpu_handles = miopen_handles_[gpu];
-    if (gpu_handles.size() <= stream_id) {
+    if (gpu_handles.size() <= (unsigned)stream_id) {
       gpu_handles.resize(stream_id + 1, nullptr);
     }
     if (!gpu_handles[stream_id]) {
@@ -119,37 +120,38 @@ class ThreadLocalHIPObjects {
   vector<miopenHandle_t> miopen_handles_[CAFFE2_COMPILE_TIME_MAX_HIP_GPUS];
 };
 
-class HIPContext final {
+class HIPContext final : public BaseContext {
  public:
   // The default HIP context constructor.
   explicit HIPContext(const int gpu_id = -1);
   explicit HIPContext(const DeviceOption& option);
+  explicit HIPContext(const at::Device& device)
+      : HIPContext(DeviceToOption(device)) {}
 
-  ~HIPContext() {
+  ~HIPContext() override {
     if (hiprand_generator_) {
       HIPRAND_CHECK(hiprandDestroyGenerator(hiprand_generator_));
     }
     FinishDeviceComputation();
   }
 
-  inline void SwitchToDevice(int stream_id) {
+  inline void SwitchToDevice(int stream_id) override {
     set_stream_id(stream_id);
     CaffeHipSetDevice(gpu_id_);
   }
-  inline void SwitchToDevice() {
-    SwitchToDevice(0);
-  }
 
-  inline void WaitEvent(const Event& ev) {
+  using BaseContext::SwitchToDevice;
+
+  inline void WaitEvent(const Event& ev) override {
     ev.Wait(HIP, this);
   }
 
-  inline void Record(Event* ev, const char* err_msg = nullptr) const {
+  inline void Record(Event* ev, const char* err_msg = nullptr) const override {
     CAFFE_ENFORCE(ev, "Event must not be null.");
     ev->Record(HIP, this, err_msg);
   }
 
-  void FinishDeviceComputation() {
+  void FinishDeviceComputation() override {
     hipStreamSynchronize(hip_objects_.GetStream(gpu_id_, stream_id_));
     hipError_t error = hipGetLastError();
     if (error != hipSuccess) {
@@ -157,7 +159,7 @@ class HIPContext final {
     }
   }
 
-  inline int hip_gpu_id() const {
+  inline int device_id() const {
     return gpu_id_;
   }
 
@@ -194,7 +196,9 @@ class HIPContext final {
     return hiprand_generator_;
   }
 
-  static std::pair<void*, MemoryDeleter> New(size_t nbytes);
+  static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(HIP)->allocate(nbytes);
+  }
 
   // Get a mutex to lock out hipMalloc / hipFree calls when
   // NCCL kernels are being launched. Should remove threat of
@@ -216,6 +220,18 @@ class HIPContext final {
         nbytes,
         hipMemcpyDefault,
         hip_objects_.GetStream(gpu_id_, stream_id_)));
+  }
+
+  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
+    CopyBytes<HIPContext, HIPContext>(nbytes, src, dst);
+  }
+
+  void CopyBytesToCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytes<HIPContext, CPUContext>(nbytes, src, dst);
+  }
+
+  void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytes<CPUContext, HIPContext>(nbytes, src, dst);
   }
 
   template <typename T, class SrcContext, class DstContext>
@@ -241,8 +257,20 @@ class HIPContext final {
   }
 
   static bool IsStreamFree(const DeviceOption& option, int stream_id) {
-    auto stream = HIPContext::hip_stream(option.hip_gpu_id(), stream_id);
+    auto stream = HIPContext::hip_stream(option.device_id(), stream_id);
     return hipStreamQuery(stream) == hipSuccess;
+  }
+
+  at::Device device() const override {
+    return at::Device(HIP, gpu_id_);
+  }
+
+  DeviceType device_type() const override {
+    return HIP;
+  }
+
+  static constexpr DeviceType GetDeviceType() {
+    return HIP;
   }
 
  protected:
@@ -289,26 +317,28 @@ inline void CPUContext::CopyBytes<CPUContext, HIPContext>(
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  */
-struct PinnedCPUAllocator final : CPUAllocator {
+struct PinnedCPUAllocator final : public at::Allocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
+  at::DataPtr allocate(size_t nbytes) const override {
     void* data;
+    at::DataPtr data_ptr;
     std::lock_guard<std::mutex> lock(HIPContext::mutex());
     if (IsNUMAEnabled()) {
-      auto ptr_and_deleter = baseAllocator_.New(nbytes);
-      data = ptr_and_deleter.first;
+      data_ptr = baseAllocator_.allocate(nbytes);
+      data = data_ptr.get();
       CAFFE_ENFORCE(data);
       HIP_ENFORCE(hipHostRegister(data, nbytes, hipHostRegisterDefault));
     } else {
       HIP_ENFORCE(hipHostMalloc(&data, nbytes));
+      data_ptr = {data, data, &Delete, at::Device(CPU)};
     }
     memset(data, 0, nbytes);
-    return {data, Delete};
+    return data_ptr;
   }
 
-  MemoryDeleter GetDeleter() override {
-    return Delete;
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
   }
 
  private:
@@ -338,8 +368,7 @@ struct PinnedCPUAllocator final : CPUAllocator {
   DefaultCPUAllocator baseAllocator_;
 };
 
-// For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
-typedef Tensor<HIPContext> TensorHIP;
+typedef Tensor TensorHIP;
 
 } // namespace caffe2
 

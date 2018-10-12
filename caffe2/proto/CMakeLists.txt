@@ -10,8 +10,10 @@ if (MSVC)
   else()
     set(Caffe2_API_DEFINE "-DCAFFE2_API=")
   endif()
-  target_compile_definitions(
-      Caffe2_PROTO PRIVATE ${Caffe2_API_DEFINE})
+else()
+  set(Caffe2_API_DEFINE "-DCAFFE2_API=")
 endif()
+target_compile_definitions(
+    Caffe2_PROTO PRIVATE ${Caffe2_API_DEFINE})
 
 install(FILES ${Caffe2_PROTO_HEADERS} DESTINATION include/caffe2/proto)

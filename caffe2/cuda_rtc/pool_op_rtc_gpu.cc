@@ -216,7 +216,7 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
           stride_w(),
           pad_t(),
           pad_l());
-      input_dims_ = X.dims();
+      input_dims_ = X.dims().vec();
     }
     // Carry out the pooling computation.
     func_.Launch(CAFFE_GET_BLOCKS(Y->size()), 1, 1, CAFFE_CUDA_NUM_THREADS,
@@ -232,7 +232,7 @@ class MaxPoolRTCOp final : public ConvPoolOpBase<CUDAContext> {
 
  private:
   MaxPoolRTCFunction func_;
-  vector<TIndex> input_dims_;
+  vector<int64_t> input_dims_;
 };
 
 class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
@@ -269,7 +269,7 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
           stride_w(),
           pad_t(),
           pad_l());
-      input_dims_ = X.dims();
+      input_dims_ = X.dims().vec();
     }
     func_.Launch(CAFFE_GET_BLOCKS(X.size()), 1, 1, CAFFE_CUDA_NUM_THREADS, 1, 1,
                  0, context_.cuda_stream(),
@@ -285,7 +285,7 @@ class MaxPoolGradientRTCOp final : public ConvPoolOpBase<CUDAContext> {
 
  private:
   MaxPoolGradientRTCFunction func_;
-  vector<TIndex> input_dims_;
+  vector<int64_t> input_dims_;
 };
 
 namespace {

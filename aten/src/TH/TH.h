@@ -1,7 +1,7 @@
 #ifndef TH_INC
 #define TH_INC
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #include "THBlas.h"
 #ifdef USE_LAPACK

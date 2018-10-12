@@ -17,11 +17,11 @@ void concat(
   const auto numRows = inputs.size();
 
   // Precompute the output sizes to avoid resizing
-  std::vector<std::vector<TIndex>> outputDims(numTensors);
+  std::vector<std::vector<int64_t>> outputDims(numTensors);
 
   for (int i = 0; i < numTensors; ++i) {
     SmartTensorPrinter::PrintTensor(inputZero.at(i));
-    outputDims[i] = inputZero.at(i).dims();
+    outputDims[i] = inputZero.at(i).dims().vec();
     outputDims[i].insert(outputDims[i].begin(), numRows);
   }
 
@@ -50,12 +50,12 @@ void concat(
         continue;
       }
 
-      context.CopyItems<CPUContext, CPUContext>(
+      context.CopyItemsToCPU(
           input.meta(),
           input.size(),
           input.raw_data() /* src */,
           destinations[j] /* dst */
-          );
+      );
 
       destinations[j] =
           (char*)destinations[j] + input.size() * input.itemsize();
@@ -78,14 +78,14 @@ std::vector<std::vector<TensorCPU>> split(
     const auto innerSize = input.size_from_dim(1);
     const auto itemSize = input.meta().itemsize();
 
-    auto outputDims = input.dims();
+    auto outputDims = input.dims().vec();
     CAFFE_ENFORCE(!outputDims.empty());
     outputDims.erase(outputDims.begin());
     CAFFE_ENFORCE_EQ(input.dims().at(0), outputSize);
 
     for (int i = 0; i < outputSize; ++i) {
-      outputs[i].push_back(TensorCPU(outputDims));
-      context.CopyItems<CPUContext, CPUContext>(
+      outputs[i].push_back(Tensor(outputDims, CPU));
+      context.CopyItemsToCPU(
           input.meta(),
           innerSize,
           (char*)input.raw_data() + i * innerSize * itemSize /* src */,

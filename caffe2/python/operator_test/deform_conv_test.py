@@ -9,6 +9,8 @@ import hypothesis.strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import unittest
+import os
 
 import unittest
 

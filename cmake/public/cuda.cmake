@@ -178,7 +178,7 @@ add_library(caffe2::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt)
 else()
     set_property(
         TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
@@ -354,10 +354,6 @@ if (MSVC)
       list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD")
     endif()
   elseif(${CMAKE_BUILD_TYPE} MATCHES "Debug")
-    message(FATAL_ERROR
-            "Caffe2 currently does not support the combination of MSVC, Cuda "
-            "and Debug mode. Either set USE_CUDA=OFF or set the build type "
-            "to Release")
     if (${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MTd")
     else()

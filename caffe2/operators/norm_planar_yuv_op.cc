@@ -28,7 +28,7 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
     CAFFE_ENFORCE(C == M.dim(1));
     CAFFE_ENFORCE(C == S.dim(1));
     const auto* Xdata = X.data<float>();
-    auto* Zdata = Z->mutable_data<float>();
+    auto* Zdata = Z->template mutable_data<float>();
 
     int offset = H * W;
     for (auto n = 0; n < N; n++) { // realistically N will always be 1

@@ -25,15 +25,16 @@ class FP32MomentumSGDUpdateOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   FP32MomentumSGDUpdateOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.0)),
+        momentum_(this->template GetSingleArgument<float>("momentum", 0.0)),
         weight_decay_(
-            OperatorBase::GetSingleArgument<float>("weight_decay", 0.0)),
-        nesterov_(OperatorBase::GetSingleArgument<int>("nesterov", 0)) {}
+            this->template GetSingleArgument<float>("weight_decay", 0.0)),
+        nesterov_(this->template GetSingleArgument<int>("nesterov", 0)) {}
 
   bool RunOnDevice() override {
+    auto device_type = Context::GetDeviceType();
     // Iter live on the CPU
-    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor<Context>>(GRAD));
-    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor<Context>>(MOMENTUM));
+    CAFFE_ENFORCE(OperatorBase::InputIsTensorType(GRAD, device_type));
+    CAFFE_ENFORCE(OperatorBase::InputIsTensorType(MOMENTUM, device_type));
     CAFFE_ENFORCE(Input(LR).size() == 1);
     CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENTUM).size());
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));

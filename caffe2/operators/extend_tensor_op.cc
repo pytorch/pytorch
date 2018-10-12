@@ -34,7 +34,7 @@ class ExtendTensorOp final : public Operator<Context> {
             indices.template data<int>(),
             indices.template data<int>() + indices.size()));
 
-    auto extendSize = (TIndex)maxElem - oldSize;
+    auto extendSize = (int64_t)maxElem - oldSize;
     if (extendSize > 0) {
       new_tensor->Extend(extendSize, growthPct_, &context_);
       if (!new_tensor->meta().ctor()) {

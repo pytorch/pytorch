@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Exceptions.h"
+#include "ATen/cuda/CUDAContext.h"
+#include "ATen/cuda/Exceptions.h"
 
 #include "cudnn-wrapper.h"
 #include <ATen/ATen.h>
@@ -256,7 +257,7 @@ struct AT_CUDA_API DropoutDescriptor
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
     AT_ASSERT(type.is_cuda());
     AT_ASSERT(type.scalarType() == kByte);
-    state = at::empty({static_cast<int64_t>(state_size)}, type);
+    state = at::empty({static_cast<int64_t>(state_size)}, type.options());
     AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
 
@@ -290,7 +291,7 @@ struct AT_CUDA_API RNNDescriptor
   DropoutDescriptor dropout_desc_;
   void set(cudnnHandle_t handle, int hidden_size, int num_layers, DropoutDescriptor&& dropout_desc,
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
-           cudnnRNNMode_t mode, cudnnDataType_t datatype) {
+           cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnRNNAlgo_t algo) {
     dropout_desc_ = std::move(dropout_desc);
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
@@ -301,10 +302,10 @@ struct AT_CUDA_API RNNDescriptor
           input_mode,
           bidirectional,
           mode,
-          CUDNN_RNN_ALGO_STANDARD,
+          algo,
           datatype));
 #if CUDNN_VERSION >= 7000 && CUDA_VERSION >= 9000
-    cudaDeviceProp* prop = globalContext().getCurrentDeviceProperties();
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (datatype == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
@@ -318,13 +319,27 @@ struct AT_CUDA_API RNNDescriptor
   }
 };
 
+#if CUDNN_VERSION >= 7000
+
+struct AT_CUDA_API CTCLossDescriptor
+  : public Descriptor<cudnnCTCLossStruct,
+                      &cudnnCreateCTCLossDescriptor,
+                      &cudnnDestroyCTCLossDescriptor>
+{
+  void set(cudnnDataType_t datatype) {
+    AT_CUDNN_CHECK(cudnnSetCTCLossDescriptor(mut_desc(), datatype));
+  }
+};
+
+#endif
+
 union Constant
 {
   float f;
   double d;
   Constant(cudnnDataType_t dataType, double value) {
     if (dataType == CUDNN_DATA_HALF || dataType == CUDNN_DATA_FLOAT) {
-      f = (float) value;
+      f = static_cast<float>(value);
     } else {
       d = value;
     }

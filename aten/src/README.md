@@ -75,14 +75,14 @@ under some conditions you have to have to call, e.g., `newContiguous`, to get
 it into the correct form:
 
 ```
-  if (!(k_->stride[3] == 1) || !(k_->stride[2] == k_->size[3])) {
+  if (!(k_->stride(3) == 1) || !(k_->stride[2] == k_->size(3))) {
     kernel = THTensor_(newContiguous)(k_);
   } else {
     THTensor_(retain)(k_);
     kernel = k_;
   }
   ...
-  THTensor_(free)(kernel);
+  c10::raw::intrusive_ptr::decref(kernel);
 ```
 
 In this case, we have (redundantly) called `retain` on `k_`, so that we can

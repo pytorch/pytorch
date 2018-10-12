@@ -70,7 +70,7 @@ bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
       scale_dims.data(),
       dY_data,
       scale_data,
-      dX->mutable_data<float>(),
+      dX->template mutable_data<float>(),
       &context_);
   if (is_learnable_) {
     const auto& X = Input(1);
@@ -85,8 +85,8 @@ bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
         HxW,
         dY_data,
         X_data,
-        dscale->mutable_data<float>(),
-        dbias->mutable_data<float>());
+        dscale->template mutable_data<float>(),
+        dbias->template mutable_data<float>());
   }
   return true;
 }
@@ -104,7 +104,12 @@ bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   const float* dY_data = dY.data<float>();
   const float* scale_data = scale.data<float>();
   math::RowwiseMul<float, CPUContext>(
-      rows, cols, dY_data, scale_data, dX->mutable_data<float>(), &context_);
+      rows,
+      cols,
+      dY_data,
+      scale_data,
+      dX->template mutable_data<float>(),
+      &context_);
   if (is_learnable_) {
     const auto& X = Input(1);
     const float* X_data = X.data<float>();
@@ -120,8 +125,8 @@ bool AffineChannelGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
         HxW,
         dY_data,
         X_data,
-        dscale->mutable_data<float>(),
-        dbias->mutable_data<float>());
+        dscale->template mutable_data<float>(),
+        dbias->template mutable_data<float>());
   }
   return true;
 }

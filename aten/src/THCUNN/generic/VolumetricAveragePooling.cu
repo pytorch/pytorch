@@ -30,13 +30,13 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
     dimw++;
   }
 
-  if (!input->is_empty() && THCTensor_(nDimension)(state, input) == 4)
+  if (!input->is_empty() && THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
-    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
-               && input->size[dimt] >= kT, 2,
+    THArgCheck(input->size(dimw) >= kW && input->size(dimh) >= kH
+               && input->size(dimt) >= kT, 2,
                "input image (T: %d H: %d W: %d) smaller than "
                "kernel size (kT: %d kH: %d kW: %d)",
-               input->size[dimt], input->size[dimh], input->size[dimw],
+               input->size(dimt), input->size(dimh), input->size(dimw),
                kT, kH, kW);
 
     /* sizes */
@@ -45,13 +45,13 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else if (!input->is_empty() && THCTensor_(nDimension)(state, input) == 5)
+  else if (!input->is_empty() && THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5)
   {
-    THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
-               && input->size[dimt] >= kT, 2,
+    THArgCheck(input->size(dimw) >= kW && input->size(dimh) >= kH
+               && input->size(dimt) >= kT, 2,
                "input image (T: %d H: %d W: %d) smaller than "
                "kernel size (kT: %d kH: %d kW: %d)",
-               input->size[dimt], input->size[dimh], input->size[dimw],
+               input->size(dimt), input->size(dimh), input->size(dimw),
                kT, kH, kW);
 
     /* sizes */
@@ -128,7 +128,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   int dimh = 2;
   int dimw = 3;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
   if (fiveDimensionalInput)
   {
     dimt++;
@@ -211,10 +211,10 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     THCTensor_(retain)(state, output);
   }
 
-  THCDeviceTensor<real, 4> cudaInput;
-  THCDeviceTensor<real, 4> cudaOutput;
-  cudaInput  = toDeviceTensor<real, 4>(state, input);
-  cudaOutput = toDeviceTensor<real, 4>(state, output);
+  THCDeviceTensor<scalar_t, 4> cudaInput;
+  THCDeviceTensor<scalar_t, 4> cudaOutput;
+  cudaInput  = toDeviceTensor<scalar_t, 4>(state, input);
+  cudaOutput = toDeviceTensor<scalar_t, 4>(state, output);
 
   int totalZ = outputTime * inputSlices * batchSize;
   int offsetZ = 0;
@@ -234,7 +234,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
         LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(6);
         LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(7);
       default:
-        cuda_VolumetricAveragePooling_updateOutput<real, accreal>
+        cuda_VolumetricAveragePooling_updateOutput<scalar_t, accreal>
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
             cudaInput,
             cudaOutput,
@@ -284,7 +284,7 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   int outputHeight;
   int outputWidth;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5;
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
@@ -322,10 +322,10 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
     THCTensor_(retain)(state, gradInput);
   }
 
-  THCDeviceTensor<real, 4> cudaGradInput;
-  THCDeviceTensor<real, 4> cudaGradOutput;
-  cudaGradInput  = toDeviceTensor<real, 4>(state, gradInput);
-  cudaGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
+  THCDeviceTensor<scalar_t, 4> cudaGradInput;
+  THCDeviceTensor<scalar_t, 4> cudaGradOutput;
+  cudaGradInput  = toDeviceTensor<scalar_t, 4>(state, gradInput);
+  cudaGradOutput = toDeviceTensor<scalar_t, 4>(state, gradOutput);
 
   dim3 block(32, 8);
 
@@ -340,7 +340,7 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
       dim3 grid(THCCeilDiv(inputWidth, static_cast<int>(block.x)),
                 THCCeilDiv(inputHeight, static_cast<int>(block.y)),
                 totalZ > 65535 ? 65535 : totalZ);
-      cuda_VolumetricAveragePooling_updateGradInput_Stride1<real, accreal>
+      cuda_VolumetricAveragePooling_updateGradInput_Stride1<scalar_t, accreal>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           cudaGradOutput, cudaGradInput, kT, kH, kW, 1.0f/(kT * kH * kW), offsetZ);
       THCudaCheck(cudaGetLastError());
@@ -358,14 +358,14 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
                 totalZ > 65535 ? 65535 : totalZ);
       if (kernelsOverlap)
       {
-        cuda_VolumetricAveragePooling_updateGradInput_atomicAdd<real, accreal>
+        cuda_VolumetricAveragePooling_updateGradInput_atomicAdd<scalar_t, accreal>
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
             cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
             padT, padH, padW, count_include_pad, offsetZ);
       }
       else
       {
-        cuda_VolumetricAveragePooling_updateGradInput<real, accreal>
+        cuda_VolumetricAveragePooling_updateGradInput<scalar_t, accreal>
           <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
             cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
             padT, padH, padW, count_include_pad, offsetZ);

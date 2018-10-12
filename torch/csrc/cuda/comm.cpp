@@ -1,5 +1,7 @@
 #include <torch/csrc/cuda/comm.h>
 
+#ifdef USE_CUDA
+
 #include <torch/csrc/cuda/device_set.h>
 #include <torch/csrc/utils/tensor_flatten.h>
 
@@ -7,16 +9,15 @@
 #include <torch/csrc/cuda/nccl.h>
 #endif
 
-#include <THC/THC.h>
-
 #include <ATen/ATen.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGuard.h>
 
 #include <cstddef>
 #include <vector>
 
 namespace torch { namespace cuda {
-
 using namespace at;
 
 // Some operations can be performed more efficiently if we're handling tensors
@@ -46,14 +47,14 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
       _device_guard.set_index(device);
-      tensors.push_back(type.tensor(tensor.sizes()));
+      tensors.push_back(at::empty(tensor.sizes(), type.options()));
     }
     nccl::broadcast(tensors);
   } else {
 #else
   {
 #endif
-    auto & gpu_type = type.toBackend(type.is_sparse() ? at::kSparseCUDA : at::kCUDA);
+    auto & gpu_type = type.toBackend(type.is_sparse() ? at::Backend::SparseCUDA : at::Backend::CUDA);
     if (type.is_cuda()) {
       tensors.push_back(tensor);
     }
@@ -71,9 +72,12 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
                    [&](const at::Tensor& t) { return t.get_device() == devices[0]; })) {
     throw std::runtime_error("all tensors must be on devices[0]");
   }
+#ifdef USE_NCCL
+  buffer_size = std::min(torch::cuda::nccl::get_max_count(), buffer_size);
+#endif
 
   tensor_list2d outputs(devices.size());
-  outputs[0] = tensors;
+  outputs[0] = tensors.vec();
   for (auto & o : outputs)
     o.reserve(tensors.size());
 
@@ -121,11 +125,11 @@ std::vector<at::Tensor> scatter(
     at::IntList devices,
     const at::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const at::optional<std::vector<THCStream*>>& streams) {
+    const at::optional<std::vector<at::cuda::CUDAStream>>& streams) {
   std::vector<at::Tensor> chunks;
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
-        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), 0);
+        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), int64_t{0});
     AT_CHECK(
       chunk_size_sum == tensor.size(dim),
       "given chunk sizes don't sum up to the tensor's size ",
@@ -143,20 +147,20 @@ std::vector<at::Tensor> scatter(
   } else {
     chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
-  at::CUDAGuard cuda_guard;
+  at::cuda::CUDAGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int32_t>(devices[chunk]);
     if (streams) {
       AT_CHECK(
-          THCStream_device((*streams)[chunk]) == device_index,
+          (*streams)[chunk].device() == device_index,
           "Expected the device associated with the stream at index ",
-          chunk, " (was ", THCStream_device((*streams)[chunk]), ") ",
+          chunk, " (was ", (*streams)[chunk].device(), ") ",
           "to match the device supplied at that index ",
           "(expected ", device_index, ")");
-      cuda_guard.set_stream(CUDAStream((*streams)[chunk], /*retain=*/true));
+      cuda_guard.set_stream(at::cuda::CUDAStream((*streams)[chunk]));
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
-        {at::kCUDA, device_index}, /*non_blocking=*/true);
+        {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);
   }
   return chunks;
 }
@@ -174,7 +178,7 @@ at::Tensor gather(
   for (const auto& tensor : tensors) {
     AT_CHECK(
         tensor.type().is_cuda(), "Gather expects all inputs to have CUDA type");
-    AT_CHECK(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
+    AT_ASSERT(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
       AT_CHECK(
@@ -185,9 +189,9 @@ at::Tensor gather(
     total_size += tensor.size(dim);
   }
   expected_size[dim] = total_size;
-  at::Device device(at::kCPU);
+  at::Device device(at::DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
-    device = at::Device(at::kCUDA, destination_index ? *destination_index : -1);
+    device = at::Device(at::DeviceType::CUDA, destination_index ? *destination_index : -1);
   }
   result = at::empty(expected_size, first.options().device(device));
 
@@ -200,3 +204,5 @@ at::Tensor gather(
   return result;
 }
 }} // namespace torch::cuda
+
+#endif

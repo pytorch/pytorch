@@ -5,6 +5,7 @@ from ..modules import Module
 from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
 from .parallel_apply import parallel_apply
+from torch.cuda._utils import _get_device_index
 
 
 def _check_balance(device_ids):
@@ -13,7 +14,7 @@ def _check_balance(device_ids):
     has less than 75% of the memory or cores of GPU {}. You can do so by setting
     the device_ids argument to DataParallel, or by setting the CUDA_VISIBLE_DEVICES
     environment variable."""
-
+    device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
     dev_props = [torch.cuda.get_device_properties(i) for i in device_ids]
 
     def warn_imbalance(get_prop):
@@ -36,9 +37,10 @@ class DataParallel(Module):
 
     This container parallelizes the application of the given module by
     splitting the input across the specified devices by chunking in the batch
-    dimension. In the forward pass, the module is replicated on each device,
-    and each replica handles a portion of the input. During the backwards
-    pass, gradients from each replica are summed into the original module.
+    dimension (other objects will be copied once per device). In the forward
+    pass, the module is replicated on each device, and each replica handles a
+    portion of the input. During the backwards pass, gradients from each replica
+    are summed into the original module.
 
     The batch size should be larger than the number of GPUs used.
 
@@ -76,9 +78,9 @@ class DataParallel(Module):
 
 
     Args:
-        module: module to be parallelized
-        device_ids: CUDA devices (default: all devices)
-        output_device: device location of output (default: device_ids[0])
+        module (Module): module to be parallelized
+        device_ids (list of int or torch.device): CUDA devices (default: all devices)
+        output_device (int or torch.device): device location of output (default: device_ids[0])
 
     Attributes:
         module (Module): the module to be parallelized
@@ -103,10 +105,11 @@ class DataParallel(Module):
             device_ids = list(range(torch.cuda.device_count()))
         if output_device is None:
             output_device = device_ids[0]
+
         self.dim = dim
         self.module = module
-        self.device_ids = device_ids
-        self.output_device = output_device
+        self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
+        self.output_device = _get_device_index(output_device, True)
 
         _check_balance(self.device_ids)
 
@@ -142,10 +145,10 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
     This is the functional version of the DataParallel module.
 
     Args:
-        module: the module to evaluate in parallel
-        inputs: inputs to the module
-        device_ids: GPU ids on which to replicate module
-        output_device: GPU location of the output  Use -1 to indicate the CPU.
+        module (Module): the module to evaluate in parallel
+        inputs (tensor): inputs to the module
+        device_ids (list of int or torch.device): GPU ids on which to replicate module
+        output_device (list of int or torch.device): GPU location of the output  Use -1 to indicate the CPU.
             (default: device_ids[0])
     Returns:
         a Tensor containing the result of module(input) located on

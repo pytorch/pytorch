@@ -1,6 +1,8 @@
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/error_report.h"
+#include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/operator.h"
 
 namespace torch { namespace jit { namespace script {
@@ -11,7 +13,7 @@ void placeholderCreator(Method&) {
   throw RecursiveMethodCallError();
 }
 
-static FunctionSchema defaultSchemaFor(Method& method) {
+static FunctionSchema defaultSchemaFor(const Method& method) {
   std::vector<Argument> args;
   std::vector<Argument> returns;
   Graph& g = *method.graph();
@@ -19,16 +21,31 @@ static FunctionSchema defaultSchemaFor(Method& method) {
   for(size_t i = 0; i < num_inputs; ++i) {
     const Value* v = g.inputs().at(i);
     std::string name = v->hasUniqueName() ? v->uniqueName() : ("argument_"  + std::to_string(i));
-    args.push_back({std::move(name), DynamicType::get()});
+    args.push_back({std::move(name), unshapedType(g.inputs()[i]->type())});
   }
   for(size_t i = 0; i < g.outputs().size(); ++i) {
-    returns.push_back({"", DynamicType::get()});
+    returns.push_back({"", unshapedType(g.outputs()[i]->type())});
   }
   return { method.name(), std::move(args), std::move(returns) };
 }
 
-std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
-  JIT_ASSERT(!executor);
+
+const FunctionSchema& Method::getSchema() const {
+  if(schema == nullptr) {
+    schema.reset(new FunctionSchema(defaultSchemaFor(*this)));
+  }
+  return *schema;
+}
+
+at::optional<std::vector<Value*>> try_emit_call_to(
+    Graph& graph,
+    SourceRange loc,
+    Method& callee,
+    ArrayRef<NamedValue> args,
+    ArrayRef<NamedValue> kwargs,
+    std::stringstream& failure_messages,
+    Method* caller,
+    bool conv_tensors_to_nums) {
   try {
     callee.ensure_defined();
   } catch (RecursiveMethodCallError&) {
@@ -37,19 +54,38 @@ std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, Array
   }
   auto fn = callee.graph();
 
-  std::stringstream failure_messages;
-  auto all_inputs = tryMatchSchema(
-    callee.schema ? *callee.schema : defaultSchemaFor(callee),
-    loc, *graph(), args, kwargs, failure_messages);
-  if(!all_inputs)
-    throw ErrorReport(loc) << failure_messages.str();
+  auto matched_schema = tryMatchSchema(
+    callee.getSchema(),
+    loc, graph, args, kwargs, failure_messages, conv_tensors_to_nums);
+  if(!matched_schema)
+    return at::nullopt;
 
   // parameters to callee method (which become parameters to _this_ method
   // if they were not already)
-  for(at::Tensor* member : callee.member_inputs) {
-    all_inputs->push_back(get_or_add_parameter(member));
+  for(at::Tensor* member : callee.params()) {
+    if(!caller) {
+      throw ErrorReport(loc) << " attempting to call a method with parameters from a raw graph. File a bug report";
+    }
+    matched_schema->inputs.push_back(caller->get_or_add_parameter(member));
   }
-  return inlineCallTo(*graph(), *callee.graph(), *all_inputs);
+  return inlineCallTo(graph, *callee.graph(), matched_schema->inputs);
+}
+
+std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
+  JIT_ASSERT(!executor);
+  std::stringstream failure_messages;
+  if (auto result = try_emit_call_to(
+          *graph(),
+          loc,
+          callee,
+          args,
+          kwargs,
+          failure_messages,
+          this,
+          /*conv_tensors_to_nums=*/true)) {
+    return *result;
+  }
+  throw ErrorReport(loc) << failure_messages.str();
 }
 
 void Method::ensure_defined() {
@@ -59,6 +95,14 @@ void Method::ensure_defined() {
     creator(*this);
     method_creator = nullptr;
   }
+}
+
+void Module::save(std::ostream& out) {
+  ExportModule(*this, out);
+}
+
+void Module::save(const std::string& filename) {
+  ExportModule(*this, filename);
 }
 
 }}}

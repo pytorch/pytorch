@@ -24,10 +24,10 @@ class SequenceMaskOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   explicit SequenceMaskOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)),
-        radius_(OperatorBase::GetSingleArgument<int>("radius", 10)),
-        grad_(OperatorBase::GetSingleArgument<bool>("grad", false)),
-        fill_val_(OperatorBase::GetSingleArgument<float>(
+        axis_(this->template GetSingleArgument<int>("axis", 1)),
+        radius_(this->template GetSingleArgument<int>("radius", 10)),
+        grad_(this->template GetSingleArgument<bool>("grad", false)),
+        fill_val_(this->template GetSingleArgument<float>(
             "fill_val",
             -1.0f * std::numeric_limits<float>::infinity())) {
     // Mode argument is required
@@ -45,7 +45,7 @@ class SequenceMaskOp final : public Operator<Context> {
           !HasArgument("batch"),
           "repeat_from_axis and batch not currently supported together.");
       repeat_from_ =
-          OperatorBase::GetSingleArgument<int>("repeat_from_axis", -1);
+          this->template GetSingleArgument<int>("repeat_from_axis", -1);
     }
   }
 

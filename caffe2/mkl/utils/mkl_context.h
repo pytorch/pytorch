@@ -6,6 +6,7 @@
 #include <random>
 
 #include "caffe2/core/context.h"
+#include "caffe2/core/context_base.h"
 
 namespace caffe2 {
 
@@ -17,30 +18,32 @@ namespace caffe2 {
  * operators to mainly perform input and output via MKLMemory. As a result,
  * most likely MKLContext::New and ::Delete won't be used as often.
  */
-class MKLContext final {
+class MKLContext : public BaseContext {
  public:
   MKLContext() : random_seed_(RandomNumberSeed()) {}
   explicit MKLContext(const DeviceOption& option)
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), MKLDNN);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_MKLDNN);
   }
+  explicit MKLContext(const at::Device& device)
+      : MKLContext(DeviceToOption(device)) {}
 
-  ~MKLContext() {}
+  ~MKLContext() override {}
 
-  inline void SwitchToDevice(int /*stream_id*/ = 0) {}
+  inline void SwitchToDevice(int /*stream_id*/ = 0) override {}
 
-  inline void WaitEvent(const Event& ev) {
+  inline void WaitEvent(const Event& ev) override {
     ev.Wait(MKLDNN, this);
   }
 
-  inline void Record(Event* ev, const char* err_msg = nullptr) const {
+  inline void Record(Event* ev, const char* err_msg = nullptr) const override {
     CAFFE_ENFORCE(ev, "Event must not be null.");
     ev->Record(MKLDNN, this, err_msg);
   }
 
-  inline void FinishDeviceComputation() {}
+  inline void FinishDeviceComputation() override {}
 
   inline std::mt19937& RandGenerator() {
     if (!random_generator_.get()) {
@@ -49,8 +52,30 @@ class MKLContext final {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return GetCPUAllocator()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(CPU)->allocate(nbytes);
+  }
+
+  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
+    if (nbytes == 0) {
+      return;
+    }
+    CAFFE_ENFORCE(src);
+    CAFFE_ENFORCE(dst);
+    memcpy(dst, src, nbytes);
+  }
+
+  void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytesSameDevice(nbytes, src, dst);
+  }
+
+  void CopyBytesToCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytesSameDevice(nbytes, src, dst);
+  }
+
+  bool SupportsNonFundamentalTypes() const override {
+    // MKL meta copy is OK
+    return true;
   }
 
   // Two copy functions that deals with cross-device copies.
@@ -90,8 +115,20 @@ class MKLContext final {
     return false;
   }
 
-  static bool IsStreamFree(const DeviceOption& /* unused */, int /* unused */) {
+  static bool IsStreamFree(const DeviceOption& option, int stream_id) {
     return true;
+  }
+
+  at::Device device() const override {
+    return at::Device(MKLDNN);
+  }
+
+  DeviceType device_type() const override {
+    return MKLDNN;
+  }
+
+  static constexpr DeviceType GetDeviceType() {
+    return MKLDNN;
   }
 
  protected:
@@ -108,21 +145,6 @@ inline void MKLContext::CopyBytes<MKLContext, MKLContext>(
   memcpy(dst, src, nbytes);
 }
 
-template <>
-inline void MKLContext::CopyBytes<CPUContext, MKLContext>(
-    size_t nbytes,
-    const void* src,
-    void* dst) {
-  memcpy(dst, src, nbytes);
-}
-
-template <>
-inline void MKLContext::CopyBytes<MKLContext, CPUContext>(
-    size_t nbytes,
-    const void* src,
-    void* dst) {
-  memcpy(dst, src, nbytes);
-}
 } // namespace caffe2
 
 #endif // CAFFE2_UTILS_MKL_CONTEXT_H_

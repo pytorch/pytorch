@@ -32,6 +32,11 @@ HARDCODED_DIFFERENTIABLE_OUTPUTS = {
     #   2 => cy
     #   3 => reserve
     #   4 => weight_buf
+    '_thnn_fused_lstm_cell': (0, 1),
+    # _thnn_fused_lstm_cell outputs:
+    #   0 => hy
+    #   1 => cy
+    #   2 => workspace
 }
 
 

@@ -17,16 +17,17 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import numpy as np
-import hypothesis.strategies as st
-import unittest
-import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
+import hypothesis.strategies as st
+import numpy as np
+import unittest
 
 
-class TestUpSample(hu.HypothesisTestCase):
-    @given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
+class TestUpSample(serial.SerializedTestCase):
+    @serial.given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
            width_scale=st.floats(1.0, 4.0) | st.just(2.0),
            height=st.integers(4, 32),
            width=st.integers(4, 32),
@@ -86,7 +87,7 @@ class TestUpSample(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=0.1, threshold=1e-2)
 
-    @given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
+    @serial.given(height_scale=st.floats(1.0, 4.0) | st.just(2.0),
            width_scale=st.floats(1.0, 4.0) | st.just(2.0),
            height=st.integers(4, 32),
            width=st.integers(4, 32),

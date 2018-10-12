@@ -1,9 +1,10 @@
 #pragma once
 
-#include <THC/THC.h>
+#ifdef USE_CUDA
 
 #include <ATen/ATen.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
+#include <ATen/cuda/CUDAContext.h>
 
 #include <cstddef>
 #include <vector>
@@ -21,10 +22,12 @@ std::vector<at::Tensor> scatter(
     at::IntList devices,
     const at::optional<std::vector<int64_t>>& chunk_sizes = at::nullopt,
     int64_t dim = 0,
-    const at::optional<std::vector<THCStream*>>& streams = at::nullopt);
+    const at::optional<std::vector<at::cuda::CUDAStream>>& streams = at::nullopt);
 
 at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
     at::optional<int32_t> destination_index);
 }}
+
+#endif

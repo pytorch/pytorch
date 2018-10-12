@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "c10/util/Registry.h"
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
@@ -16,17 +17,16 @@
 #include "caffe2/core/net_dag_utils.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
-#include "caffe2/core/registry.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/simple_queue.h"
 
 namespace caffe2 {
 
-class DAGNetBase : public NetBase {
+class CAFFE2_API DAGNetBase : public NetBase {
  public:
   DAGNetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   ~DAGNetBase() override;
@@ -84,10 +84,10 @@ class DAGNetBase : public NetBase {
   mutable std::vector<DAGNetStats> stats_;
   std::unordered_map<int, std::unique_ptr<Timer>> task_timers_;
 
-  DISABLE_COPY_AND_ASSIGN(DAGNetBase);
+  C10_DISABLE_COPY_AND_ASSIGN(DAGNetBase);
 };
 
-class DAGNet : public DAGNetBase {
+class CAFFE2_API DAGNet : public DAGNetBase {
  public:
   using DAGNetBase::DAGNetBase;
 

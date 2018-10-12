@@ -51,7 +51,7 @@ class MIOPEN_LRNOP final : public Operator<HIPContext> {
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t data_desc_;
   miopenLRNDescriptor_t norm_desc_;
-  vector<TIndex> miopen_input_dims_;
+  vector<int64_t> miopen_input_dims_;
   const miopenLRNMode_t mode_;
   const int size_;
   const float alpha_;
@@ -103,7 +103,7 @@ class MIOPENLRNGradientOp final : public Operator<HIPContext> {
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t data_desc_;
   miopenLRNDescriptor_t norm_desc_;
-  vector<TIndex> miopen_input_dims_;
+  vector<int64_t> miopen_input_dims_;
   const miopenLRNMode_t mode_;
   const int size_;
   const float alpha_;
@@ -124,7 +124,7 @@ bool MIOPEN_LRNOP::DoRunWithType() {
   // Reshape tensor descriptors if necessary
   if (X.dims() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors";
-    miopen_input_dims_ = X.dims();
+    miopen_input_dims_ = X.dims().vec();
     int C = 1, H = 1, W = 1;
     // Normal 4-dimensional tensors for images.
     C = X.dim32(1);
@@ -173,7 +173,7 @@ bool MIOPENLRNGradientOp::DoRunWithType() {
 
   if (dY.dims() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors";
-    miopen_input_dims_ = dY.dims();
+    miopen_input_dims_ = dY.dims().vec();
     int C = 1, H = 1, W = 1;
     // Normal 4-dimensional tensors for images.
     C = dY.dim32(1);

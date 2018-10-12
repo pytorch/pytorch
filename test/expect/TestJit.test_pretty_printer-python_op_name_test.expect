@@ -1,0 +1,2 @@
+def script(y):
+  return ^python_fn()(y)

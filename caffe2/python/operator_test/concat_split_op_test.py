@@ -3,13 +3,14 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import numpy as np
-import hypothesis.strategies as st
-import unittest
-import caffe2.python.hypothesis_test_util as hu
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
+import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 from hypothesis import given
+import hypothesis.strategies as st
+import numpy as np
+import unittest
 
 
 @st.composite
@@ -44,8 +45,8 @@ def _tensor_splits(draw, add_axis=False):
         )
 
 
-class TestConcatSplitOps(hu.HypothesisTestCase):
-    @given(tensor_splits=_tensor_splits(),
+class TestConcatSplitOps(serial.SerializedTestCase):
+    @serial.given(tensor_splits=_tensor_splits(),
            **hu.gcs)
     def test_concat(self, tensor_splits, gc, dc):
         axis, _, splits = tensor_splits
@@ -92,7 +93,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
         for i in range(len(splits)):
             self.assertGradientChecks(gc, op, splits, i, [0])
 
-    @given(tensor_splits=_tensor_splits(),
+    @serial.given(tensor_splits=_tensor_splits(),
            split_as_arg=st.booleans(),
            **hu.gcs)
     def test_split(self, tensor_splits, split_as_arg, gc, dc):
@@ -127,7 +128,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, input_tensors, outputs_with_grad)
         self.assertGradientChecks(gc, op, input_tensors, 0, outputs_with_grad)
 
-    @given(
+    @serial.given(
         inputs=hu.lengths_tensor(
             dtype=np.float32,
             min_value=1,

@@ -193,15 +193,15 @@ bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
   auto& R = Input(1); // RoIs
   auto& dY = Input(2); // Gradient of net w.r.t. output of "forward" op
                        // (aka "gradOutput")
-  auto* dX = Output(0); // Gradient of net w.r.t. input to "forward" op
-                        // (aka "gradInput")
+  auto* dX = Output(0); // Gradient of net w.r.t. input to
+                        // "forward" op (aka "gradInput")
 
   dX->ResizeLike(X);
 
   // Must zero-out dX before accumulating gradients
   // (TODO): Kaiming - is this safe?
   math::Set<float, CUDAContext>(
-      dX->size(), 0.f, dX->mutable_data<float>(), &context_);
+      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
 
   if (dY.size() > 0) { // Handle possibly empty gradient if there were no rois
     RoIAlignBackwardFeature<float>
@@ -219,7 +219,7 @@ bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
             pooled_height_,
             pooled_width_,
             sampling_ratio_,
-            dX->mutable_data<float>(),
+            dX->template mutable_data<float>(),
             R.data<float>());
   }
   return true;

@@ -5,7 +5,7 @@
 #include "caffe2/utils/math.h"
 
 // Bounding box utils for generate_proposals_op
-// Reference: detectron/lib/utils/boxes.py
+// Reference: facebookresearch/Detectron/detectron/utils/boxes.py
 
 namespace caffe2 {
 namespace utils {
@@ -107,7 +107,6 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_rotated(
     const int angle_bound_hi = 90) {
   using T = typename Derived1::Scalar;
   using EArrXX = EArrXXt<T>;
-  using EArrX = EArrXt<T>;
 
   if (boxes.rows() == 0) {
     return EArrXX::Zero(T(0), deltas.cols());
@@ -358,7 +357,6 @@ std::vector<int> filter_boxes_rotated(
   min_size *= im_info[2];
 
   using T = typename Derived::Scalar;
-  using EArrX = EArrXt<T>;
 
   const auto& x_ctr = boxes.col(0);
   const auto& y_ctr = boxes.col(1);

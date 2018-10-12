@@ -1,5 +1,5 @@
 #include "THCUNN.h"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include <THC/THCApply.cuh>
 #include "common.h"
@@ -14,12 +14,10 @@
 template<typename T>
 inline T __device__ curand_uniform_type(curandStateMtgp32 *state);
 
-#ifdef CUDA_HALF_TENSOR
 template <>
-inline half __device__ curand_uniform_type<half>(curandStateMtgp32 *state) {
-  return ScalarConvert<float, half>::to(curand_uniform(state));
+inline THHalf __device__ curand_uniform_type<THHalf>(curandStateMtgp32 *state) {
+  return ScalarConvert<float, THHalf>::to(curand_uniform(state));
 }
-#endif
 
 template <>
 inline float __device__ curand_uniform_type<float>(curandStateMtgp32 *state) {

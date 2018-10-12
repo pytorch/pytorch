@@ -22,7 +22,7 @@ class ThreadsafeOperatorTable_ final {
   template <class Key_>
   void emplace(Key_&& key, void* value) {
     bool res = map_.write([&](ska::flat_hash_map<Key, void*>& map) -> bool {
-      auto result = map->emplace(std::forward<Key>(key), value);
+      auto result = map.emplace(std::forward<Key>(key), value);
       return result.second;
     });
     if (!res) {
@@ -35,7 +35,7 @@ class ThreadsafeOperatorTable_ final {
   void erase(const Key& key) {
     auto num_removed =
         map_.write([&](ska::flat_hash_map<Key, void*>& map) -> size_t {
-          return map->erase(key);
+          return map.erase(key);
         });
     assert(num_removed <= 1); // This is not a multi-map
     if (num_removed == 0) {
@@ -46,8 +46,8 @@ class ThreadsafeOperatorTable_ final {
 
   void* lookup(const Key& key) const {
     return map_.read([&](const ska::flat_hash_map<Key, void*>& map) -> void* {
-      auto found = map->find(key);
-      if (found != map->end()) {
+      auto found = map.find(key);
+      if (found != map.end()) {
         return found->second;
       } else {
         return nullptr;

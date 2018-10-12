@@ -53,9 +53,9 @@ template <typename T>
 int64_t int_array_sum(
     const T* dev_array,
     int64_t num_items,
-    Tensor<CUDAContext>& dev_buffer,
-    Tensor<CUDAContext>& dev_sum,
-    Tensor<CPUContext>& host_sum,
+    Tensor& dev_buffer,
+    Tensor& dev_sum,
+    Tensor& host_sum,
     CUDAContext& context) {
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;
@@ -82,7 +82,7 @@ int64_t int_array_sum(
       context.cuda_stream());
 
   // Copy to host
-  host_sum.CopyFrom<CUDAContext>(dev_sum);
+  host_sum.CopyFrom(dev_sum);
   context.FinishDeviceComputation();
   return *host_sum.data<int64_t>();
 }
@@ -91,9 +91,9 @@ template <typename T>
 T array_max(
     const T* dev_array,
     int64_t num_items,
-    Tensor<CUDAContext>& dev_max_buffer,
-    Tensor<CUDAContext>& dev_max,
-    Tensor<CPUContext>& host_max,
+    Tensor& dev_max_buffer,
+    Tensor& dev_max,
+    Tensor& host_max,
     CUDAContext& context) {
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;
@@ -120,7 +120,7 @@ T array_max(
       context.cuda_stream());
 
   // Copy to host
-  host_max.CopyFrom<CUDAContext>(dev_max);
+  host_max.CopyFrom(dev_max);
   context.FinishDeviceComputation();
   return *host_max.data<T>();
 }
@@ -129,8 +129,8 @@ template <typename T>
 void array_prefix_sum_exclusive(
     const T* dev_array,
     const int32_t num_items,
-    Tensor<CUDAContext>& prefix_buffer,
-    Tensor<CUDAContext>& prefix_sum,
+    Tensor& prefix_buffer,
+    Tensor& prefix_sum,
     CUDAContext& context) {
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;
@@ -208,7 +208,7 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
       lengths_ptr, num_seq, dev_buffer_, dev_lengths_prefix_sum_, context_);
 
   // create output tensor
-  auto shape = data.dims(); // Shape of out is batch_size x max_len x ...
+  auto shape = data.dims().vec(); // Shape of out is batch_size x max_len x ...
   shape[0] = max_length;
   shape.insert(shape.begin(), lengths.size());
   out->Resize(shape);
@@ -256,7 +256,12 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
 
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
-
+  if (max_length_ != -1) {
+    CAFFE_ENFORCE_EQ(
+        max_length_,
+        data.dim(1),
+        "max_length should be equal to the packed segments");
+  }
   // Compute prefix sum over the lengths
   array_prefix_sum_exclusive<T>(
       lengths_ptr, num_seq, dev_buffer_, dev_lengths_prefix_sum_, context_);
@@ -285,7 +290,7 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
       context_);
 
   // create output tensor
-  auto shape = data.dims();
+  auto shape = data.dims().vec();
   CAFFE_ENFORCE_EQ(
       shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
@@ -294,7 +299,7 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
   Data_T* out_ptr = static_cast<Data_T*>(out->raw_mutable_data(data.meta()));
 
   // Return empty out (with the proper shape) if any of the dimensions is 0.
-  if (!(data.dim(0) * data.dim(1))) {
+  if (data.dim(0) == 0 || data.dim(1) == 0) {
     return true;
   }
 
