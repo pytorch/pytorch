@@ -245,6 +245,11 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
           sudo chown -R jenkins:jenkins '/opt/conda'
         fi
 
+        # set the env var for onnx build and test
+        if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
+          export INTEGRATED=1
+        fi
+
         # Build
         if test -x ".jenkins/caffe2/build.sh"; then
           ./.jenkins/caffe2/build.sh ${cmake_args[@]}
@@ -321,6 +326,11 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
         # the same as that in install_anaconda.sh used to build the docker image)
         if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
           export PATH=/opt/conda/bin:$PATH
+        fi
+
+        # set the env var for onnx build and test
+        if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
+          export INTEGRATED=1
         fi
 
         # Upgrade SSL module to avoid old SSL warnings
