@@ -1252,6 +1252,10 @@ def detach(g, input):
     return input
 
 
+def contiguous(g, input):
+    return input
+
+
 @parse_args('v', 'v', 'i')
 def _pack_padded_sequence(g, input, lengths, batch_first):
     # There currently is no PackPadded operator in ONNX. We rely on an

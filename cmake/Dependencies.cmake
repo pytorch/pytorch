@@ -16,11 +16,13 @@ macro(enable_ubsan)
   endif()
 endmacro()
 
+if(NOT BUILD_ATEN_ONLY)
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
+endif()
 endif()
 
 # ---[ Threads
@@ -523,18 +525,18 @@ if(NOT BUILD_ATEN_MOBILE)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -fPIC")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_PLATFORM_HCC__=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -DCUDA_HAS_FP16=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_OPERATORS__=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_CONVERSIONS__=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-macro-redefined")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-inconsistent-missing-override")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-exceptions")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-negative")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-overflow")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-duplicate-decl-specifier")
+    list(APPEND HIP_HIPCC_FLAGS -fPIC)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_PLATFORM_HCC__=1)
+    list(APPEND HIP_HIPCC_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-macro-redefined)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-inconsistent-missing-override)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-exceptions)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-negative)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-overflow)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-unused-command-line-argument)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-duplicate-decl-specifier)
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
@@ -778,6 +780,7 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
+if(NOT BUILD_ATEN_ONLY)
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
@@ -815,6 +818,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+endif()
 endif()
 
 # --[ TensorRT integration with onnx-trt
