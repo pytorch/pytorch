@@ -270,8 +270,8 @@ def pack_sequence(sequences, batch_first=False):
 
     Arguments:
         sequences (list[Tensor]): A list of sequences of decreasing length.
-        batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
-            format.
+        batch_first (bool, optional): if ``True``, the packed data will have the batch
+            dimension first.
 
     Returns:
         a :class:`PackedSequence` object
