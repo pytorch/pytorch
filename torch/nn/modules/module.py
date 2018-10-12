@@ -429,6 +429,9 @@ class Module(object):
         tuple of gradients that will be used in place of attr:`grad_input`
         in subsequent computations.
 
+        Backward hook are only allowed for modules that work only with Tensors
+        for their input and output.
+
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
@@ -465,11 +468,12 @@ class Module(object):
         The hook will be called every time after :func:`forward` has computed an output.
         It should have the following signature::
 
-            hook(module, input, output) -> tuple or None
+            hook(module, input, output) -> new_ouput or None
 
-        The :attr:`input` and :attr:`output` are tuples. The hook should not modify
-        its arguments, but it can optionally return a new tuple that will be used in
-        place of attr:`output` in subsequent computations.
+        The :attr:`input` is a tuple. The :attr:`output` is what is returned by the forward
+        pass of the module. The hook should not modify its arguments, but it can optionally
+        return a new object of the same type as :attr:`output` that will be used in place of
+        attr:`output` in subsequent computations.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -544,17 +548,11 @@ class Module(object):
         else:
             result = self.forward(*input, **kwargs)
 
-        if len(self._forward_hooks) > 0:
-            unpack_tuple, result = _ensure_tuple(result)
-
-            for hook in self._forward_hooks.values():
-                hook_result = hook(self, input, result)
-                if hook_result is not None:
-                    _check_same_shape(result, hook_result, "forward hook '{}'".format(hook))
-                    result = hook_result
-
-            if unpack_tuple:
-                result = result[0]
+        for hook in self._forward_hooks.values():
+            hook_result = hook(self, input, result)
+            if hook_result is not None:
+                _check_same_shape(result, hook_result, "forward hook '{}'".format(hook))
+                result = hook_result
 
         if len(self._backward_hooks) > 0:
             unpack_tuple, result = _ensure_tuple(result)
