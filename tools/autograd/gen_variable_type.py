@@ -29,6 +29,7 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS, HARDCODED_DIFFERENTIABLE_OUTPUTS
 from .gen_autograd_functions import uses_single_grad
 
+
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
     'resize_', 'resize_as_', 'detach', 'detach_',
@@ -239,8 +240,30 @@ def gen_variable_type(out, aten_declarations, template_path):
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
+
+    # WARNING: this function call modifies global mutable state
     find_factory_functions(aten_declarations)
 
+    aten_declarations = list(sorted(aten_declarations, key=lambda decl: decl['name']))
+
+    gen_variable_type_shard(out, aten_declarations, template_path, None, True)
+
+    # NOTE: see the comment at the top of the VariableType.cpp
+    # template regarding sharding of the generated files.
+    num_shards = 5
+    shards = [[] for _ in range(num_shards)]
+
+    # functions are assigned arbitrarily but stably to a file based on hash
+    for decl in aten_declarations:
+        x = sum(ord(c) for c in decl['name']) % num_shards
+        shards[x].append(decl)
+
+    for i, shard in enumerate(shards):
+        gen_variable_type_shard(out, shard, template_path, '-%d' % i, False)
+    gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
+
+
+def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
 
@@ -260,8 +283,10 @@ def gen_variable_type(out, aten_declarations, template_path):
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
     }
-    write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
-    write(out, 'VariableType.cpp', VARIABLE_TYPE_CPP, env)
+    if header:
+        write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
+    else:
+        write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
 
 
 def emit_method_definition(declaration):

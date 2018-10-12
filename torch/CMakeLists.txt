@@ -70,7 +70,11 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/nn/THNN.cpp"
   "${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-0.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-1.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-2.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-3.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-4.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
@@ -131,12 +135,17 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-0.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-1.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-2.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-3.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType-4.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
