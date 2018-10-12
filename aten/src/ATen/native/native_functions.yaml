@@ -335,6 +335,9 @@
     CPU: _ceil_out_cpu
     CUDA: _ceil_out_cuda
 
+- func: chain_matmul(TensorList matrices) -> Tensor
+  variants: function
+
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
   variants: function, method
 
