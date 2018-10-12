@@ -273,7 +273,7 @@ class C10_EXPORT MKLMemory {
 
   void Reset() {
     buffer_.reset();
-    dims_.clear();
+    dims_ = {0};
     size_ = 0;
     user_layout_.Reset();
     layout_.Reset();
@@ -567,9 +567,9 @@ class C10_EXPORT MKLMemory {
   mutable std::mutex buffer_lock_;
   // The dimensions in the same order as Caffe2 does. This is used to
   // interface with C2.
-  vector<int64_t> dims_;
+  vector<int64_t> dims_{0};
   // Number of items in the buffer.
-  int64_t size_ = -1;
+  int64_t size_ = 0;
   // The user dnn layout.
   LayoutWrapper<T> user_layout_;
   // The internal dnn layout.

@@ -133,9 +133,9 @@ struct CAFFE2_API PlacementDeleteContext {
 };
 
 /**
- * The low-level representation of a tensor, which contains a storage
- * (which contains the actual data) and metadata (e.g., sizes and strides)
- * describing this data as a tensor.
+ * The low-level representation of a tensor, which contains a pointer
+ * to a storage (which contains the actual data) and metadata (e.g., sizes and
+ * strides) describing this particular view of the data as a tensor.
  *
  * Some basic characteristics about our in-memory representation of
  * tensors:
@@ -155,6 +155,37 @@ struct CAFFE2_API PlacementDeleteContext {
  *    intrusively refcounted so that we can still perform reference
  *    counted operations on raw pointers, which is often more convenient
  *    when passing tensors across language boundaries.
+ *
+ *  - For backwards-compatibility reasons, a tensor may be in an
+ *    uninitialized state.  The following uninitialized states are valid:
+ *
+ *      - A tensor may be STORAGE AND DTYPE UNINITIALIZED.  A tensor of this
+ *        form has an uninitialized dtype, and has an "uninitialized storage"
+ *        (e.g., a storage whose data pointer is null).  This situation most
+ *        frequently arises when a user writes Tensor x(CPU).  The dtype and
+ *        storage is subsequently initialized when mutable_data<T>() is
+ *        invoked for the first time.
+ *
+ *      - A tensor may be STORAGE UNINITIALIZED.  A tensor of this form
+ *        has a valid dtype, but has a storage with a null pointer.  This
+ *        situation most frequently arises when a user calls FreeMemory().
+ *        The current use-case for this situation is to use a tensor
+ *        to "remember" what the size and dtype of a tensor are, without
+ *        retaining the memory.
+ *
+ *    All other fields on tensor are always initialized.  In particular,
+ *    size is always valid. (Historically, a tensor declared as Tensor x(CPU)
+ *    also had uninitialized size, encoded as numel == -1, but we have now
+ *    decided to default size to an empty list, resulting in numel == 1).
+ *
+ *    Uninitialized storages MUST be uniquely owned, to keep our model
+ *    simple.  Thus, we will reject operations which could cause an
+ *    uninitialized storage to become shared (or a shared storage to
+ *    become uninitialized, e.g., from FreeMemory).
+ *
+ *    We intend to eliminate all uninitialized states, so that every
+ *    tensor is fully initialized in all fields.  Please do not write new code
+ *    that depends on these uninitialized states.
  */
 struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
@@ -206,14 +237,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * The number of elements in a tensor.
    *
-   * WARNING: If you are using the Caffe2 API, this method can sometimes
-   * return -1, specifically when a tensor has not yet had its storage
-   * allocated by calling mutable_data().  You can use this case to
-   * test if a tensor is initialized or not.
+   * WARNING: Previously, if you were using the Caffe2 API, you could
+   * test numel() == -1 to see if a tensor was uninitialized.  This
+   * is no longer true; numel always accurately reports the product
+   * of sizes of a tensor.
    */
   virtual int64_t numel() const {
 #ifdef DEBUG
-    AT_ASSERT(numel_ == -1 || compute_numel() == numel_);
+    AT_ASSERT(compute_numel() == numel_);
 #endif
     return numel_;
   }
@@ -265,7 +296,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   inline T * data() const {
     AT_ASSERT(!is_variable());
     AT_ENFORCE_WITH_CALLER(
-        storage_.data() || numel_ == 0,
+        storage_initialized(),
         "The tensor has a non-zero number of elements, but its data is not allocated yet. "
         "Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
@@ -282,7 +313,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   inline void* data() const {
     AT_ASSERT(!is_variable());
-    AT_ENFORCE_WITH_CALLER(storage_.data() || numel_ == 0);
+    AT_ENFORCE_WITH_CALLER(storage_initialized());
     return static_cast<void*>(
         static_cast<char*>(storage_.data()) +
         data_type_.itemsize() * storage_offset_);
@@ -415,36 +446,55 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * @brief Copies the data from a source tensor, with a contex provided to
    * carry out the underlying memcpy operation.  This method respects
    * caffe2_keep_on_shrink.
+   *
+   * After CopyFrom, this function guarantees that the destination tensor will
+   * have the same initialization state and dtype as src.  This function
+   * preserves the DeviceType of the source tensor (so, e.g., if you allocate
+   * a tensor on CPU and then CopyFrom a CUDA tensor, that will to a
+   * CUDA-to-CPU transfer).
    */
   void CopyFrom(const TensorImpl& src, at::BaseContext* context = nullptr) {
+    AT_ASSERT(!is_variable());
+    CAFFE_ENFORCE_WITH_CALLER(
+        src.is_contiguous(),
+        "Right now only copy of contiguous source Tensor is supported.");
+
     if ((void*)&src == (void*)this) {
       return;
     }
-    if (data_type_ != src.dtype()) {
-      AT_ENFORCE_WITH_CALLER(
-          src.is_contiguous(),
-          "Right now only copy of contiguous source Tensor is supported.");
-      storage_ = at::Storage(GetDevice(), src.dtype());
-      data_type_ = src.dtype();
+
+    // Test if we need to allocate a new storage
+    // Uninitialized storages are guaranteed to be uniquely owned,
+    // so we don't need to swap in this case.
+    if (storage_initialized()) {
+      // If the dtype changed, we need to reallocate;
+      // If the src storage is uninitialized, we need to reallocate
+      // to preserve the unique storage invariant.
+      if (data_type_ != src.dtype() || !src.storage_initialized()) {
+        // NB: copy preserves device_type
+        storage_ = at::Storage(device_type(), src.dtype());
+      }
     }
-    if (src.numel() == -1) {
-      sizes_.clear();
-      numel_ = -1;
-      strides_.reset();
-      is_contiguous_ = true;
-      storage_ = at::Storage(GetDevice(), caffe2::TypeMeta());
-      data_type_ = caffe2::TypeMeta();
-      return;
-    }
+    data_type_ = src.dtype();
     Resize(src.sizes());
-    if (numel() > 0) {
+
+    if (src.storage_initialized() && numel() > 0) {
+
+      // Only do an actual data copy if we actually have an initialized storage
+      // to copy from (NB: we have !storage_initialized() at this point if
+      // data_type_ != src.dtype() but src.storage_initialized(), since
+      // we're waiting for the raw_mutable_data call to actually initialize
+      // the storage)
+
       if (data_type_.copy()) {
         AT_ENFORCE(
             device_type() == ::at::DeviceType::CPU,
-            "In CopyFrom source and dest tensors must both be CPU for meta copy");
+            "In CopyFrom source and dest tensors must both be CPU for meta copy, "
+            "but dest tensor was ", device_type());
         AT_ENFORCE(
             src.device_type() == ::at::DeviceType::CPU,
-            "In CopyFrom source and dest tensors must both be CPU for meta copy");
+            "In CopyFrom source and dest tensors must both be CPU for meta copy, "
+            "but src tensor was ", src.device_type());
         data_type_.copy()(src.data(), raw_mutable_data(data_type_), numel());
       } else {
         // We'll need to use a non-CPU context to perform the copy if
@@ -540,8 +590,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         is_contiguous_,
         "Right now ReserveSpace is only supported for contiguous Tensor.");
     AT_ENFORCE(
-        numel_ != -1, "size should be initialized before calling ReserveSpace");
-    AT_ENFORCE(
         storage_.unique(), "Can't call ReserveSpace on shared storage.");
     auto newCapacity = sizes_;
     newCapacity[0] = outer_dim;
@@ -583,7 +631,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename... Ts>
   void Resize(Ts... dim_source) {
-    bool is_init = numel_ == -1;
     bool size_changed = SetDims(dim_source...);
     if (size_changed) {
       // If needed, we will free the data. the next mutable_data() call
@@ -603,7 +650,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
                     c10::FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
-      if (reset_tensor && !is_init) {
+      if (reset_tensor && storage_initialized()) {
         FreeMemory();
       }
     }
@@ -670,7 +717,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // in which case ShareData() doesn't make much sense since we don't really
     // know what to share yet.
     AT_ENFORCE_WITH_CALLER(
-        src.storage_.data() || src.numel_ == 0,
+        src.storage_initialized(),
         "Source tensor has no content and has size > 0");
     // Finally, do sharing.
     /* Since we create new Storage whenever we need to change data_type/capacity
@@ -693,9 +740,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       capacity = numel_ * data_type.itemsize();
     }
     if (storage_.unique()) {
-      AT_ENFORCE_WITH_CALLER(
-          numel_ >= 0,
-          "To share data with a raw pointer, you need to set shape first.");
       storage_.UniqueStorageShareExternalPointer(
           std::move(data_ptr), data_type, capacity);
       data_type_ = data_type;
@@ -722,13 +766,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline void* raw_mutable_data(const caffe2::TypeMeta& meta) {
     // For 0-size tensors it's fine to return any pointer (including nullptr)
-    if (data_type_ == meta && (storage_.data() || numel_ == 0)) {
+    if (data_type_ == meta && storage_initialized()) {
       return static_cast<void*>(static_cast<char*>(storage_.data()) + storage_offset_ * meta.itemsize());
     } else {
-      AT_ENFORCE_WITH_CALLER(
-          numel_ >= 0,
-          "Tensor is not initialized. You probably need to call Resize() "
-          "before calling mutable_data()");
       bool had_special_dtor = data_type_.dtor() != nullptr;
       storage_offset_ = 0;
       if (storage_.unique()) {
@@ -785,7 +825,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   template <typename T>
   inline T* mutable_data() {
-    if ((numel_ == 0 || storage_.data()) && storage_.IsType<T>()) {
+    if (storage_initialized() && storage_.IsType<T>()) {
       return static_cast<T*>(storage_.data()) + storage_offset_;
     }
     // Check it here statically - otherwise TypeMeta would throw the runtime
@@ -794,6 +834,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
         std::is_default_constructible<T>::value,
         "Tensor can't hold non-default-constructible types");
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
+  }
+
+  bool storage_initialized() const noexcept {
+    return storage_.data() || numel_ == 0;
   }
 
  private:
@@ -858,7 +902,7 @@ protected:
   std::unique_ptr<int64_t[]> strides_; // this saves two words
 
   int64_t storage_offset_ = 0;
-  int64_t numel_ = -1;
+  int64_t numel_ = 1;
 
   // INVARIANT: When storage is non-null, this type meta must
   // agree with the type meta in storage

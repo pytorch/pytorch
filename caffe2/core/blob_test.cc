@@ -388,12 +388,6 @@ TYPED_TEST(TensorCPUTest, TensorShareDataRawPointerWithMeta) {
   }
 }
 
-TYPED_TEST(TensorCPUTest, CannotShareDataWhenShapeNotSet) {
-  std::unique_ptr<TypeParam[]> raw_buffer(new TypeParam[10]);
-  Tensor tensor(CPU);
-  ASSERT_THROW(tensor.ShareExternalPointer(raw_buffer.get()), EnforceNotMet);
-}
-
 TYPED_TEST(TensorCPUTest, TensorShareDataCanUseDifferentShapes) {
   vector<int> dims(3);
   dims[0] = 2;
@@ -1078,15 +1072,14 @@ TEST(BlobTest, CastingMessage) {
   }
 }
 
-TEST(TensorConstruction, UnitializedCopyTest) {
+TEST(TensorConstruction, UninitializedCopyTest) {
   Tensor x(CPU);
   Tensor y(x, CPU);
   Tensor z = x.Clone();
-  // should be uninitialized
-  EXPECT_EQ(x.size(), -1);
-  EXPECT_EQ(y.size(), -1);
+  EXPECT_FALSE(x.storage_initialized());
+  EXPECT_FALSE(y.storage_initialized());
   LOG(INFO) << "z.size()" << z.size();
-  EXPECT_EQ(z.size(), -1);
+  EXPECT_FALSE(z.storage_initialized());
 }
 
 TEST(TensorConstruction, CopyConstructorTest) {
