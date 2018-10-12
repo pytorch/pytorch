@@ -1853,7 +1853,7 @@ class TestLayers(LayersTestCase):
         if enable_diagnose:
             assert len(self.model.ad_hoc_plot_blobs) == num
             reconst_weights_from_ad_hoc = np.array(
-                [workspace.FetchBlob(b) for b in self.model.ad_hoc_plot_blobs]
+                [workspace.FetchBlob(b[0]) for b in self.model.ad_hoc_plot_blobs]
             ).flatten()
             npt.assert_allclose(
                 reconst_weights_from_ad_hoc, weights, atol=1e-4, rtol=1e-4

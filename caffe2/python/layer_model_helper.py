@@ -106,13 +106,15 @@ class LayerModelHelper(model_helper.ModelHelper):
             (name, value)
         )
 
-    def add_ad_hoc_plot_blob(self, blob, dtype=None):
+    def add_ad_hoc_plot_blob(self, blob, example_count_provider=None, dtype=None):
+        dtype = dtype or (np.float, (1,))
         assert isinstance(
             blob, (six.string_types, core.BlobReference)
         ), "expect type str or BlobReference, but got {}".format(type(blob))
-        dtype = dtype or (np.float, (1, ))
         self.add_metric_field(str(blob), schema.Scalar(dtype, blob))
-        self.ad_hoc_plot_blobs.append(blob)
+        if example_count_provider is None:
+            example_count_provider = "supervision:label"
+        self.ad_hoc_plot_blobs.append((blob, example_count_provider))
 
     @staticmethod
     def _get_global_constant_initializer_op(
