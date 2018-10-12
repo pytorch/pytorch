@@ -10,7 +10,6 @@ else()
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
-option(BUILD_TEST "Build torch test binaries" ON)
 option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
