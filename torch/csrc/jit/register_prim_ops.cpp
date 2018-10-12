@@ -182,6 +182,37 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::TensorDevice,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, std::vector<int64_t>({static_cast<int64_t>(a.device().type()),
+                                              a.device().index()}));
+            return 0;
+          };
+        }),
+    Operator(
+        prim::TensorDType,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, static_cast<int64_t>(a.dtype()));
+            return 0;
+          };
+        }),
+    Operator(
+        prim::TensorShape,
+        [](Node* node) -> Operation {
+          return [](Stack& stack) {
+            at::Tensor a;
+            pop(stack, a);
+            push(stack, a.sizes());
+            return 0;
+          };
+        }),
+    Operator(
         prim::Undefined,
         [](Node* node) {
           return [](Stack& stack) {

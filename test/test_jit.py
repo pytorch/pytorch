@@ -2710,6 +2710,54 @@ class TestScript(JitTestCase):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
+    def test_tensor_shape(self):
+        x = torch.empty(34, 56, 78)
+
+        def f(x):
+            return x.shape
+
+        self.checkScript(f, (x,))
+
+    def test_tensor_dtype(self):
+        x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
+        x_long = torch.empty(34, 56, 78, dtype=torch.long)
+        x_float32 = torch.empty(34, 56, 78, dtype=torch.float32)
+
+        @torch.jit.script
+        def byte(x):
+            return x.dtype == torch.uint8
+
+        @torch.jit.script
+        def long(x):
+            return x.dtype == torch.long
+
+        @torch.jit.script
+        def float32(x):
+            return x.dtype == torch.float32
+
+        self.assertTrue(byte(x_byte))
+        self.assertFalse(byte(x_long))
+        self.assertFalse(byte(x_float32))
+        self.assertFalse(long(x_byte))
+        self.assertTrue(long(x_long))
+        self.assertFalse(long(x_float32))
+        self.assertFalse(float32(x_byte))
+        self.assertFalse(float32(x_long))
+        self.assertTrue(float32(x_float32))
+
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_device(self):
+        cpu = torch.empty(34, 56, 78, device='cpu')
+        gpu = torch.empty(34, 56, 78, device='cuda')
+
+        @torch.jit.script
+        def same_device(x, y):
+            return x.device == y.device
+
+        self.assertTrue(same_device(cpu, cpu))
+        self.assertTrue(same_device(gpu, gpu))
+        self.assertFalse(same_device(cpu, gpu))
+
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
