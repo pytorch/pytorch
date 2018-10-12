@@ -140,7 +140,7 @@ fi
 # NB: Warnings are disabled because they make it harder to see what
 # the actual erroring test is
 echo "Running Python tests.."
-pip install pytest-sugar
+pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
   -x \
