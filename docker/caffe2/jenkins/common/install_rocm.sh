@@ -25,7 +25,8 @@ install_ubuntu() {
                    cxlactivitylogger \
                    rocsparse \
                    hipsparse \
-                   rocrand
+                   rocrand \
+                   hip-thrust
 
     # HIP has a bug that drops DEBUG symbols in generated MakeFiles.
     # https://github.com/ROCm-Developer-Tools/HIP/pull/588
@@ -41,6 +42,8 @@ install_centos() {
  
 install_hip_thrust() {
     # Needed for now, will be replaced soon
+    # We are now (redundantly) installing the Thrust package into another location (/opt/rocm/include/thrust) which we will
+    # switch over to
     git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
     rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
