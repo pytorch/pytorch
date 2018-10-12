@@ -1491,8 +1491,8 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
   AT_CHECK(compute_uv,
-           "Setting compute_uv to false doesn't compute singular matrices, and hence we cannot compute backward ",
-           "for SVD without the singular matrices in the forward pass.");
+           "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
+           "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");
 
   auto m = self.size(0);
   auto n = self.size(1);
@@ -1574,7 +1574,8 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
     AT_CHECK(eigenvectors,
-             "cannot compute backward without computing eigenvectors in forward pass");
+             "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
+             "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
 
     auto glambda = grads[0];
     auto gv = grads[1];
