@@ -35,8 +35,8 @@ skipIfNoCuda = _skipper(lambda: not torch.cuda.is_available(),
 skipIfTravis = _skipper(lambda: os.getenv('TRAVIS'),
                         'Skip In Travis')
 
-skipIfCI = _skipper(lambda: os.getenv('CI') or os.getenv('TRAVIS')
-                    or os.getenv('JENKINS_URL') or os.getenv('INTEGRATED'),
+skipIfCI = _skipper(lambda: os.getenv('CI') or os.getenv('TRAVIS') or
+                    os.getenv('JENKINS_URL') or os.getenv('INTEGRATED'),
                     'Skip In CI')
 
 
