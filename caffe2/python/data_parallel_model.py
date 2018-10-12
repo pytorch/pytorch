@@ -813,7 +813,7 @@ def ConvertNetForDevice(net, device=None):
 
     device_prefix = "gpu" if device.device_type == caffe2_pb2.CUDA else "cpu"
 
-    namescope = "{}_{}/".format(device_prefix, device.cuda_gpu_id)
+    namescope = "{}_{}/".format(device_prefix, device.device_id)
     for op in mnet.Proto().op:
         if "RecurrentNetwork" in op.type:
             raise("RecurrentNetwork conversion not yet supported")
@@ -1037,19 +1037,19 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         """
         devices = [model._devices[idx] for idx in dev_indices]
         blobs = [blobs_group[idx] for idx in dev_indices]
-        for i, peer in enumerate(devices):
-            if i == 0:
-                continue  # Skip the first device
-            if p2p_access_pattern is not None and not p2p_access_pattern[
-                devices[0], peer
-            ]:
-                # Copy from peer to d0
-                blobs[i] = model.Copy(
-                    blobs[i],
-                    'gpu_{}/{}_gpu{}_copy'.format(devices[0], param, peer)
-                )
         device_opt = core.DeviceOption(model._device_type, devices[0])
         with core.DeviceScope(device_opt):
+            for i, peer in enumerate(devices):
+                if i == 0:
+                    continue  # Skip the first device
+                if p2p_access_pattern is not None and not p2p_access_pattern[
+                    devices[0], peer
+                ]:
+                    # Copy from peer to d0
+                    blobs[i] = model.Copy(
+                        blobs[i],
+                        'gpu_{}/{}_gpu{}_copy'.format(devices[0], param, peer)
+                    )
             net.Sum(blobs, [blobs[0]], name='dpm')
 
     if len(devices) == 16:
@@ -1540,7 +1540,7 @@ def _AnalyzeOperators(model):
             continue
 
         op_dev = op.device_option
-        op_gpu = op_dev.cuda_gpu_id
+        op_gpu = op_dev.device_id
 
         # This avoids failing on operators that are only for CPU
         if op_dev.device_type != caffe2_pb2.CUDA:
@@ -1904,7 +1904,7 @@ def _InterleaveOps(model):
     new_ops = []
     ops = {d: [] for d in range(num_devices)}
     for op in orig_ops:
-        ops[op.device_option.cuda_gpu_id].append(op)
+        ops[op.device_option.device_id].append(op)
 
     for j in range(num_ops_per_dev):
         tp = None

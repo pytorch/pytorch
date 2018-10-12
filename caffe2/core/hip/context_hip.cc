@@ -203,6 +203,8 @@ static void Caffe2SetHIPMemoryPool()
   }
 }
 
+static PinnedCPUAllocator g_pinned_cpu_alloc;
+
 // An initialization function that sets the CPU side to use pinned cpu
 // allocator.
 void Caffe2UsePinnedCPUAllocator()
@@ -222,7 +224,7 @@ void Caffe2UsePinnedCPUAllocator()
         return;
     }
     VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
-    SetCPUAllocator(new PinnedCPUAllocator());
+    SetCPUAllocator(&g_pinned_cpu_alloc);
 #endif
 }
 
@@ -265,8 +267,8 @@ HIPContext::HIPContext(const int gpu_id)
 
 HIPContext::HIPContext(const DeviceOption& option)
     : gpu_id_(
-          option.has_hip_gpu_id() ? RectifyGPUID(option.hip_gpu_id())
-                                  : CaffeHipGetDevice()),
+          option.has_device_id() ? RectifyGPUID(option.device_id())
+                                 : CaffeHipGetDevice()),
       random_seed_(
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
@@ -326,10 +328,6 @@ void TrackMemoryAlloc(size_t nbytes)
 }
 }
 
-at::DataPtr HIPStaticContext::New(size_t nbytes) const {
-  return GetHIPAllocator()->allocate(nbytes);
-}
-
 struct DefaultHIPAllocator final : public at::Allocator {
   DefaultHIPAllocator() {}
   ~DefaultHIPAllocator() override {}
@@ -350,7 +348,7 @@ struct DefaultHIPAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
           g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(HIP)};
+        return {ptr, ptr, &Delete, at::Device(HIP, CaffeHipGetDevice())};
     case HipMemoryPoolType::CUB:
         HIP_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
         g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
@@ -358,16 +356,16 @@ struct DefaultHIPAllocator final : public at::Allocator {
         if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
         }
-        return {ptr, ptr, &Delete, at::Device(HIP)};
+        return {ptr, ptr, &Delete, at::Device(HIP, CaffeHipGetDevice())};
     case HipMemoryPoolType::THC:
         HIP_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
         if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr]                = nbytes;
           g_hip_device_affiliation[ptr] = CaffeHipGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(HIP)};
+        return {ptr, ptr, &Delete, at::Device(HIP, CaffeHipGetDevice())};
     }
-    return {nullptr, nullptr, &Delete, at::Device(HIP)};
+    return {nullptr, nullptr, &Delete, at::Device(HIP, CaffeHipGetDevice())};
   }
 
   static void Delete(void* ptr) {
@@ -429,17 +427,7 @@ struct DefaultHIPAllocator final : public at::Allocator {
   }
 };
 
-static std::unique_ptr<at::Allocator> g_hip_allocator(
-    new DefaultHIPAllocator());
-at::Allocator* GetHIPAllocator() {
-  return g_hip_allocator.get();
-}
-
-BaseStaticContext* GetHIPStaticContext() {
-  static HIPStaticContext context;
-  return &context;
-}
-
-REGISTER_STATIC_CONTEXT(HIP, GetHIPStaticContext());
+static DefaultHIPAllocator g_hip_alloc;
+REGISTER_ALLOCATOR(HIP, &g_hip_alloc);
 
 } // namespace caffe2

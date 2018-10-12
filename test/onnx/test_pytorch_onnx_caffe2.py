@@ -37,7 +37,7 @@ from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 import onnx
 import caffe2.python.onnx.backend as c2
 
-from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda
+from test_pytorch_common import skipIfTravis, skipIfNoLapack, skipIfNoCuda, skipIfCI
 import verify
 
 skip = unittest.skip
@@ -388,6 +388,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(),
                      "model on net has cuda in it, awaiting fix")
+    @skipIfCI
     def test_densenet(self):
         state_dict = model_zoo.load_url(model_urls['densenet121'], progress=False)
         self.run_model_test(densenet121(), train=False, batch_size=BATCH_SIZE,
@@ -408,6 +409,7 @@ class TestCaffe2Backend(unittest.TestCase):
         self.run_model_test(resnet50(), train=False, batch_size=BATCH_SIZE,
                             state_dict=state_dict, atol=1e-6)
 
+    @skipIfCI
     def test_squeezenet(self):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         state_dict = model_zoo.load_url(model_urls['squeezenet1_1'], progress=False)
@@ -661,6 +663,7 @@ class TestCaffe2Backend(unittest.TestCase):
             model, train=True, batch_size=0, input=input, use_gpu=False
         )
 
+    @skipIfCI
     def test_mnist(self):
         model = MNIST()
         input = Variable(torch.randn(BATCH_SIZE, 1, 28, 28))
@@ -789,6 +792,7 @@ class TestCaffe2Backend(unittest.TestCase):
 
     # TODO: Add test cases for prod once Caffe2 has support for ReduceProd
 
+    @skipIfCI
     def test_softmax(self):
         for i in range(7)[2:]:
             model = nn.Softmax(dim=i - 1)
@@ -797,6 +801,7 @@ class TestCaffe2Backend(unittest.TestCase):
                              requires_grad=True)
             self.run_model_test(model, train=False, batch_size=BATCH_SIZE, input=input)
 
+    @skipIfCI
     def test_logsoftmax(self):
         for i in range(7)[2:]:
             model = nn.LogSoftmax(dim=i - 1)

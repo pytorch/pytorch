@@ -217,6 +217,9 @@ _(aten, bilinear) \
 _(aten, binary_cross_entropy) \
 _(aten, binary_cross_entropy_backward) \
 _(aten, binary_cross_entropy_forward) \
+_(aten, binary_cross_entropy_with_logits) \
+_(aten, binary_cross_entropy_with_logits_backward) \
+_(aten, binary_cross_entropy_with_logits_target_backward) \
 _(aten, bincount) \
 _(aten, blackman_window) \
 _(aten, bmm) \
@@ -228,6 +231,7 @@ _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
+_(aten, chain_matmul) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
