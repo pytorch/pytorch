@@ -61,6 +61,16 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
       }
     }
 
+    if (report_stats_) {
+      auto last_op_id = lastTaskOpId(task_id);
+      auto* last_op = lastTaskOp(task_id);
+      if (last_op->device_option().device_type() == PROTO_CPU &&
+          last_op->HasAsyncPart()) {
+        last_op->event().SetCallback(
+            [this, last_op_id] { counters_.AddPerOpAsyncEndTime(last_op_id); });
+      }
+    }
+
     for (auto child_id : children(task_id)) {
       int parent_count = updateParentCount(child_id);
       if (parent_count == 0) {
@@ -209,6 +219,9 @@ void AsyncSchedulingNet::finishRun() {
   std::unique_lock<std::mutex> lock(running_mutex_);
   // wait for scheduled ops and make sure all events are marked as finished
   finalizeEvents();
+  if (report_stats_) {
+    counters_.ReportRunEnd();
+  }
   // notify observers and waiters
   StopAllObservers();
   running_ = false;
@@ -228,7 +241,11 @@ bool AsyncSchedulingNet::RunAsync() {
 
       StartAllObservers();
       tracing::startIter(tracer_);
+      if (report_stats_) {
+        counters_.ReportRunStart();
+      }
     }
+
     for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
       if (parents(task_id).empty()) {
         schedule(task_id);
