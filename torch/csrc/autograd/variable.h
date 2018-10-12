@@ -436,7 +436,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 /// In certain cases, although function outputs share storage with inputs, they
 /// will **never** require gradient history tracking. Instead of registering the
 /// view relation via DifferentiableViewImpl in autograd, the views will be
-/// using usual Varaible::Impl and just share the version counters with the base
+/// using usual Variable::Impl and just share the version counters with the base
 /// Variables.
 /// Some examples are:
 ///   1. Views created from .detach(),
