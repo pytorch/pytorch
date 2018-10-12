@@ -25,12 +25,6 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
-# Install numba to enable integration testing in a limited set of target
-# environments.
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
-  conda install numba=0.39 cudatoolkit=9.0
-fi
-
 
 # JIT C++ extensions require ninja.
 git clone https://github.com/ninja-build/ninja --quiet
