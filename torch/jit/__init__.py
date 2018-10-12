@@ -684,7 +684,7 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 
-def script_method(fn):
+def script_method(fn, _rcb=None):
     if not _enabled:
         return fn
     # NOTE: we need to traverse two frames here because the meta-class frame
@@ -699,15 +699,16 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    rcb = createResolutionCallback(frames_up=2)
+    if _rcb is None:
+        _rcb = createResolutionCallback(frames_up=2)
     ast = get_jit_ast(fn, is_method=True)
-    return ScriptMethodStub(rcb, ast, fn)
+    return ScriptMethodStub(_rcb, ast, fn)
 
 
 def weak_script_method(fn):
-    # weak_script_methods[fn] = True
     weak_script_methods[fn.__qualname__] = {
-        "fn": fn
+        "fn": fn,
+        "rcb": createResolutionCallback(frames_up=2)
     }
     return fn
 
@@ -918,12 +919,10 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             # run this once, before the most-derived __init__ is called
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
-            other = False
             stubs = methods
-            if 'new_stubs' in kwargs:
-                other = True
-                stubs = kwargs['new_stubs']
-                del kwargs['new_stubs']
+            if '_jit_new_stubs' in kwargs:
+                stubs = kwargs['_jit_new_stubs']
+                del kwargs['_jit_new_stubs']
             original_init(self, *args, **kwargs)
             defs = [m.def_ for m in stubs]
             rcbs = [m.resolution_callback for m in stubs]
@@ -1107,20 +1106,31 @@ if _enabled:
             self._original_methods = {}
             methods = []
             original.__class__._jit_script_module = self
+            self.original = original
+            WeakScriptModuleProxy.__constants__ = original.__constants__
             for item in dir(original):
                 func = getattr(original, item)
                 if not callable(func) or not isinstance(func, types.MethodType):
                     continue
                 if func.__qualname__ in weak_script_methods:
-                    fn = weak_script_methods[func.__qualname__]["fn"]
-                    stub = script_method(fn)
+                    entry = weak_script_methods[func.__qualname__]
+                    stub = script_method(entry["fn"], entry["rcb"])
                     methods.append(stub)
 
             original_init = getattr(original, '__init__', lambda self: None)
+            super_constants = getattr(original, '_constants_set', set())
+            self._constants_set = set(getattr(original, '__constants__', ())).union(super_constants)
 
+            # WeakScriptModuleProxy.__setattr__ = self.__setattr
             del WeakScriptModuleProxy.__setattr__
 
-            super(WeakScriptModuleProxy, self).__init__(new_stubs=methods)
+            super(WeakScriptModuleProxy, self).__init__(_jit_new_stubs=methods)
+
+        def __getattr__(self, attr):
+            return getattr(self.original, attr)
+
+        def __setattr__(self, attr, value):
+            return setattr(self.original, attr, value)
 
 else:
     ScriptModule = torch.nn.Module
