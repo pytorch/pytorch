@@ -19,18 +19,18 @@ If you are not familiar with creating a Pull Request, here are some guides:
 - https://help.github.com/articles/creating-a-pull-request/
 
 
-## Developing locally with PyTorch
+## Developing PyTorch
 
-To locally develop with PyTorch, here are some tips:
+To develop PyTorch on your machine, here are some tips:
 
-1. Uninstall all existing pytorch installs
+1. Uninstall all existing PyTorch installs:
 ```
 conda uninstall pytorch
 pip uninstall torch
 pip uninstall torch # run this command twice
 ```
 
-2. Locally clone a copy of PyTorch from source:
+2. Clone a copy of PyTorch from source:
 
 ```
 git clone https://github.com/pytorch/pytorch
@@ -104,6 +104,18 @@ PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/late
 for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
 fit into Jupyter documentation popups.
 
+For C++ documentation (https://pytorch.org/cppdocs), we use
+[Doxygen](http://www.doxygen.nl/) and then convert it to
+[Sphinx](http://www.sphinx-doc.org/) via
+[Breathe](https://github.com/michaeljones/breathe) and
+[Exhale](https://github.com/svenevs/exhale). Check the [Doxygen
+reference](http://www.stack.nl/~dimitri/doxygen/manual/index.html) for more
+information on the documentation syntax. To build the documentation locally,
+`cd` into `docs/cpp` and then `make html`.
+
+We run Doxygen in CI (Travis) to verify that you do not use invalid Doxygen
+commands. To run this check locally, run `./check-doxygen.sh` from inside
+`docs/cpp`.
 
 ## Managing multiple build trees
 
@@ -142,10 +154,13 @@ working on:
 - Working on the Python bindings?  Run `python setup.py develop` to rebuild
   (NB: no `build` here!)
 
-- Working on `torch/csrc` or `aten`?  Run `python setup.py build_caffe2` to
+- Working on `torch/csrc` or `aten`?  Run `python setup.py rebuild_libtorch` to
   rebuild and avoid having to rebuild other dependent libraries we
-  depend on.  The other valid targets are listed in `dep_libs` in `setup.py`
-  (prepend `build_` to get a target).
+  depend on.
+
+- Working on one of the other dependent libraries? The other valid
+  targets are listed in `dep_libs` in `setup.py`. prepend `build_` to
+  get a target, and run as e.g. `python setup.py build_gloo`.
 
 - Working on a test binary?  Run `(cd build && ninja bin/test_binary_name)` to
   rebuild only that test binary (without rerunning cmake).  (Replace `ninja` with
@@ -179,6 +194,8 @@ information for the code in `torch/csrc`. More information at:
 Python `setuptools` is pretty dumb, and always rebuilds every C file in a
 project.  If you install the ninja build system with `pip install ninja`,
 then PyTorch will use it to track dependencies correctly.
+If pytorch was already built, you will need to run `python setup.py clean` once
+after installing ninja for builds to succeed.
 
 #### Use CCache
 
@@ -245,9 +262,9 @@ than Linux, which are worth keeping in mind when fixing these problems.
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
    `__declspec(dllimport)`.  We have codified this pattern into a set of macros
-   which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
-   shared library needs a unique macro name, because symbol visibility is on a per
-   shared library basis.)
+   which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
+   (Every separate shared library needs a unique macro name, because symbol visibility
+   is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
    The upshot is if you see an "unresolved external" error in your Windows build, this
    is probably because you forgot to mark a function with `*_API`.  However, there is
@@ -264,8 +281,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 3. If you have a Windows box (we have a few on EC2 which you can request access to) and
    you want to run the build, the easiest way is to just run `.jenkins/pytorch/win-build.sh`.
    If you need to rebuild, run `REBUILD=1 .jenkins/pytorch/win-build.sh` (this will avoid
-   blowing away your Conda environment.)  I recommend opening `cmd.exe`, and then running
-   `bash` to work in a bash shell (which will make various Linux commands available.)
+   blowing away your Conda environment.)
 
 Even if you don't know anything about MSVC, you can use cmake to build simple programs on
 Windows; this can be helpful if you want to learn more about some peculiar linking behavior
@@ -290,6 +306,83 @@ cd build
 cmake ..
 cmake --build .
 ```
+
+### Known MSVC (and MSVC with NVCC) bugs
+
+The PyTorch codebase sometimes likes to use exciting C++ features, and
+these exciting features lead to exciting bugs in Windows compilers.
+To add insult to injury, the error messages will often not tell you
+which line of code actually induced the erroring template instantiation.
+
+I've found the most effective way to debug these problems is to
+carefully read over diffs, keeping in mind known bugs in MSVC/NVCC.
+Here are a few well known pitfalls and workarounds:
+
+* This is not actually a bug per se, but in general, code generated by MSVC
+  is more sensitive to memory errors; you may have written some code
+  that does a use-after-free or stack overflows; on Linux the code
+  might work, but on Windows your program will crash.  ASAN may not
+  catch all of these problems: stay vigilant to the possibility that
+  your crash is due to a real memory problem.
+
+* (NVCC) `at::optional` does not work when used from device code.  Don't use
+  it from kernels.  Upstream issue: https://github.com/akrzemi1/Optional/issues/58
+  and our local issue #10329.
+
+* `constexpr` generally works less well on MSVC.
+
+  * The idiom `static_assert(f() == f())` to test if `f` is constexpr
+    does not work; you'll get "error C2131: expression did not evaluate
+    to a constant".  Don't use these asserts on Windows.
+    (Example: `aten/src/ATen/core/intrusive_ptr.h`)
+
+* (NVCC) Code you access inside a `static_assert` will eagerly be
+  evaluated as if it were device code, and so you might get an error
+  that the code is "not accessible".
+
+```
+class A {
+  static A singleton_;
+  static constexpr inline A* singleton() {
+    return &singleton_;
+  }
+};
+static_assert(std::is_same(A*, decltype(A::singelton()))::value, "hmm");
+```
+
+* The compiler will run out of heap if you attempt to compile files that
+  are too large.  Splitting such files into separate files helps.
+  (Example: `THTensorMath`, `THTensorMoreMath`, `THTensorEvenMoreMath`.)
+
+### Running Clang-Tidy
+
+[Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
+linter and static analysis tool based on the clang compiler. We run clang-tidy
+in our CI to make sure that new C++ code is safe, sane and efficient. See our
+[.travis.yml](https://github.com/pytorch/pytorch/blob/master/.travis.yml) file
+for the simple commands we use for this.
+
+To run clang-tidy locally, follow these steps:
+
+1. Install clang-tidy. First, check if you already have clang-tidy by simply
+writing `clang-tidy` in your terminal. If you don't yet have clang-tidy, you
+should be able to install it easily with your package manager, e.g. by writing
+`apt-get install clang-tidy` on Ubuntu. See https://apt.llvm.org for details on
+how to install the latest version. Note that newer versions of clang-tidy will
+have more checks than older versions. In our CI, we run clang-tidy-6.0.
+
+2. Use our driver script to run clang-tidy over any changes relative to some
+   git revision (you may want to replace `HEAD~1` with `HEAD` to pick up
+   uncommitted changes). Changes are picked up based on a `git diff` with the
+   given revision:
+  ```sh
+  $ python tools/clang_tidy.py -d build -p torch/csrc -r HEAD~1
+  ```
+
+Above, it is assumed you are in the PyTorch root folder. `path/to/build` should
+be the path to where you built PyTorch from source, e.g. `build` in the PyTorch
+root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
+to change the clang-tidy this script uses.
 
 ## Caffe2 notes
 

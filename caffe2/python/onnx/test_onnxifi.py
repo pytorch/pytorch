@@ -88,7 +88,7 @@ class OnnxifiTest(TestCase):
         model_def = make_model(graph_def, producer_name='conv-test')
         op = core.CreateOperator(
             "Onnxifi",
-            ["X", "W"],
+            ["X"],
             ["Y"],
             onnx_model=model_def.SerializeToString(),
             initializers=["W", "W"],

@@ -15,23 +15,23 @@ class BBoxTransformOp final : public Operator<Context> {
  public:
   BBoxTransformOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        weights_(OperatorBase::GetRepeatedArgument<T>(
+        weights_(this->template GetRepeatedArgument<T>(
             "weights",
             vector<T>{1.0f, 1.0f, 1.0f, 1.0f})),
         apply_scale_(
-            OperatorBase::GetSingleArgument<bool>("apply_scale", true)),
-        correct_transform_coords_(OperatorBase::GetSingleArgument<bool>(
+            this->template GetSingleArgument<bool>("apply_scale", true)),
+        correct_transform_coords_(this->template GetSingleArgument<bool>(
             "correct_transform_coords",
             false)),
-        rotated_(OperatorBase::GetSingleArgument<bool>("rotated", false)),
+        rotated_(this->template GetSingleArgument<bool>("rotated", false)),
         angle_bound_on_(
-            OperatorBase::GetSingleArgument<bool>("angle_bound_on", true)),
+            this->template GetSingleArgument<bool>("angle_bound_on", true)),
         angle_bound_lo_(
-            OperatorBase::GetSingleArgument<int>("angle_bound_lo", -90)),
+            this->template GetSingleArgument<int>("angle_bound_lo", -90)),
         angle_bound_hi_(
-            OperatorBase::GetSingleArgument<int>("angle_bound_hi", 90)),
+            this->template GetSingleArgument<int>("angle_bound_hi", 90)),
         clip_angle_thresh_(
-            OperatorBase::GetSingleArgument<float>("clip_angle_thresh", 1.0)) {
+            this->template GetSingleArgument<float>("clip_angle_thresh", 1.0)) {
     CAFFE_ENFORCE_EQ(
         weights_.size(),
         4,

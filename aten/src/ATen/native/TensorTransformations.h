@@ -1,7 +1,7 @@
 #include "ATen/ATen.h"
 
-#include <ATen/Error.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/core/Error.h>
 
 #include <algorithm>
 #include <vector>
@@ -14,7 +14,7 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
   AT_CHECK(flip_dims_size > 0 && flip_dims_size <= total_dims,
     "flip dims size out of range, got flip dims size=", flip_dims_size);
 
-  auto flip_dims_v = std::vector<int64_t>(dims);
+  auto flip_dims_v = dims.vec();
 
   // check if dims axis within range
   auto min_max_d = std::minmax_element(flip_dims_v.begin(), flip_dims_v.end());

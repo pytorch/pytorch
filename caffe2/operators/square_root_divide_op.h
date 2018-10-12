@@ -43,7 +43,7 @@ class SquareRootDivideOp final : public Operator<Context> {
       auto scale = scalePtr[i];
       CAFFE_ENFORCE(scale >= 0, scale, " < 0");
       auto multiplier = scale == 0 ? 1.0 : 1 / std::sqrt(scale);
-      math::Scale<TData, Context>(
+      math::Scale<float, TData, Context>(
           exampleSize,
           multiplier,
           dataPtr + i * exampleSize,

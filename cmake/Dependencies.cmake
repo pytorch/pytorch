@@ -1,4 +1,4 @@
-# UBSAN triggers when compiling protobuf, so we need to disable it.
+ # UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
 macro(disable_ubsan)
@@ -16,22 +16,22 @@ macro(enable_ubsan)
   endif()
 endmacro()
 
+if(NOT BUILD_ATEN_ONLY)
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
 endif()
+endif()
 
 # ---[ Threads
-if(BUILD_CAFFE2)
-  include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-  if (TARGET Threads::Threads)
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
-  else()
-    message(FATAL_ERROR
-        "Cannot find threading library. Caffe2 requires Threads to compile.")
-  endif()
+include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
+if (TARGET Threads::Threads)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+else()
+  message(FATAL_ERROR
+      "Cannot find threading library. Caffe2 requires Threads to compile.")
 endif()
 
 # ---[ protobuf
@@ -41,27 +41,8 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
 endif()
 
-# ---[ git: used to generate git build string.
-if(BUILD_CAFFE2)
-  find_package(Git)
-  if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-                    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
-                    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
-                    OUTPUT_VARIABLE CAFFE2_GIT_VERSION
-                    RESULT_VARIABLE __git_result)
-    if(NOT ${__git_result} EQUAL 0)
-      set(CAFFE2_GIT_VERSION "unknown")
-    endif()
-  else()
-    message(
-        WARNING
-        "Cannot find git, so Caffe2 won't have any git build info available")
-  endif()
-endif()
-
 # ---[ BLAS
-if(BUILD_ATEN)
+if(NOT BUILD_ATEN_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
 else()
   set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -87,9 +68,10 @@ elseif(BLAS STREQUAL "MKL")
   else()
     find_package(MKL QUIET)
   endif()
+  include(${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake)
   if(MKL_FOUND)
     include_directories(SYSTEM ${MKL_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${MKL_LIBRARIES})
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -156,11 +138,7 @@ list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 # ---[ gflags
 if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
-  if (TARGET gflags)
-    set(CAFFE2_USE_GFLAGS 1)
-    include_directories(SYSTEM ${GFLAGS_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS gflags)
-  else()
+  if (NOT TARGET gflags)
     message(WARNING
         "gflags is not found. Caffe2 will build without gflags support but "
         "it is strongly recommended that you install gflags. Suppress this "
@@ -188,18 +166,21 @@ endif()
 
 # ---[ Googletest and benchmark
 if(BUILD_TEST)
+  # Preserve build options.
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+
   # We will build gtest as static libs and embed it directly into the binary.
-  set(BUILD_SHARED_LIBS OFF)
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+
   # For gtest, we will simply embed it into our test binaries, so we won't
   # need to install it.
-  set(BUILD_GTEST ON)
-  set(INSTALL_GTEST OFF)
+  set(BUILD_GTEST ON CACHE BOOL "Build gtest" FORCE)
+  set(INSTALL_GTEST OFF CACHE BOOL "Install gtest." FORCE)
   # We currently don't need gmock right now.
-  set(BUILD_GMOCK OFF)
+  set(BUILD_GMOCK OFF CACHE BOOL "Build gmock." FORCE)
   # For Windows, we will check the runtime used is correctly passed in.
   if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
-    set(gtest_force_shared_crt ON)
+      set(gtest_force_shared_crt ON CACHE BOOL "force shared crt on gtest" FORCE)
   endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest)
   include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/include)
@@ -211,8 +192,8 @@ if(BUILD_TEST)
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark)
   include_directories(${CMAKE_CURRENT_LIST_DIR}/../third_party/benchmark/include)
 
-  # Recover the build shared libs option.
-  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+  # Recover build options.
+  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 endif()
 
 # ---[ LMDB
@@ -324,14 +305,34 @@ if(USE_FFMPEG)
   endif ()
 endif()
 
+# ---[ Caffe2 depends on FP16 library for half-precision conversions
+if (NOT TARGET fp16)
+  if (NOT DEFINED FP16_SOURCE_DIR)
+    set(FP16_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/FP16" CACHE STRING "FP16 source directory")
+  endif()
+
+  set(FP16_BUILD_TESTS OFF CACHE BOOL "")
+  set(FP16_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  add_subdirectory(
+    "${FP16_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+endif()
+list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
+
 # ---[ EIGEN
 # Due to license considerations, we will only use the MPL2 parts of Eigen.
 set(EIGEN_MPL2_ONLY 1)
-find_package(Eigen3)
-if(EIGEN3_FOUND)
-  message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+if (USE_SYSTEM_EIGEN_INSTALL)
+  find_package(Eigen3)
+  if(EIGEN3_FOUND)
+    message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIR})
+  else()
+    message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+    set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
+    caffe2_update_option(USE_SYSTEM_EIGEN_INSTALL OFF)
+  endif()
 else()
-  message(STATUS "Did not find system Eigen. Using third party subdirectory.")
+  message(STATUS "Using third party subdirectory Eigen.")
   set(EIGEN3_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/eigen)
 endif()
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
@@ -343,7 +344,9 @@ if(BUILD_PYTHON)
     execute_process(
       COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
     if(${_exitcode} EQUAL 0)
-      string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      if (NOT MSVC)
+        string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      endif()
       message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
     endif()
   endif()
@@ -382,7 +385,11 @@ if(BUILD_PYTHON)
     pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       SET(PYTHON_LIBRARY "${_py_lib}")
-      message(STATUS "Setting Python's library to ${_py_lib}")
+      if (MSVC)
+        STRING(REPLACE "Lib" "libs" _py_static_lib ${_py_lib})
+        link_directories(${_py_static_lib})
+      endif()
+      message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
     endif()
   endif(NOT DEFINED PYTHON_LIBRARY)
 
@@ -391,9 +398,14 @@ if(BUILD_PYTHON)
   set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
-  find_package(NumPy REQUIRED)
-  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND AND NUMPY_FOUND)
-    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR} ${NUMPY_INCLUDE_DIR})
+  find_package(NumPy)
+  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
+    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
+    caffe2_update_option(USE_NUMPY OFF)
+    if(NUMPY_FOUND)
+      caffe2_update_option(USE_NUMPY ON)
+      include_directories(SYSTEM ${NUMPY_INCLUDE_DIR})
+    endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
   else()
@@ -403,11 +415,20 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-find_package(pybind11)
-if(pybind11_FOUND)
-  include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
+find_package(pybind11 CONFIG)
+if((DEFINED pybind11_DIR) AND pybind11_DIR)
+  get_target_property(pybind11_INCLUDE_DIRS pybind11::pybind11 INTERFACE_INCLUDE_DIRECTORIES)
 else()
-  include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
+  find_package(pybind11)
+endif()
+
+if(pybind11_FOUND)
+    message(STATUS "System pybind11 found")
+    message(STATUS "pybind11l include dirs: " ${pybind11_INCLUDE_DIRS})
+    include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
+else()
+    message(STATUS "Using third_party/pybind11.")
+    include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/pybind11/include)
 endif()
 
 # ---[ MPI
@@ -512,23 +533,24 @@ if(USE_CUDA)
 endif()
 
 # ---[ HIP
-if(BUILD_CAFFE2 OR BUILD_ATEN)
+if(NOT BUILD_ATEN_MOBILE)
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -fPIC")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_PLATFORM_HCC__=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -DCUDA_HAS_FP16=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_OPERATORS__=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_CONVERSIONS__=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-macro-redefined")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-inconsistent-missing-override")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-exceptions")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-negative")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-overflow")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
+    list(APPEND HIP_HIPCC_FLAGS -fPIC)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_PLATFORM_HCC__=1)
+    list(APPEND HIP_HIPCC_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-macro-redefined)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-inconsistent-missing-override)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-exceptions)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-negative)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-overflow)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-unused-command-line-argument)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-duplicate-decl-specifier)
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
@@ -537,25 +559,35 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
     hip_include_directories(${Caffe2_HIP_INCLUDES})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
-      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipblas_LIBRARIES})
+      ${rocrand_LIBRARIES} ${hiprand_LIBRARIES} ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES})
     # Additional libraries required by PyTorch AMD that aren't used by Caffe2 (not in Caffe2's docker image)
-    if(BUILD_ATEN)
-      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES} ${hiprng_LIBRARIES})
+    if(NOT BUILD_ATEN_MOBILE)
+      set(Caffe2_HIP_DEPENDENCY_LIBS ${Caffe2_HIP_DEPENDENCY_LIBS} ${hipsparse_LIBRARIES})
     endif()
     # TODO: There is a bug in rocblas's cmake files that exports the wrong targets name in ${rocblas_LIBRARIES}
     list(APPEND Caffe2_HIP_DEPENDENCY_LIBS
       roc::rocblas)
+
+    # TODO: Currently pytorch hipify script uses a feature called
+    # "disabled_modules" that effectively ifdef out a file, but
+    # without doing extra processing in the callers, which results in
+    # some unresolved symbols in the shared lib
+    # (libcaffe2_hip.so). Remove this when all disabled_modules are
+    # eliminated.
+    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--unresolved-symbols=ignore-in-shared-libs ${CMAKE_EXE_LINKER_FLAGS}")
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
 endif()
 
 # ---[ ROCm
-if(USE_ROCM AND NOT BUILD_CAFFE2)
+if(USE_ROCM)
  include_directories(SYSTEM ${HIP_PATH}/include)
- include_directories(SYSTEM ${HIPBLAS_PATH}/include)
+ include_directories(SYSTEM ${ROCBLAS_PATH}/include)
+ include_directories(SYSTEM ${ROCFFT_PATH}/include)
  include_directories(SYSTEM ${HIPSPARSE_PATH}/include)
- include_directories(SYSTEM ${HIPRNG_PATH}/include)
+ include_directories(SYSTEM ${HIPRAND_PATH}/include)
+ include_directories(SYSTEM ${ROCRAND_PATH}/include)
  include_directories(SYSTEM ${THRUST_PATH})
 
  # load HIP cmake module and load platform id
@@ -744,8 +776,8 @@ if (USE_NNAPI AND NOT ANDROID)
   caffe2_update_option(USE_NNAPI OFF)
 endif()
 
-if (BUILD_ATEN)
-  if (BUILD_CAFFE2)
+if (NOT BUILD_ATEN_MOBILE AND BUILD_CAFFE2_OPS)
+  if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen)
     if (USE_CUDA)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS aten_op_header_gen)
@@ -762,26 +794,33 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
+if(NOT BUILD_ATEN_ONLY)
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if (NOT DEFINED ONNX_NAMESPACE)
-    SET(ONNX_NAMESPACE "onnx_c2")
-  endif()
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
   endif()
   set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
   # We will build onnx as static libs and embed it directly into the binary.
   set(BUILD_SHARED_LIBS OFF)
+  if (MSVC AND BUILD_SHARED_LIBS)
+    # That also means we want to export all symbols from the shared
+    # library we are building
+    set(ONNX_BUILD_MAIN_LIB ON)
+  endif()
   set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
+  set(ONNX_USE_LITE_PROTO ${CAFFE2_USE_LITE_PROTO})
   # If linking local protobuf, make sure ONNX has the same protobuf
   # patches as Caffe2 and Caffe proto. This forces some functions to
   # not be inline and instead route back to the statically-linked protobuf.
   if (CAFFE2_LINK_LOCAL_PROTOBUF)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
+  # Add op schemas in "ai.onnx.pytorch" domain
+  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx)
+
   include_directories(${ONNX_INCLUDE_DIRS})
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DONNX_NAMESPACE=${ONNX_NAMESPACE}")
+  add_definitions(-DONNX_NAMESPACE=${ONNX_NAMESPACE})
   # In mobile build we care about code size, and so we need drop
   # everything (e.g. checker, optimizer) in onnx but the pb definition.
   if (ANDROID OR IOS)
@@ -793,6 +832,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+endif()
 endif()
 
 # --[ TensorRT integration with onnx-trt
@@ -808,7 +848,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # --[ ATen checks
-if (BUILD_ATEN)
+if (NOT BUILD_ATEN_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
 
@@ -845,35 +885,32 @@ if (BUILD_ATEN)
 
   #Check if certain std functions are supported. Sometimes
   #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  if (NOT ANDROID)
-    CHECK_CXX_SOURCE_COMPILES("
-    #include <cmath>
-    #include <string>
+  CHECK_CXX_SOURCE_COMPILES("
+  #include <cmath>
+  #include <string>
 
-    int main() {
-      int a = std::isinf(3.0);
-      int b = std::isnan(0.0);
-      std::string s = std::to_string(1);
+  int main() {
+    int a = std::isinf(3.0);
+    int b = std::isnan(0.0);
+    std::string s = std::to_string(1);
 
-      return 0;
-      }" SUPPORT_GLIBCXX_USE_C99)
+    return 0;
+    }" SUPPORT_GLIBCXX_USE_C99)
 
-    if (NOT SUPPORT_GLIBCXX_USE_C99)
-      message(FATAL_ERROR
-              "The C++ compiler does not support required functions. "
-              "This is very likely due to a known bug in GCC 5 "
-              "(and maybe other versions) on Ubuntu 17.10 and newer. "
-              "For more information, see: "
-              "https://github.com/pytorch/pytorch/issues/5229"
-             )
-    endif()
+  if (NOT SUPPORT_GLIBCXX_USE_C99)
+    message(FATAL_ERROR
+            "The C++ compiler does not support required functions. "
+            "This is very likely due to a known bug in GCC 5 "
+            "(and maybe other versions) on Ubuntu 17.10 and newer. "
+            "For more information, see: "
+            "https://github.com/pytorch/pytorch/issues/5229"
+           )
   endif()
 
   # Top-level build config
   ############################################
   # Flags
   # When using MSVC
-
   # Detect CUDA architecture and get best NVCC flags
   # finding cuda must be first because other things depend on the result
   #
@@ -1066,36 +1103,17 @@ if (BUILD_ATEN)
     add_compile_options(-DUSE_GCC_GET_CPUID)
   ENDIF()
 
-  FIND_PACKAGE(SSE) # checks SSE, AVX and AVX2
-  IF (C_SSE2_FOUND)
-    MESSAGE(STATUS "SSE2 Found")
-    # TODO: Work out correct way to do this.  Note that C_SSE2_FLAGS is often
-    # empty, in which case it expands to " " flag which is bad
-    SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE2)
-  ENDIF()
-  IF (C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-    SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE4_1 -DUSE_SSE4_2)
-  ENDIF()
-  IF (C_SSE3_FOUND)
-    MESSAGE(STATUS "SSE3 Found")
-    SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE3)
-  ENDIF()
+  FIND_PACKAGE(AVX) # checks AVX and AVX2
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
   # however, we want to enable the AVX codepaths, so we still need to
   # add USE_AVX and USE_AVX2 macro defines
   IF (C_AVX_FOUND)
-    MESSAGE(STATUS "AVX Found")
+    MESSAGE(STATUS "AVX compiler support found")
     add_compile_options(-DUSE_AVX)
   ENDIF()
   IF (C_AVX2_FOUND)
-    MESSAGE(STATUS "AVX2 Found")
+    MESSAGE(STATUS "AVX2 compiler support found")
     add_compile_options(-DUSE_AVX2)
   ENDIF()
 
@@ -1214,6 +1232,15 @@ if (BUILD_ATEN)
   ELSE()
     include_directories(SYSTEM ${CUDNN_INCLUDE_DIRS})
     set(AT_CUDNN_ENABLED 1)
+  ENDIF()
+
+  IF (NOT USE_ROCM)
+    message("disabling ROCM because NOT USE_ROCM is set")
+    MESSAGE(STATUS "MIOpen not found. Compiling without MIOpen support")
+    set(AT_ROCM_ENABLED 0)
+  ELSE()
+    INCLUDE_DIRECTORIES(BEFORE ${MIOPEN_INCLUDE_DIRS})
+    set(AT_ROCM_ENABLED 1)
   ENDIF()
 
   if (NO_MKLDNN)

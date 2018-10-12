@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <zstd.h>
 #include "caffe2/core/tensor.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 
 namespace caffe2 {
 
@@ -65,7 +65,7 @@ TensorProtos GetTensorsProto(const TensorCPU& compressed) {
 // Decompress tensor stored in compressed format
 // It is compressed using mutils.compress_data_list()
 void Decompress(const TensorProto& compressed, TensorCPU* outDecomp) {
-  vector<TIndex> shape(compressed.dims().begin(), compressed.dims().end());
+  vector<int64_t> shape(compressed.dims().begin(), compressed.dims().end());
   // shape stores the dimensions of data before compression,
   //   see _compress_data_single() in mutils.py
   outDecomp->Resize(shape);

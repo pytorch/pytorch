@@ -100,6 +100,14 @@ void DataChannelMPI::destroy() {}
 
 
 bool DataChannelMPI::init() {
+#ifdef OMPI_MAJOR_VERSION
+  // OMPI_* is specific to Openmpi implementation.
+  // Openmpi v1.10 segfaults in MPI_Bcast with CUDA buffer.
+  if (int(OMPI_MAJOR_VERSION) < 2) {
+      throw std::runtime_error("Please use Openmpi major version 2 and above for distributed.");
+  }
+#endif /* OMPI_MAJOR_VERSION */
+
   int provided;
   MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
   if (provided != MPI_THREAD_MULTIPLE) {
@@ -145,7 +153,7 @@ at::Tensor DataChannelMPI::_newLikeFlat(std::vector<at::Tensor>& tensors) const 
   at::DeviceGuard gpu_guard(t.is_cuda() ? t.get_device() : -1);
   std::vector<int64_t> sizes { static_cast<int64_t>(tensors.size()) };  // sizes = [output.size()] + input.sizes()
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  return t.type().tensor(sizes);
+  return at::empty(sizes, t.options());
 }
 
 

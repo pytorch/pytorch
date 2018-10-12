@@ -5,7 +5,7 @@
 #include "THCDeviceTensorUtils.cuh"
 #include "THCDeviceUtils.cuh"
 #include "THCReduceApplyUtils.cuh"
-#include "THCHalf.h"
+#include "TH/THHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
 #include <THC/THCApply.cuh>

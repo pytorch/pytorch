@@ -113,14 +113,14 @@ class SpaceBatchOpBase : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SpaceBatchOpBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        pad_(OperatorBase::GetSingleArgument<int>("pad", 0)),
-        pad_t_(OperatorBase::GetSingleArgument<int>("pad_t", pad_)),
-        pad_l_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        pad_b_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        pad_r_(OperatorBase::GetSingleArgument<int>("pad", pad_)),
-        block_size_(OperatorBase::GetSingleArgument<int>("block_size", 2)),
+        pad_(this->template GetSingleArgument<int>("pad", 0)),
+        pad_t_(this->template GetSingleArgument<int>("pad_t", pad_)),
+        pad_l_(this->template GetSingleArgument<int>("pad", pad_)),
+        pad_b_(this->template GetSingleArgument<int>("pad", pad_)),
+        pad_r_(this->template GetSingleArgument<int>("pad", pad_)),
+        block_size_(this->template GetSingleArgument<int>("block_size", 2)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            this->template GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(order_ == StorageOrder::NCHW);
   }
 

@@ -19,23 +19,26 @@
 #
 import os
 # import sys
-# sys.path.insert(0, os.path.abspath('.'))
+
+# source code directory, relative to this file, for sphinx-autobuild
+# sys.path.insert(0, os.path.abspath('../..'))
+
 import torch
 try:
     import torchvision
 except ImportError:
     import warnings
     warnings.warn('unable to load "torchvision" package')
-import sphinx_rtd_theme
 
 RELEASE = os.environ.get('RELEASE', False)
 
+import pytorch_sphinx_theme
 
 # -- General configuration ------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
 #
-# needs_sphinx = '1.0'
+needs_sphinx = '1.6'
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
@@ -47,10 +50,22 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
     'sphinx.ext.coverage',
-    'sphinx.ext.mathjax',
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
+    'sphinxcontrib.katex',
 ]
+
+# katex options
+#
+#
+
+katex_options = r'''
+delimiters : [
+   {left: "$$", right: "$$", display: true},
+   {left: "\\(", right: "\\)", display: false},
+   {left: "\\[", right: "\\]", display: true}
+]
+'''
 
 napoleon_use_ivar = True
 
@@ -106,19 +121,29 @@ todo_include_todos = True
 autodoc_inherit_docstrings = False
 
 
-# -- Options for HTML output ----------------------------------------------
+# -- katex javascript in header
+#
+#    def setup(app):
+#    app.add_javascript("https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.js")
 
+
+# -- Options for HTML output ----------------------------------------------
+#
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_rtd_theme'
-html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+#
+#
+
+html_theme = 'pytorch_sphinx_theme'
+html_theme_path = [pytorch_sphinx_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-#
+
 html_theme_options = {
+    'pytorch_project': 'docs',
     'canonical_url': 'https://pytorch.org/docs/stable/',
     'collapse_navigation': False,
     'display_version': True,
@@ -135,13 +160,23 @@ if RELEASE:
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static', '_images']
 
-# html_style_path = 'css/pytorch_theme.css'
-html_context = {
-    'css_files': [
+
+# Called automatically by Sphinx, making this `conf.py` an "extension".
+def setup(app):
+    # NOTE: in Sphinx 1.8+ `html_css_files` is an official configuration value
+    # and can be moved outside of this function (and the setup(app) function
+    # can be deleted).
+    html_css_files = [
         'https://fonts.googleapis.com/css?family=Lato',
-        '_static/css/pytorch_theme.css'
-    ],
-}
+        'css/pytorch_theme.css',  # relative to paths in `html_static_path`
+        'https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css'
+    ]
+
+    # In Sphinx 1.8 it was renamed to `add_css_file`, 1.7 and prior it is
+    # `add_stylesheet` (deprecated in 1.8).
+    add_css = getattr(app, 'add_css_file', getattr(app, 'add_stylesheet'))
+    for css_file in html_css_files:
+        add_css(css_file)
 
 
 # -- Options for HTMLHelp output ------------------------------------------
@@ -204,7 +239,7 @@ texinfo_documents = [
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
     'python': ('https://docs.python.org/', None),
-    'numpy': ('http://docs.scipy.org/doc/numpy/', None),
+    'numpy': ('https://docs.scipy.org/doc/numpy/', None),
 }
 
 # -- A patch that prevents Sphinx from cross-referencing ivar tags -------

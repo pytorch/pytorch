@@ -21,7 +21,7 @@ class CuDNNActivationOp<CUDNN_ACTIVATION_ELU> final
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>
@@ -67,7 +67,7 @@ class CuDNNActivationGradientOp<CUDNN_ACTIVATION_ELU> final
   }
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<float, float16>>::call(this, Input(0));
+    return DispatchHelper<TensorTypes<float, at::Half>>::call(this, Input(0));
   }
 
   template <typename T>

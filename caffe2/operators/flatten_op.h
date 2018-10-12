@@ -12,7 +12,7 @@ class FlattenOp : public Operator<Context> {
 
   FlattenOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axis_(OperatorBase::GetSingleArgument<int>("axis", 1)) {}
+        axis_(this->template GetSingleArgument<int>("axis", 1)) {}
 
   bool RunOnDevice() override {
     auto& input = Input(0);

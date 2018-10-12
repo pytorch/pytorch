@@ -15,7 +15,7 @@ class KeySplitOp : public Operator<Context> {
   KeySplitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         categorical_limit_(
-            OperatorBase::GetSingleArgument<int>("categorical_limit", 0)) {
+            this->template GetSingleArgument<int>("categorical_limit", 0)) {
     CAFFE_ENFORCE_GT(categorical_limit_, 0);
   }
 

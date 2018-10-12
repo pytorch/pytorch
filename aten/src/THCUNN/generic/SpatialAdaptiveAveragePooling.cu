@@ -15,8 +15,8 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
 {
   THCUNN_assertSameGPU(state, 2, input, output);
 
-  real *output_data;
-  real *input_data;
+  scalar_t *output_data;
+  scalar_t *input_data;
 
   THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
                   "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
@@ -89,8 +89,8 @@ void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
 
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradInput);
 
-  real *gradInput_data;
-  real *gradOutput_data;
+  scalar_t *gradInput_data;
+  scalar_t *gradOutput_data;
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 

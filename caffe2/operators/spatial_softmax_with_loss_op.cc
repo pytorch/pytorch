@@ -119,7 +119,7 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   }
 
   // Compute the avg cross-entropy loss
-  avg_loss->Resize(vector<TIndex>());
+  avg_loss->Resize(vector<int64_t>());
   float* avg_loss_data = avg_loss->template mutable_data<float>();
   const int* label_data = T.data<int>();
 
@@ -217,14 +217,14 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   }
 
   if (total_weight > 0) {
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         dX->size(),
         scale_ / total_weight,
         dX->data<float>(),
         dX_data,
         &context_);
   }
-  math::Scale<float, CPUContext>(
+  math::Scale<float, float, CPUContext>(
       dX->size(),
       d_avg_loss.data<float>(),
       dX->data<float>(),

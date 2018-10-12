@@ -46,7 +46,7 @@ class LengthsPadOp : public Operator<Context> {
 
     CAFFE_ENFORCE_EQ(total_length, data.dim(0));
 
-    auto shape = data.dims();
+    auto shape = data.dims().vec();
     shape[0] = lengths_size * target_length_;
     output->Resize(shape);
 
@@ -56,7 +56,7 @@ class LengthsPadOp : public Operator<Context> {
 
     math::Set(
         output->size(), static_cast<T>(padding_value_), out_data, &context_);
-    for (TIndex i = 0; i < lengths_size; ++i) {
+    for (int64_t i = 0; i < lengths_size; ++i) {
       auto length = lengths_data[i];
       CAFFE_ENFORCE_GE(length, 0);
       CAFFE_ENFORCE_GE(

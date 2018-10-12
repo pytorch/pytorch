@@ -32,14 +32,17 @@ class ExpandOp final : public Operator<Context> {
         shape_dims.data());
     auto* Y = Output(0);
 
-	const int ndim = shape_dims.size();
+    const int ndim = shape_dims.size();
     const std::vector<int> X_dims(X.dims().cbegin(), X.dims().cend());
     std::vector<int> Y_dims;
     Y_dims.reserve(std::max(ndim, X.ndim()));
     // ndim, X.ndim() might equal to 0
     for (int i = ndim - 1, j = X.ndim() - 1; i >= 0 || j >= 0; --i, --j) {
       const int shape_x = (j >= 0 ? X_dims[j] : 1);
-      const int shape_y = (i >= 0 ? shape_dims[i] : 1);
+      // In PyTorch expand treats -1 as a special value to indicate
+      // preserving the size of that dimension.
+      const int shape_y = ((i >= 0 && shape_dims[i] > 0) ? shape_dims[i] : 1);
+
       CAFFE_ENFORCE(
           shape_x == 1 || shape_y == 1 || shape_x == shape_y,
           "Dimensions format invalid.");
@@ -52,6 +55,7 @@ class ExpandOp final : public Operator<Context> {
         X_dims.data(),
         Y_dims.size(),
         Y_dims.data(),
+        T(1),
         X.template data<T>(),
         Y->template mutable_data<T>(),
         &context_);
@@ -93,6 +97,7 @@ class ExpandGradientOp final : public Operator<Context> {
         dY_dims.data(),
         axes.size(),
         axes.data(),
+        T(1),
         dY.template data<T>(),
         dX->template mutable_data<T>(),
         &context_);

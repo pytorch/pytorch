@@ -1,20 +1,10 @@
 #include "caffe2/core/tensor.h"
 
 #include "caffe2/core/blob_stats.h"
-#include "caffe2/core/flags.h"
-
-CAFFE2_DEFINE_bool(
-    caffe2_keep_on_shrink,
-    true,
-    "If set, keeps memory when a tensor is shrinking its size.");
-
-CAFFE2_DEFINE_int64(
-    caffe2_max_keep_on_shrink_memory,
-    LLONG_MAX,
-    "The maximum memory in bytes to keep on shrink, if the difference between "
-    "tensor sizes is bigger than this then tensor will be reset.");
 
 namespace caffe2 {
+
+CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(12, Tensor);
 
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,
@@ -68,10 +58,10 @@ TypeMeta GetTensorType(const void* c) {
 }
 
 // TODO(jerryzh): Remove
-static CaffeMap<CaffeTypeId, TypeCall> type_call_registry_{
+static CaffeMap<TypeIdentifier, TypeCall> type_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorType}};
 
-TypeCall GetTypeCallFunction(CaffeTypeId id) {
+TypeCall GetTypeCallFunction(TypeIdentifier id) {
   auto f = type_call_registry_.find(id);
   if (f == type_call_registry_.end()) {
     return nullptr;
@@ -79,31 +69,33 @@ TypeCall GetTypeCallFunction(CaffeTypeId id) {
   return f->second;
 }
 
-void RegisterTypeCallFunction(CaffeTypeId id, TypeCall c) {
+void RegisterTypeCallFunction(TypeIdentifier id, TypeCall c) {
   type_call_registry_[id] = c;
 }
 
 int GetGPUIDForPointer(const void* ptr);
 
-vector<TIndex> GetTensorInfo(
+vector<int64_t> GetTensorInfo(
     const void* c,
-    bool* shares_data,
     size_t* capacity,
     DeviceOption* device) {
+  CHECK(capacity);
   const Tensor* tc = static_cast<const Tensor*>(c);
-  *shares_data = tc->shares_data();
-  *capacity = tc->capacity_nbytes();
-  tc->ExtractDeviceOption(device);
-  return tc->dims();
+  CHECK(tc);
+  CHECK(tc->unsafeGetTensorImpl());
+  CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
+  *capacity = tc->storage().capacity();
+  ExtractDeviceOption(device, tc->GetDevice());
+  return tc->dims().vec();
 }
 
 // since we only have one tensor, probably need to remove this at some point?
-static CaffeMap<CaffeTypeId, TensorInfoCall> tensor_info_call_registry_{
+static CaffeMap<TypeIdentifier, TensorInfoCall> tensor_info_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorInfo}};
 
 // TODO: Remove this code in a separate diff, since we only have one
 // GetTensorInfo function now
-TensorInfoCall GetTensorInfoFunction(CaffeTypeId id) {
+TensorInfoCall GetTensorInfoFunction(TypeIdentifier id) {
   auto f = tensor_info_call_registry_.find(id);
   if (f == tensor_info_call_registry_.end()) {
     return nullptr;
@@ -111,7 +103,7 @@ TensorInfoCall GetTensorInfoFunction(CaffeTypeId id) {
   return f->second;
 }
 
-void RegisterTensorInfoFunction(CaffeTypeId id, TensorInfoCall c) {
+void RegisterTensorInfoFunction(TypeIdentifier id, TensorInfoCall c) {
   tensor_info_call_registry_[id] = c;
 }
 

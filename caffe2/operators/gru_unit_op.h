@@ -114,10 +114,10 @@ class GRUUnitOp : public Operator<Context> {
  public:
   GRUUnitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        drop_states_(OperatorBase::template GetSingleArgument<bool>(
+        drop_states_(this->template GetSingleArgument<bool>(
             "drop_states",
             false)),
-        sequence_lengths_(OperatorBase::template GetSingleArgument<bool>(
+        sequence_lengths_(this->template GetSingleArgument<bool>(
             "sequence_lengths",
             true)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -170,10 +170,10 @@ class GRUUnitGradientOp : public Operator<Context> {
  public:
   GRUUnitGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        drop_states_(OperatorBase::template GetSingleArgument<bool>(
+        drop_states_(this->template GetSingleArgument<bool>(
             "drop_states",
             false)),
-        sequence_lengths_(OperatorBase::template GetSingleArgument<bool>(
+        sequence_lengths_(this->template GetSingleArgument<bool>(
             "sequence_lengths",
             true)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;

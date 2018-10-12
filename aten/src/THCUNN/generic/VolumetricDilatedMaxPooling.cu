@@ -235,22 +235,15 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     THCTensor_(retain)(state, output);
   }
 
-  real* inputData = THCTensor_(data)(state, input);
+  scalar_t* inputData = THCTensor_(data)(state, input);
 
-  THCDeviceTensor<real, 4> cudaOutput;
-  cudaOutput = toDeviceTensor<real, 4>(state, output);
-
-  THLongStorage *indicesSize = THLongStorage_newWithSize(4);
-  int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
-                            outputTime, outputHeight, outputWidth };
-  THLongStorage_rawCopy(indicesSize, indicesSizeRaw);
+  THCDeviceTensor<scalar_t, 4> cudaOutput;
+  cudaOutput = toDeviceTensor<scalar_t, 4>(state, output);
 
   THCIndexTensor *indices1 = THCIndexTensor_(newWithStorage)(
     state, THCIndexTensor_(storage)(state, indices),
     THCIndexTensor_(storageOffset)(state, indices),
-    indicesSize, NULL);
-
-  THLongStorage_free(indicesSize);
+    { batchSize * inputSlices, outputTime, outputHeight, outputWidth }, {});
 
   THCDeviceTensor<THCIndex_t, 4> cudaIndices =
     toDeviceTensor<THCIndex_t, 4>(state, indices1);
@@ -361,18 +354,14 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
     THCTensor_(retain)(state, gradInput);
   }
 
-  THCDeviceTensor<real, 4> cudaGradOutput;
-  cudaGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
-  real* gradInputData = THCTensor_(data)(state, gradInput);
+  THCDeviceTensor<scalar_t, 4> cudaGradOutput;
+  cudaGradOutput = toDeviceTensor<scalar_t, 4>(state, gradOutput);
+  scalar_t* gradInputData = THCTensor_(data)(state, gradInput);
 
-  THLongStorage *indicesSize = THLongStorage_newWithSize(4);
-  int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
-                           outputTime, outputHeight, outputWidth };
-  THLongStorage_rawCopy(indicesSize, indicesSizeRaw);
   THCIndexTensor *indices1 = THCIndexTensor_(newWithStorage)(
     state, THCIndexTensor_(storage)(state, indices),
-    THCIndexTensor_(storageOffset)(state, indices), indicesSize, NULL);
-  THLongStorage_free(indicesSize);
+    THCIndexTensor_(storageOffset)(state, indices),
+    { batchSize * inputSlices, outputTime, outputHeight, outputWidth }, {});
 
   THCDeviceTensor<THCIndex_t, 4> cudaIndices =
     toDeviceTensor<THCIndex_t, 4>(state, indices1);

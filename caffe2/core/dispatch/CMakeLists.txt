@@ -8,8 +8,6 @@ set(LIB_SOURCES
         LeftRight.cpp
         OpSchema.cpp
         OpSchemaRegistration.cpp
-        TensorTypeId.cpp
-        TensorTypeIdRegistration.cpp
 )
 
 set(TEST_SOURCES

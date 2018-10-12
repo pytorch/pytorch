@@ -11,7 +11,6 @@
 #include "THCP.h"
 
 #include "override_macros.h"
-#include "torch/csrc/finalizer.h"
 #include "torch/csrc/copy_utils.h"
 #include "DynamicTypes.h"
 

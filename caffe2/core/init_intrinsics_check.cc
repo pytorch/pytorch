@@ -4,7 +4,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/utils/cpuid.h"
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_quit_on_unsupported_cpu_feature,
     false,
     "If set, when Caffe2 is built with a CPU feature (like avx2) but the "
@@ -23,7 +23,7 @@ static void QuitIfFeatureUnsupported(
         "on your machine, such as SIGILL 'illegal instructions' on Linux. "
         "As a result Caffe2 will preemptively quit. Please install or "
         "build a Caffe2 binary with the feature turned off.";
-    if (FLAGS_caffe2_quit_on_unsupported_cpu_feature) {
+    if (c10::FLAGS_caffe2_quit_on_unsupported_cpu_feature) {
       LOG(FATAL) << err_string;
     } else {
       LOG(ERROR) << err_string;

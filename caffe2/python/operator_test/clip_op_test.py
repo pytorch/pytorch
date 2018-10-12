@@ -10,10 +10,11 @@ import hypothesis.strategies as st
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 
-class TestClip(hu.HypothesisTestCase):
-    @given(X=hu.tensor(),
+class TestClip(serial.SerializedTestCase):
+    @serial.given(X=hu.tensor(),
            min_=st.floats(min_value=-2, max_value=0),
            max_=st.floats(min_value=0, max_value=2),
            inplace=st.booleans(),

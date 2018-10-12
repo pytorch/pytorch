@@ -18,17 +18,17 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
  public:
   SinusoidPositionEncodingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        embedding_size_(OperatorBase::template GetSingleArgument<int>(
+        embedding_size_(this->template GetSingleArgument<int>(
             "embedding_size",
             100)),
-        alpha_(OperatorBase::template GetSingleArgument<float>("alpha", 10000)),
+        alpha_(this->template GetSingleArgument<float>("alpha", 10000)),
         amplitude_(
-            OperatorBase::template GetSingleArgument<float>("amplitude", 1)) {}
+            this->template GetSingleArgument<float>("amplitude", 1)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<Tensor>(0, CPU));
+        this, this->template Input<Tensor>(0, CPU));
   }
 
   template <typename Index>
@@ -38,7 +38,7 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
 
     CAFFE_ENFORCE_EQ(positions.ndim(), 2, "POSITIONS should be a 2-D tensor");
 
-    auto shape = positions.dims();
+    auto shape = positions.dims().vec();
     shape.push_back(embedding_size_);
     output->Resize(shape);
 

@@ -18,12 +18,10 @@ inline int GET_BLOCKS(const int N)
 }
 
 #define THCUNN_resizeAs_indices(STATE, I1, I2)              \
-  THLongStorage *size2 = THCTensor_(newSizeOf)(STATE, I2);  \
-  if (!THCIndexTensor_(isSize)(STATE, I1, size2))           \
+  if (!I1->sizes().equals(I2->sizes()))                     \
   { \
-    THCudaLongTensor_resize(STATE, I1, size2, NULL);        \
-  } \
-  THLongStorage_free(size2);
+    THCudaLongTensor_resizeAs(STATE, I1, I2);               \
+  }
 
 #define THCUNN_check_shape(STATE, I1, I2)                 \
   if (I1 != NULL && I2 != NULL && !THCTensor_(isSameSizeAs)(STATE, I1, I2))	\
@@ -36,15 +34,13 @@ inline int GET_BLOCKS(const int N)
 
 
 #define THCUNN_check_shape_indices(STATE, I1, I2)              \
-  THLongStorage *size2 = THCTensor_(newSizeOf)(STATE, I2);     \
-  if (!THCIndexTensor_(isSize)(STATE, I1, size2))              \
+  if (!I1->sizes().equals(I2->sizes()))                        \
   { \
        THCDescBuff s1 = THCIndexTensor_(sizeDesc)(STATE, I1);  \
        THCDescBuff s2 = THCTensor_(sizeDesc)(STATE, I2);       \
        THError(#I1 " and " #I2 " shapes do not match: "        \
                #I1 " %s, " #I2 " %s", s1.str, s2.str);         \
-  } \
-  THLongStorage_free(size2);
+  }
 
 #define THCUNN_check_nElement(STATE, I1, I2)                \
   if (I1 != NULL && I2 != NULL ) {                          \
@@ -62,7 +58,7 @@ inline int GET_BLOCKS(const int N)
 
 #define THCUNN_check_dim_size(STATE, T, DIM, DIM_SIZE, SIZE) \
   if (THCTensor_(nDimensionLegacyNoScalars)(STATE, T) != DIM ||             \
-      THCTensor_(size)(STATE, T, DIM_SIZE) != SIZE) {        \
+      THCTensor_(sizeLegacyNoScalars)(STATE, T, DIM_SIZE) != SIZE) {        \
       THCDescBuff s1 = THCTensor_(sizeDesc)(state, T);       \
       THError("Need " #T " of dimension %d and " #T ".size[%d] == %d"	\
               " but got " #T " to be of shape: %s", DIM, DIM_SIZE, SIZE, s1.str); \
@@ -70,7 +66,7 @@ inline int GET_BLOCKS(const int N)
 
 #define THCUNN_check_dim_size_indices(STATE, T, DIM, DIM_SIZE, SIZE)  \
   if (THCIndexTensor_(nDimensionLegacyNoScalars)(STATE, T) != DIM ||                 \
-      THCIndexTensor_(size)(STATE, T, DIM_SIZE) != SIZE) {            \
+      THCIndexTensor_(sizeLegacyNoScalars)(STATE, T, DIM_SIZE) != SIZE) {            \
       THCDescBuff s1 = THCIndexTensor_(sizeDesc)(state, T);           \
       THError("Need " #T " of dimension %d and " #T ".size[%d] == %d" \
               " but got " #T " to be of shape: %s", DIM, DIM_SIZE, SIZE, s1.str); \

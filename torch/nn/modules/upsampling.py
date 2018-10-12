@@ -33,12 +33,14 @@ class Upsample(Module):
         - Output: :math:`(N, C, W_{out})`, :math:`(N, C, H_{out}, W_{out})`
           or :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
-          .. math::
-              D_{out} = \left\lfloor D_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-3]
+    .. math::
+        D_{out} = \left\lfloor D_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-3]
 
-              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-2]
+    .. math::
+        H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-2]
 
-              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-1]
+    .. math::
+        W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor \text{ or size}[-1]
 
     .. warning::
         With ``align_corners = True``, the linearly interpolating modes
@@ -48,8 +50,8 @@ class Upsample(Module):
         0.3.1. Since then, the default behavior is ``align_corners = False``.
         See below for concrete examples on how this affects the outputs.
 
-    .. warning::
-        This class is deprecated in favor of :func:`~nn.functional.interpolate`.
+    .. note::
+        If you want downsampling/general resizing, you should use :func:`~nn.functional.interpolate`.
 
     Examples::
 
@@ -119,7 +121,6 @@ class Upsample(Module):
         self.align_corners = align_corners
 
     def forward(self, input):
-        warnings.warn("nn.Upsampling is deprecated. Use nn.functional.interpolate instead.")
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def extra_repr(self):
@@ -151,10 +152,11 @@ class UpsamplingNearest2d(Upsample):
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
-          .. math::
-              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor
+    .. math::
+          H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor
 
-              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor
+    .. math::
+          W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor
 
     Examples::
 
@@ -199,10 +201,11 @@ class UpsamplingBilinear2d(Upsample):
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
-          .. math::
-              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor
+    .. math::
+        H_{out} = \left\lfloor H_{in} \times \text{scale\_factor} \right\rfloor
 
-              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor
+    .. math::
+        W_{out} = \left\lfloor W_{in} \times \text{scale\_factor} \right\rfloor
 
     Examples::
 

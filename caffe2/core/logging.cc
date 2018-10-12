@@ -3,24 +3,23 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 #include <numeric>
 
 // Common code that we use regardless of whether we use glog or not.
 
-CAFFE2_DEFINE_bool(caffe2_use_fatal_for_enforce, false,
-                   "If set true, when CAFFE_ENFORCE is not met, abort instead "
-                   "of throwing an exception.");
+C10_DEFINE_bool(
+    caffe2_use_fatal_for_enforce,
+    false,
+    "If set true, when CAFFE_ENFORCE is not met, abort instead "
+    "of throwing an exception.");
 
 namespace caffe2 {
-std::string StripBasename(const std::string &full_path) {
-  const char kSeparator = '/';
-  size_t pos = full_path.rfind(kSeparator);
-  if (pos != std::string::npos) {
-    return full_path.substr(pos + 1, std::string::npos);
-  } else {
-    return full_path;
-  }
+namespace enforce_detail {
+/* implicit */ EnforceFailMessage::EnforceFailMessage(std::string&& msg) {
+  msg_ = new std::string(std::move(msg));
 }
+} // namespace enforce_detail
 
 size_t ReplaceAll(string& s, const char* from, const char* to) {
   CAFFE_ENFORCE(from && *from);
@@ -48,82 +47,55 @@ void SetStackTraceFetcher(std::function<string(void)> fetcher) {
   *GetFetchStackTrace() = fetcher;
 }
 
-static std::function<void(const OperatorDef&)> OperatorLogger =
-    [](const OperatorDef&) { return; };
-
-void SetOperatorLogger(std::function<void(const OperatorDef&)> tracer) {
-  OperatorLogger = tracer;
-}
-
-std::function<void(const OperatorDef&)> GetOperatorLogger() {
-  return OperatorLogger;
-}
-
-EnforceNotMet::EnforceNotMet(
+void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
-    const string& msg,
-    const void* caller)
-    : msg_stack_{MakeString(
-          "[enforce fail at ",
-          StripBasename(std::string(file)),
-          ":",
-          line,
-          "] ",
-          condition,
-          ". ",
-          msg,
-          " ")},
-      stack_trace_((*GetFetchStackTrace())()) {
-  if (FLAGS_caffe2_use_fatal_for_enforce) {
-    LOG(FATAL) << msg_stack_[0];
+    const std::string& msg,
+    const void* caller) {
+  at::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+  if (c10::FLAGS_caffe2_use_fatal_for_enforce) {
+    LOG(FATAL) << e.msg_stack()[0];
   }
-  caller_ = caller;
-  full_msg_ = this->msg();
-}
-
-void EnforceNotMet::AppendMessage(const string& msg) {
-  msg_stack_.push_back(msg);
-  full_msg_ = this->msg();
-}
-
-string EnforceNotMet::msg() const {
-  return std::accumulate(msg_stack_.begin(), msg_stack_.end(), string("")) +
-      stack_trace_;
-}
-
-const char* EnforceNotMet::what() const noexcept {
-  return full_msg_.c_str();
-}
-
-const void* EnforceNotMet::caller() const noexcept {
-  return caller_;
+  throw e;
 }
 
 }  // namespace caffe2
 
+#ifdef C10_USE_GFLAGS
+// When GLOG depends on GFLAGS, these variables are being defined in GLOG
+// directly via the GFLAGS definition, so we will use DECLARE_* to declare
+// them, and use them in Caffe2.
+// GLOG's minloglevel
+DECLARE_int32(minloglevel);
+// GLOG's verbose log value.
+DECLARE_int32(v);
+// GLOG's logtostderr value
+DECLARE_bool(logtostderr);
+#elif !CAFFE2_MOBILE && !__APPLE__ && !defined(_WIN32)
+// Declare our own versions of the above flags so we don't error out
+// when they are passed into Caffe2.
+C10_DEFINE_int(minloglevel, 0, "Equivalent to glog minloglevel");
+C10_DEFINE_int(v, 0, "Equivalent to glog verbose");
+C10_DEFINE_bool(logtostderr, false, "Equivalent to glog logtostderr");
+#endif // C10_USE_GFLAGS
 
 #ifdef CAFFE2_USE_GOOGLE_GLOG
 
-#ifdef CAFFE2_USE_GFLAGS
-// GLOG's minloglevel
-CAFFE2_DECLARE_int(minloglevel);
-// GLOG's verbose log value.
-CAFFE2_DECLARE_int(v);
-// GLOG's logtostderr value
-CAFFE2_DECLARE_bool(logtostderr);
-
-#else
-
+// Provide easy access to the above variables, regardless whether GLOG is
+// dependent on GFLAGS or not. Note that the namespace (fLI, fLB) is actually
+// consistent between GLOG and GFLAGS, so we can do the below declaration
+// consistently.
+namespace caffe2 {
 using fLI::FLAGS_minloglevel;
 using fLI::FLAGS_v;
 using fLB::FLAGS_logtostderr;
+}  // namespace caffe2
 
-#endif // CAFFE2_USE_GFLAGS
-
-CAFFE2_DEFINE_int(caffe2_log_level, google::GLOG_ERROR,
-                  "The minimum log level that caffe2 will output.");
+C10_DEFINE_int(
+    caffe2_log_level,
+    google::GLOG_ERROR,
+    "The minimum log level that caffe2 will output.");
 
 // Google glog's api does not have an external function that allows one to check
 // if glog is initialized or not. It does have an internal function - so we are
@@ -157,14 +129,14 @@ bool InitCaffeLogging(int* argc, char** argv) {
 void UpdateLoggingLevelsFromFlags() {
   // If caffe2_log_level is set and is lower than the min log level by glog,
   // we will transfer the caffe2_log_level setting to glog to override that.
-  FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
+  FLAGS_minloglevel = std::min(c10::FLAGS_caffe2_log_level, FLAGS_minloglevel);
   // If caffe2_log_level is explicitly set, let's also turn on logtostderr.
-  if (FLAGS_caffe2_log_level < google::GLOG_ERROR) {
+  if (c10::FLAGS_caffe2_log_level < google::GLOG_ERROR) {
     FLAGS_logtostderr = 1;
   }
   // Also, transfer the caffe2_log_level verbose setting to glog.
-  if (FLAGS_caffe2_log_level < 0) {
-    FLAGS_v = std::min(FLAGS_v, -FLAGS_caffe2_log_level);
+  if (c10::FLAGS_caffe2_log_level < 0) {
+    FLAGS_v = std::min(FLAGS_v, -c10::FLAGS_caffe2_log_level);
   }
 }
 
@@ -180,24 +152,27 @@ void ShowLogInfoToStderr() {
 #include <android/log.h>
 #endif // ANDROID
 
-CAFFE2_DEFINE_int(caffe2_log_level, ERROR,
-                  "The minimum log level that caffe2 will output.");
+C10_DEFINE_int(
+    caffe2_log_level,
+    ERROR,
+    "The minimum log level that caffe2 will output.");
 
 namespace caffe2 {
 bool InitCaffeLogging(int* argc, char** argv) {
   // When doing InitCaffeLogging, we will assume that caffe's flag paser has
   // already finished.
   if (*argc == 0) return true;
-  if (!CommandLineFlagsHasBeenParsed()) {
+  if (!c10::CommandLineFlagsHasBeenParsed()) {
     std::cerr << "InitCaffeLogging() has to be called after "
-                 "ParseCaffeCommandLineFlags. Modify your program to make sure "
-                 "of this." << std::endl;
+                 "c10::ParseCommandLineFlags. Modify your program to make sure "
+                 "of this."
+              << std::endl;
     return false;
   }
-  if (FLAGS_caffe2_log_level > FATAL) {
+  if (c10::FLAGS_caffe2_log_level > FATAL) {
     std::cerr << "The log level of Caffe2 has to be no larger than FATAL("
               << FATAL << "). Capping it to FATAL." << std::endl;
-    FLAGS_caffe2_log_level = FATAL;
+    c10::FLAGS_caffe2_log_level = FATAL;
   }
   return true;
 }
@@ -206,12 +181,12 @@ void UpdateLoggingLevelsFromFlags() {
 }
 
 void ShowLogInfoToStderr() {
-  FLAGS_caffe2_log_level = INFO;
+  c10::FLAGS_caffe2_log_level = INFO;
 }
 
 MessageLogger::MessageLogger(const char *file, int line, int severity)
   : severity_(severity) {
-  if (severity_ < FLAGS_caffe2_log_level) {
+  if (severity_ < c10::FLAGS_caffe2_log_level) {
     // Nothing needs to be logged.
     return;
   }
@@ -236,12 +211,12 @@ MessageLogger::MessageLogger(const char *file, int line, int severity)
           //<< ":" << std::setw(2) << timeinfo->tm_min
           //<< ":" << std::setw(2) << timeinfo->tm_sec
           //<< "." << std::setw(9) << ns.count() % 1000000000
-          << " " << StripBasename(std::string(file)) << ":" << line << "] ";
+          << " " << at::detail::StripBasename(std::string(file)) << ":" << line << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
 MessageLogger::~MessageLogger() {
-  if (severity_ < FLAGS_caffe2_log_level) {
+  if (severity_ < c10::FLAGS_caffe2_log_level) {
     // Nothing needs to be logged.
     return;
   }
@@ -264,9 +239,15 @@ MessageLogger::~MessageLogger() {
     __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
   }
 #else  // !ANDROID
-  if (severity_ >= FLAGS_caffe2_log_level) {
+  if (severity_ >= c10::FLAGS_caffe2_log_level) {
     // If not building on Android, log all output to std::cerr.
     std::cerr << stream_.str();
+    // Simulating the glog default behavior: if the severity is above INFO,
+    // we flush the stream so that the output appears immediately on std::cerr.
+    // This is expected in some of our tests.
+    if (severity_ > INFO) {
+      std::cerr << std::flush;
+    }
   }
 #endif  // ANDROID
   if (severity_ == FATAL) {

@@ -32,18 +32,27 @@
 # define TH_EXTERNC extern
 #endif
 
+// Note(jiayq): copied from ATen/core/Macros.h. Because internal build of TH
+// and ATen are not unified yet, we need to duplicate code for now. Long term
+// we should merge macros.
 #ifdef _WIN32
-# if defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
-#  define TH_API TH_EXTERNC __declspec(dllexport)
-#  define TH_CPP_API __declspec(dllexport)
-# else
-#  define TH_API TH_EXTERNC __declspec(dllimport)
-#  define TH_CPP_API __declspec(dllimport)
-# endif
-#else
-# define TH_API TH_EXTERNC
-# define TH_CPP_API
-#endif
+#if !defined(AT_CORE_STATIC_WINDOWS)
+// TODO: unfiy the controlling macros.
+#if defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
+#define TH_CPP_API __declspec(dllexport)
+#else // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
+#define TH_CPP_API __declspec(dllimport)
+#endif // defined(CAFFE2_BUILD_MAIN_LIBS) || defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
+#else // !defined(AT_CORE_STATIC_WINDOWS)
+#define TH_CPP_API
+#endif // !defined(AT_CORE_STATIC_WINDOWS)
+#else  // _WIN32
+#if defined(__GNUC__)
+#define TH_CPP_API __attribute__((__visibility__("default")))
+#endif // defined(__GNUC__)
+#endif  // _WIN32
+
+#define TH_API TH_EXTERNC TH_CPP_API
 
 #ifdef _WIN32
 # define TH_NO_RETURN __declspec(noreturn)

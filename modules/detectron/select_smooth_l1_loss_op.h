@@ -29,8 +29,8 @@ class SelectSmoothL1LossOp final : public Operator<Context> {
  public:
   SelectSmoothL1LossOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 1.)),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)) {
+        beta_(this->template GetSingleArgument<float>("beta", 1.)),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)) {
     CAFFE_ENFORCE(beta_ > 0);
     CAFFE_ENFORCE(scale_ >= 0);
   }
@@ -53,8 +53,8 @@ class SelectSmoothL1LossGradientOp final : public Operator<Context> {
  public:
   SelectSmoothL1LossGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        beta_(OperatorBase::GetSingleArgument<float>("beta", 1.)),
-        scale_(OperatorBase::GetSingleArgument<float>("scale", 1.)) {
+        beta_(this->template GetSingleArgument<float>("beta", 1.)),
+        scale_(this->template GetSingleArgument<float>("scale", 1.)) {
     CAFFE_ENFORCE(beta_ > 0);
     CAFFE_ENFORCE(scale_ >= 0);
   }

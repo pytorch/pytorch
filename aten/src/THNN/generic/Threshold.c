@@ -10,11 +10,11 @@ void THNN_(Threshold_updateOutput)(
           accreal val_,
           bool inplace)
 {
-  real threshold = TH_CONVERT_ACCREAL_TO_REAL(threshold_);
-  real val = TH_CONVERT_ACCREAL_TO_REAL(val_);
+  scalar_t threshold = TH_CONVERT_ACCREAL_TO_REAL(threshold_);
+  scalar_t val = TH_CONVERT_ACCREAL_TO_REAL(val_);
   if (inplace)
   {
-    TH_TENSOR_APPLY(real, input,
+    TH_TENSOR_APPLY(scalar_t, input,
       if (*input_data <= threshold)
         *input_data = val;
     );
@@ -23,8 +23,8 @@ void THNN_(Threshold_updateOutput)(
   else
   {
     THTensor_(resizeAs)(output, input);
-    TH_TENSOR_APPLY2(real, output, real, input,
-      *output_data = (*input_data > threshold) ? *input_data : val;
+    TH_TENSOR_APPLY2(scalar_t, output, scalar_t, input,
+      *output_data = (*input_data <= threshold) ? val : *input_data;  // this order propagates NaN
     );
   }
 }
@@ -38,11 +38,11 @@ void THNN_(Threshold_updateGradInput)(
           accreal val_,
           bool inplace)
 {
-  real threshold = TH_CONVERT_ACCREAL_TO_REAL(threshold_);
+  scalar_t threshold = TH_CONVERT_ACCREAL_TO_REAL(threshold_);
   THNN_CHECK_NELEMENT(input, gradOutput);
   if (inplace)
   {
-    TH_TENSOR_APPLY2(real, gradOutput, real, input,
+    TH_TENSOR_APPLY2(scalar_t, gradOutput, scalar_t, input,
       if ((*input_data) <= threshold)
         *gradOutput_data = 0;
     );
@@ -51,11 +51,11 @@ void THNN_(Threshold_updateGradInput)(
   else
   {
     THTensor_(resizeAs)(gradInput, input);
-    TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
-      if ((*input_data) > threshold)
-        *gradInput_data = *gradOutput_data;
-      else
+    TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, gradOutput, scalar_t, input,
+      if ((*input_data) <= threshold)
         *gradInput_data = 0;
+      else
+        *gradInput_data = *gradOutput_data;  // let NaN case pass through here
     );
   }
 }

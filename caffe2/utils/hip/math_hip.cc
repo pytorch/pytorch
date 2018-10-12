@@ -38,11 +38,11 @@ namespace {
     }                                                                 \
   };                                                                  \
   template <>                                                         \
-  struct Func##Functor<float16> {                                     \
-    inline __host__ __device__ float16                                \
-    operator()(const float16& lhs, const float16& rhs) const {        \
-      return convert::To<float, float16>(convert::To<float16, float>( \
-          lhs) expr convert::To<float16, float>(rhs));                \
+  struct Func##Functor<at::Half> {                                     \
+    inline __host__ __device__ at::Half                                \
+    operator()(const at::Half& lhs, const at::Half& rhs) const {        \
+      return convert::To<float, at::Half>(convert::To<at::Half, float>( \
+          lhs) expr convert::To<at::Half, float>(rhs));                \
     }                                                                 \
   };
 DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Add, +)
@@ -391,6 +391,9 @@ DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(
     Sign,
     utils::Sign<std::int64_t>)
 
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Inv, utils::Inv<float>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
+
 #undef DELEGATE_SIMPLE_HIP_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_HIP_FUNCTION(T, fn)                         \
@@ -456,7 +459,7 @@ DEFINE_SIMPLE_HIP_COMPARE_FUNCTION(GE, thrust::greater_equal)
   DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op) \
   DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, Func, Op)               \
   DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(double, double, Func, Op)             \
-  DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float16, float16, Func, Op)
+  DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(at::Half, at::Half, Func, Op)
 
 DEFINE_SIMPLE_HIP_BINARY_FUNCTION(Add, AddFunctor)
 DEFINE_SIMPLE_HIP_BINARY_FUNCTION(Sub, SubFunctor)
@@ -609,7 +612,7 @@ DEFINE_2D_BROADCAST_HIP_COMPARE_FUNCTION(GE, thrust::greater_equal)
       std::int64_t, std::int64_t, Func, Op)                           \
   DELEGATE_2D_BROADCAST_HIP_BINARY_FUNCTION(float, float, Func, Op)   \
   DELEGATE_2D_BROADCAST_HIP_BINARY_FUNCTION(double, double, Func, Op) \
-  DELEGATE_2D_BROADCAST_HIP_BINARY_FUNCTION(float16, float16, Func, Op)
+  DELEGATE_2D_BROADCAST_HIP_BINARY_FUNCTION(at::Half, at::Half, Func, Op)
 
 DEFINE_2D_BROADCAST_HIP_BINARY_FUNCTION(Add, AddFunctor)
 DEFINE_2D_BROADCAST_HIP_BINARY_FUNCTION(Sub, SubFunctor)
@@ -673,7 +676,7 @@ DEFINE_BROADCAST_HIP_COMPARE_FUNCTION(GE, thrust::greater_equal)
   DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(std::int64_t, std::int64_t, Func, Op) \
   DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(float, float, Func, Op)               \
   DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(double, double, Func, Op)             \
-  DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(float16, float16, Func, Op)
+  DELEGATE_BROADCAST_HIP_BINARY_FUNCTION(at::Half, at::Half, Func, Op)
 
 DEFINE_BROADCAST_HIP_BINARY_FUNCTION(Add, AddFunctor)
 DEFINE_BROADCAST_HIP_BINARY_FUNCTION(Sub, SubFunctor)
@@ -711,8 +714,8 @@ DEFINE_BROADCAST_HIP_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
     cub::DeviceReduce::func(                                            \
         nullptr, memRequired, src, dst, N, context->hip_stream());      \
     auto buffer_size =                                                  \
-        static_cast<TIndex>((memRequired + sizeof(T) - 1) / sizeof(T)); \
-    scratch_ptr->Resize(std::vector<TIndex>{buffer_size});              \
+        static_cast<int64_t>((memRequired + sizeof(T) - 1) / sizeof(T)); \
+    scratch_ptr->Resize(std::vector<int64_t>{buffer_size});              \
     cub::DeviceReduce::func(                                            \
         static_cast<void*>(scratch_ptr->mutable_data<T>()),             \
         memRequired,                                                    \
@@ -773,17 +776,17 @@ void Gemm<float, HIPContext>(
 }
 
 template <>
-void Gemm<float16, HIPContext>(
+void Gemm<at::Half, HIPContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
     const int M,
     const int N,
     const int K,
     const float alpha,
-    const float16* A,
-    const float16* B,
+    const at::Half* A,
+    const at::Half* B,
     const float beta,
-    float16* C,
+    at::Half* C,
     HIPContext* context,
     TensorProto::DataType math_type) {
   CAFFE_THROW("Unsupported math type");
@@ -820,8 +823,8 @@ void Gemm<float16, HIPContext>(
 
   } else if (math_type == TensorProto_DataType_FLOAT16) {
     // convert alpha, beta from float -> __half
-    /*auto alpha_fp16 = convert::floatToHalf(alpha);
-    auto beta_fp16 = convert::floatToHalf(beta);
+    /*__half alpha_fp16 = at::Half(alpha);
+    __half beta_fp16 = at::Half(beta);
 
     // call cublasHgemm
     ROCBLAS_CHECK(cublasHgemm(
@@ -951,7 +954,7 @@ void GemmStridedBatched<float, HIPContext>(
 }
 
 template <>
-void GemmStridedBatched<float16, HIPContext>(
+void GemmStridedBatched<at::Half, HIPContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
     const int batch_size,
@@ -959,12 +962,12 @@ void GemmStridedBatched<float16, HIPContext>(
     const int N,
     const int K,
     const float alpha,
-    const float16* A,
+    const at::Half* A,
     const int A_stride,
-    const float16* B,
+    const at::Half* B,
     const int B_stride,
     const float beta,
-    float16* C,
+    at::Half* C,
     const int C_stride,
     HIPContext* context,
     TensorProto::DataType math_type) {
@@ -972,7 +975,7 @@ void GemmStridedBatched<float16, HIPContext>(
   if (math_type == TensorProto_DataType_FLOAT) {
     // loop over matrices in the batch
     for (int i = 0; i < batch_size; ++i) {
-      math::Gemm<float16, HIPContext>(
+      math::Gemm<at::Half, HIPContext>(
           TransA,
           TransB,
           M,
@@ -998,8 +1001,8 @@ void GemmStridedBatched<float16, HIPContext>(
         : rocblas_operation_transpose;
 
     // convert alpha, beta from float -> __half
-    auto alpha_fp16 = convert::floatToHalf(alpha);
-    auto beta_fp16 = convert::floatToHalf(beta);
+    __half alpha_fp16 = at::Half(alpha);
+    __half beta_fp16 = at::Half(beta);
     ROCBLAS_ENFORCE(cublasHgemmStridedBatched(
         context->rocblas_handle(),
         cuTransB,
@@ -1138,19 +1141,19 @@ __global__ void AddStripedBatchKernel(
   }
 
 CAFFE2_SPECIALIZED_HIP_ADD_STRIPED_BATCH(float);
-CAFFE2_SPECIALIZED_HIP_ADD_STRIPED_BATCH(float16);
+CAFFE2_SPECIALIZED_HIP_ADD_STRIPED_BATCH(at::Half);
 #undef CAFFE2_SPECIALIZED_HIP_ADD_STRIPED_BATCH
 
 template <>
-void Gemv<float16, HIPContext>(
+void Gemv<at::Half, HIPContext>(
     const CBLAS_TRANSPOSE TransA,
     const int M,
     const int N,
     const float alpha,
-    const float16* A,
-    const float16* x,
+    const at::Half* A,
+    const at::Half* x,
     const float beta,
-    float16* y,
+    at::Half* y,
     HIPContext* context,
     TensorProto::DataType math_type) {
   CAFFE_THROW("Unsupported math type");
@@ -1185,8 +1188,8 @@ void Gemv<float16, HIPContext>(
         CUDA_R_16F,
         LDC));
   } else if (math_type == TensorProto_DataType_FLOAT16) {
-    auto alpha_fp16 = convert::floatToHalf(alpha);
-    auto beta_fp16 = convert::floatToHalf(beta);
+    __half alpha_fp16 = at::Half(alpha);
+    __half beta_fp16 = at::Half(beta);
 
     ROCBLAS_CHECK(cublasHgemm(
         context->rocblas_handle(),
@@ -1223,6 +1226,9 @@ __global__ void SetKernel(const int N, const T alpha, T* Y) {
   template <>                                                     \
   void Set<T, HIPContext>(                                        \
       const size_t N, const T alpha, T* Y, HIPContext* context) { \
+    if (N == 0) {                                                 \
+      return;                                                     \
+    }                                                             \
     hipLaunchKernelGGL(                                           \
         (SetKernel),                                              \
         CAFFE_GET_BLOCKS(N),                                      \
@@ -1239,7 +1245,7 @@ CAFFE2_SPECIALIZED_HIP_SET(double);
 CAFFE2_SPECIALIZED_HIP_SET(bool);
 CAFFE2_SPECIALIZED_HIP_SET(int8_t);
 CAFFE2_SPECIALIZED_HIP_SET(int16_t);
-CAFFE2_SPECIALIZED_HIP_SET(float16);
+CAFFE2_SPECIALIZED_HIP_SET(at::Half);
 CAFFE2_SPECIALIZED_HIP_SET(int);
 CAFFE2_SPECIALIZED_HIP_SET(int64_t);
 CAFFE2_SPECIALIZED_HIP_SET(char);
@@ -1389,15 +1395,15 @@ void Dot<float, HIPContext>(
 }
 
 template <>
-void Dot<float16, HIPContext>(
+void Dot<at::Half, HIPContext>(
     const int n,
-    const float16* a,
-    const float16* b,
-    float16* y,
+    const at::Half* a,
+    const at::Half* b,
+    at::Half* y,
     HIPContext* context) {
   CAFFE_THROW("Unsupported math type");
 #if ROCBLAS_FP16 // rocblas does not support fp16 yet
-  float16 result;
+  at::Half result;
   // execute with 32-bit math
   ROCBLAS_CHECK(cublasDotEx(
       context->rocblas_handle(),
@@ -1411,7 +1417,7 @@ void Dot<float16, HIPContext>(
       &result,
       CUDA_R_16F,
       CUDA_R_32F));
-  context->Copy<float16, CPUContext, HIPContext>(1, &result, y);
+  context->Copy<at::Half, CPUContext, HIPContext>(1, &result, y);
 #endif
 }
 
@@ -1479,13 +1485,13 @@ void SumGenericIter(
   cub::DeviceReduce::Sum(
       nullptr, memRequired, it, dest, N, context->hip_stream());
   auto buffer_size =
-      static_cast<TIndex>((memRequired + sizeof(T) - 1) / sizeof(T));
+      static_cast<int64_t>((memRequired + sizeof(T) - 1) / sizeof(T));
   if (!dest) {
     // allocate one more T at the end of scratch for dest
-    scratch_ptr->Resize(std::vector<TIndex>{buffer_size + 1});
+    scratch_ptr->Resize(std::vector<int64_t>{buffer_size + 1});
     dest = scratch_ptr->template mutable_data<T>() + buffer_size;
   } else {
-    scratch_ptr->Resize(std::vector<TIndex>{buffer_size});
+    scratch_ptr->Resize(std::vector<int64_t>{buffer_size});
   }
   cub::DeviceReduce::Sum(
       static_cast<void*>(scratch_ptr->template mutable_data<T>()),
@@ -1588,7 +1594,7 @@ struct FloatTransform {
     }                                                                     \
   }
 
-CAFFE2_MATH_SUM_FUNC(float16)
+CAFFE2_MATH_SUM_FUNC(at::Half)
 #undef CAFFE2_MATH_SUM_FUNC
 
 namespace {
@@ -1668,7 +1674,7 @@ void SumSqr<float, HIPContext>(
     }                                                                 \
   }
 
-CAFFE2_MATH_SUMSQR_FUNC(float16)
+CAFFE2_MATH_SUMSQR_FUNC(at::Half)
 #undef CAFFE2_MATH_SUMSQR_FUNC
 #undef DEVICE_REDUCE_SIZE_THRESHOLD
 
@@ -1704,15 +1710,15 @@ void Select<float, HIPContext>(
 }
 
 template <>
-void Select<float16, HIPContext>(
+void Select<at::Half, HIPContext>(
     const int N,
     const int D,
-    const float16* x,
+    const at::Half* x,
     const int* idx,
-    float16* y,
+    at::Half* y,
     HIPContext* context) {
   hipLaunchKernelGGL(
-      (SelectKernel<float16>),
+      (SelectKernel<at::Half>),
       dim3(CAFFE_GET_BLOCKS(N)),
       dim3(CAFFE_HIP_NUM_THREADS),
       0,
@@ -1725,19 +1731,70 @@ void Select<float16, HIPContext>(
 }
 
 namespace {
-template <typename T>
-__global__ void ScaleKernel(const int n, const float alpha, const T* x, T* y) {
+
+template <typename TAlpha, typename TData>
+__global__ void
+ScaleKernel(const int n, const TAlpha alpha, const TData* x, TData* y) {
   HIP_1D_KERNEL_LOOP(i, n) {
-    // y[i] = convert::To<float,T>(convert::To<T, float>(x[i]) * alpha);
-    y[i] = convert::Get<T>(convert::Get<float>(x[i]) * alpha);
+    y[i] = x[i] * static_cast<TData>(alpha);
   }
 }
 
-template <typename T>
+template <typename TAlpha, typename TData>
 __global__ void
-ScaleKernelDeviceAlpha(const int n, const float* alpha, const T* x, T* y) {
+ScaleKernel(const int n, const TAlpha* alpha, const TData* x, TData* y) {
   HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = x[i] * (*alpha);
+    y[i] = x[i] * static_cast<TData>(*alpha);
+  }
+}
+
+template <>
+__global__ void ScaleKernel<at::Half, at::Half>(
+    const int n,
+    const at::Half alpha,
+    const at::Half* x,
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * convert::To<at::Half, float>(alpha));
+  }
+}
+
+template <>
+__global__ void ScaleKernel<at::Half, at::Half>(
+    const int n,
+    const at::Half* alpha,
+    const at::Half* x,
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) *
+        convert::To<at::Half, float>(*alpha));
+  }
+}
+
+// fp16 specialization
+template <>
+__global__ void ScaleKernel<float, at::Half>(
+    const int n,
+    const float alpha,
+    const at::Half* x,
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] =
+        convert::To<float, at::Half>(convert::To<at::Half, float>(x[i]) * alpha);
+  }
+}
+
+template <>
+__global__ void ScaleKernel<float, at::Half>(
+    const int n,
+    const float* alpha,
+    const at::Half* x,
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * (*alpha));
   }
 }
 
@@ -1745,19 +1802,6 @@ template <typename T>
 __global__ void PowKernel(const int n, const T* x, const T exponent, T* y) {
   HIP_1D_KERNEL_LOOP(i, n) {
     y[i] = powf(x[i], exponent);
-  }
-}
-
-// fp16 specialization
-template <>
-__global__ void ScaleKernelDeviceAlpha(
-    const int n,
-    const float* alpha,
-    const float16* x,
-    float16* y) {
-  HIP_1D_KERNEL_LOOP(i, n) {
-    y[i] = convert::To<float, float16>(
-        convert::To<float16, float>(x[i]) * (*alpha));
   }
 }
 
@@ -1782,81 +1826,50 @@ void Powx<float, HIPContext>(
       y);
 }
 
-template <>
-void Scale<float, HIPContext>(
-    const int n,
-    const float alpha,
-    const float* x,
-    float* y,
-    HIPContext* context) {
-  hipLaunchKernelGGL(
-      (ScaleKernel<float>),
-      dim3(CAFFE_GET_BLOCKS(n)),
-      dim3(CAFFE_HIP_NUM_THREADS),
-      0,
-      context->hip_stream(),
-      n,
-      alpha,
-      x,
-      y);
-}
-
-template <>
-void Scale<float16, HIPContext>(
-    const int n,
-    const float alpha,
-    const float16* x,
-    float16* y,
-    HIPContext* context) {
-  hipLaunchKernelGGL(
-      (ScaleKernel<float16>),
-      dim3(CAFFE_GET_BLOCKS(n)),
-      dim3(CAFFE_HIP_NUM_THREADS),
-      0,
-      context->hip_stream(),
-      n,
-      alpha,
-      x,
-      y);
-}
-
-template <>
-void Scale<float, HIPContext>(
-    const int n,
-    const float* alpha,
-    const float* x,
-    float* y,
-    HIPContext* context) {
-  hipLaunchKernelGGL(
-      (ScaleKernelDeviceAlpha<float>),
-      dim3(CAFFE_GET_BLOCKS(n)),
-      dim3(CAFFE_HIP_NUM_THREADS),
-      0,
-      context->hip_stream(),
-      n,
-      alpha,
-      x,
-      y);
-}
-
-template <>
-void Scale<float16, HIPContext>(
-    const int n,
-    const float* alpha,
-    const float16* x,
-    float16* y,
-    HIPContext* context) {
-  hipLaunchKernelGGL(
-      (ScaleKernelDeviceAlpha<float16>),
-      dim3(CAFFE_GET_BLOCKS(n)),
-      dim3(CAFFE_HIP_NUM_THREADS),
-      0,
-      context->hip_stream(),
-      n,
-      alpha,
-      x,
-      y);
-}
+#define CAFFE2_SPECIALIZED_HIP_SCALE(TAlpha, TData) \
+  template <>                                       \
+  void Scale<TAlpha, TData, HIPContext>(            \
+      const int n,                                  \
+      const TAlpha alpha,                           \
+      const TData* x,                               \
+      TData* y,                                     \
+      HIPContext* context) {                        \
+    hipLaunchKernelGGL(                             \
+        (ScaleKernel<TAlpha, TData>),               \
+        dim3(CAFFE_GET_BLOCKS(n)),                  \
+        dim3(CAFFE_HIP_NUM_THREADS),                \
+        0,                                          \
+        context->hip_stream(),                      \
+        n,                                          \
+        alpha,                                      \
+        x,                                          \
+        y);                                         \
+  }                                                 \
+  template <>                                       \
+  void Scale<TAlpha, TData, HIPContext>(            \
+      const int n,                                  \
+      const TAlpha* alpha,                          \
+      const TData* x,                               \
+      TData* y,                                     \
+      HIPContext* context) {                        \
+    hipLaunchKernelGGL(                             \
+        (ScaleKernel<TAlpha, TData>),               \
+        dim3(CAFFE_GET_BLOCKS(n)),                  \
+        dim3(CAFFE_HIP_NUM_THREADS),                \
+        0,                                          \
+        context->hip_stream(),                      \
+        n,                                          \
+        alpha,                                      \
+        x,                                          \
+        y);                                         \
+  }
+CAFFE2_SPECIALIZED_HIP_SCALE(float, float)
+CAFFE2_SPECIALIZED_HIP_SCALE(at::Half, at::Half)
+CAFFE2_SPECIALIZED_HIP_SCALE(float, at::Half)
+CAFFE2_SPECIALIZED_HIP_SCALE(double, double)
+CAFFE2_SPECIALIZED_HIP_SCALE(std::int32_t, std::int32_t)
+CAFFE2_SPECIALIZED_HIP_SCALE(std::int64_t, std::int64_t)
+#undef CAFFE2_SPECIALIZED_HIP_SCALE
 
 template <>
 void Axpy<float, HIPContext>(
@@ -1882,11 +1895,11 @@ void Axpy<double, HIPContext>(
 }
 
 template <>
-void Axpy<float16, HIPContext>(
+void Axpy<at::Half, HIPContext>(
     const int N,
     const float alpha,
-    const float16* X,
-    float16* Y,
+    const at::Half* X,
+    at::Half* Y,
     HIPContext* context) {
   CAFFE_THROW("Unsupported math type");
 #if ROCBLAS_FP16
@@ -1935,14 +1948,14 @@ void Axpy<float, HIPContext>(
 }
 
 template <>
-void Axpy<float16, HIPContext>(
+void Axpy<at::Half, HIPContext>(
     const int n,
     const float* alpha,
-    const float16* X,
-    float16* Y,
+    const at::Half* X,
+    at::Half* Y,
     HIPContext* context) {
   hipLaunchKernelGGL(
-      (AxpyKernel<float16>),
+      (AxpyKernel<at::Half>),
       dim3(CAFFE_GET_BLOCKS(n)),
       dim3(CAFFE_HIP_NUM_THREADS),
       0,
@@ -1954,35 +1967,105 @@ void Axpy<float16, HIPContext>(
 }
 
 namespace {
-template <typename T>
-__global__ void
-AxpbyKernel(const int n, const T a, const T* x, const T b, T* y) {
-  HIP_1D_KERNEL_LOOP(index, n) {
-    y[index] = x[index] * a + y[index] * b;
+
+template <typename TCoeff, typename TData>
+__global__ void AxpbyKernel(
+    const int n,
+    const TCoeff a,
+    const TData* x,
+    const TCoeff b,
+    TData* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = x[i] * a + y[i] * b;
   }
 }
-} // namespace
 
 template <>
-void Axpby<float, HIPContext>(
+__global__ void AxpbyKernel<float, at::Half>(
     const int n,
     const float a,
-    const float* x,
+    const at::Half* x,
     const float b,
-    float* y,
-    HIPContext* context) {
-  hipLaunchKernelGGL(
-      (AxpbyKernel<float>),
-      dim3(CAFFE_GET_BLOCKS(n)),
-      dim3(CAFFE_HIP_NUM_THREADS),
-      0,
-      context->hip_stream(),
-      n,
-      a,
-      x,
-      b,
-      y);
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * a +
+        convert::To<at::Half, float>(y[i]) * b);
+  }
 }
+
+template <typename TCoeff, typename TData>
+__global__ void AxpbyKernel(
+    const int n,
+    const TCoeff* a,
+    const TData* x,
+    const TCoeff* b,
+    TData* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = x[i] * *a + y[i] * *b;
+  }
+}
+
+template <>
+__global__ void AxpbyKernel<float, at::Half>(
+    const int n,
+    const float* a,
+    const at::Half* x,
+    const float* b,
+    at::Half* y) {
+  HIP_1D_KERNEL_LOOP(i, n) {
+    y[i] = convert::To<float, at::Half>(
+        convert::To<at::Half, float>(x[i]) * *a +
+        convert::To<at::Half, float>(y[i]) * *b);
+  }
+}
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_HIP_AXPBY(TCoeff, TData) \
+  template <>                                       \
+  void Axpby<TCoeff, TData, HIPContext>(            \
+      const int n,                                  \
+      const TCoeff a,                               \
+      const TData* x,                               \
+      const TCoeff b,                               \
+      TData* y,                                     \
+      HIPContext* context) {                        \
+    hipLaunchKernelGGL(                             \
+        (AxpbyKernel<TCoeff, TData>),               \
+        dim3(CAFFE_GET_BLOCKS(n)),                  \
+        dim3(CAFFE_HIP_NUM_THREADS),                \
+        0,                                          \
+        context->hip_stream(),                      \
+        n,                                          \
+        a,                                          \
+        x,                                          \
+        b,                                          \
+        y);                                         \
+  }                                                 \
+  template <>                                       \
+  void Axpby<TCoeff, TData, HIPContext>(            \
+      const int n,                                  \
+      const TCoeff* a,                              \
+      const TData* x,                               \
+      const TCoeff* b,                              \
+      TData* y,                                     \
+      HIPContext* context) {                        \
+    hipLaunchKernelGGL(                             \
+        (AxpbyKernel<TCoeff, TData>),               \
+        dim3(CAFFE_GET_BLOCKS(n)),                  \
+        dim3(CAFFE_HIP_NUM_THREADS),                \
+        0,                                          \
+        context->hip_stream(),                      \
+        n,                                          \
+        a,                                          \
+        x,                                          \
+        b,                                          \
+        y);                                         \
+  }
+CAFFE2_SPECIALIZED_HIP_AXPBY(float, float)
+CAFFE2_SPECIALIZED_HIP_AXPBY(float, at::Half)
+#undef CAFFE2_SPECIALIZED_HIP_AXPBY
 
 namespace {
 
@@ -2340,7 +2423,8 @@ void Im2Col<float, HIPContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    HIPContext* context) {
+    HIPContext* context,
+    const int /* groups */) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2386,7 +2470,10 @@ void Im2Col<float, HIPContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* img_data,
     float* col_data,
-    HIPContext* context) {
+    HIPContext* context,
+    const int groups) {
+  CAFFE_ENFORCE_EQ(groups, 1, "groups must be 1 for GPU NHWC Im2Col");
+
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2432,7 +2519,8 @@ void Col2Im<float, HIPContext, StorageOrder::NCHW>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    HIPContext* context) {
+    HIPContext* context,
+    const int /* groups */) {
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2478,7 +2566,10 @@ void Col2Im<float, HIPContext, StorageOrder::NHWC>(
     const int stride_w,
     const float* col_data,
     float* img_data,
-    HIPContext* context) {
+    HIPContext* context,
+    const int groups) {
+  CAFFE_ENFORCE_EQ(groups, 1, "groups must be 1 for GPU NHWC Col2Im");
+
   const int dkernel_h = dilation_h * (kernel_h - 1) + 1;
   const int dkernel_w = dilation_w * (kernel_w - 1) + 1;
   const int output_h = (height + pad_t + pad_b - dkernel_h) / stride_h + 1;
@@ -2619,6 +2710,7 @@ __global__ void RowwiseReduceKernel(
     const int cols,
     const Reducer reducer,
     const T init,
+    const T alpha,
     const T* X,
     T* Y) {
   __shared__ typename BlockReduce<T>::TempStorage temp_storage;
@@ -2629,7 +2721,7 @@ __global__ void RowwiseReduceKernel(
     }
     val = BlockReduce<T>(temp_storage).Reduce(val, reducer);
     if (threadIdx.x == 0) {
-      Y[i] = val;
+      Y[i] = val * alpha;
     }
     __syncthreads();
   }
@@ -2641,6 +2733,7 @@ __global__ void ColwiseReduceKernel(
     const int cols,
     const Reducer reducer,
     const T init,
+    const T alpha,
     const T* X,
     T* Y) {
   __shared__ typename BlockReduce<T>::TempStorage temp_storage;
@@ -2651,7 +2744,7 @@ __global__ void ColwiseReduceKernel(
     }
     val = BlockReduce<T>(temp_storage).Reduce(val, reducer);
     if (threadIdx.x == 0) {
-      Y[i] = val;
+      Y[i] = val * alpha;
     }
     __syncthreads();
   }
@@ -2673,6 +2766,7 @@ __global__ void ColwiseReduceKernel(
         D,                                                               \
         cub::Max(),                                                      \
         std::numeric_limits<T>::lowest(),                                \
+        T(1),                                                            \
         x,                                                               \
         y);                                                              \
   }
@@ -2693,6 +2787,7 @@ CAFFE2_SPECIALIZED_HIP_ROWWISE_MAX(float)
         D,                                                               \
         cub::Max(),                                                      \
         std::numeric_limits<T>::lowest(),                                \
+        T(1),                                                            \
         x,                                                               \
         y);                                                              \
   }
@@ -2737,6 +2832,7 @@ __global__ void ReduceTensorHIPKernel(
     SimpleArray<FixedDivisor<int>, D> Y_dims,
     const Reducer reducer,
     const T init,
+    const T alpha,
     const T* X,
     T* Y) {
   __shared__ typename BlockReduce<T>::TempStorage temp_storage;
@@ -2759,7 +2855,7 @@ __global__ void ReduceTensorHIPKernel(
     }
     val = BlockReduce<T>(temp_storage).Reduce(val, reducer);
     if (threadIdx.x == 0) {
-      Y[i] = val;
+      Y[i] = val * alpha;
     }
     __syncthreads();
   }
@@ -2772,7 +2868,8 @@ void ReduceTensorHIPImpl(
     const int* dims,
     const int* axes,
     const Reducer& reducer,
-    const T& init,
+    const T init,
+    const T alpha,
     const T* X,
     T* Y,
     HIPContext* context) {
@@ -2794,6 +2891,7 @@ void ReduceTensorHIPImpl(
       Y_dims,
       reducer,
       init,
+      alpha,
       X,
       Y);
 }
@@ -2805,14 +2903,12 @@ void ReduceTensorHIP(
     const int num_axes,
     const int* axes,
     const Reducer& reducer,
-    const T& init,
+    const T init,
+    const T alpha,
     const T* X,
     T* Y,
     HIPContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
-  if (X == Y) {
-    return;
-  }
   std::vector<int> transpose_axes(num_dims);
   utils::ComputeTransposeAxesForReduceOp(
       num_dims, num_axes, axes, transpose_axes.data());
@@ -2825,39 +2921,48 @@ void ReduceTensorHIP(
   for (int i = pivot; i < num_dims; ++i) {
     inner_size *= dims[transpose_axes[i]];
   }
-  if (outer_size > 0 && inner_size > 0) {
-    if (transpose_axes[pivot] == pivot) {
-      hipLaunchKernelGGL(
-          (RowwiseReduceKernel<T>),
-          dim3(std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS)),
-          dim3(CAFFE_HIP_NUM_THREADS),
-          0,
-          context->hip_stream(),
-          outer_size,
-          inner_size,
-          reducer,
-          init,
-          X,
-          Y);
-      return;
-    }
-    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-        num_dims,
-        ReduceTensorHIPImpl,
-        T,
-        Reducer,
+  if (outer_size == 0) {
+    return;
+  }
+  if (inner_size == 0) {
+    Set<T, HIPContext>(outer_size, alpha * init, Y, context);
+    return;
+  }
+  if (inner_size == 1) {
+    Scale<T, T, HIPContext>(outer_size, alpha, X, Y, context);
+    return;
+  }
+  if (transpose_axes[pivot] == pivot) {
+    hipLaunchKernelGGL(
+        (RowwiseReduceKernel<T>),
+        dim3(std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS)),
+        dim3(CAFFE_HIP_NUM_THREADS),
+        0,
+        context->hip_stream(),
         outer_size,
         inner_size,
-        dims,
-        transpose_axes.data(),
         reducer,
         init,
+        alpha,
         X,
-        Y,
-        context);
-  } else if (outer_size > 0) {
-    math::Set<T, HIPContext>(outer_size, init, Y, context);
+        Y);
+    return;
   }
+  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
+      num_dims,
+      ReduceTensorHIPImpl,
+      T,
+      Reducer,
+      outer_size,
+      inner_size,
+      dims,
+      transpose_axes.data(),
+      reducer,
+      init,
+      alpha,
+      X,
+      Y,
+      context);
 }
 
 template <typename T>
@@ -2866,19 +2971,27 @@ void ReduceMeanHIPImpl(
     const int* dims,
     const int num_axes,
     const int* axes,
+    const T alpha,
     const T* X,
     T* Y,
     HIPContext* context) {
-  ReduceTensorHIP(
-      num_dims, dims, num_axes, axes, cub::Sum(), T(0), X, Y, context);
   const int X_size =
       std::accumulate(dims, dims + num_dims, 1, std::multiplies<int>());
   int scale = 1;
   for (int i = 0; i < num_axes; ++i) {
     scale *= dims[axes[i]];
   }
-  const int Y_size = X_size / scale;
-  Scale<T, HIPContext>(Y_size, 1.0f / static_cast<float>(scale), Y, Y, context);
+  ReduceTensorHIP(
+      num_dims,
+      dims,
+      num_axes,
+      axes,
+      cub::Sum(),
+      T(0),
+      alpha / static_cast<T>(scale),
+      X,
+      Y,
+      context);
 }
 
 } // namespace
@@ -2890,6 +3003,7 @@ void ReduceMeanHIPImpl(
       const int* dims,                       \
       const int num_axes,                    \
       const int* axes,                       \
+      const T alpha,                         \
       const T* X,                            \
       T* Y,                                  \
       HIPContext* context) {                 \
@@ -2900,6 +3014,7 @@ void ReduceMeanHIPImpl(
         axes,                                \
         cub::Min(),                          \
         std::numeric_limits<T>::max(),       \
+        alpha,                               \
         X,                                   \
         Y,                                   \
         context);                            \
@@ -2917,6 +3032,7 @@ CAFFE2_SPECIALIZED_HIP_REDUCE_MIN(double)
       const int* dims,                       \
       const int num_axes,                    \
       const int* axes,                       \
+      const T alpha,                         \
       const T* X,                            \
       T* Y,                                  \
       HIPContext* context) {                 \
@@ -2927,6 +3043,7 @@ CAFFE2_SPECIALIZED_HIP_REDUCE_MIN(double)
         axes,                                \
         cub::Max(),                          \
         std::numeric_limits<T>::lowest(),    \
+        alpha,                               \
         X,                                   \
         Y,                                   \
         context);                            \
@@ -2937,18 +3054,28 @@ CAFFE2_SPECIALIZED_HIP_REDUCE_MAX(float)
 CAFFE2_SPECIALIZED_HIP_REDUCE_MAX(double)
 #undef CAFFE2_SPECIALIZED_HIP_REDUCE_MAX
 
-#define CAFFE2_SPECIALIZED_HIP_REDUCE_SUM(T)                              \
-  template <>                                                             \
-  void ReduceSum<T, HIPContext>(                                          \
-      const int num_dims,                                                 \
-      const int* dims,                                                    \
-      const int num_axes,                                                 \
-      const int* axes,                                                    \
-      const T* X,                                                         \
-      T* Y,                                                               \
-      HIPContext* context) {                                              \
-    ReduceTensorHIP(                                                      \
-        num_dims, dims, num_axes, axes, cub::Sum(), T(0), X, Y, context); \
+#define CAFFE2_SPECIALIZED_HIP_REDUCE_SUM(T) \
+  template <>                                \
+  void ReduceSum<T, HIPContext>(             \
+      const int num_dims,                    \
+      const int* dims,                       \
+      const int num_axes,                    \
+      const int* axes,                       \
+      const T alpha,                         \
+      const T* X,                            \
+      T* Y,                                  \
+      HIPContext* context) {                 \
+    ReduceTensorHIP(                         \
+        num_dims,                            \
+        dims,                                \
+        num_axes,                            \
+        axes,                                \
+        cub::Sum(),                          \
+        T(0),                                \
+        alpha,                               \
+        X,                                   \
+        Y,                                   \
+        context);                            \
   }
 CAFFE2_SPECIALIZED_HIP_REDUCE_SUM(std::int32_t)
 CAFFE2_SPECIALIZED_HIP_REDUCE_SUM(std::int64_t)
@@ -2956,17 +3083,19 @@ CAFFE2_SPECIALIZED_HIP_REDUCE_SUM(float)
 CAFFE2_SPECIALIZED_HIP_REDUCE_SUM(double)
 #undef CAFFE2_SPECIALIZED_HIP_REDUCE_SUM
 
-#define CAFFE2_SPECIALIZED_HIP_REDUCE_MEAN(T)                            \
-  template <>                                                            \
-  void ReduceMean<T, HIPContext>(                                        \
-      const int num_dims,                                                \
-      const int* dims,                                                   \
-      const int num_axes,                                                \
-      const int* axes,                                                   \
-      const T* X,                                                        \
-      T* Y,                                                              \
-      HIPContext* context) {                                             \
-    ReduceMeanHIPImpl<T>(num_dims, dims, num_axes, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_HIP_REDUCE_MEAN(T)                  \
+  template <>                                                  \
+  void ReduceMean<T, HIPContext>(                              \
+      const int num_dims,                                      \
+      const int* dims,                                         \
+      const int num_axes,                                      \
+      const int* axes,                                         \
+      const T alpha,                                           \
+      const T* X,                                              \
+      T* Y,                                                    \
+      HIPContext* context) {                                   \
+    ReduceMeanHIPImpl<T>(                                      \
+        num_dims, dims, num_axes, axes, alpha, X, Y, context); \
   }
 CAFFE2_SPECIALIZED_HIP_REDUCE_MEAN(float)
 #undef CAFFE2_SPECIALIZED_HIP_REDUCE_MEAN
@@ -2978,6 +3107,7 @@ __global__ void BroadcastHIPKernel(
     const int Y_size,
     const SimpleArray<int, D> X_strides,
     const SimpleArray<int, D> Y_dims,
+    const T alpha,
     const T* X,
     T* Y) {
   HIP_1D_KERNEL_LOOP(Y_index, Y_size) {
@@ -2990,7 +3120,7 @@ __global__ void BroadcastHIPKernel(
           : (Y_index_val % Y_dims.data[i]) * X_strides.data[i];
       Y_index_val /= Y_dims.data[i];
     }
-    Y[Y_index] = __ldg(X + X_index);
+    Y[Y_index] = __ldg(X + X_index) * alpha;
   }
 }
 
@@ -2999,6 +3129,7 @@ void BroadcastHIPImpl(
     const int X_ndim,
     const int* X_dims,
     const int* Y_dims,
+    const T alpha,
     const T* X,
     T* Y,
     HIPContext* context) {
@@ -3024,25 +3155,36 @@ void BroadcastHIPImpl(
       Y_size,
       X_strides_array,
       Y_dims_array,
+      alpha,
       X,
       Y);
 }
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_HIP_BROADCAST(T)                                  \
-  template <>                                                                \
-  void Broadcast<T, HIPContext>(                                             \
-      const int X_ndim,                                                      \
-      const int* X_dims,                                                     \
-      const int Y_ndim,                                                      \
-      const int* Y_dims,                                                     \
-      const T* X,                                                            \
-      T* Y,                                                                  \
-      HIPContext* context) {                                                 \
-    CAFFE_ENFORCE_LE(X_ndim, Y_ndim);                                        \
-    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(                                  \
-        Y_ndim, BroadcastHIPImpl, T, X_ndim, X_dims, Y_dims, X, Y, context); \
+#define CAFFE2_SPECIALIZED_HIP_BROADCAST(T) \
+  template <>                               \
+  void Broadcast<T, HIPContext>(            \
+      const int X_ndim,                     \
+      const int* X_dims,                    \
+      const int Y_ndim,                     \
+      const int* Y_dims,                    \
+      const T alpha,                        \
+      const T* X,                           \
+      T* Y,                                 \
+      HIPContext* context) {                \
+    CAFFE_ENFORCE_LE(X_ndim, Y_ndim);       \
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1( \
+        Y_ndim,                             \
+        BroadcastHIPImpl,                   \
+        T,                                  \
+        X_ndim,                             \
+        X_dims,                             \
+        Y_dims,                             \
+        alpha,                              \
+        X,                                  \
+        Y,                                  \
+        context);                           \
   }
 CAFFE2_SPECIALIZED_HIP_BROADCAST(std::int32_t)
 CAFFE2_SPECIALIZED_HIP_BROADCAST(std::int64_t)
@@ -3219,6 +3361,47 @@ CAFFE2_SPECIALIZED_HIP_MOMENTS(float)
 
 namespace {
 
+template <typename T>
+__global__ void
+InvStdHIPKernel(const int N, const T epsilon, const T* var, T* inv_std);
+
+#define DELEGATE_INV_STD_KERNEL_FUNCTION(T, Func)               \
+  template <>                                                   \
+  __global__ void InvStdHIPKernel<T>(                           \
+      const int N, const T epsilon, const T* var, T* inv_std) { \
+    HIP_1D_KERNEL_LOOP(i, N) {                                  \
+      inv_std[i] = Func(var[i] + epsilon);                      \
+    }                                                           \
+  }
+DELEGATE_INV_STD_KERNEL_FUNCTION(float, rsqrtf)
+#undef DELEGATE_INV_STD_KERNEL_FUNCTION
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_HIP_INV_STD(T) \
+  template <>                             \
+  void InvStd<T, HIPContext>(             \
+      const int N,                        \
+      const T epsilon,                    \
+      const T* var,                       \
+      T* inv_std,                         \
+      HIPContext* context) {              \
+    hipLaunchKernelGGL(                   \
+        InvStdHIPKernel<T>,               \
+        CAFFE_GET_BLOCKS(N),              \
+        CAFFE_HIP_NUM_THREADS,            \
+        0,                                \
+        context->hip_stream(),            \
+        N,                                \
+        epsilon,                          \
+        var,                              \
+        inv_std);                         \
+  }
+CAFFE2_SPECIALIZED_HIP_INV_STD(float)
+#undef CAFFE2_SPECIALIZED_HIP_INV_STD
+
+namespace {
+
 template <typename T, int D>
 __global__ void TransposeHIPKernel(
     const int size,
@@ -3290,7 +3473,57 @@ void TransposeHIPImpl(
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(float)
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(int)
-CAFFE2_SPECIALIZED_HIP_TRANSPOSE(TIndex)
+CAFFE2_SPECIALIZED_HIP_TRANSPOSE(int64_t)
 #undef CAFFE2_SPECIALIZED_HIP_TRANSPOSE
+
+namespace {
+
+template <typename T, StorageOrder kOrder>
+__global__ void AffineChannelHIPKernel(
+    const int size,
+    const int C,
+    const int HxW,
+    const T* X,
+    const T* scale,
+    const T* bias,
+    T* Y) {
+  HIP_1D_KERNEL_LOOP(i, size) {
+    const int c = kOrder == StorageOrder::NCHW ? i / HxW % C : i % C;
+    Y[i] = scale[c] * X[i] + bias[c];
+  }
+}
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL(T, kOrder) \
+  template <>                                            \
+  void AffineChannel<T, HIPContext, kOrder>(             \
+      const int N,                                       \
+      const int C,                                       \
+      const int HxW,                                     \
+      const T* X,                                        \
+      const T* scale,                                    \
+      const T* bias,                                     \
+      T* Y,                                              \
+      HIPContext* context) {                             \
+    const int size = N * C * HxW;                        \
+    hipLaunchKernelGGL(                                  \
+        AffineChannelHIPKernel<T, kOrder>,               \
+        CAFFE_GET_BLOCKS(size),                          \
+        CAFFE_HIP_NUM_THREADS,                           \
+        0,                                               \
+        context->hip_stream(),                           \
+        size,                                            \
+        C,                                               \
+        HxW,                                             \
+        X,                                               \
+        scale,                                           \
+        bias,                                            \
+        Y);                                              \
+  }
+CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL(float, StorageOrder::NCHW)
+CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL(float, StorageOrder::NHWC)
+#undef CAFFE2_SPECIALIZED_HIP_AFFINE_CHANNEL
+
 } // namespace math
 } // namespace caffe2

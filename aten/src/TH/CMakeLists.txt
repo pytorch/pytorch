@@ -1,19 +1,8 @@
 set(extra_src)
 
-# IF ANY SIMD FOUND
-IF(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/generic/simd/convolve.cpp)
-ENDIF(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
-
-# IF SSE4 FOUND
-IF(C_SSE4_1_FOUND OR C_SSE4_2_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/generic/simd/convolve5x5_sse.cpp)
-ENDIF(C_SSE4_1_FOUND OR C_SSE4_2_FOUND)
-
 # IF AVX FOUND
 IF(C_AVX_FOUND)
   LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.cpp)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/generic/simd/convolve5x5_avx.cpp)
 ENDIF(C_AVX_FOUND)
 
 IF(C_AVX2_FOUND)
@@ -26,7 +15,6 @@ SET(hdr
 
 set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THGeneral.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THHalf.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THSize.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
@@ -102,7 +90,6 @@ INSTALL(FILES
   THTensor.hpp
   THStorageFunctions.hpp
   THGenerator.hpp
-  THTypeConversion.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 INSTALL(FILES
@@ -122,6 +109,7 @@ INSTALL(FILES
   generic/THStorageCopy.h
   generic/THTensor.cpp
   generic/THTensor.h
+  generic/THTensor.hpp
   generic/THTensorConv.cpp
   generic/THTensorConv.h
   generic/THTensorCopy.cpp

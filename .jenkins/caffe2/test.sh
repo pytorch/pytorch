@@ -49,7 +49,21 @@ fi
 
 mkdir -p $TEST_DIR/{cpp,python}
 
-cd ${INSTALL_PREFIX}
+if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
+  export LANG=C.UTF-8
+  export LC_ALL=C.UTF-8
+
+  # Pin individual runs to specific gpu so that we can schedule
+  # multiple jobs on machines that have multi-gpu.
+  NUM_AMD_GPUS=$(/opt/rocm/bin/rocminfo | grep 'Device Type.*GPU' | wc -l)
+  if (( $NUM_AMD_GPUS == 0 )); then
+      echo >&2 "No AMD GPU detected!"
+      exit 1
+  fi
+  export HIP_VISIBLE_DEVICES=$(($BUILD_NUMBER % $NUM_AMD_GPUS))
+fi
+
+cd "${WORKSPACE}"
 
 # C++ tests
 echo "Running C++ tests.."
@@ -62,12 +76,26 @@ for test in $(find "${INSTALL_PREFIX}/test" -executable -type f); do
     */mkl_utils_test|*/aten/integer_divider_test)
       continue
       ;;
-    */aten/*)
-      # ATen uses test framework Catch2
-      "$test" -r=xml -o "${junit_reports_dir}/$(basename $test).xml"
-      ;;
-    *)
-      "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+    */scalar_tensor_test|*/basic|*/native_test)
+	  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+		continue
+	  else
+	    "$test"
+	  fi
+	  ;;
+	*)
+      # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
+      # planning to migrate to gtest as the common PyTorch c++ test suite, we
+      # currently do NOT use the xml test reporter, because Catch doesn't
+      # support multiple reporters
+      # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
+      # which means that enabling XML output means you lose useful stdout
+      # output for Jenkins.  It's more important to have useful console
+      # output than it is to have XML output for Jenkins.
+      # Note: in the future, if we want to use xml test reporter once we switch
+      # to all gtest, one can simply do:
+      # "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+      "$test"
       ;;
   esac
 done
@@ -92,9 +120,6 @@ fi
 
 rocm_ignore_test=()
 if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
-  export LANG=C.UTF-8
-  export LC_ALL=C.UTF-8
-
   # Currently these tests are failing on ROCM platform:
 
   # Unknown reasons, need to debug
@@ -126,6 +151,8 @@ echo "Running Python tests.."
   ${rocm_ignore_test[@]} \
   "$CAFFE2_PYPATH/python" \
   "${EXTRA_TESTS[@]}"
+
+cd ${INSTALL_PREFIX}
 
 if [[ -n "$INTEGRATED" ]]; then
   pip install --user torchvision

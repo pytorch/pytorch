@@ -26,7 +26,7 @@ PyObject * THCPModule_nccl_version(PyObject *self, PyObject *args) {
 PyObject * THCPModule_nccl_unique_id(PyObject *self, PyObject *args) {
   HANDLE_TH_ERRORS
   ncclUniqueId id;
-  CHECK(ncclGetUniqueId(&id));
+  NCCL_CHECK(ncclGetUniqueId(&id));
   return PyBytes_FromStringAndSize((char*)&id, NCCL_UNIQUE_ID_BYTES);
   END_HANDLE_TH_ERRORS
 }
@@ -99,7 +99,7 @@ PyObject * THCPModule_nccl_init_rank(PyObject *self, PyObject *args) {
   int rank;
 
   if (!PyArg_ParseTuple(args, "is#i:nccl_init_rank", &nranks, &id, &id_len, &rank)) {
-    return NULL;
+    return nullptr;
   }
   THPUtils_assert(id_len == NCCL_UNIQUE_ID_BYTES,
       "invalid unqiue_id (expected %d bytes, got %zd)",
@@ -109,7 +109,7 @@ PyObject * THCPModule_nccl_init_rank(PyObject *self, PyObject *args) {
   memcpy(&commId, id, NCCL_UNIQUE_ID_BYTES);
   ncclComm_t comm;
   with_no_gil([&]{
-    CHECK(ncclCommInitRank(&comm, nranks, commId, rank));
+    NCCL_CHECK(ncclCommInitRank(&comm, nranks, commId, rank));
   });
   return PyCapsule_New(comm, COMM_CAPSULE_NAME, &destroy_nccl_comm);
   END_HANDLE_TH_ERRORS
@@ -121,10 +121,10 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
   int root, op;
 
   if (!PyArg_ParseTuple(args, "OOiiOO", &_inputs, &_outputs, &root, &op, &_streams, &_comms)) {
-    THPUtils_invalidArguments(args, NULL, "nccl_reduce", 1,
+    THPUtils_invalidArguments(args, nullptr, "nccl_reduce", 1,
 			      "(sequence[Tensor] inputs, sequence[Tensor] outputs, int root,"
             " int op, sequence[torch.cuda.Stream or None]");
-    return NULL;
+    return nullptr;
   }
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
@@ -148,8 +148,8 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
-      auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
-      CHECK(ncclReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
+      auto stream = (streams[i] == nullptr) ? nullptr : THCStream_stream(streams[i]);
+      NCCL_CHECK(ncclReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
            count, data_type, (ncclRedOp_t) op, root, comms[i], stream));
     }
   });
@@ -164,11 +164,11 @@ PyObject * THCPModule_nccl_all_reduce(PyObject *self, PyObject *args) {
   int op;
 
   if (!PyArg_ParseTuple(args, "OOiOO", &_inputs, &_outputs, &op, &_streams, &_comms)) {
-    THPUtils_invalidArguments(args, NULL, "nccl_all_reduce", 1,
+    THPUtils_invalidArguments(args, nullptr, "nccl_all_reduce", 1,
         "(sequence[Tensor] inputs, sequence[Tensor] outputs, int op,"
         " sequence[torch.cuda.Stream] streams,"
         " sequence[torch.cuda.nccl.Communicator] comms)");
-    return NULL;
+    return nullptr;
   }
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
@@ -190,8 +190,8 @@ PyObject * THCPModule_nccl_all_reduce(PyObject *self, PyObject *args) {
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
-      auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
-      CHECK(ncclAllReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
+      auto stream = (streams[i] == nullptr) ? nullptr : THCStream_stream(streams[i]);
+      NCCL_CHECK(ncclAllReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));
     }
   });
@@ -206,9 +206,9 @@ PyObject * THCPModule_nccl_broadcast(PyObject *self, PyObject *args) {
   int root;
 
   if (!PyArg_ParseTuple(args, "OiOO", &_inputs, &root, &_streams, &_comms)) {
-    THPUtils_invalidArguments(args, NULL, "nccl_broadcast", 1,
+    THPUtils_invalidArguments(args, nullptr, "nccl_broadcast", 1,
 			      "(sequence[Tensor] inputs, int root)");
-    return NULL;
+    return nullptr;
   }
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
@@ -229,9 +229,9 @@ PyObject * THCPModule_nccl_all_gather(PyObject *self, PyObject *args) {
   PyObject *_inputs, *_outputs, *_streams, *_comms;
 
   if (!PyArg_ParseTuple(args, "OOOO", &_inputs, &_outputs, &_streams, &_comms)) {
-    THPUtils_invalidArguments(args, NULL, "nccl_all_gather", 1,
+    THPUtils_invalidArguments(args, nullptr, "nccl_all_gather", 1,
 			      "(sequence[Tensor] inputs, sequence[Tensor] outputs");
-    return NULL;
+    return nullptr;
   }
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
@@ -253,12 +253,12 @@ PyObject * THCPModule_nccl_all_gather(PyObject *self, PyObject *args) {
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
-      auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
+      auto stream = (streams[i] == nullptr) ? nullptr : THCStream_stream(streams[i]);
     #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-      CHECK(ncclAllGather(inputs[i].data_ptr(), outputs[i].data_ptr(),
+      NCCL_CHECK(ncclAllGather(inputs[i].data_ptr(), outputs[i].data_ptr(),
         count, data_type, comms[i], stream));
     #else
-      CHECK(ncclAllGather(inputs[i].data_ptr(), count, data_type,
+      NCCL_CHECK(ncclAllGather(inputs[i].data_ptr(), count, data_type,
         outputs[i].data_ptr(), comms[i], stream));
     #endif
     }
@@ -274,9 +274,9 @@ PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
   int op;
 
   if (!PyArg_ParseTuple(args, "OOiOO", &_inputs, &_outputs, &op, &_streams, &_comms)) {
-    THPUtils_invalidArguments(args, NULL, "nccl_reduce_scatter", 1,
+    THPUtils_invalidArguments(args, nullptr, "nccl_reduce_scatter", 1,
 			      "(sequence[Tensor] inputs, sequence[Tensor] outputs, int op");
-    return NULL;
+    return nullptr;
   }
 
   std::vector<at::Tensor> inputs = extract_tensors(_inputs);
@@ -298,8 +298,8 @@ PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
-      auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
-      CHECK(ncclReduceScatter(inputs[i].data_ptr(), outputs[i].data_ptr(),
+      auto stream = (streams[i] == nullptr) ? nullptr : THCStream_stream(streams[i]);
+      NCCL_CHECK(ncclReduceScatter(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));
     }
   });

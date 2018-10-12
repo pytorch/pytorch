@@ -50,7 +50,7 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     CAFFE_ENFORCE_GT(data.dim(1), 8, "DATA must have more than 8 columns");
     // Subtract 8 from the #columns of data for the 4 bytes for scale and 4
     // bytes for bias that we use in the fused representation (per row).
-    const std::vector<TIndex> shape = {lengths.dim(0), data.dim(1) - 8};
+    const std::vector<int64_t> shape = {lengths.dim(0), data.dim(1) - 8};
     output->Resize(shape);
 
     Fused8BitRowwiseEmbeddingLookup(
@@ -68,23 +68,6 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     return true;
   }
 
-  std::vector<TensorFiller<Context>> InputFillers(
-      const std::vector<std::vector<TIndex>>& shapes) override {
-    CAFFE_ENFORCE_EQ(shapes.size(), Operator<Context>::Inputs().size());
-    auto fillers = Operator<Context>::InputFillers(shapes);
-    if (with_weights) {
-      // TODO: enable the fillers
-      throw UnsupportedOperatorFeature(
-          OperatorBase::type() + " does not have input fillers");
-    }
-    Operator<Context>::SparseLengthsFillerHelper(
-        shapes, INDICES, LENGTHS, &fillers);
-    Operator<Context>::SparseSegmentsFillerHelper(
-        shapes, DATA, INDICES, &fillers);
-    return fillers;
-  }
-
- private:
   enum {
     DATA = 0,
     WEIGHTS = 1,

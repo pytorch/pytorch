@@ -9,7 +9,7 @@
 #include <torch/csrc/utils/functional.h>
 
 #include <ATen/ATen.h>
-#include <ATen/optional.h>
+#include <ATen/core/optional.h>
 #include <ATen/cuda/CUDAContext.h>
 
 #include <cstddef>

@@ -7,11 +7,12 @@
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/named_value.h"
+#include "torch/csrc/jit/source_range.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
-#include <ATen/optional.h>
-#include <ATen/ArrayRef.h>
+#include <ATen/core/ArrayRef.h>
+#include <ATen/core/optional.h>
 
 #include <functional>
 #include <memory>
@@ -19,6 +20,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <ostream>
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -34,8 +36,6 @@ namespace torch { namespace jit { namespace script {
 //     ...
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
-
-struct SourceRange;
 
 struct Method {
   Method(std::string name, bool optimize,
@@ -60,6 +60,16 @@ struct Method {
     }
     get_executor().run(stack);
   }
+
+  IValue operator()(std::vector<IValue> stack) {
+    checkInputsAgainstSchema(stack);
+    run(stack);
+    if (stack.size() != 1) {
+      return Tuple::create(std::move(stack));
+    }
+    return stack.front();
+  }
+
   std::shared_ptr<Graph> graph_for(const Stack& inputs) {
     return get_executor().graphFor(inputs);
   }
@@ -75,6 +85,7 @@ struct Method {
 
   // defined here to keep details of member_input handling confined to this class
   std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
+
   // if this isn't yet defined, run its method_creator function
   void ensure_defined();
 
@@ -103,7 +114,9 @@ struct Method {
     for (at::Tensor* inp : member_inputs) {
       stack.push_back(*inp);
     }
-    PropagateInputShapes(*retval, ArgumentSpec(with_grad, std::move(stack)));
+    const auto size = stack.size();
+    setInputTypes(*retval, ArgumentSpec(with_grad, std::move(stack), size));
+    PropagateInputShapes(*retval);
     return retval;
   }
 
@@ -113,20 +126,21 @@ struct Method {
       inputs.push_back(*inp);
     }
     if (propagate) {
-      PropagateInputShapes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
+      setInputTypes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs), inputs.size()));
+      PropagateInputShapes(*retval);
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
+      auto type = torch::jit::CompleteTensorType::create(scalar_type, -1, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;
@@ -141,11 +155,25 @@ struct Method {
     return *this;
   }
 
-  std::string prettyPrintSchema() const {
+  const FunctionSchema& getSchema() const;
+
+  std::string pretty_print_schema() const {
     JIT_ASSERT(schema);
     std::stringstream ss;
     ss << *schema;
     return ss.str();
+  }
+
+  GraphExecutorState getDebugState() {
+    return get_executor().getDebugState();
+  }
+
+  void debugDisableAutodiffSubgraphInlining() {
+    return get_executor().debugDisableAutodiffSubgraphInlining();
+  }
+
+  bool is_optimized() {
+    return optimize;
   }
 
 private:
@@ -158,6 +186,34 @@ private:
       executor = GraphExecutor(graph(), optimize);
     });
     return executor;
+  }
+
+  void checkInputsAgainstSchema(std::vector<IValue>& inputs) {
+    const auto& schema = getSchema();
+    // Do we have more inputs than the schema accepts?
+    AT_CHECK(
+        inputs.size() <= schema.arguments.size(),
+        "Expected at most ", schema.arguments.size(),
+        " argument(s) for operator '", schema.name, "', but received ",
+        inputs.size(), " argument(s). Declaration: ", schema);
+
+    for (size_t pos = 0; pos < schema.arguments.size(); ++pos) {
+      const auto& argument = schema.arguments[pos];
+      if (pos < inputs.size()) {
+        const TypePtr inputType = inferTypeFrom(inputs[pos]);
+        AT_CHECK(inputType->isSubtypeOf(argument.type),
+              "Expected value of type ", *argument.type,
+              " for argument '", argument.name,
+              "' in position ", pos,
+              ", but instead got value of type ", *inputType,
+              ". Declaration: ", schema);
+      } else if (argument.default_value) {
+        inputs.push_back(*argument.default_value);
+      } else {
+        AT_ERROR(schema.name, "() is missing value for argument '",
+                argument.name, "'. Declaration: ", schema);
+      }
+    }
   }
 
   GraphExecutor executor; // for execution
@@ -188,7 +244,9 @@ private:
   std::function<void(Method&)> method_creator;
 
   // if absent, then we generate a default schema based on the graph
-  std::unique_ptr<FunctionSchema> schema;
+  // mutable because getSchema caches the default schema if one is requested
+  // before a call to setSchema
+  mutable std::unique_ptr<FunctionSchema> schema;
 };
 
 struct Module;
@@ -229,6 +287,10 @@ struct Module {
   // added afterward.
   void set_optimized(bool o) {
     optimize = o;
+  }
+
+  IValue forward(std::vector<IValue> inputs) {
+    return get_method("forward")(inputs);
   }
 
   void register_parameter(const std::string & name, autograd::Variable v, bool is_buffer) {
@@ -276,13 +338,13 @@ struct Module {
     return modules.get(name).module;
   }
 
-  const detail::OrderedDict<std::string, NamedModule>& get_modules() const {
+  const torch::detail::OrderedDict<std::string, NamedModule>& get_modules() const {
     return modules;
   }
-  const detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
+  const torch::detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
     return parameters;
   }
-  const detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
+  const torch::detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
     return methods;
   }
 
@@ -299,16 +361,52 @@ struct Module {
     return nullptr;
   }
 
+  /// Run a method from this module.
+  ///
+  /// For example:
+  /// @code
+  ///   IValue output = module->run("relu_script", a, b);
+  /// @endcode
+  ///
+  /// To get a compile a module from a source string, see torch::jit::compile
+  ///
+  /// @param method_name The name of the method to run
+  /// @param args Arguments to be passed to the method
+  /// @return An IValue containing the return value (or values if it is a tuple)
+  /// from the method
+  template <typename... Types>
+  IValue run_method(const std::string& method_name, Types&&... args) {
+    return get_method(method_name)({IValue(std::forward<Types>(args))...});
+  }
+
+  void save(std::ostream& out);
+
+  void save(const std::string& filename);
+
  private:
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  detail::OrderedDict<std::string, NamedModule> modules;
-  detail::OrderedDict<std::string, NamedParameter> parameters;
-  detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
+  torch::detail::OrderedDict<std::string, NamedModule> modules;
+  torch::detail::OrderedDict<std::string, NamedParameter> parameters;
+  torch::detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
+
+// returns at::nullopt and fills in failure_messages if the callee does not
+// match the functions schema
+at::optional<std::vector<Value*>> try_emit_call_to(
+    Graph& graph,
+    SourceRange loc,
+    Method& callee,
+    ArrayRef<NamedValue> args,
+    ArrayRef<NamedValue> kwargs,
+    std::stringstream& failure_messages,
+    // when callee uses no parameters (e.g. it is a function in a compilation unit,
+    // and not a method), then nullptr can be passed as caller.
+    Method* caller,
+    bool conv_tensors_to_nums);
 
 }}}

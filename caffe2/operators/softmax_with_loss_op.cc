@@ -163,12 +163,6 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
   D = X.size_from_dim(canonical_axis);
   P->ResizeLike(X);
 
-  if (sum_multiplier_.size() != D) {
-    sum_multiplier_.Resize(D);
-    math::Set<float, CPUContext>(
-        D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
-  }
-
   float* Pdata = P->template mutable_data<float>();
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
 
@@ -252,7 +246,7 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
     }
   }
 
-  avg_loss->Resize(vector<TIndex>());
+  avg_loss->Resize(vector<int64_t>());
   float* avg_loss_data = avg_loss->template mutable_data<float>();
   if (weight_sum != 0.0) {
     avg_loss_data[0] = loss_sum * scale_ / weight_sum;
@@ -348,7 +342,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
 
   // Scale by d_avg_loss / N
   if (total_weight > 0) {
-    math::Scale<float, CPUContext>(
+    math::Scale<float, float, CPUContext>(
         dX->size(),
         scale_ / total_weight * d_avg_loss.data<float>()[0],
         dX->data<float>(),

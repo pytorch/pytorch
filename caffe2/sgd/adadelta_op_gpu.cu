@@ -1,7 +1,6 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/sgd/adadelta_op.h"
-#include "caffe2/utils/mixed_utils.h"
 
 namespace caffe2 {
 
@@ -70,16 +69,16 @@ __global__ void SparseAdadeltaKernel(
     const SIndex index = indices[i / grad_slice_sz];
     const size_t paramIdx = index * grad_slice_sz + (i % grad_slice_sz);
 
-    float mom_new = mixed_mult(decay, param_mom[paramIdx]) +
+    float mom_new = decay * param_mom[paramIdx] +
         (1.0f - decay) * grad[gradIdx] * grad[gradIdx];
-    mixed_store(&mom_new, &(param_mom[paramIdx]));
-    float grad_new = sqrtf(mixed_add(epsilon, param_mom_delta[paramIdx])) *
+    param_mom[paramIdx] = mom_new;
+    float grad_new = sqrtf(epsilon + param_mom_delta[paramIdx]) *
         rsqrtf(mom_new + epsilon) * grad[gradIdx];
-    float param_new = mixed_add(LR * grad_new, param[paramIdx]);
-    mixed_store(&param_new, &(param[paramIdx]));
-    float mom_delta_new = mixed_mult(decay, param_mom_delta[paramIdx]) +
+    float param_new = LR * grad_new + param[paramIdx];
+    param[paramIdx] = param_new;
+    float mom_delta_new = decay * param_mom_delta[paramIdx] +
         (1.0f - decay) * grad_new * grad_new;
-    mixed_store(&mom_delta_new, &(param_mom_delta[paramIdx]));
+    param_mom_delta[paramIdx] = mom_delta_new;
   }
 }
 
@@ -116,7 +115,7 @@ class CUDASparseAdadeltaOp final : public Operator<Context> {
     if (n == 0) {
       return true;
     }
-    return DispatchHelper<TensorTypes2<float, float16>, IndexType>::call(
+    return DispatchHelper<TensorTypes2<float, at::Half>, IndexType>::call(
         this, Input(PARAM));
   }
 

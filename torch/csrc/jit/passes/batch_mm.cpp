@@ -3,8 +3,9 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/constants.h"
-#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/assertions.h"
+#include "torch/csrc/utils/functional.h"
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -94,8 +95,8 @@ struct TreeToken {
     token.tree_size = 1;
     Value *lhs = mm->inputs()[0];
     Value *rhs = mm->inputs()[1];
-    token.lhs_sizes = as_array(lhs->type()->expect<TensorType>()->sizes());
-    token.rhs_sizes = as_array(rhs->type()->expect<TensorType>()->sizes());
+    token.lhs_sizes = as_array(lhs->type()->expect<CompleteTensorType>()->sizes());
+    token.rhs_sizes = as_array(rhs->type()->expect<CompleteTensorType>()->sizes());
     token.node = mm;
     token.is_root = true;
     return token;
@@ -149,8 +150,8 @@ void BatchMMBlock(Block* block) {
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : block->nodes()) {
     if (node->kind() == aten::mm &&
-        node->input(0)->type()->cast<TensorType>() &&
-        node->input(1)->type()->cast<TensorType>()) {
+        node->input(0)->type()->cast<CompleteTensorType>() &&
+        node->input(1)->type()->cast<CompleteTensorType>()) {
       tokens[node] = TreeToken::fromMM(node);
     } else if (node->kind() == aten::add) {
       // NOTE: x + 2 is add[other={2}](%x)
@@ -184,19 +185,18 @@ void BatchMMBlock(Block* block) {
       continue;
     auto matmuls = root.gatherMatMuls();
     auto type_ = root.node->output()->type();
-    auto type = type_->expect<TensorType>();
+    auto type = type_->expect<CompleteTensorType>();
 
     auto batch_inputs = [&](Side s, std::array<int64_t, 2> cat_sizes) -> Value* {
       int inputs_off = s == Side::LHS ? 0 : 1;
       int cat_dim    = s == Side::LHS ? 1 : 0;
       cat_sizes[cat_dim] *= matmuls.size(); // make them really cat_sizes
 
-      auto inputs = fmap(matmuls, [=](Node *mm) { return mm->inputs()[inputs_off]; });
       WithInsertPoint iguard { root.node };
-      inputs.push_back(insertConstant(*graph, cat_dim));
-      Node *cat = graph->insertNode(graph->create(aten::cat, inputs));
-      cat->output()->setType(type->withSizes(cat_sizes));
-      return cat->output();
+      auto inputs = fmap(matmuls, [=](Node *mm) -> SymbolicVariable { return mm->inputs()[inputs_off]; });
+      auto cat_output = SymbolicVariable::cat(inputs, cat_dim).value();
+      cat_output->setType(type->withSizes(cat_sizes));
+      return cat_output;
     };
 
     auto lhs_batch = batch_inputs(Side::LHS, root.lhs_sizes);

@@ -32,6 +32,7 @@ namespace python {
 class Int8TensorFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
+#ifdef USE_NUMPY
     const caffe2::int8::Int8TensorCPU& src =
         blob.template Get<caffe2::int8::Int8TensorCPU>();
     const int numpy_type = CaffeToNumpyType(src.t.meta());
@@ -51,6 +52,9 @@ class Int8TensorFetcher : public BlobFetcherBase {
     auto result = pybind11::cast<pybind11::object>(
         pybind11::make_tuple(data_array, src.scale, src.zero_point));
     return result;
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 };
 

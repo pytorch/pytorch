@@ -10,8 +10,6 @@
 
 namespace caffe2 {
 
-BaseStaticContext* GetMKLStaticContext();
-
 /**
  * The MKL Context, which is largely the same as the CPUContext. We instantiate
  * this mainly in order to have a first-class MKL device.
@@ -27,18 +25,12 @@ class MKLContext : public BaseContext {
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
                                      : RandomNumberSeed()) {
-    CAFFE_ENFORCE_EQ(option.device_type(), MKLDNN);
+    CAFFE_ENFORCE_EQ(option.device_type(), PROTO_MKLDNN);
   }
+  explicit MKLContext(const at::Device& device)
+      : MKLContext(DeviceToOption(device)) {}
 
   ~MKLContext() override {}
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetMKLStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetMKLStaticContext();
-  }
 
   inline void SwitchToDevice(int /*stream_id*/ = 0) override {}
 
@@ -60,8 +52,8 @@ class MKLContext : public BaseContext {
     return *random_generator_.get();
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(CPU)->allocate(nbytes);
   }
 
   void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
@@ -127,7 +119,11 @@ class MKLContext : public BaseContext {
     return true;
   }
 
-  DeviceType GetDevicetype() const override {
+  at::Device device() const override {
+    return at::Device(MKLDNN);
+  }
+
+  DeviceType device_type() const override {
     return MKLDNN;
   }
 
@@ -148,26 +144,6 @@ inline void MKLContext::CopyBytes<MKLContext, MKLContext>(
     void* dst) {
   memcpy(dst, src, nbytes);
 }
-
-class MKLStaticContext : public BaseStaticContext {
- public:
-  inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
-    return GetCPUAllocator()->New(nbytes);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<MKLContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<MKLContext>(option);
-  }
-
-  DeviceType GetDeviceType() override {
-    return MKLDNN;
-  }
-};
 
 } // namespace caffe2
 

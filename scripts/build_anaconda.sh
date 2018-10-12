@@ -16,7 +16,7 @@
 #                      [<flags forwarded to cmake>]...
 #
 # Parameters can also be passed through the BUILD_ENVIRONMENT environment
-# variable, e.g. 
+# variable, e.g.
 #  BUILD_ENVIRONMENT=conda2-cuda8.0-cudnn7-gcc4.8 ./scripts/build_anaconda.sh
 # - Parameters parsed from the BUILD_ENVIRONMENT will be overridden by command
 #   line parameters.
@@ -296,6 +296,10 @@ fi
 # Add packages required for all Caffe2 builds
 add_package 'glog'
 add_package 'gflags'
+add_package 'mkl' '>=2018'
+add_package 'mkl-include'
+add_package 'typing'
+append_to_section 'build' '- pyyaml'
 caffe2_cmake_args+=("-DUSE_LEVELDB=OFF")
 caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 
@@ -303,22 +307,17 @@ caffe2_cmake_args+=("-DUSE_LMDB=OFF")
 # Add packages required for pytorch
 if [[ -n $integrated ]]; then
   add_package 'cffi'
-  add_package 'mkl' '>=2018'
-  add_package 'mkl-include'
-  add_package 'typing'
-  append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
   #caffe2_cmake_args+=("-DBLAS=MKL")
   if [[ -n $cuda_ver ]]; then
     # Removed until https://github.com/conda/conda/issues/7245 is resolved
     #append_to_section 'features' features:
-    #append_to_section 'features' "  - $cuda_feature_name" 
+    #append_to_section 'features' "  - $cuda_feature_name"
     append_to_section 'build' "- magma-$cuda_feature_name"
     #append_to_section 'features' '  - nccl2'
     #add_package $cuda_feature_name
     conda_channel+=('-c pytorch')
 
-    caffe2_cmake_args+=("-DUSE_ATEN=ON")
   fi
 fi
 

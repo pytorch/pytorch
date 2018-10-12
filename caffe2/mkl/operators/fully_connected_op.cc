@@ -26,11 +26,11 @@ class MKLFullyConnectedOp final : public MKLOperator<T> {
 
     bool dims_changed;
     CHECK_INPUT_FILTER_DIMS(X, filter, dims_changed);
-    if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
+    if (dims_changed || c10::FLAGS_caffe2_mkl_memonger_in_use) {
       const int N = filter.dim32(0);
       CAFFE_ENFORCE(N == bias.dim32(0));
 
-      auto Y_shape = X.dims();
+      auto Y_shape = X.dims().vec();
       Y_shape[1] = N;
       Y_shape.resize(2);
 
@@ -80,7 +80,7 @@ class MKLFullyConnectedOp final : public MKLOperator<T> {
 
     MKLDNN_SAFE_CALL(mkl::dnnExecute<T>(primitive_, resources_));
     buffer_.CopyTo(Y, primitive_, dnnResourceDst);
-    if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+    if (c10::FLAGS_caffe2_mkl_memonger_in_use && !shared) {
       buffer_.Reset();
     }
     return true;
@@ -90,8 +90,8 @@ class MKLFullyConnectedOp final : public MKLOperator<T> {
   // Input: X, W, b
   // Output: Y
   size_t axis_{1};
-  vector<TIndex> cached_input_dims_;
-  vector<TIndex> cached_filter_dims_;
+  vector<int64_t> cached_input_dims_;
+  vector<int64_t> cached_filter_dims_;
   PrimitiveWrapper<T> primitive_;
   LayoutWrapper<T> input_layout_;
   LayoutWrapper<T> filter_layout_;

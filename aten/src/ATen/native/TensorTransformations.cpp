@@ -1,7 +1,7 @@
 #include "ATen/native/TensorTransformations.h"
 
 #include <ATen/NativeFunctions.h>
-#include <ATen/Error.h>
+#include <ATen/core/Error.h>
 
 #include <algorithm>
 #include <vector>
@@ -13,7 +13,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
   const int64_t total_dims = self.dim(), flip_dims_size = dims.size();
   flip_check_errors(total_dims, flip_dims_size, dims);
 
-  auto flip_dims_v = std::vector<int64_t>(dims);
+  auto flip_dims_v = dims.vec();
   wrap_all_dims(flip_dims_v, total_dims);
   std::sort(flip_dims_v.begin(), flip_dims_v.end());
   auto final_indices = std::vector<at::Tensor>(total_dims);

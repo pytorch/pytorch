@@ -7,7 +7,7 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
@@ -171,9 +171,9 @@ class GemmBatchedTest
  protected:
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
-    X_.Resize(std::vector<TIndex>{3, 5, 10});
-    W_.Resize(std::vector<TIndex>{3, 6, 10});
-    Y_.Resize(std::vector<TIndex>{3, 5, 6});
+    X_.Resize(std::vector<int64_t>{3, 5, 10});
+    W_.Resize(std::vector<int64_t>{3, 6, 10});
+    Y_.Resize(std::vector<int64_t>{3, 5, 6});
     math::Set<float, CPUContext>(
         X_.size(), 1, X_.mutable_data<float>(), cpu_context_.get());
     math::Set<float, CPUContext>(
@@ -407,16 +407,14 @@ TEST(MathTest, GemvTrans) {
   }
 }
 
-using convert::cpu_float2half_rn;
-using convert::cpu_half2float;
 TEST(MathTest, FloatToHalfConversion) {
   float a = 1.0f;
   float b = 1.75f;
   float c = 128.125f;
 
-  float converted_a = cpu_half2float(cpu_float2half_rn(a));
-  float converted_b = cpu_half2float(cpu_float2half_rn(b));
-  float converted_c = cpu_half2float(cpu_float2half_rn(c));
+  float converted_a = static_cast<float>(at::Half(a));
+  float converted_b = static_cast<float>(at::Half(b));
+  float converted_c = static_cast<float>(at::Half(c));
 
   CHECK_EQ(a, converted_a);
   CHECK_EQ(b, converted_b);
@@ -452,6 +450,7 @@ class ReduceTensorTest : public testing::Test {
         X_dims.data(),
         axes.size(),
         axes.data(),
+        1.0f,
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());
@@ -472,11 +471,12 @@ TEST_F(ReduceTensorTest, ReduceMinTest) {
                               const int* dims,
                               const int num_axes,
                               const int* axes,
+                              const float alpha,
                               const float* X,
                               float* Y,
                               CPUContext* context) {
     return math::ReduceMin<float, CPUContext>(
-        num_dims, dims, num_axes, axes, X, Y, context);
+        num_dims, dims, num_axes, axes, alpha, X, Y, context);
   };
   // Test for 1D tensor.
   RunRedcueTensorTest(reduce_min, {3}, {0}, {1.0f, 2.0f, 3.0f}, {1.0f});
@@ -523,11 +523,12 @@ TEST_F(ReduceTensorTest, ReduceMaxTest) {
                               const int* dims,
                               const int num_axes,
                               const int* axes,
+                              const float alpha,
                               const float* X,
                               float* Y,
                               CPUContext* context) {
     return math::ReduceMax<float, CPUContext>(
-        num_dims, dims, num_axes, axes, X, Y, context);
+        num_dims, dims, num_axes, axes, alpha, X, Y, context);
   };
   // Test for 1D tensor.
   RunRedcueTensorTest(reduce_max, {3}, {0}, {1.0f, 2.0f, 3.0f}, {3.0f});
@@ -686,6 +687,7 @@ class BroadcastTest : public testing::Test {
         X_dims.data(),
         Y_dims.size(),
         Y_dims.data(),
+        1.0f,
         X_.data<float>(),
         Y_.mutable_data<float>(),
         cpu_context_.get());

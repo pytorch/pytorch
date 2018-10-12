@@ -41,6 +41,75 @@ bool IsIdentityPermutation(const int n, const int* perm) {
   return true;
 }
 
+bool IsRowwiseReduce(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims,
+    int* rows,
+    int* cols) {
+  *cols = 1;
+  int pivot = ndim - 1;
+  for (; pivot >= 0 && B_dims[pivot] == 1; --pivot) {
+    *cols *= A_dims[pivot];
+  }
+  *rows = 1;
+  for (int i = pivot; i >= 0; --i) {
+    if (A_dims[i] != B_dims[i]) {
+      return false;
+    }
+    *rows *= A_dims[i];
+  }
+  return true;
+}
+
+bool IsColwiseReduce(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims,
+    int* rows,
+    int* cols) {
+  *rows = 1;
+  int pivot = 0;
+  for (; pivot < ndim && B_dims[pivot] == 1; ++pivot) {
+    *rows *= A_dims[pivot];
+  }
+  *cols = 1;
+  for (int i = pivot; i < ndim; ++i) {
+    if (A_dims[i] != B_dims[i]) {
+      return false;
+    }
+    *cols *= A_dims[i];
+  }
+  return true;
+}
+
+bool IsBothEndsReduce(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims,
+    int* pre,
+    int* mid,
+    int* nxt) {
+  *nxt = 1;
+  int r = ndim - 1;
+  for (; r >= 0 && B_dims[r] == 1; --r) {
+    *nxt *= A_dims[r];
+  }
+  *pre = 1;
+  int l = 0;
+  for (; l <= r && B_dims[l] == 1; ++l) {
+    *pre *= A_dims[l];
+  }
+  *mid = 1;
+  for (int i = l; i <= r; ++i) {
+    if (A_dims[i] != B_dims[i]) {
+      return false;
+    }
+    *mid *= A_dims[i];
+  }
+  return true;
+}
+
 void ComputeBroadcastBinaryOpDims(
     const int A_ndim,
     const int* A_dims,
@@ -146,7 +215,7 @@ bool IsColwiseBroadcastBinaryOp(
   return true;
 }
 
-bool IsMiddleBroadcastBinaryOp(
+bool IsBothEndsBroadcastBinaryOp(
     const int ndim,
     const int* A_dims,
     const int* B_dims,

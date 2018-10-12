@@ -16,7 +16,7 @@ class ReshapeOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ReshapeOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        new_shape_(OperatorBase::GetRepeatedArgument<int64_t>("shape")) {}
+        new_shape_(this->template GetRepeatedArgument<int64_t>("shape")) {}
 
   bool RunOnDevice() override {
     if (InputSize() == 2) {

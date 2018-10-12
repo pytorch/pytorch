@@ -39,7 +39,7 @@ class IterOp final : public Operator<Context> {
   bool RunOnDevice() override {
     if (InputSize() == 0) {
       LOG(INFO) << "[Input size is zero]";
-      if (!OperatorBase::OutputIsType<Tensor>(0, CPU)) {
+      if (!OperatorBase::OutputIsTensorType(0, CPU)) {
         // This is the first run; set the iter to start with 0.
         LOG(ERROR) << "You are using an old definition of IterOp that will "
                       "be deprecated soon. More specifically, IterOp now "

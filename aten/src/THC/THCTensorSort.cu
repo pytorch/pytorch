@@ -8,7 +8,7 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
 
   ptrdiff_t inElements = THCudaLongTensor_nElement(state, t);
   if (inElements > 0) {
-    int64_t sliceSize = THCudaLongTensor_size(state, t, dim);
+    int64_t sliceSize = THCudaLongTensor_sizeLegacyNoScalars(state, t, dim);
     ptrdiff_t numSlices = inElements / sliceSize;
 
     dim3 grid;

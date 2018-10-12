@@ -5,7 +5,7 @@
 namespace at {
 struct Type;
 struct Device;
-struct Tensor;
+class Tensor;
 } // namespace at
 
 namespace torch { namespace tensors {
