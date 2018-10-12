@@ -323,6 +323,11 @@ caffe2_linux_test_defaults: &caffe2_linux_test_defaults
           export PATH=/opt/conda/bin:$PATH
         fi
 
+        # set the env var for onnx build and test
+        if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
+          export INTEGRATED=1
+        fi
+
         # Upgrade SSL module to avoid old SSL warnings
         pip install --user --upgrade pyOpenSSL ndg-httpsclient pyasn1
 
