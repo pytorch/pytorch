@@ -2,7 +2,7 @@ import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
-from torch.jit.frontend import get_jit_ast
+from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 import torch.testing
@@ -675,7 +675,7 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
     # 2) Throwing everything away except for the graph 3) Creating a new
     # ScriptModule and dumping that graph in 4) Re-populating the schema
     # because it was lost doing the previous
-    mod.__getattr__('forward').forward_schema(ast, False)
+    mod.__getattr__('forward').forward_schema(ast, get_default_args(fn), False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
@@ -913,7 +913,8 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             original_init(self, *args, **kwargs)
             defs = [m.def_ for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(defs, rcbs)
+            defaults = [get_default_args(m.original_method) for m in methods]
+            self._create_methods(defs, rcbs, defaults)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
