@@ -317,7 +317,6 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
         for i, w in enumerate(it.workers):
             worker_pids[i] = w.pid
 
-
     def kill_pid(pid):
         if IS_WINDOWS:
             os.system('taskkill /PID ' + str(os.getpid()) + ' /F')
