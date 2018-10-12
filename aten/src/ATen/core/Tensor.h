@@ -633,10 +633,10 @@ public:
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
   int64_t get_device() const;
-  Tensor to(Device device, ScalarType dtype, bool non_blocking=false) const;
-  Tensor to(ScalarType dtype, bool non_blocking=false) const;
-  Tensor to(Device device, bool non_blocking=false) const;
-  Tensor to(const Tensor & other, bool non_blocking=false) const;
+  Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
+  Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
+  Tensor to(Device device, bool non_blocking=false, bool copy=false) const;
+  Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar _local_scalar() const;
 
   template <typename F, typename... Args>
