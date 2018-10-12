@@ -7352,6 +7352,29 @@ a")
         with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
             fn(torch.tensor(4))
 
+    def test_trace_contiguous(self):
+        def foo(x):
+            return x[:, :, ::2].contiguous().view(12)
+
+        x = torch.rand(2, 3, 4)
+        traced = torch.jit.trace(foo, (x,))
+        y = traced(x)
+        self.assertNotEqual(x.storage().data_ptr(), y.storage().data_ptr())
+
+    # This tests the logic in THPVariable_contiguous. There is short-circuiting
+    # code that prevents us from even getting to VariableType::contiguous, since
+    # it is an optimization that prevents us from acquiring the GIL for touching
+    # the device. We needed to add the tracing logic directly into the
+    # THPVariable_contiguous function only for the path where we are skipping
+    # dispatch into contiguous. We should see an aten::contiguous in this trace!
+    def test_trace_contiguous_short_circuit(self):
+        def foo(x):
+            return x.contiguous()
+
+        x = torch.rand(2, 3, 4)
+        traced = torch.jit.trace(foo, (x,))
+        self.assertExpectedGraph(traced.graph)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
