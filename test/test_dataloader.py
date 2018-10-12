@@ -305,17 +305,18 @@ def _test_proper_exit(use_workers, pin_memory, exit_method, hold_iter_reference,
     if exit_method == 'worker_error' or exit_method == 'worker_kill':
         assert use_workers is True
 
-    ds = TestProperExitDataset(8, setup_event if exit_method == 'worker_error' else None)
+    ds = TestProperExitDataset(10, setup_event if exit_method == 'worker_error' else None)
 
     loader = DataLoader(ds, batch_size=2, shuffle=False,
                         num_workers=num_workers, pin_memory=pin_memory)
+    error_it = 4
+    assert len(loader) > error_it
+
     it = iter(loader)
     if use_workers:
         for i, w in enumerate(it.workers):
             worker_pids[i] = w.pid
 
-    error_it = 3
-    assert len(loader) > error_it
 
     def kill_pid(pid):
         if IS_WINDOWS:
