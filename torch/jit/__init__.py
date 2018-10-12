@@ -932,6 +932,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             defaults = [get_default_args(m.original_method) for m in stubs]
             self._create_methods(defs, rcbs, defaults)
 
+        print("meta done")
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
@@ -1049,15 +1050,20 @@ if _enabled:
                       return input
         """
 
-        def __init__(self, optimize=True):
-            # must be before Module.init since the field is used in __getattr__
+        def __init__(self, optimize=True, _parameters=None):
             Module.__init__(self)
+            print("Init, setting up containers")
             self._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self)
             self._buffers = OrderedBufferDict(self)
             self._modules = OrderedModuleDict(self)
 
+            if _parameters is not None:
+                for name, param in _parameters:
+                    setattr(self, name, param)
+
         def __getattr__(self, attr):
+            # print("_-get", attr)
             if self._has_method(attr):
                 if attr in self.__class__._original_methods:
                     original_method = self.__class__._original_methods[attr]
@@ -1070,6 +1076,7 @@ if _enabled:
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
+            # print("_-set", attr, value)
             if attr not in self._constants_set:
                 if isinstance(value, Module) and weak_modules.get(value.__class__) is not None:
                     # Weak script module
@@ -1106,12 +1113,17 @@ if _enabled:
 
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original):
-            WeakScriptModuleProxy.__setattr__ = object.__setattr__
-            self._original_methods = {}
+            # WeakScriptModuleProxy.__setattr__ = object.__setattr__
+            # self._original_methods = {}
+            # setattr(original, '_jit_script_module', self)
             methods = []
-            original.__class__._jit_script_module = self
-            self.original = original
-            WeakScriptModuleProxy.__constants__ = original.__constants__
+            # original._jit_script_module = self
+            print("WSMProxy")
+            setattr(original, '_jit_script_module', self)
+            # self.original = original
+            object.__setattr__(self, 'original', original)
+            self.__constants__ = original.__constants__
+            # self.__constants__ = original.__constants__
             for item in dir(original):
                 func = getattr(original, item)
                 if not callable(func) or not isinstance(func, types.MethodType):
@@ -1123,18 +1135,38 @@ if _enabled:
 
             original_init = getattr(original, '__init__', lambda self: None)
             super_constants = getattr(original, '_constants_set', set())
-            self._constants_set = set(getattr(original, '__constants__', ())).union(super_constants)
+            constants_set = set(getattr(original, '__constants__', ())).union(super_constants)
+            self._constants_set = constants_set
+            # setattr(WeakScriptModuleProxy, '__setattr__', self.__setattr__)
+            # WeakScriptModuleProxy.__setattr__ = self.__setattr__
+            # del WeakScriptModuleProxy.__setattr__
 
-            # WeakScriptModuleProxy.__setattr__ = self.__setattr
-            del WeakScriptModuleProxy.__setattr__
+                    # self.name = item
+            params = []
+            for name in dir(original):
+                item = getattr(original, name)
+                # print(name, item)
+                if isinstance(item, Parameter):
+                    print("doing", name)
+                    # setattr(self, name, item)
+                    params.append((name, item))
+            super(WeakScriptModuleProxy, self).__init__(_parameters=params, _jit_new_stubs=methods)
+            # print("Hello")
+            # # print(dir(original))
+            # for name in dir(original):
+            #     item = getattr(original, name)
+            #     # print(name, item)
+            #     if isinstance(item, Parameter):
+            #         print("doing", name)
+            #         setattr(self, name, item)
 
-            super(WeakScriptModuleProxy, self).__init__(_jit_new_stubs=methods)
-
-        def __getattr__(self, attr):
-            return getattr(self.original, attr)
-
-        def __setattr__(self, attr, value):
-            return setattr(self.original, attr, value)
+        #
+        # def __getattr__(self, attr):
+        #     return getattr(self.original, attr)
+        #
+        # def __setattr__(self, attr, value):
+        #     # print("Setting", attr, value)
+        #     return setattr(self.original, attr, value)
 
 else:
     ScriptModule = torch.nn.Module
@@ -1145,10 +1177,11 @@ def weak_module(mod):
     return mod
 
 
-def _make_strong(obj):
-    if hasattr(obj, "_jit_script_module"):
-        return obj._jit_script_module
-    obj._jit_script_module = WeakScriptModuleProxy(obj)
+def _make_strong(mod):
+    print("_make_strong")
+    if hasattr(mod, "_jit_script_module"):
+        return mod._jit_script_module
+    mod._jit_script_module = WeakScriptModuleProxy(mod)
 
 
 def _get_methods(cls):
