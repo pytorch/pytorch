@@ -335,6 +335,9 @@
     CPU: _ceil_out_cpu
     CUDA: _ceil_out_cuda
 
+- func: chain_matmul(TensorList matrices) -> Tensor
+  variants: function
+
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
   variants: function, method
 
@@ -391,6 +394,9 @@
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
   device_guard: false
+
+- func: contiguous(Tensor self) -> Tensor
+  variants: method
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups) -> Tensor
 
@@ -1901,9 +1907,6 @@
     SparseCPU: new_with_size_sparse
     SparseCUDA: new_with_size_sparse
 
-- func: tensor(Type dtype) -> Tensor
-  variants: []
-
 - func: tensor(Type dtype, IntList size) -> Tensor
   variants: []
 
@@ -2083,19 +2086,19 @@
   variants: function, method
   device_guard: False
 
-- func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
-- func: to(Tensor self, ScalarType dtype, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
-- func: to(Tensor self, Device device, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, Device device, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
-- func: to(Tensor self, Tensor other, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, Tensor other, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 

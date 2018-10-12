@@ -136,7 +136,7 @@ struct CAFFE2_API TensorOptions {
     return *this;
   }
 
-  // Since dtype is taken..
+  // Since dtype is taken...
   template <typename T>
   TensorOptions& data_type() {
     dtype_ = CTypeToScalarType<T>::to();
@@ -318,6 +318,11 @@ DefaultTensorOptions& DefaultTensorOptions::merge(const TensorOptions& options) 
     is_variable_ = options.is_variable();
   }
   return *this;
+}
+
+template <typename T>
+inline TensorOptions data_type() {
+  return TensorOptions(CTypeToScalarType<T>::to());
 }
 
 } // namespace at

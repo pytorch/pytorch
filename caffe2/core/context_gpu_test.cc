@@ -64,7 +64,7 @@ TEST(CUDAContextTest, MemoryPoolAllocateDealloc) {
     EXPECT_NE(allocated, nullptr);
     cudaPointerAttributes attr;
     CUDA_ENFORCE(cudaPointerGetAttributes(&attr, allocated.get()));
-    EXPECT_EQ(attr.memoryType, cudaMemoryTypeDevice);
+    EXPECT_EQ(attr.CAFFE2_CUDA_PTRATTR_MEMTYPE, cudaMemoryTypeDevice);
     EXPECT_EQ(attr.device, i);
     void* prev_allocated = allocated.get();
     allocated.clear();

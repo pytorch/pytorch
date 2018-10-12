@@ -173,7 +173,7 @@ unique_ptr<NetBase> CreateNet(
   return net;
 }
 
-TaskThreadPool* ExecutorHelper::GetPool(
+TaskThreadPoolBase* ExecutorHelper::GetPool(
     const DeviceOption& /* unused */) const {
   CAFFE_THROW("Not implemented");
 }

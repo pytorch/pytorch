@@ -12,7 +12,6 @@
 #include <ATen/core/typeid.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/core/tensor_factories.h"
 
 namespace caffe2 {
 
@@ -23,10 +22,6 @@ inline bool BlobIsTensorType(const Blob& blob, DeviceType device_type) {
   }
   const Tensor* tensor = &blob.Get<Tensor>();
   return tensor && *tensor && tensor->GetDeviceType() == device_type;
-}
-
-inline void BlobSetTensor(Blob* blob, Tensor tensor) {
-  blob->Reset<Tensor>(new Tensor(std::move(tensor)));
 }
 
 inline Tensor* BlobGetMutableTensor(

@@ -21,11 +21,8 @@ graph(%a : Dynamic
     }
   %c0.5 : int = aten::add(%c0.4, %c2.1)
   %11 : int = prim::Constant[value=5]()
-  %12 : int = prim::Constant[value=1]()
-  %13 : Dynamic = aten::add(%a, %c0.5, %12)
-  %14 : int = prim::Constant[value=1]()
-  %15 : Dynamic = aten::add(%13, %c1, %14)
-  %16 : int = prim::Constant[value=1]()
-  %17 : Dynamic = aten::add(%15, %11, %16)
-  return (%17);
+  %12 : Dynamic = aten::add(%a, %c0.5, %c2.1)
+  %13 : Dynamic = aten::add(%12, %c1, %c2.1)
+  %14 : Dynamic = aten::add(%13, %11, %c2.1)
+  return (%14);
 }

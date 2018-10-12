@@ -31,7 +31,7 @@ from .gen_autograd_functions import uses_single_grad
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'contiguous', 'resize_', 'resize_as_', 'detach', 'detach_',
+    'resize_', 'resize_as_', 'detach', 'detach_',
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -131,7 +131,7 @@ torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
 if (jit::tracer::isTracing()) {
   tracer_state = jit::tracer::getTracingState();
-  node = tracer_state->graph->create(jit::aten::${trace_name}, /*outputs=*/0);
+  node = tracer_state->graph->create(jit::aten::${trace_name}, /*num_outputs=*/0);
   jit::tracer::recordSourceLocation(node);
   ${add_trace_inputs}
   tracer_state->graph->appendNode(node);

@@ -35,7 +35,7 @@ look as follows:
 
 .. code-block:: cpp
 
-  #include <ATen/Aten.h>
+  #include <ATen/ATen.h>
 
   at::Tensor a = at::ones({2, 2}, at::kInt);
   at::Tensor b = at::randn({2, 2});
