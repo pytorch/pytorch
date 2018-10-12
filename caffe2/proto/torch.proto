@@ -7,10 +7,8 @@ package torch;
 message ParameterDef {
   // whether we compute the gradient for the parameter
   optional bool require_gradient = 1;
-  // if keep_in_opt is true, we keep the this parameter
-  // no matter whether the model has any dependency on
-  // this parameter
-  optional bool keep_in_opt = 2;
+  // whether this parameter is registered as buffer or not
+  optional bool is_buffer = 2;
 
   // tensor type parameter
   optional caffe2.TensorProto tensor = 3;

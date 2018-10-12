@@ -12,27 +12,24 @@ package caffe2;
 //     those in the future.
 
 // ExternalDataProto stores the pointer to the content of TensorProto
-// Later, we can use it to replace BlobProto
+// the content are stored in the raw format as little endian
 message ExternalDataProto {
   // type of the external storage type, can be the following:
-  // NEW type to be ADDED here
   enum SourceType {
-    // use external file to store the data, id is the path to the file, and
-    // POSIX file format is used
+    // use external file to store the data, and id is the POSIX relative path
+    // to the file
     FILE = 0;
     // the wrapper defined in torch/csrc/jit/serialization.h is used,
     // and id is the tag to help the runtime identify the data
     // this type of storage is set as DEFAULT and recommended for external
     // data storage
     TORCH_WRAPPER = 1;
-    // (de)serialze the data using DB, id is the serialized DBReaderProto
-    DB = 2;
   }
   optional SourceType source_type = 1 [default = TORCH_WRAPPER];
-  // used together with type, default encoding is utf-8
-  optional bytes id = 2;
-  // the offset of the starting point, the content may be between multiple
-  // tensors.
+  // used together with type
+  optional string id = 2;
+  // the offset of the starting point, the content may be shared between
+  // multiple tensors
   optional int64 offset = 3;
   // the strides of the content
   repeated int64 strides = 4;
@@ -211,7 +208,7 @@ message OperatorDef {
   repeated string output = 2; // the name of output top blobs
   optional string name = 3; // the operator name. This is optional.
   // the operator type. This is needed to create the object from the operator
-  // registry. the domain and concrete aten function are also embedded here.
+  // registry.
   optional string type = 4;
   // arg is for the argument defined in operator schema
   repeated Argument arg = 5;
@@ -260,17 +257,6 @@ message OperatorDef {
   // the runtime system should check the op_version of each OperatorDef
   // and decide it should reject or accept the model
   optional int64 op_version = 12;
-
-  // annotation is a list of named values for additional information
-  // for example, for some training platform, if they want to tag the
-  // operator for placing strategy, component info and parallel strategy,
-  // such information is not about the model/operator itself, but about
-  // the runtime/platform.
-  // existing solution is saving extra info in device option,
-  // however, it's more natural to keep the information here.
-  // please ADD new annotations in comments
-  // COMMENT out for now, need further discussion
-  // repeated Argument annotations = 13;
 }
 
 // Network definition.
