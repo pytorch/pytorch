@@ -195,16 +195,16 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x, y, z: torch.addmm(torch.addmm(z, x, y), x, y), (m1, m2, m3))
 
     def test_permute2(self):
-        x = torch.tensor([[[[[[0]]]]]], requires_grad=True)
+        x = torch.tensor([[[[[[0.0]]]]]], requires_grad=True)
         self.assertONNX(lambda x: x.permute(0, 1, 4, 2, 5, 3), x)
 
     def test_pad(self):
-        x = torch.tensor([[[[0, 1, 1, 1], [2, 3, 7, 7]]]], requires_grad=True)
+        x = torch.tensor([[[[0.0, 1.0, 1.0, 1.0], [2.0, 3.0, 7.0, 7.0]]]], requires_grad=True)
         self.assertONNX(nn.ReflectionPad2d((2, 3, 0, 1)), x)
 
     def test_params(self):
-        x = torch.tensor([[1, 2], [3, 4]], requires_grad=True)
-        y = nn.Parameter(torch.tensor([[1, 2], [3, 4]], requires_grad=True))
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+        y = nn.Parameter(torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True))
         self.assertONNX(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, params=(y, ))
 
     def test_symbolic_mismatch(self):
@@ -513,8 +513,8 @@ class TestOperators(TestCase):
                 return foo(x, y)
 
         inp = (torch.tensor([1], dtype=torch.float),
-               torch.tensor([2], dtype=torch.float),
-               torch.tensor([3], dtype=torch.float))
+               (torch.tensor([2], dtype=torch.float),
+                torch.tensor([3], dtype=torch.float)))
         BigModule()(*inp)
         self.assertONNX(BigModule(), inp)
 
