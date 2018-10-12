@@ -206,30 +206,29 @@ void AsyncSchedulingNet::pollAndSchedule(int task_id) {
 }
 
 void AsyncSchedulingNet::finishRun() {
-  {
-    std::unique_lock<std::mutex> lock(running_mutex_);
-    running_ = false;
-  }
+  std::unique_lock<std::mutex> lock(running_mutex_);
   // wait for scheduled ops and make sure all events are marked as finished
   finalizeEvents();
   // notify observers and waiters
   StopAllObservers();
+  running_ = false;
   running_cv_.notify_all();
 }
 
 bool AsyncSchedulingNet::RunAsync() {
   try {
-    std::unique_lock<std::mutex> lock(running_mutex_);
-    if (running_) {
-      LOG(ERROR) << "Detected concurrent runs";
-      return false;
+    {
+      std::unique_lock<std::mutex> lock(running_mutex_);
+      if (running_) {
+        LOG(ERROR) << "Detected concurrent runs";
+        return false;
+      }
+      running_ = true;
+      reset();
+
+      StartAllObservers();
+      tracing::startIter(tracer_);
     }
-    running_ = true;
-    reset();
-
-    StartAllObservers();
-    tracing::startIter(tracer_);
-
     for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
       if (parents(task_id).empty()) {
         schedule(task_id);

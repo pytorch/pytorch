@@ -2234,7 +2234,6 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CURAND_ENFORCE" ,("HIPRAND_ENFORCE", API_CAFFE2)),
     ("curandGenerateUniform" , ("hiprandGenerateUniform", API_CAFFE2)),
     ("curand_generator" , ("hiprand_generator", API_CAFFE2)),
-    ("cuda_gpu_id" , ("hip_gpu_id", API_CAFFE2)),
     ("CaffeCudaGetDevice" , ("CaffeHipGetDevice", API_CAFFE2)),
 ])
 

@@ -589,11 +589,24 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(24, int*)
 // int64_t. As a result we will need to actually define them separately.
 // It is recommended that one does NOT use long - use int32_t and int64_t
 // explicitly. Explicit long type annotation may go away in the future.
-#if defined(_MSC_VER) || defined(__APPLE__) || \
-    (defined(__ANDROID__) && !defined(__LP64__))
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, long)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(26, std::vector<long>)
-#endif
+// details: This hack works by defining a _guard_long_unique type, which is
+// long iff the compiler has a separate long type and is a dummy type otherwise.
+// we then allocate a type id to that _guard_long_unique. If the compiler has a
+// separate long type, this allocates a type id for long. Otherwise, it
+// allocates a type id for the dummy type, which doesn't matter.
+namespace detail {
+template <class T>
+class _guard_long_unique_dummy final {};
+template <class T>
+using _guard_long_unique = c10::guts::conditional_t<
+    std::is_same<long, int32_t>::value || std::is_same<long, int64_t>::value,
+    _guard_long_unique_dummy<T>,
+    T>;
+} // namespace detail
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, detail::_guard_long_unique<long>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(
+    26,
+    detail::_guard_long_unique<std::vector<long>>)
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2

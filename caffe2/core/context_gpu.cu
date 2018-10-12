@@ -209,6 +209,8 @@ static void Caffe2SetCUDAMemoryPool() {
   }
 }
 
+static PinnedCPUAllocator g_pinned_cpu_alloc;
+
 // An initialization function that sets the CPU side to use pinned cpu
 // allocator.
 void Caffe2UsePinnedCPUAllocator() {
@@ -226,7 +228,7 @@ void Caffe2UsePinnedCPUAllocator() {
     return;
   }
   VLOG(1) << "Caffe2 gpu: setting CPUAllocator to PinnedCPUAllocator.";
-  SetCPUAllocator(new PinnedCPUAllocator());
+  SetCPUAllocator(&g_pinned_cpu_alloc);
 #endif
 }
 
@@ -265,7 +267,7 @@ CUDAContext::CUDAContext(const int gpu_id)
 
 CUDAContext::CUDAContext(const DeviceOption& option)
     : gpu_id_(
-          option.has_cuda_gpu_id() ? RectifyGPUID(option.cuda_gpu_id())
+          option.has_device_id() ? RectifyGPUID(option.device_id())
                                    : CaffeCudaGetDevice()),
       random_seed_(
           option.has_random_seed() ? option.random_seed()
@@ -323,11 +325,6 @@ void TrackMemoryAlloc(size_t nbytes) {
 }
 }
 
-// TODO: wrap this function in DefaultCUDAAllocator
-at::DataPtr CUDAStaticContext::New(size_t nbytes) const {
-  return GetCUDAAllocator()->allocate(nbytes);
-}
-
 struct DefaultCUDAAllocator final : public at::Allocator {
   DefaultCUDAAllocator() {}
   ~DefaultCUDAAllocator() override {}
@@ -348,7 +345,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA)};
+        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::CUB:
         CUDA_ENFORCE(g_cub_allocator->DeviceAllocate(&ptr, nbytes));
         g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
@@ -357,16 +354,16 @@ struct DefaultCUDAAllocator final : public at::Allocator {
         if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA)};
+        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
       case CudaMemoryPoolType::THC:
         CUDA_ENFORCE(g_thc_allocator->Alloc(&ptr, nbytes, 0 /* stream */));
         if (c10::FLAGS_caffe2_gpu_memory_tracking) {
           g_size_map[ptr] = nbytes;
           g_cuda_device_affiliation[ptr] = CaffeCudaGetDevice();
         }
-        return {ptr, ptr, &Delete, at::Device(CUDA)};
+        return {ptr, ptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
     }
-    return {nullptr, nullptr, &Delete, at::Device(CUDA)};
+    return {nullptr, nullptr, &Delete, at::Device(CUDA, CaffeCudaGetDevice())};
   }
 
   at::DeleterFnPtr raw_deleter() const override {
@@ -427,17 +424,7 @@ struct DefaultCUDAAllocator final : public at::Allocator {
   }
 };
 
-static std::unique_ptr<at::Allocator> g_cuda_allocator(
-    new DefaultCUDAAllocator());
-at::Allocator* GetCUDAAllocator() {
-  return g_cuda_allocator.get();
-}
-
-BaseStaticContext* GetCUDAStaticContext() {
-  static CUDAStaticContext context;
-  return &context;
-}
-
-REGISTER_STATIC_CONTEXT(CUDA, GetCUDAStaticContext());
+static DefaultCUDAAllocator g_cuda_alloc;
+REGISTER_ALLOCATOR(CUDA, &g_cuda_alloc);
 
 }  // namespace caffe2
