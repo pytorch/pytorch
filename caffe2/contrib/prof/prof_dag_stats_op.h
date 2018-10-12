@@ -3,6 +3,7 @@
 
 #include "caffe2/contrib/prof/prof_dag_net.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/net_async_base.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 
@@ -53,14 +54,16 @@ class GetProfDagStatsOp final : public Operator<Context> {
           " as part of its name");
     }
 
-    auto prof_dag_net = dynamic_cast_if_rtti<ProfDAGNet*>(net);
-    CAFFE_ENFORCE(prof_dag_net);
-
     ProfDAGProtos stats;
-    if (per_op_) {
-      stats = prof_dag_net->GetPerOperatorCost();
+    auto async_net = dynamic_cast_if_rtti<AsyncNetBase*>(net);
+    if (async_net) {
+      LOG(INFO) << "Using AsyncNetBase to collect stats";
+      stats = getProtos(async_net);
     } else {
-      stats = prof_dag_net->GetOperatorStats();
+      auto prof_dag_net = dynamic_cast_if_rtti<ProfDAGNet*>(net);
+      CAFFE_ENFORCE(prof_dag_net);
+      LOG(INFO) << "Using ProfDAGNet to collect stats";
+      stats = getProtos(prof_dag_net);
     }
 
     // Write protobuf message to the output blob
@@ -70,6 +73,17 @@ class GetProfDagStatsOp final : public Operator<Context> {
     Output(0)->template mutable_data<std::string>()[0] = serialized_data;
 
     return true;
+  }
+
+  template <typename Net>
+  ProfDAGProtos getProtos(Net* net) {
+    ProfDAGProtos stats;
+    if (per_op_) {
+      stats = net->GetPerOperatorCost();
+    } else {
+      stats = net->GetOperatorStats();
+    }
+    return stats;
   }
 
  protected:
