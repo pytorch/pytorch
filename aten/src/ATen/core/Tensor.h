@@ -263,7 +263,6 @@ public:
   Tensor & masked_scatter_(const Tensor & mask, const Tensor & source);
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
-  Tensor contiguous() const;
   Tensor view(IntList size) const;
   Tensor index_select(int64_t dim, const Tensor & index) const;
   Tensor take(const Tensor & index) const;
@@ -449,6 +448,7 @@ public:
   Tensor & clamp_max_(Scalar max);
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
+  Tensor contiguous() const;
   Tensor cos() const;
   Tensor & cos_();
   Tensor cosh() const;
