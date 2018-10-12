@@ -24,10 +24,9 @@ message MethodDef {
   //   2) init --> init method
   optional string name = 1; // method name
 
-  // static graph
+  // one of graph and torch_script must exist,
+  // if both exist, we reconstruct the graph from torch_script
   optional caffe2.NetDef graph = 2;
-
-  // method is represented as torch script
   optional string torch_script = 3;
 
   // inputs and outputs are inferred from graph or script

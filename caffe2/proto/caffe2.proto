@@ -244,16 +244,6 @@ message OperatorDef {
   // operators can be constructed in any language.
   optional string debug_info = 10;
 
-  // annotation is a list of named values for additional information
-  // for example, for some training platform, if they want to tag the
-  // operator for placing strategy, component info and parallel strategy,
-  // such information is not about the model/operator itself, but about
-  // the runtime/platform.
-  // existing solution is saving extra info in device option,
-  // however, it's more natural to keep the information here.
-  // please ADD new annotations in comments
-  repeated Argument annotations = 11;
-
   // the domain of the operator
   // to support legacy operator libs, we use domain to distinguish which
   // operator lib we refer to:
@@ -262,14 +252,25 @@ message OperatorDef {
   //   - "C10" is for the fused library
   //   - if the domain is missing or empty, we use "CAFFE2", this is for
   //     legacy models
-  optional string domain = 12;
+  optional string domain = 11;
   // each operator is has its own version number.
   // operator version information
   // each time, we change the API or semantics of the operator,
   // we bump the version for the operator.
   // the runtime system should check the op_version of each OperatorDef
   // and decide it should reject or accept the model
-  optional int64 op_version = 13;
+  optional int64 op_version = 12;
+
+  // annotation is a list of named values for additional information
+  // for example, for some training platform, if they want to tag the
+  // operator for placing strategy, component info and parallel strategy,
+  // such information is not about the model/operator itself, but about
+  // the runtime/platform.
+  // existing solution is saving extra info in device option,
+  // however, it's more natural to keep the information here.
+  // please ADD new annotations in comments
+  // COMMENT out for now, need further discussion
+  // repeated Argument annotations = 13;
 }
 
 // Network definition.
