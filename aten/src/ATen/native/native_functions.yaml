@@ -2083,19 +2083,19 @@
   variants: function, method
   device_guard: False
 
-- func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
-- func: to(Tensor self, ScalarType dtype, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
-- func: to(Tensor self, Device device, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, Device device, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
-- func: to(Tensor self, Tensor other, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, Tensor other, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
