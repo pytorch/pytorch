@@ -116,13 +116,24 @@ static Tensor dispatch_contiguous(const Tensor & self) {
   DeviceGuard device_guard(self);
   return self.contiguous();
 }
-
-static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
+ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   // avoids touching the GIL or current device if self is already contiguous
   if (self_.is_contiguous()) {
+    // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
+    // record this call to contiguous() in the trace regardless of whether
+    // we actually call contiguous here, we need to record this information
+    // manually.
+    if (jit::tracer::isTracing()) {
+      auto tracer_state = jit::tracer::getTracingState();
+      auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
+      jit::tracer::recordSourceLocation(node);
+      jit::tracer::addInputs(node, "self", self_);
+      tracer_state->graph->appendNode(node);
+      jit::tracer::addOutput(node, self_);
+    }
     Py_INCREF(self);
     return self;
   }
