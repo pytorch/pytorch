@@ -10,7 +10,7 @@ extern "C" {
 
 namespace caffe2 {
 
-class RedisStoreHandler : public StoreHandler {
+class CAFFE2_API RedisStoreHandler : public StoreHandler {
  public:
   explicit RedisStoreHandler(std::string& host, int port, std::string& prefix);
   virtual ~RedisStoreHandler();

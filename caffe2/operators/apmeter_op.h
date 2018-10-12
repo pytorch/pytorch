@@ -14,7 +14,7 @@ class APMeterOp final : public Operator<Context> {
   APMeterOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         buffer_size_(
-            OperatorBase::GetSingleArgument<int32_t>("buffer_size", 1000)),
+            this->template GetSingleArgument<int32_t>("buffer_size", 1000)),
         buffer_used_(0) {}
 
   bool RunOnDevice() override;

@@ -37,7 +37,7 @@ TEST(TypeMetaTest, Names) {
   EXPECT_TRUE(
       string(string_meta.name()) != typeid(string).name());
   EXPECT_TRUE(
-      string(string_meta.name()) == Demangle(typeid(string).name()));
+      string(string_meta.name()) == at::demangle(typeid(string).name()));
 #endif  // __GXX_RTTI
 }
 
@@ -127,13 +127,12 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
   // gtest seems to have some problem with function pointers and
   // clang right now... Disabling it.
   // TODO: figure out the real cause.
-  EXPECT_EQ(meta_b.copy(),
-            &(TypeMeta::_CopyNotAllowed<ClassNoAssignment>));
+  EXPECT_EQ(meta_b.copy(), &(detail::_CopyNotAllowed<ClassNoAssignment>));
 #endif
 }
 
 TEST(TypeMetaTest, Float16IsNotUint16) {
-  EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<float16>());
+  EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<at::Half>());
 }
 
 }  // namespace

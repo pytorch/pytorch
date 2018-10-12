@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/utils/C++17.h"
+#include <ATen/core/C++17.h>
 #include "caffe2/utils/TypeTraits.h"
 
 namespace c10 { namespace guts { namespace typelist {
@@ -177,7 +177,58 @@ template<class Head, class... Tail> struct head<typelist<Head, Tail...>> final {
 };
 template<class TypeList> using head_t = typename head<TypeList>::type;
 
+/**
+ * Returns the N-th element of a type list.
+ * Example:
+ * int == element_t<1, typelist<float, int, char>>
+ */
 
+/// Base template.
+template<size_t Index, class TypeList> struct element final {
+    static_assert(detail::false_t<TypeList>::value, "In typelist::element<T>, the T argument must be typelist<...>.");
+};
+
+/// Successful case, we have reached the zero index and can "return" the head type.
+template<class Head, class... Tail> struct element<0, typelist<Head, Tail...>> { using type = Head; };
+
+/// Error case, we have an index but ran out of types! It will only be selected
+/// if `Ts...` is actually empty!
+template <size_t Index, class... Ts>
+struct element<Index, typelist<Ts...>> {
+  static_assert(Index < sizeof...(Ts), "Index is out of bounds in typelist::element");
+};
+
+/// Shave off types until we hit the <0, Head, Tail...> or <Index> case.
+template<size_t Index, class Head, class... Tail> struct element<Index, typelist<Head, Tail...>> : element<Index-1, typelist<Tail...>> { };
+
+/// Convenience alias.
+template<size_t Index, class TypeList>
+using element_t = typename element<Index, TypeList>::type;
+
+/**
+ * Returns the last element of a type list.
+ * Example:
+ *   int  ==  last_t<typelist<int, string>>
+ */
+template <class TypeList>
+struct last final {
+  static_assert(
+      detail::false_t<TypeList>::value,
+      "In typelist::last<T>, the T argument must be typelist<...>.");
+};
+template <class Head, class... Tail>
+struct last<typelist<Head, Tail...>> final {
+  using type = typename last<typelist<Tail...>>::type;
+};
+template <class Head>
+struct last<typelist<Head>> final {
+  using type = Head;
+};
+template <class TypeList>
+using last_t = typename last<TypeList>::type;
+static_assert(
+    std::is_same<int, last_t<typelist<double, float, int>>>::value,
+    "");
 
 /**
  * Reverses a typelist.

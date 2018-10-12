@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/Col2Im.c"
 #else
 
+#include <ATen/div_rtn.h>
+
 // Note [im2col/col2im output padding]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Our implementations of im2col and col2im take both the input height/width as
@@ -54,14 +56,14 @@
 //
 // ALSO do vol2col
 
-static void THNN_(im2col)(const real* data_im, const int64_t channels,
+static void THNN_(im2col)(const scalar_t* data_im, const int64_t channels,
       const int64_t height, const int64_t width,
       const int64_t output_height, const int64_t output_width,
       const int64_t kernel_h, const int64_t kernel_w,
       const int64_t pad_h, const int64_t pad_w,
       const int64_t stride_h, const int64_t stride_w,
       const int64_t dilation_h, const int64_t dilation_w,
-      real* data_col) {
+      scalar_t* data_col) {
   const int64_t height_col = output_height;
   const int64_t width_col = output_width;
   const int64_t channels_col = channels * kernel_h * kernel_w;
@@ -81,15 +83,15 @@ static void THNN_(im2col)(const real* data_im, const int64_t channels,
   }
 }
 
-static void THNN_(col2im)(const real* data_col, const int64_t channels,
+static void THNN_(col2im)(const scalar_t* data_col, const int64_t channels,
       const int64_t height, const int64_t width,
       const int64_t output_height, const int64_t output_width,
       const int64_t kernel_h, const int64_t kernel_w,
       const int64_t pad_h, const int64_t pad_w,
       const int64_t stride_h, const int64_t stride_w,
       const int64_t dilation_h, const int64_t dilation_w,
-      real* data_im) {
-  memset(data_im, 0, sizeof(real) * height * width * channels);
+      scalar_t* data_im) {
+  memset(data_im, 0, sizeof(scalar_t) * height * width * channels);
   const int64_t height_col = output_height;
   const int64_t width_col = output_width;
   const int64_t channels_col = channels * kernel_h * kernel_w;
@@ -124,7 +126,7 @@ static inline void THNN_(Col2Im_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "dilation should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int64_t ndim = THTensor_(nDimension)(input);
+  int64_t ndim = THTensor_(nDimensionLegacyNoScalars)(input);
   THNN_ARGCHECK(!input->is_empty() && (ndim == 2 || ndim == 3), 2, input,
                 "Expected non-empty 2D or 3D input tensor, but got input of shape %s");
 
@@ -138,8 +140,8 @@ static inline void THNN_(Col2Im_shapeCheck)(
   }
 
   int64_t inputLength  = input->size(batch_dim + 2);
-  int64_t nBlocksH = 1 + (outputHeight + 2 * padH - dH * (kH - 1) - 1) / sH;
-  int64_t nBlocksW = 1 + ( outputWidth + 2 * padW - dW * (kW - 1) - 1) / sW;
+  int64_t nBlocksH = div_rtn<int64_t>(outputHeight + 2 * padH - dH * (kH - 1) - 1, sH) + 1;
+  int64_t nBlocksW = div_rtn<int64_t>(outputWidth + 2 * padW - dW * (kW - 1) - 1, sW) + 1;
 
   if (inputLength != (nBlocksH * nBlocksW)) {
     THError("Given output_size=(%d, %d), kernel_size=(%d, %d), "
@@ -197,23 +199,23 @@ void THNN_(Col2Im_updateOutput)(
     THTensor_(select)(output_n, output, 0, elt);
 
     THNN_(col2im)(
-      THTensor_(data)(input_n),
+      input_n->data<scalar_t>(),
       nOutputPlane,
       outputHeight, outputWidth,
       height_col, width_col,
       kH, kW,
       padH, padW,
       sH, sW,
-      dH, dW, THTensor_(data)(output_n));
+      dH, dW, output_n->data<scalar_t>());
   }
 
-  THTensor_(free)(input_n);
-  THTensor_(free)(output_n);
+  c10::raw::intrusive_ptr::decref(input_n);
+  c10::raw::intrusive_ptr::decref(output_n);
 
   if (!batched_input) {
       THTensor_(resize3d)(output, nOutputPlane, outputHeight, outputWidth);
   }
-  THTensor_(free)(input);
+  c10::raw::intrusive_ptr::decref(input);
 }
 
 void THNN_(Col2Im_updateGradInput)(

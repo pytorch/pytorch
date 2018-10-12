@@ -1,7 +1,25 @@
+#pragma once
+
 #include "TH/THMath.h"
 #ifdef __CUDA_ARCH__
 #include <nvfunctional>
 #endif
+
+#include "ATen/ATen.h"
+#include "ATen/CPUGenerator.h"
+#include "ATen/CheckGenerator.h"
+#include "ATen/Generator.h"
+#include "TH/THGenerator.hpp"
+
+namespace at {namespace native {
+
+static inline THGenerator* get_generator(at::Generator* gen) {
+  auto default_gen = &at::globalContext().defaultGenerator(at::kCPU);
+  auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
+  return gen_->generator;
+}
+
+}}  // namespace at::native
 
 namespace {
 
@@ -57,6 +75,7 @@ deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t>& st
 
   // Boost alpha for higher acceptance probability.
   if (alpha < 1.0f) {
+    if (alpha == 0.f) return 0.f;
     scale *= std::pow(1 - standard_uniform.sample(), 1.0f / alpha);
     alpha += 1.0f;
   }

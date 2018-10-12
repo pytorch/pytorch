@@ -108,3 +108,10 @@ elif sys.version_info[:2] > (3, 2):
 else:
     def raise_from(value, from_value):
         raise value
+
+if PY2:
+    import collections
+    container_abcs = collections
+elif PY3:
+    import collections.abc
+    container_abcs = collections.abc

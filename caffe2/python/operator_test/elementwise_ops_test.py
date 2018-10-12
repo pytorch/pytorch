@@ -4,11 +4,13 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
-from hypothesis import given
+from hypothesis import given, assume
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 
+import unittest
+import os
 
 class TestElementwiseOps(hu.HypothesisTestCase):
 
@@ -333,6 +335,46 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
+    @given(X=hu.tensor(dtype=np.float32),
+           inplace=st.booleans(),
+           alpha=st.floats(min_value=-100.0, max_value=100.0),
+           beta=st.floats(min_value=-100.0, max_value=100.0),
+           engine=st.sampled_from([""]),
+           **hu.gcs)
+    def test_hard_sigmoid(self, X, inplace, alpha, beta, engine, gc, dc):
+        # Prevent alpha and beta from mutually being 0 to avoid a division
+        # error when adjusting our inputs
+        assume(alpha != 0.0 or beta != 0.0)
+        op = core.CreateOperator(
+            "HardSigmoid",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+            alpha=alpha,
+            beta=beta,
+            engine=engine,
+        )
+
+        def hard_sigmoid_ref(X):
+            return [np.minimum(1.0, np.maximum(0.0, X * alpha + beta))]
+
+        # Adjust inputs to avoid differentitating at inflection points
+        if abs(alpha) > 0.001:
+            Y = X * alpha + beta
+            Y += 0.04 * np.sign(Y)
+            Y[Y == 0.0] += 0.1
+            Y[Y == 1.0] -= 0.1
+            X = (Y - beta) / alpha
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=hard_sigmoid_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
+
     @given(n=st.integers(0, 6), m=st.integers(4, 6), **hu.gcs)
     def test_eq(self, n, m, gc, dc):
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
@@ -447,6 +489,10 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
         A = np.random.rand(n, m, 1, 1).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
+
+        A = np.random.rand(1, m, k, 1).astype(np.float32) + bias
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
         self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
@@ -574,6 +620,10 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         B = np.random.randint(128, size=(n, m, k, t))
         self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
+        A = np.random.randint(128, size=(1, m, k, 1))
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
+
         A = np.random.randint(128, size=(m, 1, t))
         B = np.random.randint(128, size=(n, m, k, t))
         self._run_single_test(op, ref, A, B, True, False, gc, dc)
@@ -599,3 +649,30 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     def test_bitwise_xor(self, n, m, k, t, gc, dc):
         self._test_bitwise_binary_op(
             "BitwiseXor", np.bitwise_xor, n, m, k, t, gc, dc)
+
+    @given(X=hu.tensor(elements=st.floats(0.5, 2), dtype=np.float32),
+           inplace=st.booleans(), **hu.gcs)
+    def test_reciprocal(self, X, inplace, gc, dc):
+        def reciprocal_op(X):
+            return [np.reciprocal(X)]
+
+        op = core.CreateOperator(
+            "Reciprocal",
+            ["X"],
+            ["X"] if inplace else ["Y"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=reciprocal_op,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(
+            gc, op, [X], 0, [0], stepsize=1e-3, threshold=0.05)
+
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

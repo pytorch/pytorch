@@ -77,9 +77,9 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
       hostValuesData[i] = (char*)value.raw_data();
       hostValueSizesData[i] = value.size();
     }
-    masks_.CopyFrom(hostMasks_, &context_);
-    values_.CopyFrom(hostValues_, &context_);
-    valueSizes_.CopyFrom(hostValueSizes_, &context_);
+    masks_.CopyFrom(hostMasks_);
+    values_.CopyFrom(hostValues_);
+    valueSizes_.CopyFrom(hostValueSizes_);
 
     indices_.Resize(maskSize);
     auto* indicesData = indices_.mutable_data<int>();
@@ -109,14 +109,14 @@ class BooleanUnmaskOp<CUDAContext> final : public Operator<CUDAContext> {
   }
 
  private:
-  Tensor<CUDAContext> indices_;
-  Tensor<CUDAContext> masks_;
-  Tensor<CUDAContext> values_;
-  Tensor<CUDAContext> valueSizes_;
+  Tensor indices_{CUDA};
+  Tensor masks_{CUDA};
+  Tensor values_{CUDA};
+  Tensor valueSizes_{CUDA};
 
-  Tensor<CPUContext> hostMasks_;
-  Tensor<CPUContext> hostValues_;
-  Tensor<CPUContext> hostValueSizes_;
+  Tensor hostMasks_{CPU};
+  Tensor hostValues_{CPU};
+  Tensor hostValueSizes_{CPU};
 };
 
 REGISTER_CUDA_OPERATOR(BooleanUnmask, BooleanUnmaskOp<CUDAContext>);

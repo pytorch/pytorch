@@ -50,7 +50,7 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
         dX->template mutable_data<T>(),
         &context_);
     for (int i = 0; i < N; ++i) {
-      math::Scale<T, Context>(
+      math::Scale<T, T, Context>(
           D,
           dDistance.template data<T>() + i,
           dX->template data<T>() + i * D,
@@ -58,7 +58,7 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
           &context_);
     }
     // The gradient of the other side is basically the negative.
-    math::Scale<T, Context>(
+    math::Scale<T, T, Context>(
         X.size(),
         -1,
         dX->template data<T>(),
@@ -130,8 +130,8 @@ class DotProductWithPaddingOp : public Operator<Context> {
  public:
   DotProductWithPaddingOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        pad_value_(OperatorBase::GetSingleArgument<float>("pad_value", 0.0)),
-        replicate_(OperatorBase::GetSingleArgument<bool>("replicate", false)) {}
+        pad_value_(this->template GetSingleArgument<float>("pad_value", 0.0)),
+        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override;
@@ -157,7 +157,7 @@ class CosineSimilarityOp : public Operator<Context> {
   OUTPUT_TAGS(COS_OUT);
 
  private:
-  Tensor<Context> aux_;
+  Tensor aux_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
@@ -174,7 +174,7 @@ class CosineSimilarityGradientOp final : public Operator<Context> {
   OUTPUT_TAGS(DER_X_OUT, DER_Y_OUT);
 
  private:
-  Tensor<Context> aux_;
+  Tensor aux_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
@@ -182,8 +182,8 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
  public:
   DotProductWithPaddingGradientOp(const OperatorDef& def, Workspace* ws)
       : Operator<Context>(def, ws),
-        pad_value_(OperatorBase::GetSingleArgument<float>("pad_value", 0.0)),
-        replicate_(OperatorBase::GetSingleArgument<bool>("replicate", false)) {}
+        pad_value_(this->template GetSingleArgument<float>("pad_value", 0.0)),
+        replicate_(this->template GetSingleArgument<bool>("replicate", false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
@@ -245,16 +245,16 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
         std::vector<T> tmp_data(DS);
         math::Set<T, Context>(DS, 0.0, dS_data, &context_);
         for (int j = 0; j < DL / DS; j++) {
-          math::Scale<T, Context>(
+          math::Scale<T, T, Context>(
               DS, dDot_data[i], S_data, dL_data + j * DS, &context_);
-          math::Scale<T, Context>(
+          math::Scale<T, T, Context>(
               DS, dDot_data[i], L_data + j * DS, tmp_data.data(), &context_);
           math::Axpy<T, Context>(DS, 1.0, tmp_data.data(), dS_data, &context_);
         }
       } else {
-        math::Scale<T, Context>(
+        math::Scale<T, T, Context>(
             D, dDot_data[i], X_data + offsetX, dY_data + offsetY, &context_);
-        math::Scale<T, Context>(
+        math::Scale<T, T, Context>(
             D, dDot_data[i], Y_data + offsetY, dX_data + offsetX, &context_);
       }
 

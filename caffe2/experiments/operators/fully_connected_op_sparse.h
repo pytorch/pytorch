@@ -32,8 +32,8 @@ template<int N>
 using Shape = std::array<int, N>;
 
 template<int N>
-const std::vector<TIndex>& shape(Shape<N> vs) {
-  static thread_local std::vector<TIndex> cache;
+const std::vector<int64_t>& shape(Shape<N> vs) {
+  static thread_local std::vector<int64_t> cache;
   cache.resize(vs.size());
   for (auto i = 0; i < vs.size(); ++i) {
     cache[i] = vs[i];
@@ -41,11 +41,11 @@ const std::vector<TIndex>& shape(Shape<N> vs) {
   return cache;
 }
 
-inline const std::vector<TIndex>& shape(int i) {
+inline const std::vector<int64_t>& shape(int i) {
   return shape<1>(Shape<1>({i}));
 }
 
-inline const std::vector<TIndex>& shape(int i, int j) {
+inline const std::vector<int64_t>& shape(int i, int j) {
   return shape<2>(Shape<2>({i, j}));
 }
 
@@ -106,7 +106,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
     const auto& jw = Input(3);
     // Notice that we do not need to transpose b
     const auto& b = Input(4);
-    auto* Yt = Output(0); //transposed Y
+    auto* Yt = Output(0); // transposed Y
     // here we assume X is k-by-m
     CAFFE_ENFORCE_EQ(Xt.ndim(), 2);
     CAFFE_ENFORCE_EQ(b.ndim(), 1);
@@ -140,7 +140,7 @@ class FullyConnectedOp_SPARSE final : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
 };
 
 

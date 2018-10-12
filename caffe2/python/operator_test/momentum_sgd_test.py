@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+import caffe2.python.serialized_test.serialized_test_util as serial
 
 import hypothesis
 from hypothesis import given
@@ -13,8 +14,8 @@ import numpy as np
 import unittest
 
 
-class TestMomentumSGD(hu.HypothesisTestCase):
-    @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
+class TestMomentumSGD(serial.SerializedTestCase):
+    @serial.given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs)
     def test_momentum_sgd(self, n, nesterov, gc, dc):
         param = np.random.rand(n).astype(np.float32)
         grad = np.random.rand(n).astype(np.float32)
@@ -69,7 +70,7 @@ class TestMomentumSGD(hu.HypothesisTestCase):
             reference=momentum_sgd
         )
 
-    @given(
+    @serial.given(
         inputs=hu.tensors(n=3),
         momentum=st.floats(min_value=0.1, max_value=0.9),
         nesterov=st.booleans(),

@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/SpatialConvolutionMM.cu"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
                          THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
@@ -49,8 +51,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
       exactInputHeight, exactInputWidth, kH, kW);
   }
 
-  int64_t outputHeight = (exactInputHeight - kH) / dH + 1;
-  int64_t outputWidth  = (exactInputWidth - kW) / dW + 1;
+  int64_t outputHeight = div_rtn<int64_t>(exactInputHeight - kH, dH) + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(exactInputWidth - kW, dW) + 1;
 
   if (outputWidth < 1 || outputHeight < 1) {
     THError("Given input size per channel: (%ld x %ld). "
@@ -71,7 +73,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
       int64_t nOutputPlane = weight->size(0);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = bias->size(0);
+      int64_t nOutputPlane = THTensor_sizeLegacyNoScalars(bias, 0);
       THCUNN_check_dim_size(state, gradOutput, ndim, dimf, nOutputPlane);
     }
     THCUNN_check_dim_size(state, gradOutput, ndim, dimh, outputHeight);
@@ -144,7 +146,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   if (ones->dim() != 2 || ones->size(0)*ones->size(1) < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THCTensor_(resize2d)(state, ones, outputHeight, outputWidth);
-    THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));
+    THCTensor_(fill)(state, ones, ScalarConvert<int, scalar_t>::to(1));
   }
 
   // Helpers
@@ -176,10 +178,10 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
           state,
           't', 'n',
           n_, m_, k_,
-          ScalarConvert<int, real>::to(1),
+          ScalarConvert<int, scalar_t>::to(1),
           THCTensor_(data)(state, ones), k_,
           THCTensor_(data)(state, bias), k_,
-          ScalarConvert<int, real>::to(0),
+          ScalarConvert<int, scalar_t>::to(0),
           THCTensor_(data)(state, output_n), n_
       );
     } else {
@@ -213,10 +215,10 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
         state,
         'n', 'n',
         n, m, k,
-        ScalarConvert<int, real>::to(1),
+        ScalarConvert<int, scalar_t>::to(1),
         THCTensor_(data)(state, columns), n,
         THCTensor_(data)(state, weight), k,
-        ScalarConvert<int, real>::to(1),
+        ScalarConvert<int, scalar_t>::to(1),
         THCTensor_(data)(state, output_n), n
     );
   }
@@ -320,15 +322,15 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
         state,
         'n', 't',
         n, m, k,
-        ScalarConvert<int, real>::to(1),
+        ScalarConvert<int, scalar_t>::to(1),
         THCTensor_(data)(state, gradOutput_n), n,
         THCTensor_(data)(state, weight), m,
-        ScalarConvert<int, real>::to(0),
+        ScalarConvert<int, scalar_t>::to(0),
         THCTensor_(data)(state, gradColumns), n
     );
 
     // Unpack columns back into input:
-    col2im<real, accreal>(
+    col2im<scalar_t, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
@@ -366,7 +368,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
            int padW, int padH,
            accreal scale_) {
 
-  real scale = ScalarConvert<accreal, real>::to(scale_);
+  scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, gradBias, columns, ones);
   if (gradWeight) {
     THArgCheck(THCTensor_(isContiguous)(state, gradWeight), 4, "gradWeight needs to be contiguous");
@@ -414,7 +416,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   if (ones->dim() != 2 || ones->size(0)*ones->size(1) < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THCTensor_(resize2d)(state, ones, outputHeight, outputWidth);
-    THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));
+    THCTensor_(fill)(state, ones, ScalarConvert<int, scalar_t>::to(1));
   }
 
   // Resize temporary columns
@@ -464,7 +466,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           scale,
           THCTensor_(data)(state, columns), k,
           THCTensor_(data)(state, gradOutput_n), k,
-          ScalarConvert<int, real>::to(1),
+          ScalarConvert<int, scalar_t>::to(1),
           THCTensor_(data)(state, gradWeight), n
       );
     }
@@ -489,7 +491,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           scale,
           THCTensor_(data)(state, gradOutput_n), k_,
           THCTensor_(data)(state, ones), 1,
-          ScalarConvert<int, real>::to(1),
+          ScalarConvert<int, scalar_t>::to(1),
           THCTensor_(data)(state, gradBias), 1
       );
       #endif
@@ -501,7 +503,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           scale,
           THCTensor_(data)(state, gradOutput_n), k_,
           THCTensor_(data)(state, ones), k_,
-          ScalarConvert<int, real>::to(1),
+          ScalarConvert<int, scalar_t>::to(1),
           THCTensor_(data)(state, gradBias), m_
       );
       #endif

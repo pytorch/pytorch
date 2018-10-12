@@ -45,10 +45,10 @@ class MKLConcatOp final : public MKLOperator<T> {
 
     bool dims_changed = (input_size_cache_.size() != nInputs);
     for (int i = 0; i < nInputs && !dims_changed; ++i) {
-      dims_changed = (input_size_cache_[i] != Input(i).dims());
+      dims_changed = (at::IntList(input_size_cache_[i]) != Input(i).dims());
     }
 
-    if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
+    if (dims_changed || c10::FLAGS_caffe2_mkl_memonger_in_use) {
       input_size_cache_.resize(nInputs);
       int output_channels = 0;
       int canonical_axis = canonical_axis_index_(axis_, nDims);
@@ -68,11 +68,11 @@ class MKLConcatOp final : public MKLOperator<T> {
               " has dimension mismatch at axis ",
               j);
         }
-        input_size_cache_[i] = Xi.dims();
+        input_size_cache_[i] = Xi.dims().vec();
         output_channels += Xi.dim32(canonical_axis);
         input_layouts[i] = Xi.layout();
       }
-      cached_output_dims_ = X0.dims();
+      cached_output_dims_ = X0.dims().vec();
       cached_output_dims_[canonical_axis] = output_channels;
 
       primitive_.Reset(
@@ -88,7 +88,7 @@ class MKLConcatOp final : public MKLOperator<T> {
     resources_[dnnResourceDst] = buffer_.buffer();
     ExecutePrimitive();
     buffer_.CopyTo(Y, primitive_, dnnResourceDst);
-    if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+    if (c10::FLAGS_caffe2_mkl_memonger_in_use && !shared) {
       buffer_.Reset();
     }
     return true;
@@ -96,7 +96,7 @@ class MKLConcatOp final : public MKLOperator<T> {
 
  private:
   int axis_;
-  vector<TIndex> cached_output_dims_;
+  vector<int64_t> cached_output_dims_;
 };
 
 } // namespace mkl

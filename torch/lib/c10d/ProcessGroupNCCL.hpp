@@ -66,7 +66,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Checks if request has completed. In this specific case of NCCL, it checks
     // if the NCCL operation has completed on the GPU in its own NCCL stream.
     // Non-blocking operation.
-    bool isCompleted() const override;
+    bool isCompleted() override;
 
     // Let current THC stream wait on the completing of the NCCL work
     // always return true and will throw if there are exceptions
@@ -108,6 +108,44 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> reduce(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allgather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors) override;
+
+  // Unsupported Ops
+  std::shared_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> recv(
+      std::vector<at::Tensor>& tensors,
+      int srcRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+      std::vector<at::Tensor>& tensors,
+      int* srcRank,
+      int tag) override;
+
+  std::shared_ptr<ProcessGroup::Work> barrier() override;
+
+  std::unordered_map<int, int> getGroupRank() override;
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store

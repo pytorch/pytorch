@@ -228,14 +228,14 @@ static uint32_t FLOAT_MASK = (1 << 24) - 1;
 static float FLOAT_DIVISOR = 1.0f / (1 << 24);
 
 /* generates a random number on [0,1)-double-interval */
-static double uniform_double(THGenerator *_generator)
+static inline double uniform_double(THGenerator *_generator)
 {
   uint64_t x = THRandom_random64(_generator);
   return (x & DOUBLE_MASK) * DOUBLE_DIVISOR;
 }
 
 /* generates a random number on [0,1)-double-interval */
-static float uniform_float(THGenerator *_generator)
+static inline float uniform_float(THGenerator *_generator)
 {
   uint32_t x = (uint32_t)THRandom_random(_generator);
   return (x & FLOAT_MASK) * FLOAT_DIVISOR;
@@ -313,4 +313,10 @@ int THRandom_bernoulli(THGenerator *_generator, double p)
 {
   THArgCheck(p >= 0 && p <= 1, 1, "must be >= 0 and <= 1");
   return(uniform_double(_generator) <= p);
+}
+
+int THRandom_bernoulliFloat(THGenerator *_generator, float p)
+{
+  THArgCheck(p >= 0 && p <= 1, 1, "must be >= 0 and <= 1");
+  return(uniform_float(_generator) <= p);
 }

@@ -13,8 +13,8 @@ namespace {
 void inclusive_scan_wrapper(
     const int* length_data,
     int len_length,
-    Tensor<CUDAContext>* temp_buffer,
-    Tensor<CUDAContext>* prefix_sum_out,
+    Tensor* temp_buffer,
+    Tensor* prefix_sum_out,
     CUDAContext* context_) {
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;
@@ -22,19 +22,20 @@ void inclusive_scan_wrapper(
       NULL,
       temp_storage_bytes,
       length_data,
-      prefix_sum_out->mutable_data<int>(),
+      prefix_sum_out->template mutable_data<int>(),
       len_length,
       context_->cuda_stream());
   // Allocate temporary storage
   auto buffer_size = (temp_storage_bytes + sizeof(int)) / sizeof(int);
   temp_buffer->Resize(buffer_size);
-  void* d_temp_storage = static_cast<void*>(temp_buffer->mutable_data<int>());
+  void* d_temp_storage =
+      static_cast<void*>(temp_buffer->template mutable_data<int>());
   // Run inclusive prefix sum
   cub::DeviceScan::InclusiveSum(
       d_temp_storage,
       temp_storage_bytes,
       length_data,
-      prefix_sum_out->mutable_data<int>(),
+      prefix_sum_out->template mutable_data<int>(),
       len_length,
       context_->cuda_stream());
 }
@@ -432,13 +433,13 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
     auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const TIndex dataSize = dataInput.dim(0);
+    const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
-    TIndex dataToReduceSize;
-    const TIndex outputSize = lengthsInput.dim(0);
+    int64_t dataToReduceSize;
+    const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     T* out_data = output->template mutable_data<T>();
@@ -523,8 +524,8 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{CUDA};
+  Tensor inclusive_scan_length_buffer_{CUDA};
 };
 
 template <typename T, class Context = CUDAContext, bool SparseFused = true>
@@ -553,13 +554,13 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
     auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const TIndex dataSize = dataInput.dim(0);
+    const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
-    TIndex dataToReduceSize;
-    const TIndex outputSize = lengthsInput.dim(0);
+    int64_t dataToReduceSize;
+    const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     T* out_data = output->template mutable_data<T>();
@@ -645,8 +646,8 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{CUDA};
+  Tensor inclusive_scan_length_buffer_{CUDA};
 };
 
 template <typename T, class Context = CUDAContext, bool SparseFused = true>
@@ -675,13 +676,13 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
     auto* output = Output(0);
 
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
-    const TIndex dataSize = dataInput.dim(0);
+    const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
-    TIndex dataToReduceSize;
-    const TIndex outputSize = lengthsInput.dim(0);
+    int64_t dataToReduceSize;
+    const int64_t outputSize = lengthsInput.dim(0);
     int len_length = outputSize;
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
 
@@ -779,8 +780,8 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{CUDA};
+  Tensor inclusive_scan_length_buffer_{CUDA};
 };
 
 template <typename T, class Context = CUDAContext, bool SparseFused = true>
@@ -809,13 +810,13 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
     CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
     CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
 
-    const TIndex dataSize = dataInput.dim(0);
+    const int64_t dataSize = dataInput.dim(0);
     // Either first dim the data or how much we pull in indexies from it
-    const TIndex dataToReduceSize = indicesInput.dim(0);
-    const TIndex outputSize = lengthsInput.dim(0);
+    const int64_t dataToReduceSize = indicesInput.dim(0);
+    const int64_t outputSize = lengthsInput.dim(0);
     const int len_length = outputSize;
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     shape[0] = outputSize;
     output->Resize(shape);
     T* out_data = output->template mutable_data<T>();
@@ -879,8 +880,8 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{CUDA};
+  Tensor inclusive_scan_length_buffer_{CUDA};
 };
 
 template <typename SIndex>
@@ -943,7 +944,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
 
     if (segment_ids.size() == 0 || data.size() == 0) {
       // Special handling for empty input
-      auto dims = data.dims();
+      auto dims = data.dims().vec();
       if (dims.size() > 0) {
         dims[0] = 0;
       }
@@ -953,7 +954,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
     }
 
     CAFFE_ENFORCE_EQ(1, segment_ids.ndim(), "SEGMENT_IDS must be a vector");
-    TIndex slize_sz = data.size_from_dim(1);
+    int64_t slize_sz = data.size_from_dim(1);
 
     K_tensor_.Resize(1);
     // Get maximum segment id so we can size the output.
@@ -988,11 +989,11 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
     }
 
     SIndex K = 0;
-    context_.CopyBytes<CUDAContext, CPUContext>(
+    context_.CopyBytesToCPU(
         sizeof(SIndex), K_tensor_.template data<SIndex>(), &K);
     context_.FinishDeviceComputation();
 
-    auto dims = data.dims();
+    auto dims = data.dims().vec();
     dims[0] = K + 1;
     output->Resize(dims);
 
@@ -1046,9 +1047,9 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
   }
 
  private:
-  Tensor<CUDAContext> buffer_tensor_;
-  Tensor<CUDAContext> K_tensor_;
-  Tensor<CUDAContext> scaling_factors_; // for mean
+  Tensor buffer_tensor_{CUDA};
+  Tensor K_tensor_{CUDA};
+  Tensor scaling_factors_{CUDA}; // for mean
 };
 
 template <typename SIndex>
@@ -1095,9 +1096,9 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
     int M = input.dim32(0);
     int N = input.size_from_dim(1);
     auto* output = Output(0);
-    auto dims = input.dims();
+    auto dims = input.dims().vec();
     SIndex K = 0;
-    context_.template CopyBytes<Context, CPUContext>(
+    context_.CopyBytesToCPU(
         sizeof(SIndex),
         indices.template data<SIndex>() + indices.size() - 1,
         &K);
@@ -1156,9 +1157,9 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
   }
 
  private:
-  Tensor<CUDAContext> segment_len_; // for mean
-  Tensor<CUDAContext> segment_len_prefix_sum_;
-  Tensor<CUDAContext> prefix_buffer_;
+  Tensor segment_len_{CUDA}; // for mean
+  Tensor segment_len_prefix_sum_{CUDA};
+  Tensor prefix_buffer_{CUDA};
 };
 
 template <typename T, typename SIndex, bool LOGEXP = false>
@@ -1201,7 +1202,7 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
     const int N = X.size_from_dim(1);
 
     SIndex K = 0;
-    context_.template CopyBytes<Context, CPUContext>(
+    context_.CopyBytesToCPU(
         sizeof(SIndex), I.template data<SIndex>() + I.size() - 1, &K);
 
     K += 1;
@@ -1241,7 +1242,7 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
   }
 
  private:
-  Tensor<CUDAContext> segment_len_; // for mean
+  Tensor segment_len_{CUDA}; // for mean
 };
 
 REGISTER_CUDA_OPERATOR_STR(
@@ -1306,7 +1307,7 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims();
+    auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     dataGradsOutput->Resize(shape);
@@ -1358,8 +1359,8 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{CUDA};
+  Tensor inclusive_scan_length_buffer_{CUDA};
 };
 
 template <typename T, class Context = CUDAContext>
@@ -1385,7 +1386,7 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims();
+    auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     dataGradsOutput->Resize(shape);
@@ -1437,8 +1438,8 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
 
  private:
   // menber field to manage memory
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{CUDA};
+  Tensor inclusive_scan_length_buffer_{CUDA};
 };
 
 template <typename T, class Context = CUDAContext>
@@ -1466,7 +1467,7 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims();
+    auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     dataGradsOutput->Resize(shape);
@@ -1526,8 +1527,8 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
 
  private:
   // menber field to manage memory
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{CUDA};
+  Tensor inclusive_scan_length_buffer_{CUDA};
 };
 
 template <typename T, bool ExactBlock = false>
@@ -1614,7 +1615,7 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
     auto* prefix_sum_length_data =
         inclusive_scan_length_buffer_.template data<int>();
 
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     dataGradsOutput->Resize(shape);
 
     const T* in_data = segmentGradsInput.template data<T>();
@@ -1664,8 +1665,8 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
 
  private:
   // menber field to manage memory
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{CUDA};
+  Tensor inclusive_scan_length_buffer_{CUDA};
 };
 
 template <typename T, class Context = CUDAContext>
@@ -1700,7 +1701,7 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
     CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
 
-    auto shape = segmentGradsInput.dims();
+    auto shape = segmentGradsInput.dims().vec();
     int output_0dim = indicesInput.dim(0);
     shape[0] = output_0dim;
     dataGradsOutput->Resize(shape);
@@ -1792,8 +1793,8 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
 
  private:
   // menber field to manage memory
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{CUDA};
+  Tensor inclusive_scan_length_buffer_{CUDA};
 };
 
 // Needed because name is auto-generated in segment_reduction_op.cc:224

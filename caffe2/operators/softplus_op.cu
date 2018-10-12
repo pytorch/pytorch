@@ -26,12 +26,12 @@ bool SoftplusOp<float, CUDAContext>::RunOnDevice() {
   auto* Y = Output(0);
   DCHECK_GT(X.size(), 0);
   Y->ResizeLike(X);
-  SoftplusKernel<float><<<
-      CAFFE_GET_BLOCKS(X.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      X.size(), X.data<float>(), Y->mutable_data<float>());
+  SoftplusKernel<float>
+      <<<CAFFE_GET_BLOCKS(X.size()),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          X.size(), X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
@@ -43,12 +43,15 @@ bool SoftplusGradientOp<float, CUDAContext>::RunOnDevice() {
   DCHECK_GT(Y.size(), 0);
   DCHECK_EQ(dY.size(), Y.size());
   dX->ResizeLike(Y);
-  SoftplusGradientKernel<float><<<
-      CAFFE_GET_BLOCKS(Y.size()),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context_.cuda_stream()>>>(
-      Y.size(), Y.data<float>(), dY.data<float>(), dX->mutable_data<float>());
+  SoftplusGradientKernel<float>
+      <<<CAFFE_GET_BLOCKS(Y.size()),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context_.cuda_stream()>>>(
+          Y.size(),
+          Y.data<float>(),
+          dY.data<float>(),
+          dX->template mutable_data<float>());
   return true;
 }
 

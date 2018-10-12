@@ -5,7 +5,7 @@
 #include <iomanip>
 #include <mutex>
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_version,
     false,
     "Print Caffe2 version and build options on startup");
@@ -53,7 +53,7 @@ bool GlobalInit(int* pargc, char*** pargv) {
   if (init_state == internal::State::Initialized) {
     VLOG(1) << "GlobalInit has already been called: re-parsing gflags only.";
     // Reparse command line flags
-    success &= ParseCaffeCommandLineFlags(pargc, pargv);
+    success &= c10::ParseCommandLineFlags(pargc, pargv);
     UpdateLoggingLevelsFromFlags();
   } else if (init_state == internal::State::Uninitialized) {
     init_state = internal::State::Initializing;
@@ -68,10 +68,10 @@ bool GlobalInit(int* pargc, char*** pargv) {
                    ->RunRegisteredEarlyInitFunctions(pargc, pargv);
     CAFFE_ENFORCE(
         success, "Failed to run some early init functions for caffe2.");
-    success &= ParseCaffeCommandLineFlags(pargc, pargv);
+    success &= c10::ParseCommandLineFlags(pargc, pargv);
     success &= InitCaffeLogging(pargc, *pargv);
     // Print out the current build version. Using cerr as LOG(INFO) might be off
-    if (FLAGS_caffe2_version) {
+    if (c10::FLAGS_caffe2_version) {
       std::cerr << "Caffe2 build configuration: " << std::endl;
       for (const auto& it : GetBuildOptions()) {
         std::cerr << "  " << std::setw(25) << std::left << it.first << " : "

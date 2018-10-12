@@ -8,7 +8,6 @@
 #include <mkl.h>
 #endif // CAFFE2_USE_MKL
 
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -22,20 +21,19 @@ void RunChannelShuffleNCHW(
     const int K,
     const int HxW,
     const T* X,
-    T* Y) {
+    T* Y,
+    CPUContext* context) {
   const int stride = G * K * HxW;
   for (int i = 0; i < N; ++i) {
     if (G < K) {
-      EigenMatrixMap<T> Y_mat(Y, G * HxW, K);
       for (int j = 0; j < G; ++j) {
-        Y_mat.block(j * HxW, 0, HxW, K) =
-            ConstEigenMatrixMap<T>(X + j * K * HxW, HxW, K);
+        math::CopyMatrix<T, CPUContext>(
+            K, HxW, X + j * K * HxW, HxW, Y + j * HxW, G * HxW, context);
       }
     } else {
-      ConstEigenMatrixMap<T> X_mat(X, K * HxW, G);
       for (int j = 0; j < K; ++j) {
-        EigenMatrixMap<float>(Y + j * G * HxW, HxW, G) =
-            X_mat.block(j * HxW, 0, HxW, G);
+        math::CopyMatrix<T, CPUContext>(
+            G, HxW, X + j * HxW, K * HxW, Y + j * G * HxW, HxW, context);
       }
     }
     X += stride;
@@ -63,36 +61,6 @@ void RunChannelShuffleNHWC(
   }
 }
 
-#ifdef CAFFE2_USE_MKL
-
-template <>
-void RunChannelShuffleNCHW<float>(
-    const int N,
-    const int G,
-    const int K,
-    const int HxW,
-    const float* X,
-    float* Y) {
-  const int stride = G * K * HxW;
-  for (int i = 0; i < N; ++i) {
-    if (G < K) {
-      for (int j = 0; j < G; ++j) {
-        mkl_somatcopy(
-            'R', 'N', K, HxW, 1.0f, X + j * K * HxW, HxW, Y + j * HxW, G * HxW);
-      }
-    } else {
-      for (int j = 0; j < K; ++j) {
-        mkl_somatcopy(
-            'R', 'N', G, HxW, 1.0f, X + j * HxW, K * HxW, Y + j * G * HxW, HxW);
-      }
-    }
-    X += stride;
-    Y += stride;
-  }
-}
-
-#endif // CAFFE2_USE_MKL
-
 } // namespace
 
 template <>
@@ -108,7 +76,7 @@ bool ChannelShuffleOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int HxW = X.size() / (N * C);
   const float* X_data = X.data<float>();
   float* Y_data = Y->mutable_data<float>();
-  RunChannelShuffleNCHW<float>(N, G, K, HxW, X_data, Y_data);
+  RunChannelShuffleNCHW<float>(N, G, K, HxW, X_data, Y_data, &context_);
   return true;
 } // namespace caffe2
 
@@ -143,7 +111,7 @@ bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const int HxW = dY.size() / (N * C);
   const float* dY_data = dY.data<float>();
   float* dX_data = dX->mutable_data<float>();
-  RunChannelShuffleNCHW<float>(N, K, G, HxW, dY_data, dX_data);
+  RunChannelShuffleNCHW<float>(N, K, G, HxW, dY_data, dX_data, &context_);
   return true;
 }
 

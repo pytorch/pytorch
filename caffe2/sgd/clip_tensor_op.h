@@ -16,7 +16,7 @@ class ClipTensorByScalingOp final : public Operator<Context> {
 
   ClipTensorByScalingOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    threshold_ = OperatorBase::GetSingleArgument<float>("threshold", 0.0);
+    threshold_ = this->template GetSingleArgument<float>("threshold", 0.0);
     CAFFE_ENFORCE_GT(threshold_, 0, "Threshold must be greater than 0");
   }
 
@@ -43,7 +43,7 @@ class ClipTensorByScalingOp final : public Operator<Context> {
     if (*val_data > threshold_) {
       float ratio = threshold_ / *val_data;
 
-      math::Scale<float, Context>(
+      math::Scale<float, float, Context>(
           clipped->size(),
           ratio,
           input_tensor_data,

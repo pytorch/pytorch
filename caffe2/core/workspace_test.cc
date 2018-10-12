@@ -3,7 +3,6 @@
 #include "caffe2/core/operator.h"
 #include <gtest/gtest.h>
 
-
 namespace caffe2 {
 
 class WorkspaceTestFoo {};
@@ -113,6 +112,38 @@ TEST(WorkspaceTest, BlobMapping) {
     EXPECT_TRUE(child.HasBlob("inner_b"));
     EXPECT_TRUE(child.GetBlob("inner_b"));
   }
+}
+
+/**
+ * Checks that Workspace::ForEach(f) applies f on  the specified set of
+ * workspaces in any order.
+ */
+static void forEachCheck(std::initializer_list<Workspace*> workspaces) {
+  std::unordered_set<Workspace*> expected(workspaces);
+  std::unordered_set<Workspace*> actual;
+  Workspace::ForEach([&](Workspace* ws) {
+    auto inserted = actual.insert(ws).second;
+    EXPECT_TRUE(inserted);
+  });
+  EXPECT_EQ(actual, expected);
+}
+
+TEST(WorkspaceTest, ForEach) {
+  forEachCheck({});
+
+  {
+    Workspace ws1;
+    forEachCheck({&ws1});
+
+    {
+      Workspace ws2;
+      forEachCheck({&ws1, &ws2});
+    }
+
+    forEachCheck({&ws1});
+  }
+
+  forEachCheck({});
 }
 
 }  // namespace caffe2

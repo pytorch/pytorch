@@ -1,4 +1,4 @@
-from common import TestCase, run_tests, skipIfNoZeroSize
+from common import TestCase, run_tests
 import torch
 import warnings
 from torch import tensor
@@ -93,7 +93,6 @@ class TestIndexing(TestCase):
         y[mask] = -1
         self.assertEqual(x, y)
 
-    @skipIfNoZeroSize
     def test_empty_ndim_index(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -104,14 +103,12 @@ class TestIndexing(TestCase):
             self.assertEqual(torch.empty(2, 0, 6, 4, 5, device=device),
                              x[:, torch.empty(0, 6, dtype=torch.int64, device=device)])
 
-    @skipIfNoZeroSize
     def test_empty_ndim_index_bool(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
             x = torch.randn(5, device=device)
             self.assertRaises(IndexError, lambda: x[torch.empty(0, 2, dtype=torch.uint8, device=device)])
 
-    @skipIfNoZeroSize
     def test_empty_slice(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
@@ -277,12 +274,14 @@ class TestIndexing(TestCase):
         self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
 
     def test_zero_dim_index(self):
-        # We temporarily support indexing a zero-dim tensor as if it were
-        # a one-dim tensor to better maintain backwards compatibility.
         x = torch.tensor(10)
-        with warnings.catch_warnings(record=True) as w:
-            self.assertEqual(x, x[0])
-            self.assertEqual(len(w), 1)
+        self.assertEqual(x, x.item())
+
+        def runner():
+            print(x[0])
+            return x[0]
+
+        self.assertRaisesRegex(IndexError, 'invalid index', runner)
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to
@@ -475,26 +474,18 @@ class NumpyTests(TestCase):
     def test_boolean_indexing_weirdness(self):
         # Weird boolean indexing things
         a = torch.ones((2, 3, 4))
-        if torch._C._use_zero_size_dim():
-            self.assertEqual((0, 2, 3, 4), a[False, True, ...].shape)
-        else:
-            self.assertEqual((0,), a[False, True, ...].shape)
+        self.assertEqual((0, 2, 3, 4), a[False, True, ...].shape)
         self.assertEqual(torch.ones(1, 2), a[True, [0, 1], True, True, [1], [[2]]])
-        if torch._C._use_zero_size_dim():
-            self.assertRaises(RuntimeError, lambda: a[False, [0, 1], ...])
+        self.assertRaises(RuntimeError, lambda: a[False, [0, 1], ...])
 
     def test_boolean_indexing_weirdness_tensors(self):
         # Weird boolean indexing things
         false = torch.tensor(False)
         true = torch.tensor(True)
         a = torch.ones((2, 3, 4))
-        if torch._C._use_zero_size_dim():
-            self.assertEqual((0, 2, 3, 4), a[False, True, ...].shape)
-        else:
-            self.assertEqual((0,), a[False, True, ...].shape)
+        self.assertEqual((0, 2, 3, 4), a[False, True, ...].shape)
         self.assertEqual(torch.ones(1, 2), a[true, [0, 1], true, true, [1], [[2]]])
-        if torch._C._use_zero_size_dim():
-            self.assertRaises(RuntimeError, lambda: a[false, [0, 1], ...])
+        self.assertRaises(RuntimeError, lambda: a[false, [0, 1], ...])
 
     def test_boolean_indexing_alldims(self):
         true = torch.tensor(True)

@@ -3,11 +3,11 @@
 
 #include "nervana_c_api.h"
 
-
-CAFFE2_DEFINE_string(nervana_cubin_path,
-                     "/usr/local/fbcode/gcc-4.8.1-glibc-2.17/lib/cubin/",
-                     "The cubin path for nervana kernels. Currently defaulted "
-                     "to the internal fb deployment path.");
+C10_DEFINE_string(
+    nervana_cubin_path,
+    "/usr/local/fbcode/gcc-4.8.1-glibc-2.17/lib/cubin/",
+    "The cubin path for nervana kernels. Currently defaulted "
+    "to the internal fb deployment path.");
 
 namespace caffe2 {
 

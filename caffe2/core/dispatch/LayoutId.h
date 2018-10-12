@@ -1,10 +1,10 @@
 #pragma once
 
-#include "caffe2/utils/IdWrapper.h"
+#include "ATen/core/IdWrapper.h"
 
 namespace c10 {
 
-class LayoutId final : public c10::guts::IdWrapper<LayoutId, uint8_t> {
+class LayoutId final : public at::IdWrapper<LayoutId, uint8_t> {
 public:
     constexpr explicit LayoutId(underlying_type id): IdWrapper(id) {}
 
@@ -19,4 +19,4 @@ public:
 
 }
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::LayoutId)
+AT_DEFINE_HASH_FOR_IDWRAPPER(c10::LayoutId)

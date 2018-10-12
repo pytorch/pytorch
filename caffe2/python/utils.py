@@ -6,13 +6,13 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.proto import caffe2_pb2
+from caffe2.python.compatibility import container_abcs
 from future.utils import viewitems
 from google.protobuf.message import DecodeError, Message
 from google.protobuf import text_format
 
 import sys
 import copy
-import collections
 import functools
 import numpy as np
 from six import integer_types, binary_type, text_type, string_types
@@ -120,7 +120,7 @@ def MakeArgument(key, value):
     """Makes an argument based on the value type."""
     argument = caffe2_pb2.Argument()
     argument.name = key
-    iterable = isinstance(value, collections.Iterable)
+    iterable = isinstance(value, container_abcs.Iterable)
 
     # Fast tracking common use case where a float32 array of tensor parameters
     # needs to be serialized.  The entire array is guaranteed to have the same

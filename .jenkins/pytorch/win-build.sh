@@ -38,7 +38,7 @@ EOL
 
 cat >ci_scripts/build_pytorch.bat <<EOL
 
-set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
+set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install MKL
 if "%REBUILD%"=="" (
@@ -91,6 +91,7 @@ if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
 :: Install ninja
 if "%REBUILD%"=="" ( pip install ninja )
 
+call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x64
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
 
 git submodule update --init --recursive

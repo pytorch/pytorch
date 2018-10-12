@@ -14,6 +14,14 @@
 
 #if !defined(__CUDACC__) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
 #include <glog/stl_logging.h>
+
+// Old versions of glog don't declare this using declaration, so help
+// them out.  Fortunately, C++ won't complain if you declare the same
+// using declaration multiple times.
+namespace std {
+  using ::operator<<;
+}
+
 #else // !defined(__CUDACC__) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
 
 // here, we need to register a fake overload for vector/string - here,

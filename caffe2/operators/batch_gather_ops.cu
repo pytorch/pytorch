@@ -31,7 +31,7 @@ __global__ void BatchGatherKernel(
 template <>
 bool BatchGatherOp<CUDAContext>::RunOnDevice() {
   return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-      this, OperatorBase::Input<TensorCUDA>(INDICES));
+      this, OperatorBase::Input<Tensor>(INDICES, CUDA));
 }
 
 template <>
@@ -41,7 +41,7 @@ bool BatchGatherOp<CUDAContext>::DoRunWithType() {
   auto& indices = Input(INDICES);
   auto* output = Output(0);
 
-  vector<TIndex> shape;
+  vector<int64_t> shape;
   shape.push_back(data.dim(0));
   shape.insert(shape.end(), indices.dims().begin(), indices.dims().end());
   shape.insert(shape.end(), data.dims().begin() + 2, data.dims().end());
@@ -99,7 +99,7 @@ __global__ void BatchGatherGradientKernel(
 template <>
 bool BatchGatherGradientOp<CUDAContext>::RunOnDevice() {
   return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-      this, OperatorBase::Input<TensorCUDA>(INDICES));
+      this, OperatorBase::Input<Tensor>(INDICES, CUDA));
 }
 
 template <>
@@ -107,7 +107,7 @@ template <typename TInd>
 bool BatchGatherGradientOp<CUDAContext>::DoRunWithType() {
   return DispatchHelper<
       TensorTypes2<float, GenericTensorImplementation>,
-      TInd>::call(this, OperatorBase::Input<TensorCUDA>(DATA));
+      TInd>::call(this, OperatorBase::Input<Tensor>(DATA, CUDA));
 }
 
 template <>

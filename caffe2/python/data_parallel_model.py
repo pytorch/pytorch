@@ -9,6 +9,8 @@ from future.utils import viewitems, viewkeys, viewvalues
 import logging
 import copy
 
+from multiprocessing import cpu_count
+
 from caffe2.python import \
     model_helper, dyndep, scope, workspace, core, memonger, utils
 from caffe2.proto import caffe2_pb2
@@ -44,6 +46,7 @@ def Parallelize(
     param_update_builder_fun=None,
     optimizer_builder_fun=None,
     post_sync_builder_fun=None,
+    pre_grad_net_transformer_fun=None,
     net_transformer_fun=None,
     devices=None,
     rendezvous=None,
@@ -91,6 +94,11 @@ def Parallelize(
                         Signature:
                         net_transformer_fun(
                             model, num_devices, device_prefix, device_type)
+      pre_grad_net_transformer_fun:
+                        Optional function to transform the network similar to
+                        net_transformer_fun, but happens before gradient ops
+                        been add.
+                        Signature: pre_grad_net_transformer_fun(model)
       post_sync_builder_fun:
                         Function applied after initial parameter sync has been
                         completed, such as keeping multi-precision parameters
@@ -127,7 +135,10 @@ def Parallelize(
         device scope was: {}".format(scope.CurrentDeviceScope())
 
     if devices is None:
-        devices = list(range(0, workspace.NumCudaDevices())),
+        if not cpu_device:
+            devices = list(range(0, workspace.NumCudaDevices()))
+        else:
+            devices = list(range(0, cpu_count()))
 
     if not cpu_device:
         for gpu in devices:
@@ -233,6 +244,9 @@ def Parallelize(
         list(viewkeys(model_helper_obj._device_grouped_blobs))
     model_helper_obj._computed_param_names =\
         list(viewkeys(computed_params_grouped))
+
+    if pre_grad_net_transformer_fun:
+        pre_grad_net_transformer_fun(model_helper_obj)
 
     if has_parameter_updates:
         log.info("Adding gradient operators")
@@ -799,7 +813,7 @@ def ConvertNetForDevice(net, device=None):
 
     device_prefix = "gpu" if device.device_type == caffe2_pb2.CUDA else "cpu"
 
-    namescope = "{}_{}/".format(device_prefix, device.cuda_gpu_id)
+    namescope = "{}_{}/".format(device_prefix, device.device_id)
     for op in mnet.Proto().op:
         if "RecurrentNetwork" in op.type:
             raise("RecurrentNetwork conversion not yet supported")
@@ -1023,19 +1037,19 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         """
         devices = [model._devices[idx] for idx in dev_indices]
         blobs = [blobs_group[idx] for idx in dev_indices]
-        for i, peer in enumerate(devices):
-            if i == 0:
-                continue  # Skip the first device
-            if p2p_access_pattern is not None and not p2p_access_pattern[
-                devices[0], peer
-            ]:
-                # Copy from peer to d0
-                blobs[i] = model.Copy(
-                    blobs[i],
-                    'gpu_{}/{}_gpu{}_copy'.format(devices[0], param, peer)
-                )
         device_opt = core.DeviceOption(model._device_type, devices[0])
         with core.DeviceScope(device_opt):
+            for i, peer in enumerate(devices):
+                if i == 0:
+                    continue  # Skip the first device
+                if p2p_access_pattern is not None and not p2p_access_pattern[
+                    devices[0], peer
+                ]:
+                    # Copy from peer to d0
+                    blobs[i] = model.Copy(
+                        blobs[i],
+                        'gpu_{}/{}_gpu{}_copy'.format(devices[0], param, peer)
+                    )
             net.Sum(blobs, [blobs[0]], name='dpm')
 
     if len(devices) == 16:
@@ -1526,7 +1540,7 @@ def _AnalyzeOperators(model):
             continue
 
         op_dev = op.device_option
-        op_gpu = op_dev.cuda_gpu_id
+        op_gpu = op_dev.device_id
 
         # This avoids failing on operators that are only for CPU
         if op_dev.device_type != caffe2_pb2.CUDA:
@@ -1890,7 +1904,7 @@ def _InterleaveOps(model):
     new_ops = []
     ops = {d: [] for d in range(num_devices)}
     for op in orig_ops:
-        ops[op.device_option.cuda_gpu_id].append(op)
+        ops[op.device_option.device_id].append(op)
 
     for j in range(num_ops_per_dev):
         tp = None

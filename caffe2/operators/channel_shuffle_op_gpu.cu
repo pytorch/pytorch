@@ -56,7 +56,7 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), S, C, G, K, X.data<float>(), Y->mutable_data<float>());
+      X.size(), S, C, G, K, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
@@ -74,7 +74,7 @@ bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), G, K, X.data<float>(), Y->mutable_data<float>());
+      X.size(), G, K, X.data<float>(), Y->template mutable_data<float>());
   return true;
 }
 
@@ -93,7 +93,13 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      dY.size(), S, C, K, G, dY.data<float>(), dX->mutable_data<float>());
+      dY.size(),
+      S,
+      C,
+      K,
+      G,
+      dY.data<float>(),
+      dX->template mutable_data<float>());
   return true;
 }
 
@@ -111,7 +117,7 @@ bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      dY.size(), K, G, dY.data<float>(), dX->mutable_data<float>());
+      dY.size(), K, G, dY.data<float>(), dX->template mutable_data<float>());
   return true;
 }
 

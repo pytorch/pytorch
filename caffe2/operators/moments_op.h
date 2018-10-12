@@ -17,7 +17,7 @@ class MomentsOp final : public Operator<Context> {
 
   MomentsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axes_(OperatorBase::GetRepeatedArgument<int>("axes")),
+        axes_(this->template GetRepeatedArgument<int>("axes")),
         OP_SINGLE_ARG(bool, "keepdims", keep_dims_, true) {}
 
   bool RunOnDevice() override {
@@ -76,7 +76,7 @@ class MomentsGradientOp final : public Operator<Context> {
 
   MomentsGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        axes_(OperatorBase::GetRepeatedArgument<int>("axes")) {}
+        axes_(this->template GetRepeatedArgument<int>("axes")) {}
 
   bool RunOnDevice() override {
     const auto& dmean = Input(0);

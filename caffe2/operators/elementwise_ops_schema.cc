@@ -636,7 +636,7 @@ Performs element-wise {desc} comparison **{name}** (with limited broadcast suppo
               }                                                                \
             }                                                                  \
             auto output_dims =                                                 \
-                std::vector<TIndex>(in[0].dims().begin(), in[0].dims().end()); \
+                std::vector<int64_t>(in[0].dims().begin(), in[0].dims().end()); \
             return vector<TensorShape>{                                        \
                 CreateTensorShape(output_dims, TensorProto::BOOL)};            \
           })                                                                   \
