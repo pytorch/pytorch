@@ -650,7 +650,7 @@ class TestDataLoader(TestCase):
     @skipIfRocm
     def test_proper_exit(self):
         (r'''There might be ConnectionResetError or leaked semaphore warning '''
-        r'''(due to dirty process exit), but they are all safe to ignore''')
+         r'''(due to dirty process exit), but they are all safe to ignore''')
 
         # TODO: test the case where the pin_memory_thread triggers an
         #       error/fatal signal. I haven't found out how to properly do that.
