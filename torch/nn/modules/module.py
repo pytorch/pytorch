@@ -366,11 +366,6 @@ class Module(object):
 
         """
 
-        if len(args) > 3:
-            raise TypeError("to() takes at most 3 arguments ({} given)".format(len(args)))
-        if "copy" in kwargs:
-            raise TypeError("'copy' is an invalid keyword argument for this function")
-
         device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:

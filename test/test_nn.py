@@ -710,7 +710,7 @@ class TestNN(NNTestCase):
         self.assertIs(m, m.to('cpu'))
         self.assertIs(m, m.to('cpu', dtype=torch.float32))
         self.assertEqual(m.double(), m.to(torch.float64))
-        self.assertRaises(TypeError, lambda: m.to('cpu', copy=True))
+        self.assertRaises(RuntimeError, lambda: m.to('cpu', copy=True))
 
         if torch.cuda.is_available():
             for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
