@@ -783,7 +783,6 @@ class TestCaffe2Backend(unittest.TestCase):
             self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
     # TODO: Add test cases for prod once Caffe2 has support for ReduceProd
-
     def test_softmax(self):
         for i in range(7)[2:]:
             model = nn.Softmax(dim=i - 1)

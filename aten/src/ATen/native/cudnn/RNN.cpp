@@ -524,7 +524,7 @@ namespace {
     return data_ptrs;
   }
 
-  void _copyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to) {
+  void _viewOrCopyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to, bool copy) {
     AT_ASSERTM(params_from.size(0) == params_to.size(0), "number of layers mismatch");
     for (size_t i = 0; i < params_from.size(0); i++) {
       auto layer_params_from = params_from[i];
@@ -537,10 +537,23 @@ namespace {
            ++a, ++b) {
         auto param_from = *a, param_to = *b;
         AT_ASSERTM(param_from.type() == param_to.type(), "parameter types mismatch");
-        param_to.copy_(param_from.view_as(param_to));
+        if (copy) {
+            param_to.copy_(param_from.view_as(param_to));
+        } else {
+            param_from.resize_as_(param_to);
+        }
       }
     }
   }
+
+  void _copyParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to) {
+    _viewOrCopyParams(params_from, params_to, true);
+  }
+  
+  void _viewParams(MatrixRef<Tensor> params_from, MatrixRef<Tensor> params_to) {
+    _viewOrCopyParams(params_from, params_to, false);
+  }
+
 
   std::vector<int64_t> _input_size(const TensorDescriptorListParams& tensors) {
     if (tensors.is_input_packed()) {
@@ -569,7 +582,7 @@ namespace {
       cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
       const int64_t bsize = tensors.mini_batch;
       if (prop->major == 7 && rnn.datatype == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
-          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && tensors.input_size <=1024 && rnn.num_directions() == 1 &&
+          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 && 
                   rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
               //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
               //weed them out
@@ -998,19 +1011,24 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         fn_reserve.data_ptr(), fn_reserve.size(0)
         ));
 
-  std::vector<Tensor> grad_weight_arr;
-  grad_weight_arr.reserve( weight.numel() );
-  for (const auto& w : weight_arr) {
-    grad_weight_arr.emplace_back(at::zeros(w.sizes(), w.options()));
-  }
 
   std::vector<Tensor> grad_params_arr;
   size_t grad_params_stride0;
   std::tie(grad_params_arr, grad_params_stride0) = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, dw);
-  _copyParams(MatrixRef<Tensor>{grad_params_arr, grad_params_stride0},
+  if (grad_params_stride0 == static_cast<size_t>(weight_stride0)) {
+     _viewParams(MatrixRef<Tensor>{grad_params_arr, grad_params_stride0},
+              MatrixRef<Tensor>{weight_arr, static_cast<size_t>(weight_stride0)});
+      return grad_params_arr;
+  } else {
+     std::vector<Tensor> grad_weight_arr;
+     grad_weight_arr.reserve( weight.numel() );
+     for (const auto& w : weight_arr) {
+        grad_weight_arr.emplace_back(at::empty(w.sizes(), w.options()));
+     }
+     _copyParams(MatrixRef<Tensor>{grad_params_arr, grad_params_stride0},
               MatrixRef<Tensor>{grad_weight_arr, static_cast<size_t>(weight_stride0)});
-
-  return grad_weight_arr; // stride is known from call site (and also inconvenient to return)
+     return grad_weight_arr;
+  }
 }
 
 // We need this dispatcher because _cudnn_rnn_backward_weight has a stringent
