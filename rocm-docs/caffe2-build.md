@@ -19,7 +19,7 @@ Once the machine is ready with ROCm stack, there are two ways to use caffe2
 
 ## Launch docker container with caffe2 pre-installed
 ```
-docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video rocm/caffe2:rocm1.9-v2
+docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video rocm/caffe2:wrabbit-v1
 ```
 
 To run benchmarks, skip directly to benchmarks section of the document.
@@ -27,7 +27,7 @@ To run benchmarks, skip directly to benchmarks section of the document.
 ## Build Caffe2 from source
 ### Pull the docker image
 ```
-docker pull rocm/caffe2:unbuilt-rocm1.9-v2
+docker pull rocm/caffe2:unbuilt-wrabbit-v1
 ```
 This docker image has all the dependencies for caffe2 pre-installed.
 
@@ -48,7 +48,7 @@ cd pytorch
 
 ### Launch the docker container
 ```	
-docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video -v $PWD:/pytorch rocm/caffe2:unbuilt-rocm1.9-v2
+docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video -v $PWD:/pytorch rocm/caffe2:unbuilt-wrabbit-v1
 ``` 
 Navigate to pytorch directory `cd /pytorch` inside the container.
 
@@ -67,8 +67,8 @@ Navigate to pytorch directory `cd /pytorch` inside the container.
 If the test fails, make sure the following environment variables are set.
 
 ```
-LD_lIBRARY_PATH=/usr/local/caffe2/lib
-PYTHONPATH=/usr/local/caffe2/lib/python2.7/dist-packages
+LD_LIBRARY_PATH=/pytorch/build_caffe2/lib
+PYTHONPATH=/pytorch/build_caffe2
 ```
 
 ## Run benchmarks

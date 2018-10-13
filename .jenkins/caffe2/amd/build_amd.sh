@@ -34,8 +34,8 @@ fi
 
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
-export HCC_AMDGPU_TARGET=gfx900
 export KMTHINLTO=1
+echo -e 'gfx803\ngfx900\ngfx906' > /opt/rocm/bin/target.lst
 
 ########## HIPIFY Caffe2 operators
 ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
