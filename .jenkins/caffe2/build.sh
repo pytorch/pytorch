@@ -238,6 +238,16 @@ fi
 
 
 ###############################################################################
+# Update Valgrind
+###############################################################################
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-* ]]; then
+  sudo apt-get update
+  sudo apt-get install -qq software-properties-common python-software-properties
+  sudo add-apt-repository ppa:ibmpackages/valgrind
+  sudo apt-get update -qq
+  sudo apt-get install -qq valgrind
+fi
+###############################################################################
 # Install ONNX
 ###############################################################################
 
