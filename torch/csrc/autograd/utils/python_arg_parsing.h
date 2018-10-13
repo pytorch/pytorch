@@ -7,6 +7,8 @@
 
 namespace torch { namespace autograd { namespace utils {
 
+// The parameter allow_copy is to accept copy for Tensor.to (and by proxy
+// PackedSequences.to) but not nn.Module.to.
 inline std::tuple<at::optional<at::Device>, at::optional<at::ScalarType>, bool, bool>
   parse_to_conversion(PyObject *args, PyObject *kwargs, bool allow_copy) {
   static PythonArgParser parser({
