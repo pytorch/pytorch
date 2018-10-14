@@ -224,6 +224,11 @@ caffe2_build_dir = os.path.join(cwd, "build")
 rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
 # full absolute path to the dir above
 full_site_packages = distutils.sysconfig.get_python_lib()
+# CMAKE: full path to python library
+cmake_python_library = "{}/{}".format(
+    distutils.sysconfig.get_config_var("LIBDIR"),
+    distutils.sysconfig.get_config_var("INSTSONAME"))
+cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 
 
 class PytorchCommand(setuptools.Command):
@@ -352,6 +357,8 @@ def build_libs(libs):
         build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
+    my_env["PYTORCH_PYTHON_INCLUDE_DIR"] = cmake_python_include_dir
     my_env["PYTORCH_BUILD_VERSION"] = version
     my_env["CMAKE_PREFIX_PATH"] = full_site_packages
     my_env["NUM_JOBS"] = str(NUM_JOBS)

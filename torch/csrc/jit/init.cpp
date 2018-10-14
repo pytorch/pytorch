@@ -90,7 +90,7 @@ void initJITBindings(PyObject *module) {
      return EliminateCommonSubexpression(g); // overload resolution
    })
    .def("_jit_pass_constant_pooling", ConstantPooling)
-   .def("_jit_pass_peephole", PeepholeOptimize)
+   .def("_jit_pass_peephole", PeepholeOptimize, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })

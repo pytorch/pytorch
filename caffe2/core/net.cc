@@ -107,6 +107,7 @@ std::vector<NetObserverCreator>* GetNetObserverCreators() {
 const std::unordered_map<std::string, std::string>& defaultOverrides() {
   static const std::unordered_map<std::string, std::string> overrides = {
       {"dag", "async_scheduling"},
+      {"prof_dag", "async_scheduling"},
       {"async_dag", "async_scheduling"},
       {"async_polling", "async_scheduling"},
       {"async_simple", "simple"},
