@@ -8,6 +8,7 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/native/RNN.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/TensorUtils.h>
 
 #if !AT_CUDNN_ENABLED()
@@ -436,7 +437,7 @@ namespace {
           // TODO: The use of CPU tensor here is a bit goofy in C++,
           // some sort of alloca would be good enough except that it is
           // kind of convenient to be able to prod() on it.
-          Tensor filter_dim_a = at::CPU(kInt).tensor(min_dim);
+          Tensor filter_dim_a = at::empty({min_dim}, at::initialTensorOptions().dtype(kInt));
           AT_CUDNN_CHECK(cudnnGetFilterNdDescriptor(
                 lin_layer_mat_desc.desc(),
                 min_dim,
