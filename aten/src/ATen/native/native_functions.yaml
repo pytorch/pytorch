@@ -1015,13 +1015,19 @@
 
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: log_softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
+  variants: function, method
+
 - func: log_softmax(Tensor self, int64_t dim) -> Tensor
   variants: function, method
+
+- func: _log_softmax(Tensor self, int64_t dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
 
-- func: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+- func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
@@ -1444,13 +1450,19 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
+  variants: function, method
+
 - func: softmax(Tensor self, int64_t dim) -> Tensor
   variants: function, method
+
+- func: _softmax(Tensor self, int64_t dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: softmax_cpu
     CUDA: softmax_cuda
 
-- func: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+- func: _softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
