@@ -3,10 +3,6 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 namespace {
 
@@ -333,12 +329,6 @@ bool RoIAlignOp<float, CPUContext>::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(RoIAlign, RoIAlignOp<float, CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-REGISTER_MKL_OPERATOR(
-    RoIAlign,
-    mkl::MKLFallbackOp<RoIAlignOp<float, CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 // Input: X, rois; Output: Y
 OPERATOR_SCHEMA(RoIAlign)

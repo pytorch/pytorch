@@ -401,7 +401,8 @@ _(aten, log_sigmoid) \
 _(aten, log_sigmoid_backward) \
 _(aten, log_sigmoid_forward) \
 _(aten, log_softmax) \
-_(aten, log_softmax_backward_data) \
+_(aten, _log_softmax) \
+_(aten, _log_softmax_backward_data) \
 _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
@@ -581,7 +582,8 @@ _(aten, soft_margin_loss) \
 _(aten, soft_margin_loss_backward) \
 _(aten, soft_margin_loss_forward) \
 _(aten, softmax) \
-_(aten, softmax_backward_data) \
+_(aten, _softmax) \
+_(aten, _softmax_backward_data) \
 _(aten, softplus) \
 _(aten, softplus_backward) \
 _(aten, softplus_forward) \
