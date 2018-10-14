@@ -51,7 +51,7 @@ class TestVerify(TestCase):
 
             def forward(self, x):
                 y = x * x
-                self.param = Parameter(torch.tensor([2]))
+                self.param = Parameter(torch.tensor([2.0]))
                 return y
 
         x = torch.tensor([1, 2])
@@ -62,7 +62,7 @@ class TestVerify(TestCase):
         class MyModel(Module):
             def __init__(self):
                 super(MyModel, self).__init__()
-                self.param = Parameter(torch.tensor([2]))
+                self.param = Parameter(torch.tensor([2.0]))
 
             def forward(self, x):
                 y = x * x
