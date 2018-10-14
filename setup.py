@@ -55,6 +55,9 @@
 #   USE_OPENCV
 #     enables use of OpenCV for additional operators
 #
+#   USE_FFMPEG
+#     enables use of ffmpeg for additional operators
+#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
@@ -153,7 +156,7 @@ def hotpatch_var(var, prefix='USE_'):
 # Before we run the setup_helpers, let's look for NO_* and WITH_*
 # variables and hotpatch environment with the USE_* equivalent
 use_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
-                'OPENCV', 'SYSTEM_NCCL', 'GLOO_IBVERBS']
+                'OPENCV', 'FFMPEG', 'SYSTEM_NCCL', 'GLOO_IBVERBS']
 list(map(hotpatch_var, use_env_vars))
 
 # Also hotpatch a few with BUILD_* equivalent
@@ -163,7 +166,7 @@ build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
 from tools.setup_helpers.cuda import USE_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.build import (BUILD_BINARY, BUILD_TEST,
                                        BUILD_CAFFE2_OPS, USE_LEVELDB,
-                                       USE_LMDB, USE_OPENCV)
+                                       USE_LMDB, USE_OPENCV, USE_FFMPEG)
 from tools.setup_helpers.rocm import USE_ROCM, ROCM_HOME, ROCM_VERSION
 from tools.setup_helpers.cudnn import (USE_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
@@ -221,6 +224,11 @@ caffe2_build_dir = os.path.join(cwd, "build")
 rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
 # full absolute path to the dir above
 full_site_packages = distutils.sysconfig.get_python_lib()
+# CMAKE: full path to python library
+cmake_python_library = "{}/{}".format(
+    distutils.sysconfig.get_config_var("LIBDIR"),
+    distutils.sysconfig.get_config_var("INSTSONAME"))
+cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 
 
 class PytorchCommand(setuptools.Command):
@@ -349,6 +357,8 @@ def build_libs(libs):
         build_libs_cmd = ['bash', os.path.join('..', 'tools', 'build_pytorch_libs.sh')]
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    my_env["PYTORCH_PYTHON_LIBRARY"] = cmake_python_library
+    my_env["PYTORCH_PYTHON_INCLUDE_DIR"] = cmake_python_include_dir
     my_env["PYTORCH_BUILD_VERSION"] = version
     my_env["CMAKE_PREFIX_PATH"] = full_site_packages
     my_env["NUM_JOBS"] = str(NUM_JOBS)
@@ -400,6 +410,7 @@ def build_libs(libs):
     my_env["USE_LEVELDB"] = "ON" if USE_LEVELDB else "OFF"
     my_env["USE_LMDB"] = "ON" if USE_LMDB else "OFF"
     my_env["USE_OPENCV"] = "ON" if USE_OPENCV else "OFF"
+    my_env["USE_FFMPEG"] = "ON" if USE_FFMPEG else "OFF"
 
     try:
         os.mkdir('build')
@@ -848,7 +859,7 @@ if USE_CUDA:
 if USE_ROCM:
     CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_hip.so'), '-Wl,--as-needed'])
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
-NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
+NCCL_LIB = os.path.join(lib_path, 'libnccl.so.2')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
 
 # static library only
@@ -863,7 +874,7 @@ if IS_DARWIN:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_gpu.dylib'))
     if USE_ROCM:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'libcaffe2_hip.dylib'))
-    NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
+    NCCL_LIB = os.path.join(lib_path, 'libnccl.2.dylib')
 
 if IS_WINDOWS:
     CAFFE2_LIBS = [os.path.join(lib_path, 'caffe2.lib')]

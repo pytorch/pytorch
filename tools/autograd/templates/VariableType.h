@@ -31,8 +31,6 @@ using at::ScalarType;
 using at::optional;
 using at::Device;
 
-void register_variable_type_for(at::TypeExtendedInterface* baseType);
-
 struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::TypeExtendedInterface* baseType);
   at::ScalarType scalarType() const override;

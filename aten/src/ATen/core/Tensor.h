@@ -263,7 +263,6 @@ public:
   Tensor & masked_scatter_(const Tensor & mask, const Tensor & source);
   Tensor masked_select(const Tensor & mask) const;
   Tensor nonzero() const;
-  Tensor contiguous() const;
   Tensor view(IntList size) const;
   Tensor index_select(int64_t dim, const Tensor & index) const;
   Tensor take(const Tensor & index) const;
@@ -449,6 +448,7 @@ public:
   Tensor & clamp_max_(Scalar max);
   Tensor clamp_min(Scalar min) const;
   Tensor & clamp_min_(Scalar min);
+  Tensor contiguous() const;
   Tensor cos() const;
   Tensor & cos_();
   Tensor cosh() const;
@@ -510,6 +510,7 @@ public:
   Tensor log2() const;
   Tensor & log2_();
   Tensor logdet() const;
+  Tensor log_softmax(int64_t dim, ScalarType dtype) const;
   Tensor log_softmax(int64_t dim) const;
   Tensor logsumexp(int64_t dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
@@ -565,6 +566,7 @@ public:
   Tensor slice(int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) const;
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
+  Tensor softmax(int64_t dim, ScalarType dtype) const;
   Tensor softmax(int64_t dim) const;
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
   std::vector<Tensor> split_with_sizes(IntList split_sizes, int64_t dim=0) const;
@@ -634,10 +636,10 @@ public:
   int64_t numel() const;
   std::vector<Tensor> unbind(int64_t dim=0) const;
   int64_t get_device() const;
-  Tensor to(Device device, ScalarType dtype, bool non_blocking=false) const;
-  Tensor to(ScalarType dtype, bool non_blocking=false) const;
-  Tensor to(Device device, bool non_blocking=false) const;
-  Tensor to(const Tensor & other, bool non_blocking=false) const;
+  Tensor to(Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) const;
+  Tensor to(ScalarType dtype, bool non_blocking=false, bool copy=false) const;
+  Tensor to(Device device, bool non_blocking=false, bool copy=false) const;
+  Tensor to(const Tensor & other, bool non_blocking=false, bool copy=false) const;
   Scalar _local_scalar() const;
 
   template <typename F, typename... Args>

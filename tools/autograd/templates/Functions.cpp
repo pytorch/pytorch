@@ -130,6 +130,10 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor & self, const Tensor & ex
   return grad * self.pow(exponent) * self.log();
 }
 
+Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor & exponent) {
+  return grad * at::pow(base, exponent) * std::log(base.toDouble());
+}
+
 Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   Tensor args = at::arange(-p + 1, 1, -1, self.options()).div_(2.);
   args = args.add(self.unsqueeze(-1));
@@ -733,6 +737,25 @@ Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, in
     return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
   }
   return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
+}
+
+Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_output, const Tensor& self, const Tensor& target, const Tensor& weight, const Tensor& pos_weight, int64_t reduction) {
+  Tensor grad_target;
+  if (pos_weight.defined()) {
+    grad_target = (1. - self.sigmoid()).log_().sub_(pos_weight.mul(self.sigmoid().log_())).mul_(grad_output);
+  } else {
+    grad_target = self.mul(-grad_output);
+  }
+
+  if (weight.defined()) {
+    grad_target.mul_(weight);
+  }
+
+  if (reduction == Reduction::ElementwiseMean) {
+    grad_target.div_(target.numel());
+  }
+
+  return grad_target;
 }
 
 Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {

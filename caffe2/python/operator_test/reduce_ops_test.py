@@ -7,10 +7,12 @@ from caffe2.python import core, workspace
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
+from caffe2.python.test_util import IN_CIRCLECI_FLAKY_ENV
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import itertools as it
+import unittest
 
 
 class TestReduceOps(serial.SerializedTestCase):
@@ -55,6 +57,7 @@ class TestReduceOps(serial.SerializedTestCase):
                 self.run_reduce_op_test_impl(
                     op_name, X, axes, keepdims, ref_func, gc, dc)
 
+    @unittest.skipIf(IN_CIRCLECI_FLAKY_ENV, "FIXME: flaky test in CircleCI")
     @serial.given(
         X=hu.tensor(max_dim=3, dtype=np.float32), keepdims=st.booleans(),
         num_axes=st.integers(1, 3), **hu.gcs)

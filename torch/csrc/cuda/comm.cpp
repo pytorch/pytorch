@@ -129,7 +129,7 @@ std::vector<at::Tensor> scatter(
   std::vector<at::Tensor> chunks;
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
-        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), 0);
+        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), int64_t{0});
     AT_CHECK(
       chunk_size_sum == tensor.size(dim),
       "given chunk sizes don't sum up to the tensor's size ",
