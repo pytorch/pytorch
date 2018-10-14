@@ -108,7 +108,7 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   return self.as_strided(sizes, strides, storage_offset);
 }
 
-Tensor matrix_diag(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
+Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_) {
   int64_t nDims = self.dim() + 1;
   int64_t dim1 = maybe_wrap_dim(dim1_, nDims);
   int64_t dim2 = maybe_wrap_dim(dim2_, nDims);

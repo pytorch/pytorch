@@ -200,6 +200,7 @@ view of a storage and defines numeric operations on it.
    .. autoattribute:: device
       :annotation:
    .. automethod:: diag
+   .. automethod:: diag_embed
    .. automethod:: dim
    .. automethod:: dist
    .. automethod:: div
@@ -285,7 +286,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: masked_fill_
    .. automethod:: masked_select
    .. automethod:: matmul
-   .. automethod:: matrix_diag
    .. automethod:: matrix_power
    .. automethod:: max
    .. automethod:: mean

@@ -417,6 +417,7 @@ struct CAFFE2_API Type {
   virtual Tensor cumprod(const Tensor & self, int64_t dim, ScalarType dtype) const = 0;
   virtual Tensor cumprod(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor det(const Tensor & self) const = 0;
+  virtual Tensor diag_embed(const Tensor & self, int64_t offset, int64_t dim1, int64_t dim2) const = 0;
   virtual Tensor diagflat(const Tensor & self, int64_t offset) const = 0;
   virtual Tensor diagonal(const Tensor & self, int64_t offset, int64_t dim1, int64_t dim2) const = 0;
   virtual Tensor div(const Tensor & self, const Tensor & other) const = 0;
@@ -473,7 +474,6 @@ struct CAFFE2_API Type {
   virtual Tensor log_softmax(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor logsumexp(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor matmul(const Tensor & self, const Tensor & other) const = 0;
-  virtual Tensor matrix_diag(const Tensor & self, int64_t offset, int64_t dim1, int64_t dim2) const = 0;
   virtual Tensor matrix_power(const Tensor & self, int64_t n) const = 0;
   virtual std::tuple<Tensor,Tensor> max(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor max_values(const Tensor & self, int64_t dim, bool keepdim) const = 0;

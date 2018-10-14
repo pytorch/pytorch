@@ -277,6 +277,7 @@ _(aten, data_ptr) \
 _(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
+_(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, digamma) \
@@ -414,7 +415,6 @@ _(aten, masked_fill) \
 _(aten, masked_scatter) \
 _(aten, masked_select) \
 _(aten, matmul) \
-_(aten, matrix_diag) \
 _(aten, matrix_power) \
 _(aten, matrix_rank) \
 _(aten, max) \

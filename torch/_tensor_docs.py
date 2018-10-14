@@ -669,6 +669,13 @@ diag(diagonal=0) -> Tensor
 See :func:`torch.diag`
 """)
 
+add_docstr_all('diag_embed',
+               r"""
+diag_embed(offset=0, dim1=-2, dim2=-1) -> Tensor
+
+See :func:`torch.diag_embed`
+""")
+
 add_docstr_all('diagflat',
                r"""
 diagflat(diagonal=0) -> Tensor
@@ -1342,13 +1349,6 @@ add_docstr_all('masked_select',
 masked_select(mask) -> Tensor
 
 See :func:`torch.masked_select`
-""")
-
-add_docstr_all('matrix_diag',
-               r"""
-matrix_diag(offset=0, dim1=-2, dim2=-1) -> Tensor
-
-See :func:`torch.matrix_diag`
 """)
 
 add_docstr_all('matrix_power',

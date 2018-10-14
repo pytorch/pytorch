@@ -1106,6 +1106,69 @@ Get the k-th diagonal of a given matrix::
     tensor([ 0.0255, 0.1374])
 """)
 
+add_docstr(torch.diag_embed,
+           r"""
+diag_embed(input, offset=0, dim1=-2, dim2=-1) -> Tensor
+
+Creates a tensor with entries on a diagonal from :attr:`input` by
+using the last dimension as a diagonal dimension. By default, the
+new dimensions are put at the end of the Tensor to facilitate creating
+batches of diagonal matrices, but this can be specified using :attr:`dim1`
+and :attr:`dim2`.
+
+The argument :attr:`offset` controls which diagonal to consider:
+
+- If :attr:`offset` = 0, it is the main diagonal.
+- If :attr:`offset` > 0, it is above the main diagonal.
+- If :attr:`offset` < 0, it is below the main diagonal.
+
+The size of the new matrix will be calculated to make the specified diagonal
+of the size of the last input dimension.
+Note that for :attr:`offset` other than :math:`0`, the order of :attr:`dim1`
+and :attr:`dim2` matters, exchaning them is equivalent to changing the
+sign of :attr:`offset`.
+
+Applying :meth:`torch.diagonal` to the output of this function with
+the same arguments yields a matrix identical to input. However,
+:meth:`torch.diagonal` has different default dimensions, so those
+need to be explicitly specified.
+
+Args:
+    input (Tensor): the input tensor. Must be at least 1-dimensional.
+    offset (int, optional): which diagonal to consider. Default: 0
+        (main diagonal).
+    dim1 (int, optional): first dimension with respect to which to
+        take diagonal. Default: -2.
+    dim2 (int, optional): second dimension with respect to which to
+        take diagonal. Default: -1.
+
+Example::
+
+    >>> a = torch.randn(2, 3)
+    >>> torch.diag_embed(a)
+    tensor([[[ 1.5410,  0.0000,  0.0000],
+             [ 0.0000, -0.2934,  0.0000],
+             [ 0.0000,  0.0000, -2.1788]],
+
+            [[ 0.5684,  0.0000,  0.0000],
+             [ 0.0000, -1.0845,  0.0000],
+             [ 0.0000,  0.0000, -1.3986]]])
+
+    >>> torch.diag_embed(a, offset=1, dim1=0, dim2=2)
+    tensor([[[ 0.0000,  1.5410,  0.0000,  0.0000],
+             [ 0.0000,  0.5684,  0.0000,  0.0000]],
+
+            [[ 0.0000,  0.0000, -0.2934,  0.0000],
+             [ 0.0000,  0.0000, -1.0845,  0.0000]],
+
+            [[ 0.0000,  0.0000,  0.0000, -2.1788],
+             [ 0.0000,  0.0000,  0.0000, -1.3986]],
+
+            [[ 0.0000,  0.0000,  0.0000,  0.0000],
+             [ 0.0000,  0.0000,  0.0000,  0.0000]]])
+""")
+
+
 add_docstr(torch.diagflat,
            r"""
 diagflat(input, diagonal=0) -> Tensor
@@ -1166,9 +1229,9 @@ The argument :attr:`offset` controls which diagonal to consider:
 - If :attr:`offset` > 0, it is above the main diagonal.
 - If :attr:`offset` < 0, it is below the main diagonal.
 
-Applying :meth:`torch.matrix_diag` to the output of this function with
+Applying :meth:`torch.diag_embed` to the output of this function with
 the same arguments yields a diagonal matrix with the diagonal entries
-of the input. However, :meth:`torch.matrix_diag` has different default
+of the input. However, :meth:`torch.diag_embed` has different default
 dimensions, so those need to be explicitly specified.
 
 Args:
@@ -2361,67 +2424,6 @@ Example::
             [ 0,  0,  0,  1]], dtype=torch.uint8)
     >>> torch.masked_select(x, mask)
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
-""")
-
-add_docstr(torch.matrix_diag,
-           r"""
-matrix_diag(input, offset=0, dim1=-2, dim2=-1) -> Tensor
-
-Creates a diagonal matrix from :attr:`input` by using the last
-dimension as a diagonal dimension. By default, the new dimensions
-are put at the end of the Tensor to facilitate creating batches of
-diagonal matrices, but this can be specified using :attr:`dim1` and
-:attr:`dim2`.
-
-The argument :attr:`offset` controls which diagonal to consider:
-
-- If :attr:`offset` = 0, it is the main diagonal.
-- If :attr:`offset` > 0, it is above the main diagonal.
-- If :attr:`offset` < 0, it is below the main diagonal.
-
-The size of the new matrix will be calculated to make the specified diagonal
-of the size of the last input dimension.
-Note that for :attr:`offset` other than :math:`0`, the order of :attr:`dim1`
-and :attr:`dim2` matters, exchaning them is equivalent to changing the
-sign of :attr:`offset`.
-
-Applying :meth:`torch.diagonal` to the output of this function with
-the same arguments yields a matrix identical to input. However,
-:meth:`torch.diagonal` has different default dimensions, so those
-need to be explicitly specified.
-
-Args:
-    input (Tensor): the input tensor. Must be at least 1-dimensional.
-    offset (int, optional): which diagonal to consider. Default: 0
-        (main diagonal).
-    dim1 (int, optional): first dimension with respect to which to
-        take diagonal. Default: -2.
-    dim2 (int, optional): second dimension with respect to which to
-        take diagonal. Default: -1.
-
-Example::
-
-    >>> x = torch.randn(2, 3)
-    tensor([[[ 1.5410,  0.0000,  0.0000],
-             [ 0.0000, -0.2934,  0.0000],
-             [ 0.0000,  0.0000, -2.1788]],
-
-            [[ 0.5684,  0.0000,  0.0000],
-             [ 0.0000, -1.0845,  0.0000],
-             [ 0.0000,  0.0000, -1.3986]]])
-
-    >>> torch.matrix_diag(a, offset=1, dim1=0, dim2=2)
-    tensor([[[ 0.0000,  1.5410,  0.0000,  0.0000],
-             [ 0.0000,  0.5684,  0.0000,  0.0000]],
-
-            [[ 0.0000,  0.0000, -0.2934,  0.0000],
-             [ 0.0000,  0.0000, -1.0845,  0.0000]],
-
-            [[ 0.0000,  0.0000,  0.0000, -2.1788],
-             [ 0.0000,  0.0000,  0.0000, -1.3986]],
-
-            [[ 0.0000,  0.0000,  0.0000,  0.0000],
-             [ 0.0000,  0.0000,  0.0000,  0.0000]]])
 """)
 
 add_docstr(torch.matrix_rank,

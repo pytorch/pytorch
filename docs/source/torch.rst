@@ -260,13 +260,13 @@ Other Operations
 .. autofunction:: broadcast_tensors
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diag_embed
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
 .. autofunction:: flatten
 .. autofunction:: flip
 .. autofunction:: histc
-.. autofunction:: matrix_diag
 .. autofunction:: meshgrid
 .. autofunction:: renorm
 .. autofunction:: tensordot
