@@ -9,8 +9,6 @@ namespace at { namespace native {
 namespace {
 
 
-using namespace at;
-
 #if defined(__HIP_PLATFORM_HCC__)
 constexpr int WARP_SIZE = 64;
 #else
@@ -340,7 +338,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
 							    bool train, double momentum, double epsilon) {
 
   using accscalar_t = at::acc_type<scalar_t, true>;
-  Tensor output_= at::native::empty_like(input_);
+  Tensor output_= at::empty_like(input_);
   int64_t n_input = input_.size(1);
   Tensor save_mean_;
   Tensor save_invstd_;
@@ -349,11 +347,11 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
     input_options.dtype(ScalarType::Float);
   }
   if (train) {
-    save_mean_ = at::native::empty({n_input}, input_options);
-    save_invstd_ = at::native::empty({n_input}, input_options);
+    save_mean_ = at::empty({n_input}, input_options);
+    save_invstd_ = at::empty({n_input}, input_options);
   } else {
-    save_mean_ = at::native::empty({0}, input_options);
-    save_invstd_ = at::native::empty({0}, input_options);
+    save_mean_ = at::empty({0}, input_options);
+    save_invstd_ = at::empty({0}, input_options);
   }
   auto input = reshaped_packed_accessor<scalar_t, 3>(input_);
   auto output = reshaped_packed_accessor<scalar_t, 3>(output_);
@@ -395,13 +393,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
   Tensor grad_weight_;
   Tensor grad_bias_;
   if (grad_input_mask[0]) {
-    grad_input_ = at::native::empty_like(input_);
+    grad_input_ = at::empty_like(input_);
   }
   if (grad_input_mask[1]) {
-    grad_weight_ = at::native::empty_like(weight_);
+    grad_weight_ = at::empty_like(weight_);
   }
   if (grad_input_mask[2]) {
-    grad_bias_ = at::native::empty_like(weight_);
+    grad_bias_ = at::empty_like(weight_);
   }
 
   auto grad_output = reshaped_packed_accessor<scalar_t, 3>(grad_out_);

@@ -40,7 +40,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_template(const Tensor& input, co
 			       const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double eps) {
 
   using accscalar_t = at::acc_type<scalar_t, false>;
-  Tensor output = at::native::empty_like(input);
+  Tensor output = at::empty_like(input);
 
   int64_t n_input = input.size(1);
   int64_t n = input.numel() / n_input;
@@ -49,8 +49,8 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_template(const Tensor& input, co
   Tensor save_invstd;
   const int64_t zero = 0;
   if (train) {
-    save_mean = at::native::empty({n_input}, input.options());
-    save_invstd = at::native::empty({n_input}, input.options());
+    save_mean = at::empty({n_input}, input.options());
+    save_invstd = at::empty({n_input}, input.options());
   }
   auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
   auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
@@ -122,13 +122,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
   Tensor grad_weight;
   Tensor grad_bias;
   if (grad_input_mask[0]) {
-    grad_input = at::native::empty_like(input);
+    grad_input = at::empty_like(input);
   }
   if (grad_input_mask[1]) {
-    grad_weight = at::native::empty_like(weight);
+    grad_weight = at::empty_like(weight);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::native::empty_like(weight);
+    grad_bias = at::empty_like(weight);
   }
 
   auto weight_a = conditional_accessor_1d<scalar_t>(weight);
