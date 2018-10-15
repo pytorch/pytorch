@@ -825,7 +825,8 @@ class TestCaffe2Backend(unittest.TestCase):
         shape = (1, 64, 5, 5)
         input = Variable(torch.randn(*shape),
                          requires_grad=True)
-        self.run_model_test(underlying, train=False, input=(input), batch_size=BATCH_SIZE)
+        self.run_model_test(underlying, train=False, input=(input),
+                            batch_size=BATCH_SIZE)
 
     def test_dynamic_sizes(self):
         class MyModel(torch.nn.Module):

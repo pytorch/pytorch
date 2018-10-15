@@ -1088,7 +1088,8 @@ def pixel_shuffle(g, self, upscale_factor):
                                 output_channel, dims[2], dims[3]])
     after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
     return view(g, after_transpose,
-                [-1, output_channel, dims[2] * upscale_factor, dims[3] * upscale_factor])
+                [-1, output_channel, dims[2] * upscale_factor, dims[3] *
+                 upscale_factor])
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
