@@ -1120,6 +1120,43 @@ void testCustomOperators() {
     tracer::abandon();
   }
 }
+
+// test a few features that are not directly used in schemas yet
+void testSchemaParser() {
+  // nested arrays
+  auto s = parseSchema("at::what(int[][4] foo) -> ()");
+  ASSERT_TRUE(s.arguments.at(0).N == 4);
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments.at(0)
+                                              .type->expect<ListType>()
+                                              ->getElementType()
+                                              ->expect<ListType>()
+                                              ->getElementType()));
+  auto s2 = parseSchema("at::what(int[][] foo) -> ()");
+  ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments.at(0)
+                                            .type->expect<ListType>()
+                                            ->getElementType()
+                                            ->expect<ListType>()
+                                            ->getElementType()));
+  // futures
+  try {
+    parseSchema("at::what(Future(int) foo) -> ()");
+    ASSERT_TRUE(false);
+  } catch (script::ErrorReport& er) {
+    ASSERT_TRUE(
+        std::string(er.what()).find("Futures are not yet implemented") !=
+        std::string::npos);
+  }
+  // named returns
+  parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
+  auto s3 = parseSchema("at::what() -> (Tensor the_return, Tensor the_return2)");
+  ASSERT_TRUE(s3.returns.at(0).name == "the_return");
+  ASSERT_TRUE(s3.returns.at(1).name == "the_return2");
+
+  // test tensor with annotated alias sets
+  parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");
+
+}
+
 } // namespace
 } // namespace jit
 } // namespace torch

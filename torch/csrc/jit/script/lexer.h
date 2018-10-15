@@ -85,7 +85,7 @@ namespace script {
   _(TK_SLICE_EXPR, "slice expr", "")             \
   _(TK_TYPE_COMMENT, "type comment", "# type:")
 
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?";
+static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
