@@ -1,4 +1,4 @@
-#include "caffe2/utils/Metaprogramming.h"
+#include <c10/util/Metaprogramming.h>
 #include <gtest/gtest.h>
 
 using namespace c10::guts;

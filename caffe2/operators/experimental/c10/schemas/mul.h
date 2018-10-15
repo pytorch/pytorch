@@ -1,7 +1,7 @@
 #pragma once
 
 #include "caffe2/core/tensor.h"
-#include "caffe2/utils/Array.h"
+#include <c10/util/Array.h>
 
 namespace caffe2 {
 namespace ops {
