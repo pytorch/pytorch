@@ -35,6 +35,7 @@ template <>
 inline bool equal(const at::Tensor& a, const at::Tensor& b) {
   return a.equal(b);
 }
+
 template <>
 inline bool equal(
     const std::vector<at::Tensor>& a,
@@ -47,17 +48,6 @@ inline bool equal(
              [](const at::Tensor& a, const at::Tensor& b) {
                return a.equal(b);
              });
-}
-
-// TODO(suo). This hack is necessary because torch.clamp uses `nan` to represent
-// undefined values. Once the schema supports optional types, we can remove
-// this.
-template <>
-inline bool equal(const double& a, const double& b) {
-  if (std::isnan(a) && std::isnan(b)) {
-    return true;
-  }
-  return a == b;
 }
 }
 

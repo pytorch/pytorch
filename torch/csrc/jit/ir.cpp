@@ -555,9 +555,6 @@ std::shared_ptr<Graph> Graph::copy() {
   };
   new_g->block()->cloneFrom(this->block(), env);
 
-#ifndef NDEBUG
-  JIT_ASSERT(this->equals(new_g));
-#endif
   return new_g;
 }
 
