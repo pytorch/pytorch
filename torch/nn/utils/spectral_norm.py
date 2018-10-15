@@ -72,13 +72,12 @@ class SpectralNorm(object):
             setattr(module, self.name, weight)
         else:
             r_g = getattr(module, self.name + '_orig').requires_grad
-            weight = getattr(module, self.name)
-            if weight.requires_grad != r_g:
-                # NB: Cannot detach weight in-place here because if this is used
-                #     DataParallel, the buffesr are broadcast using
-                #     broadacast_coalesced and `weight` here is actually a view
-                #     and you can't detach views in-place.
-                setattr(module, self.name, weight.detach().requires_grad_(r_g))
+            weight = getattr(module, self.name).detach()
+            # NB: Cannot detach weight in-place here because if this is used
+            #     DataParallel, the bufferr are broadcast using
+            #     `broadacast_coalesced` and `weight` here is actually a view,
+            #     and you can't detach views in-place.
+            setattr(module, self.name, weight.requires_grad_(r_g))
 
     @staticmethod
     def apply(module, name, n_power_iterations, dim, eps):

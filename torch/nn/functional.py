@@ -2383,10 +2383,11 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
-    denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
     if out is None:
+        denom = input.norm(p, dim, True).clamp(min=eps).expand_as(input)
         return input / denom
     else:
+        denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
         return torch.div(input, denom, out=out)
 
 
