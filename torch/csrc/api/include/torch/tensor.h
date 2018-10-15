@@ -6,7 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch {
-using namespace at;
+using namespace at; // NOLINT
 
 using Dtype = at::ScalarType;
 
