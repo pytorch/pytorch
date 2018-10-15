@@ -1839,10 +1839,25 @@ static const std::unordered_map<std::string, std::string> &builtin_cast_methods(
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
-  if (value->type()->isSubtypeOf(DynamicType::get()) && builtin_cast_methods().count(field)) {
-    return std::make_shared<BuiltinFunction>(
-        Symbol::aten(builtin_cast_methods().at(field)),
-        NamedValue(loc, "self", value));
+  if (value->type()->isSubtypeOf(DynamicType::get())) {
+    if (builtin_cast_methods().count(field)) {
+      return std::make_shared<BuiltinFunction>(
+          Symbol::aten(builtin_cast_methods().at(field)),
+          NamedValue(loc, "self", value));
+    }
+    if (field == "dtype") {
+      auto* node = m.graph()->create(prim::TensorDType, {value});
+      node->output()->setType(IntType::get());
+      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    } else if (field == "device") {
+      auto* node = m.graph()->create(prim::TensorDevice, {value});
+      node->output()->setType(ListType::create(IntType::get()));
+      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    } else if (field == "shape") {
+      auto* node = m.graph()->create(prim::TensorShape, {value});
+      node->output()->setType(ListType::create(IntType::get()));
+      return std::make_shared<SimpleValue>(m.graph()->insertNode(node)->output());
+    }
   }
   if (getValue()->type()->isSubtypeOf(NumberType::get())) {
     throw ErrorReport(loc) << "Cannot call methods on numbers";

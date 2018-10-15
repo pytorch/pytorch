@@ -1968,6 +1968,70 @@ class TestJit(JitTestCase):
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
         self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
 
+    def test_function_default_values(self):
+        outer_var = torch.tensor(20)
+        outer_var2 = torch.tensor(30)
+        a = torch.tensor(0.5)
+        b = torch.tensor(10)
+
+        @torch.jit.script
+        def simple_fn(x, a=a, b=b, c=outer_var + outer_var2):
+            return x + a + b + c
+
+        self.assertExpectedGraph(simple_fn.graph, "simple")
+        self.assertEqual(
+            simple_fn(torch.ones(1)),
+            torch.ones(1) + 0.5 + 10 + (20 + 30))
+        self.assertEqual(
+            simple_fn(torch.ones(1), torch.tensor(1), torch.tensor(3), torch.tensor(4)),
+            torch.ones(1) + 1 + 3 + 4)
+
+        outer_c = torch.tensor(9)
+        outer_flag = torch.tensor(False)
+
+        @torch.jit.script
+        def bool_fn(x, a=outer_c, flag=outer_flag):
+            if bool(flag):
+                result = x
+            else:
+                result = x + a
+            return result
+
+        self.assertExpectedGraph(bool_fn.graph, "bool")
+        self.assertEqual(bool_fn(torch.ones(1)), torch.ones(1) + 9)
+        self.assertEqual(
+            bool_fn(torch.ones(1), torch.tensor(1), torch.tensor(True)),
+            torch.ones(1))
+
+        @torch.jit.script
+        def hints(x, a=0.5, b=10):  # noqa: E999
+            # type: (Tensor, float, int) -> Tensor
+            return x + a + b
+
+        self.assertExpectedGraph(hints.graph, "type_hints")
+        self.assertEqual(hints(torch.ones(1)), torch.ones(1) + 0.5 + 10)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
+
+            @torch.jit.script
+            def hints_bad_types(x, a=10, b=0.5):
+                # type: (Tensor, float, int) -> Tensor
+                return x + a + b
+
+    def test_module_default_values(self):
+        four = torch.tensor(4)
+
+        class Test(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Test, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, input, other=four):
+                return input + other
+
+        t = Test()
+        self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -2645,6 +2709,54 @@ class TestScript(JitTestCase):
         def foo():
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
+
+    def test_tensor_shape(self):
+        x = torch.empty(34, 56, 78)
+
+        def f(x):
+            return x.shape
+
+        self.checkScript(f, (x,))
+
+    def test_tensor_dtype(self):
+        x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
+        x_long = torch.empty(34, 56, 78, dtype=torch.long)
+        x_float32 = torch.empty(34, 56, 78, dtype=torch.float32)
+
+        @torch.jit.script
+        def byte(x):
+            return x.dtype == torch.uint8
+
+        @torch.jit.script
+        def long(x):
+            return x.dtype == torch.long
+
+        @torch.jit.script
+        def float32(x):
+            return x.dtype == torch.float32
+
+        self.assertTrue(byte(x_byte))
+        self.assertFalse(byte(x_long))
+        self.assertFalse(byte(x_float32))
+        self.assertFalse(long(x_byte))
+        self.assertTrue(long(x_long))
+        self.assertFalse(long(x_float32))
+        self.assertFalse(float32(x_byte))
+        self.assertFalse(float32(x_long))
+        self.assertTrue(float32(x_float32))
+
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_device(self):
+        cpu = torch.empty(34, 56, 78, device='cpu')
+        gpu = torch.empty(34, 56, 78, device='cuda')
+
+        @torch.jit.script
+        def same_device(x, y):
+            return x.device == y.device
+
+        self.assertTrue(same_device(cpu, cpu))
+        self.assertTrue(same_device(gpu, gpu))
+        self.assertFalse(same_device(cpu, gpu))
 
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
@@ -7288,6 +7400,29 @@ a")
         with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
             fn(torch.tensor(4))
 
+    def test_trace_contiguous(self):
+        def foo(x):
+            return x[:, :, ::2].contiguous().view(12)
+
+        x = torch.rand(2, 3, 4)
+        traced = torch.jit.trace(foo, (x,))
+        y = traced(x)
+        self.assertNotEqual(x.storage().data_ptr(), y.storage().data_ptr())
+
+    # This tests the logic in THPVariable_contiguous. There is short-circuiting
+    # code that prevents us from even getting to VariableType::contiguous, since
+    # it is an optimization that prevents us from acquiring the GIL for touching
+    # the device. We needed to add the tracing logic directly into the
+    # THPVariable_contiguous function only for the path where we are skipping
+    # dispatch into contiguous. We should see an aten::contiguous in this trace!
+    def test_trace_contiguous_short_circuit(self):
+        def foo(x):
+            return x.contiguous()
+
+        x = torch.rand(2, 3, 4)
+        traced = torch.jit.trace(foo, (x,))
+        self.assertExpectedGraph(traced.graph)
+
 
 class MnistNet(nn.Module):
     def __init__(self):
@@ -8327,9 +8462,9 @@ class TestCustomOperators(JitTestCase):
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::log_softmax\(\) is missing value for argument 'dim'."
+            "aten::transpose\(\) is missing value for argument 'dim0'."
         ):
-            torch.ops.aten.log_softmax(torch.ones(5))
+            torch.ops.aten.transpose(torch.ones(5, 5))
 
     def test_passing_an_argument_both_as_positional_and_kwarg(self):
         with self.assertRaisesRegex(

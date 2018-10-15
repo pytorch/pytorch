@@ -41,7 +41,7 @@ inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_d
 }
 
 // [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
-// nDimension                 corresponds to the "true" ATen dimension. TODO: implement.
+// nDimension                 corresponds to the "true" ATen dimension.
 // nDimensionLegacyNoScalars  correpsonds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
 // nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
 //                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.

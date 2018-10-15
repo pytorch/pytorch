@@ -150,12 +150,10 @@ struct CAFFE2_API Type {
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int32_t device_index = -1) const {
-    TensorOptions r;
-    r.dtype(scalarType());
-    r.device({backendToDeviceType(backend()), device_index});
-    r.layout(layout());
-    r.is_variable(is_variable());
-    return r;
+    return TensorOptions().dtype(scalarType())
+                          .device({backendToDeviceType(backend()), device_index})
+                          .layout(layout())
+                          .is_variable(is_variable());
   }
 
   operator TensorOptions() const {
@@ -181,7 +179,6 @@ struct CAFFE2_API Type {
   virtual Tensor s_masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor nonzero(const Tensor & self) const = 0;
-  virtual Tensor contiguous(const Tensor & self) const = 0;
   virtual Tensor view(const Tensor & self, IntList size) const = 0;
   virtual Tensor index_select(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
   virtual Tensor take(const Tensor & self, const Tensor & index) const = 0;
@@ -408,6 +405,7 @@ struct CAFFE2_API Type {
   virtual Tensor & clamp_max_(Tensor & self, Scalar max) const = 0;
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
   virtual Tensor & clamp_min_(Tensor & self, Scalar min) const = 0;
+  virtual Tensor contiguous(const Tensor & self) const = 0;
   virtual Tensor cos(const Tensor & self) const = 0;
   virtual Tensor & cos_(Tensor & self) const = 0;
   virtual Tensor cosh(const Tensor & self) const = 0;
@@ -469,6 +467,7 @@ struct CAFFE2_API Type {
   virtual Tensor log2(const Tensor & self) const = 0;
   virtual Tensor & log2_(Tensor & self) const = 0;
   virtual Tensor logdet(const Tensor & self) const = 0;
+  virtual Tensor log_softmax(const Tensor & self, int64_t dim, ScalarType dtype) const = 0;
   virtual Tensor log_softmax(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor logsumexp(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor matmul(const Tensor & self, const Tensor & other) const = 0;
@@ -523,6 +522,7 @@ struct CAFFE2_API Type {
   virtual Tensor slice(const Tensor & self, int64_t dim, int64_t start, int64_t end, int64_t step) const = 0;
   virtual std::tuple<Tensor,Tensor> slogdet(const Tensor & self) const = 0;
   virtual Tensor smm(const Tensor & self, const Tensor & mat2) const = 0;
+  virtual Tensor softmax(const Tensor & self, int64_t dim, ScalarType dtype) const = 0;
   virtual Tensor softmax(const Tensor & self, int64_t dim) const = 0;
   virtual std::vector<Tensor> split(const Tensor & self, int64_t split_size, int64_t dim) const = 0;
   virtual std::vector<Tensor> split_with_sizes(const Tensor & self, IntList split_sizes, int64_t dim) const = 0;
@@ -592,10 +592,10 @@ struct CAFFE2_API Type {
   virtual int64_t numel(const Tensor & self) const = 0;
   virtual std::vector<Tensor> unbind(const Tensor & self, int64_t dim) const = 0;
   virtual int64_t get_device(const Tensor & self) const = 0;
-  virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking) const = 0;
-  virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking) const = 0;
-  virtual Tensor to(const Tensor & self, Device device, bool non_blocking) const = 0;
-  virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking) const = 0;
+  virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
+  virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
+  virtual Tensor to(const Tensor & self, Device device, bool non_blocking, bool copy) const = 0;
+  virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
   virtual Scalar _local_scalar(const Tensor & self) const = 0;
 protected:
   TensorTypeId type_id_;
