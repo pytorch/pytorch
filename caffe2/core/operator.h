@@ -131,7 +131,7 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
       const vector<int64_t>& dims,
       const at::TensorOptions& options) {
     CAFFE_ENFORCE_WITH_CALLER(
-        options.device_opt() != at::nullopt,
+        options.device_opt() != c10::nullopt,
         "device must be provided in option.");
     return BlobGetMutableTensor(outputs_.at(idx), dims, options);
   }
