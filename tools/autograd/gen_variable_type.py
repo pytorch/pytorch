@@ -248,7 +248,7 @@ def gen_variable_type(out, aten_declarations, template_path):
 
     gen_variable_type_shard(out, aten_declarations, template_path, None, True)
 
-    # NOTE: see the comment at the top of the VariableType.cpp
+    # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
     num_shards = 5
     shards = [[] for _ in range(num_shards)]
@@ -259,7 +259,7 @@ def gen_variable_type(out, aten_declarations, template_path):
         shards[x].append(decl)
 
     for i, shard in enumerate(shards):
-        gen_variable_type_shard(out, shard, template_path, '-%d' % i, False)
+        gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
 
