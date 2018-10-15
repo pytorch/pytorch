@@ -355,6 +355,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   inline void* data() const {
     AT_ASSERT(!is_variable());
     AT_ENFORCE_WITH_CALLER(storage_initialized());
+    AT_ENFORCE_WITH_CALLER(dtype_initialized());
     return static_cast<void*>(
         static_cast<char*>(storage_.data()) +
         data_type_.itemsize() * storage_offset_);
@@ -370,6 +371,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return data_type_;
   }
   size_t itemsize() const {
+    AT_ENFORCE_WITH_CALLER(dtype_initialized());
     return data_type_.itemsize();
   }
 
@@ -876,6 +878,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool storage_initialized() const noexcept {
     return storage_.data() || numel_ == 0;
+  }
+
+  bool dtype_initialized() const noexcept {
+    return data_type_ != caffe2::TypeMeta();
   }
 
  private:
