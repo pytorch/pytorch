@@ -6928,6 +6928,20 @@ def bceloss_weights_no_reduce_scalar_test():
     )
 
 
+def bce_with_logistic_legacy_enum_test():
+    t = Variable(torch.randn(15, 10).gt(0).double())
+    sigmoid = nn.Sigmoid()
+    return dict(
+        fullname='BCEWithLogitsLoss_legacy_enum',
+        constructor=wrap_functional(
+            lambda i: F.binary_cross_entropy_with_logits(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
+        reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
+        check_gradgrad=False,
+        pickle=False,
+    )
+
+
 def bce_with_logistic_no_reduce_test():
     t = Variable(torch.randn(15, 10).gt(0).double())
     sigmoid = nn.Sigmoid()
@@ -7416,6 +7430,7 @@ new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
     bceloss_weights_no_reduce_test(),
+    bce_with_logistic_legacy_enum_test(),
     bce_with_logistic_no_reduce_test(),
     bceloss_no_reduce_scalar_test(),
     bceloss_weights_no_reduce_scalar_test(),
