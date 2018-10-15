@@ -242,7 +242,7 @@ void DAGNetBase::WorkerFunction() {
                           operator_nodes_[idx].operator_->debug_def());
       }
     } catch (std::exception& e) {
-      std::string exception_str = at::GetExceptionString(e);
+      std::string exception_str = c10::GetExceptionString(e);
       HandleException(idx, exception_str);
     } catch (...) {
       std::string exception_str = "Unknown exception";

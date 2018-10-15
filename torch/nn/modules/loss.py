@@ -206,7 +206,7 @@ class NLLLoss2d(NLLLoss):
                  reduce=None, reduction='elementwise_mean'):
         warnings.warn("NLLLoss2d has been deprecated. "
                       "Please use NLLLoss instead as a drop-in replacement and see "
-                      "http://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
+                      "https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
         super(NLLLoss2d, self).__init__(weight, size_average, ignore_index, reduce, reduction)
 
 
@@ -498,8 +498,8 @@ class BCEWithLogitsLoss(_Loss):
 
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_n \left[ t_n \cdot \log \sigma(x_n)
-        + (1 - t_n) \cdot \log (1 - \sigma(x_n)) \right],
+        l_n = - w_n \left[ y_n \cdot \log \sigma(x_n)
+        + (1 - y_n) \cdot \log (1 - \sigma(x_n)) \right],
 
     where :math:`N` is the batch size. If reduce is ``True``, then
 
@@ -518,8 +518,8 @@ class BCEWithLogitsLoss(_Loss):
 
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_n \left[ p_n t_n \cdot \log \sigma(x_n)
-        + (1 - t_n) \cdot \log (1 - \sigma(x_n)) \right],
+        l_n = - w_n \left[ p_n y_n \cdot \log \sigma(x_n)
+        + (1 - y_n) \cdot \log (1 - \sigma(x_n)) \right],
 
     where :math:`p_n` is the positive weight of class :math:`n`.
     :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.

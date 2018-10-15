@@ -63,20 +63,21 @@ struct TORCH_API Operator {
     // we do less work during static operator registration
     if(!schema_) {
       schema_ = std::make_shared<FunctionSchema>(parseSchema(schema_string_.value()));
-      schema_string_ = at::nullopt;
+      schema_string_ = c10::nullopt;
     }
     return *schema_;
   }
 private:
-  mutable at::optional<std::string> schema_string_;
-  // cannot use at::optional because windows has issues that require an assignment operator to be generated
-  // cannot use std::unique_ptr because initializer lists of Operators end up copying the Operator
-  mutable std::shared_ptr<FunctionSchema> schema_;
+ mutable c10::optional<std::string> schema_string_;
+ // cannot use c10::optional because windows has issues that require an
+ // assignment operator to be generated cannot use std::unique_ptr because
+ // initializer lists of Operators end up copying the Operator
+ mutable std::shared_ptr<FunctionSchema> schema_;
 
-  // Essentially a variant<Operation, OperationCreator>.
-  // NB: std::function has a default state (where it == nullptr).
-  std::shared_ptr<Operation> op_;
-  OperationCreator op_creator_;
+ // Essentially a variant<Operation, OperationCreator>.
+ // NB: std::function has a default state (where it == nullptr).
+ std::shared_ptr<Operation> op_;
+ OperationCreator op_creator_;
 };
 
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name);

@@ -25,6 +25,8 @@
 #include "ATen/core/IdWrapper.h"
 #include "ATen/core/Macros.h"
 
+#include "c10/util/Type.h"
+
 /*
  * TypeIdentifier is a small type containing an id.
  * Types must be registered using CAFFE_KNOWN_TYPE() for them to have a type id.
@@ -156,7 +158,7 @@ inline void _Ctor(void* ptr, size_t n) {
 template <typename T>
 inline void _CtorNotDefault(void* /*ptr*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(at::demangle_type<T>()) +
+      "Type " + std::string(c10::demangle_type<T>()) +
       " is not default-constructible.");
 }
 
@@ -206,7 +208,7 @@ inline void _Copy(const void* src, void* dst, size_t n) {
 template <typename T>
 inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(at::demangle_type<T>()) +
+      "Type " + std::string(c10::demangle_type<T>()) +
       " does not allow assignment.");
 }
 
@@ -273,7 +275,7 @@ const char* _TypeName() noexcept {
   static const char* literal_name = __TypeName<T>();
 #ifdef __GXX_RTTI
   std::ignore = literal_name; // suppress unused warning
-  static const std::string name = at::demangle(typeid(T).name());
+  static const std::string name = c10::demangle(typeid(T).name());
   return name.c_str();
 #else
   return literal_name;

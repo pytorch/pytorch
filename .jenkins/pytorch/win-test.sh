@@ -39,12 +39,20 @@ cat >ci_scripts/setup_pytorch_env.bat <<EOL
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\ProgramData\\chocolatey\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install Miniconda3
-IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
-curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
-.\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
-call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-call conda install -y -q numpy mkl cffi pyyaml boto3
-
+if "%BUILD_ENVIRONMENT%"=="" (
+    set CONDA_PARENT_DIR=%CD%
+) else (
+    set CONDA_PARENT_DIR=C:\\Jenkins
+)
+if NOT "%BUILD_ENVIRONMENT%"=="" (
+    IF EXIST %CONDA_PARENT_DIR%\\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\\Miniconda3 )
+    curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
+    .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
+)
+call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
+if NOT "%BUILD_ENVIRONMENT%"=="" (
+    call conda install -y -q numpy mkl cffi pyyaml boto3
+)
 pip install ninja future
 
 call "C:\\Program Files (x86)\\Microsoft Visual Studio\\2017\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat" x86_amd64
@@ -58,13 +66,14 @@ set CUDA_TOOLKIT_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\
 set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 set PYTHONPATH=%CD%\\test;%PYTHONPATH%
 
-cd test/
-
-python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
-
-7z x %IMAGE_COMMIT_TAG%.7z
-
-cd ..
+if NOT "%BUILD_ENVIRONMENT%"=="" (
+    cd test/
+    python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
+    7z x %IMAGE_COMMIT_TAG%.7z
+    cd ..
+) else (
+    xcopy /s %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch .\\test\\torch\\
+)
 
 EOL
 

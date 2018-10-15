@@ -101,7 +101,7 @@ struct GetRecurrentNetworkGradient : public GradientMakerBase {
       gradientOutputs.push_back(GI(id));
     }
 
-    VLOG(1) << "Gradient blobs: " << Join(", ", gradientOutputs);
+    VLOG(1) << "Gradient blobs: " << c10::Join(", ", gradientOutputs);
 
     return SingleGradientDef(
         "RecurrentNetworkGradient", "", gradientInputs, gradientOutputs);

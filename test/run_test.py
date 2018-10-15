@@ -30,10 +30,12 @@ TESTS = [
     'multiprocessing',
     'nccl',
     'nn',
+    'numba_integration',
     'optim',
     'sparse',
     'thd_distributed',
     'torch',
+    'type_info',
     'utils',
 ]
 

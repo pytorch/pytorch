@@ -305,6 +305,20 @@ if(USE_FFMPEG)
   endif ()
 endif()
 
+# ---[ Caffe2 depends on FP16 library for half-precision conversions
+if (NOT TARGET fp16)
+  if (NOT DEFINED FP16_SOURCE_DIR)
+    set(FP16_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/FP16" CACHE STRING "FP16 source directory")
+  endif()
+
+  set(FP16_BUILD_TESTS OFF CACHE BOOL "")
+  set(FP16_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  add_subdirectory(
+    "${FP16_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+endif()
+list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
+
 # ---[ EIGEN
 # Due to license considerations, we will only use the MPL2 parts of Eigen.
 set(EIGEN_MPL2_ONLY 1)

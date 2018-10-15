@@ -267,7 +267,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           },
           py::return_value_policy::reference);
 
-  py::class_<GenericOperator> nnop(m, "NeuralNetOperator");
+  py::class_<NeuralNetOperator, GenericOperator> nnop(m, "NeuralNetOperator");
   py::class_<nom::repr::Tensor> nndata(m, "NeuralNetData");
 
   nnop.def(py::init<std::string>()).def("getName", &NeuralNetOperator::getName);

@@ -144,6 +144,7 @@ goto:eof
                   -DTHS_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
                   -DTHC_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
                   -DTHCS_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
+                  -DC10_LIBRARIES="%INSTALL_DIR%/lib/c10.lib" ^
                   -DCAFFE2_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
                   -DTHNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2.lib" ^
                   -DTHCUNN_LIBRARIES="%INSTALL_DIR%/lib/caffe2_gpu.lib" ^
