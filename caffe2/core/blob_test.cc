@@ -1079,10 +1079,10 @@ TEST(TensorConstruction, UninitializedCopyTest) {
   Tensor x(CPU);
   Tensor y(x, CPU);
   Tensor z = x.Clone();
-  EXPECT_FALSE(x.storage_initialized());
-  EXPECT_FALSE(y.storage_initialized());
+  EXPECT_FALSE(x.dtype_initialized());
+  EXPECT_FALSE(y.dtype_initialized());
   LOG(INFO) << "z.size()" << z.size();
-  EXPECT_FALSE(z.storage_initialized());
+  EXPECT_FALSE(z.dtype_initialized());
 }
 
 TEST(TensorConstruction, CopyConstructorTest) {

@@ -452,6 +452,10 @@ class CAFFE2_API Tensor final {
   bool storage_initialized() const {
     return impl_->storage_initialized();
   }
+
+  bool dtype_initialized() const {
+    return impl_->dtype_initialized();
+  }
 };
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
