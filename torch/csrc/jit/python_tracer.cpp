@@ -36,9 +36,9 @@ std::string getPythonInterpreterStackTrace() {
 }
 
 std::shared_ptr<torch::jit::Graph> createGraphByTracing(
-        py::function func,
-        Stack trace_inputs,
-        at::optional<size_t> num_real_inputs) {
+    py::function func,
+    Stack trace_inputs,
+    c10::optional<size_t> num_real_inputs) {
   size_t num_func_inputs = num_real_inputs.value_or(trace_inputs.size());
   auto enter_info = tracer::enter(std::move(trace_inputs));
   try {

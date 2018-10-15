@@ -12,9 +12,9 @@
 namespace torch { namespace utils {
 
 at::Tensor dispatch_type_conversion(
-    const at::Tensor & self,
-    const at::Type & type,
-    at::optional<int32_t> device_index,
+    const at::Tensor& self,
+    const at::Type& type,
+    c10::optional<int32_t> device_index,
     bool non_blocking) {
   if (type.is_cuda()) {
     torch::utils::cuda_lazy_init();
@@ -49,5 +49,4 @@ at::Tensor dispatch_type_conversion(
     default: { return self.toType(type, non_blocking); } break;
   }
 }
-
 }} // namespace torch::utils

@@ -1387,7 +1387,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   auto storage = at::zeros({base_size}, grad.options());
 
   // prepare indices tensor if we will do index_add_ later
-  at::optional<at::Tensor> flatten_full_indices;
+  c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices = at::arange(0, base_size, grad.options().dtype(at::kLong));
   }
@@ -1508,7 +1508,11 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 //
 // This makes no assumption on the signs of sigma.
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-          bool some, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
+          bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
+  AT_CHECK(compute_uv,
+           "svd_backward: Setting compute_uv to false in torch.svd doesn't compute singular matrices, ",
+           "and hence we cannot compute backward. Please use torch.svd(compute_uv=True)");
+
   auto m = self.size(0);
   auto n = self.size(1);
   auto k = sigma.size(0);
@@ -1588,15 +1592,14 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
+    AT_CHECK(eigenvectors,
+             "symeig_backward: Setting eigenvectors to false in torch.symeig doesn't compute eigenvectors ",
+             "and hence we cannot compute backward. Please use torch.symeig(eigenvectors=True)");
+
     auto glambda = grads[0];
     auto gv = grads[1];
 
     auto vt = v.t();
-
-    if (!eigenvectors) {
-        throw std::runtime_error(std::string("cannot compute backward without "
-                                             "computing eigenvectors in forward pass"));
-    }
 
     Tensor result;
     if (gv.defined()) {
@@ -1632,7 +1635,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
     Tensor u, sigma, v;
     std::tie(u, sigma, v) = self.svd();
     auto gsigma = prod_backward(grad, sigma, det);
-    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
 
@@ -1645,7 +1648,7 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
     std::tie(u, sigma, v) = self.svd();
     // backward det = \sum log(sigma)
     auto gsigma = grad.div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
 
@@ -1663,7 +1666,7 @@ Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
     auto gsigma = grads[1].div(sigma);
-    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, self, true, true, u, sigma, v);
   }
 }
 

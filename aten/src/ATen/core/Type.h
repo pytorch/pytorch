@@ -14,6 +14,8 @@
 #include "ATen/core/Reduction.h"
 #include "ATen/core/TensorOptions.h"
 
+#include "c10/util/Optional.h"
+
 #include <array>
 #include <cstddef>
 #include <functional>
@@ -132,7 +134,11 @@ struct CAFFE2_API Type {
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
   virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const = 0;
 
-  virtual void backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const = 0;
+  virtual void backward(
+      Tensor& self,
+      c10::optional<Tensor> gradient,
+      bool keep_graph,
+      bool create_graph) const = 0;
   virtual void set_data(Tensor & self, Tensor new_data) const = 0;
 
   virtual Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
@@ -150,12 +156,10 @@ struct CAFFE2_API Type {
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int32_t device_index = -1) const {
-    TensorOptions r;
-    r.dtype(scalarType());
-    r.device({backendToDeviceType(backend()), device_index});
-    r.layout(layout());
-    r.is_variable(is_variable());
-    return r;
+    return TensorOptions().dtype(scalarType())
+                          .device({backendToDeviceType(backend()), device_index})
+                          .layout(layout())
+                          .is_variable(is_variable());
   }
 
   operator TensorOptions() const {
@@ -341,7 +345,7 @@ struct CAFFE2_API Type {
   virtual std::tuple<Tensor,Tensor> trtrs(const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) const = 0;
   virtual std::tuple<Tensor,Tensor> symeig(const Tensor & self, bool eigenvectors, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> eig(const Tensor & self, bool eigenvectors) const = 0;
-  virtual std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some) const = 0;
+  virtual std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool compute_uv) const = 0;
   virtual Tensor potrf(const Tensor & self, bool upper) const = 0;
   virtual Tensor potrs(const Tensor & self, const Tensor & input2, bool upper) const = 0;
   virtual Tensor potri(const Tensor & self, bool upper) const = 0;

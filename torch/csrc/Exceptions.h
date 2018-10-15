@@ -11,22 +11,25 @@
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
-
-#define END_HANDLE_TH_ERRORS_RET(retval)                                       \
-  } catch (python_error &e) {                                                  \
-    return retval;                                                             \
-  } catch (const at::Error &e) {                                               \
-    auto msg = torch::processErrorMsg(e.what_without_backtrace());              \
-    PyErr_SetString(PyExc_RuntimeError, msg.c_str());                          \
-    return retval;                                                             \
-  } catch (torch::PyTorchError &e) {                                           \
-    auto msg = torch::processErrorMsg(e.what());                               \
-    PyErr_SetString(e.python_type(), msg.c_str());                             \
-    return retval;                                                             \
-  } catch (const std::exception &e) {                                          \
-    auto msg = torch::processErrorMsg(e.what());                               \
-    PyErr_SetString(PyExc_RuntimeError, msg.c_str());                          \
-    return retval;                                                             \
+#define END_HANDLE_TH_ERRORS_RET(retval)                           \
+  }                                                                \
+  catch (python_error & e) {                                       \
+    return retval;                                                 \
+  }                                                                \
+  catch (const c10::Error& e) {                                    \
+    auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
+    PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
+    return retval;                                                 \
+  }                                                                \
+  catch (torch::PyTorchError & e) {                                \
+    auto msg = torch::processErrorMsg(e.what());                   \
+    PyErr_SetString(e.python_type(), msg.c_str());                 \
+    return retval;                                                 \
+  }                                                                \
+  catch (const std::exception& e) {                                \
+    auto msg = torch::processErrorMsg(e.what());                   \
+    PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
+    return retval;                                                 \
   }
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)

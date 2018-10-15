@@ -9,12 +9,13 @@
 //
 // From https://github.com/akrzemi1/Optional
 //
-// ATen:
-// - Move to `at` namespace.
+// C10
+// - Move to `c10` namespace.
 // - Remove macro use in line 478 because the nvcc device compiler cannot handle
 // it.
 
-#pragma once
+#ifndef C10_UTIL_OPTIONAL_H_
+#define C10_UTIL_OPTIONAL_H_
 
 #include <cassert>
 #include <functional>
@@ -105,7 +106,7 @@
 #define OPTIONAL_MUTABLE_CONSTEXPR constexpr
 #endif
 
-namespace at {
+namespace c10 {
 
 // 20.5.4, optional for object types
 template <class T>
@@ -301,8 +302,7 @@ using OptionalBase = typename std::conditional<
 
 template <class T>
 class optional : private OptionalBase<T> {
-
-  template <class U>  // re-declaration for nvcc on Windows.
+  template <class U> // re-declaration for nvcc on Windows.
   using OptionalBase = typename std::conditional<
       std::is_trivially_destructible<U>::value, // if possible
       constexpr_optional_base<typename std::remove_const<
@@ -1007,13 +1007,13 @@ constexpr optional<X&> make_optional(std::reference_wrapper<X> v) {
   return optional<X&>(v.get());
 }
 
-} // namespace at
+} // namespace c10
 
 namespace std {
 template <typename T>
-struct hash<at::optional<T>> {
+struct hash<c10::optional<T>> {
   typedef typename hash<T>::result_type result_type;
-  typedef at::optional<T> argument_type;
+  typedef c10::optional<T> argument_type;
 
   constexpr result_type operator()(argument_type const& arg) const {
     return arg ? std::hash<T>{}(*arg) : result_type{};
@@ -1021,9 +1021,9 @@ struct hash<at::optional<T>> {
 };
 
 template <typename T>
-struct hash<at::optional<T&>> {
+struct hash<c10::optional<T&>> {
   typedef typename hash<T>::result_type result_type;
-  typedef at::optional<T&> argument_type;
+  typedef c10::optional<T&> argument_type;
 
   constexpr result_type operator()(argument_type const& arg) const {
     return arg ? std::hash<T>{}(*arg) : result_type{};
@@ -1031,5 +1031,13 @@ struct hash<at::optional<T&>> {
 };
 } // namespace std
 
+// TODO: remove at::optional when done moving files
+namespace at {
+template <class T>
+using optional = c10::optional<T>;
+}
+
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION
+
+#endif // C10_UTIL_OPTIONAL_H_

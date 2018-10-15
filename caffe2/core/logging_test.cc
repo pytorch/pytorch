@@ -65,11 +65,11 @@ TEST(LoggingTest, EnforceShowcase) {
 }
 
 TEST(LoggingTest, Join) {
-  auto s = Join(", ", vector<int>({1, 2, 3}));
+  auto s = c10::Join(", ", vector<int>({1, 2, 3}));
   EXPECT_EQ(s, "1, 2, 3");
-  s = Join(":", vector<string>());
+  s = c10::Join(":", vector<string>());
   EXPECT_EQ(s, "");
-  s = Join(", ", set<int>({3, 1, 2}));
+  s = c10::Join(", ", set<int>({3, 1, 2}));
   EXPECT_EQ(s, "1, 2, 3");
 }
 

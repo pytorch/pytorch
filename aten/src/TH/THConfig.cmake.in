@@ -6,4 +6,8 @@
 
 SET(TH_FOUND 1)
 SET(TH_INCLUDE_DIR "@TH_INCLUDE_DIR@")
-SET(TH_LIBRARIES "@TH_LIBRARIES@")
+# TODO: TH right now uses old-style cmake targets, and due to
+# transitive dependency, now libraries such as libshm depend
+# on C10 as well. As a result, we manually add that TH_LIBRARIES
+# will contain C10 as well.
+SET(TH_LIBRARIES "@TH_LIBRARIES@;@C10_LIBRARIES")
