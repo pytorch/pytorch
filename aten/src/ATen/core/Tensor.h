@@ -382,7 +382,7 @@ public:
   std::tuple<Tensor,Tensor> trtrs(const Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
   std::tuple<Tensor,Tensor> symeig(bool eigenvectors=false, bool upper=true) const;
   std::tuple<Tensor,Tensor> eig(bool eigenvectors=false) const;
-  std::tuple<Tensor,Tensor,Tensor> svd(bool some=true) const;
+  std::tuple<Tensor,Tensor,Tensor> svd(bool some=true, bool compute_uv=true) const;
   Tensor potrf(bool upper=true) const;
   Tensor potrs(const Tensor & input2, bool upper=true) const;
   Tensor potri(bool upper=true) const;

@@ -339,7 +339,7 @@ struct CAFFE2_API Type {
   virtual std::tuple<Tensor,Tensor> trtrs(const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) const = 0;
   virtual std::tuple<Tensor,Tensor> symeig(const Tensor & self, bool eigenvectors, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> eig(const Tensor & self, bool eigenvectors) const = 0;
-  virtual std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some) const = 0;
+  virtual std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool compute_uv) const = 0;
   virtual Tensor potrf(const Tensor & self, bool upper) const = 0;
   virtual Tensor potrs(const Tensor & self, const Tensor & input2, bool upper) const = 0;
   virtual Tensor potri(const Tensor & self, bool upper) const = 0;

@@ -4575,6 +4575,17 @@ class TestTorch(TestCase):
         self.assertEqual(X, Xhat, 1e-8, 'USV\' wrong')
 
     @staticmethod
+    def _test_svd_no_singularvectors(self, cast):
+        for size in [(5, 5), (5, 20), (20, 5)]:
+            a = cast(torch.randn(*size))
+            u, s_expect, v = torch.svd(a)
+            u, s_actual, v = torch.svd(a, compute_uv=False)
+            self.assertEqual(s_expect, s_actual, "Singular values don't match")
+
+    def test_svd_no_singularvectors(self):
+        self._test_svd_no_singularvectors(self, lambda t: t)
+
+    @staticmethod
     def _test_matrix_rank(self, conv_fn):
         a = conv_fn(torch.eye(10))
         self.assertEqual(torch.matrix_rank(a).item(), 10)
