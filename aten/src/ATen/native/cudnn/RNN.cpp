@@ -1105,7 +1105,7 @@ struct DropoutState {
   // for the first time. Note that in this case needed != used, as we don't need
   // a bufer to e.g. run RNNs in test mode.
   at::Tensor buffer;
-  at::optional<cuda::CUDAEvent> event;
+  c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
 
   // Every time we use a dropout state, we need to synchronize with its event,

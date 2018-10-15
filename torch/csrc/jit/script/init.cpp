@@ -115,8 +115,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     auto schema = getSchema(inputs.size(), n_binders);
 
     std::stringstream failure_messages;
-    at::optional<MatchedSchema> matched_schema =
-      tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
+    c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
+        schema,
+        loc,
+        *m.graph(),
+        inputs_,
+        attributes,
+        failure_messages,
+        /*conv_tensor_to_num*/ true);
     if (!matched_schema)
       throw ErrorReport(loc) << failure_messages.str();
 
@@ -172,7 +178,10 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
 
 struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   explicit ConstantPythonTupleValue(py::object tup) : PythonValue(tup) {}
-  std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override {
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      SourceRange loc,
+      Method& m,
+      c10::optional<size_t> size_hint = {}) override {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     result.reserve(tup.size());
@@ -245,7 +254,10 @@ struct ModuleValue : public SugaredValue {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      SourceRange loc,
+      Method& m,
+      c10::optional<size_t> size_hint = {}) override {
     py::object py_module = py::cast(module);
     if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
       return SugaredValue::asTuple(loc, m, size_hint);
@@ -321,7 +333,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(py::str(builtin_name)), at::nullopt);
+        Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
   }
 
   if (py::isinstance<py::function>(obj)) {

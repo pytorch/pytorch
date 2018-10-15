@@ -48,7 +48,10 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 
   // use it as a vector of values, e.g. a tuple of values as return value from
   // a method invocation
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      SourceRange loc,
+      Method& m,
+      c10::optional<size_t> size_hint = {}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
@@ -92,7 +95,10 @@ struct TORCH_API SimpleValue : public SugaredValue {
   virtual Value * asValue(SourceRange range, Method & m) override {
     return value;
   }
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override;
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      SourceRange loc,
+      Method& m,
+      c10::optional<size_t> size_hint = {}) override;
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
   Value* getValue() const {
     return value;
@@ -102,14 +108,14 @@ private:
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
-  BuiltinFunction(Symbol symbol, at::optional<NamedValue> value)
+  BuiltinFunction(Symbol symbol, c10::optional<NamedValue> value)
       : symbol(std::move(symbol)), value(std::move(value)) {}
 
   // The symbol of the function (e.g. `aten::relu`).
   Symbol symbol;
 
   // if this is method, then this is the self argument.
-  at::optional<NamedValue> value;
+  c10::optional<NamedValue> value;
 
   std::string kind() const override {
     return "builtin";
@@ -132,7 +138,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   }
 
   std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-    return std::make_shared<BuiltinFunction>(Symbol::aten(field), at::nullopt);
+    return std::make_shared<BuiltinFunction>(Symbol::aten(field), c10::nullopt);
   }
 };
 
@@ -197,14 +203,14 @@ struct MatchedSchema {
   std::vector<TypePtr> return_types;
 };
 
-TORCH_API at::optional<MatchedSchema> tryMatchSchema(
-  const FunctionSchema& schema,
-  const SourceRange& loc,
-  Graph& graph,
-  at::ArrayRef<NamedValue> inputs,
-  at::ArrayRef<NamedValue> attributes,
-  std::ostream& failure_messages,
-  bool convert_tensors_to_nums);
+TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
+    const FunctionSchema& schema,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    std::ostream& failure_messages,
+    bool convert_tensors_to_nums);
 
 TORCH_API FunctionSchema extractSchemaFromDef(const Def &def, bool is_method=false);
 

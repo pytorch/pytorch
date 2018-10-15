@@ -1387,7 +1387,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   auto storage = at::zeros({base_size}, grad.options());
 
   // prepare indices tensor if we will do index_add_ later
-  at::optional<at::Tensor> flatten_full_indices;
+  c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices = at::arange(0, base_size, grad.options().dtype(at::kLong));
   }

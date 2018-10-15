@@ -11,11 +11,11 @@
 #include "ATen/Allocator.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/core/UndefinedTensorImpl.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/core/Half.h"
-#include "ATen/core/optional.h"
+#include "ATen/core/UndefinedTensorImpl.h"
+#include "c10/util/Optional.h"
 
 #include <cstddef>
 #include <functional>

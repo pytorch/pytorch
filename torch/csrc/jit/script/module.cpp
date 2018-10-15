@@ -37,7 +37,7 @@ const FunctionSchema& Method::getSchema() const {
   return *schema;
 }
 
-at::optional<std::vector<Value*>> try_emit_call_to(
+c10::optional<std::vector<Value*>> try_emit_call_to(
     Graph& graph,
     SourceRange loc,
     Method& callee,
@@ -58,7 +58,7 @@ at::optional<std::vector<Value*>> try_emit_call_to(
     callee.getSchema(),
     loc, graph, args, kwargs, failure_messages, conv_tensors_to_nums);
   if(!matched_schema)
-    return at::nullopt;
+    return c10::nullopt;
 
   // parameters to callee method (which become parameters to _this_ method
   // if they were not already)

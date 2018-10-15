@@ -53,7 +53,7 @@
 // building, and the instruction is as follows: assuming that you are building
 // a library called libawesome.so. You should:
 // (1) for your cmake target (usually done by "add_library(awesome, ...)"),
-//     define a macro called AWESOME_BUILD_MAIN_DLL using
+//     define a macro called AWESOME_BUILD_MAIN_LIB using
 //     target_compile_options.
 // (2) define the AWESOME_API macro similar to the one below.
 // And in the source file of your awesome library, use AWESOME_API to

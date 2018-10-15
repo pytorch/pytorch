@@ -36,7 +36,11 @@ Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device>
   return r;
 }
 
-void TypeDefault::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+void TypeDefault::backward(
+    Tensor& self,
+    c10::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) const {
   AT_ERROR("backward is not implemented for Tensor");
 }
 

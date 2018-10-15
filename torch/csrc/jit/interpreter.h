@@ -1,7 +1,7 @@
 #pragma once
 #include <memory>
 #include <vector>
-#include "ATen/core/optional.h"
+#include "c10/util/Optional.h"
 
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
