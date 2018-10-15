@@ -48,8 +48,7 @@ _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 compiled_weak_fns = weakref.WeakKeyDictionary()
-weak_script_methods = dict()
-# weak_script_methods = weakref.WeakKeyDictionary()
+weak_script_methods = weakref.WeakKeyDictionary()
 weak_modules = weakref.WeakKeyDictionary()
 COMPILATION_PENDING = object()
 COMPILED = object()
@@ -708,11 +707,11 @@ def script_method(fn, _rcb=None):
     return ScriptMethodStub(_rcb, ast, fn)
 
 
+WeakMethodStub = namedtuple('WeakMethodStub', ('resolution_callback', 'original_method'))
+
+
 def weak_script_method(fn):
-    weak_script_methods[fn.__qualname__] = {
-        "fn": fn,
-        "rcb": createResolutionCallback(frames_up=2)
-    }
+    weak_script_methods[fn] = WeakMethodStub(createResolutionCallback(frames_up=2), fn)
     return fn
 
 
@@ -923,16 +922,22 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             stubs = methods
-            if '_jit_new_stubs' in kwargs:
-                stubs = kwargs['_jit_new_stubs']
-                del kwargs['_jit_new_stubs']
+            if '_new_stubs' in kwargs:
+                stubs = kwargs['_new_stubs']
+                del kwargs['_new_stubs']
+            copier = None
+            if '_weak_copier' in kwargs:
+                copier = kwargs['_weak_copier']
+                del kwargs['_weak_copier']
             original_init(self, *args, **kwargs)
+            if copier is not None:
+                # For weak modules, copy over data from original class now
+                copier()
             defs = [m.def_ for m in stubs]
             rcbs = [m.resolution_callback for m in stubs]
             defaults = [get_default_args(m.original_method) for m in stubs]
             self._create_methods(defs, rcbs, defaults)
 
-        print("meta done")
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
@@ -1050,20 +1055,14 @@ if _enabled:
                       return input
         """
 
-        def __init__(self, optimize=True, _parameters=None):
+        def __init__(self, optimize=True):
             Module.__init__(self)
-            print("Init, setting up containers")
             self._set_optimized(optimize)
             self._parameters = OrderedParameterDict(self)
             self._buffers = OrderedBufferDict(self)
             self._modules = OrderedModuleDict(self)
 
-            if _parameters is not None:
-                for name, param in _parameters:
-                    setattr(self, name, param)
-
         def __getattr__(self, attr):
-            # print("_-get", attr)
             if self._has_method(attr):
                 if attr in self.__class__._original_methods:
                     original_method = self.__class__._original_methods[attr]
@@ -1076,15 +1075,13 @@ if _enabled:
             return Module.__getattr__(self, attr)
 
         def __setattr__(self, attr, value):
-            # print("_-set", attr, value)
             if attr not in self._constants_set:
                 if isinstance(value, Module) and weak_modules.get(value.__class__) is not None:
-                    # Weak script module
+                    # Compile weak script module
                     _make_strong(value)
                 return super(ScriptModule, self).__setattr__(attr, value)
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-
             if isinstance(value, ModuleList):
                 # special case for list of modules. Modules need to be registered with their
                 # parent module. To do this, we create a ConstModuleList, which is itself a module, that
@@ -1113,74 +1110,65 @@ if _enabled:
 
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original):
-            # WeakScriptModuleProxy.__setattr__ = object.__setattr__
-            # self._original_methods = {}
-            # setattr(original, '_jit_script_module', self)
             methods = []
-            # original._jit_script_module = self
-            print("WSMProxy")
-            setattr(original, '_jit_script_module', self)
-            # self.original = original
-            object.__setattr__(self, 'original', original)
-            self.__constants__ = original.__constants__
-            # self.__constants__ = original.__constants__
+            # Link to script module on original object
+            original._jit_script_module = self
+            self.__dict__['original'] = original
+
+            # Convert weak_methods to ScriptMethodStubs for compilation when
+            # __init__ is called
             for item in dir(original):
                 func = getattr(original, item)
                 if not callable(func) or not isinstance(func, types.MethodType):
                     continue
-                if func.__qualname__ in weak_script_methods:
-                    entry = weak_script_methods[func.__qualname__]
-                    stub = script_method(entry["fn"], entry["rcb"])
+                if func.__func__ in weak_script_methods:
+                    entry = weak_script_methods[func.__func__]
+                    stub = script_method(entry.original_method, entry.resolution_callback)
                     methods.append(stub)
+                    del weak_script_methods[func.__func__]
 
-            original_init = getattr(original, '__init__', lambda self: None)
+            super(WeakScriptModuleProxy, self).__init__(
+                _weak_copier=self._copy_module_data, _new_stubs=methods)
+
+            # Hook up forwarding getters and setters
+            getter = self._weak_getattr
+            setter = self._weak_setattr
+            self.__getattr__ = getter
+            self.__setattr__ = setter
+
+        def _weak_getattr(self, attr):
+            return getattr(self.original, attr)
+
+        def _weak_setattr(self, attr, value):
+            return setattr(self.original, attr, value)
+
+        def _copy_module_data(self):
+            original = self.__dict__['original']
+
+            # Copy constants
+            self.__dict__['__constants__'] = original.__constants__
             super_constants = getattr(original, '_constants_set', set())
-            constants_set = set(getattr(original, '__constants__', ())).union(super_constants)
-            self._constants_set = constants_set
-            # setattr(WeakScriptModuleProxy, '__setattr__', self.__setattr__)
-            # WeakScriptModuleProxy.__setattr__ = self.__setattr__
-            # del WeakScriptModuleProxy.__setattr__
+            self.__dict__['_constants_set'] = set(getattr(original, '__constants__', ())).union(super_constants)
 
-                    # self.name = item
-            params = []
             for name in dir(original):
                 item = getattr(original, name)
-                # print(name, item)
-                if isinstance(item, Parameter):
-                    print("doing", name)
-                    # setattr(self, name, item)
-                    params.append((name, item))
-            super(WeakScriptModuleProxy, self).__init__(_parameters=params, _jit_new_stubs=methods)
-            # print("Hello")
-            # # print(dir(original))
-            # for name in dir(original):
-            #     item = getattr(original, name)
-            #     # print(name, item)
-            #     if isinstance(item, Parameter):
-            #         print("doing", name)
-            #         setattr(self, name, item)
-
-        #
-        # def __getattr__(self, attr):
-        #     return getattr(self.original, attr)
-        #
-        # def __setattr__(self, attr, value):
-        #     # print("Setting", attr, value)
-        #     return setattr(self.original, attr, value)
+                if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
+                    setattr(self, name, item)
 
 else:
     ScriptModule = torch.nn.Module
+    WeakScriptModuleProxy = torch.nn.Module
 
 
 def weak_module(mod):
-    weak_modules[mod] = True
+    if _enabled:
+        weak_modules[mod] = True
     return mod
 
 
 def _make_strong(mod):
-    print("_make_strong")
     if hasattr(mod, "_jit_script_module"):
-        return mod._jit_script_module
+        return
     mod._jit_script_module = WeakScriptModuleProxy(mod)
 
 
