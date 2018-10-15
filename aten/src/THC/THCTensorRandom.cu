@@ -39,6 +39,9 @@ __host__ void createGeneratorState(THCGenerator* gen, uint64_t seed)
   {
     THError("Creating MTGP kernel state failed.");
   }
+  // seed and offset for philox
+  gen->state.initial_seed = seed;
+  gen->state.philox_seed_offset = 0;
 }
 
 __host__ void THCRandom_getRNGState(THCState* state, THByteTensor *rng_state)
