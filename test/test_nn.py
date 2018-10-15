@@ -1743,7 +1743,6 @@ class TestNN(NNTestCase):
             eval_out0 = dpm(input)
             self.assertEqual(eval_out0, dpm(input))
 
-
     def test_spectral_norm_eval_remove(self):
         inp = torch.randn(3, 5)
         m = nn.Linear(5, 7)

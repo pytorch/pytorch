@@ -2385,9 +2385,9 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     """
     denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
     if out is None:
-      return input / denom
+        return input / denom
     else:
-      return torch.div(input, denom, out=out)
+        return torch.div(input, denom, out=out)
 
 
 def assert_int_or_pair(arg, arg_name, message):
