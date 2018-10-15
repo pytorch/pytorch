@@ -126,14 +126,10 @@ class CAFFE2_API OperatorBase : public Observable<OperatorBase> {
     return BlobGetMutableTensor(outputs_.at(idx), type);
   }
 
-  template <typename T>
-  inline T* Output(
+  inline Tensor* OutputTensor(
       int idx,
       const vector<int64_t>& dims,
       const at::TensorOptions& options) {
-    static_assert(
-        std::is_same<T, Tensor>::value,
-        "Output(int, DeviceType) is only available for Tensor");
     CAFFE_ENFORCE_WITH_CALLER(
         options.device_opt() != at::nullopt,
         "device must be provided in option.");
@@ -473,11 +469,10 @@ class Operator : public OperatorBase {
       const vector<int64_t>& dims,
       const at::TensorOptions& options) {
     if (options.device_opt() == at::nullopt) {
-      auto opt = options;
-      opt.device(context_.device());
-      return OperatorBase::template Output<Tensor>(idx, dims, opt);
+      return OperatorBase::OutputTensor(
+          idx, dims, at::TensorOptions(options).device(context_.device()));
     }
-    return OperatorBase::template Output<Tensor>(idx, dims, options);
+    return OperatorBase::OutputTensor(idx, dims, options);
   }
 
   inline Tensor* Output(int idx, DeviceType type = Context::GetDeviceType()) {

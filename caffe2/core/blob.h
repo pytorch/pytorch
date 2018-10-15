@@ -35,22 +35,23 @@ inline Tensor* BlobGetMutableTensor(
         if (tensor->dims() != dims) {
           // Resize when the dims doesn't match
           tensor->Resize(dims);
+        }
+        auto type_meta = at::scalarTypeToTypeMeta(options.dtype());
+        if (tensor->meta() == type_meta) {
+          tensor->raw_mutable_data();
         } else {
-          // reallocate when the data_type doesn't match
-          if (tensor->meta() != at::scalarTypeToTypeMeta(options.dtype())) {
-            tensor->raw_mutable_data(at::scalarTypeToTypeMeta(options.dtype()));
-          }
+          // create a new Tensor when the data_type doesn't match
+          return blob->Reset<Tensor>(new Tensor(empty(dims, options)));
         }
         return tensor;
       }
-      // If device doesn't match, we'll allocate a new Tensor
+      // create a new Tensor when device doesn't match
     }
   }
 
-  // if we're here, then either Blob didn't hold a Tensor
-  // or that Tensor had the wrong DeviceType.
   VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<Tensor>()
-          << " dims: " << dims << " options: " << options;
+          << " dims: " << dims;
+  // << " options: " << options; (operator<< for Options is in at:: now)
   return blob->Reset<Tensor>(new Tensor(empty(dims, options)));
 }
 
