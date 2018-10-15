@@ -152,11 +152,11 @@ private:
 //      the IR API, but for now we choose to pessimisitically create inputs and
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
-  Environment(Method & method, std::shared_ptr<Resolver> resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
-      : method(method), resolver(resolver), b(b), next(next) {}
+  Environment(Method & method, Resolver resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
+      : method(method), resolver(std::move(resolver)), b(b), next(next) {}
 
   Method & method;
-  std::shared_ptr<Resolver> resolver;
+  Resolver resolver;
   std::vector<std::string> captured_inputs;
   std::unordered_map<std::string, std::string> error_messages;
   Block* b;
@@ -334,7 +334,7 @@ struct Environment {
     }
 
     if(!retval) {
-      retval = (*resolver)(ident, method, range);
+      retval = resolver(ident, method, range);
     }
 
     if (!retval && required) {
@@ -808,14 +808,15 @@ inline bool isSupportedListElementType(TypePtr type) {
 struct to_ir {
   to_ir(
       Def def,
-      std::shared_ptr<Resolver> resolver,
+      Resolver resolver_,
       SugaredValuePtr self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
       , def(def)
-      , resolver(resolver)
+      , resolver(std::move(resolver_))
       , environment_stack(nullptr) {
+    JIT_ASSERT(resolver);
     pushFrame(graph->block());
 
     auto schema = extractSchemaFromDef(def, bool(self));
@@ -913,7 +914,7 @@ private:
   Method& method;
   std::shared_ptr<Graph> graph;
   Def def;
-  std::shared_ptr<Resolver> resolver;
+  Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
 
@@ -1893,58 +1894,40 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-struct FunctionValue : public SugaredValue {
-  FunctionValue(Method &method) : method(method) {}
-
-  virtual std::string kind() const override {
-    return "function";
-  }
-
-  // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
-      Method & caller,
-      // note: names for args will be 'argument 0', 'argument 1', etc..
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) {
-    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
-  }
-
-  virtual ~FunctionValue() {}
-private:
-  Method &method;
-};
-
-void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<std::shared_ptr<Resolver>>& resolvers, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
+  std::unordered_map<std::string, Method*> function_table;
   for(Def def : definitions) {
     const std::string& name = def.name().name();
     auto resolver = *resolver_it++;
+    JIT_ASSERT(resolver);
+    if(!self) {
+      // if self is defined, then these are methods and do not go into the global namespace
+      // otherwise, they get defined together so we add them to the function table
+      // so the methods can see each other
+      resolver = [resolver, &function_table](
+                     const std::string& name,
+                     Method& m,
+                     const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
+        auto it = function_table.find(name);
+        if (it != function_table.end()) {
+          return std::make_shared<MethodValue>(nullptr, *it->second);
+        }
+        return resolver(name, m, loc);
+      };
+    }
     auto creator = [def, resolver, self](Method& method) {
+      JIT_ASSERT(resolver);
       to_ir(def, resolver, self,  method);
     };
     Method& method = m.create_method(name, creator);
-    // if self is defined, then these are methods and do not go into the global namespace
-    // otherwise, they get defined together so we add them to the function table
-    // so the methods can see each other
-    if(!self) {
-      for (auto r : resolvers) {
-        r->addEntry(name, std::make_shared<FunctionValue>(method));
-      }
-    }
+    function_table[name] = &method;
     methods.push_back(&method);
   }
   for(Method* method : methods) {
     method->ensure_defined();
-  }
-  // Method& references stored in the Resolvers are now stale and will go out of scope.
-  // NOTE: this is actually pessimistic. Technically we can resolve functions if we
-  // call defineMethodsInModule on the same m again.
-  for (auto r : resolvers) {
-    r->clear();
   }
 }
 
@@ -2064,10 +2047,10 @@ FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
     return FunctionSchema(name, args, returns, false, is_varret);
 }
 
-void defineMethodsInModule(Module & m, const std::string& source, const std::shared_ptr<Resolver> resolver, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, SugaredValuePtr self) {
   Parser p(source);
   std::vector<Def> definitions;
-  std::vector<std::shared_ptr<Resolver>> resolvers;
+  std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
     definitions.push_back(def);
@@ -2076,7 +2059,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const std::sha
   defineMethodsInModule(m, definitions, resolvers, self);
 }
 
-std::shared_ptr<Graph> compileFunction(Def def, const std::shared_ptr<Resolver> resolver) {
+std::shared_ptr<Graph> compileFunction(Def def, Resolver resolver) {
   Module m;
   defineMethodsInModule(m, {def}, {resolver}, nullptr);
   return m.get_method(def.name().name()).graph();
