@@ -1022,7 +1022,7 @@ Example::
 
 add_docstr(torch.cumsum,
            r"""
-cumsum(input, dim, out=None) -> Tensor
+cumsum(input, dim, out=None, dtype=None) -> Tensor
 
 Returns the cumulative sum of elements of :attr:`input` in the dimension
 :attr:`dim`.

@@ -2,11 +2,12 @@ import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
-from torch.jit.frontend import get_jit_ast
+from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
+import builtins
 import sys
 import warnings
 import itertools
@@ -616,6 +617,8 @@ def createResolutionCallback(frames_up=0):
             return f_locals[key]
         elif key in f_globals:
             return f_globals[key]
+        elif hasattr(builtins, key):
+            return getattr(builtins, key)
         else:
             return None
 
@@ -675,7 +678,7 @@ def script(fn, optimize=True, _frames_up=0, _rcb=None):
     # 2) Throwing everything away except for the graph 3) Creating a new
     # ScriptModule and dumping that graph in 4) Re-populating the schema
     # because it was lost doing the previous
-    mod.__getattr__('forward').forward_schema(ast, False)
+    mod.__getattr__('forward').forward_schema(ast, get_default_args(fn), False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
@@ -921,13 +924,15 @@ class ScriptMeta(type(torch._C.ScriptModule)):
                 torch._C.ScriptModule.__init__(self)
             stubs = methods
             if '_jit_new_stubs' in kwargs:
+                print("Had new stubs", kwargs)
                 stubs = kwargs['_jit_new_stubs']
                 del kwargs['_jit_new_stubs']
             original_init(self, *args, **kwargs)
             defs = [m.def_ for m in stubs]
             rcbs = [m.resolution_callback for m in stubs]
+            defaults = [get_default_args(m.original_method) for m in stubs]
             print("Compiling methods ", cls, name, stubs)
-            self._create_methods(defs, rcbs)
+            self._create_methods(defs, rcbs, defaults)
 
         print("meta done")
         cls.__init__ = init_then_register
@@ -1346,6 +1351,32 @@ def _register_builtin(fn, op):
 
 def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
+
+
+# Python equivalents for the empty list construction builtins. We need
+# these otherwise the tests won't execute in regular Python mode.
+def _construct_empty_int_list():
+    return []
+
+
+_register_builtin(_construct_empty_int_list, 'aten::_construct_empty_int_list')
+
+
+def _construct_empty_float_list():
+    return []
+
+
+_register_builtin(_construct_empty_float_list, 'aten::_construct_empty_float_list')
+
+
+def _construct_empty_tensor_list():
+    return []
+
+
+_register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_list')
+
+
+_register_builtin(len, 'aten::len')
 
 
 class _disable_tracing(object):

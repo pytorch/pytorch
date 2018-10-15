@@ -176,7 +176,7 @@ class ComputeBlobRecyclingForDag {
         // cuda device option but whose inputs/outputs are on CPU
         if (net.op(op_index).type() == "CopyGPUToCPU") {
           blob_device_[output].set_device_type(0);
-          blob_device_[output].set_cuda_gpu_id(0);
+          blob_device_[output].set_device_id(0);
         }
       }
     }
@@ -478,7 +478,7 @@ class ComputeBlobRecyclingForDag {
       const DeviceOption& device_option) {
     const DeviceOption& blob_device = blob_device_[blob_name];
     if (device_option.device_type() != blob_device.device_type() ||
-        device_option.cuda_gpu_id() != blob_device.cuda_gpu_id()) {
+        device_option.device_id() != blob_device.device_id()) {
       return false;
     }
     for (const int token : req_tokens_[blob_name]) {

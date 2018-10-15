@@ -32,6 +32,7 @@ namespace jit {
 namespace script {
 
 using ResolutionCallback = std::function<py::function(std::string)>;
+using FunctionDefaults = std::unordered_map<std::string, py::object>;
 
 // The visibility attribute is to avoid a warning about storing a field in the
 // struct that has a different visibility (from pybind) than the struct.
@@ -367,17 +368,66 @@ static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const 
   }
 }
 
-Resolver pythonResolver(ResolutionCallback rcb) {
-  return [=](const std::string& name,
-             Method& m,
-             const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
+namespace {
+struct PythonResolver : public Resolver {
+  PythonResolver(ResolutionCallback rcb) : rcb(rcb) {}
+  virtual std::shared_ptr<SugaredValue> operator() (const std::string& name, Method& m, const SourceRange& loc) const override {
+    if (function_table.count(name)) {
+      return function_table.at(name);
+    }
+
     AutoGIL ag;
     py::object obj = rcb(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
-  };
+  }
+
+  virtual void addEntry(const std::string& name, std::shared_ptr<SugaredValue> sv) override {
+    function_table[name] = sv;
+  }
+
+  virtual void clear() override {
+    function_table.clear();
+  }
+
+  virtual ~PythonResolver() {}
+
+ private:
+   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> function_table;
+   ResolutionCallback rcb;
+};
+}  // namespace
+
+FunctionSchema getSchemaWithDefaults(
+    const FunctionDefaults& default_args,
+    const FunctionSchema schema,
+    const Def& def) {
+  std::vector<Argument> new_args;
+  for (auto& arg : schema.arguments) {
+    auto it = default_args.find(arg.name);
+    if (it != default_args.end()) {
+      try {
+        IValue value = toIValue(it->second, arg.type);
+        new_args.push_back(
+            Argument(arg.name, arg.type, arg.N, value, arg.kwarg_only));
+      } catch (py::cast_error& e) {
+        throw ErrorReport(def.range())
+            << "Expected a default value of type " << arg.type->str()
+            << " on parameter \"" << arg.name << "\"";
+      }
+    } else {
+      new_args.push_back(arg);
+    }
+  }
+
+  return FunctionSchema(
+      schema.name,
+      new_args,
+      schema.returns,
+      schema.is_vararg,
+      schema.is_varret);
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -403,18 +453,32 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb, bool has_self) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
-            return defineMethodsInModule(*m, script, pythonResolver(rcb), self);
+            return defineMethodsInModule(*m, script, std::make_shared<PythonResolver>(rcb), self);
           })
-      .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
-        std::vector<Resolver> resolvers;
+      .def("_create_methods", [](std::shared_ptr<Module> m,
+          const std::vector<Def>& defs,
+          const std::vector<ResolutionCallback>& rcbs,
+          const std::vector<FunctionDefaults>& defaults) {
+        std::vector<std::shared_ptr<Resolver>> resolvers;
         for(auto & callback : rcbs) {
-          resolvers.push_back(pythonResolver(callback));
+          resolvers.push_back(std::make_shared<PythonResolver>(callback));
         }
         defineMethodsInModule(
           *m,
           defs,
           resolvers,
           std::make_shared<ModuleValue>(m));
+
+        // Stitch in default arguments for each Def if provided
+        auto defaults_it = defaults.begin();
+        auto defs_it = defs.begin();
+        while (defs_it != defs.end()) {
+          auto& method = m->get_method((*defs_it).name().name());
+          method.setSchema(getSchemaWithDefaults(
+              *defaults_it, method.getSchema(), *defs_it));
+          ++defs_it;
+          ++defaults_it;
+        }
       })
       .def("_get_method",
       [](Module& self, const std::string& name) -> const Method& {
@@ -541,15 +605,15 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args, py::kwargs kwargs) {
       return self.graph_for(createStackForSchema(self.getSchema(), std::move(args), std::move(kwargs)));
     })
-    .def("forward_schema", [](Method &self, Def &def, bool is_method) {
-      auto schema = extractSchemaFromDef(def, is_method);
-      self.setSchema(schema);
+    .def("forward_schema", [](Method &self, Def &def, FunctionDefaults defaults, bool is_method) {
+      self.setSchema(getSchemaWithDefaults(
+        defaults, extractSchemaFromDef(def, is_method), def));
     })
     .def("debug_disable_autodiff_subgraph_inlining", &Method::debugDisableAutodiffSubgraphInlining)
     .def("pretty_print_schema", &Method::pretty_print_schema);
 
   m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
-    return compileFunction(def, pythonResolver(rcb));
+    return compileFunction(def, std::make_shared<PythonResolver>(rcb));
   });
 
   m.def("parse_type_comment", [](const std::string& comment) {

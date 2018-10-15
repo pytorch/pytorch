@@ -85,7 +85,7 @@ vector<int64_t> GetTensorInfo(
   CHECK(tc->unsafeGetTensorImpl());
   CHECK(tc->unsafeGetTensorImpl()->storage().unsafeGetStorageImpl());
   *capacity = tc->storage().capacity();
-  tc->ExtractDeviceOption(device);
+  ExtractDeviceOption(device, tc->GetDevice());
   return tc->dims().vec();
 }
 

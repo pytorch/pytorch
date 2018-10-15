@@ -38,7 +38,11 @@ outputs = [
     'torch/csrc/autograd/generated/python_variable_methods.cpp',
     'torch/csrc/autograd/generated/python_variable_methods_dispatch.h',
     'torch/csrc/autograd/generated/variable_factories.h',
-    'torch/csrc/autograd/generated/VariableType.cpp',
+    'torch/csrc/autograd/generated/VariableType-0.cpp',
+    'torch/csrc/autograd/generated/VariableType-1.cpp',
+    'torch/csrc/autograd/generated/VariableType-2.cpp',
+    'torch/csrc/autograd/generated/VariableType-3.cpp',
+    'torch/csrc/autograd/generated/VariableType-4.cpp',
     'torch/csrc/autograd/generated/VariableType.h',
     'torch/csrc/jit/generated/register_aten_ops.cpp',
 ]

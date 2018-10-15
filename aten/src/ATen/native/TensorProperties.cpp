@@ -52,5 +52,12 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
+Tensor contiguous(const Tensor & self) {
+  if (self.is_contiguous()) {
+    return self;
+  }
+  return self.clone();
+}
+
 }
 }
