@@ -449,8 +449,8 @@ inline std::tuple<Tensor,Tensor> Tensor::symeig(bool eigenvectors, bool upper) c
 inline std::tuple<Tensor,Tensor> Tensor::eig(bool eigenvectors) const {
     return type().eig(*this, eigenvectors);
 }
-inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some) const {
-    return type().svd(*this, some);
+inline std::tuple<Tensor,Tensor,Tensor> Tensor::svd(bool some, bool compute_uv) const {
+    return type().svd(*this, some, compute_uv);
 }
 inline Tensor Tensor::potrf(bool upper) const {
     return type().potrf(*this, upper);

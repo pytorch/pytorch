@@ -693,8 +693,8 @@
 - name: _sum(Tensor self, IntList dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
-- name: svd(Tensor self, bool some)
-  self: svd_backward(grads, self, some, res1, res2, res3)  # resX are defined in Declarations.cwrap
+- name: svd(Tensor self, bool some, bool compute_uv)
+  self: svd_backward(grads, self, some, compute_uv, res1, res2, res3)  # resX are defined in Declarations.cwrap
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
   self: symeig_backward(grads, self, eigenvectors, upper, res1, res2)
