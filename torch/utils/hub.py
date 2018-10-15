@@ -101,7 +101,6 @@ def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
     return func(*args, **kwargs)
 
 
-
 def _load_single_model(func_name, entrypoints, hub_dir, cache, args, kwargs):
     entry = None
     checkpoint = None
@@ -115,7 +114,8 @@ def _load_single_model(func_name, entrypoints, hub_dir, cache, args, kwargs):
 
     num_fields = len(e)
     if num_fields < 2 or num_fields > 3:
-        raise ValueError('Invalid entrypoint length: {}, expect (func_name, module_name, [checkpoint_url])'.format(num_fields))
+        raise ValueError(
+            'Invalid entrypoint length: {}, expect (func_name, module_name, [checkpoint_url])'.format(num_fields))
     elif num_fields == 3:
         checkpoint = _check_type(e[2], str)
     module_name = _check_type(e[1], str)
