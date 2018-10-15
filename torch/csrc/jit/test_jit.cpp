@@ -935,7 +935,7 @@ void testAddEdgeCycleDetection() {
   bool erred = false;
   try {
     graph->addEdge(c, a);
-  } catch (at::Error& err) {
+  } catch (c10::Error& err) {
     erred = true;
   }
   JIT_ASSERT(erred);

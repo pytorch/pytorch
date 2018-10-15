@@ -6,6 +6,8 @@
 #include <ATen/core/ScalarType.h>
 #include <ATen/core/DefaultTensorOptions.h>
 
+#include "c10/util/Optional.h"
+
 #include <cstddef>
 #include <iosfwd>
 #include <utility>
@@ -124,7 +126,7 @@ struct CAFFE2_API TensorOptions {
   /// (This overload ensures that initializer lists for Device work
   /// correctly.)
   C10_NODISCARD TensorOptions device(Device d) const noexcept {
-    return device(make_optional(d));
+    return device(c10::make_optional(d));
   }
 
   /// Return a copy of `TensorOptions`, but with device set to CUDA, and the
@@ -169,10 +171,10 @@ struct CAFFE2_API TensorOptions {
     return has_device_ ? device_ : getDefaultTensorOptions().device();
   }
 
-  /// Returns the device of the `TensorOptions`, or `nullopt` if
+  /// Returns the device of the `TensorOptions`, or `c10::nullopt` if
   /// device is not specified.
   optional<Device> device_opt() const noexcept {
-    return has_device_ ? make_optional(device_) : nullopt;
+    return has_device_ ? c10::make_optional(device_) : c10::nullopt;
   }
 
   /// Returns the device index of the `TensorOptions`.
@@ -185,10 +187,10 @@ struct CAFFE2_API TensorOptions {
     return has_dtype_ ? dtype_ : getDefaultTensorOptions().dtype();
   }
 
-  /// Returns the dtype of the `TensorOptions`, or `nullopt` if
+  /// Returns the dtype of the `TensorOptions`, or `c10::nullopt` if
   /// device is not specified.
   optional<ScalarType> dtype_opt() const noexcept {
-    return has_dtype_ ? make_optional(dtype_) : nullopt;
+    return has_dtype_ ? c10::make_optional(dtype_) : c10::nullopt;
   }
 
   /// Returns the layout of the `TensorOptions`.
@@ -196,10 +198,10 @@ struct CAFFE2_API TensorOptions {
     return has_layout_ ? layout_ : getDefaultTensorOptions().layout();
   }
 
-  /// Returns the layout of the `TensorOptions`, or `nullopt` if
+  /// Returns the layout of the `TensorOptions`, or `c10::nullopt` if
   /// layout is not specified.
   optional<Layout> layout_opt() const noexcept {
-    return has_layout_ ? make_optional(layout_) : nullopt;
+    return has_layout_ ? c10::make_optional(layout_) : c10::nullopt;
   }
 
   /// Returns the `requires_grad` property of the `TensorOptions`.
@@ -207,10 +209,11 @@ struct CAFFE2_API TensorOptions {
     return has_requires_grad_ ? requires_grad_ : getDefaultTensorOptions().requires_grad();
   }
 
-  /// Returns the `requires_grad` property of the `TensorOptions`, or `nullopt`
-  /// if `requires_grad` is not specified.
+  /// Returns the `requires_grad` property of the `TensorOptions`, or
+  /// `c10::nullopt` if `requires_grad` is not specified.
   optional<bool> requires_grad_opt() const noexcept {
-    return has_requires_grad_ ? make_optional(requires_grad_) : nullopt;
+    return has_requires_grad_ ? c10::make_optional(requires_grad_)
+                              : c10::nullopt;
   }
 
   /// Returns the `is_variable` property of the `TensorOptions`.
@@ -219,9 +222,9 @@ struct CAFFE2_API TensorOptions {
   }
 
   /// Returns the `is_variable` property of the `TensorOptions`, or
-  /// `nullopt` if `is_variable` is not specified.
+  /// `c10::nullopt` if `is_variable` is not specified.
   optional<bool> is_variable_opt() const noexcept {
-    return has_is_variable_ ? make_optional(is_variable_) : nullopt;
+    return has_is_variable_ ? c10::make_optional(is_variable_) : c10::nullopt;
   }
 
   // Resolves the ATen backend specified by the current construction axes.
@@ -302,7 +305,7 @@ struct CAFFE2_API TensorOptions {
   // WARNING: If you edit TensorOptions to add more options, you
   // must adjust the implementation of Tensor::options
 
-  // NB: We didn't use at::optional here, because then we can't pack
+  // NB: We didn't use c10::optional here, because then we can't pack
   // the has_***_ boolean fields.
 
   Device     device_  = at::kCPU; // 64-bit (TODO: this should be 32-bit)

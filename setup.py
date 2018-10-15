@@ -853,7 +853,9 @@ include_dirs += [
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-CAFFE2_LIBS = [os.path.join(lib_path, 'libcaffe2.so')]
+CAFFE2_LIBS = [
+    os.path.join(lib_path, 'libcaffe2.so'),
+    os.path.join(lib_path, 'libc10.so')]
 if USE_CUDA:
     CAFFE2_LIBS.extend(['-Wl,--no-as-needed', os.path.join(lib_path, 'libcaffe2_gpu.so'), '-Wl,--as-needed'])
 if USE_ROCM:
@@ -877,7 +879,10 @@ if IS_DARWIN:
     NCCL_LIB = os.path.join(lib_path, 'libnccl.2.dylib')
 
 if IS_WINDOWS:
-    CAFFE2_LIBS = [os.path.join(lib_path, 'caffe2.lib')]
+    CAFFE2_LIBS = [
+        os.path.join(lib_path, 'caffe2.lib'),
+        os.path.join(lib_path, 'c10.lib')
+    ]
     if USE_CUDA:
         CAFFE2_LIBS.append(os.path.join(lib_path, 'caffe2_gpu.lib'))
     if USE_ROCM:

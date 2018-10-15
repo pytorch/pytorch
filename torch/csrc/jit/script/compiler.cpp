@@ -13,7 +13,7 @@
 
 #include "torch/csrc/jit/constants.h"
 
-#include "ATen/core/optional.h"
+#include "c10/util/Optional.h"
 
 #include <climits>
 #include <set>
@@ -174,7 +174,7 @@ struct Environment {
   }
 
   // see if type error has been set for a variable
-  at::optional<std::string> findVariableTypeError(const std::string& name) {
+  c10::optional<std::string> findVariableTypeError(const std::string& name) {
     auto runner = this;
     while (runner->next) {
       runner = runner->next.get();
@@ -183,7 +183,7 @@ struct Environment {
     if (msg != runner->error_messages.end()) {
       return msg->second;
     } else {
-      return at::nullopt;
+      return c10::nullopt;
     }
   }
 
@@ -395,18 +395,20 @@ Value* packOutputs(Graph& g, at::ArrayRef<Value*> values) {
   return g.insertNode(g.createTuple(values))->output();
 }
 
-at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
+c10::optional<std::vector<int64_t>> getIntListAttribute(
+    c10::optional<int32_t> N,
+    Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
     return list.value()->elements();
 
   // broadcast IntList[3] with value 4 -> {4, 4, 4}
   if(!N)
-    return at::nullopt;
+    return c10::nullopt;
 
   auto r = constant_as<int64_t>(input);
   if(!r)
-    return at::nullopt;
+    return c10::nullopt;
 
   // broadcast to attribute size
   return std::vector<int64_t>(*N, *r);
@@ -511,12 +513,14 @@ Value* tryMatchArgument(
   return value;
 }
 
-at::optional<size_t> findInputWithName(const std::string& name, at::ArrayRef<NamedValue> kwargs) {
+c10::optional<size_t> findInputWithName(
+    const std::string& name,
+    at::ArrayRef<NamedValue> kwargs) {
   for(size_t i = 0; i < kwargs.size(); ++i) {
     if(kwargs[i].name() == name)
       return i;
   }
-  return at::nullopt;
+  return c10::nullopt;
 }
 
 Value* tryCreateList(
@@ -553,7 +557,7 @@ static Value* materializeConstant(T val, Graph& graph,
   return new_constant;
 }
 
-at::optional<MatchedSchema> tryMatchSchema(
+c10::optional<MatchedSchema> tryMatchSchema(
     const FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,
@@ -595,7 +599,7 @@ at::optional<MatchedSchema> tryMatchSchema(
 
   for (size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
     const auto& arg = schema.arguments[schema_i];
-    at::optional<NamedValue> v;
+    c10::optional<NamedValue> v;
     if (!arg.kwarg_only && schema_i < modifiedArgs.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
       if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
@@ -619,7 +623,7 @@ at::optional<MatchedSchema> tryMatchSchema(
               convert_tensors_to_nums,
               type_env);
           if (!list)
-            return at::nullopt;
+            return c10::nullopt;
           used_args = modifiedArgs.size();
           positional_inputs.push_back(list);
           continue;
@@ -634,7 +638,7 @@ at::optional<MatchedSchema> tryMatchSchema(
         err() << "argument " << nv.name()
               << " specified twice in schema, submit a bug report!\n"
               << nv.locOr(loc);
-        return at::nullopt;
+        return c10::nullopt;
       }
       used_kwarg[*idx] = true;
       v = nv;
@@ -644,12 +648,12 @@ at::optional<MatchedSchema> tryMatchSchema(
       err() << "argument " << schema.arguments[schema_i].name
             << " not provided.\n"
             << loc;
-      return at::nullopt;
+      return c10::nullopt;
     }
     Value* positional = tryMatchArgument(
         arg, graph, loc, *v, err, convert_tensors_to_nums, type_env);
     if (!positional)
-      return at::nullopt;
+      return c10::nullopt;
     positional_inputs.push_back(positional);
   }
 
@@ -658,7 +662,7 @@ at::optional<MatchedSchema> tryMatchSchema(
     err() << "expected at most " << used_args << " arguments "
           << "but found " << modifiedArgs.size() << " positional arguments.\n"
           << loc << "\n";
-    return at::nullopt;
+    return c10::nullopt;
   }
   // check for unused kwargs
   for (size_t i = 0; i < kwargs.size(); ++i) {
@@ -669,7 +673,7 @@ at::optional<MatchedSchema> tryMatchSchema(
       } else {
         err() << "keyword argument " << nv.name() << " specified twice\n";
       }
-      return at::nullopt;
+      return c10::nullopt;
     }
   }
   auto return_types = fmap(schema.returns, [&](const Argument& r) {
@@ -1166,13 +1170,12 @@ private:
   // loop-carried variables whose definitions are updated as the loop executes
   // in a way that ensure single static assignment.
 
-
   void emitLoopCommon(
       SourceRange range,
-      at::optional<Expr> max_trip_count,
-      at::optional<Expr> cond,
+      c10::optional<Expr> max_trip_count,
+      c10::optional<Expr> cond,
       const List<Stmt>& body,
-      at::optional<Ident> itr_ident) {
+      c10::optional<Ident> itr_ident) {
     Node* n = graph->insertNode(create(prim::Loop, range, 0));
     Value *max_trip_count_val, *cond_val;
     {
@@ -1368,8 +1371,10 @@ private:
       return;
     }
 
-    auto outputs = output->asTuple(stmt.rhs().range(), method,
-                                   starred_unpack ? at::nullopt : at::optional<size_t>{n_binders});
+    auto outputs = output->asTuple(
+        stmt.rhs().range(),
+        method,
+        starred_unpack ? c10::nullopt : c10::optional<size_t>{n_binders});
     if(outputs.size() < n_binders) {
       throw ErrorReport(stmt)
         << "need " << (starred_unpack ? "at least " : "")
@@ -1664,7 +1669,7 @@ private:
   Value* emitSlice(
       const SourceRange& loc,
       Value* input,
-      at::optional<int64_t> dim, // Only used for tensor slicing
+      c10::optional<int64_t> dim, // Only used for tensor slicing
       const SliceExpr& slice) {
     std::vector<NamedValue> args;
     args.reserve(4);
@@ -1795,7 +1800,7 @@ private:
     JIT_ASSERT(subscript.subscript_exprs()[0].kind() == TK_SLICE_EXPR);
     auto slice_exp = SliceExpr(subscript.subscript_exprs()[0]);
     auto * sliceable = emitExpr(subscript.value());
-    at::optional<int64_t> maybe_dim;
+    c10::optional<int64_t> maybe_dim;
     if (sliceable->type()->isSubtypeOf(DynamicType::get())) {
       // If the sliceable object is a tensor, specify a default dimension
       maybe_dim = 0;
@@ -2009,9 +2014,12 @@ std::vector<Argument> parseArgsFromDecl(Decl decl, bool is_method) {
   size_t i = is_method ? 1 : 0;
   for (; i < decl.params().size(); ++i) {
     auto decl_arg = decl.params()[i];
-    auto arg = Argument(decl_arg.ident().name(), parseTypeFromExpr(decl_arg.type()),
-                        /*N =*/at::nullopt, /*default_value =*/at::nullopt,
-                        /*kwarg_only =*/false);
+    auto arg = Argument(
+        decl_arg.ident().name(),
+        parseTypeFromExpr(decl_arg.type()),
+        /*N =*/c10::nullopt,
+        /*default_value =*/c10::nullopt,
+        /*kwarg_only =*/false);
     retval.push_back(arg);
   }
   return retval;
@@ -2024,13 +2032,21 @@ std::vector<Argument> parseReturnsFromDecl(Decl decl) {
     // Flatten a single return type of type Tuple into its constituent types
     std::vector<Argument> retval;
     for (auto type_ptr : tuple_type->elements()) {
-      retval.emplace_back("", type_ptr, /*N =*/at::nullopt,
-                          /*default_value =*/at::nullopt, /*kwarg_only =*/false);
+      retval.emplace_back(
+          "",
+          type_ptr,
+          /*N =*/c10::nullopt,
+          /*default_value =*/c10::nullopt,
+          /*kwarg_only =*/false);
     }
     return retval;
   } else {
-    return {Argument("", parsed_type, /*N =*/at::nullopt,
-                     /*default_value =*/at::nullopt, /*kwarg_only =*/false)};
+    return {Argument(
+        "",
+        parsed_type,
+        /*N =*/c10::nullopt,
+        /*default_value =*/c10::nullopt,
+        /*kwarg_only =*/false)};
   }
 }
 
@@ -2066,7 +2082,10 @@ std::shared_ptr<Graph> compileFunction(Def def, const std::shared_ptr<Resolver> 
   return m.get_method(def.name().name()).graph();
 }
 
-std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint) {
+std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
+    SourceRange loc,
+    Method& m,
+    c10::optional<size_t> size_hint) {
   static const auto make_simple_value = [](Value* v) -> std::shared_ptr<SugaredValue> {
     return std::make_shared<SimpleValue>(v);
   };

@@ -104,7 +104,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// Special cloning function for `Sequential` because it does not use
   /// `reset()`.
   std::shared_ptr<Module> clone(
-      at::optional<Device> device = at::nullopt) const override {
+      c10::optional<Device> device = c10::nullopt) const override {
     auto clone = std::make_shared<SequentialImpl>();
     for (const auto& module : modules_) {
       clone->push_back(module.clone(device));
@@ -161,9 +161,9 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     }
     AT_ERROR(
         "The type of the return value is ",
-        at::demangle(input.type_info().name()),
+        c10::demangle(input.type_info().name()),
         ", but you asked for type ",
-        at::demangle(typeid(ReturnType).name()));
+        c10::demangle(typeid(ReturnType).name()));
   }
 
   /// Adds a new (boxed) `Module` to the `Sequential` container.

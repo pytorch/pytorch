@@ -1,30 +1,12 @@
-#include <ATen/core/Error.h>
-#include <ATen/core/Backtrace.h>
+#include "c10/util/Exception.h"
+#include "c10/util/Backtrace.h"
+#include "c10/util/Type.h"
 
 #include <iostream>
 #include <numeric>
 #include <string>
 
-namespace at {
-
-namespace detail {
-
-std::string StripBasename(const std::string& full_path) {
-  const char kSeparator = '/';
-  size_t pos = full_path.rfind(kSeparator);
-  if (pos != std::string::npos) {
-    return full_path.substr(pos + 1, std::string::npos);
-  } else {
-    return full_path;
-  }
-}
-
-} // namespace detail
-
-std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
-  out << loc.function << " at " << loc.file << ":" << loc.line;
-  return out;
-}
+namespace c10 {
 
 Error::Error(
     const std::string& new_msg,
@@ -102,26 +84,10 @@ Warning::handler_t Warning::warning_handler_ = &Warning::print_warning;
 
 std::string GetExceptionString(const std::exception& e) {
 #ifdef __GXX_RTTI
-  return at::demangle(typeid(e).name()) + ": " + e.what();
+  return demangle(typeid(e).name()) + ": " + e.what();
 #else
   return std::string("Exception (no RTTI available): ") + e.what();
 #endif // __GXX_RTTI
 }
 
-std::function<std::string(void)>* GetFetchStackTrace() {
-  static std::function<std::string(void)> func = []() { return ""; };
-  return &func;
-};
-
-void ThrowEnforceNotMet(
-    const char* file,
-    const int line,
-    const char* condition,
-    const std::string& msg,
-    const void* caller) 
-{
-  at::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
-  throw e;
-}
-
-} // namespace at
+} // namespace c10
