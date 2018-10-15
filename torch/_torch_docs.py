@@ -5440,7 +5440,7 @@ The inverse of this function is :func:`~torch.ifft`.
 
     Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
     4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
-    capacity of  this cache. Some cuFFT plans may allocate GPU memory. You may
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
     use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
     plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
@@ -5541,7 +5541,7 @@ The inverse of this function is :func:`~torch.fft`.
 
     Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
     4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
-    capacity of  this cache. Some cuFFT plans may allocate GPU memory. You may
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
     use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
     plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
@@ -5631,7 +5631,7 @@ The inverse of this function is :func:`~torch.irfft`.
 
     Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
     4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
-    capacity of  this cache. Some cuFFT plans may allocate GPU memory. You may
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
     use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
     plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
@@ -5713,7 +5713,7 @@ The inverse of this function is :func:`~torch.rfft`.
 
     Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
     4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
-    capacity of  this cache. Some cuFFT plans may allocate GPU memory. You may
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
     use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
     plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
