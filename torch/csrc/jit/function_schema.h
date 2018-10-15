@@ -13,11 +13,11 @@ struct Argument {
   Argument(
       std::string name = "",
       TypePtr type = nullptr,
-      at::optional<int32_t> N = at::nullopt,
-      at::optional<IValue> default_value = at::nullopt,
+      c10::optional<int32_t> N = c10::nullopt,
+      c10::optional<IValue> default_value = c10::nullopt,
       bool kwarg_only = false)
       : name(std::move(name)),
-        type(type? type : DynamicType::get()),
+        type(type ? type : DynamicType::get()),
         N(std::move(N)),
         default_value(std::move(default_value)),
         kwarg_only(kwarg_only) {}
@@ -28,9 +28,9 @@ struct Argument {
   // e.g. for int[3]: type = ListType::ofInts(), N = 3
   // If present, this will allow scalars to be broadcast to this length to
   // become a list.
-  at::optional<int32_t> N;
+  c10::optional<int32_t> N;
 
-  at::optional<IValue> default_value;
+  c10::optional<IValue> default_value;
   // is this only specifyable as a keyword argument?
   bool kwarg_only;
 };
@@ -76,12 +76,12 @@ struct FunctionSchema {
   const bool is_varret;
   const bool is_mutable;
 
-  at::optional<int> argumentIndexWithName(const std::string& name) const {
+  c10::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments.size(); ++i) {
       if(name == arguments[i].name)
         return i;
     }
-    return at::nullopt;
+    return c10::nullopt;
   }
 
  private:

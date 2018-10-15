@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ATen/core/Device.h"
+#include "ATen/core/Error.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
@@ -8,9 +9,8 @@
 #include "ATen/core/Storage.h"
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
-#include "ATen/core/optional.h"
 #include "ATen/core/UndefinedTensorImpl.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Optional.h"
 
 namespace at {
 struct Generator;
@@ -241,7 +241,7 @@ public:
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
-      at::optional<Tensor> gradient = at::nullopt,
+      c10::optional<Tensor> gradient = c10::nullopt,
       bool keep_graph = false,
       bool create_graph = false);
 
@@ -382,7 +382,7 @@ public:
   std::tuple<Tensor,Tensor> trtrs(const Tensor & A, bool upper=true, bool transpose=false, bool unitriangular=false) const;
   std::tuple<Tensor,Tensor> symeig(bool eigenvectors=false, bool upper=true) const;
   std::tuple<Tensor,Tensor> eig(bool eigenvectors=false) const;
-  std::tuple<Tensor,Tensor,Tensor> svd(bool some=true) const;
+  std::tuple<Tensor,Tensor,Tensor> svd(bool some=true, bool compute_uv=true) const;
   Tensor potrf(bool upper=true) const;
   Tensor potrs(const Tensor & input2, bool upper=true) const;
   Tensor potri(bool upper=true) const;
@@ -510,6 +510,7 @@ public:
   Tensor log2() const;
   Tensor & log2_();
   Tensor logdet() const;
+  Tensor log_softmax(int64_t dim, ScalarType dtype) const;
   Tensor log_softmax(int64_t dim) const;
   Tensor logsumexp(int64_t dim, bool keepdim=false) const;
   Tensor matmul(const Tensor & other) const;
@@ -564,6 +565,7 @@ public:
   Tensor slice(int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) const;
   std::tuple<Tensor,Tensor> slogdet() const;
   Tensor smm(const Tensor & mat2) const;
+  Tensor softmax(int64_t dim, ScalarType dtype) const;
   Tensor softmax(int64_t dim) const;
   std::vector<Tensor> split(int64_t split_size, int64_t dim=0) const;
   std::vector<Tensor> split_with_sizes(IntList split_sizes, int64_t dim=0) const;
@@ -654,7 +656,7 @@ struct CAFFE2_API WeakTensor {
   WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
 
   // XXX: this can return undefined tensors
-  // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
+  // Ideally it would be c10::optional<Tensor>, but MSVC is too cool for that
   Tensor lock() const {
     return Tensor(weak_impl_.lock());
   }

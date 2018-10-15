@@ -20,16 +20,26 @@ struct SchemaParser {
     }
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
-    kwarg_only = false;
-    parseList('(', ',', ')', arguments, &SchemaParser::parseArgument);
+    bool kwarg_only = false;
+    size_t idx = 0;
+    parseList('(', ',', ')', [&] {
+      if(L.nextIf('*')) {
+        kwarg_only = true;
+      } else {
+        arguments.push_back(parseArgument(
+            idx++, /*is_return=*/false, /*kwarg_only=*/kwarg_only));
+      }
+    });
+    idx = 0;
     L.expect(TK_ARROW);
     if (L.cur().kind == '(') {
-      parseList('(', ',', ')', returns, &SchemaParser::parseArgumentType);
+      parseList('(', ',', ')', [&] {
+        returns.push_back(
+            parseArgument(idx++, /*is_return=*/true, /*kwarg_only=*/false));
+      });
     } else {
-      parseArgumentType(returns);
-    }
-    for (size_t i = 0; i < returns.size(); ++i) {
-      returns[i].name = "ret" + std::to_string(i);
+      returns.push_back(
+          parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
     return FunctionSchema { name, arguments, returns };
   }
@@ -48,7 +58,6 @@ struct SchemaParser {
   }
   TypePtr parseBaseType() {
     static std::unordered_map<std::string, TypePtr> type_map = {
-      {"Tensor", DynamicType::get() },
       {"Generator", GeneratorType::get() },
       {"ScalarType", IntType::get() },
       {"Layout", IntType::get() },
@@ -73,44 +82,78 @@ struct SchemaParser {
     }
     return it->second;
   }
-  void parseArgumentType(std::vector<Argument>& arguments) {
-    Argument result;
+  TypePtr parseType() {
+    TypePtr value;
     if (L.cur().kind == '(') {
-      std::vector<Argument> nestedArgs;
-      parseList('(', ',', ')', nestedArgs, &SchemaParser::parseArgumentType);
-      auto types = fmap(
-          nestedArgs, [](const Argument& argument) { return argument.type; });
-      result.type = TupleType::create(std::move(types));
-    } else {
-      result.type = parseBaseType();
-      if(L.nextIf('[')) {
-        result.type = ListType::create(result.type);
-        if(L.cur().kind == TK_NUMBER) {
-          result.N = std::stoll(L.next().text());
+      std::vector<TypePtr> types;
+      parseList('(', ',', ')', [&]{
+        types.push_back(parseType());
+      });
+      value = TupleType::create(std::move(types));
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
+      L.next(); // Future
+      L.expect('(');
+      TypePtr subtype = parseType();
+      L.expect(')');
+      throw ErrorReport(L.cur()) << "Futures are not yet implemented";
+    } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
+      value = DynamicType::get();
+      auto range = L.next().range; // Tensor
+      if(L.nextIf('(')) {
+        // optional 'alias set annotation'
+        auto bt = parseBaseType();
+        if (bt->kind() != TypeKind::VarType) {
+          throw ErrorReport(range)
+              << "expected type variable but found " << bt->str();
         }
-        L.expect(']');
+        L.expect(')');
+        // annotation itself is currently unused
+      }
+    } else {
+      value = parseBaseType();
+    }
+    while(true) {
+      if(L.cur().kind == '[' && L.lookahead().kind == ']') {
+        L.next(); // [
+        L.next(); // ]
+        value = ListType::create(value);
+      } else if(L.nextIf('?')) {
+        // pass - currently ignored but optional types would go here when implemented
+      } else {
+        break;
       }
     }
-    arguments.push_back(std::move(result));
+    return value;
   }
-  void parseArgument(std::vector<Argument>& arguments) {
-    // varargs
-    if(L.nextIf('*')) {
-      kwarg_only = true;
-      return;
-    }
-    std::vector<Argument> args;
-    parseArgumentType(args);
-    auto arg = std::move(args.back());
 
-    // nullability is ignored for now, since the JIT never cares about it
-    L.nextIf('?');
-    arg.name = L.expect(TK_IDENT).text();
-    if(L.nextIf('=')) {
-      parseDefaultValue(arg);
+  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
+    Argument result;
+    result.type = parseType();
+    if(L.nextIf('[')) {
+      // note: an array with a size hint can only occur at the Argument level
+      result.type = ListType::create(result.type);
+      result.N = std::stoll(L.expect(TK_NUMBER).text());
+      L.expect(']');
     }
-    arg.kwarg_only = kwarg_only;
-    arguments.push_back(std::move(arg));
+    if(L.nextIf('!')) {
+      // pass - currently ignored but will be used to annotate where we write to a
+      // tensor
+    }
+    if(is_return) {
+      // optionally named return values
+      if(L.cur().kind == TK_IDENT) {
+        result.name = L.next().text();
+      } else {
+        result.name = "ret" + std::to_string(idx);
+      }
+    } else {
+      result.kwarg_only = kwarg_only;
+      result.name = L.expect(TK_IDENT).text();
+      if(L.nextIf('=')) {
+        parseDefaultValue(result);
+      }
+    }
+    return result;
   }
   IValue parseSingleConstant(TypeKind kind) {
     switch(L.cur().kind) {
@@ -216,21 +259,19 @@ struct SchemaParser {
     }
   }
 
-  template<typename T>
-  void parseList(int begin, int sep, int end, std::vector<T>& result, void (SchemaParser::*parse)(std::vector<T>&)) {
+  void parseList(int begin, int sep, int end, std::function<void()> callback) {
     auto r = L.cur().range;
     if (begin != TK_NOTHING)
       L.expect(begin);
     if (L.cur().kind != end) {
       do {
-        (this->*parse)(result);
+        callback();
       } while (L.nextIf(sep));
     }
     if (end != TK_NOTHING)
       L.expect(end);
   }
   Lexer L;
-  bool kwarg_only;
 };
 
 } // namespace script

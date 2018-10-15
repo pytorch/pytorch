@@ -940,7 +940,7 @@ def _get_softmax_dim(name, ndim, stacklevel):
         return 1
 
 
-def softmin(input, dim=None, _stacklevel=3):
+def softmin(input, dim=None, _stacklevel=3, dtype=None):
     r"""Applies a softmin function.
 
     Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
@@ -951,13 +951,19 @@ def softmin(input, dim=None, _stacklevel=3):
         input (Tensor): input
         dim (int): A dimension along which softmin will be computed (so every slice
             along dim will sum to 1).
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    return (-input).softmax(dim)
+    if dtype is None:
+        return (-input).softmax(dim)
+    else:
+        return (-input).softmax(dim, dtype=dtype)
 
 
-def softmax(input, dim=None, _stacklevel=3):
+def softmax(input, dim=None, _stacklevel=3, dtype=None):
     r"""Applies a softmax function.
 
     Softmax is defined as:
@@ -972,6 +978,10 @@ def softmax(input, dim=None, _stacklevel=3):
     Arguments:
         input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+
 
     .. note::
         This function doesn't work directly with NLLLoss,
@@ -981,7 +991,10 @@ def softmax(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    return input.softmax(dim)
+    if dtype is None:
+        return input.softmax(dim)
+    else:
+        return input.softmax(dim, dtype=dtype)
 
 
 def _sample_gumbel(shape, eps=1e-10, out=None):
@@ -1052,7 +1065,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     return y
 
 
-def log_softmax(input, dim=None, _stacklevel=3):
+def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
@@ -1064,10 +1077,16 @@ def log_softmax(input, dim=None, _stacklevel=3):
     Arguments:
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    return input.log_softmax(dim)
+    if dtype is None:
+        return input.log_softmax(dim)
+    else:
+        return input.log_softmax(dim, dtype=dtype)
 
 
 softshrink = _add_docstr(torch._C._nn.softshrink, r"""

@@ -802,7 +802,7 @@ const static auto cf_examples = R"JIT(
 )JIT";
 void testControlFlow() {
   script::Module cu;
-  script::defineMethodsInModule(cu, cf_examples, std::make_shared<torch::jit::script::NativeResolver>(), nullptr);
+  script::defineMethodsInModule(cu, cf_examples, script::nativeResolver, nullptr);
   auto run = [&](const std::string & name, std::vector<IValue> stack) {
     auto graph = cu.get_method(name).graph();
     Code code(graph);
@@ -935,7 +935,7 @@ void testAddEdgeCycleDetection() {
   bool erred = false;
   try {
     graph->addEdge(c, a);
-  } catch (at::Error& err) {
+  } catch (c10::Error& err) {
     erred = true;
   }
   JIT_ASSERT(erred);

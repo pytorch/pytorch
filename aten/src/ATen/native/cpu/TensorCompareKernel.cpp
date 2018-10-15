@@ -27,7 +27,12 @@ bool _isnan(double val) {
 
 template <typename scalar_t, typename index_t>
 struct Reduction {
-  static void apply(Tensor& res, Tensor& res_indices, const Tensor& self, at::optional<int64_t> dim, bool greater) {
+  static void apply(
+      Tensor& res,
+      Tensor& res_indices,
+      const Tensor& self,
+      c10::optional<int64_t> dim,
+      bool greater) {
     auto out_ = res.data<scalar_t>();
     auto indices_ = res_indices.data<index_t>();
     auto data_ = self.data<scalar_t>();
@@ -87,13 +92,21 @@ struct Reduction {
   }
 };
 
-static void max_kernel_impl(Tensor& max, Tensor& max_indices, const Tensor& self, at::optional<int64_t> dim) {
+static void max_kernel_impl(
+    Tensor& max,
+    Tensor& max_indices,
+    const Tensor& self,
+    c10::optional<int64_t> dim) {
   AT_DISPATCH_ALL_TYPES(self.type(), "max", [&] {
     Reduction<scalar_t, int64_t>::apply(max, max_indices, self, dim, true);
   });
 }
 
-static void min_kernel_impl(Tensor& min, Tensor& min_indices, const Tensor& self, at::optional<int64_t> dim) {
+static void min_kernel_impl(
+    Tensor& min,
+    Tensor& min_indices,
+    const Tensor& self,
+    c10::optional<int64_t> dim) {
   AT_DISPATCH_ALL_TYPES(self.type(), "min", [&] {
     Reduction<scalar_t, int64_t>::apply(min, min_indices, self, dim, false);
   });

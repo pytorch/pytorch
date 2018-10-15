@@ -150,7 +150,7 @@ C10_EXPORT bool ParseFromString(const string& spec, Message* proto) {
   string bc_spec = spec;
 
   {
-    auto num_replaced = ReplaceAll(bc_spec, "cuda_gpu_id", "device_id");
+    auto num_replaced = c10::ReplaceAll(bc_spec, "cuda_gpu_id", "device_id");
     if (num_replaced) {
       LOG(ERROR) << "Your model was serialized in Protobuf TextFormat and "
                  << "it has "

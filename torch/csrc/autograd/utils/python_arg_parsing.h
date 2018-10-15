@@ -9,7 +9,7 @@ namespace torch { namespace autograd { namespace utils {
 
 // The parameter allow_copy is to accept copy for Tensor.to (and by proxy
 // PackedSequences.to) but not nn.Module.to.
-inline std::tuple<at::optional<at::Device>, at::optional<at::ScalarType>, bool, bool>
+inline std::tuple<c10::optional<at::Device>, c10::optional<at::ScalarType>, bool, bool>
   parse_to_conversion(PyObject *args, PyObject *kwargs, bool allow_copy) {
   static PythonArgParser parser({
     "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False)",
@@ -25,7 +25,7 @@ inline std::tuple<at::optional<at::Device>, at::optional<at::ScalarType>, bool, 
   } else if (r.idx == 1) {
     if (!allow_copy && !r.isNone(2))
       throw std::runtime_error(".to() does not accept copy argument");
-    return std::make_tuple(at::nullopt, r.scalartype(0), r.toBool(1), r.toBool(2));
+    return std::make_tuple(c10::nullopt, r.scalartype(0), r.toBool(1), r.toBool(2));
   } else {
     auto tensor = r.tensor(0);
     if (!allow_copy && !r.isNone(2))
@@ -38,5 +38,4 @@ inline std::tuple<at::optional<at::Device>, at::optional<at::ScalarType>, bool, 
     );
   }
 }
-
 }}} // namespace torch::autograd::utils
