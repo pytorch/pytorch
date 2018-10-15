@@ -21,8 +21,6 @@ KEY_DEPENDENCIES = 'dependencies'
 KEY_HELP = 'help_msg'
 MASTER_BRANCH = 'master'
 ENV_TORCH_HUB_DIR = 'TORCH_HUB_DIR'
-# TODO: Discussion: default hub_dir
-# DEFAULT_TORCH_HUB_DIR = site.getusersitepackages()
 DEFAULT_TORCH_HUB_DIR = '~/.torch/hub'
 HUB_INFO_KEYS = [KEY_ENTRYPOINTS, KEY_DEPENDENCIES, KEY_HELP]
 READ_DATA_CHUNK = 8192
@@ -67,23 +65,6 @@ def _download_url_to_file(url, filename):
         raise RuntimeError('Failed to download {}'.format(url))
 
 
-def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
-    # Import the module
-    try:
-        m = importlib.import_module(module_name)
-    except Exception:
-        raise RuntimeError('Cannot load module {}'.format(module_name))
-    # Check if callable is defined in the module
-    if func_name not in dir(m):
-        raise RuntimeError('Cannot find callable {} in module {}'.format(func_name, module_name))
-    func = getattr(m, func_name)
-    # Check if func is callable
-    if not callable(func):
-        raise RuntimeError('{} is not callable'.format(func))
-    # Call the function
-    return func(*args, **kwargs)
-
-
 def _load_hubconf(module_name):
     # Import the module
     try:
@@ -103,8 +84,28 @@ def _check_type(value, T):
     return value
 
 
+def _load_and_execute_func(module_name, func_name, args=[], kwargs={}):
+    # Import the module
+    try:
+        m = importlib.import_module(module_name)
+    except Exception:
+        raise RuntimeError('Cannot load module {}'.format(module_name))
+    # Check if callable is defined in the module
+    if func_name not in dir(m):
+        raise RuntimeError('Cannot find callable {} in module {}'.format(func_name, module_name))
+    func = getattr(m, func_name)
+    # Check if func is callable
+    if not callable(func):
+        raise RuntimeError('{} is not callable'.format(func))
+    # Call the function
+    return func(*args, **kwargs)
+
+
+
 def _load_single_model(func_name, entrypoints, hub_dir, cache, args, kwargs):
     entry = None
+    checkpoint = None
+
     for e in entrypoints:
         if e[0] == func_name:
             entry = e
@@ -112,16 +113,12 @@ def _load_single_model(func_name, entrypoints, hub_dir, cache, args, kwargs):
     if entry is None:
         raise RuntimeError('Callable {} not found in hub entrypoints'.format(func_name))
 
-    checkpoint = None
-    if len(e) < 2:
-        raise ValueError('Invalid entrypoint: func_name and module_name are required fields')
-    else:
-        module_name = _check_type(e[1], str)
-
-    if len(e) > 2:
+    num_fields = len(e)
+    if num_fields < 2 or num_fields > 3:
+        raise ValueError('Invalid entrypoint length: {}, expect (func_name, module_name, [checkpoint_url])'.format(num_fields))
+    elif num_fields == 3:
         checkpoint = _check_type(e[2], str)
-    if len(e) > 3:
-        raise ValueError('Too many fields to unpack in entrypoint: only accept func_name, module_name, checkpoint_url')
+    module_name = _check_type(e[1], str)
 
     model = _load_and_execute_func(module_name, func_name, args, kwargs)
 
@@ -170,11 +167,11 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
     if '~' in hub_dir:
         hub_dir = os.path.expanduser(hub_dir)
 
-    if not os.path.exists(hub_dir):
-        hub_dir_existed = False
-        os.makedirs(hub_dir)
+    if os.path.exists(hub_dir):
+        hub_dir_delete = False
     else:
-        hub_dir_existed = True
+        hub_dir_delete = True
+        os.makedirs(hub_dir)
 
     # Parse github repo information
     branch = MASTER_BRANCH
@@ -223,7 +220,7 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
               .format(', '.join(missing_deps)))
 
     # Support loading multiple callables from the same repo at once.
-    if isinstance(model, list):
+    if isinstance(model, list) or isinstance(model, tuple):
         res = []
         if (len(args) and len(model) != len(args)) or (len(kwargs) and len(kwargs) != len(model)):
             raise ValueError('If not empty, args/kwargs should have the same length as model')
@@ -236,9 +233,9 @@ def load(github, model, hub_dir=None, cache=False, args=[], kwargs={}):
 
     # Clean up downloaded files
     if not cache:
-        if hub_dir_existed:
-            shutil.rmtree(repo_dir)
-        else:
+        if hub_dir_delete:
             shutil.rmtree(hub_dir)
+        else:
+            shutil.rmtree(repo_dir)
 
     return res
