@@ -139,7 +139,8 @@ namespace detail {
   //
   // This takes a TensorOptions, rather than just a DeviceType and Layout, because
   // we reserve the right to change dispatch based on *any* aspect of
-  // TensorOptions.
+  // TensorOptions.  WARNING: If you do this, you need to fix the calls
+  // to computeTensorTypeId in caffe2/tensor.h
   inline TensorTypeId computeTensorTypeId(TensorOptions options) {
     switch (options.layout()) {
       case Layout::Strided:
@@ -170,7 +171,10 @@ namespace detail {
           default:
             AT_ERROR("Unsupported device type for sparse layout: ", options.device().type());
         }
+      default:
+        AT_ERROR("Unsupported layout: ", options.layout());
     }
+    AT_ASSERT(0);
   }
 } // namespace detail
 
