@@ -6366,6 +6366,13 @@ class TestTorch(TestCase):
                 dst2[i] = val
         self.assertEqual(dst, dst2, 0)
 
+        # test non-contiguous case
+        dst = torch.randn(num_dest, num_dest, num_dest).permute((2, 0, 1))
+        dst2 = dst.clone()
+        dst.masked_fill_(dst > 0, val)
+        dst2.masked_fill_(dst2 > 0, val)
+        self.assertEqual(dst, dst2, 0)
+
     def test_abs(self):
         def _test_abs(tensors_dict):
             for category, tensors in tensors_dict.items():
