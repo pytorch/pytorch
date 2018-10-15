@@ -30,7 +30,7 @@ Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device>
   }
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   Tensor r;
-  if (is_sparse()) r = this->native_tensor({0});
+  if (is_sparse()) r = this->native_tensor({0}, this->options());
   else r = at::empty(src.sizes(), this->options());
   r.copy_(src, non_blocking);
   return r;

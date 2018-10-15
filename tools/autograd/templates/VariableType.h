@@ -27,6 +27,7 @@ using at::SparseTensorRef;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;
+using at::TensorOptions;
 using at::Type;
 using c10::optional;
 

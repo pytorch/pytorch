@@ -535,13 +535,16 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
 ])
 
 
-def device_guard(option, formals, is_factory_method=False):
+def device_guard(option, formals, is_factory_method, dispatch_options):
     # For factory methods the `DeviceGuard` is already in the template.
-    if option.get('device_guard', True) and not is_factory_method:
-        tensor_arguments = [f for f in formals if f['dynamic_type'] in {'Tensor', 'TensorList'}]
-        if tensor_arguments:
-            tensor_argument = tensor_arguments[0]['name']
-            return 'const DeviceGuard device_guard({});'.format(tensor_argument)
+    if option.get('device_guard', True):
+        if dispatch_options:
+            return 'const DeviceGuard device_guard({}.device());'.format(dispatch_options['name'])
+        if not is_factory_method:
+            tensor_arguments = [f for f in formals if f['dynamic_type'] in {'Tensor', 'TensorList'}]
+            if tensor_arguments:
+                tensor_argument = tensor_arguments[0]['name']
+                return 'const DeviceGuard device_guard({});'.format(tensor_argument)
     return '// DeviceGuard omitted'
 
 
@@ -826,7 +829,7 @@ def create_generic(top_env, declarations):
         broadcast_arg = get_broadcast_argument(option)
         # "s_" for "same size".
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
-        option['device_guard_declaration'] = device_guard(option, formals)
+        option['device_guard_declaration'] = device_guard(option, formals, False, False)
 
         env = nested_dict(option, top_env)
 
@@ -1039,10 +1042,17 @@ def create_generic(top_env, declarations):
                     return formal
             return None
 
+        type_method_dispatch = option['type_method_definition_dispatch']
         dispatch_tensor = find_dispatch_tensor(formals)
         dispatch_type = None if dispatch_tensor else find_formal('Type', formals)
         if dispatch_type:
             dispatch_type['is_type_dispatched'] = True
+        # we only dispatch via options if there is backend-specific dispatch (otherwise it's a factory function that
+        # can dispatch directly to the native function).
+        backend_dispatch = isinstance(type_method_dispatch, dict)
+        dispatch_options = (find_formal('TensorOptions', formals)
+                            if not dispatch_tensor and not dispatch_type and backend_dispatch
+                            else None)
 
         option['type_method_formals'] = [format_formal(f) for f in formals if f != dispatch_type]
         option['type_method_actuals'] = [f['name'] for f in formals if f != dispatch_type]
@@ -1052,7 +1062,7 @@ def create_generic(top_env, declarations):
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
-        is_factory_method = find_formal('TensorOptions', formals)
+        is_factory_method = find_formal('TensorOptions', formals) and not dispatch_options
         is_deprecated_factory_method = len(formals) > 0 and \
             formals[0]['dynamic_type'] == 'Type' and \
             option['return_type'] == 'Tensor' and option['deprecated']
@@ -1061,7 +1071,7 @@ def create_generic(top_env, declarations):
         check_methods_do_not_start_with_underscore(option['name'], is_method)
 
         option['method_prefix_derived'] = ''
-        option['device_guard_declaration'] = device_guard(option, formals, is_factory_method)
+        option['device_guard_declaration'] = device_guard(option, formals, is_factory_method, dispatch_options)
 
         env = nested_dict(option, top_env)
 
@@ -1079,8 +1089,7 @@ def create_generic(top_env, declarations):
                 top_env['pure_virtual_type_method_declarations'].append(
                     PURE_VIRTUAL_TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_declarations'].append(TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
-        dispatch = option['type_method_definition_dispatch']
-        option['native_type_method_dispatch'] = dispatch
+        option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1091,7 +1100,7 @@ def create_generic(top_env, declarations):
         # we just implement it in the base Type.  This is exposed
         # in Declarations.yaml via a field named 'abstract'.
         abstract = False
-        if isinstance(dispatch, dict):
+        if isinstance(type_method_dispatch, dict):
             abstract = True
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
@@ -1106,10 +1115,10 @@ def create_generic(top_env, declarations):
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if needs_native_definition:
-            if isinstance(dispatch, dict):
+            if isinstance(type_method_dispatch, dict):
                 generated_native_functions = []  # type: List[str]
-                for key in sorted(dispatch.keys()):
-                    value = dispatch[key]
+                for key in sorted(type_method_dispatch.keys()):
+                    value = type_method_dispatch[key]
                     if value not in generated_native_functions:
                         option['native_type_method_dispatch'] = value
                         top_env['native_function_declarations'].append(
@@ -1132,6 +1141,8 @@ def create_generic(top_env, declarations):
                 option['inferred_type'] = 'static_cast<const TypeExtendedInterface&>({})'.format(dispatch_type['name'])
             elif dispatch_tensor:
                 option['inferred_type'] = 'detail::infer_type({})'.format(dispatch_tensor)
+            elif dispatch_options:
+                option['inferred_type'] = 'at::getType({})'.format(dispatch_options['name'])
             else:
                 # doesn't depend on a specific type, use undefined float
                 option['inferred_type'] = 'at::getNonVariableType(at::Backend::Undefined, at::ScalarType::Float)'
