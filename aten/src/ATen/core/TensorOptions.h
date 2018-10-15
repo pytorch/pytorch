@@ -68,12 +68,12 @@ struct CAFFE2_API TensorOptions {
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
-    this->layout(layout);
+    this->set_layout(layout);
   }
 
   /// Constructs a `TensorOptions` object with the given device.
   /* implicit */ TensorOptions(Device device) : TensorOptions() {
-    this->device(device);
+    this->set_device(device);
   }
 
   /// Constructs a `TensorOptions` object from a backend, forwarded to the
@@ -88,7 +88,7 @@ struct CAFFE2_API TensorOptions {
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
-    this->dtype(dtype);
+    this->set_dtype(dtype);
   }
 
   /// True if all elements of the `TensorOptions` match that of the other.
@@ -99,11 +99,11 @@ struct CAFFE2_API TensorOptions {
         has_device_ == other.has_device_ &&
         has_requires_grad_ == other.has_requires_grad_ &&
         has_is_variable_ == other.has_is_variable_ &&
-        dtype_ == other.dtype_ &&
-        layout_ == other.layout_ &&
-        device_ == other.device_ &&
-        requires_grad_ == other.requires_grad_ &&
-        is_variable_ == other.is_variable_;
+        (!has_dtype_ || dtype_ == other.dtype_) &&
+        (!has_layout_ || layout_ == other.layout_) &&
+        (!has_device_ || device_ == other.device_) &&
+        (!requires_grad_ || requires_grad_ == other.requires_grad_) &&
+        (!is_variable_ || is_variable_ == other.is_variable_);
   }
 
   /// True if any of the elements of this `TensorOptions` do not match that of
@@ -112,48 +112,56 @@ struct CAFFE2_API TensorOptions {
     return !(*this == other);
   }
 
-  /// Sets the device of the `TensorOptions`.
-  TensorOptions& device(Device device) {
-    device_ = device;
-    has_device_ = true;
-    return *this;
+  /// Return a copy of `TensorOptions` with `device` set to the given one, or
+  /// cleared if `device` is `nullopt`.
+  C10_NODISCARD TensorOptions device(optional<Device> device) const noexcept {
+    TensorOptions r = *this;
+    r.set_device(device);
+    return r;
   }
 
-  /// Sets the device of the `TensorOptions` to CUDA, and then sets the device
-  /// index to the given one.
+  /// Return a copy of `TensorOptions` with `device` set to the given one.
+  /// (This overload ensures that initializer lists for Device work
+  /// correctly.)
+  C10_NODISCARD TensorOptions device(Device d) const noexcept {
+    return device(make_optional(d));
+  }
+
+  /// Return a copy of `TensorOptions`, but with device set to CUDA, and the
+  /// device index set to the given one.
   ///
   /// TODO: This function encourages bad behavior (assuming CUDA is
   /// the only device that matters).  Get rid of it / rename it.
-  TensorOptions& device_index(int32_t device_index) {
+  C10_NODISCARD TensorOptions device_index(int32_t device_index) const noexcept {
     return device({Device::Type::CUDA, device_index});
   }
 
-  /// Sets the dtype of the `TensorOptions`.
-  TensorOptions& dtype(ScalarType dtype) {
-    dtype_ = dtype;
-    has_dtype_ = true;
-    return *this;
+  /// Return a copy of `TensorOptions` with `dtype` set to the given one.
+  C10_NODISCARD TensorOptions dtype(optional<ScalarType> dtype) const noexcept {
+    TensorOptions r = *this;
+    r.set_dtype(dtype);
+    return r;
   }
 
   /// Sets the layout of the `TensorOptions`.
-  TensorOptions& layout(Layout layout) {
-    layout_ = layout;
-    has_layout_ = true;
-    return *this;
+  C10_NODISCARD TensorOptions layout(optional<Layout> layout) const noexcept {
+    TensorOptions r = *this;
+    r.set_layout(layout);
+    return r;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
-  TensorOptions& requires_grad(bool requires_grad) {
-    requires_grad_ = requires_grad;
-    has_requires_grad_ = true;
-    return *this;
+  C10_NODISCARD TensorOptions requires_grad(optional<bool> requires_grad) const noexcept {
+    TensorOptions r = *this;
+    r.set_requires_grad(requires_grad);
+    return r;
   }
 
   /// Sets the `is_variable` property on the `TensorOptions`.
-  TensorOptions& is_variable(bool is_variable) {
-    is_variable_ = is_variable;
-    has_is_variable_ = true;
-    return *this;
+  C10_NODISCARD TensorOptions is_variable(optional<bool> is_variable) const noexcept {
+    TensorOptions r = *this;
+    r.set_is_variable(is_variable);
+    return r;
   }
 
   /// Returns the device of the `TensorOptions`.
@@ -228,6 +236,69 @@ struct CAFFE2_API TensorOptions {
   }
 
  private:
+
+  // These methods are currently private because I'm not sure if it's wise
+  // to actually publish them.  They are methods because I need them in
+  // the constructor and the functional API implementation.
+  //
+  // If you really, really need it, you can make these public, but check if you
+  // couldn't just do what you need with the functional API.  Similarly, these
+  // methods are not chainable, because if you wanted chaining, you probably
+  // want to use the functional API instead.  (It's probably OK to make
+  // these chainable, because these functions are all explicitly annotated
+  // with a ref-qualifier, the trailing &, that makes them illegal to call
+  // on temporaries.)
+
+  /// Mutably set the device of `TensorOptions`.
+  void set_device(optional<Device> device) & noexcept {
+    if (device) {
+      device_ = *device;
+      has_device_ = true;
+    } else {
+      has_device_ = false;
+    }
+  }
+
+  /// Mutably set the dtype of `TensorOptions`.
+  void set_dtype(optional<ScalarType> dtype) & noexcept {
+    if (dtype) {
+      dtype_ = *dtype;
+      has_dtype_ = true;
+    } else {
+      has_dtype_ = false;
+    }
+  }
+
+  /// Mutably set the layout of `TensorOptions`.
+  void set_layout(optional<Layout> layout) & noexcept {
+    if (layout) {
+      layout_ = *layout;
+      has_layout_ = true;
+    } else {
+      has_layout_ = false;
+    }
+  }
+
+  /// Mutably set the `requires_grad` property of `TensorOptions`.
+  void set_requires_grad(optional<bool> requires_grad) & noexcept {
+    if (requires_grad) {
+      requires_grad_ = *requires_grad;
+      has_requires_grad_ = true;
+    } else {
+      has_requires_grad_ = false;
+    }
+  }
+
+  /// Mutably set the `is_variable` property of `TensorOptions`.
+  void set_is_variable(optional<bool> is_variable) & noexcept {
+    if (is_variable) {
+      is_variable_ = *is_variable;
+      has_is_variable_ = true;
+    } else {
+      has_is_variable_ = false;
+    }
+  }
+
   // WARNING: If you edit TensorOptions to add more options, you
   // must adjust the implementation of Tensor::options
 
