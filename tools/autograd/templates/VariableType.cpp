@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-// NOTE on this file's split-into-shards state
+// NOTE [Sharded File]: on this file's split-into-shards state
 //
 // Back in the good old days, VariableType.cpp was generated as one
 // file with every function in it, and everything was great and
@@ -12,7 +12,7 @@
 // compiling it was very slow, and in fact was a significant
 // bottleneck for incremental rebuilds. To address this, we now
 // generate the file split across multiple shards, named
-// VariableType-0.cpp and so on, which can be compiled in parallel.
+// VariableType_0.cpp and so on, which can be compiled in parallel.
 //
 // For ease of inspection and debugging, so that it's not necessary to
 // go rooting around in multiple files, we also generate all the
