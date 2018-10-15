@@ -7400,6 +7400,83 @@ a")
         with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
             fn(torch.tensor(4))
 
+    def test_weak_script_module(self):
+
+        @torch.jit.weak_module
+        class Weak(torch.nn.Module):
+            __constants__ = ['number']
+
+            def __init__(self):
+                super(Weak, self).__init__()
+                self.number = 199
+
+            def python_op_in_weak_module(self, x):
+                return x + 123
+
+            @torch.jit.weak_script_method
+            def forward(self, x):
+                return 55 + self.number + self.python_op_in_weak_module(x)
+
+        class OtherStrong(torch.jit.ScriptModule):
+            __constants__ = ['number']
+
+            def __init__(self):
+                super(OtherStrong, self).__init__()
+                self.number = 357
+
+            def python_op_in_strong_module(self, x):
+                return x + 456
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.number + self.python_op_in_strong_module(x)
+
+        class Passthrough(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Passthrough, self).__init__()
+                self.weak = Weak()
+                self.strong = OtherStrong()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.weak(x)
+
+        weak_mod = Weak()
+        x = torch.ones(1)
+        expected_result = 55 + 199 + (x + 123)
+
+        # Ensure weak mod is running without the JIT by passing the wrong type
+        # (i.e. not a tensor)
+        weak_mod(2)
+
+        python_result = weak_mod(x)
+        strong_mod = Passthrough()
+        script_result = strong_mod(x)
+        self.assertEqual(python_result, expected_result)
+        self.assertEqual(script_result, expected_result)
+        self.assertExpectedGraph(strong_mod.graph, "basic")
+
+        class Strong(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Strong, self).__init__()
+                self.weak = Weak()
+                self.strong = OtherStrong()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                y = 2 * x
+                return y + 1 + self.weak(y) + self.strong(y)
+
+        strong_mod = Strong()
+        strong_mod2 = Strong()
+        x = torch.ones(1)
+        expected_result = (x * 2) + 1 + (55 + 199 + x * 2 + 123) + (x * 2 + 357 + x * 2 + 456)
+        script_result = strong_mod(x)
+        script_result2 = strong_mod2(x)
+        self.assertEqual(script_result, expected_result)
+        self.assertEqual(script_result, script_result2)
+        self.assertExpectedGraph(mod.graph, "scope_test")
+
     def test_trace_contiguous(self):
         def foo(x):
             return x[:, :, ::2].contiguous().view(12)
