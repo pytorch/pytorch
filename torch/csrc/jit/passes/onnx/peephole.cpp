@@ -414,7 +414,7 @@ void fixDefaultRnnHiddenState(Block* b) {
       continue;
     }
     // Hidden state is the sixth input for RNN, LSTM, GRU.
-    // See http://pytorch.org/docs/master/nn.html#torch.nn.RNN
+    // See https://pytorch.org/docs/master/nn.html#torch.nn.RNN
     if (n->inputs().size() < 6) {
       continue;
     }
@@ -433,7 +433,7 @@ void fixDefaultLstmCellState(Block *b) {
       continue;
     }
     // Cell state is the seventh input for LSTM.
-    // See http://pytorch.org/docs/master/nn.html#torch.nn.LSTM
+    // See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM
     if (n->inputs().size() < 7) {
       continue;
     }
