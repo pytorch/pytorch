@@ -17,7 +17,7 @@ class SpectralNorm(object):
         self.n_power_iterations = n_power_iterations
         self.eps = eps
 
-    def compute_weight(self, module):
+    def compute_weight_and_update_u(self, module):
         # NB: This updates the _u vector **in-place**. This is very important
         #     because in DataParallel forward, the _u vector (being a buffer) is
         #     broadcast from the parallelized module to each module replica,
@@ -68,7 +68,7 @@ class SpectralNorm(object):
 
     def __call__(self, module, inputs):
         if module.training:
-            weight = self.compute_weight(module)
+            weight = self.compute_weight_and_update_u(module)
             setattr(module, self.name, weight)
         else:
             r_g = getattr(module, self.name + '_orig').requires_grad
