@@ -1,0 +1,8 @@
+graph(%0 : Double(*, *)
+      %1 : Double(*, *)
+      %2 : Double(*, *)) {
+  %3 : int = prim::Constant[value=1]()
+  %4 : Double(*, *) = aten::mm(%0, %1)
+  %5 : Double(*, *) = aten::add(%4, %2, %3)
+  return (%5);
+}

@@ -6,7 +6,7 @@ configuration files required to depend on PyTorch. We call this distribution
 *LibTorch*, and you can download ZIP archives containing the latest LibTorch
 distribution on `our website <https://pytorch.org/get-started/locally/>`_. Below
 is a small example of writing a minimal application that depends on LibTorch
-and uses the `at::Tensor` class which comes with the PyTorch C++ API.
+and uses the ``at::Tensor`` class which comes with the PyTorch C++ API.
 
 Minimal Example
 ---------------

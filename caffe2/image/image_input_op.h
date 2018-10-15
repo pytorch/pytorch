@@ -249,13 +249,13 @@ ImageInputOp<Context>::ImageInputOp(
 
   // hard-coded PCA eigenvectors and eigenvalues, based on RBG channel order
   color_lighting_eigvecs_.push_back(
-    std::vector<float>{-144.7125, 183.396, 102.2295});
+    std::vector<float>{-144.7125f, 183.396f, 102.2295f});
   color_lighting_eigvecs_.push_back(
-    std::vector<float>{-148.104, -1.1475, -207.57});
+    std::vector<float>{-148.104f, -1.1475f, -207.57f});
   color_lighting_eigvecs_.push_back(
-    std::vector<float>{-148.818, -177.174, 107.1765});
+    std::vector<float>{-148.818f, -177.174f, 107.1765f});
 
-  color_lighting_eigvals_ = std::vector<float>{0.2175, 0.0188, 0.0045};
+  color_lighting_eigvals_ = std::vector<float>{0.2175f, 0.0188f, 0.0045f};
 
   CAFFE_ENFORCE_GT(batch_size_, 0, "Batch size should be nonnegative.");
   if (use_caffe_datum_) {
@@ -466,7 +466,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
                 CV_8UC1,
                 const_cast<char*>(datum.data().data())),
             color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
-        if (src.rows == 0 or src.cols == 0) {
+        if (src.rows == 0 || src.cols == 0) {
           num_decode_errors_in_batch_++;
           src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
         }
@@ -541,7 +541,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
                 CV_8UC1,
                 const_cast<char*>(encoded_image_str.data())),
             color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
-        if (src.rows == 0 or src.cols == 0) {
+        if (src.rows == 0 || src.cols == 0) {
           num_decode_errors_in_batch_++;
           src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
         }
