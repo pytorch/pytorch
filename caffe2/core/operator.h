@@ -468,7 +468,7 @@ class Operator : public OperatorBase {
       int idx,
       const vector<int64_t>& dims,
       const at::TensorOptions& options) {
-    if (options.device_opt() == at::nullopt) {
+    if (options.device_opt() == c10::nullopt) {
       return OperatorBase::OutputTensor(
           idx, dims, at::TensorOptions(options).device(context_.device()));
     }
