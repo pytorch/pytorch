@@ -138,7 +138,8 @@ struct CAFFE2_API TensorOptions {
 
   // Since dtype is taken...
   template <typename T>
-  TensorOptions& data_type() {
+  TensorOptions& dtype() {
+    // TODO: Fix after @roy-li's fix
     dtype_ = CTypeToScalarType<T>::to();
     has_dtype_ = true;
     return *this;
@@ -322,7 +323,8 @@ DefaultTensorOptions& DefaultTensorOptions::merge(const TensorOptions& options) 
 }
 
 template <typename T>
-inline TensorOptions data_type() {
+inline TensorOptions dtype() {
+  // TODO: Fix after @roy-li's fix
   return dtype(CTypeToScalarType<T>::to());
 }
 
