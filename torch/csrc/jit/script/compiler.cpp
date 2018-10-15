@@ -153,7 +153,7 @@ private:
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
   Environment(Method & method, Resolver resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
-      : method(method), resolver(resolver), b(b), next(next) {}
+      : method(method), resolver(std::move(resolver)), b(b), next(next) {}
 
   Method & method;
   Resolver resolver;
@@ -804,13 +804,13 @@ inline bool isSupportedListElementType(TypePtr type) {
 struct to_ir {
   to_ir(
       Def def,
-      Resolver resolver,
+      Resolver resolver_,
       SugaredValuePtr self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
       , def(def)
-      , resolver(resolver)
+      , resolver(std::move(resolver_))
       , environment_stack(nullptr) {
     JIT_ASSERT(resolver);
     pushFrame(graph->block());
