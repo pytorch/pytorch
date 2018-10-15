@@ -461,10 +461,6 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   }
 }
 
-bool Value::equals(const Value* other) const {
-  return *this->type_ == *other->type_;
-}
-
 // Equivalent to C++14's std::equal on two ranges.
 template <typename T>
 static bool equal(
@@ -487,7 +483,7 @@ bool Block::equals(
 
   const std::function<bool(const Value*, const Value*)> matchValues =
       [&](const Value* a, const Value* b) {
-        if (!a->equals(b)) {
+        if (!(*a->type() == *b->type())) {
           return false;
         }
         selfToOther[a] = b;

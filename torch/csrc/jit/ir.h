@@ -244,8 +244,6 @@ public:
       setUniqueName(from->uniqueName());
     return this;
   }
-
-  bool equals(const Value* other) const;
 };
 
 struct Node : public Attributes<Node> {
