@@ -1756,7 +1756,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
          >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction = _Reduction.get_enum(reduction)
 
