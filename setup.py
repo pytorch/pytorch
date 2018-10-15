@@ -907,6 +907,7 @@ main_sources = [
     "torch/csrc/Dtype.cpp",
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/Exceptions.cpp",
+    "torch/csrc/TypeInfo.cpp",
     "torch/csrc/Generator.cpp",
     "torch/csrc/Layout.cpp",
     "torch/csrc/Module.cpp",
