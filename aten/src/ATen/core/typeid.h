@@ -487,7 +487,7 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
   CAFFE2_API extern const TypeMetaData                                        \
       MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId);      \
   }
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId,                  \
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)               \
   namespace detail {                                                          \
   CAFFE2_API const TypeMetaData                                               \
     MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId)         \
