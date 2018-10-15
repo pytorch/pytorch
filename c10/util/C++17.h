@@ -1,4 +1,6 @@
 #pragma once
+#ifndef C10_UTIL_CPP17_H_
+#define C10_UTIL_CPP17_H_
 
 #include <type_traits>
 #include <utility>
@@ -252,3 +254,5 @@ template<class T> inline std::string to_string(T value) {
 }
 
 }}
+
+#endif // C10_UTIL_CPP17_H_
