@@ -235,11 +235,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         sorted_decls = sorted(jit_decls, key=lambda decl: decl['name'])
         grouped_decls = [list(g) for _, g in
                          groupby(sorted_decls, key=lambda decl: decl['name'])]
-        result = []
-        for group in grouped_decls:
-            sorted_decls = sorted(group, key=declkey)
-            result.extend(sorted_decls)
-        return result
+        return [sorted(g, key=declkey) for g in grouped_decls]
 
     # We need to add methods implemented manually in TensorImpl
     tensor_impl_methods = [{
@@ -274,16 +270,31 @@ def gen_jit_dispatch(declarations, out, template_path):
                 ])
                 decl['has_tensor_options'] = True
 
-    jit_decls = sort_decls(jit_decls)
-    for decl in jit_decls:
-        ops.append(OPERATOR.substitute(signature=signature(decl),
-                                       op=emit_decl_variant(decl)))
+    # Group and sort the generated snippets to ensure that the
+    # generation is deterministic
+    jit_decl_groups = sort_decls(jit_decls)
 
-    # Sort the generated snippets to ensure that the generation is deterministic
-    env = {
-        'constructors': ops,
-    }
-    write(out, 'register_aten_ops.cpp', REGISTER_ATEN_OPS_CPP, env)
+    # NOTE: see Note [Sharded File] at the top of the register_aten_ops.cpp
+    # template regarding sharding of the generated files.
+    #
+    # If you edit the number of shards here, you will also have to
+    # modify generate_code.py, torch/CMakeLists.txt, and the TARGETS
+    # files.
+    num_shards = 3
+    shards = [[] for _ in range(num_shards)]
+
+    # ops are assigned arbitrarily but stably to a file based on hash
+    for group in jit_decl_groups:
+        x = sum(ord(c) for c in group[0]['name']) % num_shards
+        for decl in group:
+            shards[x].append(OPERATOR.substitute(signature=signature(decl),
+                                                 op=emit_decl_variant(decl)))
+
+    for i, shard in enumerate(shards):
+        env = {
+            'constructors': shard,
+        }
+        write(out, 'register_aten_ops_%d.cpp' % i, REGISTER_ATEN_OPS_CPP, env)
 
     # NB: Operate on aten_decls, not jit_decls, because VariableType is
     # a client for these symbols as well
