@@ -11,8 +11,29 @@ namespace {
 
 #if defined(__HIP_PLATFORM_HCC__)
 constexpr int WARP_SIZE = 64;
+
+// take these out when ROCm implements std:: math functions
+#include <math.h>
+template <typename scalar_t>
+static __forceinline__ __device__ scalar_t device_sqrt(scalar_t val);
+
+template <>
+__forceinline__ __device__ float device_sqrt(float val) {
+  return ::sqrtf(val);
+}
+
+template <>
+__forceinline__ __device__ double device_sqrt(double val) {
+  return ::sqrt(val);
+}
+
 #else
 constexpr int WARP_SIZE = 32;
+
+template<typename scalar_t>
+__forceinline__ __device__ double device_sqrt(scalar_t val) {
+  return std::sqrt(val);
+}
 #endif
 
 // The maximum number of threads in a block
@@ -174,7 +195,7 @@ __global__ void batch_norm_transform_input_kernel(
   if (train) {
     invstd = var_or_invstd[plane];
   } else {
-    invstd = static_cast<accscalar_t>(1) / std::sqrt(static_cast<accscalar_t>(var_or_invstd[plane]) + epsilon);
+    invstd = static_cast<accscalar_t>(1) / device_sqrt(static_cast<accscalar_t>(var_or_invstd[plane]) + epsilon);
   }
   for (int64_t batch = blockIdx.x; batch < input.size(0); batch += gridDim.x) {
     for (int64_t feature = blockIdx.z; feature < input.size(2); feature += gridDim.z) {
@@ -211,7 +232,7 @@ __global__ void batch_norm_collect_statistics_kernel(
   if (threadIdx.x == 0) {
     accscalar_t invstd = 0;
     if (varN != static_cast<accscalar_t>(0) || epsilon != static_cast<accscalar_t>(0)) {
-      invstd = static_cast<accscalar_t>(1) / std::sqrt(varN * norm + epsilon);
+      invstd = static_cast<accscalar_t>(1) / device_sqrt(varN * norm + epsilon);
     }
     save_mean[plane] = mean;
     save_invstd[plane] = invstd;
@@ -250,7 +271,7 @@ __global__ void batch_norm_backward_kernel(
     invstd = save_invstd[plane];
   } else {
     mean = static_cast<accscalar_t>(running_mean[plane]);
-    invstd = static_cast<accscalar_t>(1) / std::sqrt(static_cast<accscalar_t>(running_var[plane]) + epsilon);
+    invstd = static_cast<accscalar_t>(1) / device_sqrt(static_cast<accscalar_t>(running_var[plane]) + epsilon);
   }
 
   accscalar_t weight_val = weight.size(0) > 0 ? static_cast<accscalar_t>(weight[plane]) : accscalar_t(1);
