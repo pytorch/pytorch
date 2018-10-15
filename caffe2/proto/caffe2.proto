@@ -16,18 +16,19 @@ package caffe2;
 message ExternalDataProto {
   // type of the external storage type, can be the following:
   enum SourceType {
-    // use external file to store the data, and id is the POSIX relative path
-    // to the file
-    FILE = 0;
-    // the wrapper defined in torch/csrc/jit/serialization.h is used,
-    // and id is the tag to help the runtime identify the data
+    // the container defined in torch/csrc/jit/serialization.h is used,
+    // and record_id is the tag to help the runtime identify the data
     // this type of storage is set as DEFAULT and recommended for external
     // data storage
-    TORCH_WRAPPER = 1;
+    INLINE_CONTAINER = 0;
+    // use external file to store the data, and record_id is the POSIX relative path
+    // to the file. this (simple) file is only for the data, and the data is stored
+    // as little endian in the file
+    SIMPLE_FILE = 1;
   }
-  optional SourceType source_type = 1 [default = TORCH_WRAPPER];
+  optional SourceType source_type = 1 [default = INLINE_CONTAINER];
   // used together with type
-  optional string id = 2;
+  optional string record_id = 2;
   // the offset of the starting point, the content may be shared between
   // multiple tensors
   optional int64 offset = 3;
@@ -241,14 +242,17 @@ message OperatorDef {
   // operators can be constructed in any language.
   optional string debug_info = 10;
 
-  // the domain of the operator
-  // to support legacy operator libs, we use domain to distinguish which
-  // operator lib we refer to:
-  //   - "CAFFE2" means this uses Caffe2 operator library
-  //   - "ATEN" means this uses ATen operator library
-  //   - "C10" is for the fused library
-  //   - if the domain is missing or empty, we use "CAFFE2", this is for
-  //     legacy models
+  // the domain of the operator to help runtime distinguish which operator
+  // library this OperatorDef refers to. For example, both caffe2 and aten
+  // has `Add` operator, with domain, we can easily decide which operator
+  // to execute. to support multiple operator libs, we use domain to
+  // distinguish which operator lib we refer to:
+  //   - "caffe2" means this uses Caffe2 operator library
+  //   - "aten" means this uses ATen operator library
+  //   - "c10" is for the fused library
+  //   - if the domain is missing or empty, we use "caffe2", this is for
+  //     legacy models, new serializer should always export an OperatorDef
+  //     with domain and op_version
   optional string domain = 11;
   // each operator is has its own version number.
   // operator version information
