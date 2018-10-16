@@ -949,7 +949,7 @@ class DummyTypeSerializer : public BlobSerializerBase {
     const auto& container = blob.template Get<DummyType>();
     for (int k = 0; k < container.n_chunks; ++k) {
       std::string serialized_chunk = container.serialize(name, k);
-      acceptor(MakeString(name, kChunkIdSeparator, k), serialized_chunk);
+      acceptor(c10::str(name, kChunkIdSeparator, k), serialized_chunk);
     }
   }
 };

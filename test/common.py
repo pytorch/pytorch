@@ -85,13 +85,15 @@ def _check_module_exists(name):
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_NUMBA = _check_module_exists('numba')
 
 # On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
 # see librosa/librosa#729.
 # TODO: allow Py2 when librosa 0.6.2 releases
 TEST_LIBROSA = _check_module_exists('librosa') and PY3
 
-NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
+# Python 2.7 doesn't have spawn
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1' or sys.version_info[0] == 2
 TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'

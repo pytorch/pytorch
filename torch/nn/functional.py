@@ -940,7 +940,7 @@ def _get_softmax_dim(name, ndim, stacklevel):
         return 1
 
 
-def softmin(input, dim=None, _stacklevel=3):
+def softmin(input, dim=None, _stacklevel=3, dtype=None):
     r"""Applies a softmin function.
 
     Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
@@ -951,13 +951,19 @@ def softmin(input, dim=None, _stacklevel=3):
         input (Tensor): input
         dim (int): A dimension along which softmin will be computed (so every slice
             along dim will sum to 1).
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    return (-input).softmax(dim)
+    if dtype is None:
+        return (-input).softmax(dim)
+    else:
+        return (-input).softmax(dim, dtype=dtype)
 
 
-def softmax(input, dim=None, _stacklevel=3):
+def softmax(input, dim=None, _stacklevel=3, dtype=None):
     r"""Applies a softmax function.
 
     Softmax is defined as:
@@ -972,6 +978,10 @@ def softmax(input, dim=None, _stacklevel=3):
     Arguments:
         input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+
 
     .. note::
         This function doesn't work directly with NLLLoss,
@@ -981,7 +991,10 @@ def softmax(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    return input.softmax(dim)
+    if dtype is None:
+        return input.softmax(dim)
+    else:
+        return input.softmax(dim, dtype=dtype)
 
 
 def _sample_gumbel(shape, eps=1e-10, out=None):
@@ -1052,7 +1065,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     return y
 
 
-def log_softmax(input, dim=None, _stacklevel=3):
+def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
@@ -1064,10 +1077,16 @@ def log_softmax(input, dim=None, _stacklevel=3):
     Arguments:
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    return input.log_softmax(dim)
+    if dtype is None:
+        return input.log_softmax(dim)
+    else:
+        return input.log_softmax(dim, dtype=dtype)
 
 
 softshrink = _add_docstr(torch._C._nn.softshrink, r"""
@@ -1738,26 +1757,13 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
+    else:
+        reduction = _Reduction.get_enum(reduction)
+
     if not (target.size() == input.size()):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
-    max_val = (-input).clamp(min=0)
-
-    if pos_weight is None:
-        loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
-    else:
-        log_weight = 1 + (pos_weight - 1) * target
-        loss = input - input * target + log_weight * (max_val + ((-max_val).exp() + (-input - max_val).exp()).log())
-
-    if weight is not None:
-        loss = loss * weight
-
-    if reduction == 'none':
-        return loss
-    elif reduction == 'elementwise_mean':
-        return loss.mean()
-    else:
-        return loss.sum()
+    return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction)
 
 
 def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwise_mean'):

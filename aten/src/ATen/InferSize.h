@@ -12,7 +12,7 @@ namespace at {
 static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
   auto res = shape.vec();
   int64_t newsize = 1;
-  auto infer_dim = at::optional<int64_t>();
+  auto infer_dim = c10::optional<int64_t>();
   for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
     if (shape[dim] == -1) {
       if (infer_dim) {

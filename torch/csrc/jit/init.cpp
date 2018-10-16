@@ -90,7 +90,7 @@ void initJITBindings(PyObject *module) {
      return EliminateCommonSubexpression(g); // overload resolution
    })
    .def("_jit_pass_constant_pooling", ConstantPooling)
-   .def("_jit_pass_peephole", PeepholeOptimize)
+   .def("_jit_pass_peephole", PeepholeOptimize, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
@@ -274,7 +274,7 @@ void initJITBindings(PyObject *module) {
         return invokeOperatorFromPython(
             *op, std::move(args), std::move(kwargs));
       }, py::name(qualified_name.c_str()), py::doc(docstring.str().c_str()));
-    } catch (const at::Error& error) {
+    } catch (const c10::Error& error) {
       throw std::runtime_error(error.what_without_backtrace());
     }
   }, py::arg("qualified_name"));
