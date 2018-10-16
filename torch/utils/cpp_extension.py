@@ -795,9 +795,10 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         torch_path = os.path.dirname(os.path.dirname(here))
         lib_path = os.path.join(torch_path, 'lib')
 
-        extra_ldflags.append('c10.lib')
         extra_ldflags.append('caffe2.lib')
         extra_ldflags.append('torch.lib')
+        extra_ldflags.append('torch_python.lib')
+        extra_ldflags.append('c10.lib')
         if with_cuda:
             extra_ldflags.append('caffe2_gpu.lib')
         extra_ldflags.append('_C.lib')
