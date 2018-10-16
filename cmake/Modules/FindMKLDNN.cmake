@@ -8,13 +8,13 @@
 #  MKLDNN_FOUND          : set to true if mkl-dnn is found.
 #  MKLDNN_INCLUDE_DIR    : path to mkl-dnn include dir.
 #  MKLDNN_LIBRARIES      : list of libraries for mkl-dnn
-#  CAFFE2_USE_IDEEP      : set to ON if MKLDNN_FOUND is true
+#  CAFFE2_USE_MKLDNN     : set to ON if MKLDNN_FOUND is true
 
 IF (NOT MKLDNN_FOUND)
 
 SET(MKLDNN_LIBRARIES)
 SET(MKLDNN_INCLUDE_DIR)
-SET(CAFFE2_USE_IDEEP OFF)
+SET(CAFFE2_USE_MKLDNN OFF)
 
 IF (NOT USE_MKLDNN)
   RETURN()
@@ -94,7 +94,7 @@ INCLUDE(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(MKLDNN DEFAULT_MSG ${__mkldnn_looked_for})
 
 IF(MKLDNN_FOUND)
-  SET(CAFFE2_USE_IDEEP ON)
+  SET(CAFFE2_USE_MKLDNN ON)
   IF(NOT APPLE AND CMAKE_COMPILER_IS_GNUCC)
     ADD_COMPILE_OPTIONS(-Wno-maybe-uninitialized)
   ENDIF(NOT APPLE AND CMAKE_COMPILER_IS_GNUCC)

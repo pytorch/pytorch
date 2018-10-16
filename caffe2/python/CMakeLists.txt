@@ -7,7 +7,7 @@ set(Caffe2_CPU_PYTHON_SRCS
 )
 
 # ---[ IDEEP binding
-if(CAFFE2_USE_IDEEP)
+if(CAFFE2_USE_MKLDNN)
   set(Caffe2_CPU_PYTHON_SRCS
       ${Caffe2_CPU_PYTHON_SRCS}
       "/pybind_state_ideep.cc"
