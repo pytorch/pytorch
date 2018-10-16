@@ -8,6 +8,7 @@
 
 #include <ATen/core/Error.h>
 
+#include <istream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -47,11 +48,12 @@ void InputArchive::read(const std::string& key, InputArchive& archive) {
   }
 }
 
-InputArchive::InputArchive(std::shared_ptr<jit::script::Module> module)
-    : module_(std::move(module)) {}
+void InputArchive::load_from(const std::string& filename) {
+  module_ = torch::jit::load(filename);
+}
 
-InputArchive load_from_file(const std::string& filename) {
-  return InputArchive(torch::jit::load(filename));
+void InputArchive::load_from(std::istream& stream) {
+  module_ = torch::jit::load(stream);
 }
 } // namespace serialize
 } // namespace torch

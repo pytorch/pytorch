@@ -6,10 +6,12 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/net_async_base.h"
 #include "caffe2/core/net_dag_utils.h"
+#include "caffe2/core/prof_dag_counters.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2_pb.h"
+#include "caffe2/proto/prof_dag.pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/thread_pool.h"
 
@@ -50,6 +52,9 @@ class CAFFE2_API AsyncNetBase : public NetBase {
     return execution_chains_;
   }
 
+  ProfDAGProtos GetOperatorStats() const;
+  ProfDAGProtos GetPerOperatorCost() const;
+
  protected:
   bool canSchedule(
       int chain_id,
@@ -66,8 +71,13 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   int getParentCount(int child_id);
   bool testAndSetScheduled(int task_id);
   int numOps(int task_id) const;
+
+  int firstTaskOpId(int task_id) const;
+  int lastTaskOpId(int task_id) const;
   const OperatorBase* firstTaskOp(int task_id) const;
   const OperatorBase* lastTaskOp(int task_id) const;
+  OperatorBase* firstTaskOp(int task_id);
+  OperatorBase* lastTaskOp(int task_id);
 
   void asyncWait(
       int task_id,
@@ -126,6 +136,9 @@ class CAFFE2_API AsyncNetBase : public NetBase {
   bool use_single_pool_;
   bool use_per_net_pools_;
   bool is_blocking_;
+  bool report_stats_;
+
+  ProfDAGCounters counters_;
 
   C10_DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 

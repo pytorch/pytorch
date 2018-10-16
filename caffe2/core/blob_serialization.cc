@@ -114,7 +114,7 @@ void TensorSerializer::SerializeWithChunkSize(
     this->Serialize(
         tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
     acceptor(
-        MakeString(name, kChunkIdSeparator, chunkStart / chunk_size),
+        c10::str(name, kChunkIdSeparator, chunkStart / chunk_size),
         blob_proto.SerializeAsString());
   };
 
@@ -319,7 +319,7 @@ int GetGPUIDForPointer(const void* ptr);
 void TensorSerializer::StoreDeviceDetail(
     const Tensor& input,
     TensorProto* proto) {
-  input.ExtractDeviceOption(proto->mutable_device_detail());
+  ExtractDeviceOption(proto->mutable_device_detail(), input.GetDevice());
 }
 // The actual serialization registry objects.
 C10_DEFINE_TYPED_REGISTRY(

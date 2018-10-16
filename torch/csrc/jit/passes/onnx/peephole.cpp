@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 #include "torch/csrc/jit/assertions.h"
 
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #if defined(_MSC_VER)
 #include <BaseTsd.h>
@@ -71,16 +71,16 @@ const std::vector<size_t>& getBroadcastPositions(Node* node) {
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
 // occurences of 1 in `from` are treated as wildcards.
-at::optional<size_t> fusibleExpandTo(at::IntList from, at::IntList to) {
+c10::optional<size_t> fusibleExpandTo(at::IntList from, at::IntList to) {
   if (from.size() > to.size()) {
-    return at::nullopt;
+    return c10::nullopt;
   }
 
   for (size_t i = 0; i < from.size(); i++) {
     auto fdim = from[from.size() - 1 - i];
     auto tdim = to[to.size() - 1 - i];
     if (fdim != 1 && fdim != tdim) {
-      return at::nullopt;
+      return c10::nullopt;
     }
   }
 
@@ -118,12 +118,12 @@ void fuseBroadcast(Block *b) {
         continue;
 
       // Not all broadcasts are supported by ONNX broadcast.
-      at::optional<size_t> axis = fusibleExpandTo(
+      c10::optional<size_t> axis = fusibleExpandTo(
           unexpanded_input->type()
               ->expect<CompleteTensorType>()
               ->sizes(), // from
           n->output()->type()->expect<CompleteTensorType>()->sizes()); // to
-      if (axis == at::nullopt)
+      if (axis == c10::nullopt)
         continue;
 
       n->replaceInput(position, unexpanded_input);
@@ -414,7 +414,7 @@ void fixDefaultRnnHiddenState(Block* b) {
       continue;
     }
     // Hidden state is the sixth input for RNN, LSTM, GRU.
-    // See http://pytorch.org/docs/master/nn.html#torch.nn.RNN
+    // See https://pytorch.org/docs/master/nn.html#torch.nn.RNN
     if (n->inputs().size() < 6) {
       continue;
     }
@@ -433,7 +433,7 @@ void fixDefaultLstmCellState(Block *b) {
       continue;
     }
     // Cell state is the seventh input for LSTM.
-    // See http://pytorch.org/docs/master/nn.html#torch.nn.LSTM
+    // See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM
     if (n->inputs().size() < 7) {
       continue;
     }

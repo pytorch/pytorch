@@ -12,6 +12,7 @@
 #include "ATen/core/TensorTypeId.h"
 
 #include <atomic>
+#include <mutex>
 #include <unordered_set>
 
 namespace at {

@@ -15,6 +15,7 @@ std::string runJITCPPTests() {
   testControlFlow();
   testCreateAutodiffSubgraphs(out);
   testCustomOperators();
+  testSchemaParser();
   testDifferentiate(out);
   testDifferentiateWithRequiresGrad(out);
   testFromQualString();

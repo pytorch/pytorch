@@ -405,22 +405,22 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
   c10::raw::intrusive_ptr::decref(work);
 }
 
-void THTensor_(gesdd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* jobz)
+void THTensor_(gesdd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, const char* some, const char* compute_uv)
 {
   THTensor *ra_ = THTensor_(new)();
-  THTensor_(gesdd2)(ru_, rs_, rv_,  ra_, a, jobz);
+  THTensor_(gesdd2)(ru_, rs_, rv_,  ra_, a, some, compute_uv);
   c10::raw::intrusive_ptr::decref(ra_);
 }
 
-void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a, const char* jobz)
+void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a,
+                       const char* some, const char* compute_uv)
 {
   if (a == NULL) a = ra_;
   THArgCheck(a->dim() == 2, 1, "A should be 2 dimensional");
   THArgCheck(!a->is_empty(), 1, "A should not be empty");
 
-  int k,m, n, lda, ldu, ldvt, lwork, info;
+  int k, m, n, lda, ldu, ldvt, lwork, info;
   THTensor *work;
-  THTensor *rvf_ = THTensor_(new)();
   scalar_t wkopt;
   THIntTensor *iwork;
 
@@ -442,62 +442,99 @@ void THTensor_(gesdd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
   iwork = k ? THIntTensor_newWithSize1d((int64_t)(8 * m)) : THIntTensor_newWithSize1d((int64_t)(8 * n));
 
   THTensor_(resize1d)(rs_,k);
-  THTensor_(resize2d)(rvf_,ldvt,n);
-  if (*jobz == 'A')
+  THTensor *rvf_ = NULL;
+
+  if (*compute_uv != 'N') {
+    rvf_ = THTensor_(new)();
+    THTensor_(resize2d)(rvf_,ldvt,n);
+    if (*some == 'A')
+      THTensor_(resize2d)(ru_,m,ldu);
+    else
+      THTensor_(resize2d)(ru_,k,ldu);
+  } else {
+    THTensor_(resize2d)(rv_,ldvt,n);
     THTensor_(resize2d)(ru_,m,ldu);
-  else
-    THTensor_(resize2d)(ru_,k,ldu);
+  }
 
   THTensor_(checkTransposed)(ru_);
 
-  /* guard against someone passing a correct size, but wrong stride */
-  ru__ = THTensor_(newTransposedContiguous)(ru_);
-  rs__ = THTensor_(newContiguous)(rs_);
-  rv__ = THTensor_(newContiguous)(rvf_);
+  char jobz = 'N';
+  scalar_t *rs__data = NULL;
+  scalar_t *ru__data = NULL;
+  scalar_t *rv__data = NULL;
 
-  THLapack_(gesdd)(jobz[0],
-		   m,n,ra__->data<scalar_t>(),lda,
-		   rs__->data<scalar_t>(),
-		   ru__->data<scalar_t>(),
-		   ldu,
-		   rv__->data<scalar_t>(), ldvt,
-		   &wkopt, -1, THIntTensor_data(iwork), &info);
+  rs__ = THTensor_(newContiguous)(rs_);
+  rs__data = rs__->data<scalar_t>();  
+  if (*compute_uv != 'N') {
+    /* guard against someone passing a correct size, but wrong stride */
+    ru__ = THTensor_(newTransposedContiguous)(ru_);
+    rv__ = THTensor_(newContiguous)(rvf_);
+
+    ru__data = ru__->data<scalar_t>();
+    rv__data = rv__->data<scalar_t>();
+
+    jobz = some[0];
+  }
+
+  THLapack_(gesdd)(jobz,
+	     m,n,ra__->data<scalar_t>(),lda,
+	     rs__data,
+	     ru__data,
+	     ldu,
+	     rv__data, ldvt,
+	     &wkopt, -1, THIntTensor_data(iwork), &info);
   lwork = (int)wkopt;
   work = THTensor_(newWithSize1d)(lwork);
-  THLapack_(gesdd)(jobz[0],
-		   m,n,ra__->data<scalar_t>(),lda,
-		   rs__->data<scalar_t>(),
-		   ru__->data<scalar_t>(),
-		   ldu,
-		   rv__->data<scalar_t>(), ldvt,
-		   work->data<scalar_t>(),lwork, THIntTensor_data(iwork), &info);
+  THLapack_(gesdd)(jobz,
+	     m,n,ra__->data<scalar_t>(),lda,
+	     rs__data,
+	     ru__data,
+	     ldu,
+	     rv__data, ldvt,
+	     work->data<scalar_t>(),lwork, THIntTensor_data(iwork), &info);
 
-  THLapackCheckWithCleanup("Lapack Error %s : %d superdiagonals failed to converge.",
-                           THCleanup(
-                               c10::raw::intrusive_ptr::decref(ru__);
-                               c10::raw::intrusive_ptr::decref(rs__);
-                               c10::raw::intrusive_ptr::decref(rv__);
-                               c10::raw::intrusive_ptr::decref(ra__);
-                               c10::raw::intrusive_ptr::decref(work);
-                               c10::raw::intrusive_ptr::decref(iwork);),
-                           "gesdd", info, "");
+  if (jobz != 'N') {
+    THLapackCheckWithCleanup("Lapack Error %s : %d superdiagonals failed to converge.",
+                             THCleanup(
+                                 c10::raw::intrusive_ptr::decref(ru__);
+                                 c10::raw::intrusive_ptr::decref(rs__);
+                                 c10::raw::intrusive_ptr::decref(rv__);
+                                 c10::raw::intrusive_ptr::decref(ra__);
+                                 c10::raw::intrusive_ptr::decref(work);
+                                 c10::raw::intrusive_ptr::decref(iwork);),
+                             "gesdd", info, "");
+  } else {
+    THLapackCheckWithCleanup("Lapack Error %s : %d superdiagonals failed to converge.",
+                             THCleanup(
+                                 c10::raw::intrusive_ptr::decref(rs__);
+                                 c10::raw::intrusive_ptr::decref(ra__);
+                                 c10::raw::intrusive_ptr::decref(work);
+                                 c10::raw::intrusive_ptr::decref(iwork);),
+                             "gesdd", info, "");
+  }
 
-  if (*jobz == 'S')
-    THTensor_(narrow)(rv__,NULL,1,0,k);
-
-  THTensor_(freeCopyTo)(ru__, ru_);
-  THTensor_(freeCopyTo)(rs__, rs_);
-  THTensor_(freeCopyTo)(rv__, rvf_);
   THTensor_(freeCopyTo)(ra__, ra_);
+  THTensor_(freeCopyTo)(rs__, rs_);
   c10::raw::intrusive_ptr::decref(work);
   c10::raw::intrusive_ptr::decref(iwork);
 
-  if (*jobz == 'S')
-    THTensor_(narrow)(rvf_,NULL,1,0,k);
+  if (jobz != 'N') {
+    if (jobz == 'S')
+      THTensor_(narrow)(rv__,NULL,1,0,k);
 
-  THTensor_(resizeAs)(rv_, rvf_);
-  THTensor_(copy)(rv_, rvf_);
-  c10::raw::intrusive_ptr::decref(rvf_);
+    THTensor_(freeCopyTo)(ru__, ru_);
+    THTensor_(freeCopyTo)(rv__, rvf_);
+
+    if (jobz == 'S')
+      THTensor_(narrow)(rvf_,NULL,1,0,k);
+
+    THTensor_(resizeAs)(rv_, rvf_);
+    THTensor_(copy)(rv_, rvf_);
+    c10::raw::intrusive_ptr::decref(rvf_);
+  } else {
+    THTensor_(zero)(ru_);
+    THTensor_(zero)(rv_);
+  }
 }
 
 void THTensor_(getri)(THTensor *ra_, THTensor *a)

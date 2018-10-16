@@ -144,7 +144,8 @@ class Converter {
         // Load image
         cv::Mat img = cv::imread(
             input_folder + pair.first,
-            c10::FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+            c10::FLAGS_color ? cv::IMREAD_COLOR
+                             : cv::IMREAD_GRAYSCALE);
 
         // Resize image
         cv::Mat resized_img;

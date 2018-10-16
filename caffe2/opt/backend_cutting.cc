@@ -40,12 +40,12 @@ struct VisitorContext {
 std::string ShowNode(NodeRef node) {
   if (nn::is<NeuralNetData>(node)) {
     const auto* nn_tensor = nn::get<NeuralNetData>(node);
-    return MakeString("Tensor: ", nn_tensor->getName());
+    return c10::str("Tensor: ", nn_tensor->getName());
   } else if (nn::is<NeuralNetOperator>(node)) {
     const auto* nn_op = nn::get<NeuralNetOperator>(node);
     const auto& op_def =
         dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
-    return MakeString("Op: ", op_def.type());
+    return c10::str("Op: ", op_def.type());
   } else {
     CAFFE_THROW("Known node");
   }

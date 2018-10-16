@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ATen/core/Device.h"
+#include "ATen/core/Error.h"
 #include "ATen/core/Layout.h"
 #include "ATen/core/Scalar.h"
 #include "ATen/core/ScalarType.h"
@@ -8,9 +9,8 @@
 #include "ATen/core/Storage.h"
 #include "ATen/core/TensorAccessor.h"
 #include "ATen/core/TensorImpl.h"
-#include "ATen/core/optional.h"
 #include "ATen/core/UndefinedTensorImpl.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Optional.h"
 
 namespace at {
 struct Generator;
@@ -241,7 +241,7 @@ public:
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.
   void backward(
-      at::optional<Tensor> gradient = at::nullopt,
+      c10::optional<Tensor> gradient = c10::nullopt,
       bool keep_graph = false,
       bool create_graph = false);
 
@@ -267,7 +267,7 @@ struct CAFFE2_API WeakTensor {
   WeakTensor(const Tensor& t) : weak_impl_(t.impl_) {}
 
   // XXX: this can return undefined tensors
-  // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
+  // Ideally it would be c10::optional<Tensor>, but MSVC is too cool for that
   Tensor lock() const {
     return Tensor(weak_impl_.lock());
   }

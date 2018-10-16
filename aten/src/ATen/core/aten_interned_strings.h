@@ -217,6 +217,9 @@ _(aten, bilinear) \
 _(aten, binary_cross_entropy) \
 _(aten, binary_cross_entropy_backward) \
 _(aten, binary_cross_entropy_forward) \
+_(aten, binary_cross_entropy_with_logits) \
+_(aten, binary_cross_entropy_with_logits_backward) \
+_(aten, binary_cross_entropy_with_logits_target_backward) \
 _(aten, bincount) \
 _(aten, blackman_window) \
 _(aten, bmm) \
@@ -228,6 +231,7 @@ _(aten, cat) \
 _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
+_(aten, chain_matmul) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
@@ -397,7 +401,8 @@ _(aten, log_sigmoid) \
 _(aten, log_sigmoid_backward) \
 _(aten, log_sigmoid_forward) \
 _(aten, log_softmax) \
-_(aten, log_softmax_backward_data) \
+_(aten, _log_softmax) \
+_(aten, _log_softmax_backward_data) \
 _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \
@@ -577,7 +582,8 @@ _(aten, soft_margin_loss) \
 _(aten, soft_margin_loss_backward) \
 _(aten, soft_margin_loss_forward) \
 _(aten, softmax) \
-_(aten, softmax_backward_data) \
+_(aten, _softmax) \
+_(aten, _softmax_backward_data) \
 _(aten, softplus) \
 _(aten, softplus_backward) \
 _(aten, softplus_forward) \

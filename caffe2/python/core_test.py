@@ -897,7 +897,7 @@ op {
   type: "CopyCPUToGPU"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -907,7 +907,7 @@ op {
   type: "CopyCPUToGPU"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -919,7 +919,7 @@ op {
   type: "FC"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -930,7 +930,7 @@ op {
   type: "Add"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 external_input: "data"
@@ -945,7 +945,7 @@ external_input: "const_cuda_1"
         init_net = core.Net("init")
         device_option = caffe2_pb2.DeviceOption()
         device_option.device_type = caffe2_pb2.CUDA
-        device_option.cuda_gpu_id = 1
+        device_option.device_id = 1
 
         with core.DeviceScope(device_option):
             weight = init_net.XavierFill([], 'fc_w', shape=[10, 100])
@@ -962,7 +962,7 @@ external_input: "const_cuda_1"
         self.assertEqual(op.input[1], "fc_w")
         self.assertEqual(op.input[2], "fc_b")
         self.assertEqual(op.device_option.device_type, 1)
-        self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        self.assertEqual(op.device_option.device_id, 1)
         """
 For reference, net.Proto() should be like:
 name: ""
@@ -975,7 +975,7 @@ op {
   type: "FC"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 external_input: "data"
@@ -1093,7 +1093,7 @@ op {
   type: "CopyCPUToGPU"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -1103,7 +1103,7 @@ op {
   type: "Relu"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -1119,7 +1119,7 @@ op {
   type: "Relu"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 op {
@@ -1135,7 +1135,7 @@ op {
   type: "CopyCPUToGPU"
   device_option {
     device_type: 1
-    cuda_gpu_id: 0
+    device_id: 0
   }
 }
 op {
@@ -1145,7 +1145,7 @@ op {
   type: "Relu"
   device_option {
     device_type: 1
-    cuda_gpu_id: 0
+    device_id: 0
   }
 }
 op {
@@ -1155,7 +1155,7 @@ op {
   type: "Relu"
   device_option {
     device_type: 1
-    cuda_gpu_id: 1
+    device_id: 1
   }
 }
 external_input: "data"

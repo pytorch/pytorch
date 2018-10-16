@@ -94,10 +94,8 @@ inline CAFFE2_API caffe2::DeviceOption DeviceToOption(
       }
       break;
     case DeviceType::CUDA:
-      option.set_cuda_gpu_id(device.index());
-      break;
     case DeviceType::HIP:
-      option.set_hip_gpu_id(device.index());
+      option.set_device_id(device.index());
       break;
     case DeviceType::OPENGL:
     case DeviceType::OPENCL:
@@ -127,13 +125,18 @@ inline CAFFE2_API at::Device OptionToDevice(const caffe2::DeviceOption option) {
       }
       break;
     case caffe2::PROTO_CUDA:
-      id = option.cuda_gpu_id();
-      break;
     case caffe2::PROTO_HIP:
-      id = option.hip_gpu_id();
+      id = option.device_id();
       break;
   }
   return at::Device(ProtoToType(type), id);
+}
+
+inline void ExtractDeviceOption(
+    DeviceOption* device_option,
+    const at::Device& device) {
+  AT_ASSERT(device_option);
+  device_option->CopyFrom(DeviceToOption(device));
 }
 
 } // namespace caffe2

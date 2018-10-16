@@ -160,7 +160,7 @@ def alexnet():
         model, drop7, "fc8", 4096, 1000, ('XavierFill', {}), ('ConstantFill', {})
     )
     relu8 = brew.relu(model, fc8, "fc8")
-    _ = brew.dropout(model, relu8, "fc8_dropout", is_test=1, ratio=0.5)
+    brew.dropout(model, relu8, "fc8_dropout", is_test=1, ratio=0.5)
     return model, [(1, 3, 224, 224)]
 
 
@@ -180,16 +180,15 @@ def complex_resnet():
     return model, [(1, 1, 224, 224)]
 
 
-@unittest.skipIf(not workspace.C.has_mkldnn or not workspace.C.use_ideep,
-                 "Skipping as we do not have MKLDNN and IDEEP.")
+@unittest.skipIf(not workspace.C.use_ideep,
+                 "Skipping as we do not have IDEEP.")
 class MKLRewriteTest(hu.HypothesisTestCase):
     @given(gen=st.sampled_from([simple_relu, simple_fc,
-                                simple_mlp, simple_cnn]),
-           ideep=st.booleans())
-    def test_mkl_simple_rewrite(self, gen, ideep):
+                                simple_mlp, simple_cnn]))
+    def test_mkl_simple_rewrite(self, gen):
         cpu_model, (shape,) = gen()
         cpu_model = deterministic_io(cpu_model)
-        mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model, ideep)
+        mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model)
         X = np.random.randn(*shape).astype(np.float32)
 
         def run(model):
@@ -201,11 +200,10 @@ class MKLRewriteTest(hu.HypothesisTestCase):
         np.testing.assert_allclose(run(cpu_model), run(mkl_model),
                                    atol=1e-4, rtol=1e-4)
 
-    @given(ideep=st.booleans())
-    def test_mkl_resnet_rewrite(self, ideep):
+    def test_mkl_resnet_rewrite(self):
         cpu_model, (shape,) = complex_resnet()
         cpu_model = deterministic_io(cpu_model)
-        mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model, ideep)
+        mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model)
         np.random.seed(1701)
         X = np.random.randn(*shape).astype(np.float32)
 
@@ -217,11 +215,10 @@ class MKLRewriteTest(hu.HypothesisTestCase):
         np.testing.assert_allclose(run(cpu_model), run(mkl_model),
                                    atol=1e-4, rtol=1e-4)
 
-    @given(ideep=st.booleans())
-    def test_mkl_multi_output_rewrite(self, ideep):
+    def test_mkl_multi_output_rewrite(self):
         cpu_model, shapes = double_matmul()
         cpu_model = deterministic_io(cpu_model)
-        mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model, ideep)
+        mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model)
         np.random.seed(1701)
         Xs = [np.random.randn(*shape).astype(np.float32) for shape in shapes]
 
@@ -239,11 +236,10 @@ class MKLRewriteTest(hu.HypothesisTestCase):
         np.testing.assert_allclose(run(cpu_model), run(mkl_model),
                                    atol=1e-4, rtol=1e-4)
 
-    @given(ideep=st.booleans())
-    def test_mkl_alexnet_rewrite(self, ideep):
+    def test_mkl_alexnet_rewrite(self):
         cpu_model, (shape,) = alexnet()
         cpu_model = deterministic_io(cpu_model)
-        mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model, ideep)
+        mkl_model = rewrite_graph.rewrite_model_helper_simple(cpu_model)
         np.random.seed(1701)
         X = np.random.randn(*shape).astype(np.float32)
 

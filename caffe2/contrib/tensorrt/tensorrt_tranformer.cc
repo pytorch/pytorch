@@ -188,7 +188,7 @@ void TensorRTTransformer::AddTrtOptions(
     if (it != output_size_hints.end()) {
       const auto& dims = it->second;
       auto* output_size_hint_arg = op->add_arg();
-      output_size_hint_arg->set_name(MakeString("output_size_hint_", i));
+      output_size_hint_arg->set_name(c10::str("output_size_hint_", i));
       for (const auto& d : dims) {
         output_size_hint_arg->add_ints(d);
       }

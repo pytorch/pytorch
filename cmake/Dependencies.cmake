@@ -16,11 +16,13 @@ macro(enable_ubsan)
   endif()
 endmacro()
 
+if(NOT BUILD_ATEN_ONLY)
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
+endif()
 endif()
 
 # ---[ Threads
@@ -302,6 +304,20 @@ if(USE_FFMPEG)
     caffe2_update_option(USE_FFMPEG OFF)
   endif ()
 endif()
+
+# ---[ Caffe2 depends on FP16 library for half-precision conversions
+if (NOT TARGET fp16)
+  if (NOT DEFINED FP16_SOURCE_DIR)
+    set(FP16_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/FP16" CACHE STRING "FP16 source directory")
+  endif()
+
+  set(FP16_BUILD_TESTS OFF CACHE BOOL "")
+  set(FP16_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  add_subdirectory(
+    "${FP16_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+endif()
+list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
 
 # ---[ EIGEN
 # Due to license considerations, we will only use the MPL2 parts of Eigen.
@@ -783,6 +799,7 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
+if(NOT BUILD_ATEN_ONLY)
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
@@ -820,6 +837,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+endif()
 endif()
 
 # --[ TensorRT integration with onnx-trt

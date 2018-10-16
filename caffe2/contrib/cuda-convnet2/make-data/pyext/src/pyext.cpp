@@ -93,7 +93,7 @@ void DecoderThread::makeJPEG(int idx) {
     size_t src_len = PyString_GET_SIZE(pySrc);
     vector<uchar> src_vec(src, src + src_len);
 
-    cv::Mat decoded_mat = cv::imdecode(cv::Mat(src_vec), CV_LOAD_IMAGE_COLOR);
+    cv::Mat decoded_mat = cv::imdecode(cv::Mat(src_vec), cv::IMREAD_COLOR);
     assert(decoded_mat.channels() == 3);
 
     /*

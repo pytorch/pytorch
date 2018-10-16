@@ -9,8 +9,8 @@
 #include <torch/csrc/utils/functional.h>
 
 #include <ATen/ATen.h>
-#include <ATen/core/optional.h>
 #include <ATen/cuda/CUDAContext.h>
+#include "c10/util/Optional.h"
 
 #include <cstddef>
 #include <memory>
@@ -20,9 +20,9 @@ namespace torch {
 namespace autograd {
 Scatter::Scatter(
     std::vector<at::Device> devices,
-    const at::optional<std::vector<int64_t>>& chunk_sizes,
+    const c10::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const at::optional<std::vector<at::cuda::CUDAStream>>& streams,
+    const c10::optional<std::vector<at::cuda::CUDAStream>>& streams,
     bool unsqueeze_scalars)
     : devices_(std::move(devices)),
       chunk_sizes_(chunk_sizes),
@@ -114,7 +114,7 @@ variable_list Gather::apply(variable_list&& inputs) {
         std::move(source_devices),
         std::move(input_sizes),
         dim_,
-        /*streams=*/at::nullopt,
+        /*streams=*/c10::nullopt,
         /*unsqueeze_scalars=*/unsqueeze_scalars);
     grad_fn->set_next_edges(collect_next_edges(inputs));
   }
