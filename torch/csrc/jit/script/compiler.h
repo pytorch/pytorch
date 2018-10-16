@@ -203,7 +203,7 @@ struct MatchedSchema {
   std::vector<TypePtr> return_types;
 };
 
-TORCH_API at::optional<MatchedSchema> tryMatchSchema(
+TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
   Graph& graph,
@@ -219,7 +219,7 @@ TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
-  at::optional<NamedValue> self,
+  c10::optional<NamedValue> self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,

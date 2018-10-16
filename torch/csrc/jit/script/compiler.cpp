@@ -600,8 +600,6 @@ c10::optional<MatchedSchema> tryMatchSchema(
   for (size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
     const auto& arg = schema.arguments[schema_i];
     c10::optional<NamedValue> v;
-    if (!arg.kwarg_only && schema_i < modifiedArgs.size()) {
-    at::optional<NamedValue> v;
     if (arg.name == "self" && self) {
       v = self;
       self = c10::nullopt;
@@ -730,7 +728,7 @@ Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
-  at::optional<NamedValue> self,
+  c10::optional<NamedValue> self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
@@ -1569,7 +1567,7 @@ private:
                    tree->range(),
                    *method.graph(),
                    kind,
-                   at::nullopt,
+                   c10::nullopt,
                    named_values,
                    {},
                    /*required=*/true);
@@ -1670,7 +1668,7 @@ private:
       int64_t dim,
       Value* index) {
     return emitBuiltinCall(
-        loc, *graph, aten::select, at::nullopt,
+        loc, *graph, aten::select, c10::nullopt,
         {input, graph->insertConstant(dim, loc), index}, {}, true);
   }
 
@@ -1699,7 +1697,7 @@ private:
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
-    return emitBuiltinCall(loc, *graph, aten::slice, at::nullopt, args, {step}, true);
+    return emitBuiltinCall(loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
 
   Value* emitIndex(
@@ -1708,7 +1706,7 @@ private:
       at::ArrayRef<Value*> indices) {
     auto* index = graph->insertNode(
         graph->createList(DynamicType::get(), indices))->output();
-    return emitBuiltinCall(loc, *graph, aten::index, at::nullopt,  {input, index}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::index, c10::nullopt,  {input, index}, {}, true);
   }
 
   // Emits multidimensional slicing with int and slice indices.
@@ -1827,7 +1825,7 @@ private:
       // if it's a list, emit a regular index selection op
       auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
-                 loc, *graph, aten::select, at::nullopt, {gatherable, idx}, {}, true);
+                 loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
     } else {
       JIT_ASSERT(gatherable->type()->isSubtypeOf(DynamicType::get()));
       return emitMultidimSlicing(loc, gatherable, subscript);
