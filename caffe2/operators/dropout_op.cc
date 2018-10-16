@@ -158,7 +158,7 @@ mask: [[False False False  True  True]
         "*(type: Tensor`<bool>`)* The output mask containing boolean values for"
         "each element, signifying which elements are dropped out. If `is_test` is"
         "nonzero, this output is not filled.")
-    .InheritOnnxSchema("Dropout");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(DropoutGrad)
     .NumInputs(1, 2)
