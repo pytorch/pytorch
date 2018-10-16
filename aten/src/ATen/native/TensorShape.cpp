@@ -1,4 +1,3 @@
-#include <ATen/native/sparse/SparseUtils.h>
 #include <TH/THTensor.hpp>
 #include <algorithm>
 #include <vector>

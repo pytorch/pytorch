@@ -117,6 +117,8 @@ _(aten, _sin) \
 _(aten, _sinh) \
 _(aten, _sparseDims) \
 _(aten, _sparse_add) \
+_(aten, _sparse_coo_tensor_with_dims) \
+_(aten, _sparse_coo_tensor_with_dims_and_tensors) \
 _(aten, _sparse_coo_tensor_unsafe) \
 _(aten, _sparse_dense_add) \
 _(aten, _sparse_div_scalar) \
@@ -593,8 +595,6 @@ _(aten, softshrink_backward) \
 _(aten, softshrink_forward) \
 _(aten, sort) \
 _(aten, sparse_coo_tensor) \
-_(aten, sparse_coo_tensor_with_dims) \
-_(aten, sparse_coo_tensor_with_dims_and_tensors) \
 _(aten, sparse_mask) \
 _(aten, sparse_resize) \
 _(aten, sparse_resize_and_clear) \
