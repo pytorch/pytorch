@@ -14,7 +14,7 @@ TEST(CUDNNTest, CUDNNTestCUDA) {
 #if CUDNN_VERSION < 7000
   auto handle = getCudnnHandle();
   DropoutDescriptor desc1, desc2;
-  desc1.initialize_rng(at::CUDA(kByte), handle, 0.5, 42);
+  desc1.initialize_rng(handle, 0.5, 42, TensorOptions().device(DeviceType::CUDA).dtype(kByte));
   desc2.set(handle, 0.5, desc1.state);
   bool isEQ;
   isEQ = (desc1.desc()->dropout == desc2.desc()->dropout);

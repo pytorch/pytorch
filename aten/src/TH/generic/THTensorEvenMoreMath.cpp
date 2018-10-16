@@ -30,10 +30,10 @@ void THTensor_(zero)(THTensor *r_)
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
 #ifdef _OPENMP
-  if (!omp_in_parallel()) {
-    int64_t tensor_size = THTensor_(nElement)(tensor);
-    int tensor_contig = THTensor_(isContiguous)(tensor);
-    int mask_contig = THTensor_(isContiguous)(mask);
+  int64_t tensor_size = THTensor_(nElement)(tensor);
+  int tensor_contig = THTensor_(isContiguous)(tensor);
+  int mask_contig = THTensor_(isContiguous)(mask);
+  if (!omp_in_parallel() && tensor_contig && mask_contig) {
     TH_TENSOR_APPLY2_OMP(tensor_size, tensor_contig, mask_contig,
       scalar_t, tensor, unsigned char, mask,
       if (*mask_data > 1) {

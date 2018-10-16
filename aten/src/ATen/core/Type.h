@@ -14,6 +14,8 @@
 #include "ATen/core/Reduction.h"
 #include "ATen/core/TensorOptions.h"
 
+#include "c10/util/Optional.h"
+
 #include <array>
 #include <cstddef>
 #include <functional>
@@ -132,7 +134,11 @@ struct CAFFE2_API Type {
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const = 0;
   virtual Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const = 0;
 
-  virtual void backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const = 0;
+  virtual void backward(
+      Tensor& self,
+      c10::optional<Tensor> gradient,
+      bool keep_graph,
+      bool create_graph) const = 0;
   virtual void set_data(Tensor & self, Tensor new_data) const = 0;
 
   virtual Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
@@ -150,12 +156,10 @@ struct CAFFE2_API Type {
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int32_t device_index = -1) const {
-    TensorOptions r;
-    r.dtype(scalarType());
-    r.device({backendToDeviceType(backend()), device_index});
-    r.layout(layout());
-    r.is_variable(is_variable());
-    return r;
+    return TensorOptions().dtype(scalarType())
+                          .device({backendToDeviceType(backend()), device_index})
+                          .layout(layout())
+                          .is_variable(is_variable());
   }
 
   operator TensorOptions() const {
@@ -181,7 +185,6 @@ struct CAFFE2_API Type {
   virtual Tensor s_masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor masked_select(const Tensor & self, const Tensor & mask) const = 0;
   virtual Tensor nonzero(const Tensor & self) const = 0;
-  virtual Tensor contiguous(const Tensor & self) const = 0;
   virtual Tensor view(const Tensor & self, IntList size) const = 0;
   virtual Tensor index_select(const Tensor & self, int64_t dim, const Tensor & index) const = 0;
   virtual Tensor take(const Tensor & self, const Tensor & index) const = 0;
@@ -342,7 +345,7 @@ struct CAFFE2_API Type {
   virtual std::tuple<Tensor,Tensor> trtrs(const Tensor & self, const Tensor & A, bool upper, bool transpose, bool unitriangular) const = 0;
   virtual std::tuple<Tensor,Tensor> symeig(const Tensor & self, bool eigenvectors, bool upper) const = 0;
   virtual std::tuple<Tensor,Tensor> eig(const Tensor & self, bool eigenvectors) const = 0;
-  virtual std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some) const = 0;
+  virtual std::tuple<Tensor,Tensor,Tensor> svd(const Tensor & self, bool some, bool compute_uv) const = 0;
   virtual Tensor potrf(const Tensor & self, bool upper) const = 0;
   virtual Tensor potrs(const Tensor & self, const Tensor & input2, bool upper) const = 0;
   virtual Tensor potri(const Tensor & self, bool upper) const = 0;
@@ -408,6 +411,7 @@ struct CAFFE2_API Type {
   virtual Tensor & clamp_max_(Tensor & self, Scalar max) const = 0;
   virtual Tensor clamp_min(const Tensor & self, Scalar min) const = 0;
   virtual Tensor & clamp_min_(Tensor & self, Scalar min) const = 0;
+  virtual Tensor contiguous(const Tensor & self) const = 0;
   virtual Tensor cos(const Tensor & self) const = 0;
   virtual Tensor & cos_(Tensor & self) const = 0;
   virtual Tensor cosh(const Tensor & self) const = 0;
@@ -469,6 +473,7 @@ struct CAFFE2_API Type {
   virtual Tensor log2(const Tensor & self) const = 0;
   virtual Tensor & log2_(Tensor & self) const = 0;
   virtual Tensor logdet(const Tensor & self) const = 0;
+  virtual Tensor log_softmax(const Tensor & self, int64_t dim, ScalarType dtype) const = 0;
   virtual Tensor log_softmax(const Tensor & self, int64_t dim) const = 0;
   virtual Tensor logsumexp(const Tensor & self, int64_t dim, bool keepdim) const = 0;
   virtual Tensor matmul(const Tensor & self, const Tensor & other) const = 0;
@@ -523,6 +528,7 @@ struct CAFFE2_API Type {
   virtual Tensor slice(const Tensor & self, int64_t dim, int64_t start, int64_t end, int64_t step) const = 0;
   virtual std::tuple<Tensor,Tensor> slogdet(const Tensor & self) const = 0;
   virtual Tensor smm(const Tensor & self, const Tensor & mat2) const = 0;
+  virtual Tensor softmax(const Tensor & self, int64_t dim, ScalarType dtype) const = 0;
   virtual Tensor softmax(const Tensor & self, int64_t dim) const = 0;
   virtual std::vector<Tensor> split(const Tensor & self, int64_t split_size, int64_t dim) const = 0;
   virtual std::vector<Tensor> split_with_sizes(const Tensor & self, IntList split_sizes, int64_t dim) const = 0;
@@ -592,10 +598,10 @@ struct CAFFE2_API Type {
   virtual int64_t numel(const Tensor & self) const = 0;
   virtual std::vector<Tensor> unbind(const Tensor & self, int64_t dim) const = 0;
   virtual int64_t get_device(const Tensor & self) const = 0;
-  virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking) const = 0;
-  virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking) const = 0;
-  virtual Tensor to(const Tensor & self, Device device, bool non_blocking) const = 0;
-  virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking) const = 0;
+  virtual Tensor to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy) const = 0;
+  virtual Tensor to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy) const = 0;
+  virtual Tensor to(const Tensor & self, Device device, bool non_blocking, bool copy) const = 0;
+  virtual Tensor to(const Tensor & self, const Tensor & other, bool non_blocking, bool copy) const = 0;
   virtual Scalar _local_scalar(const Tensor & self) const = 0;
 protected:
   TensorTypeId type_id_;

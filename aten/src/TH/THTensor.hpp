@@ -41,7 +41,7 @@ inline void THTensor_maybe_zero_dim(THTensor *tensor, bool condition_when_zero_d
 }
 
 // [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
-// nDimension                 corresponds to the "true" ATen dimension. TODO: implement.
+// nDimension                 corresponds to the "true" ATen dimension.
 // nDimensionLegacyNoScalars  correpsonds to the ATen dimension, except scalars are viewed as 1-dimensional tensors.
 // nDimensionLegacyAll        corresponds to the ATen dimension, except scalars are viewed as 1-dimensional tensors
 //                            and tensors with a dimension of size zero are collapsed to 0-dimensional tensors.
@@ -110,8 +110,10 @@ TH_API void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *siz
 
 TH_CPP_API void THTensor_resize(THTensor *self, at::IntList size, at::IntList stride);
 TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntList size_, at::IntList stride_);
-TH_CPP_API at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
-                                                                      at::IntList newshape);
+TH_CPP_API c10::optional<std::vector<int64_t>> THTensor_compute_stride(
+    at::IntList oldshape,
+    at::IntList oldstride,
+    at::IntList newshape);
 
 #include "generic/THTensor.hpp"
 #include "THGenerateAllTypes.h"

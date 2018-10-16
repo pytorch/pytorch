@@ -22,25 +22,23 @@ struct TORCH_API constant_not_supported_error : public std::runtime_error {
 TORCH_API Value* insertConstant(
     Graph& g,
     IValue val,
-    at::optional<SourceRange> loc = at::nullopt);
-
+    c10::optional<SourceRange> loc = c10::nullopt);
 
 //////////////////////////////////////////////////////////////////////////////////
 // Helper for retrieving constants
 //////////////////////////////////////////////////////////////////////////////////
 
-// attempt to convert a (possibly constant) Value* into an intepreter value (IValue).
-// returns at::nullopt if the Value* was not constant
-TORCH_API at::optional<IValue> toIValue(Value* v);
+// attempt to convert a (possibly constant) Value* into an intepreter value
+// (IValue). returns c10::nullopt if the Value* was not constant
+TORCH_API c10::optional<IValue> toIValue(Value* v);
 
 // if a value is a constant then try to turn into type T using the
 // same rules as the interpreter
-template<typename T>
-at::optional<T> constant_as(Value* v) {
+template <typename T>
+c10::optional<T> constant_as(Value* v) {
   if(auto ivalue = toIValue(v)) {
     return ivalue->to<T>();
   }
-  return at::nullopt;
+  return c10::nullopt;
 }
-
 }}

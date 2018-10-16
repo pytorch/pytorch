@@ -112,7 +112,7 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
     is_input_.push_back(is_input);
     if (!is_input) {
       // For output, we try to get its output size hint
-      const std::string key = MakeString("output_size_hint_", output_idx);
+      const std::string key = c10::str("output_size_hint_", output_idx);
       auto output_size_hint = OperatorBase::GetRepeatedArgument<int>(key);
       if (!output_size_hint.empty()) {
         std::vector<int64_t> dims;

@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "c10/macros/Macros.h"
 #include "c10/util/Type.h"
 
 namespace c10 {

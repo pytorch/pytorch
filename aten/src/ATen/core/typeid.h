@@ -19,12 +19,13 @@
 
 #include "caffe2/core/macros.h"
 #include "c10/util/C++17.h"
-#include "c10/util/Metaprogramming.h"
 #include "ATen/core/Backtrace.h"
 #include "ATen/core/Error.h"
 #include "ATen/core/Half.h"
 #include "ATen/core/IdWrapper.h"
 #include "ATen/core/Macros.h"
+
+#include "c10/util/Type.h"
 
 /*
  * TypeIdentifier is a small type containing an id.
@@ -163,22 +164,36 @@ inline void _PlacementNew(void* ptr, size_t n) {
 template <typename T>
 inline void _PlacementNewNotDefault(void* /*ptr*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(at::demangle_type<T>()) +
+      "Type " + std::string(c10::demangle_type<T>()) +
       " is not default-constructible.");
 }
 
-template<class T>
-inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() noexcept {
-  using c10::guts::if_constexpr;
-  return if_constexpr<std::is_fundamental<T>::value || std::is_pointer<T>::value>(
-     /* then */ [](auto) { return nullptr; },
-     /* else */ [](auto) {
-         return if_constexpr<std::is_default_constructible<T>::value>(
-           /* then */ [](auto) { return &_PlacementNew<T>; },
-           /* else */ [](auto) { return &_PlacementNewNotDefault<T>; }
-         );
-       }
-  );
+template<
+    typename T,
+    c10::guts::enable_if_t<
+        std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
+inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
+  return nullptr;
+}
+
+template <
+    typename T,
+    c10::guts::enable_if_t<
+        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
+        std::is_default_constructible<T>::value
+    >* = nullptr>
+inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
+  return &_PlacementNew<T>;
+}
+
+template <
+    typename T,
+    c10::guts::enable_if_t<
+        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
+        !std::is_default_constructible<T>::value
+    >* = nullptr>
+inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
+  return &_PlacementNewNotDefault<T>;
 }
 
 template <typename T>
@@ -189,17 +204,22 @@ inline void* _New() {
 template <typename T>
 inline void* _NewNotDefault() {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(at::demangle_type<T>()) +
+      "Type " + std::string(c10::demangle_type<T>()) +
       " is not default-constructible.");
 }
 
-template<class T>
-inline constexpr TypeMetaData::New* _PickNew() noexcept {
-  using c10::guts::if_constexpr;
-  return if_constexpr<std::is_default_constructible<T>::value>(
-    /* then */ [](auto) { return &_New<T>; },
-    /* else */ [](auto) { return &_NewNotDefault<T>; }
-  );
+template<
+    typename T,
+    c10::guts::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
+inline constexpr TypeMetaData::New* _PickNew() {
+  return &_New<T>;
+}
+
+template <
+    typename T,
+    c10::guts::enable_if_t<!std::is_default_constructible<T>::value>* = nullptr>
+inline constexpr TypeMetaData::New* _PickNew() {
+  return &_NewNotDefault<T>;
 }
 
 /**
@@ -220,22 +240,36 @@ inline void _Copy(const void* src, void* dst, size_t n) {
 template <typename T>
 inline void _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
-      "Type " + std::string(at::demangle_type<T>()) +
+      "Type " + std::string(c10::demangle_type<T>()) +
       " does not allow assignment.");
 }
 
-template<class T>
-inline constexpr TypeMetaData::Copy* _PickCopy() noexcept {
-  using c10::guts::if_constexpr;
-  return if_constexpr<std::is_fundamental<T>::value || std::is_pointer<T>::value>(
-     /* then */ [](auto) { return nullptr; },
-     /* else */ [](auto) {
-         return if_constexpr<std::is_copy_assignable<T>::value>(
-           /* then */ [](auto) { return &_Copy<T>; },
-           /* else */ [](auto) { return &_CopyNotAllowed<T>; }
-         );
-       }
-  );
+template<
+    typename T,
+    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
+    >
+inline constexpr TypeMetaData::Copy* _PickCopy() {
+  return nullptr;
+}
+
+template <
+    typename T,
+    c10::guts::enable_if_t<
+        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
+        std::is_copy_assignable<T>::value
+    >* = nullptr>
+inline constexpr TypeMetaData::Copy* _PickCopy() {
+  return &_Copy<T>;
+}
+
+template <
+    typename T,
+    c10::guts::enable_if_t<
+        !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
+        !std::is_copy_assignable<T>::value
+    >* = nullptr>
+inline constexpr TypeMetaData::Copy* _PickCopy() {
+  return &_CopyNotAllowed<T>;
 }
 
 /**
@@ -249,13 +283,20 @@ inline void _PlacementDelete(void* ptr, size_t n) {
   }
 }
 
-template<class T>
-inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() noexcept {
-  using c10::guts::if_constexpr;
-  return if_constexpr<std::is_fundamental<T>::value || std::is_pointer<T>::value>(
-    /* then */ [](auto) { return nullptr; },
-    /* else */ [](auto) { return &_PlacementDelete<T>; }
-  );
+template<
+    typename T,
+    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
+    >
+inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
+  return nullptr;
+}
+
+template<
+    typename T,
+    c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr
+    >
+inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
+  return &_PlacementDelete<T>;
 }
 
 template <typename T>
@@ -269,23 +310,22 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
   return &_Delete<T>;
 }
 
-template <class T>
-const char* __TypeName() noexcept;
-
-template <class T>
-const char* _TypeName() noexcept {
-  static const char* literal_name = __TypeName<T>();
 #ifdef __GXX_RTTI
-  std::ignore = literal_name; // suppress unused warning
-  static const std::string name = at::demangle(typeid(T).name());
+template <class T>
+const char* _typeName(const char* literalName) noexcept {
+  std::ignore = literalName; // suppress unused warning
+  static const std::string name = c10::demangle(typeid(T).name());
   return name.c_str();
-#else
-  return literal_name;
-#endif
 }
+#else
+template <class T>
+constexpr const char* _typeName(const char* literalName) noexcept {
+  return literalName;
+}
+#endif
 
 template<class T>
-inline TypeMetaData _makeTypeMetaDataInstance() {
+inline TypeMetaData _makeTypeMetaDataInstance(const char* typeName) {
   return {
     sizeof(T),
     _PickNew<T>(),
@@ -294,7 +334,7 @@ inline TypeMetaData _makeTypeMetaDataInstance() {
     _PickPlacementDelete<T>(),
     _PickDelete<T>(),
     TypeIdentifier::Get<T>(),
-    _TypeName<T>()
+    typeName
   };
 }
 
@@ -464,52 +504,27 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 //   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
 // and as a result, we define these two macros slightly differently.
 #if defined(_MSC_VER) || defined(__clang__)
+#define EXPORT_IF_NOT_GCC C10_EXPORT
+#else
+#define EXPORT_IF_NOT_GCC
+#endif
+
 #define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)        \
   namespace detail {                                                      \
   const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) =      \
-      _makeTypeMetaDataInstance<T>();                                     \
+      _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                     \
   }                                                                       \
   template<>                                                              \
-  C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {    \
+  EXPORT_IF_NOT_GCC const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
     return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
   }
 #define CAFFE_KNOWN_TYPE(T)                                               \
   template <>                                                             \
-  C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                    \
+  EXPORT_IF_NOT_GCC TypeIdentifier TypeIdentifier::Get<T>() {             \
     static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
     return type_id;                                                       \
   }                                                                       \
-  namespace detail {                                                      \
-  template <>                                                             \
-  C10_EXPORT const char* __TypeName<T>() noexcept {                       \
-    return #T;                                                            \
-  }                                                                       \
-  }                                                                       \
   _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
-#else // defined(_MSC_VER) || defined(__clang__)
-#define _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, Counter)        \
-  namespace detail {                                                      \
-  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_, Counter) =      \
-      _makeTypeMetaDataInstance<T>();                                     \
-  }                                                                       \
-  template<>                                                              \
-  const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {     \
-    return &MACRO_CONCAT(detail::_typeMetaDataInstance_, Counter);        \
-  }
-#define CAFFE_KNOWN_TYPE(T)                                               \
-  template <>                                                             \
-  TypeIdentifier TypeIdentifier::Get<T>() {                               \
-    static const TypeIdentifier type_id = TypeIdentifier::createTypeId(); \
-    return type_id;                                                       \
-  }                                                                       \
-  namespace detail {                                                      \
-  template <>                                                             \
-  const char* __TypeName<T>() noexcept {                                  \
-    return #T;                                                            \
-  }                                                                       \
-  }                                                                       \
-  _CAFFE_KNOWN_TYPE_DEFINE_TYPEMETADATA_INSTANCE(T, __COUNTER__)
-#endif // defined(_MSC_VER) || defined(__clang__)
 
 /**
  * CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE is used
@@ -524,47 +539,37 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
     return TypeIdentifier(PreallocatedId);                                    \
   }                                                                           \
   namespace detail {                                                          \
-  template <>                                                                 \
-  inline C10_EXPORT const char* __TypeName<T>() noexcept {                    \
-    return #T;                                                                \
-  }                                                                           \
+  CAFFE2_API extern const TypeMetaData                                        \
+      MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId);      \
   }
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(Id, T)                           \
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)               \
   namespace detail {                                                          \
-  const TypeMetaData                                                          \
-    MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id)                     \
-      = _makeTypeMetaDataInstance<T>();                                       \
+  CAFFE2_API const TypeMetaData                                               \
+    MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId)         \
+      = _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                       \
   }                                                                           \
   template<>                                                                  \
   C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept { \
-    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, Id);    \
+    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, PreallocatedId);   \
   }
 #else // _MSC_VER
-#define _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(Id, T)    \
-  namespace detail {                                                          \
-  C10_EXPORT extern const TypeMetaData                                        \
-      MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id);                  \
-  }                                                                           \
-  template<>                                                                  \
-  inline const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {  \
-    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, Id);    \
-  }
 #define CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)              \
   template <>                                                                 \
   inline C10_EXPORT TypeIdentifier TypeIdentifier::Get<T>() {                 \
     return TypeIdentifier(PreallocatedId);                                    \
   }                                                                           \
   namespace detail {                                                          \
-  template <>                                                                 \
-  inline C10_EXPORT const char* __TypeName<T>() noexcept {                    \
-    return #T;                                                                \
+  C10_EXPORT extern const TypeMetaData                                        \
+      MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId);      \
   }                                                                           \
-  }                                                                           \
-  _CAFFE_KNOWN_TYPE_DEFINE_PREALLOCATED_TYPEMETADATA_INSTANCE(PreallocatedId, T)
-#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(Id, T)                           \
+  template<>                                                                  \
+  inline const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<T>() noexcept {    \
+    return &MACRO_CONCAT(detail::_typeMetaDataInstance_preallocated_, PreallocatedId);  \
+  }
+#define CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(PreallocatedId, T)               \
   namespace detail {                                                          \
-  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_preallocated_, Id)    \
-      = _makeTypeMetaDataInstance<T>();                                       \
+  const TypeMetaData MACRO_CONCAT(_typeMetaDataInstance_preallocated_, PreallocatedId)  \
+      = _makeTypeMetaDataInstance<T>(_typeName<T>(#T));                       \
   }
 #endif
 
@@ -603,11 +608,24 @@ CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(24, int*)
 // int64_t. As a result we will need to actually define them separately.
 // It is recommended that one does NOT use long - use int32_t and int64_t
 // explicitly. Explicit long type annotation may go away in the future.
-#if defined(_MSC_VER) || defined(__APPLE__) || \
-    (defined(__ANDROID__) && !defined(__LP64__))
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, long)
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(26, std::vector<long>)
-#endif
+// details: This hack works by defining a _guard_long_unique type, which is
+// long iff the compiler has a separate long type and is a dummy type otherwise.
+// we then allocate a type id to that _guard_long_unique. If the compiler has a
+// separate long type, this allocates a type id for long. Otherwise, it
+// allocates a type id for the dummy type, which doesn't matter.
+namespace detail {
+template <class T>
+class _guard_long_unique_dummy final {};
+template <class T>
+using _guard_long_unique = c10::guts::conditional_t<
+    std::is_same<long, int32_t>::value || std::is_same<long, int64_t>::value,
+    _guard_long_unique_dummy<T>,
+    T>;
+} // namespace detail
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(25, detail::_guard_long_unique<long>)
+CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(
+    26,
+    detail::_guard_long_unique<std::vector<long>>)
 
 CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(27, _CaffeHighestPreallocatedTypeId)
 } // namespace caffe2
