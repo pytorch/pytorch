@@ -13,6 +13,7 @@ class ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(PyTorch, 1, DotProduct);
 class ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(PyTorch, 1, FCTransposed);
 class ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(PyTorch, 1, BatchMatMul);
 class ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(PyTorch, 1, ExpandDims);
+class ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(PyTorch, 1, EnsureCPUOutput);
 
 // Iterate over schema from ai.onnx.pytorch domain opset 1
 class OpSet_PyTorch_ver1 {
@@ -30,6 +31,8 @@ class OpSet_PyTorch_ver1 {
            PyTorch, 1, BatchMatMul)>());
     fn(GetOpSchema<ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(
            PyTorch, 1, ExpandDims)>());
+    fn(GetOpSchema<ONNX_OPERATOR_SET_SCHEMA_CLASS_NAME(
+           PyTorch, 1, EnsureCPUOutput)>());
   }
 };
 

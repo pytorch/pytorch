@@ -69,6 +69,28 @@ ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
             "Constrain input and output types to float tensors."));
 
 ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
+    EnsureCPUOutput,
+    1,
+    OpSchema()
+        .SetDoc("Mirror Caffe2 EnsureCPUOutput operator")
+        .Input(0, "X", "Input 1 tensor", "T")
+        .Output(0, "Y", "Output tensor", "T")
+        .TypeConstraint(
+            "T",
+            {"tensor(int8)",
+             "tensor(int16)",
+             "tensor(int32)",
+             "tensor(int64)",
+             "tensor(uint8)",
+             "tensor(uint16)",
+             "tensor(uint32)",
+             "tensor(uint64)",
+             "tensor(float16)",
+             "tensor(float)",
+             "tensor(double)"},
+            "Constrain input and output types to numeric tensors."));
+
+ONNX_PYTORCH_OPERATOR_SET_SCHEMA(
     FCTransposed,
     1,
     OpSchema()
