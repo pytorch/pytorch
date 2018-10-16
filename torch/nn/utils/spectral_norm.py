@@ -74,7 +74,7 @@ class SpectralNorm(object):
             r_g = getattr(module, self.name + '_orig').requires_grad
             weight = getattr(module, self.name).detach()
             # NB: Cannot detach weight in-place here because if this is used
-            #     DataParallel, the bufferr are broadcast using
+            #     DataParallel, the buffers are broadcast using
             #     `broadacast_coalesced` and `weight` here is actually a view,
             #     and you can't detach views in-place.
             setattr(module, self.name, weight.requires_grad_(r_g))
