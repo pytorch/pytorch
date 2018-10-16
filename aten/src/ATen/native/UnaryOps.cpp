@@ -30,7 +30,7 @@
 namespace at {
 namespace native {
 
-Tensor clamp(const Tensor& self, at::optional<Scalar> min, at::optional<Scalar> max) {
+Tensor clamp(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   Tensor result = at::empty({0}, self.options());
   return clamp_out(result, self, min, max);
 }
@@ -45,7 +45,7 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
   return clamp_min_out(result, self, min);
 }
 
-Tensor& _clamp__cpu(Tensor& self, at::optional<Scalar> min, at::optional<Scalar> max) {
+Tensor& _clamp__cpu(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   if (min && max) {
     return _th_clamp_out(self, self, *min, *max);
   } else if (max) {
@@ -60,8 +60,8 @@ Tensor& _clamp__cpu(Tensor& self, at::optional<Scalar> min, at::optional<Scalar>
 Tensor& _clamp_out_cpu(
     Tensor& result,
     const Tensor& self,
-    at::optional<Scalar> min,
-    at::optional<Scalar> max) {
+    optional<Scalar> min,
+    optional<Scalar> max) {
   if (min && max) {
     _th_clamp_out(result, self, *min, *max);
   } else if (max) {

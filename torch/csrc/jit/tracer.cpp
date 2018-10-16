@@ -42,7 +42,7 @@ void addInputs(Node *n, const char * name, int64_t value)            { detail::g
 void addInputs(Node *n, const char * name, bool value)               { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, double value)             { detail::genericAddInput(n, value); }
 void addInputs(Node *n, const char * name, const at::Scalar& value)  { detail::genericAddInput(n, value); }
-void addInputs(Node *n, const char * name, const at::optional<at::Scalar>& value)  {
+void addInputs(Node *n, const char * name, const c10::optional<at::Scalar>& value)  {
   if(value) {
     detail::genericAddInput(n, *value);
   } else {

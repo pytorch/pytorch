@@ -2,7 +2,7 @@
 
 namespace at { namespace native {
 
-Tensor& _clamp__cuda(Tensor& self, at::optional<Scalar> min, at::optional<Scalar> max) {
+Tensor& _clamp__cuda(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
   if (min && max) {
     return _th_clamp_out(self, self, *min, *max);
   } else if (max) {
@@ -17,8 +17,8 @@ Tensor& _clamp__cuda(Tensor& self, at::optional<Scalar> min, at::optional<Scalar
 Tensor& _clamp_out_cuda(
     Tensor& result,
     const Tensor& self,
-    at::optional<Scalar> min,
-    at::optional<Scalar> max) {
+    optional<Scalar> min,
+    optional<Scalar> max) {
   if (min && max) {
     _th_clamp_out(result, self, *min, *max);
   } else if (max) {

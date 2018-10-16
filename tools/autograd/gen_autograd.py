@@ -62,7 +62,7 @@ def get_simple_type(arg):
     simple_type = simple_type.replace(' &', '').replace('const ', '')
     simple_type = simple_type.replace('Generator *', 'Generator')
 
-    opt_match = re.match(r'optional<(.+)>', simple_type)
+    opt_match = re.match(r'c10::optional<(.+)>', simple_type)
     if opt_match:
         simple_type = '{}?'.format(opt_match.group(1))
     return simple_type

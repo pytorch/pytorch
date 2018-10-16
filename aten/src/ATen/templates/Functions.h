@@ -9,11 +9,11 @@
 #include "ATen/core/Storage.h"
 #include "ATen/core/Generator.h"
 #include "ATen/core/Deprecated.h"
-#include "ATen/core/optional.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/core/TensorOptions.h"
 #include "ATen/core/Reduction.h"
+#include "c10/util/Optional.h"
 
 namespace at {
 

@@ -314,7 +314,7 @@ def gen_jit_dispatch(declarations, out, template_path):
     }
     write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 
-default_map = {'{}': 'None', 'nullptr': 'None', 'nullopt': 'None'}
+default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
 
 
 def signature(decl):

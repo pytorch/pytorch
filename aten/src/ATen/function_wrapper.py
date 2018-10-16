@@ -974,7 +974,7 @@ def create_generic(top_env, declarations):
                 }
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
-                argument['type'] = "optional<{}>".format(argument['type'])
+                argument['type'] = "c10::optional<{}>".format(argument['type'])
 
             if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
                 argument['type'] = translate_map(False).get(argument['type'], argument['type'])

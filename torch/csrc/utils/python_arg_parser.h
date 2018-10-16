@@ -242,7 +242,7 @@ inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar
 }
 
 inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
-  if (!args[i]) return at::nullopt;
+  if (!args[i]) return c10::nullopt;
   return scalar(i);
 }
 
