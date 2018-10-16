@@ -813,16 +813,30 @@ else:
     if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
 
-include_dirs += [
-    cwd,
-    tmp_install_path + "/include",
-    tmp_install_path + "/include/TH",
-    tmp_install_path + "/include/THNN",
-    tmp_install_path + "/include/ATen",
-    third_party_path + "/pybind11/include",
-    os.path.join(cwd, "torch", "csrc"),
-    "build/third_party",
-]
+include_dirs += [os.path.join(cwd, *xs) for xs in [
+    ["."],
+
+    ["aten", "src"],
+    ["aten", "src", "TH"],
+
+    ["build"],
+    ["build", "aten", "src"],
+    ["build", "caffe2", "aten", "src"],
+    ["build", "caffe2", "aten", "src", "TH"],
+    ["build", "caffe2", "aten", "src", "THC"],
+    ["build", "third_party"],
+    ["build", "third_party", "onnx"],
+
+    ["third_party", "build", "nccl", "include"],
+    ["third_party", "gloo"],
+    ["third_party", "onnx"],
+    ["third_party", "onnx", "onnx"],
+    ["third_party", "protobuf", "src"],
+    ["third_party", "pybind11", "include"],
+
+    ["torch", "csrc"],
+    ["torch", "lib"],
+    ["torch", "lib", "libshm"]]]
 
 library_dirs.append(lib_path)
 
@@ -944,7 +958,7 @@ if USE_DISTRIBUTED:
     main_sources += [
         "torch/csrc/distributed/Module.cpp",
     ]
-    include_dirs += [tmp_install_path + "/include/THD"]
+    include_dirs.append(os.path.join(cwd, 'torch', 'lib', 'THD'))
     main_link_args += [THD_LIB]
     if IS_LINUX:
         extra_compile_args.append('-DUSE_C10D')
@@ -982,7 +996,6 @@ if USE_CUDA:
     library_dirs.append(cuda_lib_path)
     cuda_include_path = os.path.join(CUDA_HOME, 'include')
     include_dirs.append(cuda_include_path)
-    include_dirs.append(tmp_install_path + "/include/THCUNN")
     extra_compile_args += ['-DUSE_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_libraries += ['cudart', nvtoolext_lib_name]
@@ -1014,7 +1027,6 @@ if USE_ROCM:
     include_dirs.append(hipsparse_include_path)
     include_dirs.append(hiprand_include_path)
     include_dirs.append(rocrand_include_path)
-    include_dirs.append(tmp_install_path + "/include/THCUNN")
     extra_link_args.append('-L' + hip_lib_path)
     extra_link_args.append('-Wl,-rpath,' + hip_lib_path)
     extra_compile_args += ['-DUSE_ROCM']
@@ -1073,6 +1085,9 @@ def make_relative_rpath(path):
         return ''
     else:
         return '-Wl,-rpath,$ORIGIN/' + path
+
+for path in include_dirs:
+    assert 'tmp_install' not in path, path
 
 ################################################################################
 # Declare extensions and package
