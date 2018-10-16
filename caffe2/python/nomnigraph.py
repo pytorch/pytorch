@@ -41,6 +41,22 @@ class NNModule(object):
     def dataFlow(self):
         return self._NNModule.dataFlow()
 
+    @property
+    def controlFlow(self):
+        return self._NNModule.getExecutionOrder()
+
+    @property
+    def nodes(self):
+        return self._NNModule.dataFlow().nodes
+
+    @property
+    def operators(self):
+        return self._NNModule.dataFlow().operators
+
+    @property
+    def tensors(self):
+        return self._NNModule.dataFlow().tensors
+
     def convertToCaffe2Proto(self, old_proto=None):
         if not old_proto:
             old_proto = caffe2_pb2.NetDef()
