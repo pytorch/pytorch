@@ -509,7 +509,11 @@ static void warning_handler(
   }
 }
 
-static PyObject* initModule() {
+
+#ifdef _WIN32
+__declspec(dllexport)
+#endif
+PyObject* initModule() {
   HANDLE_TH_ERRORS
   THInferNumThreads();
 
@@ -659,16 +663,3 @@ struct call_duplicate_guard {
 };
 
 static call_duplicate_guard _call_duplicate_guard;
-
-#if PY_MAJOR_VERSION == 2
-PyMODINIT_FUNC init_C()
-#else
-PyMODINIT_FUNC PyInit__C()
-#endif
-{
-#if PY_MAJOR_VERSION == 2
-  initModule();
-#else
-  return initModule();
-#endif
-}
