@@ -262,7 +262,8 @@ class Tensor(torch._C._TensorBase):
     def potrf(self, upper=True):
         r"""See :func:`torch.cholesky`"""
         warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed "
-                      "in the next release. Please use torch.cholesky instead.", stacklevel=2)
+                      "in the next release. Please use torch.cholesky instead and note that the "
+                      ":attr:`upper` argument in torch.cholesky defaults to ``False``.", stacklevel=2)
         return super(Tensor, self).cholesky(upper=upper)
 
     def stft(self, n_fft, hop_length=None, win_length=None, window=None,

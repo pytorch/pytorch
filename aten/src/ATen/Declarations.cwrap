@@ -2798,7 +2798,7 @@
     - arg: bool upper
       if_true: U
       if_false: L
-      default: U
+      default: L
 ]]
 [[
   name: potrs

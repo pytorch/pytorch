@@ -766,8 +766,10 @@ def potrf(a, upper=True, out=None):
 
     .. warning::
         torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next
-        release. Please use torch.cholesky instead.
+        release. Please use torch.cholesky instead and note that the :attr:`upper` argument in
+        torch.cholesky defaults to ``False``.
     """
     warnings.warn("torch.potrf is deprecated in favour of torch.cholesky and will be removed in the next "
-                  "release. Please use torch.cholesky instead.", stacklevel=2)
+                  "release. Please use torch.cholesky instead and note that the :attr:`upper` argument in"
+                  " torch.cholesky defaults to ``False``.", stacklevel=2)
     return torch.cholesky(a, upper=upper, out=out)

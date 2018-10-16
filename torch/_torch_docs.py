@@ -824,7 +824,7 @@ Example::
 """)
 
 add_docstr(torch.cholesky, r"""
-cholesky(a, upper=True, out=None) -> Tensor
+cholesky(a, upper=False, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a symmetric positive-definite
 matrix :math:`A`.
@@ -846,23 +846,23 @@ the decomposition has the form:
 Args:
     a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
     upper (bool, optional): flag that indicates whether to return the
-                            upper or lower triangular matrix
+                            upper or lower triangular matrix. Default: ``False``
     out (Tensor, optional): the output matrix
 
 Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
+    >>> l = torch.cholesky(a)
     >>> a
     tensor([[ 2.4112, -0.7486,  1.4551],
             [-0.7486,  1.3544,  0.1294],
             [ 1.4551,  0.1294,  1.6724]])
-    >>> u
-    tensor([[ 1.5528, -0.4821,  0.9371],
-            [ 0.0000,  1.0592,  0.5486],
-            [ 0.0000,  0.0000,  0.7023]])
-    >>> torch.mm(u.t(), u)
+    >>> l
+    tensor([[ 1.5528,  0.0000,  0.0000],
+            [-0.4821,  1.0592,  0.0000],
+            [ 0.9371,  0.5487,  0.7023]])
+    >>> torch.mm(l, l.t())
     tensor([[ 2.4112, -0.7486,  1.4551],
             [-0.7486,  1.3544,  0.1294],
             [ 1.4551,  0.1294,  1.6724]])

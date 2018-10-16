@@ -527,9 +527,9 @@ In-place version of :meth:`~Tensor.ceil`
 
 add_docstr_all('cholesky',
                r"""
-cholesky(upper=True) -> Tensor
+cholesky(upper=False) -> Tensor
 
-See :func:`torch.potrf`
+See :func:`torch.cholesky`
 """)
 
 add_docstr_all('clamp',

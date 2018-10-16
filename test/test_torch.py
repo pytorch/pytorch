@@ -5276,7 +5276,7 @@ class TestTorch(TestCase):
 
         # default Case
         C = torch.cholesky(A)
-        B = torch.mm(C.t(), C)
+        B = torch.mm(C, C.t())
         self.assertEqual(A, B, 1e-14)
 
         # test Upper Triangular
@@ -5304,8 +5304,8 @@ class TestTorch(TestCase):
         a = torch.mm(a, a.t())
 
         # upper Triangular Test
-        U = torch.cholesky(a)
-        x = torch.potrs(b, U)
+        U = torch.cholesky(a, True)
+        x = torch.potrs(b, U, True)
         self.assertLessEqual(b.dist(torch.mm(a, x)), 1e-12)
 
         # lower Triangular Test
@@ -5329,7 +5329,7 @@ class TestTorch(TestCase):
 
         # default case
         chol = torch.cholesky(a)
-        inv1 = torch.potri(chol)
+        inv1 = torch.potri(chol, False)
         self.assertLessEqual(inv0.dist(inv1), 1e-12)
 
         # upper Triangular Test
