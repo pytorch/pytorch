@@ -138,7 +138,6 @@ class DistributedDataParallel(Module):
         self.output_device = _get_device_index(output_device, True)
         self.broadcast_buffers = broadcast_buffers
 
-
         MB = 1024 * 1024
 
         # used for intra-node param sync and inter-node sync as well
@@ -206,10 +205,7 @@ class DistributedDataParallel(Module):
         self.next_bucket = len(self.bucket_sizes) - 1
         self.ready_buckets_not_reduced = set()
         self.reduction_works = [None for _ in range(len(self.bucket_sizes))]
-
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
-
-
         self._register_grad_hooks()
 
     def __getstate__(self):
@@ -232,7 +228,7 @@ class DistributedDataParallel(Module):
         try:
             if self.process_group != dist.get_default_group():
                 pickle_not_supported = True
-        except:
+        except RuntimeError:
             pickle_not_supported = True
 
         if pickle_not_supported:
