@@ -996,15 +996,18 @@ inline Block::Block(Graph* graph_, Node* node_)
 #define IR_IFM_CONST(x,Kind) GENERIC_IF(const,prim::Kind,x,Kind)
 #define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const,prim::Kind,Kind)
 
-#define IR_IF(x, Kind) \
-  auto && __match_key = x; \
-  switch(__match_key->kind()) { \
-    case ::torch::jit::prim::Kind: { \
-      auto * value = __match_key; (void) value;
-#define IR_ELSEIF(Kind) \
-    } break; \
-    case ::torch::jit::prim::Kind: { \
-      auto * value = __match_key; (void) value;
+#define IR_IF(x, Kind)           \
+  auto&& __match_key = x;        \
+  switch (__match_key->kind()) { \
+    case ::c10::prim::Kind: {    \
+      auto* value = __match_key; \
+      (void)value;
+#define IR_ELSEIF(Kind)        \
+  }                            \
+  break;                       \
+  case ::c10::prim::Kind: {    \
+    auto* value = __match_key; \
+    (void)value;
 
 #define IR_ELSE() GENERIC_ELSE()
 #define IR_END() GENERIC_END()
