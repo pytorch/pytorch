@@ -4237,20 +4237,19 @@ Example::
 
     # Create an empty sparse tensor with the following invariants:
     #   1. sparse_dim + dense_dim = len(SparseTensor.shape)
-    #   2. SparseTensor._indices().shape = (spares_dim, nnz)
+    #   2. SparseTensor._indices().shape = (sparse_dim, nnz)
     #   3. SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
     #
     # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
     # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1‚ 0))
-    >>> S = torch.sparse_coo_tensor(torch.tensor([]).reshape(1, 0), [], [1])
+    >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0,)),
            size=(1,), nnz=0, layout=torch.sparse_coo)
 
     # and to create an empty sparse tensor with nnz = 0, dense_dim = 1 and
     # sparse_dim = 1
-    >>> S = torch.sparse_coo_tensor(torch.tensor([]).reshape(1, 0),
-                                    torch.tensor([]).reshape(0, 2), [1, 2])
+    >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), torch.empty([0, 2]), [1, 2])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0, 2)),
            size=(1, 2), nnz=0, layout=torch.sparse_coo)
