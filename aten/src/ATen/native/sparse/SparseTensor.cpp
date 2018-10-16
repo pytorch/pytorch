@@ -81,26 +81,6 @@ SparseTensor new_sparse(const TensorOptions& options) {
       type_id, scalarTypeToTypeMeta(options.dtype()));
 }
 
-/** Empty init **/
-
-Tensor empty_sparse(IntList size, const TensorOptions& options) {
-  AT_CHECK(size.size() != 0,
-    "cannot construct sparse tensor with 0 dimensions and no values; you must specify at least 1 dimension if you want to create a sparse tensor with no elements, \
-     or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, [])) if you want to create a scalar sparse tensor");
-  AT_ASSERT(!options.is_variable());
-  AT_ASSERT(options.layout() == kSparse);
-  TensorTypeId type_id;
-  if (options.device().type() == kCUDA) {
-    type_id = SparseCUDATensorId();
-  } else {
-    type_id = SparseCPUTensorId();
-  }
-  auto tensor = Tensor(c10::make_intrusive<SparseTensorImpl>(type_id, scalarTypeToTypeMeta(options.dtype())));
-  get_sparse_impl(tensor)->resize_and_clear_(size.size(), 0, size);
-  return tensor;
-}
-
-
 /** Actual dispatched creation methods ***/
 
 SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size, const TensorOptions& options) {
@@ -128,24 +108,41 @@ SparseTensor new_with_dims_and_tensor_sparse(
 
 /** Public creation API that dispatch to methods above **/
 
+
+/** Empty init **/
+Tensor empty_sparse(IntList size, const TensorOptions& options) {
+  return new_with_dims_sparse(size.size(), 0, size, options);
+}
+
 /* Shape init */
 Tensor sparse_coo_tensor(ArrayRef<int64_t> size, const TensorOptions& options) {
-  TensorOptions toptions = options;
   return at::_sparse_coo_tensor_with_dims(size.size(), 0, size, options.layout(at::kSparse));
 }
 
 /* Pointer-copy init */
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
-  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
-  AT_CHECK(!values_.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values_.layout());
 
-  Tensor values;
-  if (values_.dim() == 0) {
+// argument checking helper
+static inline
+void tensor_init_arg_check(const Tensor& indices, const Tensor& values, const TensorOptions& options) {
+  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
+  AT_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
+  AT_CHECK(options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+}
+
+// values tensor preprocessing helper
+static inline
+void transform_values_if_needed(const Tensor& values, const TensorOptions& options) {
+  if (values.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
-    values = values_.expand({1});
+    return values.to(options.layout(kStrided)).expand_({1});
   } else {
-    values = values_;
+    return values.to(options.layout(kStrided));
   }
+}
+
+Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
+  tensor_init_arg_check(indices, values_, options);
+  Tensor values = transform_values_if_needed(values_, options);
 
   // If sizes are not given, it is inferred as max index of each dim.
   int64_t sparse_dim = indices.size(0);
@@ -188,22 +185,13 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
     computed_sizes[static_cast<size_t>(sparse_dim + d)] = values.size(d+1);
   }
 
-  const TensorOptions sparse_options = values.options().layout(at::kSparse);
-  return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, computed_sizes, indices, values, sparse_options);
+  return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, computed_sizes, indices, values, options);
 }
 
 // NB: Got rid of the sizes == NULL case
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
-  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
-  AT_CHECK(!values_.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values_.layout());
-
-  Tensor values;
-  if (values_.dim() == 0) {
-    // Mimic Numpy behavior here and treat it as a 1D tensor
-    values = values_.expand({1});
-  } else {
-    values = values_;
-  }
+  tensor_init_arg_check(indices, values_, options);
+  Tensor values = transform_values_if_needed(values_, options);
 
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
@@ -237,8 +225,7 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<
     }
   }
 
-  const TensorOptions sparse_options = values.options().layout(at::kSparse);
-  return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, sparse_options);
+  return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, options);
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
@@ -247,22 +234,13 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<
 // are guaranteed to be within bounds.
 // NB: Got rid of the size == NULL case
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, const TensorOptions& options) {
-  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
-  AT_CHECK(!values_.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values_.layout());
-
-  Tensor values;
-  if (values_.dim() == 0) {
-    // Mimic Numpy behavior here and treat it as a 1D tensor
-    values = values_.expand({1});
-  } else {
-    values = values_;
-  }
+  tensor_init_arg_check(indices, values_, options);
+  Tensor values = transform_values_if_needed(values_, options);
 
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
 
-  const TensorOptions sparse_options = values.options().layout(at::kSparse);
-  return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, sparse_options);
+  return at::_sparse_coo_tensor_with_dims_and_tensors(sparse_dim, dense_dim, size, indices, values, options);
 }
 
 // NB: Deleted newWithSizeNd variants
