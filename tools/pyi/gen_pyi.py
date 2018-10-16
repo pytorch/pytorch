@@ -15,6 +15,7 @@ FACTORY_PARAMS = "dtype: Optional[dtype]=None, device: Union[device, str, None]=
 # this could be more precise w.r.t list contents etc.
 INDICES = "indices: Union[None, int, Ellipsis, slice, Tensor, List, Tuple]"
 
+blacklist = ['__init_subclass__', '__new__', '__subclasshook__']
 
 def type_to_python(typename):
     """type_to_python(typename : str) -> str
@@ -78,9 +79,8 @@ def sig_for_ops(opname):
                   'ior', 'irshift', 'isub', 'itruediv', 'ixor',  # inplace ops
                   }
     unary_ops = {'neg', 'abs', 'invert'}
-    skip = {'getitem', 'setitem'}
+    skip = {'getitem', 'setitem', 'delitem', 'new'}
     to_py_type_ops = {'bool', 'float', 'long', 'index', 'int', 'nonzero'}
-    # __delitem__,  __new__, __nonzero__, __setitem__
     assert opname.endswith('__') and opname.startswith('__'), "Unexpected op {}".format(opname)
     name = opname[2:-2]
     if name in binary_ops:
@@ -272,8 +272,10 @@ It uses the Python 3 inspect module.
 def do_gen_pyi(build_lib_path):
     """do_gen_pyi(build_lib_path)
 
-This function generates a pyi file for torch. It does so by removing things from the
-import path and adding the freshly build PyTorch.
+This function generates a pyi file for torch. To do this, it imports torch and loops
+over the members of torch and torch.Tensor.
+
+To import torch it removes things from the import path and adds the freshly build PyTorch.
 As such it is inteded to be used from a subprocess.
 """
     while '' in sys.path:
@@ -309,7 +311,7 @@ As such it is inteded to be used from a subprocess.
     for fname in dir(torch):
         fn = getattr(torch, fname)
         docstr = inspect.getdoc(fn)
-        if docstr:
+        if docstr and fname not in blacklist:
             if isinstance(fn, types.BuiltinFunctionType):
                 if fname in fns:
                     type_hints[fname] += generate_type_hints(fname, fns[fname])
@@ -404,6 +406,8 @@ class device:
 class Generator: ...
 
 class Size(tuple): ...
+
+class Storage: ...
 
 class enable_grad():
     def __enter__(self) -> None: ...
