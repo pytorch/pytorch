@@ -7558,6 +7558,63 @@ a")
 
         self.assertEqual(s(inp), expected_result)
 
+    def test_weak_module_nested(self):
+        @torch.jit.weak_module
+        class OtherWeak(torch.nn.Module):
+            __constants__ = ['constant']
+
+            def __init__(self, in_features, out_features):
+                super(OtherWeak, self).__init__()
+                self.in_features = in_features
+                self.out_features = out_features
+                self.weight = torch.nn.Parameter(torch.Tensor(out_features, in_features))
+                self.bias = torch.nn.Parameter(torch.Tensor(out_features))
+                self.constant = torch.tensor([4] * 10)
+
+            @torch.jit.weak_script_method
+            def forward(self, x):
+                return F.linear(x, self.weight, self.bias)
+
+        class OtherStrong(torch.jit.ScriptModule):
+            __constants__ = ['constant']
+
+            def __init__(self):
+                super(OtherStrong, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + 27
+
+        @torch.jit.weak_module
+        class Weak(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super(Weak, self).__init__()
+                self.in_features = in_features
+                self.out_features = out_features
+                self.weight = torch.nn.Parameter(torch.Tensor(out_features, in_features))
+                self.bias = torch.nn.Parameter(torch.Tensor(out_features))
+                self.weak_submodule = OtherWeak(10, 10)
+                self.strong_submodule = OtherStrong()
+
+            @torch.jit.weak_script_method
+            def forward(self, x):
+                return F.linear(x, self.weight, self.bias) + self.weak_submodule(x) + self.strong_submodule(x)
+
+        class Strong(torch.jit.ScriptModule):
+            __constants__ = ['constant']
+
+            def __init__(self):
+                super(Strong, self).__init__()
+                self.weak = Weak(10, 10)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.weak(x)
+
+        mod = Strong()
+        self.assertExpectedGraph(mod.graph)
+        result = mod(torch.randn(10))
+        print(result)
 
 class MnistNet(nn.Module):
     def __init__(self):
