@@ -502,6 +502,9 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     CAFFE_ENFORCE_WITH_CALLER(
         src.is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
+    CAFFE_ENFORCE_WITH_CALLER(
+        src.storage_initialized(),
+        "Cannot copy from an uninitialized Tensor")
 
     if ((void*)&src == (void*)this) {
       return;
@@ -511,10 +514,8 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     // Uninitialized storages are guaranteed to be uniquely owned,
     // so we don't need to swap in this case.
     if (storage_initialized()) {
-      // If the dtype changed, we need to reallocate;
-      // If the src storage is uninitialized, we need to reallocate
-      // to preserve the unique storage invariant.
-      if (data_type_ != src.dtype() || !src.storage_initialized()) {
+      // If the dtype changed, we need to reallocate storage.
+      if (data_type_ != src.dtype()) {
         // NB: copy preserves device_type
         storage_ = at::Storage(device_type(), src.dtype());
       }
