@@ -84,8 +84,7 @@ bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
     CAFFE_ENFORCE_EQ(scales.size(), 4);
     float scales_data[4];
-    context_.CopyBytesToCPU(
-                sizeof(float) * 4, scales.data<float>(), scales_data);
+    context_.CopyToCPU<float>(4, scales.data<float>(), scales_data);
     height_scale_ = scales_data[2];
     width_scale_ = scales_data[3];
   }
@@ -130,8 +129,7 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
     CAFFE_ENFORCE_EQ(scales.size(), 4);
     float scales_data[4];
-    context_.CopyBytesToCPU(
-                sizeof(float) * 4, scales.data<float>(), scales_data);
+    context_.CopyToCPU<float>(4, scales.data<float>(), scales_data);
     height_scale_ = scales_data[2];
     width_scale_ = scales_data[3];
   }
