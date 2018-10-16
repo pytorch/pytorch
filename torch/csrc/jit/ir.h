@@ -136,6 +136,10 @@ public:
   bool isTensor() const {
     return type()->kind() == TypeKind::CompleteTensorType;
   }
+  bool isNone() const {
+    return type()->kind() == TypeKind::NoneType;
+
+  }
   size_t unique() const {
     return unique_;
   }
