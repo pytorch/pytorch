@@ -139,7 +139,7 @@ REGISTER_CPU_OPERATOR(ResizeNearestGradient,
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(ResizeNearest)
-    .NumInputs(1)
+    .NumInputs(1, 2)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension")
@@ -151,12 +151,14 @@ output_width = floor(input_width * width_scale)
 output_height = floor(output_height * height_scale)
 )DOC")
     .Input(0, "X", "Input tensor")
+    .Input(1, "scales", // the hack to support onnx spec
+        "4D, Scales tensor, [1., 1., width_scale, height_scale]")
     .Output(0, "Y", "Output tensor")
     .InheritOnnxSchema("Upsample");
 
 // Input: dY, output: dX
 OPERATOR_SCHEMA(ResizeNearestGradient)
-    .NumInputs(2)
+    .NumInputs(2, 3)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension");
@@ -164,6 +166,14 @@ OPERATOR_SCHEMA(ResizeNearestGradient)
 class GetResizeNearestGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
+    if (def_.input().size() == 2) {
+      // this is a hack to support the second input as dynamic
+      // width_scale and height_scale to align with onnx change
+      return SingleGradientDef("ResizeNearestGradient",
+          "",
+          vector<string>{GO(0), I(0), I(1)},
+          vector<string>{GI(0)});
+    }
     return SingleGradientDef("ResizeNearestGradient",
                              "",
                              vector<string>{GO(0), I(0)},
