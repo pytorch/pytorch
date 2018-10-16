@@ -115,8 +115,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     auto schema = getSchema(inputs.size(), n_binders);
 
     std::stringstream failure_messages;
-    at::optional<MatchedSchema> matched_schema =
-      tryMatchSchema(schema, loc, *m.graph(), inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
+    c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
+        schema,
+        loc,
+        *m.graph(),
+        inputs_,
+        attributes,
+        failure_messages,
+        /*conv_tensor_to_num*/ true);
     if (!matched_schema)
       throw ErrorReport(loc) << failure_messages.str();
 
@@ -172,7 +178,10 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
 
 struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
   explicit ConstantPythonTupleValue(py::object tup) : PythonValue(tup) {}
-  std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override {
+  std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      SourceRange loc,
+      Method& m,
+      c10::optional<size_t> size_hint = {}) override {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     result.reserve(tup.size());
@@ -189,23 +198,6 @@ struct VISIBILITY_HIDDEN ConstantPythonTupleValue : public PythonValue {
 // {functions, modules, contants} so this SugaredValue is defined here
 // anticipating we will eventually need to replace Module with a py::object
 // holding the actual nn.Module class.
-
-// defines how a method obtained from a module behaves in script
-struct MethodValue : public SugaredValue {
-  MethodValue(std::shared_ptr<Module> module, Method& method)
-  : module(std::move(module)) //insurance that method stays alive
-  , method(method) {}
-  std::string kind() const override {
-    return "method";
-  }
-  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
-    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
-  }
-private:
-  std::shared_ptr<Module> module;
-  Method& method;
-
-};
 
 
 struct ModuleValue : public SugaredValue {
@@ -245,7 +237,10 @@ struct ModuleValue : public SugaredValue {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_binders);
   }
 
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      SourceRange loc,
+      Method& m,
+      c10::optional<size_t> size_hint = {}) override {
     py::object py_module = py::cast(module);
     if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
       return SugaredValue::asTuple(loc, m, size_hint);
@@ -321,7 +316,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   py::object builtin_name = py::module::import("torch.jit").attr("_find_builtin")(obj);
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
-        Symbol::fromQualString(py::str(builtin_name)), at::nullopt);
+        Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
   }
 
   if (py::isinstance<py::function>(obj)) {
@@ -362,36 +357,20 @@ static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const 
 }
 
 namespace {
-struct PythonResolver : public Resolver {
-  PythonResolver(ResolutionCallback rcb) : rcb(rcb) {}
-  virtual std::shared_ptr<SugaredValue> operator() (const std::string& name, Method& m, const SourceRange& loc) const override {
-    if (function_table.count(name)) {
-      return function_table.at(name);
-    }
 
+Resolver pythonResolver(ResolutionCallback rcb) {
+  return [rcb](const std::string& name, Method& m, const SourceRange& loc)
+             -> std::shared_ptr<SugaredValue> {
     AutoGIL ag;
     py::object obj = rcb(name);
     if (obj.is(py::none())) {
       return nullptr;
     }
     return toSugaredValue(obj, m, loc);
-  }
+  };
+}
 
-  virtual void addEntry(const std::string& name, std::shared_ptr<SugaredValue> sv) override {
-    function_table[name] = sv;
-  }
-
-  virtual void clear() override {
-    function_table.clear();
-  }
-
-  virtual ~PythonResolver() {}
-
- private:
-   std::unordered_map<std::string, std::shared_ptr<SugaredValue>> function_table;
-   ResolutionCallback rcb;
-};
-}  // namespace
+}
 
 FunctionSchema getSchemaWithDefaults(
     const FunctionDefaults& default_args,
@@ -446,15 +425,15 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb, bool has_self) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
-            return defineMethodsInModule(*m, script, std::make_shared<PythonResolver>(rcb), self);
+            return defineMethodsInModule(*m, script, pythonResolver(rcb), self);
           })
       .def("_create_methods", [](std::shared_ptr<Module> m,
           const std::vector<Def>& defs,
           const std::vector<ResolutionCallback>& rcbs,
           const std::vector<FunctionDefaults>& defaults) {
-        std::vector<std::shared_ptr<Resolver>> resolvers;
+        std::vector<Resolver> resolvers;
         for(auto & callback : rcbs) {
-          resolvers.push_back(std::make_shared<PythonResolver>(callback));
+          resolvers.push_back(pythonResolver(callback));
         }
         defineMethodsInModule(
           *m,
@@ -606,7 +585,7 @@ void initJitScriptBindings(PyObject* module) {
     .def("pretty_print_schema", &Method::pretty_print_schema);
 
   m.def("_jit_script_compile", [](const Def &def, ResolutionCallback rcb) {
-    return compileFunction(def, std::make_shared<PythonResolver>(rcb));
+    return compileFunction(def, pythonResolver(rcb));
   });
 
   m.def("parse_type_comment", [](const std::string& comment) {

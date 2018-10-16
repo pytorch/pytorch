@@ -3,7 +3,6 @@ import torch.nn.functional as F
 from torch._six import inf
 from operator import mul
 from functools import reduce
-from collections import Iterable
 import math
 
 __all__ = [

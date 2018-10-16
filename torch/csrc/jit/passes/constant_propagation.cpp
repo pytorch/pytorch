@@ -88,7 +88,7 @@ void inlineIf(Block *body, Node * n) {
 }
 
 bool isTrueConstant(Value *val) {
-  at::optional<bool> maybe_value = constant_as<bool>(val);
+  c10::optional<bool> maybe_value = constant_as<bool>(val);
   JIT_ASSERT(maybe_value);
   return *maybe_value;
 }
