@@ -41,36 +41,18 @@ enum class TypeKind {
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
-template<bool is_singleton, typename T>
-struct cloneType {};
-
-template<typename T>
-struct cloneType<true, T> {
-  std::shared_ptr<T> operator()(std::shared_ptr<T> ptr) const {
-    return ptr;
-  }
-  std::shared_ptr<const T> operator()(std::shared_ptr<const T> ptr) const {
-    return ptr;
-  }
-};
-
-template<typename T>
-struct cloneType<false, T> {
-  std::shared_ptr<T> operator()(std::shared_ptr<const T> ptr) const {
-    auto result = std::make_shared<typename std::remove_const<T>::type>(*ptr);
-    // XXX: the line above will correctly slice the struct, and make its runtype
-    // type exactly equal to T. However, kind_ is a field of Type, so it will simply
-    // be copied, and we need to fix it in here to match the dynamic type.
-    result->kind_ = T::Kind;
-    return result;
-  }
-};
-
 struct TORCH_API Type : std::enable_shared_from_this<Type> {
 private:
   TypeKind kind_;
-  template<bool is_singleton, typename T>
-  friend struct cloneType;
+  template<typename T>
+    static std::shared_ptr<T> sliceType(std::shared_ptr<const T> ptr) {
+      auto result = std::make_shared<typename std::remove_const<T>::type>(*ptr);
+      // XXX: the line above will correctly slice the struct, and make its runtype
+      // type exactly equal to T. However, kind_ is a field of Type, so it will simply
+      // be copied, and we need to fix it in here to match the dynamic type.
+      result->kind_ = T::Kind;
+      return result;
+    }
 
 protected:
   Type(TypeKind kind)
@@ -112,7 +94,7 @@ public:
     if (!r || T::Kind == kind()) {
       return r;
     } else {
-      return cloneType<T::is_singleton, T>{}(r);
+      return sliceType<T>(r);
     }
   }
   template<typename T>
@@ -121,7 +103,7 @@ public:
     if (!r || T::Kind == kind()) {
       return r;
     } else {
-      return cloneType<T::is_singleton, T>{}(r);
+      return sliceType<T>(r);
     }
   }
   template<typename T>
@@ -150,9 +132,6 @@ struct OptionalType;
 using OptionalTypePtr = std::shared_ptr<OptionalType>;
 
 struct OptionalType: public Type {
-  // It's not exactly a singleton, but there should be exactly once instance of
-  // Optional[T] for every T
-  static constexpr bool is_singleton = true;
   friend struct Type;
   template<typename ... T>
   static OptionalTypePtr create( T&& ... all ) {
@@ -207,7 +186,6 @@ struct DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
 // This node represents a single Tensor value, with an unknown shape.
 struct TORCH_API DynamicType : public Type {
-  static constexpr bool is_singleton = true;
   template<typename ... T>
   static DynamicTypePtr create( T&& ... all ) {
     return DynamicTypePtr(new DynamicType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -232,7 +210,6 @@ private:
 struct UndefinedTensorType;
 using UndefinedTensorTypePtr = std::shared_ptr<UndefinedTensorType>;
 struct TORCH_API UndefinedTensorType : public Type {
-  static constexpr bool is_singleton = true;
   friend struct Type;
   static const TypeKind Kind = TypeKind::UndefinedTensorType;
 
@@ -260,7 +237,6 @@ struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This node represents a single Tensor value with a specific size
 struct TORCH_API TensorType : public Type {
-  static constexpr bool is_singleton = false;
   friend struct Type;
   static const TypeKind Kind = TypeKind::TensorType;
 
@@ -333,7 +309,6 @@ struct CompleteTensorType;
 using CompleteTensorTypePtr = std::shared_ptr<CompleteTensorType>;
 // This node represents a single Tensor value with a specific size
 struct TORCH_API CompleteTensorType : public TensorType {
-  static constexpr bool is_singleton = false;
   friend struct Type;
   template<typename ... T>
   static CompleteTensorTypePtr create( T&& ... all ) {
@@ -461,9 +436,6 @@ struct ListType;
 using ListTypePtr = std::shared_ptr<ListType>;
 
 struct TORCH_API ListType : public Type {
-  // It's not exactly a singleton, but there should be exactly once instance of
-  // List[T] for every T
-  static constexpr bool is_singleton = true;
   friend struct Type;
   template<typename ... T>
   static ListTypePtr create( T&& ... all ) {
@@ -514,7 +486,6 @@ struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 
 struct TORCH_API TupleType : public Type {
-  static constexpr bool is_singleton = false;
   friend struct Type;
   static TupleTypePtr create(std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType( std::move(types) )); // NOLINT(modernize-make-shared)
@@ -595,7 +566,6 @@ struct NumberType;
 using NumberTypePtr = std::shared_ptr<NumberType>;
 // This node represents a Python number value
 struct TORCH_API NumberType : public Type {
-  static constexpr bool is_singleton = true;
   template<typename ... T>
   static NumberTypePtr create( T&& ... all ) {
     return NumberTypePtr(new NumberType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -618,7 +588,6 @@ struct FloatType;
 using FloatTypePtr = std::shared_ptr<FloatType>;
 // This node represents a Python float number value
 struct TORCH_API FloatType : public Type {
-  static constexpr bool is_singleton = true;
   template<typename ... T>
   static FloatTypePtr create( T&& ... all ) {
     return FloatTypePtr(new FloatType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -647,7 +616,6 @@ struct IntType;
 using IntTypePtr = std::shared_ptr<IntType>;
 // This node represents a Python int number value
 struct TORCH_API IntType : public Type {
-  static constexpr bool is_singleton = true;
   template<typename ... T>
   static IntTypePtr create( T&& ... all ) {
     return IntTypePtr(new IntType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -701,7 +669,6 @@ struct StringType;
 using StringTypePtr = std::shared_ptr<StringType>;
 // This node represents a Python string value
 struct TORCH_API StringType : public Type {
-  static constexpr bool is_singleton = true;
   template<typename ... T>
   static StringTypePtr create( T&& ... all ) {
     return StringTypePtr(new StringType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -730,7 +697,6 @@ struct NoneType;
 using NoneTypePtr = std::shared_ptr<NoneType>;
 // This node represents a Python None value
 struct NoneType : public Type {
-  static constexpr bool is_singleton = true;
   template<typename ... T>
   static NoneTypePtr create( T&& ... all ) {
     return NoneTypePtr(new NoneType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -758,7 +724,6 @@ private:
 struct GeneratorType;
 using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
 struct GeneratorType : public Type {
-  static constexpr bool is_singleton = true;
   template<typename ... T>
   static GeneratorTypePtr create( T&& ... all) {
     return GeneratorTypePtr(new GeneratorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -782,7 +747,6 @@ private:
 struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
 struct VarType : public Type {
-  static constexpr bool is_singleton = false;
   template<typename ... T>
   static VarTypePtr create(std::string name_) {
     return VarTypePtr(new VarType(std::move(name_)));

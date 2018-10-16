@@ -175,7 +175,6 @@ struct FunctionParameter {
   // anyway, and Py_Finalize can already be called when this is destructed.
   PyObject *python_name;
   at::Scalar default_scalar;
-  // at::Scalar default_scalar;
   std::vector<int64_t> default_intlist;
   union {
     bool default_bool;
