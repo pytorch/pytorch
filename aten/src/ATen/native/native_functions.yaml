@@ -2100,6 +2100,10 @@
   variants: function, method
   device_guard: False
 
+- func: to(Tensor self, TensorOptions options, bool non_blocking=false, bool copy=false) -> Tensor
+  variants: method
+  device_guard: False
+
 - func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
