@@ -185,6 +185,34 @@ void Graph::dumpPretty() {
   PrettyPrint(std::cout, *this);
 }
 
+Scope* Scope::push(Symbol name) {
+  children_.push_back(std::unique_ptr<Scope>(new Scope(this, name)));
+  return children_.back().get();
+}
+
+Scope* Scope::getRoot() {
+  Scope* current = this;
+  while (current->parent_) {
+    current = current->parent_;
+  }
+  return current;
+}
+
+std::string Scope::namesFromRoot(const std::string& separator) {
+  // TODO: I think the answer is we shouldn't have used Symbol here
+  std::string out = this->name_.toUnqualString();
+  if (this->isRoot()) {
+    return out;
+  }
+  Scope* parent = this->parent_;
+  while (!parent->isRoot()) {
+    // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+    out = std::string(parent->name_.toUnqualString()) + separator + out;
+    parent = parent->parent_;
+  }
+  return out;
+}
+
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
@@ -461,6 +489,20 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> value_map) {
   }
 }
 
+void Block::destroy() {
+  // we cannot destroy the output because it is used as the sentinel
+  // for the nodes() list and has to remain valid for the loop
+  output_->removeAllInputs();
+  for(auto it = this->nodes().reverse().begin(),
+      end = this->nodes().reverse().end();
+      it != end; ++it) {
+    it.destroyCurrent();
+  }
+  output_->destroy();
+  input_->destroy();
+  graph_->freeBlock(this);
+}
+
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value* v) -> Value* {
@@ -514,6 +556,27 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
+Value* Value::copyMetadata(Value * from) {
+  setType(from->type());
+  if (from->hasUniqueName())
+    setUniqueName(from->uniqueName());
+  return this;
+}
+
+void Value::replaceFirstUseWith(Value * newValue) {
+  JIT_ASSERT(owningGraph() == newValue->owningGraph());
+  auto u = uses()[0];
+  u.user->inputs_[u.offset] = newValue;
+  newValue->uses_.push_back(u);
+  uses_.erase(uses_.begin());
+}
+
+void Value::replaceAllUsesWith(Value * newValue) {
+  while (!uses().empty()) {
+    replaceFirstUseWith(newValue);
+  }
+}
+
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
   for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
@@ -549,10 +612,8 @@ void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema();
 }
 
-namespace {
-
-const OperatorSet& nondeterminstic_aten_ops() {
-  static OperatorSet nondeterministic_ops = {
+bool Node::isNondeterministic() const {
+  static const OperatorSet nondeterministic_ops = {
     "aten::dropout(Tensor input, float p, bool train) -> Tensor",
     "aten::_fused_dropout(Tensor self, float p, Generator generator) -> (Tensor, Tensor)",
     "aten::_standard_gamma(Tensor self, Generator generator) -> Tensor",
@@ -579,13 +640,8 @@ const OperatorSet& nondeterminstic_aten_ops() {
     "aten::randn_like(Tensor self, *, int dtype, int layout, int[] device) -> Tensor",
     "aten::randperm(int n, *, int dtype, int layout, int[] device) -> Tensor"
   };
-  return nondeterministic_ops;
-}
 
-}  // namespace
-
-bool Node::isNondeterministic() const {
-  if (nondeterminstic_aten_ops().find(this) == nullptr) {
+  if (nondeterministic_ops.find(this) == nullptr) {
     return false;
   }
   // Dropout with train = False is deterministic
@@ -595,6 +651,207 @@ bool Node::isNondeterministic() const {
   return true;
 }
 
+Node::Node(Graph * graph_, NodeKind kind_) :
+  kind_(kind_),
+  graph_(graph_),
+  owning_block_(nullptr),
+  scope_(graph_->current_scope_),
+  schema_(nullptr) {
+  graph_->all_nodes.emplace(this);
+}
+
+void Node::eraseOutput(size_t i) {
+  JIT_ASSERT(i < outputs_.size());
+  JIT_ASSERT(outputs_[i]->uses().empty());
+  schema_ = nullptr;
+  Value * n = outputs_[i];
+  outputs_.erase(outputs_.begin() + i);
+  owningGraph()->freeValue(n);
+  for(size_t j = i; j < outputs_.size(); j++) {
+    outputs_[j]->offset_--;
+  }
+}
+
+Block * Node::addBlock() {
+  schema_ = nullptr;
+  blocks_.push_back(new Block(owningGraph(), this));
+  return blocks_.back();
+}
+
+void Node::eraseBlock(size_t i) {
+  JIT_ASSERT(i < blocks_.size());
+  schema_ = nullptr;
+  Block * n = blocks_[i];
+  blocks_.erase(blocks_.begin() + i);
+  n->destroy();
+}
+
+void Node::destroy() {
+  while(!outputs().empty())
+    eraseOutput(outputs().size() - 1);
+  while(!blocks().empty())
+    eraseBlock(blocks().size() - 1);
+  removeAllInputs();
+  if(inBlockList())
+    removeFromList();
+  graph_->freeNode(this);
+}
+
+void Node::cloneFrom(Node * s) {
+	setSourceLocation(s->getSourceLocation());
+	if (s->owningGraph()->scope_root_ == owningGraph()->scope_root_) {
+		scope_ = s->scope_;
+	}
+	copyAttributes(*s);
+}
+
+void Node::replaceAllUsesWith(Node * n) {
+  JIT_ASSERT(outputs().size() == n->outputs().size());
+  size_t nOutputs = outputs().size();
+  for(size_t i = 0; i < nOutputs; i++) {
+    outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
+  }
+}
+
+Value* Node::insertInput(size_t i, Value* value) {
+  JIT_ASSERT(graph_ == value->owningGraph());
+  schema_ = nullptr;
+  // First we update the offsets for all existing inputs that will reside
+  // after the one we're inserting. Concretely, these are the inputs at
+  // indices [i, # input). Since we're inserting one input before all of
+  // these inputs, increment their use offsets for this value by 1
+  for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
+    // See Note [User node does not uniquely identify use]
+    auto use = findUseForInput(use_itr);
+    use->offset += 1;
+  }
+  // Insert the actual input at the specified index
+  inputs_.insert(inputs_.begin() + i, value);
+  // Register the new use of the value we're inserted as an input.
+  value->uses_.emplace_back(this, i);
+  return value;
+}
+
+Value* Node::addInput(Value * value) {
+  JIT_ASSERT(graph_ == value->owningGraph());
+  schema_ = nullptr;
+  value->uses_.emplace_back(this, inputs_.size());
+  inputs_.push_back(value);
+  return value;
+}
+
+Value* Node::replaceInput(size_t i, Value * newValue) {
+  JIT_ASSERT(newValue->owningGraph() == graph_);
+  schema_ = nullptr;
+  Value * old = dropInput(i);
+  inputs_[i] = newValue;
+  newValue->uses_.emplace_back(this, i);
+  return old;
+}
+
+void Node::replaceInputWith(Value * from, Value * to) {
+  JIT_ASSERT(from->owningGraph() == graph_);
+  JIT_ASSERT(to->owningGraph() == graph_);
+  schema_ = nullptr;
+  size_t i = 0;
+  for(auto input : inputs()) {
+    if(input == from)
+      replaceInput(i, to);
+    i++;
+  }
+}
+
+Value* Node::addOutput() {
+  outputs_.push_back(new Value(this, outputs_.size()));
+  schema_ = nullptr;
+  return outputs_.back();
+}
+
+Value* Node::insertOutput(size_t i) {
+  schema_ = nullptr;
+  outputs_.insert(outputs_.begin() + i, new Value(this, i));
+  for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
+    outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
+  }
+  return outputs_.at(i);
+}
+
+Node* Node::insertBefore(Node * n) {
+  JIT_ASSERT(n->inBlockList());
+  insertAfter(n->prev());
+  return this;
+}
+
+Node* Node::insertAfter(Node * n) {
+  JIT_ASSERT(!inBlockList() && n->inBlockList());
+  JIT_ASSERT(n->owningBlock());
+  this->owning_block_ = n->owningBlock();
+  Node * next = n->next();
+  n->next() = this;
+  this->prev() = n;
+  this->next() = next;
+  next->prev() = this;
+  return this;
+}
+
+void Node::moveAfter(Node * n) {
+  removeFromList();
+  insertAfter(n);
+}
+
+void Node::moveBefore(Node * n) {
+  removeFromList();
+  insertBefore(n);
+}
+
+void Node::removeInput(size_t i) {
+  schema_ = nullptr;
+  dropInput(i);
+  // everything after this input shifts left,
+  // so we need to update their use offsets to match
+  for(size_t j = i+1; j < inputs_.size(); j++) {
+    auto it = findUseForInput(j);
+    it->offset--;
+  }
+  inputs_.erase(inputs_.begin() + i);
+}
+
+void Node::removeAllInputs() {
+  schema_ = nullptr;
+  for(size_t i = 0; i < inputs().size(); ++i)
+    dropInput(i);
+  inputs_.clear();
+}
+
+use_list::iterator Node::findUseForInput(size_t i) {
+  auto & input_uses = inputs_[i]->uses_;
+  // O(N) on the use list, but unless we get nodes with +100 uses
+  // vector traversal still is probably faster than linked list
+  auto use_it = std::find(input_uses.begin(), input_uses.end(), Use(this, i));
+  JIT_ASSERT(use_it != input_uses.end());
+  return use_it;
+}
+
+Value* Node::dropInput(size_t i) {
+  JIT_ASSERT(i < inputs_.size());
+  auto input_node = inputs_[i];
+  auto use_it = findUseForInput(i);
+  input_node->uses_.erase(use_it);
+  inputs_[i] = nullptr;
+  return input_node;
+}
+
+void Node::removeFromList() {
+  JIT_ASSERT(inBlockList());
+  this->owning_block_ = nullptr;
+  Node * next = this->next();
+  Node * prev = this->prev();
+  prev->next() = next;
+  next->prev() = prev;
+  this->next() = nullptr;
+  this->prev() = nullptr;
+}
+
 inline const SourceRange& fakeRange() {
   static SourceRange range(std::make_shared<std::string>("<internally-created-node>"), 0, 1);
   return range;
@@ -602,6 +859,193 @@ inline const SourceRange& fakeRange() {
 
 Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
   return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
+}
+
+Node* Graph::create(NodeKind kind, size_t num_outputs) {
+  // NB: Node constructor adds node to all_nodes
+  auto n = new Node(this, kind);
+  for(size_t i = 0; i < num_outputs; i++)
+    n->addOutput();
+  return n;
+}
+
+Node* Graph::create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs) {
+  auto n = create(kind, num_outputs);
+  for(auto i : inputs)
+    n->addInput(i);
+  return n;
+}
+
+Node* Graph::createUndefined() {
+  return create(prim::Undefined);
+}
+
+Node * Graph::createNoneGenerator() {
+  auto n = create(prim::NoneGenerator);
+  n->output()->setType(GeneratorType::get());
+  return n;
+}
+
+Node * Graph::createFusionGroup(int device) {
+  auto n = create(prim::FusionGroup, 0);
+  n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
+  n->i_(attr::device, device);
+  return n;
+}
+
+Node* Graph::createTuple(at::ArrayRef<Value*> values) {
+  auto types = fmap(values, [](Value* v) { return v->type(); });
+  auto tt = TupleType::create(std::move(types));
+  auto n = create(prim::TupleConstruct, values);
+  n->output()->setType(tt);
+  return n;
+}
+
+Node* Graph::createTupleUnpack(Value * v) {
+  TupleTypePtr tt = v->type()->expect<TupleType>();
+  auto n = create(prim::TupleUnpack, {v}, 0);
+  for(auto & element : tt->elements()) {
+    n->addOutput()->setType(element);
+  }
+  return n;
+}
+
+Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+  auto n = create(prim::ListConstruct, values);
+  for(const auto & v : values) {
+    JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
+  }
+  n->output()->setType(ListType::create(elem_type));
+  return n;
+}
+Node* Graph::createListUnpack(Value *v, size_t size) {
+  ListTypePtr list_type = v->type()->expect<ListType>();
+  TypePtr elem_type = list_type->getElementType();
+  auto n = create(prim::ListUnpack, {v}, 0);
+  for (size_t i = 0; i < size; ++i) {
+    n->addOutput()->setType(elem_type);
+  }
+  return n;
+}
+
+Node* Graph::createNumToTensor(Value* value) {
+  auto typ = value->type();
+  Node * result = create(prim::NumToTensor, {value});
+  result->output()->setType(CompleteTensorType::fromNumberType(typ));
+  return result;
+}
+
+Node* Graph::createBoolToTensor(Value* value) {
+  auto typ = value->type();
+  Node * result = create(prim::BoolToTensor, {value});
+  if (!typ->isSubtypeOf(BoolType::get())) {
+    AT_ERROR("Cannot create bool type from ", typ->str());
+  }
+  result->output()->setType(CompleteTensorType::fromBoolType());
+  return result;
+}
+Node* Graph::createTensorToNum(const TypePtr& type, Value* value) {
+  auto* result = create(prim::TensorToNum, {value});
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
+  auto* result = create(prim::ImplicitTensorToNum, {value});
+  result->output()->setType(type);
+  return result;
+}
+
+Node* Graph::createTensorToBool(Value* value) {
+  auto* result = create(prim::TensorToBool, {value});
+  result->output()->setType(BoolType::get());
+  return result;
+}
+
+Node* Graph::createIntToFloat(Value* value) {
+  JIT_ASSERT(*value->type() == *IntType::get());
+  auto* result = create(prim::IntToFloat, {value});
+  result->output()->setType(FloatType::get());
+  return result;
+}
+
+Node* Graph::createFloatToInt(Value* value) {
+  JIT_ASSERT(*value->type() == *FloatType::get());
+  auto* result = create(prim::FloatToInt, {value});
+  result->output()->setType(IntType::get());
+  return result;
+}
+
+Node* Graph::createStringToFloat(Value* value) {
+  JIT_ASSERT(*value->type() == *StringType::get());
+  auto* result = create(prim::StringToFloat, {value});
+  result->output()->setType(FloatType::get());
+  return result;
+}
+
+Node* Graph::createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks) {
+  //n can be from a different graph
+  Node * r = n->allocNewInstance(this);
+  for(auto o : n->outputs()) {
+    r->addOutput()->copyMetadata(o);
+  }
+  r->cloneFrom(n);
+  for(auto i : n->inputs()) {
+    r->addInput(value_map(i));
+  }
+  if(copy_blocks) {
+    for(auto b : n->blocks()) {
+      r->addBlock()->cloneFrom(b, value_map);
+    }
+  }
+  return r;
+}
+
+Value* Graph::insertConstant(
+    IValue val,
+    c10::optional<SourceRange> loc) {
+  return jit::insertConstant(*this, std::move(val), loc);
+}
+
+Value* Graph::insertDummyWorld() {
+  auto node = create(prim::DummyWorld, 1);
+  node->output()->setType(WorldType::get());
+  return insertNode(node)->output();
+}
+
+std::string Graph::toString() const {
+  std::ostringstream oss;
+  oss << *this;
+  return oss.str();
+}
+
+Graph::~Graph() {
+  for (const Node * n : all_nodes)
+    delete n;
+  for (const Value * v : all_values)
+    delete v;
+  for (const Block * b : all_blocks)
+    delete b;
+}
+
+void Graph::freeNode(Node * n) {
+  auto it = all_nodes.find(n);
+  JIT_ASSERT(it != all_nodes.end());
+  delete *it;
+  all_nodes.erase(it);
+}
+void Graph::freeValue(Value * v) {
+  v->setUniqueName("");
+  auto it = all_values.find(v);
+  JIT_ASSERT(it != all_values.end());
+  delete *it;
+  all_values.erase(it);
+}
+void Graph::freeBlock(Block * b) {
+  auto it = all_blocks.find(b);
+  JIT_ASSERT(it != all_blocks.end());
+  delete *it;
+  all_blocks.erase(it);
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {
