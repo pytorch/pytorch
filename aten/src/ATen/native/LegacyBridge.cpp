@@ -134,22 +134,6 @@ Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta
   }
 }
 
-Tensor tensor(const Type& dtype) {
-  if (_type_has_native(dtype)) {
-    return at::getType(dtype.options()).native_tensor({0}, dtype.options());
-  } else {
-    return at::getType(dtype.options()).th_tensor();
-  }
-}
-
-Tensor tensor(const Type& dtype, ArrayRef<int64_t> size) {
-  if (_type_has_native(dtype)) {
-    return at::getType(dtype.options()).native_tensor(size, dtype.options());
-  } else {
-    return at::getType(dtype.options()).th_tensor(size);
-  }
-}
-
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values) {
   return at::getType(values.options().layout(at::kSparse)).native_sparse_coo_tensor(indices, values);
 }
