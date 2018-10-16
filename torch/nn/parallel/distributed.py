@@ -117,6 +117,7 @@ class DistributedDataParallel(Module):
     def __init__(self, module, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None, bucket_cap_mb=25):
+
         super(DistributedDataParallel, self).__init__()
 
         # Use all devices by default
@@ -212,7 +213,7 @@ class DistributedDataParallel(Module):
         self._register_grad_hooks()
 
     def __getstate__(self):
-        self._safely_get_default_group()
+        self._check_default_group()
         attrs = copy.copy(self.__dict__)
         del attrs['process_group'], \
             attrs['allreduce_opts'], \
@@ -221,14 +222,20 @@ class DistributedDataParallel(Module):
         return attrs
 
     def __setstate__(self, state):
-        self.process_group = self._safely_get_default_group()
+        # If serializable, then the process group should be the default one
+        self.process_group = dist.get_default_group()
         super(DistributedDataParallel, self).__setstate__(state)
         self._register_grad_hooks()
 
-    def _safely_get_default_group(self):
+    def _check_default_group(self):
+        pickle_not_supported = False
         try:
-            return dist.get_default_group()
+            if self.process_group != dist.get_default_group():
+                pickle_not_supported = True
         except:
+            pickle_not_supported = True
+
+        if pickle_not_supported:
             raise RuntimeError("DDP Pickling/Unpickling are only supported "
                                "when using DDP with the default process "
                                "group. That is, when you have called "
