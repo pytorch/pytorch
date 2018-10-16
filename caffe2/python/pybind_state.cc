@@ -1217,17 +1217,10 @@ void addGlobalMethods(py::module& m) {
     return true;
   });
   m.def("nets", []() { return gWorkspace->Nets(); });
-  m.def("run_operator_once", [](const py::bytes& op_def, bool legacy_proto=true) {
+  m.def("run_operator_once", [](const py::bytes& op_def) {
     CAFFE_ENFORCE(gWorkspace);
     OperatorDef def;
-    if (legacy_proto) {
-      CAFFE_ENFORCE(ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
-    } else {
-      ::torch::NodeProto node;
-      CAFFE_ENFORCE(
-          ParseProtoFromLargeString(op_def.cast<std::string>(), &node));
-      NodeProtoToOperatorDef(node, &def);
-    }
+    CAFFE_ENFORCE(ParseProtoFromLargeString(op_def.cast<std::string>(), &def));
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunOperatorOnce(def));
     return true;
@@ -1567,38 +1560,6 @@ void addGlobalMethods(py::module& m) {
     auto* blob = gWorkspace->GetBlob(blob_name);
     CAFFE_ENFORCE(blob);
     return BlobStat::sizeBytes(*blob);
-  });
-  m.def("argument_to_attribute_proto", [](py::bytes arg_str) -> py::bytes {
-    Argument arg;
-    CAFFE_ENFORCE(
-      ParseProtoFromLargeString(arg_str.cast<std::string>(), &arg));
-    ::torch::AttributeProto attr;
-    ArgumentToAttributeProto(arg, &attr);
-    return attr.SerializeAsString();
-  });
-  m.def("attribute_proto_to_argument", [](py::bytes attr_str) -> py::bytes {
-    ::torch::AttributeProto attr;
-    CAFFE_ENFORCE(
-      ParseProtoFromLargeString(attr_str.cast<std::string>(), &attr));
-    Argument arg;
-    AttributeProtoToArgument(attr, &arg);
-    return arg.SerializeAsString();
-  });
-  m.def("operator_def_to_node_proto", [](py::bytes op_str) -> py::bytes {
-    OperatorDef op_def;
-    CAFFE_ENFORCE(
-      ParseProtoFromLargeString(op_str.cast<std::string>(), &op_def));
-    ::torch::NodeProto node;
-    OperatorDefToNodeProto(op_def, &node);
-    return node.SerializeAsString();
-  });
-  m.def("node_proto_to_operator_def", [](py::bytes node_str) -> py::bytes {
-    ::torch::NodeProto node_proto;
-    CAFFE_ENFORCE(
-      ParseProtoFromLargeString(node_str.cast<std::string>(), &node_proto));
-    OperatorDef op_def;
-    NodeProtoToOperatorDef(node_proto, &op_def);
-    return op_def.SerializeAsString();
   });
   m.def("support_onnx_export", [](const std::string& op) -> bool {
     const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(op);
