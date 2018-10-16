@@ -21,21 +21,6 @@ namespace enforce_detail {
 }
 } // namespace enforce_detail
 
-size_t ReplaceAll(string& s, const char* from, const char* to) {
-  CAFFE_ENFORCE(from && *from);
-  CAFFE_ENFORCE(to);
-
-  size_t numReplaced = 0;
-  string::size_type lenFrom = std::strlen(from);
-  string::size_type lenTo = std::strlen(to);
-  for (string::size_type pos = s.find(from); pos != string::npos;
-       pos = s.find(from, pos + lenTo)) {
-    s.replace(pos, lenFrom, to);
-    numReplaced++;
-  }
-  return numReplaced;
-}
-
 namespace {
 std::function<string(void)>* GetFetchStackTrace() {
   static std::function<string(void)> func = []() { return ""; };
@@ -53,7 +38,7 @@ void ThrowEnforceNotMet(
     const char* condition,
     const std::string& msg,
     const void* caller) {
-  at::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
+  c10::Error e(file, line, condition, msg, (*GetFetchStackTrace())(), caller);
   if (c10::FLAGS_caffe2_use_fatal_for_enforce) {
     LOG(FATAL) << e.msg_stack()[0];
   }
@@ -204,14 +189,16 @@ MessageLogger::MessageLogger(const char *file, int line, int severity)
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch());
   */
-  stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, FATAL - severity_)]
+  stream_ << "["
+          << CAFFE2_SEVERITY_PREFIX[std::min(4, FATAL - severity_)]
           //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
           //<< std::setfill('0')
           //<< " " << std::setw(2) << timeinfo->tm_hour
           //<< ":" << std::setw(2) << timeinfo->tm_min
           //<< ":" << std::setw(2) << timeinfo->tm_sec
           //<< "." << std::setw(9) << ns.count() % 1000000000
-          << " " << at::detail::StripBasename(std::string(file)) << ":" << line << "] ";
+          << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
+          << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.

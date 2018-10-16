@@ -108,9 +108,9 @@ void ConvertToRawDataset(
     const string& encoded_image = input_protos.protos(0).string_data(0);
     int encoded_size = encoded_image.size();
     cv::Mat img = cv::imdecode(
-        cv::Mat(
-            1, &encoded_size, CV_8UC1, const_cast<char*>(encoded_image.data())),
-        c10::FLAGS_color ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+        cv::Mat(1, &encoded_size, CV_8UC1,
+        const_cast<char*>(encoded_image.data())),
+        c10::FLAGS_color ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
     cv::Mat resized_img;
     int scaled_width, scaled_height;
     if (c10::FLAGS_warp) {

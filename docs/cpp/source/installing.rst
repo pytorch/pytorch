@@ -70,10 +70,10 @@ We can now run the following commands to build the application from within the
 
   mkdir build
   cd build
-  cmake -DCMAKE_PREFIX_PATH=/path/to/libtorch ..
+  cmake -DCMAKE_PREFIX_PATH=/absolute/path/to/libtorch ..
   make
 
-where ``/path/to/libtorch`` should be the full path to the unzipped LibTorch
+where ``/absolute/path/to/libtorch`` should be the absolute (!) path to the unzipped LibTorch
 distribution. If all goes well, it will look something like this:
 
 .. code-block:: sh

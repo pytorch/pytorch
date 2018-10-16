@@ -38,7 +38,7 @@
 
 #pragma once
 
-#include <ATen/core/C++17.h>
+#include <c10/util/C++17.h>
 #include <stdexcept>
 #include <string>
 #include <utility>

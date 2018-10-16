@@ -59,18 +59,17 @@ Tensor _values_sparse(const SparseTensor& self) {
  ******************************************************************************/
 
 /* Empty init */
-SparseTensor new_sparse(const SparseType& dtype) {
-  AT_ASSERT(!dtype.is_undefined());
-  AT_ASSERT(!dtype.is_variable());
-  AT_ASSERT(dtype.is_sparse());
+SparseTensor new_sparse(const TensorOptions& options) {
+  AT_ASSERT(!options.is_variable());
+  AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
-  if (dtype.is_cuda()) {
+  if (options.device().is_cuda()) {
     type_id = SparseCUDATensorId();
   } else {
     type_id = SparseCPUTensorId();
   }
   return detail::make_tensor<SparseTensorImpl>(
-      type_id, scalarTypeToTypeMeta(dtype.scalarType()));
+      type_id, scalarTypeToTypeMeta(options.dtype()));
 }
 
 /*** Helper methods ***/
@@ -123,8 +122,8 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
   return _new_with_dims_and_tensor_sparse(dtype, sparseDims, denseDims, computed_sizes, indices, values);
 }
 
-SparseTensor new_with_dims_and_size_sparse(const SparseType& dtype, int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
-  SparseTensor self = new_sparse(dtype);
+SparseTensor new_with_dims_and_size_sparse(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size, const TensorOptions& options) {
+  SparseTensor self = new_sparse(options);
   AT_CHECK(size.size() != 0,
     "cannot construct sparse tensor with 0 dimensions and no values; you must specify at least 1 dimension if you want to create a sparse tensor with no elements, \
 or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, [])) if you want to create a scalar sparse tensor");
@@ -132,8 +131,25 @@ or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_
   return self;
 }
 
-SparseTensor new_with_size_sparse(const SparseType& dtype, ArrayRef<int64_t> size) {
-  return new_with_dims_and_size_sparse(dtype, size.size(), 0, size);
+Tensor empty_sparse(IntList size, const TensorOptions& options) {
+  AT_CHECK(size.size() != 0,
+    "cannot construct sparse tensor with 0 dimensions and no values; you must specify at least 1 dimension if you want to create a sparse tensor with no elements, \
+     or you must provide a single-element `values` tensor (e.g. x = torch.sparse_coo_tensor(torch.zeros(0, 1), 12.3, [])) if you want to create a scalar sparse tensor");
+  AT_ASSERT(!options.is_variable());
+  AT_ASSERT(options.layout() == kSparse);
+  TensorTypeId type_id;
+  if (options.device().type() == kCUDA) {
+    type_id = SparseCUDATensorId();
+  } else {
+    type_id = SparseCPUTensorId();
+  }
+  auto tensor = Tensor(c10::make_intrusive<SparseTensorImpl>(type_id, scalarTypeToTypeMeta(options.dtype())));
+  _get_sparse_impl(tensor)->resize_and_clear_(size.size(), 0, size);
+  return tensor;
+}
+
+SparseTensor new_with_size_sparse(IntList size, const TensorOptions& options) {
+  return new_with_dims_and_size_sparse(size.size(), 0, size, options);
 }
 
 // NOTE: new_with_tensor_and_size_unsafe_sparse() differs from new_with_tensor_and_size_sparse()
@@ -205,7 +221,7 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
 // NB: Deleted newWithSizeNd variants
 
 SparseTensor clone_sparse(const SparseTensor& self) {
-  SparseTensor other = new_with_dims_and_size_sparse(self.type(), self._sparseDims(), self._denseDims(), self.sizes());
+  SparseTensor other = new_with_dims_and_size_sparse(self._sparseDims(), self._denseDims(), self.sizes(), self.options());
   _copy_into_sparse(other, _get_sparse_impl(self)->indices(), _get_sparse_impl(self)->values(), true);
   _get_sparse_impl(other)->set_coalesced(self.is_coalesced());
   return other;
@@ -285,7 +301,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     factor *= self.size(d);
   }
 
-  SparseTensor dst = new_sparse(self.type());
+  SparseTensor dst = new_sparse(self.options());
   _get_sparse_impl(dst)->resize_(sparseDims, denseDims, self.sizes());
   // TODO: is there a more idiomatic way to do this?
   LongTensor newIndices = at::empty(indices.sizes(), indices.options());

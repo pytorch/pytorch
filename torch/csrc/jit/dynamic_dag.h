@@ -149,7 +149,7 @@ struct DynamicDAG {
   // max_size() >= the number of live vertices.
   // for all vertices v, v.ord < max_size()
   size_t max_size() const { return vertices_.size(); };
-  at::optional<Vertex<T>*> at(size_t ord) const;
+  c10::optional<Vertex<T>*> at(size_t ord) const;
 
   std::string toString();
 
@@ -217,10 +217,10 @@ void DynamicDAG<T>::debugCheckInvariants() {
 }
 
 template <typename T>
-at::optional<Vertex<T>*> DynamicDAG<T>::at(size_t ord) const {
+c10::optional<Vertex<T>*> DynamicDAG<T>::at(size_t ord) const {
   const auto& vertex = vertices_.at(ord);
   if (!vertex) {
-    return at::nullopt;
+    return c10::nullopt;
   } else {
     return vertex.get();
   }

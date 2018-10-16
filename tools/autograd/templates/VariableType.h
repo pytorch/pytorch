@@ -18,18 +18,18 @@ namespace torch { namespace autograd {
 
 struct Variable;
 using at::Context;
+using at::Device;
 using at::Generator;
 using at::IntList;
 using at::Scalar;
-using at::SparseTensorRef;
 using at::ScalarType;
+using at::SparseTensorRef;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;
+using at::TensorOptions;
 using at::Type;
-using at::ScalarType;
-using at::optional;
-using at::Device;
+using c10::optional;
 
 struct TORCH_API VariableType final : public at::TypeDefault {
   VariableType(Context* context, at::TypeExtendedInterface* baseType);
@@ -59,7 +59,11 @@ struct TORCH_API VariableType final : public at::TypeDefault {
   Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
   Tensor & _s_copy_from(const Tensor & self, Tensor & dst, bool non_blocking) const override;
 
-  void backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const override;
+  void backward(
+      Tensor& self,
+      c10::optional<Tensor> gradient,
+      bool keep_graph,
+      bool create_graph) const override;
   void set_data(Tensor & self, Tensor new_data) const override;
 
   ${type_derived_method_declarations}

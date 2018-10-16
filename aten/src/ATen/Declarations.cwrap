@@ -2757,6 +2757,10 @@
       if_true: S
       if_false: A
       default: S
+    - arg: bool compute_uv
+      if_true: S
+      if_false: N
+      default: S
 ]]
 [[
   name: _getri

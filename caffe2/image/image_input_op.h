@@ -465,7 +465,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
                 datum.data().size(),
                 CV_8UC1,
                 const_cast<char*>(datum.data().data())),
-            color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+            color_ ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
         if (src.rows == 0 || src.cols == 0) {
           num_decode_errors_in_batch_++;
           src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
@@ -540,7 +540,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
                 &encoded_size,
                 CV_8UC1,
                 const_cast<char*>(encoded_image_str.data())),
-            color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+            color_ ? cv::IMREAD_COLOR : cv::IMREAD_GRAYSCALE);
         if (src.rows == 0 || src.cols == 0) {
           num_decode_errors_in_batch_++;
           src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
@@ -681,7 +681,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
   if (out_c == src.channels()) {
     *img = src;
   } else {
-    cv::cvtColor(src, *img, (out_c == 1) ? CV_BGR2GRAY : CV_GRAY2BGR);
+    cv::cvtColor(src, *img, (out_c == 1) ? cv::COLOR_BGR2GRAY : cv::COLOR_GRAY2BGR);
   }
 
   // Note(Yangqing): I believe that the mat should be created continuous.

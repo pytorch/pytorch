@@ -114,7 +114,7 @@ void TensorSerializer::SerializeWithChunkSize(
     this->Serialize(
         tensor, name, blob_proto.mutable_tensor(), chunkStart, chunk_size);
     acceptor(
-        MakeString(name, kChunkIdSeparator, chunkStart / chunk_size),
+        c10::str(name, kChunkIdSeparator, chunkStart / chunk_size),
         blob_proto.SerializeAsString());
   };
 
