@@ -137,8 +137,10 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
 // 2. newshape must be able to be separated into same number of chunks as oldshape was separated into,
 //    where each chunk of newshape has matching ``numel'', i.e., number of subspaces,
 //    as the corresponding chunk of oldshape.
-at::optional<std::vector<int64_t>>
-THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList newshape) {
+c10::optional<std::vector<int64_t>> THTensor_compute_stride(
+    at::IntList oldshape,
+    at::IntList oldstride,
+    at::IntList newshape) {
   if (oldshape.empty()) {
     return std::vector<int64_t>(newshape.size(), 1);
   }
@@ -182,7 +184,7 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
         view_d--;
       }
       if (view_numel != tensor_numel) {
-        return at::nullopt;
+        return c10::nullopt;
       }
       if (tensor_d > 0) {
         chunk_base_stride = oldstride[tensor_d - 1];
@@ -192,7 +194,7 @@ THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList
     }
   }
   if (view_d != -1) {
-    return at::nullopt;
+    return c10::nullopt;
   }
   return newstride;
 }

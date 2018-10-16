@@ -8,7 +8,7 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/object_ptr.h"
 
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <vector>
 #include <utility>

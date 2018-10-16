@@ -6,6 +6,10 @@ C10_DEFINE_bool(
     caffe2_net_async_optimize_polling,
     true,
     "Use event callbacks whenever possible instead of polling");
+C10_DEFINE_bool(
+    caffe2_net_async_run_root_tasks_inline,
+    false,
+    "Run root tasks in current thread instread of scheduling to threadpool");
 
 namespace caffe2 {
 
@@ -248,7 +252,7 @@ bool AsyncSchedulingNet::RunAsync() {
 
     for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
       if (parents(task_id).empty()) {
-        schedule(task_id);
+        schedule(task_id, c10::FLAGS_caffe2_net_async_run_root_tasks_inline);
       }
     }
   } catch (const std::exception& e) {

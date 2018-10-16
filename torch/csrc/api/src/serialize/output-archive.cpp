@@ -6,7 +6,10 @@
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/script/module.h>
 
+#include <ATen/core/Error.h>
+
 #include <memory>
+#include <ostream>
 #include <string>
 
 namespace torch {
@@ -27,8 +30,14 @@ void OutputArchive::write(
   module_->register_module(key, nested_archive.module_);
 }
 
-void save_to_file(const OutputArchive& archive, const std::string& filename) {
-  jit::ExportModule(*archive.module_, filename);
+void OutputArchive::save_to(const std::string& filename) {
+  AT_ASSERT(module_ != nullptr);
+  jit::ExportModule(*module_, filename);
+}
+
+void OutputArchive::save_to(std::ostream& stream) {
+  AT_ASSERT(module_ != nullptr);
+  jit::ExportModule(*module_, stream);
 }
 } // namespace serialize
 } // namespace torch

@@ -81,8 +81,8 @@ struct CAFFE2_API Storage {
   }
 
   // TODO: remove later
-  void set_numel(int64_t numel) {
-    storage_impl_->set_numel(numel);
+  void set_numel(int64_t numel) const {
+    storage_impl_.get()->set_numel(numel);
   }
 
   bool resizable() const {
@@ -93,10 +93,6 @@ struct CAFFE2_API Storage {
     return storage_impl_->capacity();
   }
   // get() use here is to get const-correctness
-
-  void* data() {
-    return storage_impl_->data();
-  }
 
   void* data() const {
     return storage_impl_.get()->data();
@@ -115,12 +111,12 @@ struct CAFFE2_API Storage {
   }
 
   // Returns the previous data_ptr
-  at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
-    return storage_impl_->set_data_ptr(std::move(data_ptr));
+  at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) const {
+    return storage_impl_.get()->set_data_ptr(std::move(data_ptr));
   };
 
-  void set_dtype(const caffe2::TypeMeta& data_type) {
-    storage_impl_->set_dtype(data_type);
+  void set_dtype(const caffe2::TypeMeta& data_type) const {
+    storage_impl_.get()->set_dtype(data_type);
   }
 
   DeviceType device_type() const {

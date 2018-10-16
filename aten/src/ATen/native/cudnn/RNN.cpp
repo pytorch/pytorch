@@ -8,6 +8,7 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <ATen/native/RNN.h>
+#include <ATen/InitialTensorOptions.h>
 #include <ATen/TensorUtils.h>
 
 #if !AT_CUDNN_ENABLED()
@@ -51,7 +52,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
-Tensor _cudnn_init_dropout_state(const Type& ty, double dropout, bool train, int64_t dropout_seed) {
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
   AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
@@ -436,7 +437,7 @@ namespace {
           // TODO: The use of CPU tensor here is a bit goofy in C++,
           // some sort of alloca would be good enough except that it is
           // kind of convenient to be able to prod() on it.
-          Tensor filter_dim_a = at::CPU(kInt).tensor(min_dim);
+          Tensor filter_dim_a = at::empty(min_dim, at::initialTensorOptions().dtype(kInt));
           AT_CUDNN_CHECK(cudnnGetFilterNdDescriptor(
                 lin_layer_mat_desc.desc(),
                 min_dim,
@@ -1060,11 +1061,11 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
 // to initialize just the state tensor
-Tensor _cudnn_init_dropout_state(const Type& ty, double dropout, bool train, int64_t dropout_seed) {
+Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
   auto dropout_p = train ? dropout : 0;
-  dropout_desc.initialize_rng(ty, handle, dropout_p, dropout_seed);
+  dropout_desc.initialize_rng(handle, dropout_p, dropout_seed, options);
   return dropout_desc.state;
 }
 
@@ -1105,7 +1106,7 @@ struct DropoutState {
   // for the first time. Note that in this case needed != used, as we don't need
   // a bufer to e.g. run RNNs in test mode.
   at::Tensor buffer;
-  at::optional<cuda::CUDAEvent> event;
+  c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
 
   // Every time we use a dropout state, we need to synchronize with its event,
@@ -1131,7 +1132,7 @@ struct DropoutState {
   }
 };
 
-DropoutState& get_dropout_state(const Type& tp, double dropout_p, bool train) {
+DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions options) {
   // Each state is slightly over 2MB and initialized lazily, so it's fine to cache them.
   static std::vector<DropoutState> ten_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
   static std::vector<DropoutState> var_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
@@ -1139,13 +1140,13 @@ DropoutState& get_dropout_state(const Type& tp, double dropout_p, bool train) {
 
   int device = cuda::current_device();
   std::unique_lock<std::mutex> lock {state_cache_mut};
-  auto& state = tp.is_variable() ? var_dropout_state_cache.at(device)
-                                 : ten_dropout_state_cache.at(device);
+  auto& state = options.is_variable() ? var_dropout_state_cache.at(device)
+                                      : ten_dropout_state_cache.at(device);
   if (train && dropout_p > 0 && !state.buffer.defined()) {
     std::unique_lock<std::mutex> lock {state.mutex};
     int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();
     state.buffer = at::_cudnn_init_dropout_state(
-      tp.toScalarType(at::kByte), dropout_p, train, seed);
+      dropout_p, train, seed, options.dtype(at::kByte));
     // NB: CUDA binds the event to a device at creation time, so we can initialize it
     // only now, when we know we're on the correct device.
     state.event.emplace();
@@ -1221,7 +1222,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
   IntList batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
-  auto & dropout_state = get_dropout_state(input.type(), dropout_p, train);
+  auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   auto cudnn_output = at::_cudnn_rnn(
@@ -1248,7 +1249,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     AT_WARN(WEIGHT_FORMAT_WARN);
   }
 
-  auto & dropout_state = get_dropout_state(input.type(), dropout_p, train);
+  auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   auto cudnn_output = at::_cudnn_rnn(

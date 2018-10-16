@@ -391,15 +391,14 @@ public:
 
   Value* namedInput(Symbol name) const;
 
-  at::optional<IValue> get(Symbol name) const;
+  c10::optional<IValue> get(Symbol name) const;
 
-  template<typename T>
-  at::optional<T> get(Symbol name) const {
+  template <typename T>
+  c10::optional<T> get(Symbol name) const {
     if(auto v = get(name))
       return v->template to<T>();
-    return at::nullopt;
+    return c10::nullopt;
   }
-
 
   // Returns true if the value of input name is statically known
   bool is_constant(Symbol name) const {
@@ -1083,7 +1082,7 @@ public:
 
   Value* insertConstant(
       IValue val,
-      at::optional<SourceRange> loc = at::nullopt) {
+      c10::optional<SourceRange> loc = c10::nullopt) {
     return jit::insertConstant(*this, std::move(val), loc);
   }
 
@@ -1406,8 +1405,7 @@ struct PythonOp : public Node {
   // recover the autograd.Function instance, if this PythonOp's function
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
-  virtual at::optional<THPObjectPtr> autogradFunction() const = 0;
-
+  virtual c10::optional<THPObjectPtr> autogradFunction() const = 0;
 };
 // patched in when python bindings are loaded
 TORCH_API PythonOp* allocPythonOp(Graph* g);

@@ -15,22 +15,25 @@ docker_config_defaults: &docker_config_defaults
 merge_pull_request_onto_master: &merge_pull_request_onto_master
   name: Merge Onto Master
   command: |
-    set -e
+    set -ex
     if [[ "${CIRCLE_BRANCH}" != "master" ]]; then
       git config --global user.email "circleci.ossci@gmail.com"
       git config --global user.name "CircleCI"
 
       git config remote.origin.url https://github.com/pytorch/pytorch.git
       git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-      git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=50 --quiet
+      git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --quiet
+      if [[ "${CIRCLE_BRANCH}" == pull/* ]]; then  # if this is a forked PR
+        git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/${CIRCLE_BRANCH}/head:refs/remotes/origin/${CIRCLE_BRANCH}
+      else
+        git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/${CIRCLE_BRANCH}:refs/remotes/origin/${CIRCLE_BRANCH}
+      fi
 
       export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
       echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
       export GIT_COMMIT=${CIRCLE_SHA1}
       echo "GIT_COMMIT: " ${GIT_COMMIT}
 
-      git checkout -f ${GIT_COMMIT}
-      git reset --hard ${GIT_COMMIT}
       git merge --no-edit --no-ff ${GIT_MERGE_TARGET}
     fi
 

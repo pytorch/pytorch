@@ -135,7 +135,7 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
     if (it != output_size_hints.end()) {
       const auto& dims = it->second;
       auto* output_size_hint_arg = op.add_arg();
-      output_size_hint_arg->set_name(MakeString("output_size_hint_", i));
+      output_size_hint_arg->set_name(c10::str("output_size_hint_", i));
       for (const auto& d : dims) {
         output_size_hint_arg->add_ints(d);
       }
@@ -199,7 +199,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
       extra_weights.emplace_back(t.name());
       CAFFE_ENFORCE(
           input_mapping_.emplace(t.name(), t.name()).second,
-          MakeString("Tensor ", t.name(), " already exists in the workspace"));
+          c10::str("Tensor ", t.name(), " already exists in the workspace"));
     }
   }
 

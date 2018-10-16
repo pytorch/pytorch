@@ -32,7 +32,7 @@ void fc_op_cpu_impl(
                                 : W.size_from_dim(canonical_axis_w);
 
   auto dimErrorString = [&]() {
-    return caffe2::MakeString(
+    return c10::str(
         "Dimension mismatch: ",
         "X: ",
         X.dims(),

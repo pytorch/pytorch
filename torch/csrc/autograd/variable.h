@@ -188,7 +188,10 @@ struct TORCH_API Variable : public at::Tensor {
   void detach_();
 
   /// Computes the gradient of current tensor w.r.t. graph leaves.
-  void backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const;
+  void backward(
+      c10::optional<Tensor> gradient,
+      bool keep_graph,
+      bool create_graph) const;
 
   /// Sets the type of the Variable.
   void set_data(Tensor new_data) const;
@@ -333,7 +336,7 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
   void set_data(Tensor new_data);
 
   void backward(
-      at::optional<at::Tensor> gradient,
+      c10::optional<at::Tensor> gradient,
       bool keep_graph,
       bool create_graph);
 
@@ -504,7 +507,10 @@ inline void Variable::detach_() {
   get()->detach_();
 }
 
-inline void Variable::backward(at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+inline void Variable::backward(
+    c10::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) const {
   get()->backward(gradient, keep_graph, create_graph);
 }
 
