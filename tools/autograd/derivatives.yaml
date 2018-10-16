@@ -803,7 +803,7 @@
   self: not_implemented("sparse_mask")
   mask: not_implemented("sparse_mask")
 
-- name: sparse_coo_tensor_with_dims_and_tensors(Type sparse_dtype, int64_t sparse_dim, int64_t dense_dim, IntList size, Tensor indices, Tensor values)
+- name: _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntList size, Tensor indices, Tensor values, TensorOptions options)
   values: sparse_constructor_values_backward(grad, indices, values.sizes())
 
 - name: _standard_gamma(Tensor self, Generator generator)

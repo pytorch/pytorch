@@ -2019,22 +2019,20 @@
 # the default would never make sense.
 - func: sparse_coo_tensor(IntList size, *, TensorOptions options) -> Tensor
 
-- func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values, *, TensorOptions options={}) -> Tensor
 
-- func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size, *, TensorOptions options={}) -> Tensor
 
-- func: _sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
+- func: _sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size, *, TensorOptions options={}) -> Tensor
 
 
-- func: sparse_coo_tensor_with_dims(Type sparse_dtype, int64_t sparse_dim, int64_t dense_dim, IntList size) -> Tensor
-  variants: []
+- func: _sparse_coo_tensor_with_dims(int64_t sparse_dim, int64_t dense_dim, IntList size, *, TensorOptions options) -> Tensor
   dispatch:
     SparseCPU: new_with_dims_sparse
     SparseCUDA: new_with_dims_sparse
   requires_tensor: True
 
-- func: sparse_coo_tensor_with_dims_and_tensors(Type sparse_dtype, int64_t sparse_dim, int64_t dense_dim, IntList size, Tensor indices, Tensor values) -> Tensor
-  variants: []
+- func: _sparse_coo_tensor_with_dims_and_tensors(int64_t sparse_dim, int64_t dense_dim, IntList size, Tensor indices, Tensor values, *, TensorOptions options) -> Tensor
   dispatch:
     SparseCPU: new_with_dims_and_tensor_sparse
     SparseCUDA: new_with_dims_and_tensor_sparse
