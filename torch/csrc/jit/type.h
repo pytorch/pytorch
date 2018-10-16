@@ -45,14 +45,14 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
 private:
   TypeKind kind_;
   template<typename T>
-    static std::shared_ptr<T> sliceType(std::shared_ptr<const T> ptr) {
-      auto result = std::make_shared<typename std::remove_const<T>::type>(*ptr);
-      // XXX: the line above will correctly slice the struct, and make its runtype
-      // type exactly equal to T. However, kind_ is a field of Type, so it will simply
-      // be copied, and we need to fix it in here to match the dynamic type.
-      result->kind_ = T::Kind;
-      return result;
-    }
+  static std::shared_ptr<T> sliceType(std::shared_ptr<const T> ptr) {
+    auto result = std::make_shared<typename std::remove_const<T>::type>(*ptr);
+    // XXX: the line above will correctly slice the struct, and make its runtype
+    // type exactly equal to T. However, kind_ is a field of Type, so it will simply
+    // be copied, and we need to fix it in here to match the dynamic type.
+    result->kind_ = T::Kind;
+    return result;
+  }
 
 protected:
   Type(TypeKind kind)
@@ -130,12 +130,10 @@ inline bool operator!=(const Type & lhs, const Type & rhs) {
 
 struct OptionalType;
 using OptionalTypePtr = std::shared_ptr<OptionalType>;
-
+// This type represents an optional type, for each element type.
 struct OptionalType: public Type {
-  friend struct Type;
-  template<typename ... T>
-  static OptionalTypePtr create( T&& ... all ) {
-    return OptionalTypePtr(new OptionalType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static OptionalTypePtr create(TypePtr element) {
+    return OptionalTypePtr(new OptionalType(std::move(element))); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     if(auto rhs_ = rhs.cast<OptionalType>()) {
@@ -184,11 +182,10 @@ private:
 
 struct DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
-// This node represents a single Tensor value, with an unknown shape.
+// This type represents a single Tensor, with an unknown shape.
 struct TORCH_API DynamicType : public Type {
-  template<typename ... T>
-  static DynamicTypePtr create( T&& ... all ) {
-    return DynamicTypePtr(new DynamicType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static DynamicTypePtr create() {
+    return DynamicTypePtr(new DynamicType()); // NOLINT(modernize-make-shared)
   }
 
   bool requires_grad() const override { return true; }
@@ -209,13 +206,11 @@ private:
 
 struct UndefinedTensorType;
 using UndefinedTensorTypePtr = std::shared_ptr<UndefinedTensorType>;
+// This type represents an undefined tensor.
 struct TORCH_API UndefinedTensorType : public Type {
-  friend struct Type;
   static const TypeKind Kind = TypeKind::UndefinedTensorType;
-
-  template<typename ... T>
-  static UndefinedTensorTypePtr create( T&& ... all ) {
-    return UndefinedTensorTypePtr(new UndefinedTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static UndefinedTensorTypePtr create() {
+    return UndefinedTensorTypePtr(new UndefinedTensorType()); // NOLINT(modernize-make-shared)
   }
 
   bool operator==(const Type& rhs) const override {
@@ -235,11 +230,9 @@ protected:
 
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
-// This node represents a single Tensor value with a specific size
+// This type represents a single Tensor with a specific size
 struct TORCH_API TensorType : public Type {
-  friend struct Type;
   static const TypeKind Kind = TypeKind::TensorType;
-
   template<typename ... T>
   static TensorTypePtr create( T&& ... all ) {
     return TensorTypePtr(new TensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -307,9 +300,8 @@ protected:
 
 struct CompleteTensorType;
 using CompleteTensorTypePtr = std::shared_ptr<CompleteTensorType>;
-// This node represents a single Tensor value with a specific size
+// This type represents a single Tensor with a specific size
 struct TORCH_API CompleteTensorType : public TensorType {
-  friend struct Type;
   template<typename ... T>
   static CompleteTensorTypePtr create( T&& ... all ) {
     return CompleteTensorTypePtr(new CompleteTensorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
@@ -411,9 +403,8 @@ private:
 struct WorldType;
 using WorldTypePtr = std::shared_ptr<WorldType>;
 struct TORCH_API WorldType : public Type {
-  template <typename... T>
-  static WorldTypePtr create(T&&... all) {
-    return WorldTypePtr(new WorldType(std::forward<T>(all)...));
+  static WorldTypePtr create() {
+    return WorldTypePtr(new WorldType());
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -436,10 +427,8 @@ struct ListType;
 using ListTypePtr = std::shared_ptr<ListType>;
 
 struct TORCH_API ListType : public Type {
-  friend struct Type;
-  template<typename ... T>
-  static ListTypePtr create( T&& ... all ) {
-    return ListTypePtr(new ListType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static ListTypePtr create(TypePtr element) {
+    return ListTypePtr(new ListType(std::move(element))); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     if(auto rhs_ = rhs.cast<ListType>()) {
@@ -484,9 +473,8 @@ private:
 
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
-
+// This type represents a Tuple
 struct TORCH_API TupleType : public Type {
-  friend struct Type;
   static TupleTypePtr create(std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType( std::move(types) )); // NOLINT(modernize-make-shared)
   }
@@ -564,11 +552,10 @@ private:
 
 struct NumberType;
 using NumberTypePtr = std::shared_ptr<NumberType>;
-// This node represents a Python number value
+// This type represents a Python number
 struct TORCH_API NumberType : public Type {
-  template<typename ... T>
-  static NumberTypePtr create( T&& ... all ) {
-    return NumberTypePtr(new NumberType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static NumberTypePtr create() {
+    return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -586,11 +573,10 @@ private:
 
 struct FloatType;
 using FloatTypePtr = std::shared_ptr<FloatType>;
-// This node represents a Python float number value
+// This type represents a Python float number
 struct TORCH_API FloatType : public Type {
-  template<typename ... T>
-  static FloatTypePtr create( T&& ... all ) {
-    return FloatTypePtr(new FloatType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static FloatTypePtr create() {
+    return FloatTypePtr(new FloatType()); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -614,11 +600,10 @@ private:
 
 struct IntType;
 using IntTypePtr = std::shared_ptr<IntType>;
-// This node represents a Python int number value
+// This type represents a Python int number
 struct TORCH_API IntType : public Type {
-  template<typename ... T>
-  static IntTypePtr create( T&& ... all ) {
-    return IntTypePtr(new IntType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static IntTypePtr create() {
+    return IntTypePtr(new IntType()); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -644,9 +629,8 @@ struct BoolType;
 using BoolTypePtr = std::shared_ptr<BoolType>;
 // This node represents a Python bool value
 struct TORCH_API BoolType : public Type {
-  template<typename ... T>
-  static BoolTypePtr create( T&& ... all ) {
-    return BoolTypePtr(new BoolType(std::forward<T>(all)... ));
+  static BoolTypePtr create( ) {
+    return BoolTypePtr(new BoolType());
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -667,11 +651,10 @@ private:
 
 struct StringType;
 using StringTypePtr = std::shared_ptr<StringType>;
-// This node represents a Python string value
+// This type represents a Python string
 struct TORCH_API StringType : public Type {
-  template<typename ... T>
-  static StringTypePtr create( T&& ... all ) {
-    return StringTypePtr(new StringType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static StringTypePtr create() {
+    return StringTypePtr(new StringType()); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -695,11 +678,10 @@ private:
 
 struct NoneType;
 using NoneTypePtr = std::shared_ptr<NoneType>;
-// This node represents a Python None value
+// This type represents a Python None
 struct NoneType : public Type {
-  template<typename ... T>
-  static NoneTypePtr create( T&& ... all ) {
-    return NoneTypePtr(new NoneType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static NoneTypePtr create() {
+    return NoneTypePtr(new NoneType()); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -723,10 +705,10 @@ private:
 
 struct GeneratorType;
 using GeneratorTypePtr = std::shared_ptr<GeneratorType>;
+// This type represents a Generator
 struct GeneratorType : public Type {
-  template<typename ... T>
-  static GeneratorTypePtr create( T&& ... all) {
-    return GeneratorTypePtr(new GeneratorType( std::forward<T>(all)... )); // NOLINT(modernize-make-shared)
+  static GeneratorTypePtr create() {
+    return GeneratorTypePtr(new GeneratorType()); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
@@ -743,11 +725,10 @@ private:
 };
 
 
-// a type variable, used in FunctionSchema
 struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
+// This type represents a type variable, used in FunctionSchema
 struct VarType : public Type {
-  template<typename ... T>
   static VarTypePtr create(std::string name_) {
     return VarTypePtr(new VarType(std::move(name_)));
   }
