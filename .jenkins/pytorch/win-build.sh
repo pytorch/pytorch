@@ -1,8 +1,9 @@
 #!/bin/bash
 
 # If you want to rebuild, run this with REBUILD=1
-# If you want to build with CUDA, run this with USE_CUDA=1
-# If you want to build without CUDA, run this with USE_CUDA=0
+#
+# WARNING: the default behavior is to build twice, with and without
+# cuda. To build only one variant, set USE_CUDA={0,1}
 
 if [ ! -f setup.py ]; then
   echo "ERROR: Please run this build script from PyTorch root directory."
@@ -123,10 +124,8 @@ set DISTUTILS_USE_SDK=1
 set CMAKE_GENERATOR=Ninja
 
 if not "%USE_CUDA%"=="1" (
-  if "%REBUILD%"=="" (
-    set NO_CUDA=1
-    python setup.py install
-  )
+  if "%REBUILD%"=="" set NO_CUDA=1
+  python setup.py install
   if errorlevel 1 exit /b 1
   if not errorlevel 0 exit /b 1
 )
