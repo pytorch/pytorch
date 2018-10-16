@@ -25,7 +25,8 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
   const auto & layout_opt = options.layout_opt();
   AT_CHECK(!layout_opt || self.layout() == layout_opt.value(),
            "to(options) doesn't support converting to a different layout, but "
-           "got options.layout set as ", options.layout());
+           "got self.layout being ", self.layout(),
+           " and options.layout set as ", options.layout());
 
   const auto & device_opt = options.device_opt();
   const auto & dtype_opt = options.dtype_opt();
