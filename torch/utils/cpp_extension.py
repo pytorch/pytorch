@@ -112,7 +112,7 @@ def check_compiler_abi_compatibility(compiler):
         False if the compiler is (likely) ABI-incompatible with PyTorch,
         else True.
     '''
-    if not _is_binary_build():
+    if not _is_binary_build() or os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI'):
         return True
     try:
         check_cmd = '{}' if IS_WINDOWS else '{} --version'
