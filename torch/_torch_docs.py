@@ -4211,36 +4211,48 @@ Args:
 
 Example::
 
-    >>> i = torch.LongTensor([[0, 1, 1],
-                              [2, 0, 2]])
-    >>> v = torch.FloatTensor([3, 4, 5])
-    >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]))
-    torch.sparse.FloatTensor of size (2,4) with indices:
-    tensor([[ 0,  1,  1],
-            [ 2,  0,  2]])
-    and values:
-    tensor([ 3.,  4.,  5.])
+    >>> i = torch.tensor([[0, 1, 1],
+                          [2, 0, 2]])
+    >>> v = torch.tensor([3, 4, 5], dtype=torch.float32)
+    >>> torch.sparse_coo_tensor(i, v, [2, 4])
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([3., 4., 5.]),
+           size=(2, 4), nnz=3, layout=torch.sparse_coo)
 
     >>> torch.sparse_coo_tensor(i, v)  # Shape inference
-    torch.sparse.FloatTensor of size (2,3) with indices:
-    tensor([[ 0,  1,  1],
-            [ 2,  0,  2]])
-    and values:
-    tensor([ 3.,  4.,  5.])
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([3., 4., 5.]),
+           size=(2, 3), nnz=3, layout=torch.sparse_coo)
 
-    >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]), dtype=torch.float64,
+    >>> torch.sparse_coo_tensor(i, v, [2, 4],
+                                dtype=torch.float64,
                                 device=torch.device('cuda:0'))
-    torch.cuda.sparse.DoubleTensor of size (2,4) with indices:
-    tensor([[ 0,  1,  1],
-            [ 2,  0,  2]], device='cuda:0')
-    and values:
-    tensor([ 3.,  4.,  5.], dtype=torch.float64, device='cuda:0')
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([3., 4., 5.]),
+           device='cuda:0', size=(2, 4), nnz=3, dtype=torch.float64,
+           layout=torch.sparse_coo)
 
-    >>> torch.sparse_coo_tensor([], [], torch.Size([])) # Create an empty tensor (of size (0,))
-    torch.sparse.FloatTensor of size () with indices:
-    tensor([], dtype=torch.int64)
-    and values:
-    tensor([])
+    # Create an empty sparse tensor with the following invariants:
+    #   1. sparse_dim + dense_dim = len(SparseTensor.shape)
+    #   2. SparseTensor._indices().shape = (sparse_dim, nnz)
+    #   3. SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
+    #
+    # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
+    # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1‚ 0))
+    >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
+    tensor(indices=tensor([], size=(1, 0)),
+           values=tensor([], size=(0,)),
+           size=(1,), nnz=0, layout=torch.sparse_coo)
+
+    # and to create an empty sparse tensor with nnz = 0, dense_dim = 1 and
+    # sparse_dim = 1
+    >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), torch.empty([0, 2]), [1, 2])
+    tensor(indices=tensor([], size=(1, 0)),
+           values=tensor([], size=(0, 2)),
+           size=(1, 2), nnz=0, layout=torch.sparse_coo)
 
 .. _torch.sparse: https://pytorch.org/docs/stable/sparse.html
 """)
