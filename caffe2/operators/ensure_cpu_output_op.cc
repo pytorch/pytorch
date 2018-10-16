@@ -25,7 +25,8 @@ Under CPU Context, this Op takes TensorCPU as input. Under the CUDA Context,
 this Op accepts either CUDA or CPU Tensor input.
 )DOC")
     .Input(0, "input", "The input CUDA or CPU tensor.")
-    .Output(0, "output", "TensorCPU that is a copy of the input.");
+    .Output(0, "output", "TensorCPU that is a copy of the input.")
+    .InheritOnnxSchema();
 
 NO_GRADIENT(EnsureCPUOutput);
 } // namespace caffe2
