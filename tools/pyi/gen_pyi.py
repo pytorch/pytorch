@@ -318,8 +318,15 @@ float : dtype = ...
 double : dtype = ...
 """
 
-    footer = """
-"""
+    footer_classes = []
+    for c in ('DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
+              'ShortStorage', 'CharStorage', 'ByteStorage'):
+        footer_classes.append('class {}(Storage): ...'.format(c))
+    for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
+              'ShortTensor', 'CharTensor', 'ByteTensor'):
+        footer_classes.append('class {}(Tensor): ...'.format(c))
+
+    footer = '\n\n'+'\n\n'.join(footer_classes)
 
     with open(os.path.join(build_lib_path, 'torch', '__init__.pyi'), 'w') as f:
         print(header, file=f)
