@@ -325,7 +325,7 @@ Here are a few well known pitfalls and workarounds:
   catch all of these problems: stay vigilant to the possibility that
   your crash is due to a real memory problem.
 
-* (NVCC) `at::optional` does not work when used from device code.  Don't use
+* (NVCC) `c10::optional` does not work when used from device code.  Don't use
   it from kernels.  Upstream issue: https://github.com/akrzemi1/Optional/issues/58
   and our local issue #10329.
 

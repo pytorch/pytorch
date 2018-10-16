@@ -5,7 +5,7 @@
 #include <torch/utils.h>
 
 #include <ATen/core/Error.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <array>
 #include <cmath>
@@ -31,7 +31,7 @@ RNNOptionsBase::RNNOptionsBase(int64_t input_size, int64_t hidden_size)
 template <typename Derived>
 RNNImplBase<Derived>::RNNImplBase(
     RNNOptionsBase options_,
-    at::optional<CuDNNMode> cudnn_mode,
+    c10::optional<CuDNNMode> cudnn_mode,
     int64_t number_of_gates)
     : options(options_),
       number_of_gates_(number_of_gates),
@@ -103,14 +103,14 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // Cache the flattened weight and bias vector.
   flat_weights_ = flat_weights();
 
-  if (!cudnn_mode_ || !torch::cudnn_is_acceptable(/*sample=*/w_ih.at(0))) {
+  if (!cudnn_mode_ || !torch::cudnn_is_acceptable(w_ih.at(0))) {
     return;
   }
 
   NoGradGuard no_grad;
   torch::_cudnn_rnn_flatten_weight(
       flat_weights_,
-      /*weight_stride=*/options.with_bias_ ? 4 : 2,
+      /*weight_stride0=*/options.with_bias_ ? 4 : 2,
       options.input_size_,
       static_cast<int64_t>(*cudnn_mode_),
       options.hidden_size_,

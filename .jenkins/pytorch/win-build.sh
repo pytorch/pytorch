@@ -80,12 +80,17 @@ if "%REBUILD%"=="" (
 )
 
 :: Install Miniconda3
-if "%REBUILD%"=="" (
-  IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
-  curl -k https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
-  .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
+if "%BUILD_ENVIRONMENT%"=="" (
+  set CONDA_PARENT_DIR=%CD%
+) else (
+  set CONDA_PARENT_DIR=C:\\Jenkins
 )
-call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
+if "%REBUILD%"=="" (
+  IF EXIST %CONDA_PARENT_DIR%\\Miniconda3 ( rd /s /q %CONDA_PARENT_DIR%\\Miniconda3 )
+  curl -k https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
+  .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%CONDA_PARENT_DIR%\\Miniconda3
+)
+call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3
 if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
 
 :: Install ninja
@@ -130,7 +135,7 @@ if not "%USE_CUDA%"=="0" (
   if "%REBUILD%"=="" (
     sccache --show-stats
     sccache --zero-stats
-    rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
+    rd /s /q %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch
     copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
   )
 
@@ -140,9 +145,9 @@ if not "%USE_CUDA%"=="0" (
 
   python setup.py install && sccache --show-stats && (
     if "%BUILD_ENVIRONMENT%"=="" (
-      echo "NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3\` in Command Prompt before running Git Bash."
+      echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3\` in Command Prompt before running Git Bash.
     ) else (
-      7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+      7z a %IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
     )
   )
 )

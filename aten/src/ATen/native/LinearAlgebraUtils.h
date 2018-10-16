@@ -52,4 +52,11 @@ static inline double _get_epsilon(const ScalarType& sc_type) {
   }
 }
 
+// Checks if all the Tensors in a TensorList are of the same dimensions
+static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
+  for (auto &t : tensors) {
+    AT_CHECK(t.dim() == dim, "Tensor dimension is ", t.dim(), ", expected ", dim, " instead.");
+  }
+}
+
 }}  // namespace at::native

@@ -2,10 +2,6 @@
 #include "caffe2/utils/eigen_utils.h"
 #include "generate_proposals_op_util_nms.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 
 template <>
@@ -246,12 +242,6 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
 namespace {
 
 REGISTER_CPU_OPERATOR(BoxWithNMSLimit, BoxWithNMSLimitOp<CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-REGISTER_MKL_OPERATOR(
-    BoxWithNMSLimit,
-    mkl::MKLFallbackOp<BoxWithNMSLimitOp<CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 OPERATOR_SCHEMA(BoxWithNMSLimit)
     .NumInputs(2, 3)

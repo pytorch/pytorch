@@ -19,24 +19,24 @@
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/core/Error.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <stdexcept>
 #include <vector>
 
+using at::Backend;
 using at::Device;
 using at::IntList;
 using at::kCPU;
 using at::kCUDA;
 using at::kLong;
-using at::optional;
 using at::Scalar;
 using at::ScalarType;
 using at::Storage;
 using at::Tensor;
 using at::TensorOptions;
 using at::Type;
-using at::Backend;
+using c10::optional;
 
 namespace torch { namespace utils {
 namespace {
@@ -149,7 +149,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(obj)->tp_name);
   }
   if (PySequence_Check(obj)) {
-    at::optional<ScalarType> scalarType;
+    c10::optional<ScalarType> scalarType;
     auto length = PySequence_Length(obj);
     if (length < 0) throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
@@ -196,9 +196,13 @@ void recursive_store(char* data, IntList sizes, IntList strides, int64_t dim,
   }
 }
 
-Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt, PyObject* data,
-                                     bool copy_variables, bool copy_numpy,
-                                     bool type_inference) {
+Tensor internal_new_from_data(
+    const Type& type,
+    c10::optional<Device> device_opt,
+    PyObject* data,
+    bool copy_variables,
+    bool copy_numpy,
+    bool type_inference) {
   int32_t device_index = -1;
   if (device_opt.has_value()) {
     device_index = device_opt->index();
@@ -240,18 +244,24 @@ Tensor internal_new_from_data(const Type & type, at::optional<Device> device_opt
   return new_with_type_conversion(type_to_use, tensor, device_index);
 }
 
-Tensor new_from_data_copy(const Type & type, at::optional<Device> device, PyObject *data) {
+Tensor new_from_data_copy(
+    const Type& type,
+    c10::optional<Device> device,
+    PyObject* data) {
   return internal_new_from_data(type, device, data, true, true, false);
 }
 
-Tensor legacy_new_from_sequence(const Type & type, at::optional<Device> device, PyObject* data) {
+Tensor legacy_new_from_sequence(
+    const Type& type,
+    c10::optional<Device> device,
+    PyObject* data) {
   if (!PySequence_Check(data)) {
     throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
   return legacy_new_from_data(type, device, data);
 }
 
-void check_legacy_ctor_device(const Type& type, at::optional<Device> device) {
+void check_legacy_ctor_device(const Type& type, c10::optional<Device> device) {
   if (device.has_value()) {
     AT_CHECK(type.device_type() == device.value().type(),
              "legacy constructor for device type: ", type.device_type(),
@@ -447,7 +457,10 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   throw std::runtime_error("new(): invalid arguments");
 }
 
-Tensor legacy_new_from_data(const Type & type, at::optional<Device> device, PyObject *data) {
+Tensor legacy_new_from_data(
+    const Type& type,
+    c10::optional<Device> device,
+    PyObject* data) {
   return internal_new_from_data(type, device, data, false, false, false);
 }
 

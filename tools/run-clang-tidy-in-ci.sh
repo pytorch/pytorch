@@ -28,4 +28,14 @@ if [[ ! -d build ]]; then
 fi
 
 # Run Clang-Tidy
-time python tools/clang_tidy.py -vp torch/csrc -d HEAD~1 "$@"
+# The negative filters below are to exclude files that include onnx_pb.h,
+# otherwise we'd have to build ONNX protos as part of this CI job.
+time python tools/clang_tidy.py    \
+  --verbose                        \
+  --paths torch/csrc               \
+  --diff master                    \
+  -g"-torch/csrc/jit/init.cpp"     \
+  -g"-torch/csrc/jit/export.cpp"   \
+  -g"-torch/csrc/jit/import.cpp"   \
+  -g"-torch/csrc/jit/test_jit.cpp" \
+  "$@"
