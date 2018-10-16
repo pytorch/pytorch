@@ -391,8 +391,6 @@ class DistributedDataParallel(Module):
                     self.bucket_events[bucket_idx][device_idx] = event
                     self._queue_reduction(bucket_idx)
 
-        distributed_data_parallel_hook._torch_unserializable = True
-
         return distributed_data_parallel_hook
 
     def _queue_reduction(self, bucket_idx):

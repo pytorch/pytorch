@@ -1180,10 +1180,10 @@ class _DistTestBase(object):
         # TODO: It should be possible to save the entire model,
         # but this doesn't work at the moment.  Update this test
         # when it does work.
-        tmp_file = tempfile.TemporaryFile()
-        torch.save(model_DDP.state_dict(), tmp_file)
-        tmp_file.seek(0)
-        saved_state_dict = torch.load(tmp_file)
+        with tempfile.TemporaryFile() as tmp_file:
+            torch.save(model_DDP.state_dict(), tmp_file)
+            tmp_file.seek(0)
+            saved_state_dict = torch.load(tmp_file)
         for k in model_DDP.state_dict():
             self.assertEqual(model_DDP.state_dict()[k],
                              saved_state_dict[k])
