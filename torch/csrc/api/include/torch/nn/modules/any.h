@@ -10,7 +10,7 @@
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/Device.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <memory>
 #include <type_traits>
@@ -135,7 +135,7 @@ class AnyModule {
 
   /// Creates a deep copy of an `AnyModule` if it contains a module, else an
   /// empty `AnyModule` if it is empty.
-  AnyModule clone(at::optional<Device> device = at::nullopt) const;
+  AnyModule clone(c10::optional<Device> device = c10::nullopt) const;
 
   /// Assigns a module to the `AnyModule` (to circumvent the explicit
   /// constructor).
@@ -263,9 +263,9 @@ class AnyModule::Value {
     }
     AT_ERROR(
         "Attempted to cast Value to ",
-        at::demangle(typeid(T).name()),
+        c10::demangle(typeid(T).name()),
         ", but its actual type is ",
-        at::demangle(type_info().name()));
+        c10::demangle(type_info().name()));
   }
 
   /// Returns the `type_info` object of the contained value.
@@ -334,7 +334,7 @@ struct AnyModule::Placeholder : public AnyModule::Value::Placeholder {
 
   /// Returns a `Placeholder` with a deep copy of this `AnyModule`.
   virtual std::unique_ptr<Placeholder> clone(
-      at::optional<Device> device) const = 0;
+      c10::optional<Device> device) const = 0;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule::Holder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -354,9 +354,9 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
           "Expected argument #",
           index,
           " to be of type ",
-          at::demangle(typeid(T).name()),
+          c10::demangle(typeid(T).name()),
           ", but received value of type ",
-          at::demangle(value.type_info().name()));
+          c10::demangle(value.type_info().name()));
     }
     std::vector<Value>& arguments_;
   };
@@ -379,7 +379,7 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
   Value forward(std::vector<Value>&& arguments) override {
     AT_CHECK(
         arguments.size() == sizeof...(ArgumentTypes),
-        at::demangle(type_info.name()),
+        c10::demangle(type_info.name()),
         "'s forward() method expects ",
         sizeof...(ArgumentTypes),
         " arguments, but received ",
@@ -399,7 +399,7 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
   }
 
   std::unique_ptr<Placeholder> clone(
-      at::optional<Device> device) const override {
+      c10::optional<Device> device) const override {
     return torch::make_unique<Holder>(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
@@ -435,7 +435,7 @@ inline AnyModule& AnyModule::operator=(const AnyModule& other) {
   return *this;
 }
 
-inline AnyModule AnyModule::clone(at::optional<Device> device) const {
+inline AnyModule AnyModule::clone(c10::optional<Device> device) const {
   AnyModule clone;
   clone.content_ = content_ ? content_->clone(device) : nullptr;
   return clone;
@@ -531,9 +531,9 @@ T& AnyModule::get_() const {
   }
   AT_ERROR(
       "Attempted to cast module of type ",
-      at::demangle(type_info().name()),
+      c10::demangle(type_info().name()),
       " to type ",
-      at::demangle(typeid(T).name()));
+      c10::demangle(typeid(T).name()));
 }
 
 } // namespace nn

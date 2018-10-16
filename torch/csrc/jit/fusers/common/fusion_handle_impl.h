@@ -46,8 +46,10 @@ private:
 
   void runFallback(Stack& stack);
   void expandArgs(std::vector<at::Tensor>& args, std::vector<int64_t>& map_size);
-  at::optional<std::vector<int64_t>> canRunKernel(at::TensorList args);
-  at::optional<std::vector<int64_t>> getMapSize(at::TensorList args, at::IntList arg_subset);
+  c10::optional<std::vector<int64_t>> canRunKernel(at::TensorList args);
+  c10::optional<std::vector<int64_t>> getMapSize(
+      at::TensorList args,
+      at::IntList arg_subset);
   std::vector<std::vector<int64_t>> getInputBroadcastGroups();
   std::vector<PartitionInfo> getInputChunkDescriptors();
   std::unique_ptr<FusedKernel> compileSpec(

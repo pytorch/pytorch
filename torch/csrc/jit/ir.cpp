@@ -525,7 +525,7 @@ size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
 }
 
-at::optional<IValue> Node::get(Symbol name) const {
+c10::optional<IValue> Node::get(Symbol name) const {
   return toIValue(namedInput(name));
 }
 

@@ -5,7 +5,7 @@
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <ATen/core/Error.h>
-#include <ATen/core/optional.h>
+#include "c10/util/Optional.h"
 
 #include <algorithm>
 #include <map>
@@ -30,12 +30,12 @@ const std::string& Module::name() const noexcept {
   // to by this typeid represents the class that is being constructed or
   // destroyed even if it is not the most-derived class.
   if (!name_.has_value()) {
-    name_ = at::demangle(typeid(*this).name());
+    name_ = c10::demangle(typeid(*this).name());
   }
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone(at::optional<Device> device) const {
+std::shared_ptr<Module> Module::clone(c10::optional<Device> device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
@@ -164,6 +164,6 @@ Tensor& Module::register_buffer(std::string name, Tensor tensor) {
   return buffers_.insert(std::move(name), std::move(tensor));
 }
 
-void Module::clone_(Module& other, at::optional<Device> device) {}
+void Module::clone_(Module& other, c10::optional<Device> device) {}
 } // namespace nn
 } // namespace torch

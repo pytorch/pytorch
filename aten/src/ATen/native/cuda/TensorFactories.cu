@@ -2,6 +2,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/InitialTensorOptions.h"
 #include "ATen/core/Error.h"
+#include "ATen/cuda/CUDAContext.h"
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
@@ -36,6 +37,17 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
   Tensor diag = result.as_strided({sz}, {stride});
   diag.fill_(1);
   return result;
+}
+
+Tensor empty_cuda(IntList size, const TensorOptions& options) {
+  AT_ASSERT(options.backend() == at::Backend::CUDA);
+  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
+  auto storage_impl = c10::make_intrusive<at::StorageImpl>(
+    scalarTypeToTypeMeta(options.dtype()), 0, cuda::getCUDADeviceAllocator(), true);
+
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, CUDATensorId(), false);
+  tensor.resize_(size);
+  return tensor;
 }
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {

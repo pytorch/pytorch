@@ -10,7 +10,6 @@ else()
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
 
-option(BUILD_TEST "Build torch test binaries" ON)
 option(TORCH_STATIC "Build libtorch.a rather than libtorch.so" OFF)
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -71,7 +70,11 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/nn/THNN.cpp"
   "${TORCH_SRC_DIR}/csrc/nn/THCUNN.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
-  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
@@ -84,7 +87,9 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
   ${PYCMD} tools/setup_helpers/generate_code.py
@@ -132,16 +137,23 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/grad_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
   ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_0.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_1.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops_2.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
@@ -236,9 +248,9 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/serialize.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/input-archive.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/serialize/output-archive.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/serialize/tensor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/utils.cpp
   )
 endif()

@@ -147,7 +147,7 @@ void checkChainingAndRun(
   ws.CreateBlob("in");
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
   {
     net_def.set_num_workers(4);
     auto old = c10::FLAGS_caffe2_disable_chaining;
@@ -168,7 +168,7 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
   net_def.set_num_workers(4);
 
   // Create all external inputs
@@ -568,7 +568,7 @@ TEST(NetTest, DISABLED_FailingOperator) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     net_def.set_num_workers(4);
@@ -627,7 +627,7 @@ TEST(NetTest, OperatorWithExecutorHelper) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   net_def.set_num_workers(kTestPoolSize);
@@ -656,7 +656,7 @@ TEST(NetTest, DISABLED_OperatorWithDisabledEvent) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -680,7 +680,7 @@ TEST(NetTest, ExecutorOverride) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     Workspace ws;
@@ -704,7 +704,7 @@ TEST(NetTest, AsyncEmptyNet) {
   Workspace ws;
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -738,7 +738,7 @@ TEST(NetTest, DISABLED_RunAsyncFailure) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -761,7 +761,7 @@ TEST(NetTest, NoTypeNet) {
   Workspace ws;
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
@@ -806,7 +806,7 @@ TEST(NetTest, PendingOpsAndNetFailure) {
 
   NetDef net_def;
   CAFFE_ENFORCE(
-      ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
+      TextFormat::ParseFromString(spec, &net_def));
 
   Workspace ws;
   std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));

@@ -85,7 +85,7 @@ namespace script {
   _(TK_SLICE_EXPR, "slice expr", "")             \
   _(TK_TYPE_COMMENT, "type comment", "# type:")
 
-static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?";
+static const char* valid_single_char_tokens = "+-*/%@()[]:,={}><.?!";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -140,8 +140,8 @@ struct SharedParserData {
     }
 
 #define ADD_CASE(tok, _, tokstring) \
-  if (*tokstring != '\0') {         \
-    head->insert(tokstring, tok);   \
+  if (*(tokstring) != '\0') {         \
+    head->insert((tokstring), (tok));   \
   }
     TC_FORALL_TOKEN_KINDS(ADD_CASE)
 #undef ADD_CASE
