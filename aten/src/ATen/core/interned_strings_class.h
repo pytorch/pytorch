@@ -7,11 +7,9 @@
 #include <vector>
 #include "ATen/core/Error.h"
 #include "ATen/core/interned_strings.h"
-#include "ATen/core/optional.h"
 #include <cstring>
 
-namespace torch {
-namespace jit {
+namespace c10 {
 
 struct CAFFE2_API InternedStrings {
   InternedStrings();
@@ -35,5 +33,4 @@ struct CAFFE2_API InternedStrings {
   std::mutex mutex_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace c10

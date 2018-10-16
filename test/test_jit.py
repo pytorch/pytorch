@@ -192,20 +192,6 @@ def _trace(*args, **kwargs):
     return wrapper
 
 
-# Python equivalents for the empty list construction builtins. We need
-# these otherwise the tests won't execute in regular Python mode.
-def _construct_empty_int_list():
-    return []
-
-
-def _construct_empty_float_list():
-    return []
-
-
-def _construct_empty_tensor_list():
-    return []
-
-
 def enable_cpu_fuser(fn):
     def wrapper(*args, **kwargs):
         torch._C._jit_override_can_fuse_on_cpu(True)
@@ -1982,6 +1968,70 @@ class TestJit(JitTestCase):
         self.assertExpected(loop_use_test.graph.pretty_print(), "loop_use_test")
         self.assertExpected(python_op_name_test.graph.pretty_print(), "python_op_name_test")
 
+    def test_function_default_values(self):
+        outer_var = torch.tensor(20)
+        outer_var2 = torch.tensor(30)
+        a = torch.tensor(0.5)
+        b = torch.tensor(10)
+
+        @torch.jit.script
+        def simple_fn(x, a=a, b=b, c=outer_var + outer_var2):
+            return x + a + b + c
+
+        self.assertExpectedGraph(simple_fn.graph, "simple")
+        self.assertEqual(
+            simple_fn(torch.ones(1)),
+            torch.ones(1) + 0.5 + 10 + (20 + 30))
+        self.assertEqual(
+            simple_fn(torch.ones(1), torch.tensor(1), torch.tensor(3), torch.tensor(4)),
+            torch.ones(1) + 1 + 3 + 4)
+
+        outer_c = torch.tensor(9)
+        outer_flag = torch.tensor(False)
+
+        @torch.jit.script
+        def bool_fn(x, a=outer_c, flag=outer_flag):
+            if bool(flag):
+                result = x
+            else:
+                result = x + a
+            return result
+
+        self.assertExpectedGraph(bool_fn.graph, "bool")
+        self.assertEqual(bool_fn(torch.ones(1)), torch.ones(1) + 9)
+        self.assertEqual(
+            bool_fn(torch.ones(1), torch.tensor(1), torch.tensor(True)),
+            torch.ones(1))
+
+        @torch.jit.script
+        def hints(x, a=0.5, b=10):  # noqa: E999
+            # type: (Tensor, float, int) -> Tensor
+            return x + a + b
+
+        self.assertExpectedGraph(hints.graph, "type_hints")
+        self.assertEqual(hints(torch.ones(1)), torch.ones(1) + 0.5 + 10)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
+
+            @torch.jit.script
+            def hints_bad_types(x, a=10, b=0.5):
+                # type: (Tensor, float, int) -> Tensor
+                return x + a + b
+
+    def test_module_default_values(self):
+        four = torch.tensor(4)
+
+        class Test(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Test, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, input, other=four):
+                return input + other
+
+        t = Test()
+        self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
+
 
 class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
@@ -2660,6 +2710,54 @@ class TestScript(JitTestCase):
             return [[4]] + [[4, 5]]
         self.checkScript(foo, ())
 
+    def test_tensor_shape(self):
+        x = torch.empty(34, 56, 78)
+
+        def f(x):
+            return x.shape
+
+        self.checkScript(f, (x,))
+
+    def test_tensor_dtype(self):
+        x_byte = torch.empty(34, 56, 78, dtype=torch.uint8)
+        x_long = torch.empty(34, 56, 78, dtype=torch.long)
+        x_float32 = torch.empty(34, 56, 78, dtype=torch.float32)
+
+        @torch.jit.script
+        def byte(x):
+            return x.dtype == torch.uint8
+
+        @torch.jit.script
+        def long(x):
+            return x.dtype == torch.long
+
+        @torch.jit.script
+        def float32(x):
+            return x.dtype == torch.float32
+
+        self.assertTrue(byte(x_byte))
+        self.assertFalse(byte(x_long))
+        self.assertFalse(byte(x_float32))
+        self.assertFalse(long(x_byte))
+        self.assertTrue(long(x_long))
+        self.assertFalse(long(x_float32))
+        self.assertFalse(float32(x_byte))
+        self.assertFalse(float32(x_long))
+        self.assertTrue(float32(x_float32))
+
+    @unittest.skipIf(not RUN_CUDA, "device tests require CUDA")
+    def test_tensor_device(self):
+        cpu = torch.empty(34, 56, 78, device='cpu')
+        gpu = torch.empty(34, 56, 78, device='cuda')
+
+        @torch.jit.script
+        def same_device(x, y):
+            return x.device == y.device
+
+        self.assertTrue(same_device(cpu, cpu))
+        self.assertTrue(same_device(gpu, gpu))
+        self.assertFalse(same_device(cpu, gpu))
+
     def test_generic_list_errors(self):
         with self.assertRaisesRegex(RuntimeError, "previously matched to type"):
             @torch.jit.script
@@ -3267,7 +3365,7 @@ a")
 
         @torch.jit.script
         def foo2(x):
-            return torch.cat(_construct_empty_tensor_list(), dim=1)
+            return torch.cat(torch.jit._construct_empty_tensor_list(), dim=1)
 
         @torch.jit.script
         def foo3(x):
@@ -3302,13 +3400,13 @@ a")
             self.checkScript(reassign_from_empty_literal, (), optimize=False)
 
         def reassign_from_empty_builtin():
-            x = _construct_empty_int_list()
+            x = torch.jit._construct_empty_int_list()
             if True:
                 x = [1, 2, 3]
-            y = _construct_empty_float_list()
+            y = torch.jit._construct_empty_float_list()
             if True:
                 y = [1.0, 2.0, 3.0]
-            z = _construct_empty_tensor_list()
+            z = torch.jit._construct_empty_tensor_list()
             if True:
                 z = [torch.randn([1])]
             return
@@ -3323,7 +3421,7 @@ a")
             self.checkScript(reassign_bad_type, (), optimize=False)
 
         def reassign_nested():
-            x = _construct_empty_int_list()
+            x = torch.jit._construct_empty_int_list()
             if True:
                 x = [1, 2, 3]
                 if True:
@@ -3367,7 +3465,7 @@ a")
         self.checkScript(func, ())
 
         def func2():
-            a = _construct_empty_tensor_list()
+            a = torch.jit._construct_empty_tensor_list()
             return len(a) == 0
 
         self.checkScript(func2, ())
@@ -3423,7 +3521,7 @@ a")
 
         def test_list_add_empty():
             a = [1, 2, 3]
-            b = _construct_empty_int_list()
+            b = torch.jit._construct_empty_int_list()
             c = a + b
             return c == [1, 2, 3]
 
@@ -3480,7 +3578,7 @@ a")
 
         def test_backward_slice():
             a = [0, 1, 2, 3, 4]
-            return a[3:2] == _construct_empty_int_list()
+            return a[3:2] == torch.jit._construct_empty_int_list()
         self.checkScript(test_backward_slice, ())
 
         def test_over_slice():
@@ -3521,7 +3619,7 @@ a")
         self.checkScript(test_append_if_else, ())
 
         def test_append_loop():
-            a = _construct_empty_int_list()
+            a = torch.jit._construct_empty_int_list()
             for i in range(5):
                 a.append(i)
 
@@ -3529,7 +3627,7 @@ a")
         self.checkScript(test_append_loop, ())
 
         def test_append_loop_if():
-            a = _construct_empty_int_list()
+            a = torch.jit._construct_empty_int_list()
             for i in range(5):
                 if i > 3:
                     a.append(i)
@@ -3540,7 +3638,7 @@ a")
         self.checkScript(test_append_loop_if, ())
 
         def test_nested_loop():
-            a = _construct_empty_int_list()
+            a = torch.jit._construct_empty_int_list()
             for i in range(2):
                 for j in range(2):
                     a.append(i + j)
@@ -3584,7 +3682,7 @@ a")
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
         def test_view_shape_prop(a):
-            return view(a, size=[-1])
+            return a.view(size=[-1])
         ''')
         inputs = [torch.zeros(10, 10)]
         outputs = torch.zeros(100)
@@ -3619,9 +3717,9 @@ a")
         def test_fuser_multiple_blocks(this, that, theother, meme):
             i = 0
             while i < 20:
-                this = cat([this, meme], dim=0)
-                that = cat([that, meme], dim=0)
-                theother = cat([theother, meme], dim=0)
+                this = torch.cat([this, meme], dim=0)
+                that = torch.cat([that, meme], dim=0)
+                theother = torch.cat([theother, meme], dim=0)
                 i = i + 1
             return this, that, theother
         ''')
@@ -5737,7 +5835,7 @@ a")
                 # because we are testing if we emit `if` statement correctly
                 # we cannot use `True` as the condition. Constant prop
                 # would remove the `if` statements.
-                c = sum(x) > 4
+                c = torch.sum(x) > 4
                 if bool(c):
                     if bool(c):
                         y = self.m(x)
@@ -7236,6 +7334,21 @@ a")
 
         self.checkScript(code, (101,), name='elif_test', outputs=3028)
 
+    def test_addmm_fusion(self):
+        class AddmmWrapper(torch.nn.Module):
+            def forward(self, x, y, c):
+                return torch.mm(x, y) + c
+
+        # Test addmm fusion is disabled for normal Jit
+        x, y, c = torch.rand(3, 4), torch.rand(4, 5), torch.rand(3, 5)
+        f = io.BytesIO()
+        pretty = torch.onnx.export_to_pretty_string(AddmmWrapper(), (x, y, c), f)
+        self.assertExpected(pretty, 'onnx')
+
+        jit_trace = torch.jit.trace(AddmmWrapper(), (x, y, c))
+        ge_graph = jit_trace.__getattr__('forward').graph_for(x, y, c)
+        self.assertExpectedGraph(ge_graph, 'jit')
+
     def test_weak_script_function(self):
         outer_var = 10
         outer_var2 = 11
@@ -7286,6 +7399,29 @@ a")
 
         with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
             fn(torch.tensor(4))
+
+    def test_trace_contiguous(self):
+        def foo(x):
+            return x[:, :, ::2].contiguous().view(12)
+
+        x = torch.rand(2, 3, 4)
+        traced = torch.jit.trace(foo, (x,))
+        y = traced(x)
+        self.assertNotEqual(x.storage().data_ptr(), y.storage().data_ptr())
+
+    # This tests the logic in THPVariable_contiguous. There is short-circuiting
+    # code that prevents us from even getting to VariableType::contiguous, since
+    # it is an optimization that prevents us from acquiring the GIL for touching
+    # the device. We needed to add the tracing logic directly into the
+    # THPVariable_contiguous function only for the path where we are skipping
+    # dispatch into contiguous. We should see an aten::contiguous in this trace!
+    def test_trace_contiguous_short_circuit(self):
+        def foo(x):
+            return x.contiguous()
+
+        x = torch.rand(2, 3, 4)
+        traced = torch.jit.trace(foo, (x,))
+        self.assertExpectedGraph(traced.graph)
 
 
 class MnistNet(nn.Module):
@@ -8114,6 +8250,163 @@ def check_against_reference(self, func, reference_func, args, kwargs=None, allow
         self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
 
+# NB: torch.jit.script, when used as a function, uses the current scope
+# to resolve variable names. This function cannot be made local to
+# TestAutodiffSubgraphSlicing because those tests call torch.jit.script on functions
+# in a different scope than they are defined in.
+def pyfn(a, b):
+    return a * b
+
+
+class TestAutodiffSubgraphSlicing(JitTestCase):
+    # TODO: It is better if we can test directly on graphs instead of the current
+    # end-to-end fashion.
+    def _perform_ad_subgraph_slicing(self, fn, *input_sizes):
+        ge = torch.jit.script(fn)
+        ge.debug_disable_autodiff_subgraph_inlining()
+        inputs = [torch.randn(size, requires_grad=True) for size in input_sizes]
+        ge(*inputs)
+        return ge.graph_for(*inputs)
+
+    def assertGraphContains(self, graph, kind, num_kind_nodes, consider_subgraphs=False):
+        if consider_subgraphs:
+            raise NotSupportedError("NYI: assertGraphHas consider_subgraphs=T")
+        nodes = [node for node in graph.nodes()
+                 if node.kind() == kind]
+        self.assertEqual(len(nodes), num_kind_nodes)
+
+    def assertGraphSize(self, graph, size):
+        self.assertEqual(len(list(graph.nodes())), size)
+
+    def test_simple_merge(self):
+        # o --> o
+        def fn(x, y, z):
+            a = x * y
+            b = a * z
+            return b
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 1)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_simple_no_merge(self):
+        # o: autodiff supported. x: not autodiff supported.
+        # o --> x
+        def fn(x, y, z):
+            a = x * y
+            b = pyfn(a, z)
+            return b
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_does_not_merge_unrelated(self):
+        # o  o
+        def fn(w, x, y, z):
+            a = x * y
+            b = w * z
+            return a, b
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_merges_without_cycles(self):
+        # o --> o --> o
+        # |           ^
+        #  \_________/
+        def fn(w, x, y):
+            a = w * x
+            b = a * y
+            c = a * b
+            return c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 1)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_merges_dense(self):
+        #   o      o
+        #   |\    /|
+        #   | \  / |
+        #   |  /\  |
+        #   vv    vv
+        #   o      o
+        def fn(x, y):
+            a, b = x.chunk(2)
+            c, d = y.chunk(2)
+            return a + c, b + d
+
+        graph = self._perform_ad_subgraph_slicing(fn, 2, 2)
+
+        self.assertGraphSize(graph, 1)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_does_not_create_cycles(self):
+        # o --> x --> o
+        # |           ^
+        #  \_________/
+        def fn(w, x, y):
+            a = w * x
+            b = pyfn(a, y)
+            c = a * b
+            return c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
+
+        self.assertGraphSize(graph, 3)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_merges_up(self):
+        # o --> x     o
+        # |           ^
+        #  \_________/
+        def fn(w, x, y, z):
+            a = w * x
+            b = pyfn(a, y)
+            c = a * z
+            return b, c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_merges_down(self):
+        # o     x --> o
+        # |           ^
+        #  \_________/
+        def fn(v, w, x, y):
+            a = v * w
+            b = pyfn(x, y)
+            c = b * a
+            return a, c
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
+
+        self.assertGraphSize(graph, 2)
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 1)
+
+    def test_respects_lexical_scoping(self):
+        def fn(x, k):
+            y = x * 1.1
+            if bool(k):
+                k += y
+            z = y * k
+            return z, k
+
+        graph = self._perform_ad_subgraph_slicing(fn, 1, 1)
+
+        # We should not have combined the two multiplications into
+        # the same group; they should each be a separate DiffGraph
+        self.assertGraphContains(graph, 'prim::DifferentiableGraph', 2)
+
+
 class TestJitGenerated(JitTestCase):
     pass
 
@@ -8169,9 +8462,9 @@ class TestCustomOperators(JitTestCase):
     def test_passing_one_positional_but_not_the_second(self):
         with self.assertRaisesRegex(
             RuntimeError,
-            "aten::log_softmax\(\) is missing value for argument 'dim'."
+            "aten::transpose\(\) is missing value for argument 'dim0'."
         ):
-            torch.ops.aten.log_softmax(torch.ones(5))
+            torch.ops.aten.transpose(torch.ones(5, 5))
 
     def test_passing_an_argument_both_as_positional_and_kwarg(self):
         with self.assertRaisesRegex(

@@ -9,21 +9,21 @@ namespace caffe2 {
 struct CudaEventWrapper {
   explicit CudaEventWrapper(const DeviceOption& option)
       : cuda_stream_(nullptr),
-        cuda_gpu_id_(option.cuda_gpu_id()),
+        device_id_(option.device_id()),
         status_(EventStatus::EVENT_INITIALIZED) {
     CAFFE_ENFORCE(option.device_type(), PROTO_CUDA);
-    DeviceGuard g(cuda_gpu_id_);
+    DeviceGuard g(device_id_);
     CUDA_ENFORCE(cudaEventCreate(
         &cuda_event_, cudaEventDefault | cudaEventDisableTiming));
   }
   ~CudaEventWrapper() {
-    DeviceGuard g(cuda_gpu_id_);
+    DeviceGuard g(device_id_);
     CUDA_CHECK(cudaEventDestroy(cuda_event_));
   }
 
   cudaEvent_t cuda_event_;
   cudaStream_t cuda_stream_;
-  int cuda_gpu_id_;
+  int device_id_;
 
   std::atomic<int> status_;
   std::mutex mutex_recorded_;
@@ -65,12 +65,12 @@ void EventRecordCUDA(Event* event, const void* context, const char* err_msg) {
       const auto& current_device = CaffeCudaGetDevice();
       CAFFE_ENFORCE_EQ(
           current_device,
-          wrapper->cuda_gpu_id_,
+          wrapper->device_id_,
           "When you call EventRecordCUDA, your current device should be the same "
           "as the device specified by the event.");
       CAFFE_ENFORCE_EQ(
           current_device,
-          static_cast<const CUDAContext*>(context)->cuda_gpu_id());
+          static_cast<const CUDAContext*>(context)->device_id());
       CUDA_ENFORCE(cudaEventRecord(
           wrapper->cuda_event_,
           static_cast<const CUDAContext*>(context)->cuda_stream()));
@@ -96,7 +96,7 @@ void EventFinishCUDA(const Event* event) {
 
   if (wrapper->status_ == EventStatus::EVENT_SCHEDULED) {
     // ok, even if event is already completed and status was not yet updated
-    DeviceGuard g(wrapper->cuda_gpu_id_);
+    DeviceGuard g(wrapper->device_id_);
     auto cudaResult = cudaEventSynchronize(wrapper->cuda_event_);
     if (cudaResult == cudaSuccess) {
       wrapper->status_ = EventStatus::EVENT_SUCCESS;
@@ -127,7 +127,7 @@ void EventWaitCUDACUDA(const Event* event, void* context) {
     if (context_stream != event_stream) {
       // CAFFE_ENFORCE_EQ(
       //    CaffeCudaGetDevice(),
-      //    static_cast<const CUDAContext*>(context)->cuda_gpu_id());
+      //    static_cast<const CUDAContext*>(context)->device_id());
       CUDA_CHECK(cudaStreamWaitEvent(context_stream, wrapper->cuda_event_, 0));
     }
   }

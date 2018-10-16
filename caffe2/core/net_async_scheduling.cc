@@ -6,6 +6,10 @@ C10_DEFINE_bool(
     caffe2_net_async_optimize_polling,
     true,
     "Use event callbacks whenever possible instead of polling");
+C10_DEFINE_bool(
+    caffe2_net_async_run_root_tasks_inline,
+    false,
+    "Run root tasks in current thread instread of scheduling to threadpool");
 
 namespace caffe2 {
 
@@ -58,6 +62,16 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
       }
       if (!run(task_id, stream_id)) {
         success_ = false;
+      }
+    }
+
+    if (report_stats_) {
+      auto last_op_id = lastTaskOpId(task_id);
+      auto* last_op = lastTaskOp(task_id);
+      if (last_op->device_option().device_type() == PROTO_CPU &&
+          last_op->HasAsyncPart()) {
+        last_op->event().SetCallback(
+            [this, last_op_id] { counters_.AddPerOpAsyncEndTime(last_op_id); });
       }
     }
 
@@ -206,33 +220,39 @@ void AsyncSchedulingNet::pollAndSchedule(int task_id) {
 }
 
 void AsyncSchedulingNet::finishRun() {
-  {
-    std::unique_lock<std::mutex> lock(running_mutex_);
-    running_ = false;
-  }
+  std::unique_lock<std::mutex> lock(running_mutex_);
   // wait for scheduled ops and make sure all events are marked as finished
   finalizeEvents();
+  if (report_stats_) {
+    counters_.ReportRunEnd();
+  }
   // notify observers and waiters
   StopAllObservers();
+  running_ = false;
   running_cv_.notify_all();
 }
 
 bool AsyncSchedulingNet::RunAsync() {
   try {
-    std::unique_lock<std::mutex> lock(running_mutex_);
-    if (running_) {
-      LOG(ERROR) << "Detected concurrent runs";
-      return false;
-    }
-    running_ = true;
-    reset();
+    {
+      std::unique_lock<std::mutex> lock(running_mutex_);
+      if (running_) {
+        LOG(ERROR) << "Detected concurrent runs";
+        return false;
+      }
+      running_ = true;
+      reset();
 
-    StartAllObservers();
-    tracing::startIter(tracer_);
+      StartAllObservers();
+      tracing::startIter(tracer_);
+      if (report_stats_) {
+        counters_.ReportRunStart();
+      }
+    }
 
     for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
       if (parents(task_id).empty()) {
-        schedule(task_id);
+        schedule(task_id, c10::FLAGS_caffe2_net_async_run_root_tasks_inline);
       }
     }
   } catch (const std::exception& e) {

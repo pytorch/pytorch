@@ -124,19 +124,44 @@ void addNomnigraphMethods(pybind11::module& m) {
           "dataFlow",
           [](NNModule* nn) -> NNGraph* { return &nn->dataFlow; },
           py::return_value_policy::reference_internal)
-      .def("convertToCaffe2Proto", [](NNModule& nn, py::object def) {
-        CAFFE_ENFORCE(
-            pybind11::hasattr(def, "SerializeToString"),
-            "convertToCaffe2Proto takes either no args", "a NetDef");
-        auto str = def.attr("SerializeToString")();
-        caffe2::NetDef proto;
-        proto.ParseFromString(py::bytes(str));
-        auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
-        std::string out;
-        new_proto.SerializeToString(&out);
-        return py::bytes(out);
-      });
+      .def(
+          "convertToCaffe2Proto",
+          [](NNModule& nn, py::object def) {
+            CAFFE_ENFORCE(
+                pybind11::hasattr(def, "SerializeToString"),
+                "convertToCaffe2Proto takes either no args",
+                "a NetDef");
+            auto str = def.attr("SerializeToString")();
+            caffe2::NetDef proto;
+            proto.ParseFromString(py::bytes(str));
+            auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
+            std::string out;
+            new_proto.SerializeToString(&out);
+            return py::bytes(out);
+          })
+      .def(
+          "getExecutionOrder",
+          [](NNModule& nn) {
+            nn::coalesceInsertedDataDependencies(&nn);
+            std::vector<NNGraph::NodeRef> out;
+            auto sccs = nom::algorithm::tarjans(&nn.controlFlow);
+            for (const auto& scc : sccs) {
+              for (const auto& bb : scc.getNodes()) {
+                for (const auto& instr : bb->data().getInstructions()) {
+                  out.emplace_back(instr);
+                }
+              }
+            }
+            return out;
+          },
+          py::return_value_policy::reference_internal);
 
+  auto getTensors = [](NNGraph* g) {
+    return nn::nodeIterator<nom::repr::Tensor>(*g);
+  };
+  auto getOperators = [](NNGraph* g) {
+    return nn::nodeIterator<NeuralNetOperator>(*g);
+  };
   // NNGraph methods
   py::class_<NNGraph> nngraph(m, "NNGraph");
   nngraph
@@ -190,12 +215,62 @@ void addNomnigraphMethods(pybind11::module& m) {
           py::return_value_policy::reference_internal)
       .def(
           "getMutableNodes",
-          [](NNGraph* g) { return g->getMutableNodes(); },
-          py::return_value_policy::reference_internal);
+          &NNGraph::getMutableNodes,
+          py::return_value_policy::reference_internal)
+      .def_property_readonly(
+          "nodes",
+          &NNGraph::getMutableNodes,
+          py::return_value_policy::reference_internal)
+      .def_property_readonly(
+          "operators",
+          getOperators,
+          py::return_value_policy::reference_internal)
+      .def_property_readonly(
+          "tensors", getTensors, py::return_value_policy::reference_internal);
 
   // Node level methods
   using NodeType = nom::Node<std::unique_ptr<nom::repr::Value>>;
   py::class_<NodeType> noderef(m, "NodeRef");
+  auto getName = [](NNGraph::NodeRef n) {
+    if (nn::is<nom::repr::Tensor>(n)) {
+      return nn::get<nom::repr::Tensor>(n)->getName();
+    } else if (nn::is<NeuralNetOperator>(n)) {
+      return nn::get<NeuralNetOperator>(n)->getName();
+    }
+    return std::string("Unknown");
+  };
+  auto getType = [](NNGraph::NodeRef n) {
+    if (nn::is<nom::repr::Tensor>(n)) {
+      return "Tensor";
+    } else if (nn::is<NeuralNetOperator>(n)) {
+      return "Operator";
+    }
+    return "Unknown";
+  };
+  auto getOperator = [](NNGraph::NodeRef n) {
+    CAFFE_ENFORCE(nn::is<NeuralNetOperator>(n));
+    return nn::get<NeuralNetOperator>(n);
+  };
+  auto getTensor = [](NNGraph::NodeRef n) {
+    CAFFE_ENFORCE(nn::is<nom::repr::Tensor>(n));
+    return nn::get<nom::repr::Tensor>(n);
+  };
+  auto getInputs = [](NNGraph::NodeRef n) {
+    CAFFE_ENFORCE(nn::is<NeuralNetOperator>(n));
+    return nn::getInputs(n);
+  };
+  auto getOutputs = [](NNGraph::NodeRef n) {
+    CAFFE_ENFORCE(nn::is<NeuralNetOperator>(n));
+    return nn::getOutputs(n);
+  };
+  auto getProducer = [](NNGraph::NodeRef n) {
+    CAFFE_ENFORCE(nn::is<NeuralNetData>(n));
+    return nn::getProducer(n);
+  };
+  auto getConsumers = [](NNGraph::NodeRef n) {
+    CAFFE_ENFORCE(nn::is<NeuralNetData>(n));
+    return nn::getConsumers(n);
+  };
 
   noderef
       .def(
@@ -204,20 +279,31 @@ void addNomnigraphMethods(pybind11::module& m) {
       .def(
           "isTensor",
           [](NNGraph::NodeRef n) { return nn::is<nom::repr::Tensor>(n); })
+      .def("getType", getType)
+      .def_property_readonly("type", getType)
+      .def("getName", getName)
+      .def_property_readonly("name", getName)
       .def(
           "getOperator",
-          [](NNGraph::NodeRef n) {
-            CAFFE_ENFORCE(nn::is<NeuralNetOperator>(n));
-            return nn::get<NeuralNetOperator>(n);
-          },
+          getOperator,
           py::return_value_policy::reference_internal)
-      .def(
-          "getTensor",
-          [](NNGraph::NodeRef n) {
-            CAFFE_ENFORCE(nn::is<nom::repr::Tensor>(n));
-            return nn::get<nom::repr::Tensor>(n);
-          },
-          py::return_value_policy::reference_internal)
+      .def("getTensor", getTensor, py::return_value_policy::reference_internal)
+      .def_property_readonly(
+          "operator", getOperator, py::return_value_policy::reference)
+      .def_property_readonly(
+          "tensor", getTensor, py::return_value_policy::reference)
+      .def("getInputs", getInputs, py::return_value_policy::reference)
+      .def("getOutputs", getOutputs, py::return_value_policy::reference)
+      .def("getProducer", getProducer, py::return_value_policy::reference)
+      .def("getConsumers", getConsumers, py::return_value_policy::reference)
+      .def_property_readonly(
+          "inputs", getInputs, py::return_value_policy::reference)
+      .def_property_readonly(
+          "outputs", getOutputs, py::return_value_policy::reference)
+      .def_property_readonly(
+          "producer", getProducer, py::return_value_policy::reference)
+      .def_property_readonly(
+          "consumers", getConsumers, py::return_value_policy::reference)
       .def_property(
           "annotation",
           [](NNGraph::NodeRef n) { return getOrAddCaffe2Annotation(n); },
@@ -267,7 +353,7 @@ void addNomnigraphMethods(pybind11::module& m) {
           },
           py::return_value_policy::reference);
 
-  py::class_<GenericOperator> nnop(m, "NeuralNetOperator");
+  py::class_<NeuralNetOperator, GenericOperator> nnop(m, "NeuralNetOperator");
   py::class_<nom::repr::Tensor> nndata(m, "NeuralNetData");
 
   nnop.def(py::init<std::string>()).def("getName", &NeuralNetOperator::getName);
@@ -275,7 +361,20 @@ void addNomnigraphMethods(pybind11::module& m) {
 
   // Subgraph matching API
   py::class_<NNSubgraph> nnsubgraph(m, "NNSubgraph");
-  nnsubgraph.def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); });
+  nnsubgraph.def("__len__", [](NNSubgraph& s) { return s.getNodes().size(); })
+      .def_property_readonly(
+          "nodes",
+          [](NNSubgraph& s) {
+            std::vector<NNGraph::NodeRef> out;
+            for (auto n : s.getNodes()) {
+              out.emplace_back(n);
+            }
+            return out;
+          },
+          py::return_value_policy::reference)
+      .def("hasNode", [](NNSubgraph& s, NNGraph::NodeRef n) {
+        return s.hasNode(n);
+      });
 
   py::class_<nn::NNMatchGraph> nnMatchGraph(m, "NNMatchGraph");
   nnMatchGraph.def(py::init<>());

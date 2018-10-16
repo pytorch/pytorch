@@ -149,13 +149,6 @@
     - THTensor* self
 ]]
 [[
-  name: contiguous
-  cname: newContiguous
-  return: THTensor*
-  arguments:
-    - THTensor* self
-]]
-[[
   name: th_clone
   cname: newClone
   return: THTensor*
@@ -2763,6 +2756,10 @@
     - arg: bool some
       if_true: S
       if_false: A
+      default: S
+    - arg: bool compute_uv
+      if_true: S
+      if_false: N
       default: S
 ]]
 [[

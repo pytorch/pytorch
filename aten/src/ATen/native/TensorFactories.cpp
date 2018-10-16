@@ -103,10 +103,15 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor empty(IntList size, const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  // Can't call a factory function, because the buck stops with us!
-  return getFactoryType(options).tensor(size);
+Tensor empty_cpu(IntList size, const TensorOptions& options) {
+  AT_ASSERT(options.backend() == Backend::CPU);
+  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
+  auto storage_impl = c10::make_intrusive<StorageImpl>(
+    scalarTypeToTypeMeta(options.dtype()), 0, at::getCPUAllocator(), true);
+
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
+  tensor.resize_(size);
+  return tensor;
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
@@ -648,7 +653,7 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 
 template <typename T>
 Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(DeviceType::CPU));
+  auto cpu_tensor = tensor_cpu(values, options.device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
 }
 

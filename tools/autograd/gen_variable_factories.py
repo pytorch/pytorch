@@ -34,7 +34,8 @@ def gen_variable_factories(out, declarations, template_path):
     function_definitions = []
     for decl in declarations:
         has_tensor_options = any(a["simple_type"] == "TensorOptions" for a in decl["arguments"])
-        if has_tensor_options or decl["name"].endswith("_like"):
+        is_namespace_fn = 'namespace' in decl['method_of']
+        if (has_tensor_options or decl["name"].endswith("_like")) and is_namespace_fn:
             function_definitions.append(process_function(decl, has_tensor_options))
     write(out,
           "variable_factories.h",

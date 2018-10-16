@@ -2,10 +2,6 @@
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
 #include "generate_proposals_op_util_nms.h"
 
-#ifdef CAFFE2_USE_MKL
-#include "caffe2/mkl/operators/operator_fallback_mkl.h"
-#endif // CAFFE2_USE_MKL
-
 namespace caffe2 {
 
 namespace {
@@ -317,16 +313,6 @@ namespace {
 REGISTER_CPU_OPERATOR(GenerateProposals, GenerateProposalsOp<CPUContext>);
 // For backward compatibility
 REGISTER_CPU_OPERATOR(GenerateProposalsCPP, GenerateProposalsOp<CPUContext>);
-
-#ifdef CAFFE2_HAS_MKL_DNN
-REGISTER_MKL_OPERATOR(
-    GenerateProposals,
-    mkl::MKLFallbackOp<GenerateProposalsOp<CPUContext>>);
-// For backward compatibility
-REGISTER_MKL_OPERATOR(
-    GenerateProposalsCPP,
-    mkl::MKLFallbackOp<GenerateProposalsOp<CPUContext>>);
-#endif // CAFFE2_HAS_MKL_DNN
 
 OPERATOR_SCHEMA(GenerateProposals)
     .NumInputs(4)
