@@ -41,13 +41,15 @@ void adam_compute(
     float beta2,
     float eps_hat,
     float correction,
+    float weight_decay,
     const float* lr,
     Context* /*context*/) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    nw[i] = w[i] + lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
+    nw[i] = weight_decay * w[i] +
+        lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
   }
 }
 
@@ -66,6 +68,7 @@ void adam_compute_output_grad(
     float beta2,
     float eps_hat,
     float correction,
+    float weight_decay,
     const float* lr,
     Context* /*context*/) {
   for (auto i = 0; i < N; ++i) {
@@ -73,7 +76,7 @@ void adam_compute_output_grad(
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
     float ngi = ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
-    nw[i] = w[i] + lr[0] * ngi;
+    nw[i] = weight_decay * w[i] + lr[0] * ngi;
   }
 }
 
@@ -85,7 +88,9 @@ class AdamOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
         beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<T>("weight_decay", 1.0f)) {}
   bool RunOnDevice() override {
     // Iter live on the CPU
     CAFFE_ENFORCE(OperatorBase::InputIsTensorType(ITER, CPU));
@@ -117,6 +122,7 @@ class AdamOp final : public Operator<Context> {
           beta2_,
           epsilon_,
           correction,
+          weight_decay_,
           Input(LR).template data<T>(),
           &context_);
     } else {
@@ -135,6 +141,7 @@ class AdamOp final : public Operator<Context> {
           beta2_,
           epsilon_,
           correction,
+          weight_decay_,
           Input(LR).template data<T>(),
           &context_);
     }
@@ -146,6 +153,7 @@ class AdamOp final : public Operator<Context> {
   T beta1_{0.9};
   T beta2_{0.999};
   T epsilon_{1e-8};
+  T weight_decay_{1.0};
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);
 };
@@ -158,7 +166,9 @@ class SparseAdamOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
         beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<T>("weight_decay", 1.0f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -205,7 +215,7 @@ class SparseAdamOp final : public Operator<Context> {
               moment1In[idx] * beta1_ + gi * (1 - beta1_);
           float vi = moment2Out[idx] =
               moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
-          paramOut[idx] = paramIn[idx] +
+          paramOut[idx] = weight_decay_ * paramIn[idx] +
               lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
 
         } else {
@@ -246,6 +256,7 @@ class SparseAdamOp final : public Operator<Context> {
               beta2_,
               epsilon_,
               correction,
+              weight_decay_,
               lr,
               &context_);
         }
@@ -263,7 +274,7 @@ class SparseAdamOp final : public Operator<Context> {
           float vi = moment2Out[idx] =
               moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
           float ngi = gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
-          paramOut[idx] = paramIn[idx] + lr[0] * ngi;
+          paramOut[idx] = weight_decay_ * paramIn[idx] + lr[0] * ngi;
 
         } else {
           auto offsetI = i * block_size;
@@ -304,6 +315,7 @@ class SparseAdamOp final : public Operator<Context> {
               beta2_,
               epsilon_,
               correction,
+              weight_decay_,
               lr,
               &context_);
         }
@@ -316,6 +328,7 @@ class SparseAdamOp final : public Operator<Context> {
   T beta1_;
   T beta2_;
   T epsilon_;
+  T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, INDICES, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);
 };
@@ -328,7 +341,9 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         beta1_(this->template GetSingleArgument<float>("beta1", 0.9f)),
         beta2_(this->template GetSingleArgument<float>("beta2", 0.999f)),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<T>("weight_decay", 1.0f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -375,7 +390,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
               moment1In[idx] * beta1_ + gi * (1 - beta1_);
           float vi = moment2Out[idx] =
               moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
-          paramOut[idx] = paramIn[idx] +
+          paramOut[idx] = weight_decay_ * paramIn[idx] +
               lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
 
         } else {
@@ -420,7 +435,8 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
               m2[0] * beta2_ + (m2_sum / block_size) * (1 - beta2_);
           for (auto j = 0; j < block_size; ++j) {
             float mi = nm1[j] = m1[j] * beta1_ + g[j] * (1 - beta1_);
-            nw[j] = w[j] + lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
+            nw[j] = weight_decay_ * w[j] +
+                lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
           }
         }
       }
@@ -437,7 +453,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
           float vi = moment2Out[idx] =
               moment2In[idx] * beta2_ + gi * gi * (1 - beta2_);
           float ngi = gradOut[i] = correction * mi / (std::sqrt(vi) + epsilon_);
-          paramOut[idx] = paramIn[idx] + lr[0] * ngi;
+          paramOut[idx] = weight_decay_ * paramIn[idx] + lr[0] * ngi;
 
         } else {
           auto offsetI = i * block_size;
@@ -483,7 +499,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
           for (auto j = 0; j < block_size; ++j) {
             float mi = nm1[j] = m1[j] * beta1_ + g[j] * (1 - beta1_);
             float ngi = ng[j] = correction * mi / (std::sqrt(vi) + epsilon_);
-            nw[j] = w[j] + lr[0] * ngi;
+            nw[j] = weight_decay_ * w[j] + lr[0] * ngi;
           }
         }
       }
@@ -495,6 +511,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
   T beta1_;
   T beta2_;
   T epsilon_;
+  T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, INDICES, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);
 };

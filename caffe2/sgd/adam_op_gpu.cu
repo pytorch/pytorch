@@ -61,13 +61,14 @@ __global__ void AdamCompute(
     float beta2,
     float eps_hat,
     float correction,
+    float weight_decay,
     const float* lr) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
     float ng = lr[0] * correction * mi / (sqrtf(vi) + eps_hat);
-    nw[i] = w[i] + ng;
+    nw[i] = weight_decay * w[i] + ng;
   }
 }
 
@@ -85,6 +86,7 @@ void adam_compute<CUDAContext>(
     float beta2,
     float eps_hat,
     float correction,
+    float weight_decay,
     const float* lr,
     CUDAContext* context) {
   AdamCompute<<<
@@ -92,7 +94,20 @@ void adam_compute<CUDAContext>(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(
-      N, w, g, m, v, nw, nm, nv, beta1, beta2, eps_hat, correction, lr);
+      N,
+      w,
+      g,
+      m,
+      v,
+      nw,
+      nm,
+      nv,
+      beta1,
+      beta2,
+      eps_hat,
+      correction,
+      weight_decay,
+      lr);
 }
 
 __global__ void AdamComputeOutputGrad(
@@ -109,13 +124,14 @@ __global__ void AdamComputeOutputGrad(
     float beta2,
     float eps_hat,
     float correction,
+    float weight_decay,
     const float* lr) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
     float ngi = ng[i] = correction * mi / (sqrtf(vi) + eps_hat);
-    nw[i] = w[i] + lr[0] * ngi;
+    nw[i] = weight_decay * w[i] + lr[0] * ngi;
   }
 }
 
@@ -134,6 +150,7 @@ void adam_compute_output_grad<CUDAContext>(
     float beta2,
     float eps_hat,
     float correction,
+    float weight_decay,
     const float* lr,
     CUDAContext* context) {
   AdamComputeOutputGrad<<<
@@ -141,7 +158,21 @@ void adam_compute_output_grad<CUDAContext>(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context->cuda_stream()>>>(
-      N, w, g, m, v, nw, nm, nv, ng, beta1, beta2, eps_hat, correction, lr);
+      N,
+      w,
+      g,
+      m,
+      v,
+      nw,
+      nm,
+      nv,
+      ng,
+      beta1,
+      beta2,
+      eps_hat,
+      correction,
+      weight_decay,
+      lr);
 }
 
 template <typename SIndex>

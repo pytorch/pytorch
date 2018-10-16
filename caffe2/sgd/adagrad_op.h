@@ -14,12 +14,13 @@ void adagrad_update(
     float* nh,
     float epsilon,
     float decay,
+    float weight_decay,
     const float* lr,
     Context* /*context*/) {
   for (auto i = 0; i < N; ++i) {
     float gi = g[i];
     float hi = nh[i] = decay * h[i] + gi * gi;
-    nw[i] = w[i] + lr[0] * gi / (std::sqrt(hi) + epsilon);
+    nw[i] = weight_decay * w[i] + lr[0] * gi / (std::sqrt(hi) + epsilon);
   }
 }
 
@@ -34,6 +35,7 @@ void adagrad_update_output_effective_lr(
     float* effectiveLROut,
     float epsilon,
     float decay,
+    float weight_decay,
     const float* lr,
     Context* /*context*/) {
   for (auto i = 0; i < N; ++i) {
@@ -41,7 +43,7 @@ void adagrad_update_output_effective_lr(
     float moment = momentOut[i] = decay * momentIn[i] + grad * grad;
     float effective_lr = effectiveLROut[i] =
         lr[0] / (std::sqrt(moment) + epsilon);
-    paramOut[i] = paramIn[i] + effective_lr * grad;
+    paramOut[i] = weight_decay * paramIn[i] + effective_lr * grad;
   }
 }
 
@@ -57,6 +59,7 @@ void adagrad_update_output_effective_lr_and_update(
     float* updateOut,
     float epsilon,
     float decay,
+    float weight_decay,
     const float* lr,
     Context* /*context*/) {
   for (auto i = 0; i < N; ++i) {
@@ -65,7 +68,7 @@ void adagrad_update_output_effective_lr_and_update(
     float effective_lr = effectiveLROut[i] =
         lr[0] / (std::sqrt(moment) + epsilon);
     float update = updateOut[i] = effective_lr * grad;
-    paramOut[i] = paramIn[i] + update;
+    paramOut[i] = weight_decay * paramIn[i] + update;
   }
 }
 
@@ -76,7 +79,9 @@ class AdagradOp final : public Operator<Context> {
   AdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<T>("epsilon", 1e-5f)),
-        decay_(this->template GetSingleArgument<T>("decay", 1.0f)) {}
+        decay_(this->template GetSingleArgument<T>("decay", 1.0f)),
+        weight_decay_(
+            this->template GetSingleArgument<T>("weight_decay", 1.0f)) {}
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE_EQ(
@@ -104,6 +109,7 @@ class AdagradOp final : public Operator<Context> {
           Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
           epsilon_,
           decay_,
+          weight_decay_,
           Input(LR).template data<T>(),
           &context_);
     } else if (OutputSize() == 3) {
@@ -118,6 +124,7 @@ class AdagradOp final : public Operator<Context> {
           Output(OUTPUT_EFFECTIVE_LR)->template mutable_data<T>(),
           epsilon_,
           decay_,
+          weight_decay_,
           Input(LR).template data<T>(),
           &context_);
     } else {
@@ -134,6 +141,7 @@ class AdagradOp final : public Operator<Context> {
           Output(OUTPUT_UPDATE)->template mutable_data<T>(),
           epsilon_,
           decay_,
+          weight_decay_,
           Input(LR).template data<T>(),
           &context_);
     }
@@ -144,6 +152,7 @@ class AdagradOp final : public Operator<Context> {
  protected:
   T epsilon_;
   T decay_;
+  T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, GRAD, LR);
   OUTPUT_TAGS(
       OUTPUT_PARAM,
@@ -158,7 +167,9 @@ class SparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<T>("weight_decay", 1.0f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -193,7 +204,8 @@ class SparseAdagradOp final : public Operator<Context> {
       if (block_size == 1) {
         float gi = gradIn[i];
         float hi = momentOut[idx] = momentIn[idx] + gi * gi;
-        paramOut[idx] = paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
+        paramOut[idx] = weight_decay_ * paramIn[idx] +
+            lr[0] * gi / (std::sqrt(hi) + epsilon_);
       } else {
         auto offsetI = i * block_size;
         auto offsetIdx = idx * block_size;
@@ -227,6 +239,7 @@ class SparseAdagradOp final : public Operator<Context> {
             momentOut + offsetIdx,
             epsilon_,
             1.0f,
+            weight_decay_,
             lr,
             &context_);
       }
@@ -236,6 +249,7 @@ class SparseAdagradOp final : public Operator<Context> {
 
  protected:
   T epsilon_;
+  T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
@@ -246,7 +260,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   RowWiseSparseAdagradOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)) {}
+        epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
+        weight_decay_(
+            this->template GetSingleArgument<T>("weight_decay", 1.0f)) {}
 
   bool RunOnDevice() override {
     // Enforce shapes
@@ -282,7 +298,8 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
       if (block_size == 1) {
         float gi = gradIn[i];
         float hi = momentOut[idx] = momentIn[idx] + gi * gi;
-        paramOut[idx] = paramIn[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
+        paramOut[idx] = weight_decay_ * paramIn[idx] +
+            lr[0] * gi / (std::sqrt(hi) + epsilon_);
       } else {
         auto offsetI = i * block_size;
         auto offsetIdx = idx * block_size;
@@ -321,7 +338,7 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
         float hi = nh[0] = h[0] + hs / block_size;
         float step = lr[0] / (std::sqrt(hi) + epsilon_);
         for (auto j = 0; j < block_size; ++j) {
-          nw[j] = w[j] + g[j] * step;
+          nw[j] = weight_decay_ * w[j] + g[j] * step;
         }
       }
     }
@@ -330,7 +347,8 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
 
  protected:
   T epsilon_;
+  T weight_decay_;
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
-}
+} // namespace caffe2

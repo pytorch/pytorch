@@ -16,7 +16,7 @@ computes
     new_moment = moment + square(grad)
     effective_lr = learning_rate / (sqrt(new_moment) + epsilon)
     update = learning_rate * grad / (sqrt(new_moment) + epsilon)
-    new_param = param + update
+    new_param = weight_decay * param + update
 and returns (new_param, new_moment).
 
 Optionally returns effective_lr and update as well.
@@ -35,7 +35,8 @@ Optionally returns effective_lr and update as well.
     .Arg(
         "decay",
         "Default 1. If it is in (0, 1), the gradient square sum "
-        "is decayed by this factor.");
+        "is decayed by this factor.")
+    .Arg("weight_decay", "in (0, 1], Default 1, meaning no weight decay");
 
 static OpSchema::Cost CostInferenceForSparseAdagrad(
     const OperatorDef& /* unused */,
@@ -84,6 +85,7 @@ new_moment) as in the dense case.
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated moment")
     .Arg("epsilon", "Default 1e-5")
+    .Arg("weight_decay", "in (0, 1], Default 1, meaning no weight decay")
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForSparseAdagrad));
 
@@ -112,9 +114,10 @@ also be a 1D tensor indexing into the rows of param.
     .Input(4, "lr", "learning rate")
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated moment")
-    .Arg("epsilon", "Default 1e-5");
+    .Arg("epsilon", "Default 1e-5")
+    .Arg("weight_decay", "in (0, 1], Default 1, meaning no weight decay");
 
 SHOULD_NOT_DO_GRADIENT(Adagrad);
 SHOULD_NOT_DO_GRADIENT(SparseAdagrad);
 SHOULD_NOT_DO_GRADIENT(RowWiseSparseAdagrad);
-}
+} // namespace caffe2

@@ -18,7 +18,7 @@ class TestAdam(hu.HypothesisTestCase):
 
     @staticmethod
     def ref_adam(param, mom1, mom2, grad, LR, ITER,
-                 beta1, beta2, epsilon, output_grad=False):
+                 beta1, beta2, epsilon, weight_decay, output_grad=False):
         t = ITER + 1
         corrected_local_rate = np.sqrt(1 - np.power(beta2, t)) / \
             (1 - np.power(beta1, t))
@@ -26,7 +26,7 @@ class TestAdam(hu.HypothesisTestCase):
         mom2_out = (beta2 * mom2) + (1 - beta2) * np.square(grad)
         grad_out = corrected_local_rate * mom1_out / \
             (np.sqrt(mom2_out) + epsilon)
-        param_out = param + LR * grad_out
+        param_out = weight_decay * param + LR * grad_out
         if output_grad:
             return param_out, mom1_out, mom2_out, grad_out
         else:
@@ -34,14 +34,14 @@ class TestAdam(hu.HypothesisTestCase):
 
     @staticmethod
     def ref_row_wise_adam(param, mom1, mom2, grad, LR, ITER,
-                          beta1, beta2, epsilon, output_grad=False):
+                          beta1, beta2, epsilon, weight_decay, output_grad=False):
         t = ITER + 1
         corrected_local_rate = np.sqrt(1 - np.power(beta2, t)) / \
             (1 - np.power(beta1, t))
         mom1_out = (beta1 * mom1) + (1 - beta1) * grad
         mom2_out = (beta2 * mom2) + (1 - beta2) * np.mean(np.square(grad))
         grad_out = corrected_local_rate * mom1_out / (np.sqrt(mom2_out) + epsilon)
-        param_out = param + LR * grad_out
+        param_out = weight_decay * param + LR * grad_out
         if output_grad:
             return param_out, mom1_out, mom2_out, grad_out
         else:
@@ -57,8 +57,10 @@ class TestAdam(hu.HypothesisTestCase):
                            allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            **hu.gcs)
-    def test_adam(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
+    def test_adam(self, inputs, ITER, LR, beta1, beta2, epsilon, weight_decay, gc, dc):
         param, mom1, mom2, grad = inputs
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
@@ -67,7 +69,7 @@ class TestAdam(hu.HypothesisTestCase):
             "Adam",
             ["param", "mom1", "mom2", "grad", "lr", "iter"],
             ["output_param", "output_mom1", "output_mom2"],
-            beta1=beta1, beta2=beta2, epsilon=epsilon)
+            beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay)
 
         # Iter lives on the CPU
         input_device_options = {'iter': hu.cpu_do}
@@ -77,7 +79,7 @@ class TestAdam(hu.HypothesisTestCase):
             [param, mom1, mom2, grad, LR, ITER],
             functools.partial(
                 self.ref_adam,
-                beta1=beta1, beta2=beta2, epsilon=epsilon),
+                beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay),
             input_device_options=input_device_options)
 
     @given(inputs=hu.tensors(n=4),
@@ -90,8 +92,11 @@ class TestAdam(hu.HypothesisTestCase):
                            allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
-    def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon, gc, dc):
+    def test_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon,
+                                weight_decay, gc, dc):
         param, mom1, mom2, grad = inputs
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
@@ -100,7 +105,7 @@ class TestAdam(hu.HypothesisTestCase):
             "Adam",
             ["param", "mom1", "mom2", "grad", "lr", "iter"],
             ["output_param", "output_mom1", "output_mom2", "output_grad"],
-            beta1=beta1, beta2=beta2, epsilon=epsilon)
+            beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay)
 
         # Iter lives on the CPU
         input_device_options = {'iter': hu.cpu_do}
@@ -110,7 +115,8 @@ class TestAdam(hu.HypothesisTestCase):
             [param, mom1, mom2, grad, LR, ITER],
             functools.partial(
                 self.ref_adam,
-                beta1=beta1, beta2=beta2, epsilon=epsilon, output_grad=True),
+                beta1=beta1, beta2=beta2, epsilon=epsilon,
+                weight_decay=weight_decay, output_grad=True),
             input_device_options=input_device_options)
 
     @given(inputs=hu.tensors(n=4),
@@ -123,9 +129,11 @@ class TestAdam(hu.HypothesisTestCase):
                            allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
            **hu.gcs)
-    def test_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
+    def test_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon, weight_decay,
                          data_strategy, gc, dc):
         param, mom1, mom2, grad = inputs
         mom2 = np.absolute(mom2)
@@ -156,7 +164,7 @@ class TestAdam(hu.HypothesisTestCase):
             "SparseAdam",
             ["param", "mom1", "mom2", "indices", "grad", "lr", "iter"],
             ["param", "mom1", "mom2"],
-            beta1=beta1, beta2=beta2, epsilon=epsilon)
+            beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay)
 
         def ref_sparse(param, mom1, mom2, indices, grad, LR, ITER):
             param_out = np.copy(param)
@@ -167,7 +175,7 @@ class TestAdam(hu.HypothesisTestCase):
                 param_out[index], mom1_out[index], mom2_out[index] = \
                     self.ref_adam(param[index], mom1[index], mom2[index],
                                   grad[i], LR, ITER,
-                                  beta1, beta2, epsilon)
+                                  beta1, beta2, epsilon, weight_decay)
             return (param_out, mom1_out, mom2_out)
 
         # Iter lives on the CPU
@@ -189,10 +197,12 @@ class TestAdam(hu.HypothesisTestCase):
                            allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
            **hu.gcs)
     def test_sparse_adam_output_grad(self, inputs, ITER, LR, beta1, beta2, epsilon,
-                         data_strategy, gc, dc):
+                         weight_decay, data_strategy, gc, dc):
         param, mom1, mom2, grad = inputs
         mom2 = np.absolute(mom2)
         ITER = np.array([ITER], dtype=np.int64)
@@ -222,7 +232,7 @@ class TestAdam(hu.HypothesisTestCase):
             "SparseAdam",
             ["param", "mom1", "mom2", "indices", "grad", "lr", "iter"],
             ["param", "mom1", "mom2", "output_grad"],
-            beta1=beta1, beta2=beta2, epsilon=epsilon)
+            beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay)
 
         def ref_sparse_output_grad(param, mom1, mom2, indices, grad, LR, ITER,
                                 beta1, beta2, epsilon, output_grad):
@@ -235,7 +245,7 @@ class TestAdam(hu.HypothesisTestCase):
                 param_out[index], mom1_out[index], mom2_out[index], grad_out[i] = \
                     self.ref_adam(param[index], mom1[index], mom2[index],
                                   grad[i], LR, ITER,
-                                  beta1, beta2, epsilon, output_grad)
+                                  beta1, beta2, epsilon, weight_decay, output_grad)
             return (param_out, mom1_out, mom2_out, grad_out)
 
         # Iter lives on the CPU
@@ -259,10 +269,12 @@ class TestAdam(hu.HypothesisTestCase):
                            allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
                **hu.gcs_cpu_only)
     def test_row_wise_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
-                                  data_strategy, gc, dc):
+                                  weight_decay, data_strategy, gc, dc):
         param, mom1, grad = inputs
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
@@ -303,7 +315,7 @@ class TestAdam(hu.HypothesisTestCase):
             "RowWiseSparseAdam",
             ["param", "mom1", "mom2", "indices", "grad", "lr", "iter"],
             ["param", "mom1", "mom2"],
-            beta1=beta1, beta2=beta2, epsilon=epsilon)
+            beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay)
 
         def ref_row_wise_sparse(param, mom1, mom2, indices, grad, LR, ITER):
             param_out = np.copy(param)
@@ -313,7 +325,7 @@ class TestAdam(hu.HypothesisTestCase):
                 param_out[index], mom1_out[index], mom2_out[index] = \
                     self.ref_row_wise_adam(param[index], mom1[index], mom2[index],
                                            grad[i], LR, ITER,
-                                           beta1, beta2, epsilon)
+                                           beta1, beta2, epsilon, weight_decay)
             return (param_out, mom1_out, mom2_out)
 
         # Iter lives on the CPU
@@ -335,10 +347,12 @@ class TestAdam(hu.HypothesisTestCase):
                            allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
                **hu.gcs_cpu_only)
     def test_row_wise_sparse_adam_output_grad(self, inputs, ITER, LR, beta1, beta2,
-                                  epsilon, data_strategy, gc, dc):
+                                  epsilon, weight_decay, data_strategy, gc, dc):
         param, mom1, grad = inputs
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
@@ -379,7 +393,7 @@ class TestAdam(hu.HypothesisTestCase):
             "RowWiseSparseAdam",
             ["param", "mom1", "mom2", "indices", "grad", "lr", "iter"],
             ["param", "mom1", "mom2", "output_grad"],
-            beta1=beta1, beta2=beta2, epsilon=epsilon)
+            beta1=beta1, beta2=beta2, epsilon=epsilon, weight_decay=weight_decay)
 
         def ref_row_wise_sparse_output_grad(param, mom1, mom2, indices, grad, LR, ITER,
                                         beta1, beta2, epsilon, output_grad):
@@ -391,8 +405,8 @@ class TestAdam(hu.HypothesisTestCase):
             for i, index in enumerate(indices):
                 param_out[index], mom1_out[index], mom2_out[index], grad_out[i] = \
                     self.ref_row_wise_adam(param[index], mom1[index], mom2[index],
-                                           grad[i], LR, ITER,
-                                           beta1, beta2, epsilon, output_grad)
+                                           grad[i], LR, ITER, beta1, beta2,
+                                           epsilon, weight_decay, output_grad)
             return (param_out, mom1_out, mom2_out, grad_out)
 
         # Iter lives on the CPU

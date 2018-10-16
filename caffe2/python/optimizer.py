@@ -511,7 +511,8 @@ class AdagradOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, decay=1, policy="fixed",
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
                  lars=None, output_effective_lr=False,
-                 output_effective_lr_and_update=False, **kwargs):
+                 output_effective_lr_and_update=False,
+                 weight_decay=1.0, **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -523,6 +524,7 @@ class AdagradOptimizer(Optimizer):
         self.lars = lars
         self.output_effective_lr = output_effective_lr
         self.output_effective_lr_and_update = output_effective_lr_and_update
+        self.weight_decay = weight_decay
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -624,6 +626,7 @@ class AdagradOptimizer(Optimizer):
                 [param, param_squared_sum],
                 epsilon=self.epsilon,
                 engine=self.engine,
+                weight_decay=self.weight_decay
             )
         else:
             output_args = [param, param_squared_sum]
@@ -638,7 +641,8 @@ class AdagradOptimizer(Optimizer):
                 output_args,
                 epsilon=self.epsilon,
                 decay=float(self.decay),
-                engine=self.engine
+                engine=self.engine,
+                weight_decay=self.weight_decay
             )
 
     def scale_learning_rate(self, scale):
@@ -903,7 +907,7 @@ class AdamOptimizer(Optimizer):
     def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8,
                  policy='fixed', use_lr_adaption=False, lr_alpha=0.01,
                  normalized_lr_adaption=True, sparse_dedup_aggregator=None,
-                 rowWise=False, engine='', **kwargs):
+                 rowWise=False, engine='', weight_decay=1.0, **kwargs):
         super(AdamOptimizer, self).__init__()
         self.alpha = alpha
         self.beta1 = beta1
@@ -916,6 +920,7 @@ class AdamOptimizer(Optimizer):
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.rowWise = rowWise
         self.engine = engine
+        self.weight_decay = weight_decay
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -980,21 +985,22 @@ class AdamOptimizer(Optimizer):
                 output_blobs,
                 beta1=self.beta1,
                 beta2=self.beta2,
-                epsilon=self.epsilon)
+                epsilon=self.epsilon,
+                weight_decay=self.weight_decay)
             if self.use_lr_adaption:
                 net.LearningRateAdaption(
                     [lr, grad.values, effective_grad],
                     [lr],
                     lr_alpha=self.lr_alpha,
                     normalized_lr_adaption=self.normalized_lr_adaption)
-
         else:
             net.Adam(
                 [param, m1, m2, grad, lr, iteration],
                 output_blobs,
                 beta1=self.beta1,
                 beta2=self.beta2,
-                epsilon=self.epsilon)
+                epsilon=self.epsilon,
+                weight_decay=self.weight_decay)
             if self.use_lr_adaption:
                 net.LearningRateAdaption(
                     [lr, grad, effective_grad],

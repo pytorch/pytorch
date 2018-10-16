@@ -1,7 +1,7 @@
 #include <cub/block/block_reduce.cuh>
-#include "caffe2/sgd/adagrad_op.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/sgd/adagrad_op.h"
 
 namespace caffe2 {
 
@@ -14,11 +14,12 @@ __global__ void AdagradUpdate(
     float* nh,
     float epsilon,
     float decay,
+    float weight_decay,
     const float* lr) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     float gi = g[i];
     float hi = nh[i] = decay * h[i] + gi * gi;
-    nw[i] = w[i] + lr[0] * gi / (sqrtf(hi) + epsilon);
+    nw[i] = weight_decay * w[i] + lr[0] * gi / (sqrtf(hi) + epsilon);
   }
 }
 
@@ -32,13 +33,15 @@ void adagrad_update<CUDAContext>(
     float* nh,
     float epsilon,
     float decay,
+    float weight_decay,
     const float* lr,
     CUDAContext* context) {
   AdagradUpdate<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context->cuda_stream()>>>(N, w, g, h, nw, nh, epsilon, decay, lr);
+      context->cuda_stream()>>>(
+      N, w, g, h, nw, nh, epsilon, decay, weight_decay, lr);
 }
 
 template <typename SIndex, typename THalf>
@@ -52,8 +55,7 @@ __global__ void SparseAdagradKernel(
     const float* grad,
     const float* lr) {
   const float LR = lr[0];
-  CUDA_1D_KERNEL_LOOP(i, N)
-  {
+  CUDA_1D_KERNEL_LOOP(i, N) {
     const size_t gradIdx = i;
     const SIndex index = indices[i / grad_slice_sz];
     const size_t paramIdx = index * grad_slice_sz + (i % grad_slice_sz);
@@ -217,4 +219,4 @@ REGISTER_CUDA_OPERATOR(SparseAdagrad, CUDASparseAdagradOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     RowWiseSparseAdagrad,
     RowWiseSparseAdagradOp<float, CUDAContext>);
-}
+} // namespace caffe2

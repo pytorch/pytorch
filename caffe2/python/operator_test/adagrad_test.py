@@ -24,10 +24,10 @@ import os
 
 class TestAdagrad(serial.SerializedTestCase):
     @staticmethod
-    def ref_row_wise_adagrad(param_in, mom_in, grad, lr, epsilon):
+    def ref_row_wise_adagrad(param_in, mom_in, grad, lr, epsilon, weight_decay):
         mom_out = mom_in + np.mean(np.square(grad))
         grad_adj = lr * grad / (np.sqrt(mom_out) + epsilon)
-        param_out = param_in + grad_adj
+        param_out = weight_decay * param_in + grad_adj
         return (param_out, mom_out)
 
     @serial.given(inputs=hu.tensors(n=3),
@@ -35,8 +35,10 @@ class TestAdagrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            **hu.gcs)
-    def test_adagrad(self, inputs, lr, epsilon, gc, dc):
+    def test_adagrad(self, inputs, lr, epsilon, weight_decay, gc, dc):
         param, momentum, grad = inputs
         lr = np.array([lr], dtype=np.float32)
 
@@ -45,21 +47,25 @@ class TestAdagrad(serial.SerializedTestCase):
             ["param", "momentum", "grad", "lr"],
             ["param", "momentum"],
             epsilon=epsilon,
+            weight_decay=weight_decay,
             device_option=gc,
         )
 
         self.assertReferenceChecks(
             gc, op,
             [param, momentum, grad, lr],
-            functools.partial(ref_adagrad, epsilon=epsilon))
+            functools.partial(ref_adagrad, epsilon=epsilon, weight_decay=weight_decay))
 
     @given(inputs=hu.tensors(n=3),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
-    def test_adagrad_output_effective_lr(self, inputs, lr, epsilon, gc, dc):
+    def test_adagrad_output_effective_lr(self, inputs, lr, epsilon,
+                                            weight_decay, gc, dc):
         param, momentum, grad = inputs
         lr = np.array([lr], dtype=np.float32)
 
@@ -68,6 +74,7 @@ class TestAdagrad(serial.SerializedTestCase):
             ["param", "momentum", "grad", "lr"],
             ["param", "momentum", "effective_lr"],
             epsilon=epsilon,
+            weight_decay=weight_decay,
             device_option=gc,
         )
 
@@ -75,16 +82,18 @@ class TestAdagrad(serial.SerializedTestCase):
             gc, op,
             [param, momentum, grad, lr],
             functools.partial(ref_adagrad, epsilon=epsilon,
-                              output_effective_lr=True))
+                              weight_decay=weight_decay, output_effective_lr=True))
 
     @given(inputs=hu.tensors(n=3),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
     def test_adagrad_output_effective_lr_and_update(
-            self, inputs, lr, epsilon, gc, dc):
+            self, inputs, lr, epsilon, weight_decay, gc, dc):
         param, momentum, grad = inputs
         lr = np.array([lr], dtype=np.float32)
 
@@ -93,13 +102,14 @@ class TestAdagrad(serial.SerializedTestCase):
             ["param", "momentum", "grad", "lr"],
             ["param", "momentum", "effective_lr", "update"],
             epsilon=epsilon,
+            weight_decay=weight_decay,
             device_option=gc,
         )
 
         self.assertReferenceChecks(
             gc, op,
             [param, momentum, grad, lr],
-            functools.partial(ref_adagrad, epsilon=epsilon,
+            functools.partial(ref_adagrad, epsilon=epsilon, weight_decay=weight_decay,
                               output_effective_lr_and_update=True))
 
     # Suppress filter_too_much health check.
@@ -110,9 +120,11 @@ class TestAdagrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            **hu.gcs)
-    def test_sparse_adagrad(self, inputs, lr, epsilon, gc, dc):
-        return adagrad_sparse_test_helper(self, inputs, lr, epsilon,
+    def test_sparse_adagrad(self, inputs, lr, epsilon, weight_decay, gc, dc):
+        return adagrad_sparse_test_helper(self, inputs, lr, epsilon, weight_decay,
             None, ref_adagrad, gc, dc)
 
     @serial.given(inputs=hu.tensors(n=2),
@@ -120,9 +132,11 @@ class TestAdagrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
            **hu.gcs)
-    def test_sparse_adagrad_empty(self, inputs, lr, epsilon,
+    def test_sparse_adagrad_empty(self, inputs, lr, epsilon, weight_decay,
                                   data_strategy, gc, dc):
         param, momentum = inputs
         momentum = np.abs(momentum)
@@ -138,6 +152,7 @@ class TestAdagrad(serial.SerializedTestCase):
             ["param", "momentum", "indices", "grad", "lr"],
             ["param", "momentum"],
             epsilon=epsilon,
+            weight_decay=weight_decay,
             device_option=gc)
 
         def ref_sparse(param, momentum, indices, grad, lr):
@@ -172,9 +187,11 @@ class TestAdagrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
            **hu.gcs)
-    def test_row_wise_sparse_adagrad(self, inputs, lr, epsilon,
+    def test_row_wise_sparse_adagrad(self, inputs, lr, epsilon, weight_decay,
                                      data_strategy, gc, dc):
         param, grad = inputs
         lr = np.array([lr], dtype=np.float32)
@@ -211,6 +228,7 @@ class TestAdagrad(serial.SerializedTestCase):
             ["param", "momentum", "indices", "grad", "lr"],
             ["param", "momentum"],
             epsilon=epsilon,
+            weight_decay=weight_decay,
             device_option=gc)
 
         def ref_row_wise_sparse(param, momentum, indices, grad, lr):
@@ -218,7 +236,7 @@ class TestAdagrad(serial.SerializedTestCase):
             momentum_out = np.copy(momentum)
             for i, index in enumerate(indices):
                 param_out[index], momentum_out[index] = self.ref_row_wise_adagrad(
-                    param[index], momentum[index], grad[i], lr, epsilon)
+                    param[index], momentum[index], grad[i], lr, epsilon, weight_decay)
             return (param_out, momentum_out)
 
         self.assertReferenceChecks(
@@ -231,9 +249,11 @@ class TestAdagrad(serial.SerializedTestCase):
                         allow_nan=False, allow_infinity=False),
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
+           weight_decay=st.floats(min_value=0.01, max_value=0.99,
+                        allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
            **hu.gcs)
-    def test_row_wise_sparse_adagrad_empty(self, inputs, lr, epsilon,
+    def test_row_wise_sparse_adagrad_empty(self, inputs, lr, epsilon, weight_decay,
                                            data_strategy, gc, dc):
         param = inputs[0]
         lr = np.array([lr], dtype=np.float32)
@@ -254,6 +274,7 @@ class TestAdagrad(serial.SerializedTestCase):
             ["param", "momentum", "indices", "grad", "lr"],
             ["param", "momentum"],
             epsilon=epsilon,
+            weight_decay=weight_decay,
             device_option=gc)
 
         def ref_row_wise_sparse(param, momentum, indices, grad, lr):

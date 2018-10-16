@@ -11,7 +11,7 @@ from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 
 
-def ref_adagrad(param_in, mom_in, grad, lr, epsilon, using_fp16=False,
+def ref_adagrad(param_in, mom_in, grad, lr, epsilon, weight_decay, using_fp16=False,
                 output_effective_lr=False,
                 output_effective_lr_and_update=False):
     mom_in_f32 = mom_in
@@ -23,7 +23,7 @@ def ref_adagrad(param_in, mom_in, grad, lr, epsilon, using_fp16=False,
     mom_out = mom_in_f32 + np.square(grad)
     effective_lr = lr / (np.sqrt(mom_out) + epsilon)
     grad_adj = effective_lr * grad
-    param_out = param_in_f32 + grad_adj
+    param_out = weight_decay * param_in_f32 + grad_adj
 
     if output_effective_lr_and_update:
         if(using_fp16):
@@ -48,7 +48,7 @@ def ref_adagrad(param_in, mom_in, grad, lr, epsilon, using_fp16=False,
         return (param_out.astype(np.float32), mom_out.astype(np.float32))
 
 
-def adagrad_sparse_test_helper(parent_test, inputs, lr, epsilon,
+def adagrad_sparse_test_helper(parent_test, inputs, lr, epsilon, weight_decay,
      engine, ref_adagrad, gc, dc):
     param, momentum, grad = inputs
     momentum = np.abs(momentum)
@@ -67,6 +67,7 @@ def adagrad_sparse_test_helper(parent_test, inputs, lr, epsilon,
         ["param", "momentum", "indices", "grad", "lr"],
         ["param", "momentum"],
         epsilon=epsilon,
+        weight_decay=weight_decay,
         engine=engine,
         device_option=gc)
 
@@ -80,6 +81,7 @@ def adagrad_sparse_test_helper(parent_test, inputs, lr, epsilon,
                 grad[i],
                 lr,
                 epsilon,
+                weight_decay,
                 using_fp16=ref_using_fp16
             )
         return (param_out, momentum_out)

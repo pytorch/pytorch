@@ -20,7 +20,7 @@ input gradient and momentum parameters. Concretely, given inputs
     m2_o = (beta2 * m2) + (1 - beta2) * np.square(grad)
     grad_o = correction_multiplier * m1_o / \
         (sqrt(m2_o) + epsilon)
-    param_o = param + lr * grad_o
+    param_o = weight_decay * param + lr * grad_o
 
 and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
 
@@ -37,7 +37,8 @@ and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
     .Output(3, "output_grad", "Optional Effective gradient")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
-    .Arg("epsilon", "Default 1e-5");
+    .Arg("epsilon", "Default 1e-5")
+    .Arg("weight_decay", "in (0, 1], Default 1, meaning no weight decay");
 
 REGISTER_CPU_OPERATOR(SparseAdam, SparseAdamOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseAdam)
@@ -65,7 +66,8 @@ OPERATOR_SCHEMA(SparseAdam)
     .Output(3, "output_grad", "Optional Effective gradient")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
-    .Arg("epsilon", "Default 1e-5");
+    .Arg("epsilon", "Default 1e-5")
+    .Arg("weight_decay", "in (0, 1], Default 1, meaning no weight decay");
 
 REGISTER_CPU_OPERATOR(
     RowWiseSparseAdam,
@@ -99,7 +101,8 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
     .Output(3, "output_grad", "Optional Effective gradient")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
-    .Arg("epsilon", "Default 1e-5");
+    .Arg("epsilon", "Default 1e-5")
+    .Arg("weight_decay", "in (0, 1], Default 1, meaning no weight decay");
 
 SHOULD_NOT_DO_GRADIENT(Adam);
 SHOULD_NOT_DO_GRADIENT(SparseAdam);
