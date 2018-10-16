@@ -203,26 +203,36 @@ namespace detail {
  *    when passing tensors across language boundaries.
  *
  *  - For backwards-compatibility reasons, a tensor may be in an
- *    uninitialized state.  The following uninitialized states are valid:
+ *    uninitialized state.  A tensor may be uninitialized in the following
+ *    two ways:
  *
- *      - A tensor may be STORAGE AND DTYPE UNINITIALIZED.  A tensor of this
- *        form has an uninitialized dtype, and has an "uninitialized storage"
- *        (e.g., a storage whose data pointer is null).  This situation most
+ *      - A tensor may be DTYPE UNINITIALIZED.  A tensor of this
+ *        form has an uninitialized dtype.  This situation most
  *        frequently arises when a user writes Tensor x(CPU).  The dtype and
- *        storage is subsequently initialized when mutable_data<T>() is
+ *        is subsequently initialized when mutable_data<T>() is
  *        invoked for the first time.
  *
  *      - A tensor may be STORAGE UNINITIALIZED.  A tensor of this form
- *        has a valid dtype, but has a storage with a null pointer.  This
- *        situation most frequently arises when a user calls FreeMemory().
- *        The current use-case for this situation is to use a tensor
- *        to "remember" what the size and dtype of a tensor are, without
- *        retaining the memory.
+ *        has non-zero size, but has a storage with a null data pointer.
+ *        This situation most frequently arises when a user calls
+ *        Resize() or FreeMemory().  This is because Caffe2 historically
+ *        does lazy allocation: allocation of data doesn't occur until
+ *        mutable_data<T>() is invoked.  A tensor with zero size is
+ *        always storage initialized, because no allocation is necessary
+ *        in this case.
+ *
+ *    All combinations of these two uninitialized states are possible.
+ *    Consider the following transcript in idiomatic Caffe2 API:
+ *
+ *      Tensor x(CPU); // x is storage-initialized, dtype-UNINITIALIZED
+ *      x.Resize(4); // x is storage-UNINITIALIZED, dtype-UNINITIALIZED
+ *      x.mutable_data<float>(); // x is storage-initialized, dtype-initialized
+ *      x.FreeMemory(); // x is storage-UNINITIALIZED, dtype-initialized.
  *
  *    All other fields on tensor are always initialized.  In particular,
  *    size is always valid. (Historically, a tensor declared as Tensor x(CPU)
  *    also had uninitialized size, encoded as numel == -1, but we have now
- *    decided to default size to an empty list, resulting in numel == 1).
+ *    decided to default to zero size, resulting in numel == 0).
  *
  *    Uninitialized storages MUST be uniquely owned, to keep our model
  *    simple.  Thus, we will reject operations which could cause an
@@ -517,20 +527,14 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       // If the dtype changed, we need to reallocate storage.
       if (data_type_ != src.dtype()) {
         // NB: copy preserves device_type
+        // This storage will get initialized by the mutable_data call below.
         storage_ = at::Storage(device_type(), src.dtype());
       }
     }
     data_type_ = src.dtype();
     Resize(src.sizes());
 
-    if (src.storage_initialized() && numel() > 0) {
-
-      // Only do an actual data copy if we actually have an initialized storage
-      // to copy from (NB: we have !storage_initialized() at this point if
-      // data_type_ != src.dtype() but src.storage_initialized(), since
-      // we're waiting for the raw_mutable_data call to actually initialize
-      // the storage)
-
+    if (numel() > 0) {
       if (data_type_.copy()) {
         AT_ASSERTM(
             device_type() == ::at::DeviceType::CPU,
