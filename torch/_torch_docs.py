@@ -5197,8 +5197,7 @@ Args:
 
 Example::
 
-    >>> input = torch.empty((2,3), dtype=torch.int64)
-    >>> input.new(input.size())
+    >>> torch.empty((2,3), dtype=torch.int64)
     tensor([[ 9.4064e+13,  2.8000e+01,  9.3493e+13],
             [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
 """.format(**factory_like_common_args))
