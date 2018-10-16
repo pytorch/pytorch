@@ -1472,7 +1472,7 @@ Args:
 
 Example::
 
-    >>> torch.exp(torch.tensor([0, math.log(2)]))
+    >>> torch.exp(torch.tensor([0, math.log(2.)]))
     tensor([ 1.,  2.])
 """)
 
@@ -1496,7 +1496,7 @@ Args:
 
 Example::
 
-    >>> torch.expm1(torch.tensor([0, math.log(2)]))
+    >>> torch.expm1(torch.tensor([0, math.log(2.)]))
     tensor([ 0.,  1.])
 """)
 
@@ -4211,36 +4211,39 @@ Args:
 
 Example::
 
-    >>> i = torch.LongTensor([[0, 1, 1],
-                              [2, 0, 2]])
-    >>> v = torch.FloatTensor([3, 4, 5])
+    >>> i = torch.tensor([[0, 1, 1],
+                          [2, 0, 2]], dtype=torch.long)
+    >>> v = torch.tensor([3, 4, 5], dtype=torch.float)
     >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]))
-    torch.sparse.FloatTensor of size (2,4) with indices:
-    tensor([[ 0,  1,  1],
-            [ 2,  0,  2]])
-    and values:
-    tensor([ 3.,  4.,  5.])
-
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([3., 4., 5.]),
+           size=(2, 4), nnz=3, layout=torch.sparse_coo)
     >>> torch.sparse_coo_tensor(i, v)  # Shape inference
-    torch.sparse.FloatTensor of size (2,3) with indices:
-    tensor([[ 0,  1,  1],
-            [ 2,  0,  2]])
-    and values:
-    tensor([ 3.,  4.,  5.])
+
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([3., 4., 5.]),
+           size=(2, 3), nnz=3, layout=torch.sparse_coo)
 
     >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]), dtype=torch.float64,
                                 device=torch.device('cuda:0'))
-    torch.cuda.sparse.DoubleTensor of size (2,4) with indices:
-    tensor([[ 0,  1,  1],
-            [ 2,  0,  2]], device='cuda:0')
-    and values:
-    tensor([ 3.,  4.,  5.], dtype=torch.float64, device='cuda:0')
+    tensor(indices=tensor([[0, 1, 1],
+                           [2, 0, 2]]),
+           values=tensor([3., 4., 5.]),
+           device='cuda:0', size=(2, 4), nnz=3, dtype=torch.float64,
+           layout=torch.sparse_coo)
 
-    >>> torch.sparse_coo_tensor([], [], torch.Size([])) # Create an empty tensor (of size (0,))
-    torch.sparse.FloatTensor of size () with indices:
-    tensor([], dtype=torch.int64)
-    and values:
-    tensor([])
+    >>> torch.sparse_coo_tensor(torch.empty(1,0), [], torch.Size([0]))  # Create an empty tensor (of size (0,))
+    tensor(indices=tensor([], size=(1, 0)),
+           values=tensor([], size=(0,)),
+           size=(0,), nnz=0, layout=torch.sparse_coo)
+
+    >>> torch.sparse_coo_tensor(torch.zeros(0, 1), 11.7, []))  # Create a scalar sparse Tensor
+    tensor(indices=tensor([], size=(0, 1)),
+           values=tensor([11.7000]),
+           size=(), nnz=1, layout=torch.sparse_coo)
+
 
 .. _torch.sparse: https://pytorch.org/docs/stable/sparse.html
 """)
