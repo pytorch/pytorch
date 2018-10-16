@@ -19,14 +19,7 @@ class ResizeNearestOp final : public Operator<Context> {
       height_scale_ = static_cast<T>(
           this->template GetSingleArgument<float>("height_scale", 1));
     }
-    if (InputSize() == 2) {
-      const auto& scales = Input(1);
-      CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-      CAFFE_ENFORCE_EQ(scales.size(), 4);
-      const float* scales_data = scales.template data<float>();
-      height_scale_ = scales_data[2];
-      width_scale_ = scales_data[3];
-    }
+
     CAFFE_ENFORCE_GT(width_scale_, 0);
     CAFFE_ENFORCE_GT(height_scale_, 0);
   }
@@ -48,14 +41,7 @@ class ResizeNearestGradientOp final : public Operator<Context> {
         this->template GetSingleArgument<float>("width_scale", 1));
     height_scale_ = static_cast<T>(
         this->template GetSingleArgument<float>("height_scale", 1));
-    if (InputSize() == 3) {
-      const auto& scales = Input(2);
-      CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-      CAFFE_ENFORCE_EQ(scales.size(), 4);
-      const float* scales_data = scales.template data<float>();
-      height_scale_ = scales_data[2];
-      width_scale_ = scales_data[3];
-    }
+
     CAFFE_ENFORCE_GT(width_scale_, 0);
     CAFFE_ENFORCE_GT(height_scale_, 0);
   }

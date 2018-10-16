@@ -62,6 +62,15 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
             num_channels = X.dim32(1),
             input_height = X.dim32(2),
             input_width = X.dim32(3);
+  if (InputSize() == 2) {
+    const auto& scales = Input(1);
+    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
+    CAFFE_ENFORCE_EQ(scales.size(), 4);
+    const float* scales_data = scales.data<float>();
+    height_scale_ = scales_data[2];
+    width_scale_ = scales_data[3];
+  }
+
   int output_width = input_width * width_scale_;
   int output_height = input_height * height_scale_;
   Y->Resize(batch_size, num_channels, output_height, output_width);
@@ -107,6 +116,14 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
             input_width = dY.dim32(3);
   const int output_height = X.dim32(2);
   const int output_width = X.dim32(3);
+  if (InputSize() == 3) {
+    const auto& scales = Input(2);
+    CAFFE_ENFORCE_EQ(scales.ndim(), 1);
+    CAFFE_ENFORCE_EQ(scales.size(), 4);
+    const float* scales_data = scales.data<float>();
+    height_scale_ = scales_data[2];
+    width_scale_ = scales_data[3];
+  }
   dX->Resize(batch_size, num_channels, output_height, output_width);
   math::Set<float, CPUContext>(
       dX->size(), 0.0f, dX->template mutable_data<float>(), &context_);
