@@ -278,7 +278,6 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   }
 
   at::Device device() const override {
-    // cache?
     return at::Device(CUDA, gpu_id_);
   }
 
