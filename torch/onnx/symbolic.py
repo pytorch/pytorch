@@ -630,7 +630,7 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
     width_scale = float(output_size[-1]) / input.type().sizes()[-1]
     return g.op("Upsample", input,
                 scales_f=[1., 1., height_scale, width_scale],
-                mode_s="bilinear")
+                mode_s="linear")
 
 
 def gt(g, input, other):
