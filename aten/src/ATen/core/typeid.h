@@ -267,20 +267,13 @@ inline void _PlacementDelete(void* ptr, size_t n) {
   }
 }
 
-template<
-    typename T,
-    c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
-    >
+template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return nullptr;
-}
-
-template<
-    typename T,
-    c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr
-    >
-inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  return &_PlacementDelete<T>;
+  if (std::is_fundamental<T>::value || std::is_pointer<T>::value) {
+    return nullptr;
+  } else {
+    return &_PlacementDelete<T>;
+  }
 }
 
 template <typename T>
