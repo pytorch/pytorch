@@ -526,6 +526,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       // to preserve the unique storage invariant.
       if (data_type_ != src.dtype() || !src.storage_initialized()) {
         // NB: copy preserves device_type
+        // This storage will get initialized by the mutable_data call below.
         storage_ = at::Storage(device_type(), src.dtype());
       }
     }
