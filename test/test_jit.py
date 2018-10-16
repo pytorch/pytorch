@@ -7423,7 +7423,7 @@ a")
         traced = torch.jit.trace(foo, (x,))
         self.assertExpectedGraph(traced.graph)
 
-    def test_weak_script_module(self):
+    def test_weak_module(self):
 
         @torch.jit.weak_module
         class Weak(torch.nn.Module):
@@ -7500,7 +7500,7 @@ a")
         self.assertEqual(script_result, script_result2)
         self.assertExpectedGraph(strong_mod.graph, "scope_test")
 
-    def test_weak_script_module_parameters(self):
+    def test_weak_module_parameters_and_buffers(self):
         import math
         weights = torch.randn(10, 10)
         bias = torch.randn(10)
@@ -7515,6 +7515,7 @@ a")
                 self.out_features = out_features
                 self.weight = torch.nn.Parameter(torch.Tensor(out_features, in_features))
                 self.bias = torch.nn.Parameter(torch.Tensor(out_features))
+                self.register_buffer('counter', torch.ones(out_features))
                 self.reset_parameters()
 
             def reset_parameters(self):
@@ -7526,7 +7527,7 @@ a")
 
             @torch.jit.weak_script_method
             def forward(self, input):
-                return F.linear(input, self.weight, self.bias)
+                return F.linear(input, self.weight, self.bias) + self.counter
 
         # Initialize a ScriptModule that uses the weak module above multiple times
         class Strong(torch.jit.ScriptModule):
@@ -7554,7 +7555,7 @@ a")
         lin2 = torch.nn.Linear(10, 10)
         lin2.weight = torch.nn.Parameter(weights2)
         lin2.bias = torch.nn.Parameter(bias2)
-        expected_result = inp + lin(inp) * 2 + lin2(inp)
+        expected_result = inp + (lin(inp) + torch.ones(10)) * 2 + lin2(inp) + torch.ones(10)
 
         self.assertEqual(s(inp), expected_result)
 
@@ -7573,7 +7574,7 @@ a")
 
             @torch.jit.weak_script_method
             def forward(self, x):
-                return F.linear(x, self.weight, self.bias)
+                return x * x
 
         class OtherStrong(torch.jit.ScriptModule):
             __constants__ = ['constant']
@@ -7598,7 +7599,7 @@ a")
 
             @torch.jit.weak_script_method
             def forward(self, x):
-                return F.linear(x, self.weight, self.bias) + self.weak_submodule(x) + self.strong_submodule(x)
+                return x + self.weak_submodule(x) + self.strong_submodule(x)
 
         class Strong(torch.jit.ScriptModule):
             __constants__ = ['constant']
@@ -7613,8 +7614,11 @@ a")
 
         mod = Strong()
         self.assertExpectedGraph(mod.graph)
-        result = mod(torch.randn(10))
-        print(result)
+        inp = torch.randn(10)
+        result = mod(inp)
+        expected_result = inp + (inp + inp * inp + inp + 27)
+        self.assertEqual(result, expected_result)
+
 
 class MnistNet(nn.Module):
     def __init__(self):

@@ -1128,8 +1128,8 @@ if _enabled:
                 item = getattr(original, name)
                 if isinstance(item, Parameter) or (isinstance(item, Module) and item is not self):
                     ScriptModule.__setattr__(self, name, item)
-            for (name, buffer) in original.buffers():
-                ScriptModule.__setattr__(self, name, buffer)
+            for name in original._buffers:
+                self.register_buffer(name, original._buffers[name])
 
             self.__dict__['_initialized'] = True
             _create_methods_from_stubs(self, methods)
