@@ -232,6 +232,7 @@ _(aten, cauchy) \
 _(aten, ceil) \
 _(aten, celu) \
 _(aten, chain_matmul) \
+_(aten, cholesky) \
 _(aten, chunk) \
 _(aten, clamp) \
 _(aten, clamp_max) \
@@ -505,7 +506,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
-_(aten, potrf) \
 _(aten, potri) \
 _(aten, potrs) \
 _(aten, pow) \

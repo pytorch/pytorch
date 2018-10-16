@@ -180,6 +180,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ceil
    .. automethod:: ceil_
    .. automethod:: char
+   .. automethod:: cholesky
    .. automethod:: chunk
    .. automethod:: clamp
    .. automethod:: clamp_
