@@ -74,10 +74,13 @@ def _test_binary(name, ref, filter_=None, gcs=hu.gcs,
                 elements=hu.elements_of_type(dtype, filter_=filter_))),
         out=st.sampled_from(('Y', 'X1', 'X2') if allow_inplace else ('Y',)),
         **gcs)
-    @settings(max_examples=3, timeout=100)
+    @settings(max_examples=3, deadline=1500)
     def test_binary(self, inputs, out, gc, dc):
         op = core.CreateOperator(name, ["X1", "X2"], [out])
         X1, X2 = inputs
+        if (X1.dtype == np.dtype('float64') or X2.dtype == np.dtype('float64')) \
+                and gc.device_type == 1:
+            return
         self.assertDeviceChecks(dc, op, [X1, X2], [0])
         # We only do gradient check with float32 types.
         if test_gradient and X1.dtype == np.float32:
@@ -95,11 +98,14 @@ def _test_binary_broadcast(name, ref, filter_=None,
             elements=hu.elements_of_type(dtype, filter_=filter_))),
         in_place=(st.booleans() if allow_inplace else st.just(False)),
         **gcs)
-    @settings(max_examples=3, timeout=100)
+    @settings(max_examples=3, deadline=1000)
     def test_binary_broadcast(self, inputs, in_place, gc, dc):
         op = core.CreateOperator(
             name, ["X1", "X2"], ["X1" if in_place else "Y"], broadcast=1)
         X1, X2 = inputs
+        if (X1.dtype == np.dtype('float64') or X2.dtype == np.dtype('float64')) \
+                and gc.device_type == 1:
+            return
         self.assertDeviceChecks(dc, op, [X1, X2], [0])
 
         def cast_ref(x, y):
@@ -124,6 +130,7 @@ class TestOperators(hu.HypothesisTestCase):
             _test_binary_broadcast(name, ref, gcs=hu.gcs_cpu_only)(self)
 
     @given(inputs=hu.tensors(n=2), in_place=st.booleans(), **hu.gcs)
+    @settings(deadline=500)
     def test_sum(self, inputs, in_place, gc, dc):
         op = core.CreateOperator("Sum", ["X1", "X2"],
                                         ["Y" if not in_place else "X1"])
@@ -223,18 +230,21 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(X=hu.tensor(), **hu.gcs)
+    @settings(deadline=1000)
     def test_tanh(self, X, gc, dc):
         op = core.CreateOperator("Tanh", "X", "Y")
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(X=hu.tensor(), **hu.gcs)
+    @settings(deadline=5000)
     def test_averaged_loss(self, X, gc, dc):
         op = core.CreateOperator("AveragedLoss", ["X"], ["loss"])
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(X=hu.tensor(), inplace=st.booleans(), **hu.gcs)
+    @settings(deadline=5000)
     def test_softsign(self, X, inplace, gc, dc):
         op = core.CreateOperator("Softsign", ["X"], ["X" if inplace else "Y"])
 
@@ -331,6 +341,7 @@ class TestOperators(hu.HypothesisTestCase):
            T=st.integers(min_value=2, max_value=6),
            N=st.integers(min_value=1, max_value=4),
            D=st.integers(min_value=1, max_value=4))
+    @settings(deadline=5000)
     def test_recurrent(self, hidden_size, num_layers, bidirectional, rnn_mode,
                        input_mode, dropout, T, N, D):
         #there's a bug in miopen for N=1 which would be resolved in the next release.
@@ -400,6 +411,7 @@ class TestOperators(hu.HypothesisTestCase):
            axis=st.integers(0, 3),
            add_axis=st.integers(0, 1),
            num_inputs=st.integers(2, 4), **hu.gcs)
+    @settings(deadline=15000)
     def test_depth_concat(self, ndim, axis, add_axis, num_inputs, gc, dc):
         assume(axis < ndim)
         input_names = ['X0', 'X1', 'X2', 'X3'][:num_inputs]
@@ -431,6 +443,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(num_inputs=st.integers(2, 4),
            order=st.sampled_from([("NCHW", 1), ("NHWC", 3)]),
            **hu.gcs)
+    @settings(deadline=15000)
     def test_depth_concat_with_order(self, num_inputs, order, gc, dc):
         input_names = ['X0', 'X1', 'X2', 'X3'][:num_inputs]
         shape = [2, 3, 5, 7]
@@ -1084,6 +1097,7 @@ class TestOperators(hu.HypothesisTestCase):
         dims=[10], elements=st.floats(allow_nan=False,
                                       allow_infinity=False)),
            **hu.gcs)
+    @settings(deadline=None)  # Runs first, thus takes time.
     def test_abs(self, input_tensor, gc, dc):
         op = core.CreateOperator(
             "Abs",
@@ -1204,6 +1218,7 @@ class TestOperators(hu.HypothesisTestCase):
            capacity=st.integers(1, 5),
            num_blobs=st.integers(1, 3),
            do=st.sampled_from(hu.device_options))
+    @settings(deadline=1000)
     def test_blobs_queue_threading(self, num_threads, num_elements,
                                    capacity, num_blobs, do):
         """
@@ -1527,6 +1542,7 @@ class TestOperators(hu.HypothesisTestCase):
                ["simple", "dag"] +
                (["async_dag"] if workspace.has_gpu_support else [])),
            do=st.sampled_from(hu.device_options))
+    @settings(deadline=1000)
     def test_dag_net_forking(self, net_type, num_workers, do):
         from caffe2.python.model_helper import ModelHelper
         from caffe2.python import brew
@@ -1911,6 +1927,7 @@ class TestOperators(hu.HypothesisTestCase):
     @given(t=st.integers(1, 5),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
+    @settings(deadline=10000)
     def test_elman_recurrent_network(self, t, n, d):
         from caffe2.python import model_helper, brew
         np.random.seed(1701)
@@ -2025,7 +2042,7 @@ class TestOperators(hu.HypothesisTestCase):
                 param,
                 [0])
 
-    @settings(suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(deadline=5000, suppress_health_check=[HealthCheck.filter_too_much])
     @given(n=st.integers(1, 5),
            c=st.integers(1, 5),
            h=st.integers(1, 5),
@@ -2042,7 +2059,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
-    @settings(suppress_health_check=[HealthCheck.filter_too_much])
+    @settings(deadline=15000, suppress_health_check=[HealthCheck.filter_too_much])
     @given(n=st.integers(1, 5),
            c=st.integers(1, 5),
            h=st.integers(1, 5),
@@ -2090,6 +2107,7 @@ class TestOperators(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            mode=st.sampled_from(["constant", "reflect", "edge"]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_same_pad_image(self, pad, size, input_channels, batch_size, order,
                             mode, gc, dc):
         assume(size > pad)
@@ -2132,6 +2150,7 @@ class TestOperators(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            mode=st.sampled_from(["constant", "reflect", "edge"]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_pad_image(self, pad_t, pad_l, pad_b, pad_r, size, input_channels,
                        batch_size, order, mode, gc, dc):
         assume(size > max(pad_b, pad_r, pad_t, pad_l))
@@ -2229,7 +2248,8 @@ class TestOperators(hu.HypothesisTestCase):
     def test_unsafe_coalesce(self, sizes, in_place, gc, dc):
         gAlignment = 64
         Xs = [np.random.randn(size)
-              .astype(np.random.choice([np.float32, np.float64, np.uint8]))
+              .astype(np.random.choice([np.float32, np.float64, np.uint8] \
+                  if gc.device_type != 1 else [np.float32, np.uint8]))
               for size in sizes]
         op = core.CreateOperator(
             "UnsafeCoalesce",
@@ -2246,7 +2266,7 @@ class TestOperators(hu.HypothesisTestCase):
                     shape=(x_aligned_bytes // x.dtype.itemsize, ),
                     dtype=x.dtype)
                 x_aligned[:x.size] = x
-                x_cast = np.fromstring(x_aligned.tobytes(), dtype='<u1')
+                x_cast = np.frombuffer(x_aligned.tobytes(), dtype='<u1')
                 return x_cast
             flat = [to_uint8(x) for x in xs]
             coalesced = np.concatenate(flat)
@@ -2282,8 +2302,12 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [I, X, D], 1, [0])
 
     @given(inputs=hu.tensors(n=2, min_dim=2, max_dim=2), **hu.gcs_cpu_only)
+    @settings(deadline=5000)
     def test_dot_product(self, inputs, gc, dc):
         X, Y = inputs
+        if (X.dtype == np.dtype('float64') or Y.dtype == np.dtype('float64')) \
+                and gc.device_type == 1:
+            return
         op = core.CreateOperator("DotProduct", ["X", "Y"], 'out')
 
         def dotproduct(X, Y):
@@ -2299,6 +2323,7 @@ class TestOperators(hu.HypothesisTestCase):
            K=st.integers(min_value=2, max_value=10),
            pad_value=st.floats(min_value=0.1, max_value=1.0),
            **hu.gcs_cpu_only)
+    @settings(deadline=5000)
     def test_dot_product_with_padding(self, N, M, K, pad_value, gc, dc):
         X = np.random.rand(N, M).astype(np.float32) - 0.5
         Y = np.random.rand(N, K).astype(np.float32) - 0.5

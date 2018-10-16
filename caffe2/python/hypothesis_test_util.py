@@ -70,7 +70,6 @@ hypothesis.settings.register_profile(
         derandomize=True,
         suppress_health_check=[hypothesis.HealthCheck.too_slow],
         database=None,
-        min_satisfying_examples=1,
         max_examples=100,
         verbosity=hypothesis.Verbosity.verbose))
 
@@ -80,7 +79,6 @@ hypothesis.settings.register_profile(
         suppress_health_check=[hypothesis.HealthCheck.too_slow],
         database=None,
         max_examples=10,
-        min_satisfying_examples=1,
         verbosity=hypothesis.Verbosity.verbose))
 hypothesis.settings.register_profile(
     "debug",
@@ -88,7 +86,6 @@ hypothesis.settings.register_profile(
         suppress_health_check=[hypothesis.HealthCheck.too_slow],
         database=None,
         max_examples=1000,
-        min_satisfying_examples=1,
         verbosity=hypothesis.Verbosity.verbose))
 hypothesis.settings.load_profile(
     'sandcastle' if is_sandcastle() else os.getenv('CAFFE2_HYPOTHESIS_PROFILE',
