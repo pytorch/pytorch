@@ -45,7 +45,7 @@ class FullyConnectedOp final : public Operator<Context> {
                                   : W.size_from_dim(canonical_axis_w);
 
     auto dimErrorString = [&]() {
-      return MakeString(
+      return c10::str(
           "Dimension mismatch: ",
           "X: ",
           X.dims(),
@@ -187,7 +187,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
                                   : W.size_from_dim(canonical_axis_w);
 
     auto dimErrorString = [&]() {
-      return MakeString(
+      return c10::str(
           "Dimension mismatch: ",
           "X: ",
           X.dims(),

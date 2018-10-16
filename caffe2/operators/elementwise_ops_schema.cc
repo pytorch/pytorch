@@ -222,9 +222,9 @@ Performs element-wise binary {name} (with limited broadcast support).
 
 {extra}
 )DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    ReplaceAll(doc, "{extra}", extra);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting");
     schema.Arg(
@@ -598,10 +598,10 @@ Performs element-wise {desc} comparison **{name}** (with limited broadcast suppo
 
 {extra}
 )DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{desc}", desc);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    ReplaceAll(doc, "{extra}", extra);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{desc}", desc);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
@@ -804,9 +804,9 @@ Both input operands should be of type `bool`.
 
 {extra}
     )DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
-    ReplaceAll(doc, "{extra}", extra);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{extra}", extra);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(
@@ -843,8 +843,8 @@ std::function<void(OpSchema&)> BitwiseDocGenerator(const char* name) {
 Performs element-wise bitwise operation `{name}` (with limited broadcast support).
 Both input operands should be of type `bool`.
 {broadcast_doc})DOC";
-    ReplaceAll(doc, "{name}", name);
-    ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
+    c10::ReplaceAll(doc, "{name}", name);
+    c10::ReplaceAll(doc, "{broadcast_doc}", kBroadcastDoc);
     schema.SetDoc(doc);
     schema.Arg("broadcast", "*(type: int; default: 0)* Pass 1 to enable broadcasting.");
     schema.Arg(

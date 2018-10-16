@@ -205,32 +205,32 @@ struct GraphFuser {
     if (!isSimpleMap(node)) return false;
 
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-          /*const=*/attr::alpha) ||
+          /*const_inputs=*/attr::alpha) ||
         node->matches("aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-          /*const=*/{attr::other, attr::alpha}) ||
+          /*const_inputs=*/{attr::other, attr::alpha}) ||
         node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
-          /*const=*/attr::alpha) ||
+          /*const_inputs=*/attr::alpha) ||
         node->matches("aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
-          /*const=*/{attr::other, attr::alpha}) ||
-        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
-        node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor", /*const=*/{attr::min, attr::max})) {
+          /*const_inputs=*/{attr::other, attr::alpha}) ||
+        node->matches("aten::mul(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
+        node->matches("aten::div(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
+        node->matches("aten::clamp(Tensor self, Scalar min, Scalar max) -> Tensor", /*const_inputs=*/{attr::min, attr::max})) {
       auto inputs = tensorInputs(node);
       return haveSupportedType(inputs);
     }
     else if (
         node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::lt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::lt(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::le(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::gt(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::gt(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::ge(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::eq(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other) ||
+        node->matches("aten::eq(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other) ||
         node->matches("aten::ne(Tensor self, Tensor other) -> Tensor") ||
-        node->matches("aten::ne(Tensor self, Scalar other) -> Tensor", /*const=*/attr::other)) {
+        node->matches("aten::ne(Tensor self, Scalar other) -> Tensor", /*const_inputs=*/attr::other)) {
       // comparison operators produce Byte type, and it's ok, check only inputs
       auto inputs = tensorInputs(node);
       return haveSupportedType(inputs);
@@ -566,11 +566,11 @@ struct GraphFuser {
     return true;
   }
 
-  at::optional<Node*> findFusedChunk(Node * group, Value * input) {
+  c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
     JIT_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {
-      return at::nullopt;
+      return c10::nullopt;
     }
     size_t input_index = it - group->inputs().begin();
     auto & subgraph = getSubgraph(group);
@@ -581,7 +581,7 @@ struct GraphFuser {
       JIT_ASSERT(subgraph_input->uses().size() == 1);
       return node;
     }
-    return at::nullopt;
+    return c10::nullopt;
   }
 
   void fuseChunkByReusingExistingFusedChunk(

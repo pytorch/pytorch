@@ -14,7 +14,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
-#include "caffe2/mkl/mkl_utils.h"
 #include "caffe2/observers/runcnt_observer.h"
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
@@ -973,13 +972,9 @@ void addGlobalMethods(py::module& m) {
   m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
-  m.attr("has_mkldnn") = py::bool_(
-#ifdef CAFFE2_HAS_MKL_DNN
-      true
-#else // CAFFE2_HAS_MKL_DNN
-      false
-#endif // CAFFE2_HAS_MKL_DNN
-      );
+  // The old mkl backend has been removed permanently, but we
+  // keep this Python attribute for BC
+  m.attr("has_mkldnn") = py::bool_(false);
 
   m.attr("use_ideep") = py::bool_(
 #ifdef CAFFE2_USE_IDEEP

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/csrc/utils/variadic.h>
+#include <torch/serialize/archive.h>
 #include <torch/tensor.h>
+
+#include <torch/csrc/utils/variadic.h>
 
 #include <memory>
 #include <type_traits>
@@ -153,6 +155,25 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
     return nullptr;
   }
 };
+
+/// Serializes an `OptimizerBase` into an `OutputArchive`.
+template <typename ModuleType>
+serialize::OutputArchive& operator<<(
+    serialize::OutputArchive& archive,
+    const nn::ModuleHolder<ModuleType>& module) {
+  module->save(archive);
+  return archive;
+}
+
+/// Deserializes a `Tensor` from an `InputArchive`.
+template <typename ModuleType>
+serialize::InputArchive& operator>>(
+    serialize::InputArchive& archive,
+    nn::ModuleHolder<ModuleType>& module) {
+  module->load(archive);
+  return archive;
+}
+
 } // namespace nn
 } // namespace torch
 

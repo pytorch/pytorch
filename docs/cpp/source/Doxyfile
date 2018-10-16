@@ -48,6 +48,7 @@ INPUT                  = ../../../torch/csrc/api/include \
                          ../../../aten/src/ATen/core/Error.h \
                          ../../../aten/src/ATen/core/Half.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
+                         ../../../aten/src/ATen/core/Tensor.h \
                          ../../../aten/src/ATen/cuda/CUDAGuard.h \
                          ../../../aten/src/ATen/cuda/CUDAStream.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
@@ -56,7 +57,6 @@ INPUT                  = ../../../torch/csrc/api/include \
                          ../../../aten/src/ATen/cudnn/Types.h \
                          ../../../aten/src/ATen/cudnn/Utils.h \
                          ../../../aten/src/ATen/mkl/Descriptors.h \
-                         ../../../build/aten/src/ATen/Tensor.h \
                          ../../../build/aten/src/ATen/Functions.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
@@ -67,7 +67,8 @@ FULL_PATH_NAMES        = YES
 # Nested folders will be ignored without this.
 RECURSIVE              = YES
 # Blacklist certain file patterns from the INPUT section.
-EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h
+EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h \
+          ../../../torch/csrc/api/include/torch/detail
 ################################################################################
 # Output formats for Doxygen to create.                                        #
 ################################################################################

@@ -6,10 +6,7 @@
 namespace torch { namespace jit {
 
 // IValue -> Constant node
-Value* insertConstant(
-    Graph& g,
-    IValue val,
-    at::optional<SourceRange> loc) {
+Value* insertConstant(Graph& g, IValue val, c10::optional<SourceRange> loc) {
   Node * n = g.create(prim::Constant);
   if(val.isTensor()) {
     at::Tensor ref = std::move(val).toTensor();
@@ -127,14 +124,13 @@ RegisterOperators reg({
       }),
 });
 
-at::optional<IValue> toIValue(Value* v) {
+c10::optional<IValue> toIValue(Value* v) {
   if(v->node()->kind() != prim::Constant)
-    return at::nullopt;
+    return c10::nullopt;
   // use implemenation of prim::Constant to compute the output IValue
   auto op = getOperation(v->node());
   Stack stack;
   op(stack);
   return stack.back();
 }
-
 }}

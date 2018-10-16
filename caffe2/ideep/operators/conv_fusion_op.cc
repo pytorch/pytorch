@@ -158,8 +158,8 @@ The convolution fusion operator consumes an input vector, a {dim}filter blob,
 a bias blob and another input vector and computes the output. This operator
 gives the chance to fuse the ReLU or element-wise Sum with a convolution
 operator. {conv_fusion_doc})DOC";
-    ReplaceAll(doc, "{dim}", dim);
-    ReplaceAll(doc, "{conv_fusion_doc}", kConvFusionDoc);
+    c10::ReplaceAll(doc, "{dim}", dim);
+    c10::ReplaceAll(doc, "{conv_fusion_doc}", kConvFusionDoc);
     schema.SetDoc(doc);
     schema.Input(
         0,
