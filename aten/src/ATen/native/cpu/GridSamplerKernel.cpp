@@ -1,12 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/C++17.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/GridSampler.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <ATen/cpu/vml.h>
+#include <c10/util/C++17.h>
 
 #ifdef _OPENMP
 #include <omp.h>

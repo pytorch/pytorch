@@ -86,7 +86,7 @@ http://www.nvidia.com/Download/index.aspx""")
 The NVIDIA driver on your system is too old (found version {}).
 Please update your GPU driver by downloading and installing a new
 version from the URL: http://www.nvidia.com/Download/index.aspx
-Alternatively, go to: http://pytorch.org to install
+Alternatively, go to: https://pytorch.org to install
 a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
@@ -96,7 +96,7 @@ def _check_capability():
     Found GPU%d %s which requires CUDA_VERSION >= %d for
      optimal performance and fast startup time, but your PyTorch was compiled
      with CUDA_VERSION %d. Please install the correct PyTorch binary
-     using instructions from http://pytorch.org
+     using instructions from https://pytorch.org
     """
 
     old_gpu_warn = """

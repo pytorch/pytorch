@@ -50,7 +50,7 @@ class MatMulOp final : public Operator<Context> {
     }
 
     auto dimErrorString = [&]() {
-      return MakeString(
+      return c10::str(
           "Dimension mismatch: ",
           trans_a_ ? "trans(A): " : "A: ",
           a_dim0,

@@ -124,12 +124,12 @@ struct PythonArgs {
   inline at::Storage storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
-  inline at::optional<at::ScalarType> scalartypeOptional(int i);
+  inline c10::optional<at::ScalarType> scalartypeOptional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
-  inline at::optional<at::Device> deviceOptional(int i);
+  inline c10::optional<at::Device> deviceOptional(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -328,8 +328,9 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
   return reinterpret_cast<THPDtype*>(args[i])->scalar_type;
 }
 
-inline at::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
-  if (!args[i]) return at::nullopt;
+inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return scalartype(i);
 }
 
@@ -384,8 +385,9 @@ inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default
   return device(i);
 }
 
-inline at::optional<at::Device> PythonArgs::deviceOptional(int i) {
-  if (!args[i]) return at::nullopt;
+inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
   return device(i);
 }
 

@@ -53,7 +53,7 @@ void test_argument_checking_for_serialized_modules(
   try {
     module->forward({torch::jit::IValue(1), torch::jit::IValue(2)});
     assert(false);
-  } catch (const at::Error& error) {
+  } catch (const c10::Error& error) {
     assert(
         std::string(error.what_without_backtrace())
             .find("Expected at most 1 argument(s) for operator 'forward', "
@@ -63,7 +63,7 @@ void test_argument_checking_for_serialized_modules(
   try {
     module->forward({torch::jit::IValue(5)});
     assert(false);
-  } catch (const at::Error& error) {
+  } catch (const c10::Error& error) {
     assert(
         std::string(error.what_without_backtrace())
             .find("Expected value of type Dynamic for argument 'input' in "
@@ -73,7 +73,7 @@ void test_argument_checking_for_serialized_modules(
   try {
     module->forward({});
     assert(false);
-  } catch (const at::Error& error) {
+  } catch (const c10::Error& error) {
     assert(
         std::string(error.what_without_backtrace())
             .find("forward() is missing value for argument 'input'") == 0);
