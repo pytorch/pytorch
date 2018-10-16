@@ -2815,6 +2815,12 @@ a")
         s = torch.rand(1)
         self.assertTrue(foo(s))
 
+        @torch.jit.script
+        def bar(a):
+            return a > float('-inf')
+        s = torch.rand(1)
+        self.assertTrue(foo(s))
+
     def test_add(self):
         def func(a, b):
             c = a + b
@@ -8123,8 +8129,10 @@ def the_method({}):
 
 
 def get_constant(x):
-    if x == inf or x == -inf:
+    if x == inf:
         return 'float(\'inf\')' if PY2 else 'math.inf'
+    if x == -inf:
+        return 'float(\'-inf\')' if PY2 else '-math.inf'
     return x
 
 

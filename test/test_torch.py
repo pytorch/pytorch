@@ -839,7 +839,7 @@ class TestTorch(TestCase):
         # full reduction
         x = torch.randn(5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf]:
+        for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p).item()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
@@ -847,7 +847,7 @@ class TestTorch(TestCase):
         # one dimension
         x = torch.randn(5, 5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, inf]:
+        for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p, 1).cpu().numpy()
             expected = np.linalg.norm(xn, p, 1)
             self.assertEqual(res.shape, expected.shape)
