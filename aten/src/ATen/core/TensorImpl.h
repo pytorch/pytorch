@@ -239,6 +239,12 @@ namespace detail {
  *    uninitialized storage to become shared (or a shared storage to
  *    become uninitialized, e.g., from FreeMemory).
  *
+ *    In practice, tensors which are storage-UNINITIALIZED and
+ *    dtype-UNINITIALIZED are *extremely* ephemeral: essentially,
+ *    after you do a Resize(), you basically always call mutable_data()
+ *    immediately afterwards.  Most functions are not designed to
+ *    work if given a storage-UNINITIALIZED, dtype-UNINITIALIZED tensor.
+ *
  *    We intend to eliminate all uninitialized states, so that every
  *    tensor is fully initialized in all fields.  Please do not write new code
  *    that depends on these uninitialized states.
