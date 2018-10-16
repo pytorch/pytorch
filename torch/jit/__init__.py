@@ -5,7 +5,7 @@ from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
-from .._jit import createResolutionCallback, compiled_weak_fns, COMPILED, COMPILATION_PENDING
+from .._jit_internal import createResolutionCallback, compiled_weak_fns, COMPILED, COMPILATION_PENDING
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
