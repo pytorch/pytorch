@@ -1170,24 +1170,13 @@ _builtin_table = None
 
 _modules_containing_builtins = (torch, torch.nn.functional)
 
-# These functions don't have aten ops
+# These functions don't have aten ops but have been converted to weak script, so
+# don't add them as builtins
+# TODO: delete this list and remove torch.nn.functional from builtins list once
+# everything in it has been converted to weak script
 _builtin_blacklist = {
     'tanhshrink',
     'softsign',
-    'softmin',
-    'local_response_norm',
-    'poisson_nll_loss',
-    'cross_entropy',
-    'multilabel_soft_margin_loss',
-    'interpolate',
-    'pad',
-    'cosine_similarity',
-    'normalize',
-    'fold',
-    'max_unpool1d',
-    'lp_pool1d',
-    'lp_pool2d',
-    'gumbel_softmax',
 }
 
 
