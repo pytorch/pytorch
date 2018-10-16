@@ -213,7 +213,6 @@ class TestSparse(TestCase):
             RuntimeError,
             lambda: self.SparseTensor(indices, values, torch.Size([2, 4, 2, 1])))
 
-    @skipIfRocm
     def test_to_dense(self):
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -255,7 +254,6 @@ class TestSparse(TestCase):
         res = self.ValueTensor(3, 4, 5, 0)
         test_tensor(x, res)
 
-    @skipIfRocm
     def test_shared(self):
         i = self.IndexTensor([[2]])
         v = self.ValueTensor([5])
@@ -271,7 +269,6 @@ class TestSparse(TestCase):
         i[0][0] = 0
         self.assertEqual(self.ValueTensor(3, 0), self.safeToDense(x))
 
-    @skipIfRocm
     def test_to_dense_hybrid(self):
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
@@ -1263,7 +1260,6 @@ class TestSparse(TestCase):
         test_shape(3, 0, [100, 100, 0])
 
     @cpu_only  # not really, but we only really want to run this once
-    @skipIfRocm
     def test_factory(self):
         for test_empty_tensor in [True, False]:
             if test_empty_tensor:
@@ -1500,7 +1496,6 @@ class TestSparse(TestCase):
         test_tensor(indices, values, False, True)  # An empty tensor's data_ptr is always equal to 0
 
     @cpu_only  # just run once, we test both cpu and cuda
-    @skipIfRocm
     def test_constructor_device_legacy(self):
         i = torch.tensor([[0, 1, 1], [2, 0, 2]])
         v = torch.tensor([3., 4., 5.])
@@ -1570,7 +1565,6 @@ class TestSparse(TestCase):
         do_test(self.SparseTensor(3, 0))
         do_test(self.SparseTensor(3, 3))
 
-    @skipIfRocm
     def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size):
         x_v_numel = torch.zeros(x_v).numel()
         y_v_numel = torch.zeros(y_v).numel()
@@ -1645,7 +1639,6 @@ class TestSparse(TestCase):
             self._test_resize_shape([1, 1], [1, 2, 3], [2, 2, 3],
                                     [1, 1], [1, 2, 0], [2, 2, 0])
 
-    @skipIfRocm
     def test_is_nonzero(self):
         self.assertTrue(torch.sparse_coo_tensor(([0],), 1., (1,)).is_nonzero())
         self.assertFalse(torch.sparse_coo_tensor(([0],), 0., (1,)).is_nonzero())
