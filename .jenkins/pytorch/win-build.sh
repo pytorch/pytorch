@@ -64,20 +64,20 @@ if "%REBUILD%"=="" (
 set MAGMA_HOME=%cd%\\magma
 
 :: Install sccache
-mkdir %CD%\\tmp_bin
-if "%REBUILD%"=="" (
-  :check_sccache
-  %CD%\\tmp_bin\\sccache.exe --show-stats || (
-    taskkill /im sccache.exe /f /t || ver > nul
-    del %CD%\\tmp_bin\\sccache.exe
-    if "%BUILD_ENVIRONMENT%"=="" (
-      curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output %CD%\\tmp_bin\\sccache.exe
-    ) else (
-      aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe
-    )
-    goto :check_sccache
-  )
-)
+:: mkdir %CD%\\tmp_bin
+:: if "%REBUILD%"=="" (
+::   :check_sccache
+::   %CD%\\tmp_bin\\sccache.exe --show-stats || (
+::     taskkill /im sccache.exe /f /t || ver > nul
+::     del %CD%\\tmp_bin\\sccache.exe
+::     if "%BUILD_ENVIRONMENT%"=="" (
+::       curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output %CD%\\tmp_bin\\sccache.exe
+::     ) else (
+::       aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe
+::     )
+::     goto :check_sccache
+::   )
+:: )
 
 :: Install Clang-LLVM
 if "%REBUILD%"=="" (
@@ -128,11 +128,13 @@ set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 :: Target only our CI GPU machine's CUDA arch to speed up the build
 set TORCH_CUDA_ARCH_LIST=5.2
 
-sccache --stop-server
-sccache --start-server
-sccache --zero-stats
-set CC=sccache clang-cl
-set CXX=sccache clang-cl
+:: sccache --stop-server
+:: sccache --start-server
+:: sccache --zero-stats
+:: set CC=sccache clang-cl
+:: set CXX=sccache clang-cl
+set CC=clang-cl
+set CXX=clang-cl
 
 set DISTUTILS_USE_SDK=1
 
@@ -149,17 +151,18 @@ if not "%USE_CUDA%"=="1" (
 
 if not "%USE_CUDA%"=="0" (
   if "%REBUILD%"=="" (
-    sccache --show-stats
-    sccache --zero-stats
-    rd /s /q %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch
-    copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+::     sccache --show-stats
+::     sccache --zero-stats
+::     rd /s /q %CONDA_PARENT_DIR%\\Miniconda3\\Lib\\site-packages\\torch
+::     copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
   )
 
   set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
 
   if "%REBUILD%"=="" set NO_CUDA=0
 
-  python setup.py install && sccache --show-stats && (
+:: && sccache --show-stats
+  python setup.py install && (
     if "%BUILD_ENVIRONMENT%"=="" (
       echo NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call %CONDA_PARENT_DIR%\\Miniconda3\\Scripts\\activate.bat %CONDA_PARENT_DIR%\\Miniconda3\` in Command Prompt before running Git Bash.
     ) else (
