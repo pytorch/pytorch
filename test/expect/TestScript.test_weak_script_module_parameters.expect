@@ -1,0 +1,14 @@
+graph(%x : Dynamic
+      %1 : Dynamic
+      %2 : Dynamic
+      %3 : Dynamic
+      %4 : Dynamic) {
+  %5 : int = prim::Constant[value=1]()
+  %6 : Dynamic = aten::linear(%x, %1, %2)
+  %7 : Dynamic = aten::add(%x, %6, %5)
+  %8 : Dynamic = aten::linear(%x, %1, %2)
+  %9 : Dynamic = aten::add(%7, %8, %5)
+  %10 : Dynamic = aten::linear(%x, %3, %4)
+  %11 : Dynamic = aten::add(%9, %10, %5)
+  return (%11);
+}

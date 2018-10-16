@@ -297,6 +297,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
      return std::make_shared<ConstantPythonTupleValue>(obj);
     }
   }
+  if (py::hasattr(obj, "_jit_script_module")) {
+    obj = py::getattr(obj, "_jit_script_module");
+    is_submodule = true;
+  }
   if (py::isinstance<Module>(obj)) {
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
     // In the case that this Python object is not a submodule, inline *ONLY
@@ -327,13 +331,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return std::make_shared<ModuleValue>(mod);
     }
   }
-
-  if (py::hasattr(obj, "_jit_script_module")) {
-    auto mod = py::cast<std::shared_ptr<Module>>(
-        py::getattr(obj, "_jit_script_module"));
-    return std::make_shared<ModuleValue>(mod);
-  }
-
   return std::make_shared<PythonValue>(obj);
 }
 

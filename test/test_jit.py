@@ -7498,7 +7498,65 @@ a")
         script_result2 = strong_mod2(x)
         self.assertEqual(script_result, expected_result)
         self.assertEqual(script_result, script_result2)
-        self.assertExpectedGraph(mod.graph, "scope_test")
+        self.assertExpectedGraph(strong_mod.graph, "scope_test")
+
+    def test_weak_script_module_parameters(self):
+        import math
+        weights = torch.randn(10, 10)
+        bias = torch.randn(10)
+        weights2 = torch.randn(10, 10)
+        bias2 = torch.randn(10)
+
+        @torch.jit.weak_module
+        class TestLinear(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super(TestLinear, self).__init__()
+                self.in_features = in_features
+                self.out_features = out_features
+                self.weight = torch.nn.Parameter(torch.Tensor(out_features, in_features))
+                self.bias = torch.nn.Parameter(torch.Tensor(out_features))
+                self.reset_parameters()
+
+            def reset_parameters(self):
+                torch.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+                if self.bias is not None:
+                    fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(self.weight)
+                    bound = 1 / math.sqrt(fan_in)
+                    torch.nn.init.uniform_(self.bias, -bound, bound)
+
+            @torch.jit.weak_script_method
+            def forward(self, input):
+                return F.linear(input, self.weight, self.bias)
+
+        # Initialize a ScriptModule that uses the weak module above multiple times
+        class Strong(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Strong, self).__init__()
+                self.fc1 = TestLinear(10, 10)
+                self.fc1.weight = torch.nn.Parameter(weights)
+                self.fc1.bias = torch.nn.Parameter(bias)
+                self.fc2 = TestLinear(10, 10)
+                self.fc2.weight = torch.nn.Parameter(weights2)
+                self.fc2.bias = torch.nn.Parameter(bias2)
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.fc1(x) + self.fc1(x) + self.fc2(x)
+
+        s = Strong()
+        self.assertExpectedGraph(s.graph)
+
+        # Run same calculation as module
+        inp = torch.ones(10)
+        lin = torch.nn.Linear(10, 10)
+        lin.weight = torch.nn.Parameter(weights)
+        lin.bias = torch.nn.Parameter(bias)
+        lin2 = torch.nn.Linear(10, 10)
+        lin2.weight = torch.nn.Parameter(weights2)
+        lin2.bias = torch.nn.Parameter(bias2)
+        expected_result = inp + lin(inp) * 2 + lin2(inp)
+
+        self.assertEqual(s(inp), expected_result)
 
 
 class MnistNet(nn.Module):
