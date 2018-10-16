@@ -175,8 +175,6 @@ class TestResize(hu.HypothesisTestCase):
             "ResizeNearestGradient",
             ["dY", "X", "scales"],
             ["dX"],
-            width_scale=width_scale,
-            height_scale=height_scale,
         )
 
         def ref(dY, X, scales):
