@@ -123,20 +123,20 @@ class TestResize(hu.HypothesisTestCase):
 
         X = np.random.rand(
             batch_size, num_channels, height, width).astype(np.float32)
-        scales = np.array([1., 1., height_scale, width_scale]).astype(np.float32)
+        scales = np.array([height_scale, width_scale]).astype(np.float32)
 
         def ref(X, scales):
-            output_height = np.int32(height * scales[2])
-            output_width = np.int32(width * scales[3])
+            output_height = np.int32(height * scales[0])
+            output_width = np.int32(width * scales[1])
 
             output_h_idxs, output_w_idxs = np.meshgrid(np.arange(output_height),
                                                        np.arange(output_width),
                                                        indexing='ij')
 
             input_h_idxs = np.minimum(
-                output_h_idxs / scales[2], height - 1).astype(np.int32)
+                output_h_idxs / scales[0], height - 1).astype(np.int32)
             input_w_idxs = np.minimum(
-                output_w_idxs / scales[3], width - 1).astype(np.int32)
+                output_w_idxs / scales[1], width - 1).astype(np.int32)
 
             Y = X[:, :, input_h_idxs, input_w_idxs]
 
@@ -169,7 +169,7 @@ class TestResize(hu.HypothesisTestCase):
                             num_channels,
                             output_height,
                             output_width).astype(np.float32)
-        scales = np.array([1., 1., height_scale, width_scale]).astype(np.float32)
+        scales = np.array([height_scale, width_scale]).astype(np.float32)
 
         op = core.CreateOperator(
             "ResizeNearestGradient",
@@ -184,8 +184,8 @@ class TestResize(hu.HypothesisTestCase):
 
             for i in range(output_height):
                 for j in range(output_width):
-                    input_i = np.minimum(i / scales[2], height - 1).astype(np.int32)
-                    input_j = np.minimum(j / scales[3], width - 1).astype(np.int32)
+                    input_i = np.minimum(i / scales[0], height - 1).astype(np.int32)
+                    input_j = np.minimum(j / scales[1], width - 1).astype(np.int32)
                     dX[:, :, input_i, input_j] += dY[:, :, i, j]
 
             return dX,

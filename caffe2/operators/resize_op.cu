@@ -82,11 +82,11 @@ bool ResizeNearestOp<float, CUDAContext>::RunOnDevice() {
   if (InputSize() == 2) {
     const auto& scales = Input(1);
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 4);
-    float scales_data[4];
-    context_.CopyToCPU<float>(4, scales.data<float>(), scales_data);
-    height_scale_ = scales_data[2];
-    width_scale_ = scales_data[3];
+    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    float scales_data[2];
+    context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
   }
   int output_width = input_width * width_scale_;
   int output_height = input_height * height_scale_;
@@ -127,11 +127,11 @@ bool ResizeNearestGradientOp<float, CUDAContext>::RunOnDevice() {
   if (InputSize() == 3) {
     const auto& scales = Input(2);
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 4);
-    float scales_data[4];
-    context_.CopyToCPU<float>(4, scales.data<float>(), scales_data);
-    height_scale_ = scales_data[2];
-    width_scale_ = scales_data[3];
+    CAFFE_ENFORCE_EQ(scales.size(), 2);
+    float scales_data[2];
+    context_.CopyToCPU<float>(2, scales.data<float>(), scales_data);
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
   }
   dX->Resize(batch_size, num_channels, output_height, output_width);
   math::Set<float, CUDAContext>(

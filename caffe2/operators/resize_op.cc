@@ -65,10 +65,10 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
   if (InputSize() == 2) {
     const auto& scales = Input(1);
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 4);
+    CAFFE_ENFORCE_EQ(scales.size(), 2);
     const float* scales_data = scales.data<float>();
-    height_scale_ = scales_data[2];
-    width_scale_ = scales_data[3];
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
   }
 
   int output_width = input_width * width_scale_;
@@ -119,10 +119,10 @@ bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
   if (InputSize() == 3) {
     const auto& scales = Input(2);
     CAFFE_ENFORCE_EQ(scales.ndim(), 1);
-    CAFFE_ENFORCE_EQ(scales.size(), 4);
+    CAFFE_ENFORCE_EQ(scales.size(), 2);
     const float* scales_data = scales.data<float>();
-    height_scale_ = scales_data[2];
-    width_scale_ = scales_data[3];
+    height_scale_ = scales_data[0];
+    width_scale_ = scales_data[1];
   }
   dX->Resize(batch_size, num_channels, output_height, output_width);
   math::Set<float, CPUContext>(
@@ -169,7 +169,7 @@ output_height = floor(output_height * height_scale)
 )DOC")
     .Input(0, "X", "Input tensor")
     .Input(1, "scales", // the hack to support onnx spec
-        "4D, Scales tensor, [1., 1., width_scale, height_scale]")
+        "1D, 2-element, Scales tensor, [height_scale, width_scale]")
     .Output(0, "Y", "Output tensor")
     .InheritOnnxSchema("Upsample");
 
