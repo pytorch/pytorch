@@ -534,7 +534,15 @@ if(BUILD_PYTHON)
   set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
-  find_package(NumPy)
+
+  # When building pytorch, we pass this in directly from setup.py, and
+  # don't want to overwrite it because we trust python more than cmake
+  if (NUMPY_INCLUDE_DIR)
+    set(NUMPY_FOUND ON)
+  else()
+    find_package(NumPy)
+  endif()
+
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
     include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
     caffe2_update_option(USE_NUMPY OFF)
