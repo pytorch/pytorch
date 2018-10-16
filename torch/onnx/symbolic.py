@@ -1090,6 +1090,20 @@ def repeat(g, self, repeats):
     return g.op("Tile", self, repeats)
 
 
+@parse_args('v', 'i')
+def pixel_shuffle(g, self, upscale_factor):
+    dims = self.type().sizes()
+    if len(dims) != 4:
+        return _unimplemented("pixel_shuffle", "only support 4d input")
+    output_channel = dims[1] // upscale_factor // upscale_factor
+    after_view = view(g, self, [-1, upscale_factor, upscale_factor,
+                                output_channel, dims[2], dims[3]])
+    after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
+    return view(g, after_transpose,
+                [-1, output_channel, dims[2] * upscale_factor, dims[3] *
+                 upscale_factor])
+
+
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
     weights_per_layer = 4 if has_biases else 2

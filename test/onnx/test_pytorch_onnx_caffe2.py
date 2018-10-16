@@ -820,6 +820,14 @@ class TestCaffe2Backend(unittest.TestCase):
         underlying = nn.InstanceNorm2d(3)
         self.run_model_test(underlying, train=False, batch_size=BATCH_SIZE)
 
+    def test_pixel_shuffle(self):
+        underlying = nn.PixelShuffle(4)
+        shape = (1, 64, 5, 5)
+        input = Variable(torch.randn(*shape),
+                         requires_grad=True)
+        self.run_model_test(underlying, train=False, input=(input),
+                            batch_size=BATCH_SIZE)
+
     def test_dynamic_sizes(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
