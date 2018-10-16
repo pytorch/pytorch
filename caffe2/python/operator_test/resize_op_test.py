@@ -144,7 +144,8 @@ class TestResize(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [X, scales], ref)
         self.assertDeviceChecks(dc, op, [X, scales], [0])
-        self.assertGradientChecks(gc, op, [X, scales], 0, [0], stepsize=0.1, threshold=1e-2)
+        self.assertGradientChecks(gc, op, [X, scales], 0, [0], stepsize=0.1,
+                                  threshold=1e-2)
 
     @given(height_scale=st.floats(0.25, 4.0) | st.just(2.0),
            width_scale=st.floats(0.25, 4.0) | st.just(2.0),

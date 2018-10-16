@@ -168,7 +168,9 @@ output_width = floor(input_width * width_scale)
 output_height = floor(output_height * height_scale)
 )DOC")
     .Input(0, "X", "Input tensor")
-    .Input(1, "scales", // the hack to support onnx spec
+    .Input(
+        1,
+        "scales", // the hack to support onnx spec
         "1D, 2-element, Scales tensor, [height_scale, width_scale]")
     .Output(0, "Y", "Output tensor")
     .InheritOnnxSchema("Upsample");
@@ -186,7 +188,8 @@ class GetResizeNearestGradient : public GradientMakerBase {
     if (def_.input().size() == 2) {
       // this is a hack to support the second input as dynamic
       // width_scale and height_scale to align with onnx change
-      return SingleGradientDef("ResizeNearestGradient",
+      return SingleGradientDef(
+          "ResizeNearestGradient",
           "",
           vector<string>{GO(0), I(0), I(1)},
           vector<string>{GI(0)});
