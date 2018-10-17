@@ -72,8 +72,14 @@ class _Formatter(object):
         self.sci_mode = False
         self.max_width = 1
 
-        # use tensor_view for 0-dim tensor iteration
-        tensor_view = tensor.view(tensor.nelement())
+        with torch.no_grad():
+            # tensor_view = tensor.view(tensor.nelement())
+            if len(tensor.size()) == 0:
+                # use tensor_view for 0-dim tensor iteration
+                tensor_view = tensor.view(tensor.nelement())
+            else:
+                tensor_view = tensor
+
         if not self.floating_dtype:
             for value in tensor_view:
                 value_str = '{}'.format(value)
@@ -86,12 +92,13 @@ class _Formatter(object):
                 # no valid number, do nothing
                 return
 
-            nonzero_finite_abs = nonzero_finite_vals.abs()
-            nonzero_finite_min = nonzero_finite_abs.min()
-            nonzero_finite_max = nonzero_finite_abs.max()
+            # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
+            nonzero_finite_abs = nonzero_finite_vals.abs().double()
+            nonzero_finite_min = nonzero_finite_abs.min().double()
+            nonzero_finite_max = nonzero_finite_abs.max().double()
 
             for value in nonzero_finite_vals:
-                if value != math.ceil(value):
+                if value != torch.ceil(value):
                     self.int_mode = False
                     break
 
