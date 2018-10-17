@@ -5201,6 +5201,10 @@ class TestTorch(TestCase):
         x = torch.Tensor([1, inf, 2, -inf, nan, -10])
         self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 0, 1, 0, 0, 1]))
 
+    def test_isfinite_int(self):
+        x = torch.tensor([1, 2, 3])
+        self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 1, 1]))
+
     def test_isinf(self):
         x = torch.Tensor([1, inf, 2, -inf, nan])
         self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
