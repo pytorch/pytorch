@@ -172,11 +172,10 @@ template<
     typename T,
     c10::guts::enable_if_t<std::is_default_constructible<T>::value>* = nullptr>
 inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
-  if (std::is_fundamental<T>::value || std::is_pointer<T>::value) {
-    return nullptr;
-  } else {
-    return &_PlacementNew<T>;
-  }
+  return
+    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+    ? nullptr
+    : &_PlacementNew<T>;
 }
 
 template<
@@ -240,11 +239,10 @@ template<
     c10::guts::enable_if_t<std::is_copy_assignable<T>::value>* = nullptr
     >
 inline constexpr TypeMetaData::Copy* _PickCopy() {
-  if (std::is_fundamental<T>::value || std::is_pointer<T>::value) {
-    return nullptr;
-  } else {
-    return &_Copy<T>;
-  }
+  return
+    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+    ? nullptr
+    : &_Copy<T>;
 }
 
 template<
@@ -269,11 +267,10 @@ inline void _PlacementDelete(void* ptr, size_t n) {
 
 template <typename T>
 inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
-  if (std::is_fundamental<T>::value || std::is_pointer<T>::value) {
-    return nullptr;
-  } else {
-    return &_PlacementDelete<T>;
-  }
+  return
+    (std::is_fundamental<T>::value || std::is_pointer<T>::value)
+    ? nullptr
+    : &_PlacementDelete<T>;
 }
 
 template <typename T>
