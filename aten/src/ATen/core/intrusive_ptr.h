@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/core/Error.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <atomic>
 #include <stdexcept>
-#include <c10/util/C++17.h>
 
 namespace c10 {
 

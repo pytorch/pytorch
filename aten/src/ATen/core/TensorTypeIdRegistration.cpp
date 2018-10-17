@@ -1,6 +1,6 @@
-#include <c10/util/C++17.h>
 #include <ATen/core/TensorTypeIdRegistration.h>
-#include <ATen/core/Error.h>
+#include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 
