@@ -711,7 +711,8 @@ WeakMethodStub = namedtuple('WeakMethodStub', ('resolution_callback', 'original_
 
 
 def weak_script_method(fn):
-    weak_script_methods[fn] = WeakMethodStub(createResolutionCallback(frames_up=2), fn)
+    if _enabled:
+        weak_script_methods[fn] = WeakMethodStub(createResolutionCallback(frames_up=2), fn)
     return fn
 
 
@@ -1138,7 +1139,8 @@ if _enabled:
                 if self.__dict__["_initialized"]:
                     return getattr(self.__dict__["_original"](), attr)
                 else:
-                    raise AttributeError("{} dne".format(attr))
+                    raise AttributeError("Weak module has no attribute '{}'"
+                                         .format(attr))
 
         def __setattr__(self, attr, value):
             if not self.__dict__["_initialized"]:
@@ -1152,7 +1154,6 @@ if _enabled:
 
 else:
     ScriptModule = torch.nn.Module
-    WeakScriptModuleProxy = torch.nn.Module
 
 
 WeakModuleInstance = namedtuple('WeakModuleInstance', ('script_module', 'method_stubs', 'status'))
