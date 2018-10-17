@@ -19,11 +19,7 @@ namespace test {
 
 #ifdef WIN32
 struct TempFile {
-  TempFile() : filename_(std::tmpnam(nullptr)) {}
-  const std::string& str() const {
-    return filename_;
-  }
-  std::string filename_;
+  std::string name{std::tmpnam(nullptr)};
 };
 #else
 struct TempFile {
@@ -32,18 +28,14 @@ struct TempFile {
     char filename[] = "/tmp/fileXXXXXX";
     fd_ = mkstemp(filename);
     AT_CHECK(fd_ != -1, "Error creating tempfile");
-    filename_.assign(filename);
+    name.assign(filename);
   }
 
   ~TempFile() {
     close(fd_);
   }
 
-  const std::string& str() const {
-    return filename_;
-  }
-
-  std::string filename_;
+  std::string name;
   int fd_;
 };
 #endif

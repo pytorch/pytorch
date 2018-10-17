@@ -26,9 +26,38 @@ class TestBindings(test_util.TestCase):
         nn = ng.NNModule(net)
         for node in nn.dataFlow.getMutableNodes():
             if node.isOperator():
-                assert node.getOperator().getName() == "FC"
+                assert node.getName() == "FC"
             elif node.isTensor():
-                assert node.getTensor().getName() in ["X", "W", "Y"]
+                assert node.getName() in ["X", "W", "Y"]
+
+    def test_core_net_controlflow(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        net.Relu(["Y"], ["Z"])
+        nn = ng.NNModule(net)
+        assert len(nn.controlFlow) == 2
+        for instr in nn.controlFlow:
+            assert instr.getType() == "Operator"
+        assert nn.controlFlow[0].getName() == "FC"
+        assert nn.controlFlow[1].getName() == "Relu"
+
+    def test_core_net_nn_accessors(self):
+        net = core.Net("name")
+        net.FC(["X", "W"], ["Y"])
+        net.Relu(["Y"], ["Z"])
+        nn = ng.NNModule(net)
+        tensors = set()
+        for t in nn.tensors:
+            tensors.add(t.name)
+        assert tensors == set(["X", "W", "Y", "Z"])
+        ops = set()
+        for op in nn.operators:
+            ops.add(op.name)
+        assert ops == set(["FC", "Relu"])
+        nodes = set()
+        for node in nn.nodes:
+            nodes.add(node.name)
+        assert nodes == (ops | tensors)
 
     def test_netdef_simple(self):
         net = core.Net("name")
@@ -84,6 +113,20 @@ class TestBindings(test_util.TestCase):
             for j in range(size):
                 if bool(random.getrandbits(1)):
                     dfg.createEdge(data[i], ops[j])
+
+    def test_traversal(self):
+        net = core.Net("test")
+        net.FC(["X", "W"], ["Y"])
+        net.Relu(["Y"], ["Z"])
+        nn = ng.NNModule(net)
+        fc = nn.controlFlow[0]
+        relu = nn.controlFlow[1]
+        assert fc.inputs[0].name == "X"
+        assert fc.inputs[1].name == "W"
+        assert relu.outputs[0].name == "Z"
+        assert relu.inputs[0].name == "Y"
+        assert relu.inputs[0].producer.name == "FC"
+        assert fc.outputs[0].consumers[0].name == "Relu"
 
     def test_debug(self):
         nn = ng.NNModule()

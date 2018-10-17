@@ -152,11 +152,11 @@ private:
 //      the IR API, but for now we choose to pessimisitically create inputs and
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
-  Environment(Method & method, std::shared_ptr<Resolver> resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
-      : method(method), resolver(resolver), b(b), next(next) {}
+  Environment(Method & method, Resolver resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
+      : method(method), resolver(std::move(resolver)), b(b), next(next) {}
 
   Method & method;
-  std::shared_ptr<Resolver> resolver;
+  Resolver resolver;
   std::vector<std::string> captured_inputs;
   std::unordered_map<std::string, std::string> error_messages;
   Block* b;
@@ -334,7 +334,7 @@ struct Environment {
     }
 
     if(!retval) {
-      retval = (*resolver)(ident, method, range);
+      retval = resolver(ident, method, range);
     }
 
     if (!retval && required) {
@@ -561,6 +561,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
     const FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,
+    c10::optional<NamedValue> self,
     at::ArrayRef<NamedValue> raw_args,
     at::ArrayRef<NamedValue> kwargs,
     std::ostream& failure_messages,
@@ -596,11 +597,13 @@ c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-
   for (size_t schema_i = 0; schema_i < schema.arguments.size(); ++schema_i) {
     const auto& arg = schema.arguments[schema_i];
     c10::optional<NamedValue> v;
-    if (!arg.kwarg_only && schema_i < modifiedArgs.size()) {
+    if (arg.name == "self" && self) {
+      v = self;
+      self = c10::nullopt;
+    } else if (!arg.kwarg_only && used_args < modifiedArgs.size()) {
       // allow zeros(IntList sizes) to work with zeros(1, 2) or zeros(1)
       if (arg.type->kind() == TypeKind::ListType && // the formal must be a list
           !arg.N && // it must not be a broadcasting list like int[3], otherwise
@@ -608,7 +611,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
           (schema_i + 1 == schema.arguments.size() ||
            schema.arguments[schema_i + 1]
                .kwarg_only)) { // must be the last position argument
-        auto actual_type = modifiedArgs[schema_i].value(graph)->type();
+        auto actual_type = modifiedArgs[used_args].value(graph)->type();
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(
                 actual_type,
@@ -618,7 +621,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
               elem_type,
               graph,
               loc,
-              at::ArrayRef<NamedValue>(modifiedArgs).slice(schema_i),
+              at::ArrayRef<NamedValue>(modifiedArgs).slice(used_args),
               err,
               convert_tensors_to_nums,
               type_env);
@@ -630,7 +633,7 @@ c10::optional<MatchedSchema> tryMatchSchema(
         }
       }
 
-      v = modifiedArgs[schema_i];
+      v = modifiedArgs[used_args];
       used_args++;
     } else if (auto idx = findInputWithName(arg.name, kwargs)) {
       const NamedValue& nv = kwargs[*idx];
@@ -655,6 +658,10 @@ c10::optional<MatchedSchema> tryMatchSchema(
     if (!positional)
       return c10::nullopt;
     positional_inputs.push_back(positional);
+  }
+  // check for unused self argument
+  if(self != c10::nullopt) {
+    err() << "provided self argument not used in schema\n";
   }
 
   // check for unused positional arguments
@@ -721,6 +728,7 @@ Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
+  c10::optional<NamedValue> self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,
@@ -742,6 +750,7 @@ Value* emitBuiltinCall(
           op->schema(),
           loc,
           graph,
+          self,
           inputs,
           attributes,
           failure_messages,
@@ -756,6 +765,7 @@ Value* emitBuiltinCall(
               graph,
               loc,
               *method,
+              self,
               inputs,
               attributes,
               failure_messages,
@@ -789,15 +799,11 @@ static Value* ensureInt(const SourceRange& range, Value* v) {
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     SourceRange loc,
     Method& m,
-    at::ArrayRef<NamedValue> inputs_,
+    at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::vector<NamedValue> inputs;
-  if (value)
-    inputs.push_back(*value);
-  inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
   return std::make_shared<SimpleValue>(emitBuiltinCall(
-      loc, *m.graph(), symbol, inputs, attributes, true));
+      loc, *m.graph(), symbol, self, inputs, attributes, true));
 }
 
 inline bool isSupportedListElementType(TypePtr type) {
@@ -808,14 +814,15 @@ inline bool isSupportedListElementType(TypePtr type) {
 struct to_ir {
   to_ir(
       Def def,
-      std::shared_ptr<Resolver> resolver,
+      Resolver resolver_,
       SugaredValuePtr self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
       , def(def)
-      , resolver(resolver)
+      , resolver(std::move(resolver_))
       , environment_stack(nullptr) {
+    JIT_ASSERT(resolver);
     pushFrame(graph->block());
 
     auto schema = extractSchemaFromDef(def, bool(self));
@@ -913,7 +920,7 @@ private:
   Method& method;
   std::shared_ptr<Graph> graph;
   Def def;
-  std::shared_ptr<Resolver> resolver;
+  Resolver resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
   std::unordered_map<double, Value*> fp_constants;
 
@@ -1561,6 +1568,7 @@ private:
                    tree->range(),
                    *method.graph(),
                    kind,
+                   c10::nullopt,
                    named_values,
                    {},
                    /*required=*/true);
@@ -1661,7 +1669,7 @@ private:
       int64_t dim,
       Value* index) {
     return emitBuiltinCall(
-        loc, *graph, aten::select,
+        loc, *graph, aten::select, c10::nullopt,
         {input, graph->insertConstant(dim, loc), index}, {}, true);
   }
 
@@ -1690,7 +1698,7 @@ private:
       args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
     }
     NamedValue step = NamedValue(loc, "step", graph->insertConstant(1, loc));
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step}, true);
+    return emitBuiltinCall(loc, *graph, aten::slice, c10::nullopt, args, {step}, true);
   }
 
   Value* emitIndex(
@@ -1699,7 +1707,7 @@ private:
       at::ArrayRef<Value*> indices) {
     auto* index = graph->insertNode(
         graph->createList(DynamicType::get(), indices))->output();
-    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::index, c10::nullopt,  {input, index}, {}, true);
   }
 
   // Emits multidimensional slicing with int and slice indices.
@@ -1818,7 +1826,7 @@ private:
       // if it's a list, emit a regular index selection op
       auto* idx = emitExpr(subscript.subscript_exprs()[0]);
       return emitBuiltinCall(
-                 loc, *graph, aten::select, {gatherable, idx}, {}, true);
+                 loc, *graph, aten::select, c10::nullopt, {gatherable, idx}, {}, true);
     } else {
       JIT_ASSERT(gatherable->type()->isSubtypeOf(DynamicType::get()));
       return emitMultidimSlicing(loc, gatherable, subscript);
@@ -1893,58 +1901,40 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-struct FunctionValue : public SugaredValue {
-  FunctionValue(Method &method) : method(method) {}
-
-  virtual std::string kind() const override {
-    return "function";
-  }
-
-  // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::shared_ptr<SugaredValue> call(
-      SourceRange loc,
-      Method & caller,
-      // note: names for args will be 'argument 0', 'argument 1', etc..
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) {
-    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
-  }
-
-  virtual ~FunctionValue() {}
-private:
-  Method &method;
-};
-
-void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<std::shared_ptr<Resolver>>& resolvers, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
+  std::unordered_map<std::string, Method*> function_table;
   for(Def def : definitions) {
     const std::string& name = def.name().name();
     auto resolver = *resolver_it++;
+    JIT_ASSERT(resolver);
+    if(!self) {
+      // if self is defined, then these are methods and do not go into the global namespace
+      // otherwise, they get defined together so we add them to the function table
+      // so the methods can see each other
+      resolver = [resolver, &function_table](
+                     const std::string& name,
+                     Method& m,
+                     const SourceRange& loc) -> std::shared_ptr<SugaredValue> {
+        auto it = function_table.find(name);
+        if (it != function_table.end()) {
+          return std::make_shared<MethodValue>(nullptr, *it->second);
+        }
+        return resolver(name, m, loc);
+      };
+    }
     auto creator = [def, resolver, self](Method& method) {
+      JIT_ASSERT(resolver);
       to_ir(def, resolver, self,  method);
     };
     Method& method = m.create_method(name, creator);
-    // if self is defined, then these are methods and do not go into the global namespace
-    // otherwise, they get defined together so we add them to the function table
-    // so the methods can see each other
-    if(!self) {
-      for (auto r : resolvers) {
-        r->addEntry(name, std::make_shared<FunctionValue>(method));
-      }
-    }
+    function_table[name] = &method;
     methods.push_back(&method);
   }
   for(Method* method : methods) {
     method->ensure_defined();
-  }
-  // Method& references stored in the Resolvers are now stale and will go out of scope.
-  // NOTE: this is actually pessimistic. Technically we can resolve functions if we
-  // call defineMethodsInModule on the same m again.
-  for (auto r : resolvers) {
-    r->clear();
   }
 }
 
@@ -2064,10 +2054,10 @@ FunctionSchema extractSchemaFromDef(const Def &def, bool is_method) {
     return FunctionSchema(name, args, returns, false, is_varret);
 }
 
-void defineMethodsInModule(Module & m, const std::string& source, const std::shared_ptr<Resolver> resolver, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, SugaredValuePtr self) {
   Parser p(source);
   std::vector<Def> definitions;
-  std::vector<std::shared_ptr<Resolver>> resolvers;
+  std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     auto def = Def(p.parseFunction(/*is_method=*/bool(self)));
     definitions.push_back(def);
@@ -2076,7 +2066,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const std::sha
   defineMethodsInModule(m, definitions, resolvers, self);
 }
 
-std::shared_ptr<Graph> compileFunction(Def def, const std::shared_ptr<Resolver> resolver) {
+std::shared_ptr<Graph> compileFunction(Def def, Resolver resolver) {
   Module m;
   defineMethodsInModule(m, {def}, {resolver}, nullptr);
   return m.get_method(def.name().name()).graph();

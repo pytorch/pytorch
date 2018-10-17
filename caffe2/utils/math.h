@@ -624,7 +624,7 @@ CAFFE2_API void CopyMatrix(
     void* B,
     const int ldb,
     Context* context,
-    TypeMeta::TypedCopy copy = nullptr);
+    TypeMeta::Copy copy = nullptr);
 
 template <typename T, class Context>
 CAFFE2_API void CopyMatrix(

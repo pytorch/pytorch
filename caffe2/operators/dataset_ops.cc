@@ -1419,10 +1419,13 @@ class TreeCursorSerializer : public BlobSerializerBase {
   ~TreeCursorSerializer() {}
 
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    auto& cursor = blob.template Get<std::unique_ptr<TreeCursor>>();
+    CAFFE_ENFORCE(typeMeta.Match<std::unique_ptr<TreeCursor>>());
+    const auto& cursor =
+        *static_cast<const std::unique_ptr<TreeCursor>*>(pointer);
     BlobProto blob_proto;
 
     // serialize offsets as a tensor
@@ -1495,7 +1498,8 @@ REGISTER_BLOB_DESERIALIZER(std::unique_ptr<TreeCursor>, TreeCursorDeserializer);
 } // namespace
 
 void SharedTensorVectorPtrSerializer::Serialize(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
   /* This is dummy serialize that doesn't save anything. If saving the content
@@ -1504,7 +1508,7 @@ void SharedTensorVectorPtrSerializer::Serialize(
   LastNWindowCollectorOp and ReservoirSamplingOp if this serializer actually
   saves the content.
   */
-  CAFFE_ENFORCE(blob.IsType<std::shared_ptr<std::vector<TensorCPU>>>());
+  CAFFE_ENFORCE(typeMeta.Match<std::shared_ptr<std::vector<TensorCPU>>>());
   BlobProto blob_proto;
   blob_proto.set_name(name);
   blob_proto.set_type("std::shared_ptr<std::vector<TensorCPU>>");
