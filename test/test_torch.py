@@ -4647,60 +4647,73 @@ class TestTorch(TestCase):
         self._test_signal_window_functions(self)
 
     @staticmethod
-    def _test_inverse(self, cast):
+    def _test_inverse(self, conv_fn):
         from common import random_fullrank_matrix_distinct_singular_value
 
         # no batches: 2-D tensors
-        M = cast(random_fullrank_matrix_distinct_singular_value(5))
-        MI = torch.inverse(M)
-        E = cast(torch.eye(5))
-        self.assertEqual(E, torch.mm(M, MI), 1e-8, 'inverse value')
-        self.assertEqual(E, torch.mm(MI, M), 1e-8, 'inverse value')
+        matrix = conv_fn(random_fullrank_matrix_distinct_singular_value(5))
+        matrix_inverse = torch.inverse(M)
+        identity = conv_fn(torch.eye(5))
+        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), 1e-8, 'inverse value')
+        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), 1e-8, 'inverse value')
 
-        MII = cast(torch.Tensor(5, 5))
-        torch.inverse(M, out=MII)
-        self.assertEqual(MII, MI, 0, 'inverse value in-place')
+        matrix_inverse_out = conv_fn(torch.empty(5, 5))
+        torch.inverse(matrix, out=matrix_inverse_out)
+        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
         # second call, now that MII is transposed
-        torch.inverse(M, out=MII)
-        self.assertEqual(MII, MI, 0, 'inverse value in-place')
+        torch.inverse(matrix, out=matrix_inverse_out)
+        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
 
         # one batch
-        M = cast(random_fullrank_matrix_distinct_singular_value(5, 1))
-        MI = torch.inverse(M)
-        expected_inv = M.squeeze(0).inverse()
-        self.assertEqual(MI, expected_inv.unsqueeze(0))
+        matrix = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 1))
+        matrix_inverse = torch.inverse(matrix)
+        expected_inv = matrix.squeeze(0).inverse()
+        self.assertEqual(matrix_inverse, expected_inv.unsqueeze(0))
 
         # four batches
-        M = cast(random_fullrank_matrix_distinct_singular_value(5, 4))
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 4))
         expected_inv_list = []
         for i in range(0, 4):
-            expected_inv_list.append(torch.inverse(M[i]))
+            expected_inv_list.append(torch.inverse(matrices[i]))
         expected_inv = torch.stack(expected_inv_list)
-        MI = torch.inverse(M)
-        self.assertEqual(MI, expected_inv)
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(matrices_inverse, expected_inv)
+        
+        # six batches (2 x 3)
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 2, 3))
+        expected_inv_list = []
+        for mat in matrices.view(-1, 5, 5):
+            expected_inv_list.append(torch.inverse(mat))
+        expected_inv = torch.stack(expected_inv_list).view(2, 3, 5, 5)
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(matrices_inverse, expected_inv)
+        
+        # incorrect input test
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            torch.inverse(torch.randn(2, 3, 4, 3))
 
         # correctness test
-        M = cast(random_fullrank_matrix_distinct_singular_value(5, 3))
-        MI = torch.inverse(M)
-        self.assertEqual(torch.matmul(M, MI), E.expand_as(M))
-        self.assertEqual(torch.matmul(MI, M), E.expand_as(M))
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 3))
+        matrices_inverse = torch.inverse(matrices)
+        self.assertEqual(torch.matmul(matrices, matrices_inverse), identity.expand_as(M))
+        self.assertEqual(torch.matmul(matrices_inverse, matrices), identity.expand_as(matrices))
 
         # torch.inverse with out and batches
-        M = cast(random_fullrank_matrix_distinct_singular_value(5, 3))
-        MI = torch.Tensor(3, 5, 5)
-        torch.inverse(M, out=MI)
-        self.assertEqual(torch.inverse(M), MI)
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(5, 3))
+        matrices_inverse = conv_fn(torch.empty(3, 5, 5))
+        torch.inverse(matrices, out=matrices_inverse)
+        self.assertEqual(torch.inverse(matrices), matrices_inverse)
 
         # non-contiguous inputs
         if not TEST_NUMPY:
             return
 
         from numpy.linalg import inv
-        M = cast(torch.randn(2, 3, 3)).permute(0, 2, 1)
-        assert not M.is_contiguous()
-        MI = torch.inverse(M)
-        expected_inv = torch.as_tensor(inv(M.cpu().numpy()))
-        self.assertEqual(MI, cast(expected_inv))
+        matrices = conv_fn(random_fullrank_matrix_distinct_singular_value(3, 2)).permute(0, 2, 1)
+        assert not matrices.is_contiguous()
+        matrices_inverse = torch.inverse(matrices)
+        expected_inv = torch.as_tensor(inv(matrices.cpu().numpy()))
+        self.assertEqual(matrices_inverse, cast(expected_inv))
 
     @skipIfNoLapack
     def test_inverse(self):
