@@ -742,7 +742,7 @@ Arguments:
 
 add_docstr(torch.cat,
            r"""
-cat(seq, dim=0, out=None) -> Tensor
+cat(tensors, dim=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
 All tensors must either have the same shape (except in the concatenating
@@ -754,7 +754,7 @@ and :func:`torch.chunk`.
 :func:`torch.cat` can be best understood via examples.
 
 Args:
-    seq (sequence of Tensors): any python sequence of tensors of the same type.
+    tensors (sequence of Tensors): any python sequence of tensors of the same type.
         Non-empty tensors provided must have the same shape, except in the
         cat dimension.
     dim (int, optional): the dimension over which the tensors are concatenated
