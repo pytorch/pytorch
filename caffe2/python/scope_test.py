@@ -24,7 +24,7 @@ def thread_runner(idx, testobj):
     testobj.assertEquals(scope.CurrentNameScope(), "")
     testobj.assertEquals(scope.CurrentDeviceScope(), None)
     namescope = "namescope_{}".format(idx)
-    dsc = core.DeviceOption(_gpu_device_type, idx)
+    dsc = core.DeviceOption(_gpu_device_type(), idx)
     with scope.DeviceScope(dsc):
         with scope.NameScope(namescope):
             testobj.assertEquals(scope.CurrentNameScope(), namescope + "/")

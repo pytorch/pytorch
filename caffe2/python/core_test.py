@@ -953,7 +953,7 @@ external_input: "fc_b"
         device_option.device_id = 0
         with core.DeviceScope(device_option):
             net.Relu("data", "relu5")
-        device_option.device_id = 0
+        device_option.device_id = 1
         with core.DeviceScope(device_option):
             net.Relu("data", "relu6")
 
