@@ -916,7 +916,7 @@ external_input: "const_cuda_1"
         self.assertEqual(op.input[0], "data")
         self.assertEqual(op.input[1], "fc_w")
         self.assertEqual(op.input[2], "fc_b")
-        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.device_type, _gpu_device_type())
         self.assertEqual(op.device_option.device_id, 1)
         """
 For reference, net.Proto() should be like:
