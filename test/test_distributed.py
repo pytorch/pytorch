@@ -1176,6 +1176,18 @@ class _DistTestBase(object):
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(batch_size)]
 
+        # Test that saving and loading work
+        # TODO: It should be possible to save the entire model,
+        # but this doesn't work at the moment.  Update this test
+        # when it does work.
+        with tempfile.TemporaryFile() as tmp_file:
+            torch.save(model_DDP.state_dict(), tmp_file)
+            tmp_file.seek(0)
+            saved_state_dict = torch.load(tmp_file)
+        for k in model_DDP.state_dict():
+            self.assertEqual(model_DDP.state_dict()[k],
+                             saved_state_dict[k])
+
     def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None):
         # Run a simple end to end DDP model, use result of single node model
         # as baseline
