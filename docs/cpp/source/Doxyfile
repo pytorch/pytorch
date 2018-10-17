@@ -45,7 +45,7 @@ INPUT                  = ../../../torch/csrc/api/include \
                          ../../../aten/src/ATen/TensorOptions.h \
                          ../../../aten/src/ATen/core/ArrayRef.h \
                          ../../../aten/src/ATen/core/DeviceType.h \
-                         ../../../aten/src/ATen/core/Error.h \
+                         ../../../aten/src/c10/util/Exception.h \
                          ../../../aten/src/ATen/core/Half.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
                          ../../../aten/src/ATen/core/Tensor.h \

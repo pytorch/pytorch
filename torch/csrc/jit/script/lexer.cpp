@@ -1,6 +1,6 @@
 #include "torch/csrc/jit/script/lexer.h"
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 
 #include <string>
 #include <unordered_map>

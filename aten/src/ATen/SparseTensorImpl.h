@@ -2,7 +2,7 @@
 
 #include "ATen/Tensor.h"
 #include "ATen/core/TensorImpl.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 namespace at {
 struct CAFFE2_API SparseTensorImpl : public TensorImpl {
