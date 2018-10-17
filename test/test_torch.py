@@ -5495,6 +5495,11 @@ class TestTorch(TestCase):
         self.assertRaises(IndexError, lambda: reference[0.0, ..., 0.0:2.0])
         self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
 
+        def delitem():
+            del reference[0]
+
+        self.assertRaises(TypeError, delitem)
+
     def test_index(self):
         self._test_index(self, lambda x: x)
 
