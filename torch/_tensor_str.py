@@ -105,7 +105,7 @@ class _Formatter(object):
             if self.int_mode:
                 # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
                 # to indicate that the tensor is of floating type. add 1 to the len to account for this.
-                if nonzero_finite_max / nonzero_finite_min > 1000. or nonzero_finite_max > 1.e8:
+                if nonzero_finite_max / nonzero_finite_min > 1000.:
                     self.sci_mode = True
                     for value in nonzero_finite_vals:
                         value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
