@@ -13,9 +13,13 @@
 
 #include "c10/util/Flags.h"
 
+#ifndef BUILD_ATEN_ONLY
 #include "caffe2/core/allocator.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
+#else
+#include "caffe2/core/common.h"
+#endif
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to

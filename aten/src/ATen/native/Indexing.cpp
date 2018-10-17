@@ -282,8 +282,10 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
                   sourceSlicedSizes.begin())) {
     std::stringstream ss;
     ss << "index_copy_(): Source/destination tensor must have same slice shapes. ";
+#ifndef BUILD_ATEN_ONLY
     ss << "Destination slice shape: " << selfSlicedSizes << " at dimension " << dim;
     ss << " and source slice shape: " << sourceSlicedSizes << " at dimension 0.";
+#endif
     AT_ERROR(ss.str());
   }
   if (source.dim() > 0 && numIndices != source.size(dim)) {

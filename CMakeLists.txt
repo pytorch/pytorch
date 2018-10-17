@@ -139,6 +139,7 @@ if (ANDROID OR IOS)
 endif()
 
 if (BUILD_ATEN_ONLY)
+  add_compile_definitions(BUILD_ATEN_ONLY)
   set(BUILD_CAFFE2_OPS OFF)
   set(BUILD_PYTHON OFF)
   set(USE_NUMA OFF)
