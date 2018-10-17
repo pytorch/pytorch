@@ -353,13 +353,13 @@ class _DataLoaderIter(object):
     #      simple things like acquiring an internal lock of a queue may hang.
     #      Therefore, in this case, we actually need to prevent `__del__` from
     #      being executed, and rely on the automatic termination of daemonic
-    #      children. Thus, we  register an `atexit` hook that sets a global flag
+    #      children. Thus, we register an `atexit` hook that sets a global flag
     #      `_python_exit_status`. Since `atexit` hooks are executed in reverse
     #      order of registration, we are guaranteed that this flag is set before
-    #      library resources we use are freed. (Those hooks are registered at
-    #      importing the Python core libraries.) So in `__del__`, we check if
-    #      `_python_exit_status` is set or `None` (freed), and perform no-op if
-    #      so.
+    #      library resources we use are freed. (Hooks freeing those resources
+    #      are registered at importing the Python core libraries at the top of
+    #      this file.) So in `__del__`, we check if `_python_exit_status` is set
+    #      or `None` (freed), and perform no-op if so.
     #
     #      Another problem with `__del__` is also related to the library cleanup
     #      calls. When a process ends, it shuts the all its daemonic children
