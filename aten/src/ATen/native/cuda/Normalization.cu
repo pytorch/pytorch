@@ -336,7 +336,8 @@ __global__ void batch_norm_backward_kernel(
 // TensorAccessor in which the last dimensions are collapsed or expanded as needed
 template <typename scalar_t, int64_t dim>
 static PackedTensorAccessor<scalar_t, dim> reshaped_packed_accessor(const Tensor& t) {
-  constexpr int too_small_feature_set = 16;  // this is the minimum feature dimension when we swap
+  constexpr int too_small_feature_set = 16;  // this is the maximum feature dimension when we swap
+  constexpr int few_planes = 256;
   // undefined...
   if (! t.defined()) {
     const std::vector<int64_t> zeros(dim);
@@ -363,7 +364,8 @@ static PackedTensorAccessor<scalar_t, dim> reshaped_packed_accessor(const Tensor
     }
   }
   // evil trick to get adjusted 2d tensors to have large dimension last
-  if (dim == 3 && sizes[0] > sizes[2] && sizes[2] < too_small_feature_set) {
+  if (dim == 3 && sizes[0] > sizes[2] && sizes[2] < too_small_feature_set &&
+      sizes[1] <= few_planes) {
     std::swap(sizes[0], sizes[2]);
     std::swap(strides[0], strides[2]);
   }
