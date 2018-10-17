@@ -715,6 +715,12 @@ def weak_script_method(fn):
     return fn
 
 
+def _try_get_weak_module(mod):
+    if mod in weak_modules:
+        return weak_modules[mod].script_module
+    return None
+
+
 def batch(batch_size=1, optimize=True, _frames_up=0):
     def decorator(fn):
         if not _enabled:
@@ -1108,8 +1114,6 @@ if _enabled:
             super(WeakScriptModuleProxy, self).__init__()
             methods = []
 
-            # Link to script module on original object
-            original._jit_script_module = self
             self.__dict__["_original"] = weakref.ref(original)
 
             # Convert weak_methods to ScriptMethodStubs for compilation when
@@ -1131,20 +1135,20 @@ if _enabled:
             for name in original._buffers:
                 self.register_buffer(name, original._buffers[name])
 
-            self.__dict__['_initialized'] = True
+            self.__dict__["_initialized"] = True
             _create_methods_from_stubs(self, methods)
 
         def __getattr__(self, attr):
             try:
                 return ScriptModule.__getattr__(self, attr)
             except AttributeError:
-                if self.__dict__['_initialized']:
+                if self.__dict__["_initialized"]:
                     return getattr(self.__dict__["_original"](), attr)
                 else:
                     raise AttributeError("{} dne".format(attr))
 
         def __setattr__(self, attr, value):
-            if not self.__dict__['_initialized']:
+            if not self.__dict__["_initialized"]:
                 return ScriptModule.__setattr__(self, attr, value)
             if hasattr(self, attr):
                 return ScriptModule.__setattr__(self, attr, value)
@@ -1158,16 +1162,20 @@ else:
     WeakScriptModuleProxy = torch.nn.Module
 
 
+WeakModule = namedtuple('WeakModule', ('script_module', 'status'))
+
+
 def weak_module(mod):
     if _enabled:
-        weak_modules[mod] = True
+        weak_modules[mod] = WeakModule(None, COMPILATION_PENDING)
     return mod
 
 
 def _make_strong(mod):
-    if not hasattr(mod, "_jit_script_module"):
-        mod._jit_script_module = WeakScriptModuleProxy(mod)
-    return mod._jit_script_module
+    entry = weak_modules.get(mod)
+    if entry is None or entry.script_module is None:
+        weak_modules[mod] = WeakModule(WeakScriptModuleProxy(mod), COMPILED)
+    return weak_modules[mod].script_module
 
 
 def _get_methods(cls):
