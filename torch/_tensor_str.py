@@ -72,26 +72,24 @@ class _Formatter(object):
         self.sci_mode = False
         self.max_width = 1
 
+        # use tensor_view for 0-dim tensor iteration
+        tensor_view = tensor.view(tensor.nelement())
         if not self.floating_dtype:
-            copy = torch.empty(tensor.size(), dtype=torch.long).copy_(tensor).view(tensor.nelement())
-            for value in copy.tolist():
+            for value in tensor_view:
                 value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
-            copy = torch.empty(tensor.size(), dtype=torch.float64).copy_(tensor).view(tensor.nelement())
-            copy_list = copy.tolist()
-            try:
-                for value in copy_list:
-                    if value != math.ceil(value):
-                        self.int_mode = False
-                        break
-            # nonfinites will throw errors
-            except (ValueError, OverflowError):
-                self.int_mode = False
+            nonzero_finite_vals = torch.masked_select(tensor_view, torch.isfinite(tensor_view) & tensor_view.ne(0))
+            if nonzero_finite_vals.numel() == 0:
+                return
+            for value in nonzero_finite_vals:
+                if value != math.ceil(value):
+                    self.int_mode = False
+                    break
 
             if self.int_mode:
-                for value in copy_list:
+                for value in tensor_view:
                     value_str = '{:.0f}'.format(value)
                     if math.isnan(value) or math.isinf(value):
                         self.max_width = max(self.max_width, len(value_str))
@@ -101,36 +99,17 @@ class _Formatter(object):
                         self.max_width = max(self.max_width, len(value_str) + 1)
 
             else:
-                copy_abs = copy.abs()
-                pos_inf_mask = copy_abs.eq(inf)
-                neg_inf_mask = copy_abs.eq(-inf)
-                nan_mask = copy_abs.ne(copy)
-                invalid_value_mask = pos_inf_mask + neg_inf_mask + nan_mask
-                if invalid_value_mask.all():
-                    example_value = 0
-                else:
-                    example_value = copy_abs[invalid_value_mask.eq(0)][0]
-                copy_abs[invalid_value_mask] = example_value
+                finite_abs = nonzero_finite_vals.abs()
+                finite_min = finite_abs.min()
+                finite_max = finite_abs.max()
 
-                exp_min = copy_abs.min()
-                if exp_min != 0:
-                    exp_min = math.floor(math.log10(exp_min)) + 1
-                else:
-                    exp_min = 1
-                exp_max = copy_abs.max()
-                if exp_max != 0:
-                    exp_max = math.floor(math.log10(exp_max)) + 1
-                else:
-                    exp_max = 1
-
-                # these conditions for using scientific notation are based on numpy
-                if exp_max - exp_min > PRINT_OPTS.precision or exp_max > 8 or exp_min < -4:
+                if finite_max / finite_min > 1000. or finite_max > 1.e8 or finite_min < 1.e-4:
                     self.sci_mode = True
-                    for value in copy_list:
+                    for value in nonzero_finite_vals:
                         value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
                 else:
-                    for value in copy_list:
+                    for value in nonzero_finite_vals:
                         value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
 
