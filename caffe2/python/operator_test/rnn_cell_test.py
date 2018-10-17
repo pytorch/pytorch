@@ -1174,15 +1174,11 @@ class RNNCellTest(hu.HypothesisTestCase):
             shapes[b] = workspace.FetchBlob(b).shape
 
         # But export in CPU
-        if workspace.has_hip_support:
-            device = core.DeviceOption(caffe2_pb2.CPU, hip_gpu_id=1)
-        else:
-            device = core.DeviceOption(caffe2_pb2.CPU, cuda_gpu_id=1)
         (predict_net, export_blobs) = ExtractPredictorNet(
             net_proto=model.net.Proto(),
             input_blobs=["input"],
             output_blobs=[output],
-            device=device,
+            device=core.DeviceOption(caffe2_pb2.CPU, 1),
         )
 
         # Create the net and run once to see it is valid
@@ -1220,10 +1216,7 @@ class RNNCellTest(hu.HypothesisTestCase):
                     if arg.name == "step_net":
                         for step_op in arg.n.op:
                             self.assertEqual(0, step_op.device_option.device_type)
-                            if workspace.has_hip_support:
-                                self.assertEqual(1, step_op.device_option.hip_gpu_id)
-                            else:
-                                self.assertEqual(1, step_op.device_option.cuda_gpu_id)
+                            self.assertEqual(1, step_op.device_option.device_id)
                     elif arg.name == 'backward_step_net':
                         self.assertEqual(caffe2_pb2.NetDef(), arg.n)
 

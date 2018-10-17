@@ -15,6 +15,12 @@ from caffe2.python import workspace
 
 import numpy as np
 
+def _gpu_device_type():
+    if workspace.has_hip_support:
+        _gpu_device_type = caffe2_pb2.HIP
+    else:
+        _gpu_device_type = caffe2_pb2.CUDA
+    return _gpu_device_type
 
 # First, we will set up a few gradient registry entries so that we can manually
 # construct some test cases.
@@ -94,7 +100,7 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=1) if workspace.has_hip_support else core.DeviceOption(caffe2_pb2.CUDA, cuda_gpu_id=1)]))
+        core.DeviceOption(_gpu_device_type(), 1)]))
     def testDirect(self, device_option):
         operators = [
             CreateOperator('Direct', 'in', 'hidden'),
@@ -279,7 +285,7 @@ class TestGradientCalculation(test_util.TestCase):
 
     @given(device_option=st.sampled_from([
         None,
-        core.DeviceOption(caffe2_pb2.HIP, hip_gpu_id=1) if workspace.has_hip_support else core.DeviceOption(caffe2_pb2.CUDA, cuda_gpu_id=1)]))
+        core.DeviceOption(_gpu_device_type(), 1)]))
     def testMultiUseInput(self, device_option):
         """Test gradient for the following case:
 

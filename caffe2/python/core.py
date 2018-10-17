@@ -2289,21 +2289,13 @@ def copy_func_between_devices(src, dst):
         return None
 
     if src.device_type == GPU and dst.device_type == GPU:
-        def fun(net, *args, **kw):
-            with DeviceScope(dst):
-                return net.Copy(*args, **kw)
-
-        if workspace.has_hip_support:
-            if src.device_id == dst.device_id:
-                return None
-            else:
-                return fun    
+        if src.device_id == dst.device_id:
+            return None
         else:
-            if src.cuda_gpu_id == dst.cuda_gpu_id:
-                return None
-            else:
-                return fun
-               
+            def fun(net, *args, **kw):
+                with DeviceScope(dst):
+                    return net.Copy(*args, **kw)
+            return fun    
 
     if src.device_type == GPU and dst.device_type == CPU:
         def fun(net, *args, **kw):
