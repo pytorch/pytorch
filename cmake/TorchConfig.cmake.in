@@ -39,7 +39,7 @@ endif()
 find_package(Caffe2 REQUIRED)
 
 find_library(TORCH_LIBRARY torch PATHS "${TORCH_INSTALL_PREFIX}/lib")
-add_library(torch SHARED IMPORTED)
+add_library(torch UNKNOWN IMPORTED)
 set(TORCH_LIBRARIES torch ${Caffe2_MAIN_LIBS})
 
 if (@USE_CUDA@)
