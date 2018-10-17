@@ -1,5 +1,4 @@
 from collections import OrderedDict
-import functools
 import itertools
 
 import torch

@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import collections
 import weakref
 import warnings
+import functools
 
 
 class RemovableHandle(object):
@@ -45,10 +46,9 @@ class BackwardHook():
         self.module = module
 
     def get_input_hook(self):
+        @functools.wraps(self.user_hook)
         def hook(grad_input, _):
             return self.user_hook(self.module, grad_input, self.grad_output)
-        # Make error message more user-friendly
-        hook.__name__ = self.user_hook.__name__
         return hook
 
     def get_output_hook(self):
