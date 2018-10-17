@@ -74,38 +74,70 @@ at::Tensor mkldnn_convolution(
     input.sizes(), weight.sizes(), padding, stride, dilation, groups), input.options());
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
+  // TODO: fn_train flag?
+  auto conv_prop = prop_kind::forward;
+  // TODO: winograd?
+  auto conv_algo = algorithm::convolution_direct;
+
+  auto dim = input.dim();
+  auto kdim = dim - 2;
+  auto depth_dim = 2;
+  auto height_dim = (dim == 5) ? 3 : 2;
+  auto weight_dim = (dim == 5) ? 4 : 3;
 
   int32_t g = groups;
 
   int32_t n = input.size(0);
   int32_t ic = input.size(1);
-  int32_t ih = input.size(2);
-  int32_t iw = input.size(3);
+  int32_t id = input.size(depth_dim);
+  int32_t ih = input.size(height_dim);
+  int32_t iw = input.size(weight_dim);
 
   int32_t oc = output.size(1);
-  int32_t oh = output.size(2);
-  int32_t ow = output.size(3);
+  int32_t od = output.size(depth_dim);
+  int32_t oh = output.size(height_dim);
+  int32_t ow = output.size(weight_dim);
 
-  int32_t kh = weight.size(2);
-  int32_t kw = weight.size(3);
+  int32_t kd = weight.size(depth_dim);
+  int32_t kh = weight.size(height_dim);
+  int32_t kw = weight.size(weight_dim);
 
-  int32_t sh = stride[0];
-  int32_t sw = stride[1];
-  int32_t ph = padding[0];
-  int32_t pw = padding[1];
+  bool dilated_conv = false;
+  memory::dims _stride(kdim), _dilation(kdim), _padding(kdim), _padding_r(kdim);
+  for (size_t d = 0; d < kdim; ++d) {
+    _stride[d] = stride[d];
+    _dilation[d] = dilation[d];
+    _padding[d] = padding[d];
+
+    if (dilation[d] != 1) dilated_conv = true;
+
+    auto osize = output.size(d + 2);
+    auto isize = input.size(d + 2);
+    auto ksize = weight.size(d + 2);
+    _padding_r[d] = (osize - 1) * stride[d] - isize + ((ksize - 1) * dilation[d] + 1) - padding[d];
+  }
 
   auto data_t = memory::data_type::f32;
   auto format_any = memory::format::any;
-  auto format_nchw = memory::format::nchw;
-  auto format_weight = (g!= 1) ? memory::format::goihw : memory::format::oihw;
   auto format_x = memory::format::x;
 
-  memory::dims input_tz = {n, ic, ih, iw};
-  memory::dims weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
-  memory::dims bias_tz = {oc};
-  memory::dims output_tz = {n, oc, oh, ow};
-  memory::dims _stride = {sh, sw};
-  memory::dims _padding = {ph, pw};
+  memory::dims input_tz, weight_tz, bias_tz, output_tz;
+  memory::format format_data, format_weight;
+  if (dim == 4) {
+    input_tz = {n, ic, ih, iw};
+    weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
+    bias_tz = {oc};
+    output_tz = {n, oc, oh, ow};
+    format_data = memory::format::nchw;
+    format_weight = (g!= 1) ? memory::format::goihw : memory::format::oihw;
+  } else {
+    input_tz = {n, ic, id, ih, iw};
+    weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kd, kh, kw} : memory::dims{oc, ic, kd, kh, kw};
+    bias_tz = {oc};
+    output_tz = {n, oc, od, oh, ow};
+    format_data = memory::format::ncdhw;
+    format_weight = (g!= 1) ? memory::format::goidhw : memory::format::oidhw;
+  }
 
   auto input_md = memory::desc({input_tz}, data_t, format_any);
   auto weight_md = memory::desc({weight_tz}, data_t, format_any);
@@ -114,24 +146,36 @@ at::Tensor mkldnn_convolution(
 
   std::shared_ptr<convolution_forward::desc> conv_forward_desc;
   if (bias.defined()) {
-    conv_forward_desc.reset(new convolution_forward::desc(prop_kind::forward,
-      convolution_direct, input_md, weight_md, bias_md, output_md,
-      _stride, _padding, _padding, padding_kind::zero));
+    if (dilated_conv) {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        conv_prop, conv_algo, input_md, weight_md, bias_md, output_md,
+        _stride, _dilation, _padding, _padding_r, padding_kind::zero));
+    } else {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        conv_prop, conv_algo, input_md, weight_md, bias_md, output_md,
+        _stride, _padding, _padding, padding_kind::zero));
+    }
   } else {
-    conv_forward_desc.reset(new convolution_forward::desc(prop_kind::forward,
-      convolution_direct, input_md, weight_md, output_md,
-      _stride, _padding, _padding, padding_kind::zero));
+    if (dilated_conv) {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        conv_prop, conv_algo, input_md, weight_md, output_md,
+        _stride, _dilation, _padding, _padding_r, padding_kind::zero));
+    } else {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        conv_prop, conv_algo, input_md, weight_md, output_md,
+        _stride, _padding, _padding, padding_kind::zero));
+    }
   }
 
   std::shared_ptr<convolution_forward::primitive_desc> conv_forward_pd;
   conv_forward_pd.reset(new convolution_forward::primitive_desc(
     *conv_forward_desc, cpu_engine));
 
-  auto input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, cpu_engine},
+  auto input_usr_memory = memory({{{input_tz}, data_t, format_data}, cpu_engine},
     input.data_ptr());
   auto weight_usr_memory = memory({{{weight_tz}, data_t,  format_weight}, cpu_engine},
     weight.data_ptr());
-  auto output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, cpu_engine},
+  auto output_usr_memory = memory({{{output_tz}, data_t, format_data}, cpu_engine},
     output.data_ptr());
 
   std::vector<primitive> net;
@@ -185,37 +229,68 @@ Tensor mkldnn_convolution_backward_input(
   auto grad_input = at::empty(input_size, grad_output.options());
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
+  // TODO: winograd?
+  auto conv_algo = algorithm::convolution_direct;
+
+  auto dim = grad_output.dim();
+  auto kdim = dim - 2;
+  auto depth_dim = 2;
+  auto height_dim = (dim == 5) ? 3 : 2;
+  auto weight_dim = (dim == 5) ? 4 : 3;
 
   int32_t g = groups;
 
   int32_t n = grad_input.size(0);
   int32_t ic = grad_input.size(1);
-  int32_t ih = grad_input.size(2);
-  int32_t iw = grad_input.size(3);
+  int32_t id = grad_input.size(depth_dim);
+  int32_t ih = grad_input.size(height_dim);
+  int32_t iw = grad_input.size(weight_dim);
 
   int32_t oc = grad_output.size(1);
-  int32_t oh = grad_output.size(2);
-  int32_t ow = grad_output.size(3);
+  int32_t od = grad_output.size(depth_dim);
+  int32_t oh = grad_output.size(height_dim);
+  int32_t ow = grad_output.size(weight_dim);
 
-  int32_t kh = weight.size(2);
-  int32_t kw = weight.size(3);
+  int32_t kd = weight.size(depth_dim);
+  int32_t kh = weight.size(height_dim);
+  int32_t kw = weight.size(weight_dim);
 
-  int32_t sh = stride[0];
-  int32_t sw = stride[1];
-  int32_t ph = padding[0];
-  int32_t pw = padding[1];
+  bool dilated_conv = false;
+  memory::dims _stride(kdim), _dilation(kdim), _padding(kdim), _padding_r(kdim);
+  for (size_t d = 0; d < kdim; ++d) {
+    _stride[d] = stride[d];
+    _dilation[d] = dilation[d];
+    _padding[d] = padding[d];
+
+    if (dilation[d] != 1) dilated_conv = true;
+
+    auto osize = grad_output.size(d + 2);
+    auto isize = grad_input.size(d + 2);
+    auto ksize = weight.size(d + 2);
+    _padding_r[d] = (osize - 1) * stride[d] - isize + ((ksize - 1) * dilation[d] + 1) - padding[d];
+  }
 
   auto data_t = memory::data_type::f32;
   auto format_any = memory::format::any;
-  auto format_nchw = memory::format::nchw;
-  auto format_weight = (g!= 1) ? memory::format::goihw : memory::format::oihw;
+  auto format_x = memory::format::x;
 
-  memory::dims input_tz = {n, ic, ih, iw};
-  memory::dims weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
-  memory::dims bias_tz = {oc};
-  memory::dims output_tz = {n, oc, oh, ow};
-  memory::dims _stride = {sh, sw};
-  memory::dims _padding = {ph, pw};
+  memory::dims input_tz, weight_tz, bias_tz, output_tz;
+  memory::format format_data, format_weight;
+  if (dim == 4) {
+    input_tz = {n, ic, ih, iw};
+    weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
+    bias_tz = {oc};
+    output_tz = {n, oc, oh, ow};
+    format_data = memory::format::nchw;
+    format_weight = (g!= 1) ? memory::format::goihw : memory::format::oihw;
+  } else {
+    input_tz = {n, ic, id, ih, iw};
+    weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kd, kh, kw} : memory::dims{oc, ic, kd, kh, kw};
+    bias_tz = {oc};
+    output_tz = {n, oc, od, oh, ow};
+    format_data = memory::format::ncdhw;
+    format_weight = (g!= 1) ? memory::format::goidhw : memory::format::oidhw;
+  }
 
   auto input_md = memory::desc({input_tz}, data_t, format_any);
   auto weight_md = memory::desc({weight_tz}, data_t, format_any);
@@ -223,15 +298,28 @@ Tensor mkldnn_convolution_backward_input(
   auto output_md = memory::desc({output_tz}, data_t, format_any);
 
   // need to re-create conv_forward_pd to feed conv_backward_data_pd
+  // TODO: cache conv_forward_pd
   std::shared_ptr<convolution_forward::desc> conv_forward_desc;
   if (bias_defined) {
-    conv_forward_desc.reset(new convolution_forward::desc(prop_kind::forward,
-      convolution_direct, input_md, weight_md, bias_md, output_md,
-      _stride, _padding, _padding, padding_kind::zero));
+    if (dilated_conv) {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        prop_kind::forward, conv_algo, input_md, weight_md, bias_md, output_md,
+        _stride, _dilation, _padding, _padding_r, padding_kind::zero));
+    } else {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        prop_kind::forward, conv_algo, input_md, weight_md, bias_md, output_md,
+        _stride, _padding, _padding, padding_kind::zero));
+    }
   } else {
-    conv_forward_desc.reset(new convolution_forward::desc(prop_kind::forward,
-      convolution_direct, input_md, weight_md, output_md,
-      _stride, _padding, _padding, padding_kind::zero));
+    if (dilated_conv) {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        prop_kind::forward, conv_algo, input_md, weight_md, output_md,
+        _stride, _dilation, _padding, _padding_r, padding_kind::zero));
+    } else {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        prop_kind::forward, conv_algo, input_md, weight_md, output_md,
+        _stride, _padding, _padding, padding_kind::zero));
+    }
   }
 
   std::shared_ptr<convolution_forward::primitive_desc> conv_forward_pd;
@@ -239,19 +327,25 @@ Tensor mkldnn_convolution_backward_input(
     *conv_forward_desc, cpu_engine));
 
   std::shared_ptr<convolution_backward_data::desc> conv_backward_data_desc;
-  conv_backward_data_desc.reset(new convolution_backward_data::desc(
-    convolution_direct, input_md, weight_md, output_md,
-    _stride, _padding, _padding, padding_kind::zero));
+  if (dilated_conv) {
+    conv_backward_data_desc.reset(new convolution_backward_data::desc(
+      conv_algo, input_md, weight_md, output_md,
+      _stride, _dilation, _padding, _padding_r, padding_kind::zero));
+  } else {
+    conv_backward_data_desc.reset(new convolution_backward_data::desc(
+      conv_algo, input_md, weight_md, output_md,
+      _stride, _padding, _padding, padding_kind::zero));
+  }
 
   std::shared_ptr<convolution_backward_data::primitive_desc> conv_backward_data_pd;
   conv_backward_data_pd.reset(new convolution_backward_data::primitive_desc(
     *conv_backward_data_desc, cpu_engine, *conv_forward_pd));
 
-  auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, cpu_engine},
+  auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_data}, cpu_engine},
     grad_output.data_ptr());
   auto weight_usr_memory = memory({{{weight_tz}, data_t, format_weight}, cpu_engine},
     weight.data_ptr());
-  auto grad_input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, cpu_engine},
+  auto grad_input_usr_memory = memory({{{input_tz}, data_t, format_data}, cpu_engine},
     grad_input.data_ptr());
 
   std::vector<primitive> net;
@@ -302,54 +396,97 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
   }
 
   auto cpu_engine = CpuEngine::Instance().get_engine();
+  // TODO: winograd?
+  auto conv_algo = algorithm::convolution_direct;
+
+  auto dim = grad_output.dim();
+  auto kdim = dim - 2;
+  auto depth_dim = 2;
+  auto height_dim = (dim == 5) ? 3 : 2;
+  auto weight_dim = (dim == 5) ? 4 : 3;
 
   int32_t g = groups;
 
   int32_t n = input.size(0);
   int32_t ic = input.size(1);
-  int32_t ih = input.size(2);
-  int32_t iw = input.size(3);
+  int32_t id = input.size(depth_dim);
+  int32_t ih = input.size(height_dim);
+  int32_t iw = input.size(weight_dim);
 
   int32_t oc = grad_output.size(1);
-  int32_t oh = grad_output.size(2);
-  int32_t ow = grad_output.size(3);
+  int32_t od = grad_output.size(depth_dim);
+  int32_t oh = grad_output.size(height_dim);
+  int32_t ow = grad_output.size(weight_dim);
 
-  int32_t kh = grad_weight.size(2);
-  int32_t kw = grad_weight.size(3);
+  int32_t kd = grad_weight.size(depth_dim);
+  int32_t kh = grad_weight.size(height_dim);
+  int32_t kw = grad_weight.size(weight_dim);
 
-  int32_t sh = stride[0];
-  int32_t sw = stride[1];
-  int32_t ph = padding[0];
-  int32_t pw = padding[1];
+  bool dilated_conv = false;
+  memory::dims _stride(kdim), _dilation(kdim), _padding(kdim), _padding_r(kdim);
+  for (size_t d = 0; d < kdim; ++d) {
+    _stride[d] = stride[d];
+    _dilation[d] = dilation[d];
+    _padding[d] = padding[d];
+
+    if (dilation[d] != 1) dilated_conv = true;
+
+    auto osize = grad_output.size(d + 2);
+    auto isize = input.size(d + 2);
+    auto ksize = grad_weight.size(d + 2);
+    _padding_r[d] = (osize - 1) * stride[d] - isize + ((ksize - 1) * dilation[d] + 1) - padding[d];
+  }
 
   auto data_t = memory::data_type::f32;
   auto format_any = memory::format::any;
-  auto format_nchw = memory::format::nchw;
-  auto format_weight = (g!= 1) ? memory::format::goihw : memory::format::oihw;
   auto format_x = memory::format::x;
 
-  memory::dims input_tz = {n, ic, ih, iw};
-  memory::dims weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
-  memory::dims bias_tz = {oc};
-  memory::dims output_tz = {n, oc, oh, ow};
-  memory::dims _stride = {sh, sw};
-  memory::dims _padding = {ph, pw};
+  memory::dims input_tz, weight_tz, bias_tz, output_tz;
+  memory::format format_data, format_weight;
+  if (dim == 4) {
+    input_tz = {n, ic, ih, iw};
+    weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
+    bias_tz = {oc};
+    output_tz = {n, oc, oh, ow};
+    format_data = memory::format::nchw;
+    format_weight = (g!= 1) ? memory::format::goihw : memory::format::oihw;
+  } else {
+    input_tz = {n, ic, id, ih, iw};
+    weight_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kd, kh, kw} : memory::dims{oc, ic, kd, kh, kw};
+    bias_tz = {oc};
+    output_tz = {n, oc, od, oh, ow};
+    format_data = memory::format::ncdhw;
+    format_weight = (g!= 1) ? memory::format::goidhw : memory::format::oidhw;
+  }
 
-  memory::desc input_md({input_tz}, data_t, format_any);
-  memory::desc weight_md({weight_tz}, data_t, format_any);
-  memory::desc bias_md({bias_tz}, data_t, format_any);
-  memory::desc output_md({output_tz}, data_t, format_any);
+  auto input_md = memory::desc({input_tz}, data_t, format_any);
+  auto weight_md = memory::desc({weight_tz}, data_t, format_any);
+  auto bias_md = memory::desc({bias_tz}, data_t, format_any);
+  auto output_md = memory::desc({output_tz}, data_t, format_any);
 
   // need to re-create conv_forward_pd to feed conv_backward_weight_pd
+  // TODO: cache conv_forward_pd
   std::shared_ptr<convolution_forward::desc> conv_forward_desc;
   if (bias_defined) {
-    conv_forward_desc.reset(new convolution_forward::desc(prop_kind::forward,
-      convolution_direct, input_md, weight_md, bias_md, output_md,
-      _stride, _padding, _padding, padding_kind::zero));
+    if (dilated_conv) {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        prop_kind::forward, conv_algo, input_md, weight_md, bias_md, output_md,
+        _stride, _dilation, _padding, _padding_r, padding_kind::zero));
+    } else {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        prop_kind::forward, conv_algo, input_md, weight_md, bias_md, output_md,
+        _stride, _padding, _padding, padding_kind::zero));
+    }
   } else {
-    conv_forward_desc.reset(new convolution_forward::desc(prop_kind::forward,
-      convolution_direct, input_md, weight_md, output_md,
-      _stride, _padding, _padding, padding_kind::zero));
+    if (dilated_conv) {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        prop_kind::forward, conv_algo, input_md, weight_md, output_md,
+        _stride, _dilation, _padding, _padding_r, padding_kind::zero));
+    } else {
+      conv_forward_desc.reset(new convolution_forward::desc(
+        prop_kind::forward, conv_algo, input_md, weight_md, output_md,
+        _stride, _padding, _padding, padding_kind::zero));
+    }
   }
 
   std::shared_ptr<convolution_forward::primitive_desc> conv_forward_pd;
@@ -358,22 +495,34 @@ std::tuple<at::Tensor, at::Tensor> mkldnn_convolution_backward_weights(
 
   std::shared_ptr<convolution_backward_weights::desc> conv_backward_weight_desc;
   if (bias_defined) {
-    conv_backward_weight_desc.reset(new convolution_backward_weights::desc(
-      convolution_direct, input_md, weight_md, bias_md, output_md,
-      _stride, _padding, _padding, padding_kind::zero));
+    if (dilated_conv) {
+      conv_backward_weight_desc.reset(new convolution_backward_weights::desc(
+        conv_algo, input_md, weight_md, bias_md, output_md,
+        _stride, _dilation, _padding, _padding_r, padding_kind::zero));
+    } else {
+      conv_backward_weight_desc.reset(new convolution_backward_weights::desc(
+        conv_algo, input_md, weight_md, bias_md, output_md,
+        _stride, _padding, _padding, padding_kind::zero));
+    }
   } else {
-    conv_backward_weight_desc.reset(new convolution_backward_weights::desc(
-      convolution_direct, input_md, weight_md, output_md,
-      _stride, _padding, _padding, padding_kind::zero));
+    if (dilated_conv) {
+      conv_backward_weight_desc.reset(new convolution_backward_weights::desc(
+        conv_algo, input_md, weight_md, output_md,
+        _stride, _dilation, _padding, _padding_r, padding_kind::zero));
+    } else {
+      conv_backward_weight_desc.reset(new convolution_backward_weights::desc(
+        conv_algo, input_md, weight_md, output_md,
+        _stride, _padding, _padding, padding_kind::zero));
+    }
   }
 
   std::shared_ptr<convolution_backward_weights::primitive_desc> conv_backward_weight_pd;
   conv_backward_weight_pd.reset(new convolution_backward_weights::primitive_desc(
     *conv_backward_weight_desc, cpu_engine, *conv_forward_pd));
 
-  auto input_usr_memory = memory({{{input_tz}, data_t, format_nchw}, cpu_engine},
+  auto input_usr_memory = memory({{{input_tz}, data_t, format_data}, cpu_engine},
     input.data_ptr());
-  auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_nchw}, cpu_engine},
+  auto grad_output_usr_memory = memory({{{output_tz}, data_t, format_data}, cpu_engine},
     grad_output.data_ptr());
   auto grad_weight_usr_memory = memory({{{weight_tz}, data_t, format_weight}, cpu_engine},
     grad_weight.data_ptr());
