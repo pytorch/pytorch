@@ -27,7 +27,7 @@ def set_printoptions(
 
     Args:
         precision: Number of digits of precision for floating point output
-            (default = 8).
+            (default = 4).
         threshold: Total number of array elements which trigger summarization
             rather than full `repr` (default = 1000).
         edgeitems: Number of array items in summary at beginning and end of
