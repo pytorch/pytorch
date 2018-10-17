@@ -172,7 +172,7 @@ pytorch_linux_build_defaults: &pytorch_linux_build_defaults
 
 pytorch_linux_test_defaults: &pytorch_linux_test_defaults
   machine:
-    image: default
+    image: circleci/ubuntu-1604:201810-01
   steps:
   - run:
       name: Prepare workspace
@@ -291,7 +291,7 @@ caffe2_linux_build_defaults: &caffe2_linux_build_defaults
 
 caffe2_linux_test_defaults: &caffe2_linux_test_defaults
   machine:
-    image: default
+    image: circleci/ubuntu-1604:201810-01
   steps:
   - run:
       name: Prepare workspace
@@ -614,7 +614,7 @@ jobs:
       CUDA_VERSION: "8"
     resource_class: gpu.medium
     machine:
-      image: default
+      image: circleci/ubuntu-1604:201810-01
     steps:
     - run:
         name: Prepare workspace
