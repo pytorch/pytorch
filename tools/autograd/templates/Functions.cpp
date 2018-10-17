@@ -17,6 +17,7 @@
 #include <ciso646>
 #include <algorithm>
 #include <numeric>
+#include <functional>
 
 // ${generated_comment}
 
@@ -2007,36 +2008,11 @@ Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const T
   return flattened_dense_grad.index_select(0, flattened_indices);
 }
 
-Tensor constant_pad_nd_backward(const Tensor& grad, const Tensor& self, IntList pad) {
-    auto l_inp = self.dim();
-    auto l_pad = pad.size() / 2;
-    auto l_diff = l_inp - l_pad;
-
-    auto grad_input = at::zeros(self.sizes(), grad.options());
-
-    auto cg_input = grad_input;
-    for (int i = l_diff; i < l_inp; i++) {
-        auto pad_idx = pad.size() - (i - l_diff + 1) * 2;
-        if (pad[pad_idx] < 0) {
-            cg_input = cg_input.narrow(i, -pad[pad_idx], cg_input.size(i) + pad[pad_idx]);
-        }
-        if (pad[pad_idx + 1] < 0) {
-            cg_input = cg_input.narrow(i, 0, cg_input.size(i) + pad[pad_idx + 1]);
-        }
-    }
-
-    auto cg_output = grad;
-    for (int i = l_diff; i < l_inp; i++) {
-        auto pad_idx = pad.size() - (i - l_diff + 1) * 2;
-        if (pad[pad_idx] > 0) {
-            cg_output = cg_output.narrow(i, pad[pad_idx], cg_output.size(i) - pad[pad_idx]);
-        }
-        if (pad[pad_idx + 1] > 0) {
-            cg_output = cg_output.narrow(i, 0, cg_output.size(i) - pad[pad_idx + 1]);
-        }
-    }
-    cg_input.copy_(cg_output);
-    return grad_input;
+// Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
+Tensor constant_pad_nd_backward(const Tensor& grad, IntList pad) {
+  auto negated_pad = pad.vec();
+  std::transform(negated_pad.cbegin(), negated_pad.cend(), negated_pad.begin(), std::negate<int64_t>());
+  return at::native::constant_pad_nd(grad, negated_pad);
 }
 
 } // anonymous namespace

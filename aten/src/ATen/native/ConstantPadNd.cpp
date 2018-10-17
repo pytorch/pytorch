@@ -17,6 +17,30 @@ Tensor constant_pad_nd(const Tensor& self, IntList pad, Scalar value) {
 
     std::vector<int64_t> new_shape;
 
+    bool all_pads_non_positive = true
+
+    auto c_input = self;
+    for (int i = l_diff; i < l_inp; i++) {
+        auto pad_idx = 2 * (l_inp - i - 1);
+        if (pad[pad_idx] < 0) {
+            c_input = c_input.narrow(i, -pad[pad_idx], c_input.size(i) + pad[pad_idx]);
+        } else if (pad[pad_idx] != 0) {
+            all_pads_non_positive = false
+        }
+        if (pad[pad_idx + 1] < 0) {
+            c_input = c_input.narrow(i, 0, c_input.size(i) + pad[pad_idx + 1]);
+        } else if (pad[pad_idx + 1] != 0) {
+            all_pads_non_positive = false
+        }
+    }
+
+    // if none of the pads are positive we can optimize and just return the result
+    // of calling .narrow() on the input
+    if (all_pads_non_positive) {
+        return c_input
+    }
+
+
     for (int i = 0; i < l_diff; i ++) {
         new_shape.emplace_back(input_sizes[i]);
     }
@@ -33,20 +57,9 @@ Tensor constant_pad_nd(const Tensor& self, IntList pad, Scalar value) {
     auto output = at::empty(new_shape, self.options());
     output.fill_(value);
 
-    auto c_input = self;
-    for (int i = l_diff; i < l_inp; i++) {
-        auto pad_idx = pad.size() - (i - l_diff + 1) * 2;
-        if (pad[pad_idx] < 0) {
-            c_input = c_input.narrow(i, -pad[pad_idx], c_input.size(i) + pad[pad_idx]);
-        }
-        if (pad[pad_idx + 1] < 0) {
-            c_input = c_input.narrow(i, 0, c_input.size(i) + pad[pad_idx + 1]);
-        }
-    }
-
     auto c_output = output;
     for (int i = l_diff; i < l_inp; i++) {
-        auto pad_idx = pad.size() - (i - l_diff + 1) * 2;
+        auto pad_idx = 2 * (l_inp - i - 1);
         if (pad[pad_idx] > 0) {
             c_output = c_output.narrow(i, pad[pad_idx], c_output.size(i) - pad[pad_idx]);
         }
