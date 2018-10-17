@@ -421,6 +421,12 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    * Otherwise, they behave like their non-wrapped equivalents.
    * See [Result type computation] in TensorIterator.h.
    *
+   * Why did we opt for wrapped numbers, as opposed to just having
+   * an extra function add(Tensor, Scalar)?  This helps greatly reduce
+   * the amount of code we have to write for add, when actually
+   * a Tensor-Scalar addition is really just a Tensor-Tensor
+   * addition when the RHS is 0-dim (except for promotion behavior.)
+   *
    * WARNING: It is NOT valid to call this method on a Variable.
    * See Note [We regret making Variable hold a Tensor]
    */
@@ -737,43 +743,6 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
    */
   bool is_variable() const { return is_variable_; };
 
- private:
-  /**
-   * Compute the number of elements based on the sizes of a tensor.
-   */
-  int64_t compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
-    }
-    return n;
-  }
-
-  /**
-   * Compute whether or not a tensor is contiguous based on the sizes and
-   * strides of a tensor.
-   */
-  bool compute_contiguous() const;
-
- protected:
-  /**
-   * Recompute the cached numel of a tensor.  Call this if you modify sizes.
-   */
-  void refresh_numel() {
-    AT_ASSERT(!is_variable());
-    numel_ = compute_numel();
-  }
-
-  /**
-   * Recompute the cached contiguity of a tensor.  Call this if you modify sizes
-   * or strides.
-   */
-  void refresh_contiguous() {
-    AT_ASSERT(!is_variable());
-    is_contiguous_ = compute_contiguous();
-  }
-
- public:
   /**
    * The device type of a Tensor, e.g., DeviceType::CPU or DeviceType::CUDA.
    */
@@ -1195,7 +1164,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
     return data_type_ != caffe2::TypeMeta();
   }
 
- private:
+private:
 
   // The Caffe2 Resize() method supports being called both as Resize({2,2}) as
   // well as variadic with Resize(2, 2).  These overloads provide all of the
@@ -1264,6 +1233,41 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       }
     }
     is_contiguous_ = true;
+  }
+
+  /**
+   * Compute the number of elements based on the sizes of a tensor.
+   */
+  int64_t compute_numel() const {
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      n *= s;
+    }
+    return n;
+  }
+
+  /**
+   * Compute whether or not a tensor is contiguous based on the sizes and
+   * strides of a tensor.
+   */
+  bool compute_contiguous() const;
+
+protected:
+  /**
+   * Recompute the cached numel of a tensor.  Call this if you modify sizes.
+   */
+  void refresh_numel() {
+    AT_ASSERT(!is_variable());
+    numel_ = compute_numel();
+  }
+
+  /**
+   * Recompute the cached contiguity of a tensor.  Call this if you modify sizes
+   * or strides.
+   */
+  void refresh_contiguous() {
+    AT_ASSERT(!is_variable());
+    is_contiguous_ = compute_contiguous();
   }
 
 public:
