@@ -16,6 +16,15 @@
   } catch (const std::exception& e) {                                    \
     ASSERT_NE(std::string(e.what()).find(substring), std::string::npos); \
   }
+#define ASSERT_ANY_THROW(statement)                                      \
+  bool threw = false;                                                    \
+  try {                                                                  \
+    (void)statement;                                                     \
+  } catch (const std::exception& e) {                                    \
+    threw = true;                                                        \
+  }                                                                      \
+  ASSERT_TRUE(threw);                                                    \
+
 #endif // defined(USE_GTEST)
 
 #include "torch/csrc/autograd/variable.h"
@@ -46,6 +55,7 @@
 
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/topological_index.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
 
@@ -1155,6 +1165,62 @@ void testSchemaParser() {
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(t) foo) -> (Tensor(t))");
 
+}
+
+void testTopologicalIndex() {
+  { // create graph so we can make nodes
+    Graph graph;
+    auto tail = graph.create(prim::Undefined);
+    TopologicalIndex index(tail);
+
+    // Can't insert twice
+    ASSERT_ANY_THROW(index.insertBefore(tail, tail));
+    auto node1 = graph.create(prim::Undefined);
+    auto node2 = graph.create(prim::Undefined);
+    auto node3 = graph.create(prim::Undefined);
+
+    index.insertBefore(tail, node1);
+    index.insertBefore(node1, node2);
+    index.insertAfter(node2, node3);
+
+    // node2 node3 node1 tail
+    for (auto node : {node3, node1, tail}) {
+      ASSERT_TRUE(index.isBefore(node2, node));
+      ASSERT_TRUE(index.isAfter(node, node2));
+    }
+    ASSERT_FALSE(index.isBefore(node1, node2));
+    ASSERT_TRUE(index.isAfter(node1, node2));
+    ASSERT_FALSE(index.isBefore(node1, node3));
+    ASSERT_TRUE(index.isBefore(node3, node1));
+
+    // erase an element
+    index.erase(node1);
+    ASSERT_TRUE(index.isBefore(node2, tail));
+    ASSERT_TRUE(index.isAfter(node3, node2));
+
+    // put it back in a different place
+    index.insertBefore(tail, node1);
+    ASSERT_TRUE(index.isBefore(node1, tail));
+    ASSERT_TRUE(index.isAfter(node1, node3));
+  }
+  {
+    // test some boundary conditions
+    Graph graph;
+    auto tail = graph.create(prim::Undefined);
+    TopologicalIndex index(tail, 2, -5, 10);
+
+    auto node1 = graph.create(prim::Undefined);
+    auto node2 = graph.create(prim::Undefined);
+    auto node3 = graph.create(prim::Undefined);
+
+    // Force a reindex by jumping off the end
+    index.insertBefore(tail, node1);
+    index.insertBefore(node1, node2);
+    index.insertBefore(node2, node3);
+
+    ASSERT_TRUE(index.isBefore(node3, tail));
+    ASSERT_TRUE(index.isAfter(node2, node3));
+  }
 }
 
 } // namespace
