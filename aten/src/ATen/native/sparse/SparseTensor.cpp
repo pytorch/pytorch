@@ -76,6 +76,7 @@ SparseTensor new_sparse(const TensorOptions& options) {
 
 /* Pointer-copy init */
 SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& values_) {
+  AT_ASSERT(indices.is_contiguous() && values_.is_contiguous());
   Tensor values;
   if (values_.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -158,6 +159,7 @@ SparseTensor new_with_size_sparse(IntList size, const TensorOptions& options) {
 // are guaranteed to be within bounds.
 // NB: Got rid of the sizes == NULL case
 SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
+  AT_ASSERT(indices.is_contiguous() && values_.is_contiguous());
   Tensor values;
   if (values_.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -175,6 +177,7 @@ SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, c
 
 // NB: Got rid of the sizes == NULL case
 SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
+  AT_ASSERT(indices.is_contiguous() && values_.is_contiguous());
   Tensor values;
   if (values_.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -286,7 +289,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
     return dst;
   }
 
-  LongTensor indices = self._indices();
+  LongTensor indices = self._indices().contiguous();
   Tensor values = self._values().contiguous();
   int64_t sparseDims = self._sparseDims();
   int64_t denseDims = self._denseDims();
@@ -366,6 +369,8 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   int64_t sparseDims = mask._sparseDims();
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
+  AT_ASSERT(mask_indices.is_contiguous() && mask_values.is_contiguous());
+
   Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   _alias_into_sparse(r, mask_indices.clone(), r_values);
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());

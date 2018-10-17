@@ -45,6 +45,7 @@ inline bool _check_device(ArrayRef<Tensor> ts) {
 // Takes indices and values and directly puts them into the sparse tensor, no
 // copy.  This used to be called THSTensor_(_move)
 inline void _alias_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values) {
+  AT_ASSERT(indices.is_contiguous() && values.is_contiguous());
   _get_sparse_impl(self)->set_indices_and_values_unsafe(indices, values);
 }
 
@@ -62,6 +63,7 @@ inline SparseTensor _new_with_dims_and_tensor_sparse(
     ArrayRef<int64_t> sizes,
     const LongTensor& indices,
     const Tensor& values) {
+  AT_ASSERT(indices.is_contiguous() && values.is_contiguous());
   SparseTensor self = at::empty({0}, dtype.options());
   _get_sparse_impl(self)->resize_(sparseDims, denseDims, sizes);
   _alias_into_sparse(self, indices, values);
