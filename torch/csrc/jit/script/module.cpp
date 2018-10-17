@@ -104,11 +104,11 @@ void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
 }
 
 void Module::to(at::ScalarType dtype, bool non_blocking) {
-  to_impl(/*device=*/at::nullopt, dtype, non_blocking);
+  to_impl(/*device=*/c10::nullopt, dtype, non_blocking);
 }
 
 void Module::to(at::Device device, bool non_blocking) {
-  to_impl(device, /*dtype=*/at::nullopt, non_blocking);
+  to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
 void Module::save(std::ostream& out) {
@@ -120,8 +120,8 @@ void Module::save(const std::string& filename) {
 }
 
 void Module::to_impl(
-    at::optional<at::Device> device,
-    at::optional<at::ScalarType> dtype,
+    c10::optional<at::Device> device,
+    c10::optional<at::ScalarType> dtype,
     bool non_blocking) {
   // First call `to()` on every child module.
   for (auto& child : modules) {
