@@ -4243,7 +4243,7 @@ Example::
     #   3. SparseTensor._values().shape = (nnz, SparseTensor.shape[sparse_dim:])
     #
     # For instance, to create an empty sparse tensor with nnz = 0, dense_dim = 0 and
-    # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1‚ 0))
+    # sparse_dim = 1 (hence indices is a 2D tensor of shape = (1, 0))
     >>> S = torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
     tensor(indices=tensor([], size=(1, 0)),
            values=tensor([], size=(0,)),
