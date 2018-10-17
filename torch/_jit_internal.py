@@ -58,6 +58,12 @@ def createResolutionCallback(frames_up=0):
 
 
 def weak_script(fn, _frames_up=0):
+    """
+    Marks a function as a weak script function. When used in a script function
+    or ScriptModule, the weak script function will be lazily compiled and
+    inlined in the graph. When not used in a script function, the weak script
+    annotation has no effect.
+    """
     compiled_weak_fns[fn] = {
         "status": COMPILATION_PENDING,
         "compiled_fn": None,
