@@ -649,6 +649,8 @@ tensor of size 0. If :attr:`minlength` is specified, the number of bins is at le
 ``out[n] += weights[i]`` if :attr:`weights` is specified else
 ``out[n] += 1``.
 
+.. include:: cuda_deterministic.rst
+
 Arguments:
     input (Tensor): 1-d int tensor
     weights (Tensor): optional, weight for each value in the input tensor.
