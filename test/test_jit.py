@@ -7370,11 +7370,11 @@ a")
                 x = x + 3
             return x + 4 + inner(x)
 
-        @torch._jit.weak_script
+        @torch._jit_internal.weak_script
         def weak_script_fn_inner(x):
             return x + 6 + not_a_script_fn(x)
 
-        @torch._jit.weak_script
+        @torch._jit_internal.weak_script
         def weak_script_fn(x):
             return x + 5 + weak_script_fn_inner(x) + weak_script_fn_inner(x)
 
