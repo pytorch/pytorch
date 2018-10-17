@@ -77,7 +77,12 @@ and `python setup.py clean`. Then you can install in `build develop` mode again.
 
 ## Codebase structure
 
-* [c10](c10) - Core library files that work everywhere (server, mobile)
+* [c10](c10) - Core library files that work everywhere, both server
+  and mobile.  We are slowly moving pieces from ATen/core here.
+  This library is intended only to contain essential functionality,
+  and appropriate to use in settings where binary size matters.  (But
+  you'll have a lot of missing functionality if you try to use it
+  directly.)
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
   * src
     * [TH](aten/src/TH)
@@ -130,7 +135,21 @@ and `python setup.py clean`. Then you can install in `build develop` mode again.
   * [jit](tools/jit) - Code generation for JIT
   * [amd_build](tools/amd_build) - HIPify scripts, for transpiling CUDA
     into AMD HIP.
-* [test](tests) - Python unit tests for PyTorch
+* [test](tests) - Python unit tests for PyTorch Python frontend
+  * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
+    functionality
+  * [test_autograd.py](test/test_autograd.py) - Tests for non-NN
+    automatic differentiation support
+  * [test_nn.py](test/test_nn.py) - Tests for NN operators and
+    their automatic differentiation
+  * [test_jit.py](test/test_jit.py) - Tests for the JIT compiler
+    and TorchScript
+  * ...
+  * [cpp](test/cpp) - C++ unit tests for PyTorch C++ frontend
+  * [expect](test/expect) - Automatically generated "expect" files
+    which are used to compare against expected output.
+  * [onnx](test/onnx) - Tests for ONNX export functionality,
+    using both PyTorch and Caffe2.
 * [caffe2](caffe2) - The Caffe2 library.
   * [core](caffe2/core) - Core files of Caffe2, e.g., tensor, workspace,
     blobs, etc.
