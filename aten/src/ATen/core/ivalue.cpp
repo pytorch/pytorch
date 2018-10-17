@@ -2,22 +2,22 @@
 #include <ATen/core/Formatting.h>
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) \
-  _(Tensor) \
-  _(Double) \
-  _(Int) \
-  _(Bool) \
-  _(Tuple) \
-  _(IntList) \
-  _(DoubleList) \
-  _(BoolList) \
-  _(String) \
-  _(TensorList) \
-  _(Blob) \
-  _(GenericList) \
-  _(World) \
+  _(None)                    \
+  _(Tensor)                  \
+  _(Double)                  \
+  _(Int)                     \
+  _(Bool)                    \
+  _(Tuple)                   \
+  _(IntList)                 \
+  _(DoubleList)              \
+  _(BoolList)                \
+  _(String)                  \
+  _(TensorList)              \
+  _(Blob)                    \
+  _(GenericList)             \
+  _(World)
 
-namespace torch { namespace jit {
+namespace c10 {
 
 CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
@@ -72,4 +72,4 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
 
 #undef TORCH_FORALL_TAGS
 
-}}
+} // namespace c10

@@ -54,7 +54,7 @@ if has_gpu_support:
     GetDeviceProperties = C.get_device_properties
 else:
     NumCudaDevices = lambda: 0 # noqa
-    GetCuDNNVersion = lambda: 0 # noqa
+    GetCUDAVersion = lambda: 0 # noqa
     GetCuDNNVersion = lambda: 0 # noqa
     GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
     GetDeviceProperties = lambda x: None # noqa
@@ -163,8 +163,8 @@ def GetOperatorCost(operator, blobs):
     return C.get_operator_cost(StringifyProto(operator), blobs)
 
 
-def RunOperatorOnce(operator, legacy_proto=True):
-    return C.run_operator_once(StringifyProto(operator), legacy_proto)
+def RunOperatorOnce(operator):
+    return C.run_operator_once(StringifyProto(operator))
 
 
 def RunOperatorsOnce(operators):

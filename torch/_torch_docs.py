@@ -5444,10 +5444,11 @@ The inverse of this function is :func:`~torch.ifft`.
     repeatedly running FFT methods on tensors of same geometry with same
     same configuration.
 
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
-    the number of plans currently in cache, and
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
+    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
+    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
+    plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
@@ -5544,10 +5545,11 @@ The inverse of this function is :func:`~torch.fft`.
     repeatedly running FFT methods on tensors of same geometry with same
     same configuration.
 
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
-    the number of plans currently in cache, and
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
+    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
+    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
+    plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
@@ -5633,10 +5635,11 @@ The inverse of this function is :func:`~torch.irfft`.
     repeatedly running FFT methods on tensors of same geometry with same
     same configuration.
 
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
-    the number of plans currently in cache, and
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
+    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
+    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
+    plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
@@ -5714,10 +5717,11 @@ The inverse of this function is :func:`~torch.rfft`.
     repeatedly running FFT methods on tensors of same geometry with same
     same configuration.
 
-    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
-    the number of plans currently in cache, and
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default is
+    4096 on CUDA 10 and newer, and 1023 on older CUDA versions) controls the
+    capacity of this cache. Some cuFFT plans may allocate GPU memory. You can
+    use ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of
+    plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
