@@ -18,14 +18,14 @@ static Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy) {
   ensure_has_index(&device);
-  if (self.device() == device && self.dtype() == dtype && !copy) {
+  if (self.device() == device && self.scalar_type() == dtype && !copy) {
     return self;
   }
   return to_impl(self, self.options().device(device).dtype(dtype), non_blocking);
 }
 
 Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy) {
-  if (self.dtype() == dtype && !copy) {
+  if (self.scalar_type() == dtype && !copy) {
     return self;
   }
   return to_impl(self, self.options().dtype(dtype), non_blocking);

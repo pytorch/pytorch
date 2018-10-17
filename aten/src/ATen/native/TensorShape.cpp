@@ -152,16 +152,16 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
   int64_t allDim = self.dim();
   int64_t end = start+length;
   AT_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  AT_CHECK(dim >= 0 && dim < allDim, 
+  AT_CHECK(dim >= 0 && dim < allDim,
     "Dimension ", dim, " out of range. Expecting 0 <= dim < ", allDim, ".");
   AT_CHECK(start >= 0 && length >= 0 && end <= self.size(dim),
     "Invalid range to narrow. range(start, start+length) must be a subset of range(0, ", self.size(dim), ").")
   LongTensor indices = self._indices();
   int64_t sparseDims = self._sparseDims();
-  
+
   std::vector<int64_t> newSizes = self.sizes().vec();
   newSizes[dim]=length;
-  
+
   Tensor newValues;
   LongTensor newIndices;
   if(dim < sparseDims){
@@ -636,7 +636,7 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
     }
   }
   for(int64_t i = 0; i < size - 1; i++){
-      AT_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
+      AT_CHECK(tensors[i].scalar_type() == tensors[i+1].scalar_type(), "meshgrid expects all tensors to have the same dtype");
       AT_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
   }
   std::vector<Tensor> grids;
