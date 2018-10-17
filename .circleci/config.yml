@@ -384,6 +384,7 @@ caffe2_macos_build_defaults: &caffe2_macos_build_defaults
 
           export IN_CIRCLECI=1
 
+          # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
           brew install moreutils --without-parallel
           brew install cmake
 
@@ -660,6 +661,7 @@ jobs:
             set -e
 
             export IN_CIRCLECI=1
+            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
             brew install moreutils --without-parallel
 
             # Install sccache
@@ -703,6 +705,7 @@ jobs:
             # TODO: need to share source files from build to test, when macOS builds are enabled
             set -e
             export IN_CIRCLECI=1
+            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
             brew install moreutils --without-parallel
 
             cp -r /Users/distiller/pytorch-ci-env/workspace/. /Users/distiller/project
@@ -728,6 +731,7 @@ jobs:
 
             export IN_CIRCLECI=1
 
+            # moreutils installs a `parallel` executable by default, which conflicts with the executable from the `parallel` formulae
             brew install moreutils --without-parallel
 
             # Install CUDA 9.2
