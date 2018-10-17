@@ -331,6 +331,10 @@ static void copy_to(Variable dst, const Variable& src) {
 
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
+  if (py_value == nullptr) {
+    throw TypeError("Tensor does not support deleting items");
+  }
+
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   DeviceGuard device_guard(self_);
   auto value = valueToTensor(self_.type(), py_value);

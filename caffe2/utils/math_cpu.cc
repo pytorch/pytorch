@@ -2628,7 +2628,7 @@ C10_EXPORT void CopyMatrix<CPUContext>(
     void* B,
     const int ldb,
     CPUContext* /*context*/,
-    TypeMeta::TypedCopy copy) {
+    TypeMeta::Copy copy) {
   if (A == nullptr || B == nullptr) {
     return;
   }
