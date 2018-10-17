@@ -227,7 +227,7 @@ def main():
         pct_diff = (cuda_prof_exec_time - cpu_prof_exec_time) / cuda_prof_exec_time
         if abs(pct_diff) > 0.05:
             print_autograd_prof_summary(autograd_prof_cpu, 'CPU', autograd_prof_sortby, autograd_prof_topk)
-    
+
     print_autograd_prof_summary(autograd_prof_cuda, 'CUDA', autograd_prof_sortby, autograd_prof_topk)
 
 if __name__ == '__main__':
