@@ -7544,8 +7544,8 @@ a")
             def forward(self, x):
                 return x + self.fc1(x) + self.fc1(x) + self.fc2(x)
 
-        s = Strong()
-        self.assertExpectedGraph(s.graph)
+        strong_mod = Strong()
+        self.assertExpectedGraph(strong_mod.graph)
 
         # Run same calculation as module
         inp = torch.ones(10)
@@ -7557,7 +7557,7 @@ a")
         lin2.bias = torch.nn.Parameter(bias2)
         expected_result = inp + (lin(inp) + torch.ones(10)) * 2 + lin2(inp) + torch.ones(10)
 
-        self.assertEqual(s(inp), expected_result)
+        self.assertEqual(strong_mod(inp), expected_result)
 
     def test_weak_module_nested(self):
         @torch.jit.weak_module
@@ -7568,16 +7568,15 @@ a")
                 super(OtherWeak, self).__init__()
                 self.in_features = in_features
                 self.out_features = out_features
-                self.weight = torch.nn.Parameter(torch.Tensor(out_features, in_features))
-                self.bias = torch.nn.Parameter(torch.Tensor(out_features))
-                self.constant = torch.tensor([4] * 10)
+                self.weight = torch.nn.Parameter(torch.ones(out_features, in_features))
+                self.bias = torch.nn.Parameter(torch.ones(out_features))
+                self.constant = 3
 
             @torch.jit.weak_script_method
             def forward(self, x):
-                return x * x
+                return x * x + self.constant + F.linear(x, self.weight, self.bias)
 
         class OtherStrong(torch.jit.ScriptModule):
-            __constants__ = ['constant']
 
             def __init__(self):
                 super(OtherStrong, self).__init__()
@@ -7592,14 +7591,15 @@ a")
                 super(Weak, self).__init__()
                 self.in_features = in_features
                 self.out_features = out_features
-                self.weight = torch.nn.Parameter(torch.Tensor(out_features, in_features))
-                self.bias = torch.nn.Parameter(torch.Tensor(out_features))
+                self.weight = torch.nn.Parameter(2 * torch.ones(out_features, in_features))
+                self.bias = torch.nn.Parameter(2 * torch.ones(out_features))
                 self.weak_submodule = OtherWeak(10, 10)
                 self.strong_submodule = OtherStrong()
 
             @torch.jit.weak_script_method
             def forward(self, x):
-                return x + self.weak_submodule(x) + self.strong_submodule(x)
+                return x + self.weak_submodule(x) + self.strong_submodule(x) \
+                    + F.linear(x, self.weight, self.bias)
 
         class Strong(torch.jit.ScriptModule):
             __constants__ = ['constant']
@@ -7612,12 +7612,103 @@ a")
             def forward(self, x):
                 return x + self.weak(x)
 
-        mod = Strong()
-        self.assertExpectedGraph(mod.graph)
+        strong_mod = Strong()
+        self.assertExpectedGraph(strong_mod.graph)
         inp = torch.randn(10)
-        result = mod(inp)
-        expected_result = inp + (inp + inp * inp + inp + 27)
+        result = strong_mod(inp)
+        expected_result = inp + (inp + inp * inp + inp + 27) + 3 \
+            + F.linear(inp, torch.ones(10, 10), torch.ones(10)) \
+            + F.linear(inp, 2 * torch.ones(10, 10), 2 * torch.ones(10))
         self.assertEqual(result, expected_result)
+
+    def test_weak_module_submodule(self):
+        @torch.jit.weak_module
+        class Weak(torch.nn.Module):
+            def __init__(self):
+                super(Weak, self).__init__()
+                self.param = torch.nn.Parameter(100 * torch.ones(5))
+
+            @torch.jit.weak_script_method
+            def forward(self, x):
+                return x + self.param
+
+        weak = Weak()
+
+        class OtherStrong(torch.jit.ScriptModule):
+            def __init__(self):
+                super(OtherStrong, self).__init__()
+                self.weak = weak
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return x + self.weak(x)
+
+        class Strong(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Strong, self).__init__()
+                self.weak = Weak()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.weak(x) + weak(x)
+
+        other_strong_mod = OtherStrong()
+
+        with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with param"):
+            strong_mod = Strong()
+
+    def test_weak_module_copying(self):
+        class Submodule(torch.nn.Module):
+            def __init__(self):
+                super(Submodule, self).__init__()
+
+            def forward(self, x):
+                return x + 100
+
+        @torch.jit.weak_module
+        class Weak(torch.nn.Module):
+            def __init__(self, in_features, out_features):
+                super(Weak, self).__init__()
+                self.weight = torch.nn.Parameter(torch.ones(out_features, in_features))
+                self.register_buffer("buffer", torch.ones(out_features))
+                self.submodule = Submodule()
+
+            @torch.jit.weak_script_method
+            def forward(self, x):
+                return F.linear(x, self.weight) + self.buffer + self.submodule(x)
+
+        class Strong(torch.jit.ScriptModule):
+            def __init__(self, weak):
+                super(Strong, self).__init__()
+                self.weak = weak
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.weak(x)
+
+        inp = torch.ones(5, 5) * 5
+        weak_mod = Weak(5, 5)
+        strong_mod = Strong(weak_mod)
+
+        self.assertTrue(isinstance(strong_mod.weak, torch.jit.ScriptModule))
+        self.assertFalse(isinstance(weak_mod, torch.jit.ScriptModule))
+
+        self.assertIs(strong_mod.weak.weight, weak_mod.weight)
+        self.assertIs(strong_mod.weak.buffer, weak_mod.buffer)
+        self.assertIs(strong_mod.weak.submodule, weak_mod.submodule)
+
+        # Test lookup fallback
+        weak_mod.new_attribute = 10
+        self.assertIs(strong_mod.weak.new_attribute, weak_mod.new_attribute)
+
+        weak_mod.weight.data += torch.ones(5, 5) * 100
+        self.assertTrue(strong_mod(inp).allclose(weak_mod(inp)))
+
+        # Re-assignment is not tracked
+        weak_mod.weight = torch.nn.Parameter(torch.ones(5, 5) * 100)
+        self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
+
+
 
 
 class MnistNet(nn.Module):

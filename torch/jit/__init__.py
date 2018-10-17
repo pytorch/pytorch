@@ -48,8 +48,16 @@ _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 compiled_weak_fns = weakref.WeakKeyDictionary()
+
+# Tracks which methods should be converted to strong methods
 weak_script_methods = weakref.WeakKeyDictionary()
+
+# Converted modules and their corresponding WeakScriptProxy objects
 weak_modules = weakref.WeakKeyDictionary()
+
+# Types that have been declared as weak modules
+weak_types = weakref.WeakKeyDictionary()
+
 COMPILATION_PENDING = object()
 COMPILED = object()
 
@@ -707,23 +715,23 @@ def script_method(fn, _rcb=None):
     return ScriptMethodStub(_rcb, ast, fn)
 
 
-WeakMethodStub = namedtuple('WeakMethodStub', ('resolution_callback', 'original_method'))
-
-
 def weak_script_method(fn):
     if _enabled:
-        weak_script_methods[fn] = WeakMethodStub(createResolutionCallback(frames_up=2), fn)
+        weak_script_methods[fn] = {
+            "rcb": createResolutionCallback(frames_up=2),
+            "original_method": fn
+        }
     return fn
 
 
 def _try_get_weak_module(mod):
-    weak_mods_of_class = weak_modules.get(mod.__class__)
-    if weak_mods_of_class is not None:
-        weak_mod = weak_mods_of_class.get(mod)
-        if weak_mod is not None:
-            return weak_mod.script_module
-        return weak_modules[mod].script_module
-    return None
+    if not isinstance(mod, Module):
+        return None
+    return weak_modules.get(mod)
+
+
+def _is_weak_type(cls):
+    return cls in weak_types
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -1081,7 +1089,7 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if isinstance(value, Module) and weak_modules.get(value.__class__) is not None:
+                if isinstance(value, Module) and _is_weak_type(type(value)):
                     # Compile weak script module
                     value = _make_strong(value)
                 return super(ScriptModule, self).__setattr__(attr, value)
@@ -1115,9 +1123,12 @@ if _enabled:
 
     class WeakScriptModuleProxy(ScriptModule):
         def __init__(self, original, stubs):
+            # Guards behavior of __setattr__ and __getattr__ so ScriptModule
+            # __init__ can run correctly
             self.__dict__['_initialized'] = False
             super(WeakScriptModuleProxy, self).__init__()
 
+            # Copy constants
             self.__dict__["_original"] = weakref.ref(original)
             self.__dict__["_constants_set"] = set(getattr(original, "__constants__", []))
 
@@ -1156,44 +1167,48 @@ else:
     ScriptModule = torch.nn.Module
 
 
-WeakModuleInstance = namedtuple('WeakModuleInstance', ('script_module', 'method_stubs', 'status'))
-WeakModule = namedtuple('WeakModule', ('instances', 'stubs'))
-
-
 def weak_module(cls):
     if _enabled:
-        if weak_modules.get(cls) is None:
-            weak_modules[cls] = WeakModule(None, None)
+        weak_types[cls] = {
+            "method_stubs": None
+        }
     return cls
 
 
-def _get_weak_stubs(mod):
+def _get_weak_stubs(cls):
+    """
+    Calls script_method for each method on the type of the object passed in and
+    returns the generated ScriptMethodStubs
+    """
     stubs = []
-    for item in dir(mod.__class__):
-        func = getattr(mod, item)
-        if getattr(func, "__func__", None) in weak_script_methods:
-            entry = weak_script_methods[func.__func__]
-            stub = script_method(entry.original_method, entry.resolution_callback)
+    for item in dir(cls):
+        method = getattr(cls, item)
+        func = getattr(method, "__func__", None)
+        if func in weak_script_methods:
+            entry = weak_script_methods[func]
+            stub = script_method(entry["original_method"], entry["rcb"])
             stubs.append(stub)
     return stubs
 
 
 def _make_strong(mod):
-    cls = mod.__class__
-    weak_module = weak_modules.get(cls)
+    """
+    Converts a weak module into a subclass of ScriptModule
+    """
+    stubs = weak_types.get(type(mod))["method_stubs"]
 
-    if weak_module.instances is None:
-        # Generate stubs and add to entry
-        stubs = _get_weak_stubs(mod)
-        weak_modules[cls] = WeakModule(weakref.WeakKeyDictionary(), stubs)
-    else:
-        stubs = weak_module.stubs
+    if stubs is None:
+        # Generate stubs and and store on weak_types in case this type is
+        # used again
+        stubs = _get_weak_stubs(type(mod))
+        weak_types[type(mod)]["method_stubs"] = stubs
 
     # Create proxy with stubs
-    weak_module_instance = WeakModuleInstance(WeakScriptModuleProxy(mod, stubs), stubs, COMPILED)
-    weak_modules[cls].instances[mod] = weak_module_instance
+    proxy = WeakScriptModuleProxy(mod, stubs)
 
-    return weak_module_instance.script_module
+    weak_modules[mod] = proxy
+
+    return proxy
 
 
 def _get_methods(cls):

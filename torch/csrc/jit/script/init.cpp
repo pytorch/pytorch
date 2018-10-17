@@ -297,6 +297,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
      return std::make_shared<ConstantPythonTupleValue>(obj);
     }
   }
+
+  auto compiled_mod =
+      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
+  if (!compiled_mod.is_none()) {
+    obj = compiled_mod;
+  }
   if (py::isinstance<Module>(obj)) {
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
     // In the case that this Python object is not a submodule, inline *ONLY
@@ -319,12 +325,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
   }
 
-  auto compiled_mod =
-      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
-  if (!compiled_mod.is_none()) {
-    auto mod = py::cast<std::shared_ptr<Module>>(compiled_mod);
-    return std::make_shared<ModuleValue>(mod);
-  }
   if (py::isinstance<py::function>(obj)) {
     auto compiled_fn =
         py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
