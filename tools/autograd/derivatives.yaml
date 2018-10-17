@@ -843,7 +843,7 @@
   i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, unroll_dim, grad_input_mask)
 
 - name: constant_pad_nd(Tensor self, IntList pad, Scalar value)
-  self: constant_pad_nd_backward(grad, self, pad)
+  self: constant_pad_nd_backward(grad, pad)
 
 - name: binary_cross_entropy_forward(Tensor self, Tensor target, Tensor weight, int64_t reduction)
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
