@@ -86,14 +86,14 @@ int main(int argc, char** argv) {
 
   // Run initialization network.
   caffe2::NetDef net_def;
-  CAFFE_ENFORCE(ReadProtoFromFile(c10::FLAGS_init_net, &net_def));
+  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_init_net, &net_def));
   CAFFE_ENFORCE(workspace->RunNetOnce(net_def));
 
   // Load input.
-  if (c10::FLAGS_input.size()) {
-    vector<string> input_names = caffe2::split(',', c10::FLAGS_input);
-    if (c10::FLAGS_input_file.size()) {
-      vector<string> input_files = caffe2::split(',', c10::FLAGS_input_file);
+  if (FLAGS_input.size()) {
+    vector<string> input_names = caffe2::split(',', FLAGS_input);
+    if (FLAGS_input_file.size()) {
+      vector<string> input_files = caffe2::split(',', FLAGS_input_file);
       CAFFE_ENFORCE_EQ(
           input_names.size(),
           input_files.size(),
@@ -103,24 +103,22 @@ int main(int argc, char** argv) {
         CAFFE_ENFORCE(caffe2::ReadProtoFromFile(input_files[i], &blob_proto));
         DeserializeBlob(blob_proto, workspace->CreateBlob(input_names[i]));
       }
-    } else if (c10::FLAGS_input_dims.size() || c10::FLAGS_input_type.size()) {
+    } else if (FLAGS_input_dims.size() || FLAGS_input_type.size()) {
       CAFFE_ENFORCE_GE(
-          c10::FLAGS_input_dims.size(),
+          FLAGS_input_dims.size(),
           0,
           "Input dims must be specified when input tensors are used.");
       CAFFE_ENFORCE_GE(
-          c10::FLAGS_input_type.size(),
+          FLAGS_input_type.size(),
           0,
           "Input type must be specified when input tensors are used.");
 
-      vector<string> input_dims_list =
-          caffe2::split(';', c10::FLAGS_input_dims);
+      vector<string> input_dims_list = caffe2::split(';', FLAGS_input_dims);
       CAFFE_ENFORCE_EQ(
           input_names.size(),
           input_dims_list.size(),
           "Input name and dims should have the same number of items.");
-      vector<string> input_type_list =
-          caffe2::split(';', c10::FLAGS_input_type);
+      vector<string> input_type_list = caffe2::split(';', FLAGS_input_type);
       CAFFE_ENFORCE_EQ(
           input_names.size(),
           input_type_list.size(),
@@ -158,28 +156,28 @@ int main(int argc, char** argv) {
   }
 
   // Run main network.
-  CAFFE_ENFORCE(ReadProtoFromFile(c10::FLAGS_net, &net_def));
+  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_net, &net_def));
   if (!net_def.has_name()) {
     net_def.set_name("benchmark");
   }
   // force changing engine and algo
-  if (c10::FLAGS_force_engine) {
-    LOG(INFO) << "force engine be: " << c10::FLAGS_engine;
+  if (FLAGS_force_engine) {
+    LOG(INFO) << "force engine be: " << FLAGS_engine;
     for (const auto& op : net_def.op()) {
-      const_cast<caffe2::OperatorDef*>(&op)->set_engine(c10::FLAGS_engine);
+      const_cast<caffe2::OperatorDef*>(&op)->set_engine(FLAGS_engine);
     }
   }
-  if (c10::FLAGS_force_algo) {
-    LOG(INFO) << "force algo be: " << c10::FLAGS_algo;
+  if (FLAGS_force_algo) {
+    LOG(INFO) << "force algo be: " << FLAGS_algo;
     for (const auto& op : net_def.op()) {
       caffe2::GetMutableArgument(
           "algo", true, const_cast<caffe2::OperatorDef*>(&op))
-          ->set_s(c10::FLAGS_algo);
+          ->set_s(FLAGS_algo);
     }
   }
-  if (c10::FLAGS_opt) {
+  if (FLAGS_opt) {
 #ifdef CAFFE2_OPTIMIZER
-    net_def = caffe2::opt::optimize(net_def, workspace.get(), c10::FLAGS_opt);
+    net_def = caffe2::opt::optimize(net_def, workspace.get(), FLAGS_opt);
 #else
     LOG(WARNING) << "Caffe2 not compiled with optimization passes.";
 #endif
@@ -188,14 +186,13 @@ int main(int argc, char** argv) {
   caffe2::NetBase* net = workspace->CreateNet(net_def);
   CHECK_NOTNULL(net);
   CAFFE_ENFORCE(net->Run());
-  net->TEST_Benchmark(
-      c10::FLAGS_warmup, c10::FLAGS_iter, c10::FLAGS_run_individual);
+  net->TEST_Benchmark(FLAGS_warmup, FLAGS_iter, FLAGS_run_individual);
 
   string output_prefix =
-      c10::FLAGS_output_folder.size() ? c10::FLAGS_output_folder + "/" : "";
-  if (c10::FLAGS_output.size()) {
-    vector<string> output_names = caffe2::split(',', c10::FLAGS_output);
-    if (c10::FLAGS_output == "*") {
+      FLAGS_output_folder.size() ? FLAGS_output_folder + "/" : "";
+  if (FLAGS_output.size()) {
+    vector<string> output_names = caffe2::split(',', FLAGS_output);
+    if (FLAGS_output == "*") {
       output_names = workspace->Blobs();
     }
     for (const string& name : output_names) {
