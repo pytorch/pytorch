@@ -115,14 +115,8 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     auto schema = getSchema(inputs.size(), n_binders);
 
     std::stringstream failure_messages;
-    c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
-        schema,
-        loc,
-        *m.graph(),
-        inputs_,
-        attributes,
-        failure_messages,
-        /*conv_tensor_to_num*/ true);
+    c10::optional<MatchedSchema> matched_schema =
+      tryMatchSchema(schema, loc, *m.graph(), c10::nullopt, inputs_, attributes, failure_messages, /*conv_tensor_to_num*/true);
     if (!matched_schema)
       throw ErrorReport(loc) << failure_messages.str();
 

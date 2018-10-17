@@ -922,7 +922,7 @@ OPERATOR_SCHEMA(AveragePool)
     .NumOutputs(1)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
     .FillUsing(AveragePoolDocGenerator(""))
-    .InheritOnnxSchema("AveragePool");
+    .InheritOnnxSchema();
 
 REGISTER_CPU_OPERATOR(
     AveragePool1D,
@@ -964,7 +964,7 @@ OPERATOR_SCHEMA(MaxPool)
     .NumOutputs(1)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForPool)
     .FillUsing(MaxPoolDocGenerator(""))
-    .InheritOnnxSchema("MaxPool");
+    .InheritOnnxSchema();
 
 REGISTER_CPU_OPERATOR(MaxPool1D, PoolOp<float, CPUContext, MaxPool<float>>);
 

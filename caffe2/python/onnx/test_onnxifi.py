@@ -212,7 +212,8 @@ class OnnxifiTransformTest(TestCase):
         # Cut the graph
         start = time.time()
         pred_net_cut = onnxifi_caffe2_net(pred_net,
-                                          {input_name: input_blob_dims})
+                                          {input_name: input_blob_dims},
+                                          infer_shapes=True)
         del init_net, pred_net
         #_print_net(pred_net_cut)
 

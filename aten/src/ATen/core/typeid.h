@@ -117,23 +117,23 @@ namespace detail {
 // instance for the type they're configured for.
 struct TypeMetaData final {
   using PlacementNew = void(void*, size_t);
-  using TypedCopy = void(const void*, void*, size_t);
-  using TypedDestructor = void(void*, size_t);
+  using Copy = void(const void*, void*, size_t);
+  using PlacementDelete = void(void*, size_t);
 
   TypeMetaData() = delete;
   constexpr TypeMetaData(
     size_t itemsize,
-    PlacementNew* ctor,
-    TypedCopy* copy,
-    TypedDestructor* dtor,
+    PlacementNew* placementNew,
+    Copy* copy,
+    PlacementDelete* placementDelete,
     TypeIdentifier id,
     const char* name) noexcept
-  : itemsize_(itemsize), ctor_(ctor), copy_(copy), dtor_(dtor), id_(id), name_(name) {}
+  : itemsize_(itemsize), placementNew_(placementNew), copy_(copy), placementDelete_(placementDelete), id_(id), name_(name) {}
 
   size_t itemsize_;
-  PlacementNew* ctor_;
-  TypedCopy* copy_;
-  TypedDestructor* dtor_;
+  PlacementNew* placementNew_;
+  Copy* copy_;
+  PlacementDelete* placementDelete_;
   TypeIdentifier id_;
   const char* name_;
 };
@@ -148,7 +148,7 @@ CAFFE2_API void _ThrowRuntimeTypeLogicError(const std::string& msg);
  * Placement new function for the type.
  */
 template <typename T>
-inline void _Ctor(void* ptr, size_t n) {
+inline void _PlacementNew(void* ptr, size_t n) {
   T* typed_ptr = static_cast<T*>(ptr);
   for (size_t i = 0; i < n; ++i) {
     new (typed_ptr + i) T;
@@ -156,7 +156,7 @@ inline void _Ctor(void* ptr, size_t n) {
 }
 
 template <typename T>
-inline void _CtorNotDefault(void* /*ptr*/, size_t /*n*/) {
+inline void _PlacementNewNotDefault(void* /*ptr*/, size_t /*n*/) {
   _ThrowRuntimeTypeLogicError(
       "Type " + std::string(c10::demangle_type<T>()) +
       " is not default-constructible.");
@@ -166,7 +166,7 @@ template<
     typename T,
     c10::guts::enable_if_t<
         std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr>
-inline constexpr TypeMetaData::PlacementNew* _PickCtor() {
+inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
   return nullptr;
 }
 
@@ -176,8 +176,8 @@ template <
         !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
         std::is_default_constructible<T>::value
     >* = nullptr>
-inline constexpr TypeMetaData::PlacementNew* _PickCtor() {
-  return &_Ctor<T>;
+inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
+  return &_PlacementNew<T>;
 }
 
 template <
@@ -186,8 +186,8 @@ template <
         !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
         !std::is_default_constructible<T>::value
     >* = nullptr>
-inline constexpr TypeMetaData::PlacementNew* _PickCtor() {
-  return &_CtorNotDefault<T>;
+inline constexpr TypeMetaData::PlacementNew* _PickPlacementNew() {
+  return &_PlacementNewNotDefault<T>;
 }
 
 /**
@@ -216,7 +216,7 @@ template<
     typename T,
     c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
     >
-inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
+inline constexpr TypeMetaData::Copy* _PickCopy() {
   return nullptr;
 }
 
@@ -226,7 +226,7 @@ template <
         !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
         std::is_copy_assignable<T>::value
     >* = nullptr>
-inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
+inline constexpr TypeMetaData::Copy* _PickCopy() {
   return &_Copy<T>;
 }
 
@@ -236,7 +236,7 @@ template <
         !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
         !std::is_copy_assignable<T>::value
     >* = nullptr>
-inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
+inline constexpr TypeMetaData::Copy* _PickCopy() {
   return &_CopyNotAllowed<T>;
 }
 
@@ -244,7 +244,7 @@ inline constexpr TypeMetaData::TypedCopy* _PickCopy() {
  * Destructor for non-fundamental types.
  */
 template <typename T>
-inline void _Dtor(void* ptr, size_t n) {
+inline void _PlacementDelete(void* ptr, size_t n) {
   T* typed_ptr = static_cast<T*>(ptr);
   for (size_t i = 0; i < n; ++i) {
     typed_ptr[i].~T();
@@ -255,7 +255,7 @@ template<
     typename T,
     c10::guts::enable_if_t<std::is_fundamental<T>::value || std::is_pointer<T>::value>* = nullptr
     >
-inline constexpr TypeMetaData::TypedDestructor* _PickDtor() {
+inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
   return nullptr;
 }
 
@@ -263,8 +263,8 @@ template<
     typename T,
     c10::guts::enable_if_t<!(std::is_fundamental<T>::value || std::is_pointer<T>::value)>* = nullptr
     >
-inline constexpr TypeMetaData::TypedDestructor* _PickDtor() {
-  return &_Dtor<T>;
+inline constexpr TypeMetaData::PlacementDelete* _PickPlacementDelete() {
+  return &_PlacementDelete<T>;
 }
 
 #ifdef __GXX_RTTI
@@ -285,9 +285,9 @@ template<class T>
 inline TypeMetaData _makeTypeMetaDataInstance(const char* typeName) {
   return {
     sizeof(T),
-    _PickCtor<T>(),
+    _PickPlacementNew<T>(),
     _PickCopy<T>(),
-    _PickDtor<T>(),
+    _PickPlacementDelete<T>(),
     TypeIdentifier::Get<T>(),
     typeName
   };
@@ -306,8 +306,8 @@ class _Uninitialized final {};
 class CAFFE2_API TypeMeta {
  public:
   using PlacementNew = detail::TypeMetaData::PlacementNew;
-  using TypedCopy = detail::TypeMetaData::TypedCopy;
-  using TypedDestructor = detail::TypeMetaData::TypedDestructor;
+  using Copy = detail::TypeMetaData::Copy;
+  using PlacementDelete = detail::TypeMetaData::PlacementDelete;
 
   /** Create a dummy TypeMeta object. To create a TypeMeta object for a specific
    * type, use TypeMeta::Make<T>().
@@ -348,20 +348,20 @@ class CAFFE2_API TypeMeta {
   /**
    * Returns the placement new function pointer for individual items.
    */
-  constexpr PlacementNew* ctor() const noexcept {
-    return data_->ctor_;
+  constexpr PlacementNew* placementNew() const noexcept {
+    return data_->placementNew_;
   }
   /**
    * Returns the typed copy function pointer for individual iterms.
    */
-  constexpr TypedCopy* copy() const noexcept {
+  constexpr Copy* copy() const noexcept {
     return data_->copy_;
   }
   /**
    * Returns the destructor function pointer for individual items.
    */
-  constexpr TypedDestructor* dtor() const noexcept {
-    return data_->dtor_;
+  constexpr PlacementDelete* placementDelete() const noexcept {
+    return data_->placementDelete_;
   }
   /**
    * Returns a printable name for the type.

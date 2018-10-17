@@ -858,7 +858,7 @@ inline const SourceRange& fakeRange() {
 }
 
 Value* Graph::insert(Symbol opname, at::ArrayRef<NamedValue> args, at::ArrayRef<NamedValue> kwargs) {
-  return script::emitBuiltinCall(fakeRange(), *this, opname, args, kwargs, /*required=*/true);
+  return script::emitBuiltinCall(fakeRange(), *this, opname, c10::nullopt, args, kwargs, /*required=*/true);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
