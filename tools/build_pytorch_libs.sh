@@ -19,7 +19,7 @@ fi
 # and use that if so.
 CMAKE_COMMAND="cmake"
 if [[ -x "$(command -v cmake3)" ]]; then
-    CMAKE_BINARY="cmake3"
+    CMAKE_COMMAND="cmake3"
 fi
 
 # Options for building only a subset of the libraries
