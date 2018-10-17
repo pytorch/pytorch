@@ -51,17 +51,19 @@ class BlobTestFooSerializer : public BlobSerializerBase {
    * otherwise this function produces a fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<BlobTestFoo>());
+    CAFFE_ENFORCE(typeMeta.Match<BlobTestFoo>());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type("BlobTestFoo");
     // For simplicity we will just serialize the 4-byte content as a string.
     blob_proto.set_content(std::string(
-        reinterpret_cast<const char*>(&(blob.Get<BlobTestFoo>().val)),
+        reinterpret_cast<const char*>(
+            &static_cast<const BlobTestFoo*>(pointer)->val),
         sizeof(int32_t)));
     acceptor(name, blob_proto.SerializeAsString());
   }
@@ -942,11 +944,12 @@ class DummyTypeSerializer : public BlobSerializerBase {
   DummyTypeSerializer() {}
   ~DummyTypeSerializer() {}
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<DummyType>());
-    const auto& container = blob.template Get<DummyType>();
+    CAFFE_ENFORCE(typeMeta.Match<DummyType>());
+    const auto& container = *static_cast<const DummyType*>(pointer);
     for (int k = 0; k < container.n_chunks; ++k) {
       std::string serialized_chunk = container.serialize(name, k);
       acceptor(c10::str(name, kChunkIdSeparator, k), serialized_chunk);
