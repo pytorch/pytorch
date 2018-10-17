@@ -68,7 +68,7 @@ struct CAFFE2_API Device {
   }
 
   /// Returns the optional index.
-  const int32_t& index() const noexcept {
+  const int16_t& index() const noexcept {
     return index_;
   }
 
@@ -89,7 +89,7 @@ struct CAFFE2_API Device {
 
  private:
   DeviceType type_;
-  int32_t index_ = -1;
+  int16_t index_ = -1;
 };
 
 CAFFE2_API std::ostream& operator<<(
