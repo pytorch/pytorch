@@ -706,7 +706,7 @@ RegisterOperators reg2({
         "aten::slice(" decl_type "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type "[]", \
         listSlice<Shared<c_type>, c_type::ElemType>), \
     Operator( \
-        "aten::append(World w, " decl_type "[] list, " decl_type " el) -> World", \
+        "aten::append(World w, " decl_type "[] self, " decl_type " el) -> World", \
         listAppend<Shared<c_type>, c_type::ElemType>), \
 
 
@@ -786,7 +786,7 @@ RegisterOperators reg2({
         };
       }),
     Operator(
-        "aten::neg(int a) -> int",
+        "aten::neg(int self) -> int",
         [](Node* node) {
           return [=](Stack& stack) {
             push(stack, -pop(stack).toInt());
@@ -794,7 +794,7 @@ RegisterOperators reg2({
           };
         }),
     Operator(
-        "aten::neg(float a) -> float",
+        "aten::neg(float self) -> float",
         [](Node* node) {
           return [=](Stack& stack) {
             push(stack, -pop(stack).toDouble());
@@ -802,7 +802,7 @@ RegisterOperators reg2({
           };
         }),
     Operator(
-        "aten::__not__(int a) -> int",
+        "aten::__not__(int self) -> int",
         [](Node* node) {
           return [=](Stack& stack) {
             push(stack, !pop(stack).toInt());
@@ -810,7 +810,7 @@ RegisterOperators reg2({
           };
         }),
     Operator(
-        "aten::_tensor_to_list(Tensor a) -> int[]",
+        "aten::_tensor_to_list(Tensor self) -> int[]",
         [](Node* node) {
           return [=](Stack& stack) {
             at::Tensor t;
@@ -824,7 +824,7 @@ RegisterOperators reg2({
           };
         }),
     Operator(
-        "aten::_list_to_tensor(int[] a) -> Tensor",
+        "aten::_list_to_tensor(int[] self) -> Tensor",
         [](Node* node) {
           return [=](Stack& stack) {
             std::vector<int64_t> l;
