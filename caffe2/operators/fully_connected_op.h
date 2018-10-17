@@ -145,7 +145,6 @@ class FullyConnectedOp final : public Operator<Context> {
   // a vector object every time we run Run().
   vector<int64_t> Y_shape_cache_;
   Tensor bias_multiplier_{Context::GetDeviceType()};
-  ;
 
   bool float16_compute_;
 };
