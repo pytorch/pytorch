@@ -520,7 +520,8 @@ void TensorDeserializer::Deserialize(const TensorProto& proto, Tensor* tensor) {
                 (i + chunkBegin) * temp_blob.meta().itemsize(),
             1);
       }
-    }
+    } break;
+      // Note: we intentially do not provide "default:" so if any new data types
   }
   context->FinishDeviceComputation();
 }

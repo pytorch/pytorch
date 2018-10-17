@@ -2379,7 +2379,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction)
 
 
-def normalize(input, p=2, dim=1, eps=1e-12):
+def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
     Does:
@@ -2399,8 +2399,15 @@ def normalize(input, p=2, dim=1, eps=1e-12):
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int): the dimension to reduce. Default: 1
         eps (float): small value to avoid division by zero. Default: 1e-12
+        out (Tensor, optional): the output tensor. If :attr:`out` is used, this
+                                operation won't be differentiable.
     """
-    return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+    if out is None:
+        denom = input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+        return input / denom
+    else:
+        denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
+        return torch.div(input, denom, out=out)
 
 
 def assert_int_or_pair(arg, arg_name, message):

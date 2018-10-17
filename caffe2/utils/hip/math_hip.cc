@@ -2670,7 +2670,7 @@ void CopyMatrix<HIPContext>(
     void* B,
     const int ldb,
     HIPContext* context,
-    TypeMeta::TypedCopy copy) {
+    TypeMeta::Copy copy) {
   CAFFE_ENFORCE(!copy, "Copy constructor is not supported in HIP context");
   hipMemcpy2DAsync(
       B,
