@@ -3,7 +3,6 @@
 #include <torch/tensor.h>
 
 #include <ATen/core/Error.h>
-#include <ATen/core/optional.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -46,7 +45,11 @@ class Queue {
     if (timeout) {
       if (!cv_.wait_for(
               lock, *timeout, [this] { return !this->queue_.empty(); })) {
-        AT_ERROR("Timeout in queue");
+        // clang-format off
+        AT_ERROR(
+            "Timeout in DataLoader queue while waiting for next batch"
+            " (timeout was ", timeout->count(), " ms)");
+        // clang-format on
       }
     } else {
       cv_.wait(lock, [this] { return !this->queue_.empty(); });

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/optional.h>
+#include <torch/tensor.h>
 
 #include <cstddef>
 #include <vector>
@@ -21,7 +21,7 @@ class Sampler {
 
   /// Returns the next batch of indices if possible, or an empty optional if the
   /// sampler is exhausted for this epoch.
-  virtual at::optional<std::vector<size_t>> next(size_t batch_size) = 0;
+  virtual optional<std::vector<size_t>> next(size_t batch_size) = 0;
 };
 
 } // namespace samplers

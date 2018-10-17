@@ -1,11 +1,12 @@
 #pragma once
 
-#include <torch/data/data_loader_options.h>
+#include <torch/data/dataloader_options.h>
 #include <torch/data/detail/data_shuttle.h>
 #include <torch/data/detail/sequencers.h>
 #include <torch/data/iterator.h>
 #include <torch/data/samplers/random.h>
 #include <torch/data/worker_exception.h>
+#include <torch/tensor.h>
 
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
@@ -34,7 +35,6 @@ class DataLoader {
   /// sampling strategy.
   DataLoader(Dataset dataset, DataLoaderOptions options, Sampler sampler)
       : options_(std::move(options)),
-        dataset_size_(dataset.size()),
         sampler_(std::move(sampler)),
         sequencer_(new_sequencer()) {
     // clang-format off
@@ -75,6 +75,10 @@ class DataLoader {
   /// standard algorithms like `std::copy(dataloader.begin(), dataloader.end(),
   /// output_iterator)`  are supported too.
   Iterator<Batch> begin() {
+    AT_CHECK(
+        shuttle_.in_flight_jobs() == 0,
+        "Attempted to get a new DataLoader iterator "
+        "while another iterator is not yet exhausted");
     reset();
     return Iterator<Batch>(torch::make_unique<detail::ValidIterator<Batch>>(
         [this] { return this->next(); }));
@@ -88,6 +92,8 @@ class DataLoader {
   }
 
   /// Joins the `DataLoader`'s worker threads and drains internal queues.
+  /// This function may only be invoked from the main thread (in which the
+  /// `DataLoader` lives).
   void join() {
     if (joined_) {
       return;
@@ -110,11 +116,6 @@ class DataLoader {
     return options_;
   }
 
-  /// Returns the size of the dataset the `DataLoader` is fetching from.
-  size_t dataset_size() const noexcept {
-    return dataset_size_;
-  }
-
  private:
   /// Simple mix-in to give something a sequence number.
   struct Sequenced {
@@ -132,8 +133,8 @@ class DataLoader {
     Job(QuitWorker q, size_t sqn) : Sequenced(sqn), quit(q) {}
     Job(IndexBatch&& i, size_t sqn)
         : Sequenced(sqn), index_batch(std::move(i)) {}
-    at::optional<QuitWorker> quit;
-    at::optional<IndexBatch> index_batch;
+    optional<QuitWorker> quit;
+    optional<IndexBatch> index_batch;
   };
 
   /// The finished result of a job.
@@ -142,7 +143,7 @@ class DataLoader {
     Result(Batch&& b, size_t sqn) : Sequenced(sqn), batch(std::move(b)) {}
     Result(std::exception_ptr exception, size_t sqn)
         : Sequenced(sqn), exception(std::move(exception)) {}
-    at::optional<Batch> batch;
+    optional<Batch> batch;
     std::exception_ptr exception;
   };
 
@@ -177,12 +178,11 @@ class DataLoader {
 
   /// Returns the next batch of data, or an empty `optional` if the `DataLoader`
   /// is exhausted. This operation will block until a batch is available.
-  at::optional<Batch> next() {
-    at::optional<Batch> batch;
+  optional<Batch> next() {
+    optional<Batch> batch;
     if (options_.workers > 0) {
-      // sequencer_->next(...).map(|r| r.batch)
-      at::optional<Result> result = sequencer_->next(
-          [this] { return shuttle_.pop_result(options_.timeout); });
+      optional<Result> result = sequencer_->next(
+          [this] { return this->shuttle_.pop_result(this->options_.timeout); });
       if (result) {
         if (result->exception) {
           throw WorkerException(result->exception);
@@ -215,11 +215,11 @@ class DataLoader {
     }
   }
 
-  at::optional<IndexBatch> get_index_batch() {
+  optional<IndexBatch> get_index_batch() {
     auto indices = sampler_.next(options_.batch_size);
     if (!indices ||
         (indices->size() < options_.batch_size && options_.drop_last)) {
-      return at::nullopt;
+      return nullopt;
     }
     AT_ASSERT(!indices->empty());
     return indices;
@@ -246,10 +246,6 @@ class DataLoader {
   /// all the work (synchronously). NOTE: Really want this to be on the heap
   /// when empty, therefore `unique_ptr` and not `optional`.
   std::unique_ptr<Dataset> main_thread_dataset_;
-
-  /// The size of the dataset. Stored separately from `main_thread_dataset_`
-  /// because that may be empty.
-  size_t dataset_size_;
 
   /// The sampler with which new index batches are created.
   Sampler sampler_;

@@ -66,6 +66,12 @@ class DataShuttle {
     }
   }
 
+  /// Returns the number of jobs that are still in progress.
+  /// When this number is zero, an epoch is finished.
+  size_t in_flight_jobs() const noexcept {
+    return in_flight_jobs_;
+  }
+
  private:
   /// The queue for jobs that are not yet in flight.
   Queue<Job> new_jobs_;

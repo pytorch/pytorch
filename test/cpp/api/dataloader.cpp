@@ -355,7 +355,10 @@ TEST(DataTest, QueuePushAndPopFromSameThread) {
 
 TEST(DataTest, QueuePopWithTimeoutThrowsUponTimeout) {
   torch::data::detail::Queue<int> queue;
-  ASSERT_THROWS_WITH(queue.pop(10 * kMillisecond), "Timeout in queue");
+  ASSERT_THROWS_WITH(
+      queue.pop(10 * kMillisecond),
+      "Timeout in DataLoader queue while waiting for next batch "
+      "(timeout was 10 ms)");
 }
 
 TEST(DataTest, QueuePushAndPopFromDifferentThreads) {
@@ -526,6 +529,17 @@ TEST(DataLoaderTest, CanDereferenceIteratorMultipleTimes) {
   ASSERT_EQ(++i, data_loader->end());
 }
 
+TEST(DataLoaderTest, CallingBeginWhileOtherIteratorIsInFlightThrows) {
+  DummyDataset dataset;
+  auto data_loader =
+      torch::data::make_data_loader(dataset, DataLoaderOptions(1).workers(2));
+  auto i = data_loader->begin();
+  ASSERT_THROWS_WITH(
+      data_loader->begin(),
+      "Attempted to get a new DataLoader iterator "
+      "while another iterator is not yet exhausted");
+}
+
 TEST(DataLoaderTest, IncrementingExhaustedValidIteratorThrows) {
   DummyDataset dataset;
   auto data_loader = torch::data::make_data_loader(dataset, dataset.size());
@@ -633,7 +647,7 @@ TEST(DataLoaderTest, RespectsTimeout) {
 
   auto start = std::chrono::system_clock::now();
 
-  ASSERT_THROWS_WITH(*data_loader->begin(), "Timeout in queue");
+  ASSERT_THROWS_WITH(*data_loader->begin(), "Timeout");
   baton->cv.notify_one();
 
   auto end = std::chrono::system_clock::now();
