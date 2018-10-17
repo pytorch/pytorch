@@ -23,7 +23,7 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
     THNN_ARGCHECK(!weight->is_empty() && (weight->dim() == 2 || weight->dim() == 4), 5, weight,
                   "non-empty 2D or 4D weight tensor expected, but got: %s");
     if (bias != NULL) {
-      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size(1));
+      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size(0));
     }
   } else if (!weight_nullable) {
     THError("weight tensor is expected to be non-nullable");
