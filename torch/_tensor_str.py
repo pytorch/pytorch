@@ -81,29 +81,37 @@ class _Formatter(object):
 
         else:
             nonzero_finite_vals = torch.masked_select(tensor_view, torch.isfinite(tensor_view) & tensor_view.ne(0))
+
             if nonzero_finite_vals.numel() == 0:
+                # no valid number, do nothing
                 return
+
+            nonzero_finite_abs = nonzero_finite_vals.abs()
+            nonzero_finite_min = nonzero_finite_abs.min()
+            nonzero_finite_max = nonzero_finite_abs.max()
+
             for value in nonzero_finite_vals:
                 if value != math.ceil(value):
                     self.int_mode = False
                     break
 
             if self.int_mode:
-                for value in tensor_view:
-                    value_str = '{:.0f}'.format(value)
-                    if math.isnan(value) or math.isinf(value):
+                # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
+                # to indicate that the tensor is of floating type. add 1 to the len to account for this.
+                if nonzero_finite_max / nonzero_finite_min > 1000. or nonzero_finite_max > 1.e8:
+                    self.sci_mode = True
+                    for value in nonzero_finite_vals:
+                        value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
                         self.max_width = max(self.max_width, len(value_str))
-                    else:
-                        # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
-                        # to indicate that the tensor is of floating type. add 1 to the len to account for this.
+                else:
+                    for value in nonzero_finite_vals:
+                        value_str = ('{:.0f}').format(value)
                         self.max_width = max(self.max_width, len(value_str) + 1)
-
             else:
-                nonzero_finite_abs = nonzero_finite_vals.abs()
-                nonzero_finite_min = nonzero_finite_abs.min()
-                nonzero_finite_max = nonzero_finite_abs.max()
-
-                if nonzero_finite_max / nonzero_finite_min > 1000. or nonzero_finite_max > 1.e8 or nonzero_finite_min < 1.e-4:
+                # Check if scientific representation should be used.
+                if nonzero_finite_max / nonzero_finite_min > 1000.\
+                        or nonzero_finite_max > 1.e8\
+                        or nonzero_finite_min < 1.e-4:
                     self.sci_mode = True
                     for value in nonzero_finite_vals:
                         value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
@@ -118,12 +126,12 @@ class _Formatter(object):
 
     def format(self, value):
         if self.floating_dtype:
-            if self.int_mode:
+            if self.sci_mode:
+                ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
+            elif self.int_mode:
                 ret = '{:.0f}'.format(value)
                 if not (math.isinf(value) or math.isnan(value)):
                     ret += '.'
-            elif self.sci_mode:
-                ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
             else:
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         else:
