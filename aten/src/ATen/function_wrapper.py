@@ -1070,7 +1070,8 @@ def create_generic(top_env, declarations):
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
-        is_factory_method = find_formal('TensorOptions', formals) and not dispatch_options
+        is_factory_method = find_formal('TensorOptions', formals) and \
+            not dispatch_options and 'method' not in option['variants']
         is_deprecated_factory_method = len(formals) > 0 and \
             formals[0]['dynamic_type'] == 'Type' and \
             option['return_type'] == 'Tensor' and option['deprecated']

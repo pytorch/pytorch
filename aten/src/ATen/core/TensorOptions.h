@@ -8,6 +8,7 @@
 #include <ATen/core/ScalarTypeUtils.h>
 
 #include "c10/util/Optional.h"
+#include "c10/util/C++17.h"
 
 #include <cstddef>
 #include <iosfwd>
@@ -69,6 +70,15 @@ struct CAFFE2_API TensorOptions {
     , has_is_variable_(false)
     {}
 
+  /// Constructs a `TensorOptions` object from arguments allowed in implicit
+  /// `Device` constructor.
+  /// NB: This allows explicit constructors too but there is no easy way to
+  ///     detect implicit constructors.
+  template <typename... Args,
+          typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+  /* implicit */ TensorOptions(Args&&... args)
+    : TensorOptions(Device(std::forward<Args>(args)...)) {}
+
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
     this->set_layout(layout);
@@ -83,11 +93,6 @@ struct CAFFE2_API TensorOptions {
   /// `Device` constructor.
   /* implicit */ TensorOptions(Backend backend)
       : TensorOptions(Device(backendToDeviceType(backend))) {}
-
-  /// Constructs a `TensorOptions` object from a device type, forwarded to the
-  /// `Device` constructor.
-  /* implicit */ TensorOptions(DeviceType device_type)
-      : TensorOptions(Device(device_type)) {}
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(caffe2::TypeMeta dtype) : TensorOptions() {

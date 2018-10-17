@@ -95,12 +95,23 @@ auto result_ = (${first}).${name}(
     ${args}
 );
 """)
-CALL_TENSOR_OPTIONS = CodeTemplate("""\
+CALL_NAMESPACE_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
         .device(${device});
 auto result_ = torch::${name}(
+    ${args},
+    options
+);
+""")
+CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
+const auto options = TensorOptions()
+        .dtype(${dtype})
+        .layout(${layout})
+        .device(${device});
+DeviceGuard device_guard(deviceForInputs(stack, ${num_inputs}));
+auto result = (${first}).${name}(
     ${args},
     options
 );
@@ -199,20 +210,25 @@ def gen_jit_dispatch(declarations, out, template_path):
         # because the arg list can get lengthy we put them on a separate line
         def pack_arguments(args):
             return ',\n'.join(args)
-        if decl.get('has_tensor_options'):
-            return CALL_TENSOR_OPTIONS.substitute(name=decl['name'],
-                                                  args=pack_arguments(args[:-3]),
-                                                  dtype=args[-3],
-                                                  layout=args[-2],
-                                                  device=args[-1])
-        elif 'namespace' in decl['method_of']:
-            return CALL_NAMESPACE.substitute(name=decl['name'],
-                                             args=pack_arguments(args),
-                                             num_inputs=num_inputs)
+        if 'namespace' in decl['method_of']:
+            if decl.get('has_tensor_options'):
+                return CALL_NAMESPACE_WITH_TENSOR_OPTIONS.substitute(
+                    name=decl['name'], args=pack_arguments(args[:-3]),
+                    dtype=args[-3], layout=args[-2], device=args[-1])
+            else:
+                return CALL_NAMESPACE.substitute(name=decl['name'],
+                                                 args=pack_arguments(args),
+                                                 num_inputs=num_inputs)
         else:
-            return CALL_METHOD.substitute(
-                name=decl['name'], first=args[0], args=pack_arguments(args[1:]),
-                num_inputs=num_inputs)
+            if decl.get('has_tensor_options'):
+                return CALL_METHOD_WITH_TENSOR_OPTIONS.substitute(
+                    name=decl['name'], args=pack_arguments(args[:-3]),
+                    dtype=args[-3], layout=args[-2], device=args[-1],
+                    first=args[0], num_inputs=num_inputs)
+            else:
+                return CALL_METHOD.substitute(
+                    name=decl['name'], first=args[0],
+                    args=pack_arguments(args[1:]), num_inputs=num_inputs)
 
     def requires_lvalue(arg):
         return 'jit_type' in arg and arg['jit_type'] in {"Tensor!", "Tensor(a!)"}
