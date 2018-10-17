@@ -1874,8 +1874,8 @@
       arguments:
         - arg: THTensor* result
           output: True
-        - real base
-        - THTensor* self
+        - real self
+        - THTensor* exponent
 ]]
 [[
   name: pow_

@@ -300,7 +300,7 @@ struct CAFFE2_API Type {
   virtual Tensor & atan2_(Tensor & self, const Tensor & other) const = 0;
   virtual Tensor s_pow(const Tensor & self, const Tensor & exponent) const = 0;
   virtual Tensor pow(const Tensor & self, const Tensor & exponent) const = 0;
-  virtual Tensor pow(Scalar base, const Tensor & self) const = 0;
+  virtual Tensor pow(Scalar self, const Tensor & exponent) const = 0;
   virtual Tensor & pow_(Tensor & self, Scalar exponent) const = 0;
   virtual Tensor & s_pow_(Tensor & self, const Tensor & exponent) const = 0;
   virtual Tensor & pow_(Tensor & self, const Tensor & exponent) const = 0;
