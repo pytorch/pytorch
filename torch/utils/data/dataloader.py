@@ -13,6 +13,7 @@ import threading
 import traceback
 import os
 import time
+import atexit
 from torch._six import string_classes, int_classes, FileNotFoundError
 
 IS_WINDOWS = sys.platform == "win32"
@@ -278,6 +279,24 @@ def _set_SIGCHLD_handler():
     _SIGCHLD_handler_set = True
 
 
+_python_exit_status = False
+r"""Whether Python is shutting down. This flag is guaranteed to be set before
+the Python core library resources are freed, but Python may already be exiting
+for some time when this is set.
+
+Hook to set this flag is `_set_python_exit_flag`, and is inspired by a similar
+hook in Python 3.7 multiprocessing library:
+https://github.com/python/cpython/blob/d4d60134b29290049e28df54f23493de4f1824b6/Lib/multiprocessing/util.py#L277-L327
+"""
+
+
+def _set_python_exit_flag():
+    global _python_exit_status
+    _python_exit_status = True
+
+atexit.register(_set_python_exit_flag)
+
+
 class _DataLoaderIter(object):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
 
@@ -309,7 +328,7 @@ class _DataLoaderIter(object):
     # particular, we need to make sure that
     #
     #   1. The iterator gracefully exits the workers when its last reference is
-    #      gone.
+    #      gone or it is depleted.
     #
     #      In this case, the workers should be gracefully exited because the
     #      main process may still need to continue to run, and we want cleaning
@@ -320,7 +339,7 @@ class _DataLoaderIter(object):
     #      We delay the discussion on the logic in this case until later.
     #
     #   2. The iterator exits the workers when the loader process and/or worker
-    #      processes exits unexpectedly (e.g., SIGKILL-ed).
+    #      processes exits normally or with error.
     #
     #      We set all workers and `pin_memory_thread` to have `daemon=True`.
     #
@@ -328,13 +347,28 @@ class _DataLoaderIter(object):
     #      gracefully exit using the same logic as we have in `__del__` when the
     #      iterator gets deleted (see 1 above)?
     #
-    #      When a process ends, it shuts the all its daemonic children down with
-    #      a SIGTERM (instead of joining them without a timeout). Simiarly for
-    #      threads, but by a different mechanism. This fact, together with a few
-    #      implementation details of multiprocessing, forces us to make workers
-    #      daemonic. All of our problems arise when a DataLoader  is used in a
-    #      subprocess, and are caused by multiprocessing code which looks more
-    #      or less like this:
+    #      First of all, `__del__` is **not** guaranteed to be called when
+    #      interpreter exits. Even if it is called, by the time it executes,
+    #      many Python core library resources may alreay be freed, and even
+    #      simple things like acquiring an internal lock of a queue may hang.
+    #      Therefore, in this case, we actually need to prevent `__del__` from
+    #      being executed, and rely on the automatic termination of daemonic
+    #      children. Thus, we register an `atexit` hook that sets a global flag
+    #      `_python_exit_status`. Since `atexit` hooks are executed in reverse
+    #      order of registration, we are guaranteed that this flag is set before
+    #      library resources we use are freed. (Hooks freeing those resources
+    #      are registered at importing the Python core libraries at the top of
+    #      this file.) So in `__del__`, we check if `_python_exit_status` is set
+    #      or `None` (freed), and perform no-op if so.
+    #
+    #      Another problem with `__del__` is also related to the library cleanup
+    #      calls. When a process ends, it shuts the all its daemonic children
+    #      down with a SIGTERM (instead of joining them without a timeout).
+    #      Simiarly for threads, but by a different mechanism. This fact,
+    #      together with a few implementation details of multiprocessing, forces
+    #      us to make workers daemonic. All of our problems arise when a
+    #      DataLoader is used in a subprocess, and are caused by multiprocessing
+    #      code which looks more or less like this:
     #
     #          try:
     #              your_function_using_a_dataloader()
@@ -362,8 +396,7 @@ class _DataLoaderIter(object):
     #        b. It doesn't prevent hanging if users have references to the
     #           iterator.
     #
-    #   3. All processes exit if any of them die unexpectedly (e.g., error,
-    #      fatal signals).
+    #   3. All processes exit if any of them die unexpectedly by fatal signals.
     #
     #      As shown above, the workers are set as daemonic children of the main
     #      process. However, automatic cleaning-up of such child processes only
@@ -636,6 +669,11 @@ class _DataLoaderIter(object):
     def _shutdown_workers(self):
         # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on
         # the logic of this function.
+        if _python_exit_status is True or _python_exit_status is None:
+            # See (2) of the note. If Python is shutting down, do no-op.
+            return
+        # Normal exit when last reference is gone / iterator is depleted.
+        # See (1) and the second half of the note.
         if not self.shutdown:
             self.shutdown = True
             # Removes pids from the C side data structure first so worker
@@ -657,7 +695,6 @@ class _DataLoaderIter(object):
                 self.worker_result_queue.cancel_join_thread()
                 self.worker_result_queue.put(None)
                 self.pin_memory_thread.join()
-
                 # Indicate that no more data will be put on this queue by the
                 # current process. This **must** be called after
                 # `pin_memory_thread` is joined because that thread shares the
