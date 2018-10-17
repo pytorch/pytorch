@@ -332,7 +332,7 @@ Y:
         "Slope",
         "1D input slope tensor. If `Slope` is of size 1, the value is shared across different channels")
     .Output(0, "Y", "Output tensor, with same shape as $X$.")
-    .InheritOnnxSchema("PRelu");
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(PReluGradient).NumInputs(4).NumOutputs(2).SetDoc(R"DOC(

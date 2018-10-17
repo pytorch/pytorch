@@ -24,11 +24,16 @@ OPERATOR_SCHEMA(Split)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
     .Input(0, "input", "(*Tensor*): tensor to split")
-    .Input(1, "split", "(*Tensor`<int>`*): [OPTIONAL] list of output lengths (see also arg `split`)")
+    .Input(
+        1,
+        "split",
+        "(*Tensor`<int>`*): [OPTIONAL] list of output lengths (see also arg `split`)")
     .Arg("axis", "(*int*): axis to split on")
     .Arg("split", "(*Tuple(int)*): length of each output")
-    .Arg("order", "(*string*): order of dimensions of input and output blobs; either \"NCHW\" or \"NHWC\"")
-    .Output(0,"[output_0, output_1, ...]","(*Tensor*): output tensor")
+    .Arg(
+        "order",
+        "(*string*): order of dimensions of input and output blobs; either \"NCHW\" or \"NHWC\"")
+    .Output(0, "[output_0, output_1, ...]", "(*Tensor*): output tensor")
     .DeviceInferenceFunction(splitOpDevInfer)
     .SetDoc(R"DOC(
 Split an `input` tensor into a list of tensors, along the axis specified by the `axis` dimension. The lengths of the split can be specified using argument `split` or optional second input blob to the operator. Otherwise, the tensor is split to equal sized parts.
@@ -77,7 +82,7 @@ output_2: [0 5 7 4]
 </details>
 
 )DOC")
-    .InheritOnnxSchema("Split");
+    .InheritOnnxSchema();
 
 OPERATOR_SCHEMA(SplitByLengths)
     .NumInputs(2)
@@ -163,9 +168,11 @@ OPERATOR_SCHEMA(Concat)
     .Arg(
         "add_axis",
         "*(type: int)* Pass non-zero integer to add the axis specified in `axis` to all input tensors.")
-    .TensorInferenceFunction(OpSchema::NeedsAllInputShapes(
-      [](const OperatorDef& def,
-         const vector<TensorShape>& in) {
+    .TensorInferenceFunction(OpSchema::NeedsAllInputShapes([](const OperatorDef&
+                                                                  def,
+                                                              const vector<
+                                                                  TensorShape>&
+                                                                  in) {
       ArgumentHelper helper(def);
       const int axis = helper.HasArgument("axis")
           ? helper.GetSingleArgument<int>("axis", -1)
@@ -357,9 +364,15 @@ split_info: [1 1]
 
     )DOC")
     .Input(0, "X1, X2, ...", "*(type: Tensor`<float>`)* List of input tensors.")
-    .Output(0, "concat_result", "*(type: Tensor`<float>`)* Concatenated tensor.")
-    .Output(1, "split_info", "*(type: Tensor`<int>`)* The dimensions of the inputs.")
-    .InheritOnnxSchema("Concat");
+    .Output(
+        0,
+        "concat_result",
+        "*(type: Tensor`<float>`)* Concatenated tensor.")
+    .Output(
+        1,
+        "split_info",
+        "*(type: Tensor`<int>`)* The dimensions of the inputs.")
+    .InheritOnnxSchema();
 
 // Backward compatibility names.
 REGISTER_CPU_OPERATOR(DepthSplit, SplitOp<CPUContext>);
