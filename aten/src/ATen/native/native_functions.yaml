@@ -1925,16 +1925,6 @@
 - func: addmm_(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method
 
-- func: native_tensor(IntList size, TensorOptions options) -> Tensor
-  variants: []
-  dispatch:
-    SparseCPU: new_with_size_sparse
-    SparseCUDA: new_with_size_sparse
-
-- func: tensor(IntList size, TensorOptions options) -> Tensor
-  variants: []
-
-
 # NB: I have to decompose sparse_coo_tensor into two functions, because
 # it has custom dispatch logic for which Type to dispatch on (we must
 # use the sparse equivalent of the type of the SECOND argument).

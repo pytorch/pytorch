@@ -424,7 +424,6 @@ THFormal = TypedDict('THFormal', {
     'resize': str,
     'cpu_zero': bool,
     'zero': bool,
-    'is_type_dispatched': bool,
 }, total=False)
 
 # Generic ATen formal or native_functions.yaml formal argument.
@@ -440,7 +439,6 @@ AtFormal = TypedDict('AtFormal', {
     'python_default_init': str,
     'output': bool,
     'size': int,
-    'is_type_dispatched': bool,
 }, total=False)
 
 ReturnType = TypedDict('ReturnType', {
@@ -1044,19 +1042,16 @@ def create_generic(top_env, declarations):
 
         type_method_dispatch = option['type_method_definition_dispatch']
         dispatch_tensor = find_dispatch_tensor(formals)
-        dispatch_type = None if dispatch_tensor else find_formal('Type', formals)
-        if dispatch_type:
-            dispatch_type['is_type_dispatched'] = True
         # we only dispatch via options if there is backend-specific dispatch (otherwise it's a factory function that
         # can dispatch directly to the native function).
         backend_dispatch = isinstance(type_method_dispatch, dict)
         dispatch_options = (find_formal('TensorOptions', formals)
-                            if not dispatch_tensor and not dispatch_type and backend_dispatch
+                            if not dispatch_tensor and backend_dispatch
                             else None)
 
-        option['type_method_formals'] = [format_formal(f) for f in formals if f != dispatch_type]
-        option['type_method_actuals'] = [f['name'] for f in formals if f != dispatch_type]
-        option['native_actuals'] = [f['name'] if f != dispatch_type else '*this' for f in formals]
+        option['type_method_formals'] = [format_formal(f) for f in formals]
+        option['type_method_actuals'] = [f['name'] for f in formals]
+        option['native_actuals'] = [f['name'] for f in formals]
 
         option['const_mark'] = '' if option['inplace'] else ' const'
 
@@ -1137,9 +1132,7 @@ def create_generic(top_env, declarations):
             method_of.append('Tensor')
 
         if is_namespace_function:
-            if dispatch_type:
-                option['inferred_type'] = 'static_cast<const TypeExtendedInterface&>({})'.format(dispatch_type['name'])
-            elif dispatch_tensor:
+            if dispatch_tensor:
                 option['inferred_type'] = 'detail::infer_type({})'.format(dispatch_tensor)
             elif dispatch_options:
                 option['inferred_type'] = 'at::getType({})'.format(dispatch_options['name'])

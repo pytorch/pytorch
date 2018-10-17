@@ -17,24 +17,11 @@ using namespace nom::repr;
 using NodeRef = NNGraph::NodeRef;
 using EdgeRef = NNGraph::EdgeRef;
 
-class GroupAnnotation {
- public:
+struct GroupAnnotation {
   GroupAnnotation(int i, int g = -1) : group(g), in_degree(i) {}
   int group;
   int in_degree;
   bool needs_transform{true};
-};
-
-struct VisitorContext {
-  VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
-      : predicate(func) {}
-  std::unordered_map<NodeRef, GroupAnnotation> infos;
-  std::unordered_set<NodeRef> frontier;
-  std::vector<NodeRef> current_group;
-  std::function<bool(const caffe2::OperatorDef&)> predicate;
-
-  int group{0};
-  bool find_supported{true};
 };
 
 std::string ShowNode(NodeRef node) {
@@ -84,6 +71,36 @@ void DumpGraph(NNGraph* g) {
   out.close();
 }
 
+struct VisitorContext {
+  VisitorContext(std::function<bool(const caffe2::OperatorDef&)> func)
+      : predicate(func) {}
+
+  std::unordered_map<NodeRef, GroupAnnotation> infos;
+  std::unordered_set<NodeRef> frontier;
+  std::vector<NodeRef> current_group;
+  std::function<bool(const caffe2::OperatorDef&)> predicate;
+
+  int group{0};
+  bool find_supported{true};
+};
+
+GroupAnnotation& GetInfo(
+    std::unordered_map<NodeRef, GroupAnnotation>& infos,
+    NodeRef node) {
+  auto it = infos.find(node);
+  CAFFE_ENFORCE(it != infos.end(), "Node info not found for ", ShowNode(node));
+  return it->second;
+}
+
+const GroupAnnotation& GetInfo(
+    const std::unordered_map<NodeRef, GroupAnnotation>& infos,
+    NodeRef node) {
+  auto it = infos.find(node);
+  CAFFE_ENFORCE(
+      it != infos.end(), "Const node info not found for ", ShowNode(node));
+  return it->second;
+}
+
 // Explore the graph in topological order until we hit stopping nodes. This is
 // based on Khan's algorithm:
 // https://en.wikipedia.org/wiki/Topological_sorting#Kahn's_algorithm
@@ -99,7 +116,7 @@ void Explore(
   while (!q.empty()) {
     auto node = q.front();
     q.pop();
-    auto& info = context->infos.at(node);
+    auto& info = GetInfo(context->infos, node);
 
     // Check if the node is supported, stop exploring further if not supported
     if (nn::is<NeuralNetOperator>(node)) {
@@ -122,7 +139,7 @@ void Explore(
     // Continue exploring its fanouts
     for (const auto& out_edge : node->getOutEdges()) {
       auto child_node = out_edge->head();
-      auto& child_info = context->infos.at(child_node);
+      auto& child_info = GetInfo(context->infos, child_node);
       if (--child_info.in_degree == 0) {
         q.push(child_node);
       }
@@ -216,7 +233,7 @@ void DetectBoundaryReferences(
     // inputs
     for (auto in_edge : node->getInEdges()) {
       auto parent_node = in_edge->tail();
-      const auto& info = infos.at(parent_node);
+      const auto& info = GetInfo(infos, parent_node);
       if (info.group != subgraph->group_id &&
           nn::is<NeuralNetData>(parent_node)) {
         const auto* nn_tensor = nn::get<const NeuralNetData>(parent_node);
@@ -238,7 +255,7 @@ void DetectBoundaryReferences(
       subgraph->external_output_refs.emplace(name, node);
     } else {
       for (auto child_node : nn::getConsumers(node)) {
-        const auto& info = infos.at(child_node);
+        const auto& info = GetInfo(infos, child_node);
         if (info.group != subgraph->group_id) {
           subgraph->external_output_refs.emplace(name, node);
           break;
