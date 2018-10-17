@@ -489,7 +489,7 @@ endif()
 
 if(pybind11_FOUND)
     message(STATUS "System pybind11 found")
-    message(STATUS "pybind11l include dirs: " ${pybind11_INCLUDE_DIRS})
+    message(STATUS "pybind11 include dirs: " ${pybind11_INCLUDE_DIRS})
     include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
 else()
     message(STATUS "Using third_party/pybind11.")
