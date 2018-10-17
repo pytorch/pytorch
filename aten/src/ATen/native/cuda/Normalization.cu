@@ -199,6 +199,7 @@ __global__ void batch_norm_transform_input_kernel(
     accscalar_t epsilon) {
 
   int plane = blockIdx.y * blockDim.y + threadIdx.y;
+  int fstep = blockDim.x * gridDim.x;
 
   if (plane >= input.size(1)) {
     return;
@@ -213,9 +214,11 @@ __global__ void batch_norm_transform_input_kernel(
   } else {
     invstd = static_cast<accscalar_t>(1) / device_sqrt(static_cast<accscalar_t>(var_or_invstd[plane]) + epsilon);
   }
-  for (int64_t batch = blockIdx.x; batch < input.size(0); batch += gridDim.x) {
-    for (int64_t feature = blockIdx.z; feature < input.size(2); feature += gridDim.z) {
-      output[batch][plane][feature] = static_cast<scalar_t>(gamma * (input[batch][plane][feature] - mean) * invstd + beta);
+  for (int64_t batch = blockIdx.z; batch < input.size(0); batch += gridDim.z) {
+    auto o = output[batch][plane];
+
+    for (int64_t feature = threadIdx.x + blockDim.x * blockIdx.x; feature < input.size(2); feature += fstep) {
+      o[feature] = static_cast<scalar_t>(gamma * (input[batch][plane][feature] - mean) * invstd + beta);
     }
   }
 }
@@ -333,13 +336,14 @@ __global__ void batch_norm_backward_kernel(
 // TensorAccessor in which the last dimensions are collapsed or expanded as needed
 template <typename scalar_t, int64_t dim>
 static PackedTensorAccessor<scalar_t, dim> reshaped_packed_accessor(const Tensor& t) {
+  constexpr int too_small_feature_set = 16;  // this is the minimum feature dimension when we swap
   // undefined...
   if (! t.defined()) {
     const std::vector<int64_t> zeros(dim);
     return PackedTensorAccessor<scalar_t, dim>(nullptr, zeros.data(), zeros.data());
   }
   int64_t in_dim = t.dim();
-  if (in_dim == dim) {
+  if (in_dim == dim && (dim < 3 || (t.size(0) < t.size(2)) || (t.size(2) >= too_small_feature_set))) { // easy, if we don't need the evil trick
     return t.packed_accessor<scalar_t, dim>();
   }
 
@@ -359,7 +363,7 @@ static PackedTensorAccessor<scalar_t, dim> reshaped_packed_accessor(const Tensor
     }
   }
   // evil trick to get adjusted 2d tensors to have large dimension last
-  if (dim == 3 && sizes[0] > sizes[2]) {
+  if (dim == 3 && sizes[0] > sizes[2] && sizes[2] < too_small_feature_set) {
     std::swap(sizes[0], sizes[2]);
     std::swap(strides[0], strides[2]);
   }
@@ -397,11 +401,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
   auto save_invstd = reshaped_packed_accessor<accscalar_t, 1>(save_invstd_);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  constexpr int max_blocks_per_input = 60000;
-  int feature_blocks = std::min<int>(input.size(2), max_blocks_per_input);
-  int batch_blocks   = std::min<int>(input.size(0), max_blocks_per_input / feature_blocks);
-  dim3 blocks(batch_blocks, (input.size(1)+127)/128, feature_blocks);
-  dim3 threads(1, 128);
+  constexpr int max_blocks = 60000;
+  int feature_threads = std::min(getNumThreads(input.size(2)), 128);
+  int plane_threads = MAX_BLOCK_SIZE / feature_threads;
+  int plane_blocks = std::min<int>((input.size(1)+plane_threads-1)/plane_threads, max_blocks);
+  int feature_blocks = std::min<int>((input.size(2)+feature_threads-1)/feature_threads, max_blocks / plane_blocks);
+  dim3 blocks(feature_blocks, plane_blocks);
+  dim3 threads(feature_threads, plane_threads);
   if (!train) {
     batch_norm_transform_input_kernel<scalar_t, accscalar_t, false> <<<blocks, threads, 0, stream>>>
       (input, output, running_mean, running_var, weight, bias, epsilon);
