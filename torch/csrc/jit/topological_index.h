@@ -15,6 +15,11 @@ struct Node;
 // This lets us answer questions like "is this node before another node"
 // efficiently, which is useful for optimization. It should be kept up to date
 // with node insertions/deletions by the owning block.
+//
+// The basic scheme is: nodes are assigned positional indices within a signed
+// 64-bit space. We leave 2^16 spaces in between each node so that nodes can
+// be inserted between them in the order. If we ever run out of space between
+// nodes, the index is rebuilt such that the nodes are "spread out" again.
 class TopologicalIndex {
  public:
   TopologicalIndex(Node* tail)
@@ -33,6 +38,10 @@ class TopologicalIndex {
     nodeToIndex_[tail_] = 0;
     indexToNode_[0] = tail_;
   }
+
+  TopologicalIndex(const TopologicalIndex&) = delete;
+  void operator=(const TopologicalIndex&) = delete;
+
   // is `lhs` before `rhs`?
   bool isBefore(const Node* lhs, const Node* rhs) const {
     AT_ASSERT(lhs != rhs);
@@ -44,6 +53,7 @@ class TopologicalIndex {
     return nodeToIndex_.at(lhs) > nodeToIndex_.at(rhs);
   }
 
+  // Insert `toInsert` after `insertPoint` in the topological index
   void insertBefore(const Node* insertPoint, const Node* toInsert) {
     // Can't insert a node twice
     AT_ASSERT(nodeToIndex_.count(toInsert) == 0);
@@ -76,6 +86,7 @@ class TopologicalIndex {
     }
   }
 
+  // Insert `toInsert` before `insertPoint` in the topological index
   void insertAfter(const Node* insertPoint, const Node* toInsert) {
     // Can't insert a node twice
     AT_ASSERT(nodeToIndex_.count(toInsert) == 0);
@@ -105,12 +116,15 @@ class TopologicalIndex {
     }
   }
 
+  // Erase `toErase` from the topological index
   void erase(const Node* toErase) {
     indexToNode_.erase(nodeToIndex_.at(toErase));
     nodeToIndex_.erase(toErase);
   }
 
  private:
+  // If we run out of space between nodes we need to rebuild the index and
+  // "spread out" the nodes again.
   void reIndex() {
     AT_ASSERT(defaultInterval_ * (int64_t)nodeToIndex_.size() < upperBound_);
 

@@ -784,6 +784,7 @@ Node* Node::insertAfter(Node * n) {
   JIT_ASSERT(!inBlockList() && n->inBlockList());
   JIT_ASSERT(n->owningBlock());
   this->owning_block_ = n->owningBlock();
+  this->owning_block_->topological_index_.insertAfter(n, this);
   Node * next = n->next();
   n->next() = this;
   this->prev() = n;
@@ -841,6 +842,7 @@ Value* Node::dropInput(size_t i) {
 
 void Node::removeFromList() {
   JIT_ASSERT(inBlockList());
+  this->owning_block_->topological_index_.erase(this);
   this->owning_block_ = nullptr;
   Node * next = this->next();
   Node * prev = this->prev();

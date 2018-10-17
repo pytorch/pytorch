@@ -13,6 +13,7 @@
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/named_value.h"
+#include "torch/csrc/jit/topological_index.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/utils/functional.h"
@@ -727,6 +728,7 @@ private:
   Node * const output_;
   Node * const input_;
   Node * const owning_node_; // either the node that has this block or nullptr for root
+  TopologicalIndex topological_index_;
 };
 
 struct Graph {
@@ -981,7 +983,8 @@ inline Block::Block(Graph* graph_, Node* node_)
     : graph_(graph_),
       output_(initOutput(graph_->create(prim::Return, 0))),
       input_(graph_->create(prim::Param, 0)),
-      owning_node_(node_) {
+      owning_node_(node_),
+      topological_index_(output_) {
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   input_->owning_block_ = this;
