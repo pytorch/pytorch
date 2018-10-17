@@ -1230,6 +1230,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     intermediate embeddings.
 
     See :class:`torch.nn.EmbeddingBag` for more details.
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         input (LongTensor): Tensor containing bags of indices into the embedding matrix
@@ -1435,6 +1436,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
     See :class:`~torch.nn.CTCLoss` for details.
 
     .. include:: cudnn_deterministic.rst
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
@@ -1952,6 +1954,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
         This is equivalent with ``nn.functional.interpolate(...)``.
 
+    .. include:: cuda_deterministic_backward.rst
 
     The algorithm used for upsampling is determined by :attr:`mode`.
 
@@ -2026,6 +2029,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         See :class:`~torch.nn.Upsample` for concrete examples on how this
         affects the outputs.
 
+    .. include:: cuda_deterministic_backward.rst
     """
     from numbers import Integral
     from .modules.utils import _ntuple
@@ -2111,6 +2115,8 @@ def upsample_nearest(input, size=None, scale_factor=None):
         size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
             size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
+
+    .. include:: cuda_deterministic_backward.rst
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
@@ -2132,6 +2138,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         input (Tensor): input
         size (int or Tuple[int, int]): output spatial size.
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
+
+    .. include:: cuda_deterministic_backward.rst
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
@@ -2189,6 +2197,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
           ``x'' = -0.5``.
 
     .. Note:: This function is often used in building Spatial Transformer Networks.
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)
@@ -2250,6 +2259,8 @@ def pad(input, pad, mode='constant', value=0):
         tensor, or the last 2 dimensions of 4D input tensor, or the last dimension of
         3D input tensor. Reflect padding is only implemented for padding the last 2
         dimensions of 4D input tensor, or the last dimension of 3D input tensor.
+
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         input (Tensor): `Nd` tensor
