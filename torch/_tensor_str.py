@@ -99,11 +99,11 @@ class _Formatter(object):
                         self.max_width = max(self.max_width, len(value_str) + 1)
 
             else:
-                finite_abs = nonzero_finite_vals.abs()
-                finite_min = finite_abs.min()
-                finite_max = finite_abs.max()
+                nonzero_finite_abs = nonzero_finite_vals.abs()
+                nonzero_finite_min = nonzero_finite_abs.min()
+                nonzero_finite_max = nonzero_finite_abs.max()
 
-                if finite_max / finite_min > 1000. or finite_max > 1.e8 or finite_min < 1.e-4:
+                if nonzero_finite_max / nonzero_finite_min > 1000. or nonzero_finite_max > 1.e8 or nonzero_finite_min < 1.e-4:
                     self.sci_mode = True
                     for value in nonzero_finite_vals:
                         value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
