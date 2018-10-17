@@ -14,6 +14,7 @@ if [ ! -d "${PYTORCH_ENV_DIR}/miniconda3" ]; then
 fi
 export PATH="${PYTORCH_ENV_DIR}/miniconda3/bin:$PATH"
 source ${PYTORCH_ENV_DIR}/miniconda3/bin/activate
+conda install python=3.6
 conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
 rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 
