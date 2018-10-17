@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/core/Backend.h>
+#include <ATen/core/DefaultTensorOptions.h>
 #include <ATen/core/Device.h>
 #include <ATen/core/Layout.h>
 #include <ATen/core/ScalarType.h>
-#include <ATen/core/DefaultTensorOptions.h>
+#include <ATen/core/ScalarTypeUtils.h>
 
 #include "c10/util/Optional.h"
 
@@ -143,6 +144,15 @@ struct CAFFE2_API TensorOptions {
     TensorOptions r = *this;
     r.set_dtype(dtype);
     return r;
+  }
+
+  // Since dtype is taken...
+  template <typename T>
+  TensorOptions& dtype() {
+    // TODO: Fix after @roy-li's fix
+    dtype_ = CTypeToScalarType<T>::to();
+    has_dtype_ = true;
+    return *this;
   }
 
   /// Sets the layout of the `TensorOptions`.
@@ -384,6 +394,12 @@ DefaultTensorOptions& DefaultTensorOptions::merge(const TensorOptions& options) 
     is_variable_ = options.is_variable();
   }
   return *this;
+}
+
+template <typename T>
+inline TensorOptions dtype() {
+  // TODO: Fix after @roy-li's fix
+  return dtype(CTypeToScalarType<T>::to());
 }
 
 } // namespace at
