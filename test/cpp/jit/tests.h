@@ -1170,8 +1170,9 @@ void testSchemaParser() {
 void testTopologicalIndex() {
   { // create graph so we can make nodes
     Graph graph;
+    auto head = graph.create(prim::Undefined);
     auto tail = graph.create(prim::Undefined);
-    TopologicalIndex index(tail);
+    TopologicalIndex index(head, tail);
 
     // Can't insert twice
     ASSERT_ANY_THROW(index.insertBefore(tail, tail));
@@ -1206,8 +1207,9 @@ void testTopologicalIndex() {
   {
     // test some boundary conditions
     Graph graph;
+    auto head = graph.create(prim::Undefined);
     auto tail = graph.create(prim::Undefined);
-    TopologicalIndex index(tail, 2, -5, 10);
+    TopologicalIndex index(head, tail, 2, -5, 10);
 
     auto node1 = graph.create(prim::Undefined);
     auto node2 = graph.create(prim::Undefined);

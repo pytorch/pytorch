@@ -22,21 +22,31 @@ struct Node;
 // nodes, the index is rebuilt such that the nodes are "spread out" again.
 class TopologicalIndex {
  public:
-  TopologicalIndex(Node* tail)
-      : TopologicalIndex(tail, 1 << 16, INT64_MIN, INT64_MAX) {}
+  TopologicalIndex(const Node* input, const Node* output)
+      : TopologicalIndex(input, output, 1 << 16, INT64_MIN, INT64_MAX) {}
 
   // Constructor for tests only, so we can test boundary conditions
   TopologicalIndex(
-      Node* tail,
+      const Node* input,
+      const Node* output,
       int64_t defaultInterval,
       int64_t lowerBound,
       int64_t upperBound)
-      : tail_(tail),
+      : input_(input),
+        output_(output),
         defaultInterval_(defaultInterval),
         lowerBound_(lowerBound),
         upperBound_(upperBound) {
-    nodeToIndex_[tail_] = 0;
-    indexToNode_[0] = tail_;
+    const auto midPoint = (lowerBound_ + upperBound_) / 2;
+    // Put the output at the midpoint, because it's the head/tail of the
+    // circular linked list of nodes.
+    nodeToIndex_[output_] = midPoint;
+    indexToNode_[midPoint] = output_;
+
+    // Put the input node somewhere way lower in the index
+    const auto inputIndex = (lowerBound_ + midPoint) / 2;
+    nodeToIndex_[input_] = inputIndex;
+    indexToNode_[inputIndex] = input_;
   }
 
   TopologicalIndex(const TopologicalIndex&) = delete;
@@ -91,9 +101,9 @@ class TopologicalIndex {
     // Can't insert a node twice
     AT_ASSERT(nodeToIndex_.count(toInsert) == 0);
 
-    if (insertPoint == tail_) {
-      // inserting AFTER the head/tail node means PREPEND to the graph
-      return insertBefore(getFirstNode(), toInsert);
+    if (insertPoint == output_) {
+      // inserting AFTER the head/output node means PREPEND to the graph
+      return insertAfter(input_, toInsert);
     }
 
     auto indexIter = indexToNode_.find(nodeToIndex_[insertPoint]);
@@ -140,16 +150,11 @@ class TopologicalIndex {
     nodeToIndex_.swap(newNodeToIndex);
   }
 
-  const Node* getLastNode() const {
-    return indexToNode_.rbegin()->second;
-  }
-  const Node* getFirstNode() const {
-    return indexToNode_.begin()->second;
-  }
-
-  // The node list is implemented as a circular linked list.
-  // We treat "appends" to the tail as prepends to the first node.
-  const Node* tail_;
+  // The node list is implemented as a circular linked list, with the output
+  // node as the head/tail. Therefore, the index needs to treat "appends" to the
+  // output as appends to the input.
+  const Node* input_;
+  const Node* output_;
 
   const int64_t defaultInterval_;
   const int64_t lowerBound_;

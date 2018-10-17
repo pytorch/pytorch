@@ -984,7 +984,7 @@ inline Block::Block(Graph* graph_, Node* node_)
       output_(initOutput(graph_->create(prim::Return, 0))),
       input_(graph_->create(prim::Param, 0)),
       owning_node_(node_),
-      topological_index_(output_) {
+      topological_index_(input_, output_) {
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
   input_->owning_block_ = this;
