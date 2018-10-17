@@ -62,29 +62,43 @@ class StringDeserializer : public BlobDeserializerBase {
   }
 };
 
-// The blob serialization member function implementation.
+namespace {
 void SerializeBlob(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
     int chunk_size) {
   std::unique_ptr<BlobSerializerBase> serializer(
-      CreateSerializer(blob.meta().id()));
-  CAFFE_ENFORCE(serializer, "No known serializer for ", blob.meta().name());
+      CreateSerializer(typeMeta.id()));
+  CAFFE_ENFORCE(serializer, "No known serializer for ", typeMeta.name());
   serializer->SerializeWithChunkSize(
-      blob.GetRaw(), blob.meta(), name, acceptor, chunk_size);
+      pointer, typeMeta, name, acceptor, chunk_size);
 }
 
-// The blob serialization member function implementation.
-std::string SerializeBlob(const Blob& blob, const string& name) {
+std::string
+SerializeBlob(const void* pointer, TypeMeta typeMeta, const string& name) {
   std::string data;
   BlobSerializerBase::SerializationAcceptor acceptor =
       [&data](const std::string&, const std::string& blob_str) {
         DCHECK(data.empty()); // should be called once with kNoChunking
         data = blob_str;
       };
-  SerializeBlob(blob, name, acceptor, kNoChunking);
+  SerializeBlob(pointer, typeMeta, name, acceptor, kNoChunking);
   return data;
+}
+} // namespace
+
+void SerializeBlob(
+    const Blob& blob,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor,
+    int chunk_size) {
+  SerializeBlob(blob.GetRaw(), blob.meta(), name, acceptor, chunk_size);
+}
+
+std::string SerializeBlob(const Blob& blob, const string& name) {
+  return SerializeBlob(blob.GetRaw(), blob.meta(), name);
 }
 
 void TensorSerializer::Serialize(
@@ -306,12 +320,10 @@ void TensorSerializer::Serialize(
       break;
     case TensorProto_DataType_UNDEFINED: {
       proto.mutable_string_data()->Reserve(chunkSize);
-      Blob temp_blob;
       const char* raw_data = static_cast<const char*>(input.raw_data());
       for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
-        temp_blob.ShareExternal(
-            const_cast<char*>(raw_data + i * input.itemsize()), input.meta());
-        proto.add_string_data(SerializeBlob(temp_blob, ""));
+        proto.add_string_data(
+            SerializeBlob(raw_data + i * input.itemsize(), input.meta(), ""));
       }
     } break;
       // Note: we intentially do not provide "default:" so if any new data types
