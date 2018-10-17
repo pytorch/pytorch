@@ -14,7 +14,6 @@ if __name__ == '__main__':
     options = parser.parse_args()
 
     os.environ['BUILD_TORCH'] = 'ON'
-    os.environ['BUILD_TEST'] = 'ON'
     os.environ['ONNX_NAMESPACE'] = 'onnx_torch'
     os.environ['PYTORCH_PYTHON'] = sys.executable
 
@@ -32,13 +31,12 @@ if __name__ == '__main__':
         command.append('--use-cuda')
         if os.environ.get('USE_CUDA_STATIC_LINK', False):
             command.append('--cuda-static-link')
-    if USE_GLOO_IBVERBS:
-        command.append('--use-gloo-ibverbs')
+    if USE_DISTRIBUTED and IS_LINUX:
+        if USE_GLOO_IBVERBS:
+            command.append('--use-gloo-ibverbs')
+        command.append('--use-distributed')
 
     command.append('caffe2')
-    if USE_DISTRIBUTED and IS_LINUX:
-        command.append('gloo')
-        command.append('c10d')
 
     sys.stdout.flush()
     sys.stderr.flush()
