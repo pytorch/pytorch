@@ -20,7 +20,7 @@ class OnnxExporter;
 
 class CAFFE2_API OnnxifiTransformer {
  public:
-  explicit OnnxifiTransformer(bool debug);
+  explicit OnnxifiTransformer(bool infer_shapes, bool debug);
 
   void Transform(
       Workspace* ws,
@@ -49,6 +49,9 @@ class CAFFE2_API OnnxifiTransformer {
       Workspace* ws,
       NetDef* pred_net,
       const std::unordered_map<std::string, TensorShape>& input_shape_hints);
+
+  // Run shape inference
+  bool infer_shapes_{false};
 
   // Dump onnx model for debugging
   bool debug_{false};
