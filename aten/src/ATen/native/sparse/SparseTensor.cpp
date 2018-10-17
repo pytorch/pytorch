@@ -69,7 +69,7 @@ SparseTensor new_sparse(const TensorOptions& options) {
     type_id = SparseCPUTensorId();
   }
   return detail::make_tensor<SparseTensorImpl>(
-      type_id, scalarTypeToTypeMeta(options.dtype()));
+      type_id, options.dtype());
 }
 
 /*** Helper methods ***/
@@ -143,7 +143,7 @@ Tensor empty_sparse(IntList size, const TensorOptions& options) {
   } else {
     type_id = SparseCPUTensorId();
   }
-  auto tensor = Tensor(c10::make_intrusive<SparseTensorImpl>(type_id, scalarTypeToTypeMeta(options.dtype())));
+  auto tensor = Tensor(c10::make_intrusive<SparseTensorImpl>(type_id, options.dtype()));
   _get_sparse_impl(tensor)->resize_and_clear_(size.size(), 0, size);
   return tensor;
 }
