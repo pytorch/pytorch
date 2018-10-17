@@ -4,7 +4,7 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 
-#include <ATen/Tensor.h>
+#include <ATen/ATen.h>
 
 #include <cstdint>
 #include <list>
@@ -32,28 +32,24 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
 }
 
 Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
+  auto grad_fn = grad_fn_;
+  if (has_grad_fn_ && !grad_fn) {
+    // If saving the grad_fn would create a circular reference, then it must
+    // be passed in to the unpack function.
+    AT_CHECK(saved_for, "No grad_fn for non-leaf saved variable");
+    grad_fn = std::move(saved_for);
+  }
+
   if (!data_.defined()) {
-    if (!was_default_constructed_) {
-      throw std::runtime_error(ERR_BACKWARD_TWICE);
-    }
+    AT_CHECK(was_default_constructed_,
+             "In function ", grad_fn->name(), ", ", ERR_BACKWARD_TWICE);
     return Variable();
   }
 
-  if (saved_version_ != version_counter_.current_version()) {
-    throw std::runtime_error(
-        "one of the variables needed for gradient computation has been "
-        "modified by an inplace operation");
-  }
-
-  auto grad_fn = grad_fn_;
-  if (has_grad_fn_ && !grad_fn) {
-    if (!saved_for) {
-      // If saving the grad_fn would create a circular reference, then it must
-      // be passed in to the unpack function.
-      throw std::runtime_error("No grad_fn for non-leaf saved variable");
-    }
-    grad_fn = std::move(saved_for);
-  }
+  AT_CHECK(saved_version_ == version_counter_.current_version(),
+           "In function ", grad_fn->name(), ", one of the variables needed ",
+           "for gradient computation has been modified by an inplace ",
+           "operation");
 
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
@@ -70,8 +66,9 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   // should have saved the grad accumulator. Even if the Variable no longer
   // alive, the accumulator should be kept alive by the references in the
   // graph).
-  if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired())
-    throw std::logic_error("No grad accumulator for a saved leaf!");
+  AT_ASSERTM(!requires_grad_ || var.grad_fn() || !grad_accumulator_.expired(),
+             "In function ", grad_fn->name(), ", can't find grad accumulator ",
+             "for a saved leaf!");
   var.set_grad_accumulator(grad_accumulator_);
 
   return var;
