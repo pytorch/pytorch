@@ -1,4 +1,5 @@
-#pragma once
+#ifndef C10_UTIL_FLAGS_H_
+#define C10_UTIL_FLAGS_H_
 
 /* Commandline flags support for C10.
  *
@@ -210,3 +211,5 @@ C10_DECLARE_REGISTRY(C10FlagsRegistry, C10FlagParser, const std::string&);
 ////////////////////////////////////////////////////////////////////////////////
 
 #endif // C10_USE_GFLAGS
+
+#endif // C10_UTIL_FLAGS_H_

@@ -135,8 +135,6 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
 #endif // CAFFE2_USE_CUDNN
 };
 
-CAFFE2_CUDA_API BaseStaticContext* GetCUDAStaticContext();
-
 class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
  public:
   // The default cuda context constructor.
@@ -150,14 +148,6 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
       CURAND_CHECK(curandDestroyGenerator(curand_generator_));
     }
     FinishDeviceComputation();
-  }
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetCUDAStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetCUDAStaticContext();
   }
 
   inline void SwitchToDevice(int stream_id) override {
@@ -287,6 +277,10 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return cudaStreamQuery(stream) == cudaSuccess;
   }
 
+  at::Device device() const override {
+    return at::Device(CUDA, gpu_id_);
+  }
+
   DeviceType device_type() const override {
     return CUDA;
   }
@@ -383,20 +377,6 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
   }
 
   DefaultCPUAllocator baseAllocator_;
-};
-
-class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
- public:
-  DeviceType GetDeviceType() override {
-    return CUDA;
-  }
-
-  void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    CAFFE_ENFORCE(data, "data cannot be nullptr");
-    device->set_device_type(TypeToProto(GetDeviceType()));
-    device->set_device_id(GetGPUIDForPointer(data));
-  }
-
 };
 
 using TensorCUDA = Tensor;

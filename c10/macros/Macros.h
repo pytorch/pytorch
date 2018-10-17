@@ -32,4 +32,20 @@
 #define CONCAT_IMPL(x, y) x##y
 #define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)
 
+/// C10_NODISCARD - Warn if a type or return value is discarded.
+#define C10_NODISCARD
+#if __cplusplus > 201402L && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(nodiscard)
+#undef C10_NODISCARD
+#define C10_NODISCARD [[nodiscard]]
+#endif
+// Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
+// error when __has_cpp_attribute is given a scoped attribute in C mode.
+#elif __cplusplus && defined(__has_cpp_attribute)
+#if __has_cpp_attribute(clang::warn_unused_result)
+#undef C10_NODISCARD
+#define C10_NODISCARD [[clang::warn_unused_result]]
+#endif
+#endif
+
 #endif // C10_MACROS_MACROS_H_

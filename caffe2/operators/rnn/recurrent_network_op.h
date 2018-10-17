@@ -86,8 +86,7 @@ void applyOffsetAlias(
   dst->Resize(dims);
   CAFFE_ENFORCE(timestep == dst->size() / numDstTimesteps, "Invalid offset");
   dst->ShareExternalPointer(
-      src->template mutable_data<T>() + startDstTimestep * timestep,
-      dst->size());
+      src->template mutable_data<T>() + startDstTimestep * timestep);
 }
 
 template <typename T, class Context>
