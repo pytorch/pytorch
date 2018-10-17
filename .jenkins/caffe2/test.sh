@@ -125,9 +125,9 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Unknown reasons, need to debug
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/arg_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/unique_ops_test.py")
-
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
+  
   # Need to go through roi ops to replace max(...) with fmaxf(...)
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/roi_align_rotated_op_test.py")
 
