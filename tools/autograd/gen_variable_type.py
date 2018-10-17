@@ -563,9 +563,6 @@ def unpack_args(env, declaration):
     body = []
     unpacked_args = []
     for i, arg in enumerate(declaration['arguments']):
-        # these arguments are skipped from the Type method.
-        if arg.get('is_type_dispatched'):
-            continue
         if not requires_unpack(arg):
             unpacked_args.append(arg['name'])
             continue
@@ -614,8 +611,7 @@ def dispatch_strategy(declaration):
           get dispatched back to VariableType (which will ensure that they
           are differentiable.)
     """
-    if (declaration['abstract'] or declaration['derivative'] is not None or
-            any(arg.get('is_type_dispatched') for arg in declaration['arguments'])):
+    if (declaration['abstract'] or declaration['derivative'] is not None):
         # If the function is abstract (not implemented on at::Type), we must
         # call the implementation on the derived type with unpacked tensors.
 

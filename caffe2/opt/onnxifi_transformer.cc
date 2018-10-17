@@ -20,22 +20,35 @@ namespace {
 std::unordered_map<std::string, TensorShape> InferShapes(
     Workspace* ws,
     NetDef* pred_net,
-    CaffeMap<std::string, TensorShape>* shape_hints_ordered) {
-  // Populate shapes from workplace
-  const std::vector<std::string>& ws_blobs = ws->Blobs();
-  for (const auto& s : ws_blobs) {
-    auto shape = GetTensorShapeOfBlob(ws->GetBlob(s));
-    if (!shape.unknown_shape()) {
-      shape_hints_ordered->emplace(s, std::move(shape));
-    }
-  }
-
-  std::vector<NetDef*> nets;
-  nets.emplace_back(pred_net);
-  InferBlobShapesAndTypes(*shape_hints_ordered, nets);
+    CaffeMap<std::string, TensorShape>* shape_hints_ordered,
+    bool infer_shapes) {
   std::unordered_map<std::string, TensorShape> shape_hints;
-  for (const auto& kv : *shape_hints_ordered) {
-    shape_hints.emplace(kv.first, kv.second);
+  if (infer_shapes) {
+    // Populate shapes from workplace
+    const std::vector<std::string> ws_blobs = ws->Blobs();
+    for (const auto& s : ws_blobs) {
+      auto shape = GetTensorShapeOfBlob(ws->GetBlob(s));
+      if (!shape.unknown_shape()) {
+        shape_hints_ordered->emplace(s, std::move(shape));
+      }
+    }
+
+    std::vector<NetDef*> nets;
+    nets.emplace_back(pred_net);
+    InferBlobShapesAndTypes(*shape_hints_ordered, nets);
+    for (const auto& kv : *shape_hints_ordered) {
+      shape_hints.emplace(kv.first, kv.second);
+    }
+  } else {
+    Workspace ws_local(ws);
+    ws_local.RunNetOnce(*pred_net);
+    const std::vector<std::string> ws_blobs = ws_local.Blobs();
+    for (const auto& s : ws_blobs) {
+      auto shape = GetTensorShapeOfBlob(ws_local.GetBlob(s));
+      if (!shape.unknown_shape()) {
+        shape_hints.emplace(s, std::move(shape));
+      }
+    }
   }
 
   return shape_hints;
@@ -84,7 +97,8 @@ void FillModelInfo(::ONNX_NAMESPACE::ModelProto* model) {
 }
 } // namespace
 
-OnnxifiTransformer::OnnxifiTransformer(bool debug) : debug_(debug) {
+OnnxifiTransformer::OnnxifiTransformer(bool infer_shapes, bool debug)
+    : infer_shapes_(infer_shapes), debug_(debug) {
   lib_ = onnx::initOnnxifiLibrary();
   CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
   CAFFE_ENFORCE_EQ(
@@ -309,7 +323,6 @@ CaffeMap<std::string, TensorShape> OnnxifiTransformer::SsaRewriteAndMapNames(
   for (const auto& kv : input_shape_hints) {
     const auto it = input_reverse_mapping.find(kv.first);
     if (it != input_reverse_mapping.end()) {
-      LOG(INFO) << "Adding input hint: " << it->second;
       shape_hints_ordered.emplace(it->second, kv.second);
     } else {
       shape_hints_ordered.emplace(kv.first, kv.second);
@@ -328,7 +341,8 @@ void OnnxifiTransformer::Transform(
   auto shape_hints_ordered =
       SsaRewriteAndMapNames(ws, pred_net, input_shape_hints);
   Workspace mapped_ws(ws, input_mapping_);
-  auto shape_hints = InferShapes(&mapped_ws, pred_net, &shape_hints_ordered);
+  auto shape_hints =
+      InferShapes(&mapped_ws, pred_net, &shape_hints_ordered, infer_shapes_);
 
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
   onnx::OnnxExporter exporter(nullptr);
@@ -337,36 +351,52 @@ void OnnxifiTransformer::Transform(
   // TODO: choose backend id
   onnxifi_library* backend = lib_;
   onnxBackendID backend_id = backend_ids_[0];
-  auto supports =
-      [&exporter, &shape_hints, backend, backend_id](
-          const caffe2::OperatorDef& op) {
-        const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
-        // NB: this might not be a hard constraint as we can just export C2
-        // domain specific ops to ONNX
-        if (!schema || schema->onnx_schema().empty()) {
-          LOG(INFO) << "Cannot export c2 op " << op.type()
-                    << " to onnx as there is no corresponding ONNX schema.";
-          return false;
-        }
+  auto supports = [&exporter, &shape_hints, backend, backend_id](
+                      const caffe2::OperatorDef& op) {
+    try {
+      const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
+      // NB: this might not be a hard constraint as we can just export C2
+      // domain specific ops to ONNX
+      if (!schema || schema->onnx_schema().empty()) {
+        LOG(INFO) << "Cannot export c2 op " << op.type()
+                  << " to onnx as there is no corresponding ONNX schema.";
+        return false;
+      }
 
-        ::ONNX_NAMESPACE::ModelProto onnx_model;
-        FillModelInfo(&onnx_model);
-        auto results = exporter.Caffe2OpToOnnxNodes(op, shape_hints);
-        for (const auto& n : results.first) {
-          onnx_model.mutable_graph()->add_node()->CopyFrom(n);
-        }
-        std::string onnx_model_str;
-        onnx_model.SerializeToString(&onnx_model_str);
-        auto ret = backend->onnxGetBackendCompatibility(
-            backend_id, onnx_model_str.size(), onnx_model_str.c_str());
-        if (ret != ONNXIFI_STATUS_SUCCESS) {
-          LOG(INFO) << "Don't support onnx for " << op.type() << " c2 op ("
-                    << ret << ")";
-          return false;
-        } else {
-          return true;
-        }
-      };
+      ::ONNX_NAMESPACE::ModelProto onnx_model;
+      FillModelInfo(&onnx_model);
+      auto results = exporter.Caffe2OpToOnnxNodes(op, shape_hints);
+      for (const auto& n : results.first) {
+        onnx_model.mutable_graph()->add_node()->CopyFrom(n);
+      }
+
+      // Add input shape info
+      std::vector<std::string> input_tmp;
+      for (const auto& op_input : op.input()) {
+        input_tmp.emplace_back(op_input);
+      }
+      auto io_vec = ConvertToValueInfo(input_tmp, shape_hints);
+      for (const auto& i : io_vec) {
+        onnx_model.mutable_graph()->add_input()->CopyFrom(i);
+      }
+
+      std::string onnx_model_str;
+      onnx_model.SerializeToString(&onnx_model_str);
+      auto ret = backend->onnxGetBackendCompatibility(
+          backend_id, onnx_model_str.size(), onnx_model_str.c_str());
+      if (ret != ONNXIFI_STATUS_SUCCESS) {
+        LOG(INFO) << "Don't support onnx for " << op.type() << " c2 op (" << ret
+                  << ")";
+        return false;
+      } else {
+        return true;
+      }
+    } catch (const std::exception& ex) {
+      LOG(ERROR) << "Gaught exception when converting op " << op.type()
+                 << ", what: " << ex.what();
+      return false;
+    }
+  };
 
   // function to convert runnable subgraph into a trt op. Note that to keep the
   // interface clean, we do the double conversion from C2 op to Onnx ops here
