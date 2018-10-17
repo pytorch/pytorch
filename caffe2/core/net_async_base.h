@@ -183,8 +183,8 @@ GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new) {
   static std::mutex pool_mutex;
 
   if (pool_size <= 0) {
-    if (c10::FLAGS_caffe2_net_async_cpu_pool_size > 0) {
-      pool_size = c10::FLAGS_caffe2_net_async_cpu_pool_size;
+    if (FLAGS_caffe2_net_async_cpu_pool_size > 0) {
+      pool_size = FLAGS_caffe2_net_async_cpu_pool_size;
       LOG(INFO) << "Using default CPU pool size: " << pool_size
                 << "; NUMA node id: " << numa_node_id;
     } else {
