@@ -471,13 +471,13 @@ def emit_body(declaration):
             if not isinstance(view_info, dict):
                 if len(differentiable_output_vars) == len(tensor_output_vars):
                     # all outputs are differentiable
-                    return 'as_view({}, {}, GradMode::is_enabled())'.format(view_info, call), []
+                    return 'as_view({}, {}, true)'.format(view_info, call), []
                 elif len(differentiable_output_vars) == 0:
                     # no output is differentiable
                     return 'as_view({}, {}, false)'.format(view_info, call), []
                 else:
                     # some of the outputs are differentiable
-                    # need to expand to dict mode
+                    # need to expand to dict mode, i.e., one entry per output
                     base_name = view_info
                     view_info_dict = {}
                     for i, return_info in enumerate(returns):
@@ -487,17 +487,17 @@ def emit_body(declaration):
                 view_info_dict = view_info
 
             def wrap_view_single(output_var, base_var):
-                fmt = '{output_var} = as_view({base_var}, {output_var}, {potentially_tracks_history});'
+                fmt = '{output_var} = as_view({base_var}, {output_var}, {is_differentiable});'
                 if output_var in differentiable_output_vars:
                     # If `GradMode::is_enabled()` is False, this is a
                     # non-differentiable view. Gradients should not flow through.
-                    potentially_tracks_history = 'GradMode::is_enabled()'
+                    is_differentiable = 'true'
                 else:
                     # This output is non-differentiable, so it is a
                     # non-differentiable view. Gradients should not flow through.
-                    potentially_tracks_history = 'false'
+                    is_differentiable = 'false'
                 return fmt.format(output_var=output_var, base_var=base_var,
-                                  potentially_tracks_history=potentially_tracks_history)
+                                  is_differentiable=is_differentiable)
 
             extra_wrapping_stmts = []
             for output_idx, return_info in enumerate(returns):

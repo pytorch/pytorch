@@ -438,9 +438,13 @@ struct TORCH_API Variable::Impl : public at::TensorImpl {
 /// view relation via DifferentiableViewImpl in autograd, the views will be
 /// using usual Variable::Impl and just share the version counters with the base
 /// Variables.
-/// Some examples are:
-///   1. Views created from .detach(),
-///   2. Views created when GradMode::is_enabled() = false.
+/// Such views include:
+///   1. Views created from .detach()
+///   2. Views that are non-differentiable by its nature.
+///      E.g., `sparse_tensor.indices()` is a integral view on a (possibly)
+///      floating point tensor.
+///      See top of `derivatives.yaml` on how to specify that outputs of a
+///      function are non-differentiable.
 /// These are called non-differentiable views as the gradients do not flow
 /// through the view relation.
 /// Relevant logic for non-differentiable views is implemented in
