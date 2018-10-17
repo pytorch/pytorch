@@ -8158,6 +8158,48 @@ class TestTorch(TestCase):
         self.assertEqual(str(y), y.__repr__())
         self.assertExpected(str(y), subname='non_contiguous')
 
+        # test print 0-dim tensor: there's no 0-dim in Numpy, we match arrayprint style
+        x = torch.tensor(0.00002)
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpected(str(x), subname='0dim')
+
+        # [Numpy] test print float in sci_mode when min < 0.0001.
+        x = torch.tensor([0.00002])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpected(str(x), subname='np_float_small_sci')
+
+        # [Numpy] test print float in sci_mode when max > 1e8.
+        # TODO: Pytorch uses fixed precision to print, while Numpy uses dragon4_scientific
+        # to do automatic trimming and padding.
+        x = torch.tensor([123456789.])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpected(str(x), subname='np_float_big_sci')
+
+        # [Numpy] test print float in sci_mode when max / min > 1000.
+        x = torch.tensor([0.01, 11])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpected(str(x), subname='np_float_scale_sci')
+
+        # [Numpy] test print int max / min > 1000, no sci_mode
+        x = torch.tensor([1, 1010])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpected(str(x), subname='np_int_scale_no_sci')
+
+        # [Numpy] test print int > 1e8, no sci_mode
+        x = torch.tensor([1000000000])  # 1e9
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpected(str(x), subname='np_int_big_no_sci')
+
+        # [Numpy] test printing float in int_mode
+        x = torch.tensor([1., 1000.])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpected(str(x), subname='np_float_int_mode')
+
+        # [Numpy] test printing float in int_mode in sci format when max / min > 1000.
+        x = torch.tensor([1., 1010.])
+        self.assertEqual(x.__repr__(), str(x))
+        self.assertExpected(str(x), subname='np_float_sci_int_mode')
+
     def test_sizeof(self):
         sizeof_empty = torch.randn(0).storage().__sizeof__()
         sizeof_10 = torch.randn(10).storage().__sizeof__()
