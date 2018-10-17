@@ -267,6 +267,15 @@ class StmtBuilder(Builder):
         return Return(r, [build_expr(ctx, val) for val in values if val is not None])
 
     @staticmethod
+    def build_Raise(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("raise"))
+        if isinstance(stmt.exc, ast.Name):
+            raise NotSupportedError(r, "Raising exceptions that have been "
+                                    "assigned to a variable is not supported")
+        call = ExprBuilder.build_Call(ctx, stmt.exc)
+        return Raise(r, call)
+
+    @staticmethod
     def build_AugAssign(ctx, stmt):
         lhs = [StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)]
         rhs = build_expr(ctx, stmt.value)

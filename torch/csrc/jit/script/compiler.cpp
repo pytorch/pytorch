@@ -948,6 +948,9 @@ private:
           }
         }
         break;
+        case TK_RAISE:
+          emitRaise(Raise(stmt));
+          break;
         case TK_RETURN:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
                                   << "of the function body";
@@ -1293,6 +1296,30 @@ private:
     auto cond = stmt.cond();
     emitLoopCommon(stmt.range(), {}, {cond}, stmt.body(), {});
   }
+
+
+  // Currently we do not support assigning exceptions to variables,
+  // a = Exception("hi")
+  // raise a
+  //
+  // We don't validate that the name of the Exception
+  // raise AnyName(3)
+  //
+  // NYI: add exception logic to control-flow nodes
+  // if True:
+  //   a = 1
+  // else
+  //   raise Exception("Hi")
+  // print(a)
+  void emitRaise(const Raise& stmt) {
+    auto apply = Apply(stmt.expr());
+    auto exception_name = Var(apply.callee()).name().name();
+    auto inputs = getValues(apply.inputs(), true);
+    auto node = graph->insertNode(graph->create(prim::RaiseException, inputs, 0)
+                     ->setSourceLocation(std::make_shared<SourceRange>(stmt.range())));
+    node->s_(attr::name, exception_name);
+  }
+
 
   // Validate that the `lhs` Expr's in an assignment statement are valid. That
   // is:

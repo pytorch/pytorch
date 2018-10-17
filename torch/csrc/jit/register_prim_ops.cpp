@@ -51,6 +51,18 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
   }
 }
 
+std::ostream& printListToStream(std::ostream & out,
+    const std::string& delim, at::ArrayRef<c10::IValue> list) {
+  bool first = true;
+  for(const auto& ivalue: list) {
+    if(!first)
+      out << delim;
+    first = false;
+    out << ivalue;
+  }
+  return out;
+}
+
 RegisterOperators reg({
     Operator(
         prim::MemoryFence,
@@ -243,18 +255,27 @@ RegisterOperators reg({
         [](Node* node) {
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
-            bool first = true;
-            for (const IValue& i : last(stack, num_inputs)) {
-              if (!first)
-                std::cout << " ";
-              first = false;
-              std::cout << i;
-            }
+            printListToStream(std::cout, " ", last(stack, num_inputs));
             drop(stack, num_inputs);
             std::cout << std::endl;
             return 0;
           };
         }),
+    Operator(
+        prim::RaiseException,
+        [](Node* node) -> Operation {
+          auto exception_name = node->s(attr::name);
+          size_t num_inputs = node->inputs().size();
+          return [exception_name, num_inputs](Stack& stack) {
+            std::stringstream exception;
+            exception << exception_name << ": ";
+            printListToStream(exception, ", ", last(stack, num_inputs));
+            drop(stack, num_inputs);
+            throw std::runtime_error(exception.str());
+            return 0;
+          };
+        }),
+
     // Load x, y
     // loads values from registers onto the stack, the actual callback does
     // nothing since the stack manipulation is already encoded in inst.inputs

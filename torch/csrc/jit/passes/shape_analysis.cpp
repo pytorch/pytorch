@@ -348,6 +348,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
     case prim::PythonOp:
     case prim::Print:
+    case prim::RaiseException:
     case prim::Undefined: {
       setUnshapedType(node);
       return;

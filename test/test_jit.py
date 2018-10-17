@@ -3844,6 +3844,7 @@ a")
                 m = x if not z else y
             while x < y > z:
                 q = x
+            raise Exception("hello")
             return x
 
         ast = torch.jit.frontend.get_jit_ast(fn, is_method=False)
@@ -7523,6 +7524,47 @@ a")
         jit_trace = torch.jit.trace(AddmmWrapper(), (x, y, c))
         ge_graph = jit_trace.__getattr__('forward').graph_for(x, y, c)
         self.assertExpectedGraph(ge_graph, 'jit')
+
+    def test_exceptions(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(cond):
+                if bool(cond):
+                    raise ValueError()
+                return 1
+        ''')
+
+        cu.foo(torch.tensor(0))
+        with self.assertRaisesRegex(RuntimeError, "ValueError"):
+            cu.foo(torch.tensor(1))
+
+        @torch.jit.script
+        def foo(cond):
+            a = 3
+            if bool(cond):
+                raise ArbitraryError(a, "hi")
+            return a
+
+        foo(torch.tensor(0))
+        # we don't currently validate the name of the exception
+        with self.assertRaisesRegex(RuntimeError, "ArbitraryError: 3, hi"):
+            foo(torch.tensor(1))
+
+        # assigning exceptions to variables unsupported
+        with self.assertRaisesRegex(NotSupportedError, "assigned to a variable"):
+            @torch.jit.script
+            def foo():
+                a = Exception()
+                raise a
+
+        # no control flow analysis yet
+        with self.assertRaisesRegex(RuntimeError, "undefined value a"):
+            @torch.jit.script
+            def foo():
+                if True:
+                    a = 1
+                else:
+                    raise Exception("Hi")
+                return a
 
     def test_weak_script_function(self):
         outer_var = 10
