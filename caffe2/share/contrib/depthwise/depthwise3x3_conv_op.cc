@@ -502,7 +502,7 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
       }
     }
 #endif
-    if (c10::FLAGS_caffe2_profile_depthwise) {
+    if (FLAGS_caffe2_profile_depthwise) {
       char buffer[1024];
       const double gmacs = double(
                                Y->dim32(2) * Y->dim32(3) * Y->dim32(1) *

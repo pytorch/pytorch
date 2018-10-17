@@ -121,7 +121,7 @@ void TensorSerializer::SerializeWithChunkSize(
   if (chunk_size == kNoChunking) {
     chunk_size = tensor.size() + 1; // to account for empty tensors
   } else if (chunk_size == kDefaultChunkSize) {
-    chunk_size = c10::FLAGS_caffe2_tensor_chunk_size;
+    chunk_size = FLAGS_caffe2_tensor_chunk_size;
   }
 
   auto processChunk = [&](int64_t chunkStart) {
@@ -148,7 +148,7 @@ void TensorSerializer::SerializeWithChunkSize(
     }
   };
   if (tensor.size() > chunk_size) {
-    for (int i = 0; i < c10::FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
+    for (int i = 0; i < FLAGS_caffe2_max_tensor_serializer_threads; ++i) {
       futures.emplace_back(std::async(std::launch::async, task));
     }
   }
@@ -287,7 +287,7 @@ void TensorSerializer::Serialize(
           uniq_ptr.get());
       break;
     case TensorProto_DataType_FLOAT16: {
-      if (c10::FLAGS_caffe2_serialize_fp16_as_bytes) {
+      if (FLAGS_caffe2_serialize_fp16_as_bytes) {
         const int kValue = 1;
         CAFFE_ENFORCE_EQ(
             reinterpret_cast<const char*>(&kValue)[0],

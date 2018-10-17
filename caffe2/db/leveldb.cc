@@ -60,7 +60,7 @@ class LevelDB : public DB {
  public:
   LevelDB(const string& source, Mode mode) : DB(source, mode) {
     leveldb::Options options;
-    options.block_size = c10::FLAGS_caffe2_leveldb_block_size;
+    options.block_size = FLAGS_caffe2_leveldb_block_size;
     options.write_buffer_size = 268435456;
     options.max_open_files = 100;
     options.error_if_exists = mode == NEW;

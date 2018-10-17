@@ -594,11 +594,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       } else {
         reset_tensor = storage_.capacity() <
                 (storage_offset_ + numel_) * storage_.itemsize() ||
-            !c10::FLAGS_caffe2_keep_on_shrink ||
+            !FLAGS_caffe2_keep_on_shrink ||
             storage_.capacity() -
                     (storage_offset_ + numel_) * storage_.itemsize() >
-                static_cast<size_t>(
-                    c10::FLAGS_caffe2_max_keep_on_shrink_memory);
+                static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
       if (reset_tensor && !is_init) {
