@@ -844,14 +844,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   inline void update_to_contiguous_strides() {
-    strides_ = c10::guts::make_unique<int64_t[]>(sizes_.size());
-    if (dim() > 0) {
-      int last_idx = dim() - 1;
-      strides_[last_idx] = 1;
-      for (auto i = last_idx - 1; i >= 0; --i) {
-        strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
-      }
-    }
+    strides_.reset();
     is_contiguous_ = true;
   }
 

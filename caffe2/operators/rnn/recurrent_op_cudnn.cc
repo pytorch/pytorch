@@ -42,9 +42,6 @@ RecurrentBaseOp<T>::RecurrentBaseOp(
   CUDNN_ENFORCE(cudnnCreateRNNDescriptor(&rnnDesc_));
   CUDNN_ENFORCE(cudnnCreateFilterDescriptor(&wDesc_));
   CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hxDesc_));
-  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&cxDesc_));
-  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&hyDesc_));
-  CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&cyDesc_));
 }
 
 template <typename T>
@@ -53,9 +50,6 @@ RecurrentBaseOp<T>::~RecurrentBaseOp() {
   CUDNN_ENFORCE(cudnnDestroyRNNDescriptor(rnnDesc_));
   CUDNN_ENFORCE(cudnnDestroyFilterDescriptor(wDesc_));
   CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(hxDesc_));
-  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(cxDesc_));
-  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(hyDesc_));
-  CUDNN_ENFORCE(cudnnDestroyTensorDescriptor(cyDesc_));
 }
 
 template <typename T>
@@ -169,12 +163,9 @@ void RecurrentBaseOp<T>::initialize(
     const std::array<int, 3> stride{batchSize * hiddenSize, hiddenSize, 1};
     CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
         hxDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-        cxDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-        hyDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
-    CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-        cyDesc_, cudnnTypeWrapper<T>::type, 3, dim.data(), stride.data()));
+    cxDesc_ = hxDesc_;
+    hyDesc_ = hxDesc_;
+    cyDesc_ = hxDesc_;
 
     if (hiddenOutput) {
       hiddenOutput->Resize(

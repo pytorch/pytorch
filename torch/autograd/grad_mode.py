@@ -66,7 +66,7 @@ class enable_grad(object):
         >>> @torch.enable_grad()
         ... def doubler(x):
         ...     return x * 2
-        >>> with torch.no_grad:
+        >>> with torch.no_grad():
         ...     z = doubler(x)
         >>> z.requires_grad
         True

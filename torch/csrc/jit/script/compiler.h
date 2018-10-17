@@ -108,14 +108,14 @@ private:
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
-  BuiltinFunction(Symbol symbol, c10::optional<NamedValue> value)
-      : symbol(std::move(symbol)), value(std::move(value)) {}
+  BuiltinFunction(Symbol symbol, c10::optional<NamedValue> self)
+      : symbol(std::move(symbol)), self(std::move(self)) {}
 
   // The symbol of the function (e.g. `aten::relu`).
   Symbol symbol;
 
   // if this is method, then this is the self argument.
-  c10::optional<NamedValue> value;
+  c10::optional<NamedValue> self;
 
   std::string kind() const override {
     return "builtin";
@@ -198,13 +198,14 @@ struct MatchedSchema {
 };
 
 TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
-    const FunctionSchema& schema,
-    const SourceRange& loc,
-    Graph& graph,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    std::ostream& failure_messages,
-    bool convert_tensors_to_nums);
+  const FunctionSchema& schema,
+  const SourceRange& loc,
+  Graph& graph,
+  c10::optional<NamedValue> self,
+  at::ArrayRef<NamedValue> inputs,
+  at::ArrayRef<NamedValue> attributes,
+  std::ostream& failure_messages,
+  bool convert_tensors_to_nums);
 
 TORCH_API FunctionSchema extractSchemaFromDef(const Def &def, bool is_method=false);
 
@@ -212,6 +213,7 @@ TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
+  c10::optional<NamedValue> self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,

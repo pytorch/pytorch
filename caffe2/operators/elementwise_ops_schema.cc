@@ -274,7 +274,7 @@ OPERATOR_SCHEMA(Add)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("addition", kAddExample))
-    .InheritOnnxSchema("Add");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(AddGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -287,7 +287,7 @@ OPERATOR_SCHEMA(Sub)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("subtraction", kSubExample))
-    .InheritOnnxSchema("Sub");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(SubGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -300,7 +300,7 @@ OPERATOR_SCHEMA(Mul)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("multiplication", kMulExample))
-    .InheritOnnxSchema("Mul");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(MulGradient)
     .NumInputs(3)
     .NumOutputs(2)
@@ -313,7 +313,7 @@ OPERATOR_SCHEMA(Div)
     .CostInferenceFunction(PointwiseCostInference<1>)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("division", kDivExample))
-    .InheritOnnxSchema("Div");
+    .InheritOnnxSchema();
 OPERATOR_SCHEMA(DivGradient)
     .NumInputs(3, 4)
     .NumOutputs(2)
@@ -927,7 +927,7 @@ Y:
     )DOC")
     .Input(0, "X", "*(Tensor`<bool>`)* Input tensor.")
     .Output(0, "Y", "*(Tensor`<bool>`)* Negated output tensor.")
-    .InheritOnnxSchema("Not");
+    .InheritOnnxSchema();
 SHOULD_NOT_DO_GRADIENT(Not);
 
 OPERATOR_SCHEMA(Sign)

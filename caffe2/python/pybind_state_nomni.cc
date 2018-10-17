@@ -97,7 +97,10 @@ void addNomnigraphMethods(pybind11::module& m) {
   m.def("NNModuleFromProtobuf", [](py::bytes def) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
-    return caffe2::convertToNNModule(proto);
+    std::vector<NNGraph::NodeRef> ns;
+    auto nn = caffe2::convertToNNModule(proto, false, &ns);
+    return std::pair<NNModule, std::vector<NNGraph::NodeRef>>(
+        std::move(nn), ns);
   });
 
   m.def(

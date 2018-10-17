@@ -90,7 +90,7 @@ Y.shape (NCHW order): (1, 3, 32, 32)
         "the dimensions by default.")
     .Input(0, "X", "*(type: Tensor)* Input tensor.")
     .Output(0, "Y", "*(type: Tensor)* Transposed output.")
-    .InheritOnnxSchema("Transpose");
+    .InheritOnnxSchema();
 
 class GetTransposeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

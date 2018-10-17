@@ -31,15 +31,19 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        # See Note [Don't serialize hooks]
+        torch.utils.hooks.warn_if_has_hooks(self)
         args = (self.storage(),
                 self.storage_offset(),
                 tuple(self.size()),
                 self.stride(),
                 self.requires_grad,
-                self._backward_hooks)
+                OrderedDict())  # previously was self._backward_hooks
         return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
+        # Warning: this method is NOT called when you torch.load() a tensor;
+        # that is managed by _rebuild_tensor_v2
         if not self.is_leaf:
             raise RuntimeError('__setstate__ can be only called on leaf Tensors')
         if len(state) == 4:
@@ -50,6 +54,8 @@ class Tensor(torch._C._TensorBase):
             # legacy serialization of Variable
             self.data = state[0]
             state = (state[3], state[4], state[2])
+        # The setting of _backward_hooks is expected to be a no-op.
+        # See Note [Don't serialize hooks]
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
