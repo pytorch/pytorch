@@ -37,15 +37,16 @@ class StringSerializer : public BlobSerializerBase {
    * otherwise this function produces a fatal error.
    */
   void Serialize(
-      const Blob& blob,
+      const void* pointer,
+      TypeMeta typeMeta,
       const string& name,
       SerializationAcceptor acceptor) override {
-    CAFFE_ENFORCE(blob.IsType<std::string>());
+    CAFFE_ENFORCE(typeMeta.Match<std::string>());
 
     BlobProto blob_proto;
     blob_proto.set_name(name);
     blob_proto.set_type("std::string");
-    blob_proto.set_content(blob.template Get<std::string>());
+    blob_proto.set_content(*static_cast<const std::string*>(pointer));
     acceptor(name, blob_proto.SerializeAsString());
   }
 };
@@ -70,7 +71,8 @@ void SerializeBlob(
   std::unique_ptr<BlobSerializerBase> serializer(
       CreateSerializer(blob.meta().id()));
   CAFFE_ENFORCE(serializer, "No known serializer for ", blob.meta().name());
-  serializer->SerializeWithChunkSize(blob, name, acceptor, chunk_size);
+  serializer->SerializeWithChunkSize(
+      blob.GetRaw(), blob.meta(), name, acceptor, chunk_size);
 }
 
 // The blob serialization member function implementation.
@@ -86,19 +88,22 @@ std::string SerializeBlob(const Blob& blob, const string& name) {
 }
 
 void TensorSerializer::Serialize(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor) {
-  this->SerializeWithChunkSize(blob, name, acceptor, kDefaultChunkSize);
+  this->SerializeWithChunkSize(
+      pointer, typeMeta, name, acceptor, kDefaultChunkSize);
 }
 
 void TensorSerializer::SerializeWithChunkSize(
-    const Blob& blob,
+    const void* pointer,
+    TypeMeta typeMeta,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
     int chunk_size) {
-  CAFFE_ENFORCE(blob.IsType<Tensor>());
-  const auto& tensor = blob.template Get<Tensor>();
+  CAFFE_ENFORCE(typeMeta.Match<Tensor>());
+  const auto& tensor = *static_cast<const Tensor*>(pointer);
   if (chunk_size == kNoChunking) {
     chunk_size = tensor.size() + 1; // to account for empty tensors
   } else if (chunk_size == kDefaultChunkSize) {
