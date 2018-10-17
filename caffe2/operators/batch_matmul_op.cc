@@ -143,7 +143,7 @@ two diemnsional, it behaves like normal matrix multiplication.
     .TensorInferenceFunction(TensorInferenceForBatchMatMul)
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForBatchMatMul))
-    .InheritOnnxSchema("BatchMatMul");
+    .InheritOnnxSchema();
 
 class GetBatchMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

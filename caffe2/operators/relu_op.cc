@@ -137,7 +137,7 @@ Y:
 )DOC")
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D output tensor with same shape as input")
-    .InheritOnnxSchema("Relu");
+    .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(ReluGradient)
