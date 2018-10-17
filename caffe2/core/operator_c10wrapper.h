@@ -3,7 +3,7 @@
 #include "caffe2/core/dispatch/Dispatcher.h"
 #include "caffe2/core/operator.h"
 #include <ATen/core/ArrayRef.h>
-#include "caffe2/utils/Metaprogramming.h"
+#include <c10/util/Metaprogramming.h>
 
 namespace caffe2 {
 

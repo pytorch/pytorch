@@ -7,41 +7,18 @@
 #include <unordered_map>
 
 #include <ATen/core/ATenGeneral.h>
-#include <ATen/core/Device.h>
+#include <ATen/core/Allocator.h>
 #include <ATen/core/Error.h>
-#include <ATen/core/UniqueVoidPtr.h>
 #include <ATen/core/typeid.h>
 #include <c10/util/Registry.h>
 
 namespace caffe2 {
 class Event;
-class DeviceOption;
 
 } // namespace caffe2
 namespace at {
 
 class BaseContext;
-
-/* BaseStaticContext defines the interface for static context, which contains
-   functions that are invoked statically before in Tensor class, e.g. New,
-   We will merge this with Allocator later.
- */
-class CAFFE2_API BaseStaticContext {
- public:
-  virtual ~BaseStaticContext() noexcept {}
-
-  virtual std::pair<void*, DeleterFnPtr> New(size_t nbytes) const = 0;
-
-  virtual DeviceType GetDeviceType() = 0;
-
-  /*
-   * @brief: Sets the DeviceOption for argument `device` based on the
-   * current context and the a data pointer
-   */
-  virtual void ExtractDeviceOption(
-      caffe2::DeviceOption* device,
-      const void* /*data*/) = 0;
-};
 
 /**
  * Virtual interface for the Context class in Caffe2.
@@ -55,7 +32,7 @@ class CAFFE2_API BaseContext {
  public:
   virtual ~BaseContext() noexcept {}
 
-  virtual BaseStaticContext* GetStaticContext() const = 0;
+  virtual Device device() const = 0;
 
   /* Sorry for the naming, will get rid of this in future diff */
   virtual DeviceType device_type() const = 0;
@@ -201,23 +178,5 @@ inline std::unique_ptr<at::BaseContext> CreateContext(
 namespace caffe2 {
 
 using at::BaseContext;
-using at::BaseStaticContext;
-
-using StaticContextMap = std::unordered_map<at::DeviceType, BaseStaticContext*>;
-CAFFE2_API StaticContextMap& GetStaticContexts();
-CAFFE2_API void set_static_context(at::DeviceType t, BaseStaticContext* ptr);
-CAFFE2_API BaseStaticContext* get_static_context(at::DeviceType t);
-
-template <at::DeviceType t>
-struct StaticContextFunctionRegisterer {
-  explicit StaticContextFunctionRegisterer(BaseStaticContext* ptr) {
-    set_static_context(t, ptr);
-  }
-};
-
-#define REGISTER_STATIC_CONTEXT(t, f)                                \
-  namespace {                                                        \
-  static StaticContextFunctionRegisterer<t> g_static_context_##d(f); \
-  }
 
 } // namespace caffe2

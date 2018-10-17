@@ -53,6 +53,7 @@ public:
   }
 
   FetchedBlob FetchTensor(const itensor &atensor, bool force_copy) {
+#ifdef USE_NUMPY
     FetchedBlob result;
     CAFFE_ENFORCE(atensor.materialized(),
                   "Trying to fetch uninitialized tensor");
@@ -86,6 +87,9 @@ public:
     }
 
     return result;
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 };
 
@@ -108,6 +112,7 @@ public:
       const DeviceOption &option,
       PyArrayObject *original_array,
       itensor *tensor) {
+#ifdef USE_NUMPY
     PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
     auto g = MakeGuard([&]() { Py_XDECREF(array); });
     const auto npy_type = PyArray_TYPE(array);
@@ -139,17 +144,25 @@ public:
         tensor->reorder_from(adims, type,
                              static_cast<void *>(PyArray_DATA(array)));
     }
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif // USE_NUMPY
   }
 
   bool ZeroDim(PyArrayObject *array) {
+#ifdef USE_NUMPY
     int ndim = PyArray_NDIM(array);
     npy_intp *npy_dims = PyArray_DIMS(array);
     return ndim == 0 ||
       std::find(npy_dims, npy_dims + ndim, 0) != npy_dims + ndim;
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif
   }
 
   void Feed(const DeviceOption &option, PyArrayObject *original_array,
             Blob *blob) {
+#ifdef USE_NUMPY
     try {
       PyArrayObject *array = PyArray_GETCONTIGUOUS(original_array);
       auto g = MakeGuard([&]() { Py_XDECREF(array); });
@@ -170,6 +183,9 @@ public:
       LOG(ERROR) << "IDEEP error: " << e.message;
       throw;
     }
+#else
+    CAFFE_THROW("Caffe2 was compiled without NumPy support.");
+#endif
   }
 };
 

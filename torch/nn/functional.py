@@ -940,7 +940,7 @@ def _get_softmax_dim(name, ndim, stacklevel):
         return 1
 
 
-def softmin(input, dim=None, _stacklevel=3):
+def softmin(input, dim=None, _stacklevel=3, dtype=None):
     r"""Applies a softmin function.
 
     Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
@@ -951,13 +951,19 @@ def softmin(input, dim=None, _stacklevel=3):
         input (Tensor): input
         dim (int): A dimension along which softmin will be computed (so every slice
             along dim will sum to 1).
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    return (-input).softmax(dim)
+    if dtype is None:
+        return (-input).softmax(dim)
+    else:
+        return (-input).softmax(dim, dtype=dtype)
 
 
-def softmax(input, dim=None, _stacklevel=3):
+def softmax(input, dim=None, _stacklevel=3, dtype=None):
     r"""Applies a softmax function.
 
     Softmax is defined as:
@@ -972,6 +978,10 @@ def softmax(input, dim=None, _stacklevel=3):
     Arguments:
         input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+
 
     .. note::
         This function doesn't work directly with NLLLoss,
@@ -981,7 +991,10 @@ def softmax(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    return input.softmax(dim)
+    if dtype is None:
+        return input.softmax(dim)
+    else:
+        return input.softmax(dim, dtype=dtype)
 
 
 def _sample_gumbel(shape, eps=1e-10, out=None):
@@ -1052,7 +1065,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     return y
 
 
-def log_softmax(input, dim=None, _stacklevel=3):
+def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
@@ -1064,10 +1077,16 @@ def log_softmax(input, dim=None, _stacklevel=3):
     Arguments:
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    return input.log_softmax(dim)
+    if dtype is None:
+        return input.log_softmax(dim)
+    else:
+        return input.log_softmax(dim, dtype=dtype)
 
 
 softshrink = _add_docstr(torch._C._nn.softshrink, r"""
@@ -1211,6 +1230,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     intermediate embeddings.
 
     See :class:`torch.nn.EmbeddingBag` for more details.
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         input (LongTensor): Tensor containing bags of indices into the embedding matrix
@@ -1416,6 +1436,7 @@ def ctc_loss(log_probs, targets, input_lengths, target_lengths, blank=0,
     See :class:`~torch.nn.CTCLoss` for details.
 
     .. include:: cudnn_deterministic.rst
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         log_probs: :math:`(T, N, C)` where `C = number of characters in alphabet including blank`,
@@ -1737,27 +1758,14 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
          >>> loss.backward()
     """
     if size_average is not None or reduce is not None:
-        reduction = _Reduction.legacy_get_string(size_average, reduce)
+        reduction = _Reduction.legacy_get_enum(size_average, reduce)
+    else:
+        reduction = _Reduction.get_enum(reduction)
+
     if not (target.size() == input.size()):
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
-    max_val = (-input).clamp(min=0)
-
-    if pos_weight is None:
-        loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
-    else:
-        log_weight = 1 + (pos_weight - 1) * target
-        loss = input - input * target + log_weight * (max_val + ((-max_val).exp() + (-input - max_val).exp()).log())
-
-    if weight is not None:
-        loss = loss * weight
-
-    if reduction == 'none':
-        return loss
-    elif reduction == 'elementwise_mean':
-        return loss.mean()
-    else:
-        return loss.sum()
+    return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction)
 
 
 def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='elementwise_mean'):
@@ -1946,6 +1954,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
         This is equivalent with ``nn.functional.interpolate(...)``.
 
+    .. include:: cuda_deterministic_backward.rst
 
     The algorithm used for upsampling is determined by :attr:`mode`.
 
@@ -2020,6 +2029,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         See :class:`~torch.nn.Upsample` for concrete examples on how this
         affects the outputs.
 
+    .. include:: cuda_deterministic_backward.rst
     """
     from numbers import Integral
     from .modules.utils import _ntuple
@@ -2105,6 +2115,8 @@ def upsample_nearest(input, size=None, scale_factor=None):
         size (int or Tuple[int, int] or Tuple[int, int, int]): output spatia
             size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
+
+    .. include:: cuda_deterministic_backward.rst
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
@@ -2126,6 +2138,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         input (Tensor): input
         size (int or Tuple[int, int]): output spatial size.
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
+
+    .. include:: cuda_deterministic_backward.rst
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
@@ -2183,6 +2197,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
           ``x'' = -0.5``.
 
     .. Note:: This function is often used in building Spatial Transformer Networks.
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)
@@ -2244,6 +2259,8 @@ def pad(input, pad, mode='constant', value=0):
         tensor, or the last 2 dimensions of 4D input tensor, or the last dimension of
         3D input tensor. Reflect padding is only implemented for padding the last 2
         dimensions of 4D input tensor, or the last dimension of 3D input tensor.
+
+    .. include:: cuda_deterministic_backward.rst
 
     Args:
         input (Tensor): `Nd` tensor
@@ -2373,7 +2390,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction)
 
 
-def normalize(input, p=2, dim=1, eps=1e-12):
+def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
     Does:
@@ -2393,8 +2410,15 @@ def normalize(input, p=2, dim=1, eps=1e-12):
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int): the dimension to reduce. Default: 1
         eps (float): small value to avoid division by zero. Default: 1e-12
+        out (Tensor, optional): the output tensor. If :attr:`out` is used, this
+                                operation won't be differentiable.
     """
-    return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+    if out is None:
+        denom = input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+        return input / denom
+    else:
+        denom = input.norm(p, dim, True).clamp_(min=eps).expand_as(input)
+        return torch.div(input, denom, out=out)
 
 
 def assert_int_or_pair(arg, arg_name, message):

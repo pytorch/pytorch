@@ -161,7 +161,7 @@ exits in a finite amount of time.
 
 For more complicated uses of the profilers, please see
 https://docs.python.org/3/library/profile.html and
-http://pytorch.org/docs/master/autograd.html#profiler for more information.
+https://pytorch.org/docs/master/autograd.html#profiler for more information.
 """.strip()
 
 

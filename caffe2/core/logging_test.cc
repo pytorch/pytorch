@@ -12,14 +12,14 @@ TEST(LoggingTest, TestEnforceTrue) {
 
 TEST(LoggingTest, TestEnforceFalse) {
   bool kFalse = false;
-  std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
+  std::swap(c10::FLAGS_caffe2_use_fatal_for_enforce, kFalse);
   try {
     CAFFE_ENFORCE(false, "This throws.");
     // This should never be triggered.
     ADD_FAILURE();
   } catch (const EnforceNotMet&) {
   }
-  std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
+  std::swap(c10::FLAGS_caffe2_use_fatal_for_enforce, kFalse);
 }
 
 TEST(LoggingTest, TestEnforceEquals) {
@@ -65,20 +65,20 @@ TEST(LoggingTest, EnforceShowcase) {
 }
 
 TEST(LoggingTest, Join) {
-  auto s = Join(", ", vector<int>({1, 2, 3}));
+  auto s = c10::Join(", ", vector<int>({1, 2, 3}));
   EXPECT_EQ(s, "1, 2, 3");
-  s = Join(":", vector<string>());
+  s = c10::Join(":", vector<string>());
   EXPECT_EQ(s, "");
-  s = Join(", ", set<int>({3, 1, 2}));
+  s = c10::Join(", ", set<int>({3, 1, 2}));
   EXPECT_EQ(s, "1, 2, 3");
 }
 
 #if GTEST_HAS_DEATH_TEST
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;
-  std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
+  std::swap(c10::FLAGS_caffe2_use_fatal_for_enforce, kTrue);
   EXPECT_DEATH(CAFFE_ENFORCE(false, "This goes fatal."), "");
-  std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
+  std::swap(c10::FLAGS_caffe2_use_fatal_for_enforce, kTrue);
 }
 #endif
 

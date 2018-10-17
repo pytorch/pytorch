@@ -705,7 +705,7 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
   }
 };
 
-#define CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(                                 \
+#define C10_DEFINE_TENSOR_TYPES_DISPATCHER(                                    \
     TensorTypes, DoRunWithType, DoRunWithOtherType)                            \
   template <typename FirstType, typename... Types, typename... ExtraArgs>      \
   struct DispatchHelper<TensorTypes<FirstType, Types...>, ExtraArgs...> {      \
@@ -763,15 +763,15 @@ struct DispatchHelper<FixedValues<>, ExtraArgs...> {
       return call<Op>(op, blob.meta());                                        \
     }                                                                          \
   };
-CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
+C10_DEFINE_TENSOR_TYPES_DISPATCHER(
     TensorTypes,
     DoRunWithType,
     DoRunWithOtherType)
-CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
+C10_DEFINE_TENSOR_TYPES_DISPATCHER(
     TensorTypes2,
     DoRunWithType2,
     DoRunWithOtherType2)
-#undef CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER
+#undef C10_DEFINE_TENSOR_TYPES_DISPATCHER
 
 // The device type registry. This works in two phases:
 // (1) gDeviceTypeRegistry() maps the device types values to the actual operator
@@ -928,9 +928,9 @@ class CAFFE2_API UnsupportedOperatorFeature : public std::exception {
 // A helper macro that should ONLY be used in the operator constructor to check
 // if needed features are met. If not, throws the UnsupportedOperatorFeature
 // exception with the given message.
-#define OPERATOR_NEEDS_FEATURE(condition, ...)                           \
-  if (!(condition)) {                                                    \
-    throw UnsupportedOperatorFeature(::caffe2::MakeString(__VA_ARGS__)); \
+#define OPERATOR_NEEDS_FEATURE(condition, ...)                 \
+  if (!(condition)) {                                          \
+    throw UnsupportedOperatorFeature(::c10::str(__VA_ARGS__)); \
   }
 
 // Creates an operator with the given operator definition.

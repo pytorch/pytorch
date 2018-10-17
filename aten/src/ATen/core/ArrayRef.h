@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include <ATen/core/C++17.h>
+#include <c10/util/C++17.h>
 #include <ATen/core/Error.h>
 #include <ATen/core/SmallVector.h>
 
@@ -105,6 +105,15 @@ class ArrayRef final {
     return Data;
   }
   constexpr iterator end() const {
+    return Data + Length;
+  }
+
+  // These are actually the same as iterator, since ArrayRef only
+  // gives you const iterators.
+  constexpr const_iterator cbegin() const {
+    return Data;
+  }
+  constexpr const_iterator cend() const {
     return Data + Length;
   }
 
@@ -208,5 +217,54 @@ class ArrayRef final {
 
   /// @}
 };
+
+template <typename T>
+std::ostream& operator<<(std::ostream & out, ArrayRef<T> list) {
+  int i = 0;
+  out << "[";
+  for(auto e : list) {
+    if (i++ > 0)
+      out << ", ";
+    out << e;
+  }
+  out << "]";
+  return out;
+}
+
+// WARNING: Template instantiation will NOT be willing to do an implicit
+// conversions to get you to an at::ArrayRef, which is why we need so
+// many overloads.
+
+template <typename T>
+bool operator==(at::ArrayRef<T> a1, at::ArrayRef<T> a2) {
+  return a1.equals(a2);
+}
+
+template <typename T>
+bool operator!=(at::ArrayRef<T> a1, at::ArrayRef<T> a2) {
+  return !a1.equals(a2);
+}
+
+template <typename T>
+bool operator==(std::vector<T> a1, at::ArrayRef<T> a2) {
+  return at::ArrayRef<T>(a1).equals(a2);
+}
+
+template <typename T>
+bool operator!=(std::vector<T> a1, at::ArrayRef<T> a2) {
+  return !at::ArrayRef<T>(a1).equals(a2);
+}
+
+template <typename T>
+bool operator==(at::ArrayRef<T> a1, std::vector<T> a2) {
+  return a1.equals(at::ArrayRef<T>(a2));
+}
+
+template <typename T>
+bool operator!=(at::ArrayRef<T> a1, std::vector<T> a2) {
+  return !a1.equals(at::ArrayRef<T>(a2));
+}
+
+using IntList = ArrayRef<int64_t>;
 
 } // namespace at

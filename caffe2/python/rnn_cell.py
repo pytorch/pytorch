@@ -292,7 +292,7 @@ class LSTMInitializer(object):
         ]
 
 
-# based on http://pytorch.org/docs/master/nn.html#torch.nn.RNNCell
+# based on https://pytorch.org/docs/master/nn.html#torch.nn.RNNCell
 class BasicRNNCell(RNNCell):
     def __init__(
         self,

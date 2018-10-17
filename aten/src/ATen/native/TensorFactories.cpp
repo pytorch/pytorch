@@ -103,10 +103,15 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor empty(IntList size, const TensorOptions& options) {
-  // Note [Native bindings for legacy TH factory functions]
-  // Can't call a factory function, because the buck stops with us!
-  return getFactoryType(options).tensor(size);
+Tensor empty_cpu(IntList size, const TensorOptions& options) {
+  AT_ASSERT(options.backend() == Backend::CPU);
+  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'
+  auto storage_impl = c10::make_intrusive<StorageImpl>(
+    scalarTypeToTypeMeta(options.dtype()), 0, at::getCPUAllocator(), true);
+
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, at::CPUTensorId(), false);
+  tensor.resize_(size);
+  return tensor;
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
@@ -147,11 +152,11 @@ Tensor empty_like(const Tensor& self) {
 
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
-    auto res = native::empty({0}, options); // to be resized
+    auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
     return res;
   }
-  return native::empty(self.sizes(), options);
+  return at::empty(self.sizes(), options);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -161,7 +166,7 @@ Tensor eye(int64_t n, const TensorOptions& options) {
 }
 
 Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
-  auto tensor = native::empty({0}, options); // to be resized
+  auto tensor = at::empty({0}, options); // to be resized
   return at::eye_out(tensor, n, m);
 }
 
@@ -196,7 +201,7 @@ Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {
   if (options.layout() == kSparse) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.fill_(fill_value);
 }
 
@@ -287,7 +292,7 @@ Tensor rand(IntList size, const TensorOptions& options) {
 }
 
 Tensor rand(IntList size, Generator* generator, const TensorOptions& options) {
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.uniform_(0, 1, generator);
 }
 
@@ -336,7 +341,7 @@ Tensor randint(
     IntList size,
     Generator* generator,
     const TensorOptions& options) {
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.random_(low, high, generator);
 }
 
@@ -397,7 +402,7 @@ Tensor randn(IntList size, const TensorOptions& options) {
 }
 
 Tensor randn(IntList size, Generator* generator, const TensorOptions& options) {
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.normal_(0, 1, generator);
 }
 
@@ -454,7 +459,7 @@ Tensor randperm(int64_t n, const TensorOptions& options) {
 }
 
 Tensor randperm(int64_t n, Generator* generator, const TensorOptions& options) {
-  auto tensor = native::empty(n, options);
+  auto tensor = at::empty(n, options);
   return at::randperm_out(tensor, n, generator);
 }
 
@@ -499,7 +504,7 @@ Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor zeros(IntList size, const TensorOptions& options) {
-  auto result = native::empty(size, options);
+  auto result = at::empty(size, options);
   return result.zero_();
 }
 
@@ -519,7 +524,7 @@ Tensor zeros_like(const Tensor& self) {
 
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
-    auto res = native::empty({0}, options); // to be resized
+    auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
     return res;
   }
@@ -538,7 +543,7 @@ Tensor bartlett_window(
     const TensorOptions& options) {
   window_function_checks("bartlett_window", options, window_length);
   if (window_length == 0) {
-    return native::empty({0}, options);
+    return at::empty({0}, options);
   }
   if (window_length == 1) {
     return native::ones({1}, options);
@@ -606,7 +611,7 @@ Tensor hamming_window(
     const TensorOptions& options) {
   window_function_checks("hamming_window", options, window_length);
   if (window_length == 0) {
-    return native::empty({0}, options);
+    return at::empty({0}, options);
   }
   if (window_length == 1) {
     return native::ones({1}, options);
@@ -648,7 +653,7 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 
 template <typename T>
 Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(DeviceType::CPU));
+  auto cpu_tensor = tensor_cpu(values, options.device(DeviceType::CPU));
   return cpu_tensor.to(options.device());
 }
 

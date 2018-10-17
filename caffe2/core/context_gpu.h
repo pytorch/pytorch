@@ -135,8 +135,6 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
 #endif // CAFFE2_USE_CUDNN
 };
 
-CAFFE2_CUDA_API BaseStaticContext* GetCUDAStaticContext();
-
 class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
  public:
   // The default cuda context constructor.
@@ -150,14 +148,6 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
       CURAND_CHECK(curandDestroyGenerator(curand_generator_));
     }
     FinishDeviceComputation();
-  }
-
-  BaseStaticContext* GetStaticContext() const override {
-    return GetCUDAStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetCUDAStaticContext();
   }
 
   inline void SwitchToDevice(int stream_id) override {
@@ -184,7 +174,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     }
   }
 
-  inline int cuda_gpu_id() const {
+  inline int device_id() const {
     return gpu_id_;
   }
 
@@ -223,8 +213,8 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
     return curand_generator_;
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
+  inline static at::DataPtr New(size_t nbytes) {
+    return GetAllocator(CUDA)->allocate(nbytes);
   }
 
   // Get a mutex to lock out cudaMalloc / cudaFree calls when
@@ -283,8 +273,12 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   }
 
   static bool IsStreamFree(const DeviceOption& option, int stream_id) {
-    auto stream = CUDAContext::cuda_stream(option.cuda_gpu_id(), stream_id);
+    auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
     return cudaStreamQuery(stream) == cudaSuccess;
+  }
+
+  at::Device device() const override {
+    return at::Device(CUDA, gpu_id_);
   }
 
   DeviceType device_type() const override {
@@ -334,26 +328,28 @@ inline void CPUContext::CopyBytes<CPUContext, CUDAContext>(
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  */
-struct CAFFE2_CUDA_API PinnedCPUAllocator final : CPUAllocator {
+struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
   PinnedCPUAllocator() {}
   ~PinnedCPUAllocator() override {}
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
+  at::DataPtr allocate(size_t nbytes) const override {
     void* data;
+    at::DataPtr data_ptr;
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
     if (IsNUMAEnabled()) {
-      auto ptr_and_deleter = baseAllocator_.New(nbytes);
-      data = ptr_and_deleter.first;
+      data_ptr = baseAllocator_.allocate(nbytes);
+      data = data_ptr.get();
       CAFFE_ENFORCE(data);
       CUDA_ENFORCE(cudaHostRegister(data, nbytes, cudaHostRegisterDefault));
     } else {
       CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
+      data_ptr = {data, data, &Delete, at::Device(CPU)};
     }
     memset(data, 0, nbytes);
-    return {data, Delete};
+    return data_ptr;
   }
 
-  MemoryDeleter GetDeleter() override {
-    return Delete;
+  at::DeleterFnPtr raw_deleter() const override {
+    return &Delete;
   }
 
  private:
@@ -381,23 +377,6 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : CPUAllocator {
   }
 
   DefaultCPUAllocator baseAllocator_;
-};
-
-class CAFFE2_CUDA_API CUDAStaticContext final : public BaseStaticContext {
- public:
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
-
-  DeviceType GetDeviceType() override {
-    return CUDA;
-  }
-
-  void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(TypeToProto(GetDeviceType()));
-    device->set_cuda_gpu_id(GetGPUIDForPointer(data));
-  }
-
- protected:
-  static void Delete(void* data);
 };
 
 using TensorCUDA = Tensor;

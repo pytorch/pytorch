@@ -19,7 +19,6 @@ def _run_in_hip(gc, dc):
 
 class TestGroupConvolution(hu.HypothesisTestCase):
 
-    @unittest.skipIf("IN_CIRCLECI" in os.environ, "FIXME: flaky test in CircleCI")
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            kernel=st.integers(1, 5),

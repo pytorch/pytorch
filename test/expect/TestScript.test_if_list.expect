@@ -1,6 +1,7 @@
 graph(%x : Double(*, *)) {
-  %1 : bool = prim::Constant[value=1]()
-  %c : Dynamic[] = prim::If(%1)
+  %1 : int = prim::Constant[value=0]()
+  %2 : bool = prim::Constant[value=1]()
+  %c : Dynamic[] = prim::If(%2)
     block0() {
       %c.1 : Dynamic[] = prim::ListConstruct(%x, %x)
       -> (%c.1)
@@ -9,7 +10,6 @@ graph(%x : Double(*, *)) {
       %c.2 : Dynamic[] = prim::ListConstruct(%x, %x, %x)
       -> (%c.2)
     }
-  %5 : int = prim::Constant[value=0]()
-  %6 : Dynamic = aten::cat(%c, %5)
+  %6 : Dynamic = aten::cat(%c, %1)
   return (%6);
 }

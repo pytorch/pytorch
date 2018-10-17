@@ -16,11 +16,13 @@ macro(enable_ubsan)
   endif()
 endmacro()
 
+if(NOT BUILD_ATEN_ONLY)
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
+endif()
 endif()
 
 # ---[ Threads
@@ -136,11 +138,7 @@ list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 # ---[ gflags
 if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
-  if (TARGET gflags)
-    set(CAFFE2_USE_GFLAGS 1)
-    include_directories(SYSTEM ${GFLAGS_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS gflags)
-  else()
+  if (NOT TARGET gflags)
     message(WARNING
         "gflags is not found. Caffe2 will build without gflags support but "
         "it is strongly recommended that you install gflags. Suppress this "
@@ -307,6 +305,20 @@ if(USE_FFMPEG)
   endif ()
 endif()
 
+# ---[ Caffe2 depends on FP16 library for half-precision conversions
+if (NOT TARGET fp16)
+  if (NOT DEFINED FP16_SOURCE_DIR)
+    set(FP16_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/FP16" CACHE STRING "FP16 source directory")
+  endif()
+
+  set(FP16_BUILD_TESTS OFF CACHE BOOL "")
+  set(FP16_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  add_subdirectory(
+    "${FP16_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/FP16")
+endif()
+list(APPEND Caffe2_DEPENDENCY_LIBS fp16)
+
 # ---[ EIGEN
 # Due to license considerations, we will only use the MPL2 parts of Eigen.
 set(EIGEN_MPL2_ONLY 1)
@@ -386,9 +398,14 @@ if(BUILD_PYTHON)
   set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
-  find_package(NumPy REQUIRED)
-  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND AND NUMPY_FOUND)
-    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR} ${NUMPY_INCLUDE_DIR})
+  find_package(NumPy)
+  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
+    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
+    caffe2_update_option(USE_NUMPY OFF)
+    if(NUMPY_FOUND)
+      caffe2_update_option(USE_NUMPY ON)
+      include_directories(SYSTEM ${NUMPY_INCLUDE_DIR})
+    endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
   else()
@@ -522,18 +539,18 @@ if(NOT BUILD_ATEN_MOBILE)
     message(INFO "Compiling with HIP for AMD.")
     caffe2_update_option(USE_ROCM ON)
 
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -fPIC")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_PLATFORM_HCC__=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -DCUDA_HAS_FP16=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_OPERATORS__=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -D__HIP_NO_HALF_CONVERSIONS__=1")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-macro-redefined")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-inconsistent-missing-override")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-exceptions")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-negative")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-shift-count-overflow")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
-    set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-duplicate-decl-specifier")
+    list(APPEND HIP_HIPCC_FLAGS -fPIC)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_PLATFORM_HCC__=1)
+    list(APPEND HIP_HIPCC_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
+    list(APPEND HIP_HIPCC_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-macro-redefined)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-inconsistent-missing-override)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-exceptions)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-negative)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-shift-count-overflow)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-unused-command-line-argument)
+    list(APPEND HIP_HIPCC_FLAGS -Wno-duplicate-decl-specifier)
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
@@ -777,6 +794,7 @@ if (USE_ZSTD)
 endif()
 
 # ---[ Onnx
+if(NOT BUILD_ATEN_ONLY)
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(ONNX_CUSTOM_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE})
@@ -814,6 +832,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
+endif()
 endif()
 
 # --[ TensorRT integration with onnx-trt
@@ -1084,36 +1103,17 @@ if (NOT BUILD_ATEN_MOBILE)
     add_compile_options(-DUSE_GCC_GET_CPUID)
   ENDIF()
 
-  FIND_PACKAGE(SSE) # checks SSE, AVX and AVX2
-  IF (C_SSE2_FOUND)
-    MESSAGE(STATUS "SSE2 Found")
-    # TODO: Work out correct way to do this.  Note that C_SSE2_FLAGS is often
-    # empty, in which case it expands to " " flag which is bad
-    SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE2)
-  ENDIF()
-  IF (C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-    SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE4_1_FLAGS} ${C_SSE4_2_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE4_1 -DUSE_SSE4_2)
-  ENDIF()
-  IF (C_SSE3_FOUND)
-    MESSAGE(STATUS "SSE3 Found")
-    SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} ${CMAKE_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} ${CMAKE_CXX_FLAGS}")
-    add_compile_options(-DUSE_SSE3)
-  ENDIF()
+  FIND_PACKAGE(AVX) # checks AVX and AVX2
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
   # however, we want to enable the AVX codepaths, so we still need to
   # add USE_AVX and USE_AVX2 macro defines
   IF (C_AVX_FOUND)
-    MESSAGE(STATUS "AVX Found")
+    MESSAGE(STATUS "AVX compiler support found")
     add_compile_options(-DUSE_AVX)
   ENDIF()
   IF (C_AVX2_FOUND)
-    MESSAGE(STATUS "AVX2 Found")
+    MESSAGE(STATUS "AVX2 compiler support found")
     add_compile_options(-DUSE_AVX2)
   ENDIF()
 

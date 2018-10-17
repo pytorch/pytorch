@@ -2,11 +2,12 @@ import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
-from torch.jit.frontend import get_jit_ast
+from torch.jit.frontend import get_jit_ast, get_default_args
 import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
+import builtins
 import sys
 import warnings
 import itertools
@@ -46,6 +47,9 @@ _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
+compiled_weak_fns = weakref.WeakKeyDictionary()
+COMPILATION_PENDING = object()
+COMPILED = object()
 
 
 @contextlib.contextmanager
@@ -602,12 +606,16 @@ def createResolutionCallback(frames_up=0):
         baz()
     """
     frame = inspect.stack()[1 + frames_up][0]
+    f_locals = frame.f_locals
+    f_globals = frame.f_globals
 
     def env(key):
-        if key in frame.f_locals:
-            return frame.f_locals[key]
-        elif key in frame.f_globals:
-            return frame.f_globals[key]
+        if key in f_locals:
+            return f_locals[key]
+        elif key in f_globals:
+            return f_globals[key]
+        elif hasattr(builtins, key):
+            return getattr(builtins, key)
         else:
             return None
 
@@ -631,19 +639,43 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def script(fn, optimize=True, _frames_up=0):
+def weak_script(fn, _frames_up=0):
+    compiled_weak_fns[fn] = {
+        "status": COMPILATION_PENDING,
+        "compiled_fn": None,
+        "rcb": createResolutionCallback(_frames_up + 1)
+    }
+    return fn
+
+
+def _try_compile_weak_script(fn):
+    entry = compiled_weak_fns.get(fn)
+    if entry is None:
+        return None
+    if entry["status"] == COMPILATION_PENDING:
+        compiled_fn = torch.jit.script(fn, True, 0, entry["rcb"])
+        del entry["rcb"]
+        compiled_weak_fns[fn]["compiled_fn"] = compiled_fn
+        entry["status"] = COMPILED
+        return compiled_fn
+    else:
+        return entry["compiled_fn"]
+
+
+def script(fn, optimize=True, _frames_up=0, _rcb=None):
     if not _enabled:
         return fn
-    rcb = createResolutionCallback(_frames_up + 1)
+    if _rcb is None:
+        _rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn, is_method=False)
-    graph = _jit_script_compile(ast, rcb)
+    graph = _jit_script_compile(ast, _rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
     # TODO: refactor everything so we're not 1) creating a ScriptModule
     # 2) Throwing everything away except for the graph 3) Creating a new
     # ScriptModule and dumping that graph in 4) Re-populating the schema
     # because it was lost doing the previous
-    mod.__getattr__('forward').forward_schema(ast, False)
+    mod.__getattr__('forward').forward_schema(ast, get_default_args(fn), False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
@@ -881,7 +913,8 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             original_init(self, *args, **kwargs)
             defs = [m.def_ for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(defs, rcbs)
+            defaults = [get_default_args(m.original_method) for m in methods]
+            self._create_methods(defs, rcbs, defaults)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -1219,6 +1252,32 @@ def _register_builtin(fn, op):
 
 def _find_builtin(fn):
     return _get_builtin_table().get(id(fn))
+
+
+# Python equivalents for the empty list construction builtins. We need
+# these otherwise the tests won't execute in regular Python mode.
+def _construct_empty_int_list():
+    return []
+
+
+_register_builtin(_construct_empty_int_list, 'aten::_construct_empty_int_list')
+
+
+def _construct_empty_float_list():
+    return []
+
+
+_register_builtin(_construct_empty_float_list, 'aten::_construct_empty_float_list')
+
+
+def _construct_empty_tensor_list():
+    return []
+
+
+_register_builtin(_construct_empty_tensor_list, 'aten::_construct_empty_tensor_list')
+
+
+_register_builtin(len, 'aten::len')
 
 
 class _disable_tracing(object):

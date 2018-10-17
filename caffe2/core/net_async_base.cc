@@ -5,50 +5,55 @@
 #include "caffe2/core/timer.h"
 
 // experimental support for multiple streams per worker per GPU
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_streams_per_gpu,
     1,
     "Number of streams per worker per GPU"
     " to use in GPU thread pool (experimental)");
 
-CAFFE2_DECLARE_bool(caffe2_dag_net_collect_stats);
+C10_DECLARE_bool(caffe2_dag_net_collect_stats);
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
+    caffe2_net_async_inference_mode,
+    false,
+    "If set, use one single chain containing all ops");
+
+C10_DEFINE_bool(
     caffe2_net_async_finish_chain,
     false,
     "Wait for chain to finish");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_always_schedule_child,
     false,
     "Always schedule child chains from parent chain");
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_net_async_max_gpus,
     16,
     "Max number of GPUs allowed in net async executor");
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_net_async_max_numa_nodes,
     8,
     "Max number of NUMA nodes allowed in net async executor");
 
-CAFFE2_DEFINE_int(
+C10_DEFINE_int(
     caffe2_net_async_cpu_pool_size,
     0,
     "Number of threads in CPU pool by default");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_check_stream_status,
     false,
     "Select next non-busy stream");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_use_single_pool,
     false,
     "Use single thread pool for all devices");
 
-CAFFE2_DEFINE_bool(
+C10_DEFINE_bool(
     caffe2_net_async_use_per_net_pools,
     false,
     "Use per net thread pools");
@@ -63,7 +68,9 @@ std::vector<int>& AsyncNetBase::getStreamCounters() {
 AsyncNetBase::AsyncNetBase(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
-    : NetBase(net_def, ws) {
+    : NetBase(net_def, ws), counters_(net_def) {
+  computeExecutionModeFlags();
+
   operator_nodes_ = dag_utils::prepareOperatorNodes(net_def, ws);
   helper_ = caffe2::make_unique<AsyncNetExecutorHelper>(this);
   operators_.reserve(operator_nodes_.size());
@@ -73,7 +80,11 @@ AsyncNetBase::AsyncNetBase(
     operators_.push_back(op_ptr);
   }
 
-  execution_chains_ = dag_utils::computeChains(operator_nodes_);
+  if (c10::FLAGS_caffe2_net_async_inference_mode) {
+    execution_chains_ = dag_utils::computeGroups(operator_nodes_);
+  } else {
+    execution_chains_ = dag_utils::computeChains(operator_nodes_);
+  }
   chains_.reserve(execution_chains_.size());
   for (const auto& kv : execution_chains_) {
     chains_.push_back(kv.second);
@@ -84,12 +95,15 @@ AsyncNetBase::AsyncNetBase(
   for (const auto& chain : chains_) {
     const auto& last_op = operators_[chain.back()];
     events_.push_back(&last_op->event());
-    for (const auto& op_id : chain) {
-      if (op_id == chain.back() || op_id == chain.front()) {
-        continue;
+    // keep events for inner chain ops in case of profiling
+    if (!report_stats_) {
+      for (const auto& op_id : chain) {
+        if (op_id == chain.back() || op_id == chain.front()) {
+          continue;
+        }
+        const auto& op = operators_[op_id];
+        op->DisableEvent();
       }
-      const auto& op = operators_[op_id];
-      op->DisableEvent();
     }
   }
 
@@ -99,8 +113,6 @@ AsyncNetBase::AsyncNetBase(
   if (tracer_) {
     LOG(INFO) << "Tracing net: " << net_def->name();
   }
-
-  computeExecutionModeFlags();
 }
 
 bool AsyncNetBase::handleRunError() {
@@ -119,7 +131,7 @@ bool AsyncNetBase::RunAsync() {
   return DoRunAsync();
 }
 
-TaskThreadPool* AsyncNetBase::poolGetter(
+TaskThreadPoolBase* AsyncNetBase::poolGetter(
     PoolsMap& pools,
     int device_type,
     int device_id,
@@ -134,7 +146,7 @@ TaskThreadPool* AsyncNetBase::poolGetter(
   return pool.get();
 }
 
-TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
+TaskThreadPoolBase* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (use_single_pool_) {
     return poolGetter(cpu_pools_, PROTO_CPU, -1, num_workers_);
   }
@@ -152,14 +164,14 @@ TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
     }
     CAFFE_ENFORCE_LT(
         numa_node_id,
-        FLAGS_caffe2_net_async_max_numa_nodes,
+        c10::FLAGS_caffe2_net_async_max_numa_nodes,
         "Invalid NUMA node id: ",
         numa_node_id);
     return poolGetter(cpu_pools_, PROTO_CPU, numa_node_id, num_workers_);
   } else if (device_option.device_type() == PROTO_CUDA) {
-    auto gpu_id = device_option.cuda_gpu_id();
+    auto gpu_id = device_option.device_id();
     CAFFE_ENFORCE(
-        gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
+        gpu_id >= 0 && gpu_id < c10::FLAGS_caffe2_net_async_max_gpus,
         "Invalid GPU id: " + caffe2::to_string(gpu_id));
     return poolGetter(gpu_pools_, PROTO_CUDA, gpu_id, num_workers_);
   } else {
@@ -173,7 +185,7 @@ int AsyncNetBase::stream(int task_id) {
   const auto& device_option = event(task_id).GetDeviceOption();
   int stream_id = 0;
   if (device_option.device_type() == PROTO_CUDA) {
-    int gpu_id = device_option.cuda_gpu_id();
+    int gpu_id = device_option.device_id();
     CAFFE_ENFORCE_GE(gpu_id, 0, "Invalid gpu id: " + caffe2::to_string(gpu_id));
     if ((unsigned)gpu_id >= getStreamCounters().size()) {
       getStreamCounters().resize(gpu_id + 1, 0);
@@ -285,14 +297,28 @@ int AsyncNetBase::numOps(int task_id) const {
   return chains_[task_id].size();
 }
 
+int AsyncNetBase::firstTaskOpId(int task_id) const {
+  return chains_[task_id].front();
+}
+
+int AsyncNetBase::lastTaskOpId(int task_id) const {
+  return chains_[task_id].back();
+}
+
 const OperatorBase* AsyncNetBase::firstTaskOp(int task_id) const {
-  auto op_id = chains_[task_id].front();
-  return operator_nodes_[op_id].operator_.get();
+  return operator_nodes_[firstTaskOpId(task_id)].operator_.get();
 }
 
 const OperatorBase* AsyncNetBase::lastTaskOp(int task_id) const {
-  auto op_id = chains_[task_id].back();
-  return operator_nodes_[op_id].operator_.get();
+  return operator_nodes_[lastTaskOpId(task_id)].operator_.get();
+}
+
+OperatorBase* AsyncNetBase::firstTaskOp(int task_id) {
+  return operator_nodes_[firstTaskOpId(task_id)].operator_.get();
+}
+
+OperatorBase* AsyncNetBase::lastTaskOp(int task_id) {
+  return operator_nodes_[lastTaskOpId(task_id)].operator_.get();
 }
 
 void AsyncNetBase::asyncWait(
@@ -355,14 +381,24 @@ bool AsyncNetBase::run(int task_id, int stream_id) {
     }
     for (auto& op_id : chains_[task_id]) {
       op = operators_[op_id];
-      TRACE_EVENT(
-          tracing::TRACE_OP,
-          op_id,
-          tracing::TRACE_TASK,
-          task_id,
-          tracing::TRACE_STREAM,
-          stream_id);
-      bool success = op->RunAsync(stream_id);
+      bool success = false;
+      if (!report_stats_) {
+        TRACE_EVENT(
+            tracing::TRACE_OP,
+            op_id,
+            tracing::TRACE_TASK,
+            task_id,
+            tracing::TRACE_STREAM,
+            stream_id);
+        success = op->RunAsync(stream_id);
+      } else {
+        counters_.AddPerOpStartTime(op_id);
+        success = op->RunAsync(stream_id);
+        if (success && op->device_option().device_type() != PROTO_CPU) {
+          op->Finish();
+        }
+        counters_.AddPerOpEndTime(op_id);
+      }
       if (!success) {
         auto err_msg = "Failed to execute an op: " +
             (op->has_debug_def() ? op->type() : " unknown");
@@ -416,55 +452,31 @@ void AsyncNetBase::finalizeEvents() {
   }
 }
 
-AsyncNetBase::~AsyncNetBase() {}
+ProfDAGProtos AsyncNetBase::GetOperatorStats() const {
+  return counters_.GetOperatorStats();
+}
 
-C10_DEFINE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int, bool);
+ProfDAGProtos AsyncNetBase::GetPerOperatorCost() const {
+  return counters_.GetPerOperatorCost();
+}
 
-C10_REGISTER_CREATOR(ThreadPoolRegistry, CPU, GetAsyncNetCPUThreadPool);
-
-/* static */
-std::shared_ptr<TaskThreadPool>
-GetAsyncNetCPUThreadPool(int numa_node_id, int pool_size, bool create_new) {
-  // Note: numa_node_id = -1 corresponds to no NUMA used
-  static std::
-      unordered_map<int, std::unordered_map<int, std::weak_ptr<TaskThreadPool>>>
-          pools;
-  static std::mutex pool_mutex;
-
-  if (pool_size <= 0) {
-    if (FLAGS_caffe2_net_async_cpu_pool_size > 0) {
-      pool_size = FLAGS_caffe2_net_async_cpu_pool_size;
-      LOG(INFO) << "Using default CPU pool size: " << pool_size
-                << "; NUMA node id: " << numa_node_id;
-    } else {
-      auto num_cores = std::thread::hardware_concurrency();
-      CAFFE_ENFORCE(num_cores > 0, "Failed to get number of CPU cores");
-      LOG(INFO) << "Using estimated CPU pool size: " << num_cores
-                << "; NUMA node id: " << numa_node_id;
-      pool_size = num_cores;
-    }
-  } else {
-    LOG(INFO) << "Using specified CPU pool size: " << pool_size
-              << "; NUMA node id: " << numa_node_id;
-  }
-
-  if (create_new) {
-    LOG(INFO) << "Created new CPU pool, size: " << pool_size
-              << "; NUMA node id: " << numa_node_id;
-    return std::make_shared<TaskThreadPool>(pool_size, numa_node_id);
-  } else {
-    std::lock_guard<std::mutex> lock(pool_mutex);
-
-    auto shared_pool = pools[numa_node_id][pool_size].lock();
-    if (!shared_pool) {
-      LOG(INFO) << "Created shared CPU pool, size: " << pool_size
-                << "; NUMA node id: " << numa_node_id;
-      shared_pool = std::make_shared<TaskThreadPool>(pool_size, numa_node_id);
-      pools[numa_node_id][pool_size] = shared_pool;
-    }
-    return shared_pool;
+AsyncNetBase::~AsyncNetBase() {
+  if (report_stats_) {
+    counters_.PrintStats();
   }
 }
+
+C10_DEFINE_SHARED_REGISTRY(
+    ThreadPoolRegistry,
+    TaskThreadPoolBase,
+    int,
+    int,
+    bool);
+
+C10_REGISTER_CREATOR(
+    ThreadPoolRegistry,
+    CPU,
+    GetAsyncNetCPUThreadPool<TaskThreadPool>);
 
 void AsyncNetBase::computeExecutionModeFlags() {
   static const std::string kDag = "dag";
@@ -486,6 +498,7 @@ void AsyncNetBase::computeExecutionModeFlags() {
     use_single_pool_ = true;
     use_per_net_pools_ = true;
     is_blocking_ = true;
+    report_stats_ = (net_type == kProfDag);
   } else if (net_type == kAsyncDag) {
     streams_per_gpu_ = 1;
     finish_chain_ = false;
@@ -494,14 +507,25 @@ void AsyncNetBase::computeExecutionModeFlags() {
     use_single_pool_ = true;
     use_per_net_pools_ = true;
     is_blocking_ = true;
+    report_stats_ = false;
   } else {
-    streams_per_gpu_ = FLAGS_caffe2_streams_per_gpu;
-    finish_chain_ = FLAGS_caffe2_net_async_finish_chain;
-    always_schedule_child_ = FLAGS_caffe2_net_async_always_schedule_child;
-    check_stream_status_ = FLAGS_caffe2_net_async_check_stream_status;
-    use_single_pool_ = FLAGS_caffe2_net_async_use_single_pool;
-    use_per_net_pools_ = FLAGS_caffe2_net_async_use_per_net_pools;
+    streams_per_gpu_ = c10::FLAGS_caffe2_streams_per_gpu;
+    finish_chain_ = c10::FLAGS_caffe2_net_async_finish_chain;
+    always_schedule_child_ = c10::FLAGS_caffe2_net_async_always_schedule_child;
+    check_stream_status_ = c10::FLAGS_caffe2_net_async_check_stream_status;
+    use_single_pool_ = c10::FLAGS_caffe2_net_async_use_single_pool;
+    use_per_net_pools_ = c10::FLAGS_caffe2_net_async_use_per_net_pools;
     is_blocking_ = false;
+    report_stats_ = false;
+  }
+
+  for (int arg_idx = 0; arg_idx < net_def_->arg_size(); ++arg_idx) {
+    auto& arg = net_def_->arg(arg_idx);
+    if (arg.has_name() && arg.name() == "enable_profiling") {
+      CAFFE_ENFORCE(arg.has_i(), "enable_profiling should be an int");
+      report_stats_ = arg.i() == 1;
+      break;
+    }
   }
 }
 

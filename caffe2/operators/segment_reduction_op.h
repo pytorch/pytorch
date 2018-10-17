@@ -72,7 +72,7 @@ class AbstractSortedSegmentRangeOp : public Operator<Context> {
     const SIndex* s_ids = segment_ids.template data<SIndex>();
 
     const SIndex K = N > 0 ? s_ids[N - 1] + 1 : 0;
-    auto shape = dataInput.dims();
+    auto shape = dataInput.dims().vec();
     shape[0] = K;
     output->Resize(shape);
 
@@ -142,7 +142,7 @@ class AbstractSortedSegmentRangeGradientOp : public Operator<Context> {
     const T* d_in = data_in.template data<T>();
     const T* d_out = data_out.template data<T>();
 
-    auto shape = segment_grads.dims();
+    auto shape = segment_grads.dims().vec();
     shape[0] = N;
     data_grads->Resize(shape);
 

@@ -32,8 +32,7 @@ namespace torch { namespace jit {
 // to what the instructions will look like.
 // In particular we:
 // * (TODO) desugar Loop trip counts into c = 0, c += 1 instructions in the loop
-// * flatten stages so that each stage starts with a load to registers
-//   and ends with a store to the stack
+// * Turn inputs/outputs into Load/Store instruction
 // *. computes move_flags (see Outputs), and inserts
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
@@ -47,8 +46,6 @@ namespace torch { namespace jit {
 // * move_flags[n] - a list of booleans, one for each input,
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
-// * stage_input_types: the type annotations on the inputs to each stage
-//   these can be removed once the the backward tracer is no longer used
 
 namespace {
 
@@ -129,40 +126,20 @@ void desugarTripCounts(Block * b) {
   }
 }
 
-// removes all inputs and outputs to a graph, replacing them with nodes before of after each insertStage
-static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
-  // because JIT classic needs this to fix up gradients, remove when possible
-  std::vector<std::vector<TypePtr>> stage_input_types;
-
-  WithInsertPoint guard(*graph.nodes().begin());
-  size_t input_pos = 0;
-  size_t output_pos = 0;
-  auto it = graph.nodes().begin();
-  for(size_t i = 0; i <= graph.stage(); i++) {
-    stage_input_types.emplace_back();
-    auto load = graph.create(prim::Load, 0)->insertBefore(*it);
-    while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
-      auto nv = load->addOutput();
-      auto old_node = graph.inputs()[input_pos];
-      nv->setType(old_node->type());
-      stage_input_types[i].push_back(old_node->type());
-      old_node->replaceAllUsesWith(nv);
-      input_pos++;
-    }
-    while(it != graph.nodes().end() && it->stage() == i)
-      ++it;
-    auto store = graph.create(prim::Store, 0)->insertBefore(*it);
-    while(output_pos < graph.outputs().size() && graph.outputs()[output_pos]->stage() == i) {
-      store->addInput(graph.outputs()[output_pos]);
-      output_pos++;
-    }
+// removes all inputs and outputs to a graph, replacing them with Load Store nodes
+static void flattenIO(Graph & graph) {
+  auto load = graph.prependNode(graph.create(prim::Load, 0));
+  for(auto old_input : graph.inputs()) {
+    auto nv = load->addOutput();
+    nv->setType(old_input->type());
+    old_input->replaceAllUsesWith(nv);
   }
+  graph.appendNode(graph.create(prim::Store, graph.outputs(), 0));
+
   while (graph.inputs().size() > 0)
     graph.eraseInput(graph.inputs().size() - 1);
   while (graph.outputs().size() > 0)
     graph.eraseOutput(graph.outputs().size() - 1);
-
-  return stage_input_types;
 }
 
 
@@ -312,7 +289,7 @@ struct PreprocessGraph {
   PreprocessGraph(Graph & g)
   : graph(g.copy()) {
     desugarTripCounts(graph->block());
-    stage_input_types = flattenStages(*graph);
+    flattenIO(*graph);
     dropUnused(graph->block());
     // fill in move_flags by scanning blocks;
     move_flags = findLastUses(*graph);
@@ -322,7 +299,6 @@ struct PreprocessGraph {
   std::shared_ptr<Graph> graph;
   // for each input, should we move rather than copy the inputs
   std::unordered_map<Node*, std::vector<uint8_t>> move_flags;
-  std::vector<std::vector<TypePtr>> stage_input_types;
 
 };
 
@@ -501,12 +477,6 @@ struct CodeImpl {
           insertInstruction(node);
         } break;
       }
-      // each stage ends with a store instruction
-      // we record where these instructions occur, and use them to
-      // exit the interpreter
-      if(node->kind() == prim::Store) {
-        stage_end.push_back(instructions.size());
-      }
     }
   }
 
@@ -650,14 +620,13 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
-  at::optional<std::vector<GraphExecutor*>> grad_executors_;
+  c10::optional<std::vector<GraphExecutor*>> grad_executors_;
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
 
   friend struct InterpreterState;
   std::vector<Instruction> instructions;
-  std::vector<size_t> stage_end; // each stage runs while(pc < stage_end[stage])
   int register_size = 0;
 
   // all memory ArrayRef<int> are slices of this, to make sure
@@ -666,7 +635,7 @@ struct CodeImpl {
   std::vector<bool> bool_data;
 };
 
-// InterpreterState state that is held across stages and used to compute a Code
+// InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl {
   InterpreterStateImpl(const Code & code)
   : function(code.pImpl),
@@ -674,13 +643,12 @@ struct InterpreterStateImpl {
     bool_data(function->bool_data),
     registers(function->register_size) {
   }
-  void runOneStage(Stack & stack) {
-    // std::cout << "running stage: " << current_stage << " of " << function->stage_end.size() << "\n";
+  void run(Stack & stack) {
     // std::cout << *function->graph << "\n";
     // function->dump(std::cout);
     size_t pc = current_pc;
-    size_t last = function->stage_end[current_stage];
     auto & instructions = function->instructions;
+    size_t last = instructions.size();
     while(pc < last) {
         // std::cout << "executing " << pc << ": ";
         // function->dumpInstruction(std::cout, pc);
@@ -703,7 +671,6 @@ struct InterpreterStateImpl {
         }
     }
     current_pc = pc;
-    current_stage++;
   }
   int get(const ListHandle<int> & list, int i) {
     return int_data[list.start + i];
@@ -723,7 +690,11 @@ struct InterpreterStateImpl {
 
     }
   }
-  size_t current_stage = 0;
+  // note: it may seem unnecessary to keep the current_pc inside InterpreterState
+  // since InterpreterState::run completes the function. However, in the
+  // future we will end up with interpreters that can suspend (e.g. for asynchrony)
+  // so we keep this design in place eventhough we removed the 'staging'
+  // that it was originally used for.
   size_t current_pc = 0;
   std::shared_ptr<CodeImpl> function; // keep function alive
   // these are just copies of function to prevent indirections in interpreter
@@ -765,8 +736,8 @@ InterpreterState::InterpreterState(const Code & code)
   : pImpl(new InterpreterStateImpl(code)) {}
 InterpreterState::~InterpreterState() = default;
 
-void InterpreterState::runOneStage(Stack & stack) {
-  return pImpl->runOneStage(stack);
+void InterpreterState::run(Stack & stack) {
+  return pImpl->run(stack);
 }
 
 InterpreterState InterpreterState::clone() const {

@@ -21,7 +21,7 @@
 #include "caffe2/utils/simple_queue.h"
 #include "caffe2/utils/thread_pool.h"
 
-CAFFE2_DECLARE_string(caffe2_override_executor);
+C10_DECLARE_string(caffe2_override_executor);
 
 namespace caffe2 {
 
@@ -130,7 +130,7 @@ class CAFFE2_API NetBase : public Observable<NetBase> {
 class CAFFE2_API ExecutorHelper {
  public:
   ExecutorHelper() {}
-  virtual TaskThreadPool* GetPool(const DeviceOption& option) const;
+  virtual TaskThreadPoolBase* GetPool(const DeviceOption& option) const;
   virtual ~ExecutorHelper() {}
 };
 

@@ -45,7 +45,7 @@
   dispatch:
     CUDA: _cudnn_rnn_backward
 
-- func: _cudnn_init_dropout_state(Type self_ty, double dropout, bool train, int64_t dropout_seed) -> Tensor
+- func: _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, TensorOptions options) -> Tensor
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
@@ -293,6 +293,12 @@
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
 
+- func: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight, Tensor? pos_weight, int64_t reduction) -> Tensor
+  variants: function
+
+- func: binary_cross_entropy_with_logits_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, Tensor? pos_weight, int64_t reduction) -> Tensor
+  variants: function
+
 - func: bincount(Tensor self, Tensor? weights={}, int64_t minlength=0) -> Tensor
   variants: function, method
   dispatch:
@@ -334,6 +340,9 @@
   dispatch:
     CPU: _ceil_out_cpu
     CUDA: _ceil_out_cuda
+
+- func: chain_matmul(TensorList matrices) -> Tensor
+  variants: function
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
   variants: function, method
@@ -391,6 +400,9 @@
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
   device_guard: false
+
+- func: contiguous(Tensor self) -> Tensor
+  variants: method
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups) -> Tensor
 
@@ -640,6 +652,12 @@
     CUDA: _embedding_bag_dense_backward_cuda
 
 - func: empty(IntList size, TensorOptions options={}) -> Tensor
+  cpu_half: True
+  dispatch:
+    CPU: empty_cpu
+    CUDA: empty_cuda
+    SparseCPU: empty_sparse
+    SparseCUDA: empty_sparse
 
 - func: empty_out(Tensor result, IntList size) -> Tensor
 
@@ -1003,13 +1021,19 @@
 
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: log_softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
+  variants: function, method
+
 - func: log_softmax(Tensor self, int64_t dim) -> Tensor
   variants: function, method
+
+- func: _log_softmax(Tensor self, int64_t dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: log_softmax_cpu
     CUDA: log_softmax_cuda
 
-- func: log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+- func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
   dispatch:
     CPU: log_softmax_backward_cpu
     CUDA: log_softmax_backward_cuda
@@ -1432,13 +1456,19 @@
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: softmax(Tensor self, int64_t dim, ScalarType dtype) -> Tensor
+  variants: function, method
+
 - func: softmax(Tensor self, int64_t dim) -> Tensor
   variants: function, method
+
+- func: _softmax(Tensor self, int64_t dim, bool half_to_float) -> Tensor
   dispatch:
     CPU: softmax_cpu
     CUDA: softmax_cuda
 
-- func: softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
+- func: _softmax_backward_data(Tensor grad_output, Tensor output, int64_t dim, Tensor self) -> Tensor
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
@@ -1895,26 +1925,6 @@
 - func: addmm_(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method
 
-
-- func: native_tensor(Type self_ty) -> Tensor
-  variants: []
-  dispatch:
-    SparseCPU: new_sparse
-    SparseCUDA: new_sparse
-
-- func: native_tensor(Type self_ty, IntList size) -> Tensor
-  variants: []
-  dispatch:
-    SparseCPU: new_with_size_sparse
-    SparseCUDA: new_with_size_sparse
-
-- func: tensor(Type dtype) -> Tensor
-  variants: []
-
-- func: tensor(Type dtype, IntList size) -> Tensor
-  variants: []
-
-
 # NB: I have to decompose sparse_coo_tensor into two functions, because
 # it has custom dispatch logic for which Type to dispatch on (we must
 # use the sparse equivalent of the type of the SECOND argument).
@@ -1926,7 +1936,7 @@
 # just only ever dispatch to CPULongTensor or CUDALongTensor, but that
 # seems a bit too finely balanced.)
 
-- func: native_sparse_coo_tensor(Type self_ty, IntList size) -> Tensor
+- func: native_sparse_coo_tensor(IntList size, TensorOptions options) -> Tensor
   variants: []
   dispatch:
     SparseCPU: new_with_size_sparse
@@ -2090,19 +2100,19 @@
   variants: function, method
   device_guard: False
 
-- func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, Device device, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
-- func: to(Tensor self, ScalarType dtype, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, ScalarType dtype, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
-- func: to(Tensor self, Device device, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, Device device, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 
-- func: to(Tensor self, Tensor other, bool non_blocking=false) -> Tensor
+- func: to(Tensor self, Tensor other, bool non_blocking=false, bool copy=false) -> Tensor
   variants: method
   device_guard: False
 

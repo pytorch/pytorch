@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
@@ -14,6 +15,7 @@
 #include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/constant_pooling.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
@@ -63,7 +65,13 @@ bool loadPythonClasses() {
 
 } // anonymous namespace
 
-extern std::string runJITCPPTests();
+#if defined(_WIN32)
+std::string runJITCPPTests() {
+  AT_ERROR("JIT tests not yet supported on Windows");
+}
+#else
+std::string runJITCPPTests();
+#endif
 
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
@@ -81,7 +89,8 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
      return EliminateCommonSubexpression(g); // overload resolution
    })
-   .def("_jit_pass_peephole", PeepholeOptimize)
+   .def("_jit_pass_constant_pooling", ConstantPooling)
+   .def("_jit_pass_peephole", PeepholeOptimize, py::arg("graph"), py::arg("addmm_fusion_enabled") = false)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
@@ -265,7 +274,7 @@ void initJITBindings(PyObject *module) {
         return invokeOperatorFromPython(
             *op, std::move(args), std::move(kwargs));
       }, py::name(qualified_name.c_str()), py::doc(docstring.str().c_str()));
-    } catch (const at::Error& error) {
+    } catch (const c10::Error& error) {
       throw std::runtime_error(error.what_without_backtrace());
     }
   }, py::arg("qualified_name"));

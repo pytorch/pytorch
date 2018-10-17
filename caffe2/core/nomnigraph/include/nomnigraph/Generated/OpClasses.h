@@ -1,3 +1,4 @@
+
 class Relu : public NeuralNetOperator {
  public:
   Relu() : NeuralNetOperator(NNKind::Relu) {}
@@ -709,6 +710,28 @@ class NHWC2NCHW : public NeuralNetOperator {
   ~NHWC2NCHW() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(NHWC2NCHW);
+
+ private:
+};
+
+class Declare : public NeuralNetOperator {
+ public:
+  Declare() : NeuralNetOperator(NNKind::Declare) {}
+
+  ~Declare() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Declare);
+
+ private:
+};
+
+class Export : public NeuralNetOperator {
+ public:
+  Export() : NeuralNetOperator(NNKind::Export) {}
+
+  ~Export() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(Export);
 
  private:
 };

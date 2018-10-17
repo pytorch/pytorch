@@ -15,10 +15,9 @@ def script(a1, b1):
     else:
       c4 = 3
     t21 = aten::lt(a2, 10)
-    t22 = prim::TensorToBool(t21)
-    t7 = t22
+    t7 = prim::TensorToBool(t21)
     a = a2
     b = b2
     c = c4
   t27 = aten::add(a, 1, 1)
-  return t27
+  return aten::add(t27, c, 1)

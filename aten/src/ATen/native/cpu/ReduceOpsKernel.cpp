@@ -6,8 +6,8 @@
 
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
-#include "ATen/core/optional.h"
 #include "ATen/cpu/vec256/vec256.h"
+#include "c10/util/Optional.h"
 
 namespace at { namespace native { namespace {
 
@@ -46,7 +46,10 @@ struct Reduction {
   using Reduce = Op<Vec>;
   using ReduceScalar = Op<scalar_t>;
 
-  static void apply(Tensor& res, const Tensor& self, at::optional<int64_t> dim) {
+  static void apply(
+      Tensor& res,
+      const Tensor& self,
+      c10::optional<int64_t> dim) {
     auto out_ = res.data<scalar_t>();
     auto data_ = self.data<scalar_t>();
     auto numel = self.numel();
@@ -171,13 +174,19 @@ struct Reduction {
   }
 };
 
-static void sum_kernel_impl(Tensor& result, const Tensor& self, at::optional<int64_t> dim) {
+static void sum_kernel_impl(
+    Tensor& result,
+    const Tensor& self,
+    c10::optional<int64_t> dim) {
   AT_DISPATCH_ALL_TYPES(self.type(), "sum", [&] {
     Reduction<scalar_t, std::plus, 0>::apply(result, self, dim);
   });
 }
 
-static void prod_kernel_impl(Tensor& result, const Tensor& self, at::optional<int64_t> dim) {
+static void prod_kernel_impl(
+    Tensor& result,
+    const Tensor& self,
+    c10::optional<int64_t> dim) {
   AT_DISPATCH_ALL_TYPES(self.type(), "prod", [&] {
     Reduction<scalar_t, std::multiplies, 1>::apply(result, self, dim);
   });
@@ -189,7 +198,11 @@ struct NormReduction {
   static constexpr int WIDTH = 128 / sizeof(scalar_t);
   using Vec = Vec256<scalar_t>;
 
-  static void apply(Tensor& res, const Tensor& self, Scalar p, at::optional<int64_t> dim) {
+  static void apply(
+      Tensor& res,
+      const Tensor& self,
+      Scalar p,
+      c10::optional<int64_t> dim) {
     auto out_ = res.data<scalar_t>();
     auto data_ = self.data<scalar_t>();
     auto numel = self.numel();
@@ -330,7 +343,11 @@ struct NormReduction {
   }
 };
 
-static void norm_kernel_impl(Tensor& result, const Tensor& self, Scalar p, at::optional<int64_t> dim) {
+static void norm_kernel_impl(
+    Tensor& result,
+    const Tensor& self,
+    Scalar p,
+    c10::optional<int64_t> dim) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "norm", [&] {
     NormReduction<scalar_t>::apply(result, self, p, dim);
   });

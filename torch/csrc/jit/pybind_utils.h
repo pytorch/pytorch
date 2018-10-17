@@ -37,8 +37,13 @@ inline void findErrorInKwargs(
             arguments.begin(),
             arguments.end(),
             [&key](const Argument& argument) { return argument.name == key; })) {
-        throw std::runtime_error(at::str("Unknown keyword argument '", key, "' for operator '",
-        schema.name, "'. Schema: ", schema));
+      throw std::runtime_error(c10::str(
+          "Unknown keyword argument '",
+          key,
+          "' for operator '",
+          schema.name,
+          "'. Schema: ",
+          schema));
     }
   }
   // If there are unconsumed kwargs but none of them were unknown, the first
@@ -46,9 +51,12 @@ inline void findErrorInKwargs(
   for (const auto& argument : arguments) {
     if (kwargs.contains(argument.name.c_str())) {
       AT_ASSERT(!argument.default_value);
-      throw std::runtime_error(at::str(
-          "Argument '", argument.name, "' specified both as positional and ",
-          "keyword argument. Schema: ", schema));
+      throw std::runtime_error(c10::str(
+          "Argument '",
+          argument.name,
+          "' specified both as positional and ",
+          "keyword argument. Schema: ",
+          schema));
     }
   }
 }
@@ -160,14 +168,21 @@ inline IValue argumentToIValue(
   try {
     return toIValue(object, argument.type);
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(at::str(
-        schema.name, "() expected value of type ", argument.type->str(),
-        " for argument '", argument.name,
-        "' in position ", argumentPosition,
+    throw std::runtime_error(c10::str(
+        schema.name,
+        "() expected value of type ",
+        argument.type->str(),
+        " for argument '",
+        argument.name,
+        "' in position ",
+        argumentPosition,
         ", but instead got value of type ",
-        py::str(object.get_type().attr("__name__")), ".",
-        "\nValue: ", py::repr(object),
-        "\nDeclaration: ", schema));
+        py::str(object.get_type().attr("__name__")),
+        ".",
+        "\nValue: ",
+        py::repr(object),
+        "\nDeclaration: ",
+        schema));
   }
 }
 
@@ -177,11 +192,14 @@ inline IValue returnToIValue(
   try {
     return toIValue(object, type);
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(at::str(
-        " expected value of type ", type->str(),
+    throw std::runtime_error(c10::str(
+        " expected value of type ",
+        type->str(),
         " for return value but instead got value of type ",
-        py::str(object.get_type().attr("__name__")), ".",
-          "\nValue: ", py::repr(object)));
+        py::str(object.get_type().attr("__name__")),
+        ".",
+        "\nValue: ",
+        py::repr(object)));
   }
 }
 
@@ -234,10 +252,14 @@ inline Stack createStackForSchema(
     py::args args,
     py::kwargs kwargs = py::kwargs()) {
   if(args.size() + kwargs.size() > schema.arguments.size()) {
-    throw std::runtime_error(at::str(
-        schema.name, "() expected at most ", schema.arguments.size(),
+    throw std::runtime_error(c10::str(
+        schema.name,
+        "() expected at most ",
+        schema.arguments.size(),
         " argument(s) but received ",
-        args.size() + kwargs.size(), " argument(s). Declaration: ", schema));
+        args.size() + kwargs.size(),
+        " argument(s). Declaration: ",
+        schema));
   }
   Stack stack;
   stack.reserve(schema.arguments.size());
@@ -260,9 +282,12 @@ inline Stack createStackForSchema(
     } else if (arg.default_value) {
       push(stack, *arg.default_value);
     } else {
-      throw std::runtime_error(at::str(
-          schema.name, "() is missing value for argument '", arg.name,
-          "'. Declaration: ", schema));
+      throw std::runtime_error(c10::str(
+          schema.name,
+          "() is missing value for argument '",
+          arg.name,
+          "'. Declaration: ",
+          schema));
     }
   }
 

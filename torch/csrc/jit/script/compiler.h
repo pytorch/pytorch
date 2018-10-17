@@ -48,7 +48,10 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 
   // use it as a vector of values, e.g. a tuple of values as return value from
   // a method invocation
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      SourceRange loc,
+      Method& m,
+      c10::optional<size_t> size_hint = {}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
@@ -92,7 +95,10 @@ struct TORCH_API SimpleValue : public SugaredValue {
   virtual Value * asValue(SourceRange range, Method & m) override {
     return value;
   }
-  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m, at::optional<size_t> size_hint={}) override;
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
+      SourceRange loc,
+      Method& m,
+      c10::optional<size_t> size_hint = {}) override;
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override;
   Value* getValue() const {
     return value;
@@ -102,14 +108,14 @@ private:
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
-  BuiltinFunction(Symbol symbol, at::optional<NamedValue> value)
-      : symbol(std::move(symbol)), value(std::move(value)) {}
+  BuiltinFunction(Symbol symbol, c10::optional<NamedValue> self)
+      : symbol(std::move(symbol)), self(std::move(self)) {}
 
   // The symbol of the function (e.g. `aten::relu`).
   Symbol symbol;
 
   // if this is method, then this is the self argument.
-  at::optional<NamedValue> value;
+  c10::optional<NamedValue> self;
 
   std::string kind() const override {
     return "builtin";
@@ -132,14 +138,18 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   }
 
   std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-    return std::make_shared<BuiltinFunction>(Symbol::aten(field), at::nullopt);
+    return std::make_shared<BuiltinFunction>(Symbol::aten(field), c10::nullopt);
   }
 };
 
-using Resolver = std::function<std::shared_ptr<
-    SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
+using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name, Method& m, const SourceRange& loc)>;
 
-std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc);
+inline std::shared_ptr<SugaredValue> nativeResolver(const std::string& name, Method& m, const SourceRange& loc){
+  if (name == "torch") {
+    return std::make_shared<BuiltinModule>(name);
+  }
+  return nullptr;
+}
 
 TORCH_API void defineMethodsInModule(
   Module & m,
@@ -149,8 +159,8 @@ TORCH_API void defineMethodsInModule(
 );
 
 // same as above but parse the definitions from source
-TORCH_API void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
-TORCH_API std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
+TORCH_API void defineMethodsInModule(Module & m, const std::string& source, Resolver resolver, std::shared_ptr<SugaredValue> self);
+TORCH_API std::shared_ptr<Graph> compileFunction(Def def, Resolver resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.
@@ -158,6 +168,23 @@ TORCH_API Value* packOutputs(Graph& g, at::ArrayRef<Value*> values);
 TORCH_API std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> inputs);
 TORCH_API void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what);
 TORCH_API void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values);
+
+// defines how a method obtained from a module behaves in script
+struct MethodValue : public SugaredValue {
+  MethodValue(std::shared_ptr<Module> module, Method& method)
+  : module(std::move(module)) //insurance that method stays alive
+  , method(method) {}
+  std::string kind() const override {
+    return "method";
+  }
+  virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & caller, at::ArrayRef<NamedValue> inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
+    return std::make_shared<SimpleValue>(packOutputs(*caller.graph(), caller.emit_call_to(loc, method, inputs, attributes)));
+  }
+private:
+  std::shared_ptr<Module> module;
+  Method& method;
+
+};
 
 // try to match a list if inputs and keyword 'attributes' to this schema,
 // if it works return the flat list of positional inputs to the call
@@ -170,10 +197,11 @@ struct MatchedSchema {
   std::vector<TypePtr> return_types;
 };
 
-TORCH_API at::optional<MatchedSchema> tryMatchSchema(
+TORCH_API c10::optional<MatchedSchema> tryMatchSchema(
   const FunctionSchema& schema,
   const SourceRange& loc,
   Graph& graph,
+  c10::optional<NamedValue> self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   std::ostream& failure_messages,
@@ -185,6 +213,7 @@ TORCH_API Value* emitBuiltinCall(
   const SourceRange& loc,
   Graph& graph,
   Symbol name,
+  c10::optional<NamedValue> self,
   at::ArrayRef<NamedValue> inputs,
   at::ArrayRef<NamedValue> attributes,
   // if true, emitBuiltinCall will throw an exception if this builtin does not exist,

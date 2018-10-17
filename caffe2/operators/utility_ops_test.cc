@@ -4,7 +4,7 @@
 #include "caffe2/operators/utility_ops.h"
 #include <gtest/gtest.h>
 
-CAFFE2_DECLARE_string(caffe_test_root);
+C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
 

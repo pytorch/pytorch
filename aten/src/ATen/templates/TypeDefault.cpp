@@ -18,8 +18,11 @@ namespace at {
 
 Tensor & TypeDefault::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
-  if (is_sparse()) b_src = src;
-  else std::tie(b_src) = expand_inplace(self, src, "copy");
+  if (is_sparse()) {
+    b_src = src;
+  } else {
+    std::tie(b_src) = expand_inplace(self, src, "copy");
+  }
   return s_copy_(self, b_src, non_blocking);
 }
 
@@ -30,13 +33,20 @@ Tensor TypeDefault::copy(const Tensor & src, bool non_blocking, optional<Device>
   }
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   Tensor r;
-  if (is_sparse()) r = this->native_tensor();
-  else r = this->tensor(src.sizes());
+  if (is_sparse()) {
+    r = at::empty({0}, this->options());
+  } else {
+    r = at::empty(src.sizes(), this->options());
+  }
   r.copy_(src, non_blocking);
   return r;
 }
 
-void TypeDefault::backward(Tensor & self, at::optional<Tensor> gradient, bool keep_graph, bool create_graph) const {
+void TypeDefault::backward(
+    Tensor& self,
+    c10::optional<Tensor> gradient,
+    bool keep_graph,
+    bool create_graph) const {
   AT_ERROR("backward is not implemented for Tensor");
 }
 
@@ -118,7 +128,7 @@ Storage TypeDefault::unsafeStorageFromTH(void * th_pointer, bool retain) const {
 
 
 Tensor TypeDefault::scalarTensor(Scalar s) const {
-  return tensor({}).fill_(s);
+  return at::empty({}, this->options()).fill_(s);
 }
 
 ${type_method_definitions}

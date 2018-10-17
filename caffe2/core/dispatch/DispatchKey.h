@@ -7,7 +7,7 @@
 #include <vector>
 #include <functional>
 #include <sstream>
-#include "caffe2/utils/Array.h"
+#include <c10/util/Array.h>
 
 namespace c10 {
 
