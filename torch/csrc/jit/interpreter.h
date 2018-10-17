@@ -8,6 +8,9 @@
 namespace at {
   class Tensor;
 }
+namespace c10 {
+struct IValue;
+}
 namespace torch { namespace jit {
 
 // The interpreter run Graphs with Tensor inputs and Tensor outputs
@@ -20,8 +23,7 @@ struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
 struct Node;
-struct IValue;
-using Stack = std::vector<IValue>;
+using Stack = std::vector<c10::IValue>;
 
 struct TORCH_API Code {
   Code()
