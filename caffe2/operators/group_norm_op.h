@@ -1,11 +1,15 @@
 #ifndef CAFFE2_OPERATORS_GROUP_NORM_OP_H_
 #define CAFFE2_OPERATORS_GROUP_NORM_OP_H_
 
+#include <array>
 #include <string>
 #include <vector>
 
+#include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
@@ -19,11 +23,15 @@ class GroupNormOp final : public Operator<Context> {
         OP_SINGLE_ARG(int, "group", group_, 32),
         OP_SINGLE_ARG(float, "epsilon", epsilon_, 1e-5),
         order_(StringToStorageOrder(
-            this->template GetSingleArgument<std::string>("order", "NCHW"))) {
+            this->template GetSingleArgument<std::string>("order", "NCHW"))),
+        OP_SINGLE_ARG(bool, OpSchema::Arg_IsTest, is_test_, true) {
     CAFFE_ENFORCE_NE(
         order_,
         StorageOrder::UNKNOWN,
         "order should be either \"NCHW\" or \"NHWC\".");
+    if (!is_test_) {
+      CAFFE_ENFORCE_EQ(OutputSize(), 3);
+    }
   }
 
   bool RunOnDevice() override {
@@ -40,11 +48,22 @@ class GroupNormOp final : public Operator<Context> {
     const int G = group_;
     const int D = C / G;
     auto* Y = Output(OUTPUT);
-    auto* mu = Output(MU);
-    auto* rsig = Output(INV_SIGMA);
     Y->ResizeLike(X);
-    mu->Resize(N, G);
-    rsig->Resize(N, G);
+    T* mu_data = nullptr;
+    T* rsig_data = nullptr;
+    if (OutputSize() == 3) {
+      auto* mu = Output(MU);
+      auto* rsig = Output(INV_SIGMA);
+      mu->Resize(N, G);
+      rsig->Resize(N, G);
+      mu_data = mu->template mutable_data<T>();
+      rsig_data = rsig->template mutable_data<T>();
+    } else {
+      mu_.Resize(N, G);
+      rsig_.Resize(N, G);
+      mu_data = mu_.template mutable_data<T>();
+      rsig_data = rsig_.template mutable_data<T>();
+    }
     return RunOnDeviceImpl(
         N,
         G,
@@ -54,8 +73,8 @@ class GroupNormOp final : public Operator<Context> {
         gamma.template data<T>(),
         beta.template data<T>(),
         Y->template mutable_data<T>(),
-        mu->template mutable_data<T>(),
-        rsig->template mutable_data<T>());
+        mu_data,
+        rsig_data);
   }
 
  protected:
@@ -64,16 +83,99 @@ class GroupNormOp final : public Operator<Context> {
       const int G,
       const int D,
       const int HxW,
-      const T* X_data,
-      const T* gamma_data,
-      const T* beta_data,
-      T* Y_data,
-      T* mu_data,
-      T* rsig_data);
+      const T* X,
+      const T* gamma,
+      const T* beta,
+      T* Y,
+      T* mu,
+      T* rsig) {
+    if (order_ == StorageOrder::NCHW) {
+      const std::array<int, 2> dims = {N * G, D * HxW};
+      const int axis = 1;
+      math::Moments<T, Context>(
+          2, dims.data(), 1, &axis, X, mu, rsig, &context_);
+      math::InvStd<T, Context>(
+          N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
+      GroupNormForwardNCHW(N, G, D, HxW, X, mu, rsig, gamma, beta, Y);
+    } else {
+      const std::array<int, 4> dims = {N, HxW, G, D};
+      const std::array<int, 2> axes = {1, 3};
+      math::Moments<T, Context>(
+          4, dims.data(), 2, axes.data(), X, mu, rsig, &context_);
+      math::InvStd<T, Context>(
+          N * G, static_cast<T>(epsilon_), rsig, rsig, &context_);
+      GroupNormForwardNHWC(N, G, D, HxW, X, mu, rsig, gamma, beta, Y);
+    }
+    return true;
+  }
+
+  void GroupNormForwardNCHW(
+      const int N,
+      const int G,
+      const int D,
+      const int HxW,
+      const T* X,
+      const T* mu,
+      const T* rsig,
+      const T* gamma,
+      const T* beta,
+      T* Y) {
+    const int C = G * D;
+    EigenArrayMap<T>(Y, D * HxW, N * G) =
+        (ConstEigenArrayMap<T>(X, D * HxW, N * G).rowwise() -
+         ConstEigenVectorArrayMap<T>(mu, N * G).transpose())
+            .rowwise() *
+        ConstEigenVectorArrayMap<T>(rsig, N * G).transpose();
+    T* Y_ptr = Y;
+    const int stride = C * HxW;
+    ConstEigenVectorArrayMap<T> gamma_arr(gamma, C);
+    ConstEigenVectorArrayMap<T> beta_arr(beta, C);
+    for (int i = 0; i < N; ++i) {
+      EigenArrayMap<T> Y_arr(Y_ptr, HxW, C);
+      Y_arr = (Y_arr.rowwise() * gamma_arr.transpose()).rowwise() +
+          beta_arr.transpose();
+      Y_ptr += stride;
+    }
+  }
+
+  void GroupNormForwardNHWC(
+      const int N,
+      const int G,
+      const int D,
+      const int HxW,
+      const T* X,
+      const T* mu,
+      const T* rsig,
+      const T* gamma,
+      const T* beta,
+      T* Y) {
+    const int C = G * D;
+    const T* X_ptr = X;
+    T* Y_ptr = Y;
+    for (int i = 0; i < N; ++i) {
+      for (int j = 0; j < HxW; ++j) {
+        EigenArrayMap<T>(Y_ptr, D, G) =
+            (ConstEigenArrayMap<T>(X_ptr, D, G).rowwise() -
+             ConstEigenVectorArrayMap<T>(mu + i * G, G).transpose())
+                .rowwise() *
+            ConstEigenVectorArrayMap<T>(rsig + i * G, G).transpose();
+        X_ptr += C;
+        Y_ptr += C;
+      }
+    }
+    EigenArrayMap<T> Y_arr(Y, C, N * HxW);
+    Y_arr =
+        (Y_arr.colwise() * ConstEigenVectorArrayMap<T>(gamma, C)).colwise() +
+        ConstEigenVectorArrayMap<T>(beta, C);
+  }
+
+  Tensor mu_{Context::GetDeviceType()};
+  Tensor rsig_{Context::GetDeviceType()};
 
   const int group_;
   const float epsilon_;
   const StorageOrder order_;
+  const bool is_test_;
 
   // Input: X, gamma, beta
   // Output: Y, mu, inv_sig
