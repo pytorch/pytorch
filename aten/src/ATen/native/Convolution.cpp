@@ -182,9 +182,9 @@ static void check_input_shape_forward(const at::Tensor& input,
              "Given transposed=", transposed, ", weight of size ", weight.sizes(),
              ", expected input", input.sizes(), " to have ", weight.size(0),
              " channels, but got ", input.size(1), " channels instead");
-    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight.size(0)),
+    AT_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight.size(1)),
              "Given transposed=", transposed, ", weight of size ", weight.sizes(),
-             ", expected bias to be 1-dimensional with ", weight.size(0), " elements",
+             ", expected bias to be 1-dimensional with ", weight.size(1), " elements",
              ", but got bias of size ", bias.sizes(), " instead");
   }
 }
