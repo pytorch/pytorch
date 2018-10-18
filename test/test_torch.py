@@ -8132,14 +8132,14 @@ class TestTorch(TestCase):
         x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
         self.assertEqual(x.__repr__(), str(x))
         expected_str = 'tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,\n'\
-                + '                inf], dtype=torch.float64)'
+            + '                inf], dtype=torch.float64)'
         self.assertEqual(str(x), expected_str)
 
         # test changing default dtype
         torch.set_default_dtype(torch.float64)
         self.assertEqual(x.__repr__(), str(x))
         expected_str = 'tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,\n'\
-                + '                inf])'
+            + '                inf])'
         self.assertEqual(str(x), expected_str)
 
         # test summary
