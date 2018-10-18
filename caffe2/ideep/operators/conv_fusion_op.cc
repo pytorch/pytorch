@@ -7,20 +7,14 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
-  enum FusionType {
-    FUSION_UNKNOWN = 0,
-    FUSION_CONV_RELU = 1,
-    FUSION_CONV_SUM = 2,
-    FUSION_CONV_SUM_RELU = 3,
-    FUSION_MAX = FUSION_CONV_SUM_RELU + 1,
-  };
-
   IDEEPConvFusionOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPConvPoolOpBase(operator_def, ws),
         fusion_type_(static_cast<FusionType>(
             OperatorBase::GetSingleArgument<int>("fusion_type", 0))),
         training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
+            OperatorBase::GetSingleArgument<int>("training_mode", 0)),
+        conv_algorithm_(
+            OperatorBase::GetSingleArgument<int>("conv_algorithm", CONV_ALGORITHM_AUTO)) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
@@ -74,6 +68,11 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
         "*",
         group_);
 
+    ideep::algorithm aalgorithm = ideep::algorithm::convolution_direct;
+    if (conv_algorithm_ == CONV_ALGORITHM_WINOGRAD) {
+      aalgorithm = ideep::algorithm::convolution_winograd;
+    }
+
     bool weights_changed =
         (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed && !training_mode_) {
@@ -88,7 +87,8 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
               pad_tl(),
               pad_br(),
               dilation_,
-              group_);
+              group_,
+              aalgorithm);
       filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
           expected_descriptor);
       ideep::reorder::compute(filter_in, filter_);
@@ -106,7 +106,8 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
           pad_tl(),
           pad_br(),
           group_,
-          attr());
+          attr(),
+          aalgorithm);
     } else {
       ideep::convolution_forward::compute(
           X,
@@ -118,7 +119,8 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
           pad_tl(),
           pad_br(),
           group_,
-          attr());
+          attr(),
+          aalgorithm);
     }
 
     if (fusion_type_ != FUSION_CONV_RELU) {
@@ -133,6 +135,7 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
  private:
   FusionType fusion_type_;
 
+  int conv_algorithm_;
   bool training_mode_;
   ideep::tensor filter_;
   ideep::tensor::descriptor cached_weights_descriptor_;

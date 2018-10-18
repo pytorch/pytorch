@@ -10,7 +10,9 @@ public:
   IDEEPConvOp(const OperatorDef &operator_def, Workspace *ws)
       : IDEEPConvPoolOpBase(operator_def, ws),
         training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
+            OperatorBase::GetSingleArgument<int>("training_mode", 0)),
+        conv_algorithm_(
+            OperatorBase::GetSingleArgument<int>("conv_algorithm", CONV_ALGORITHM_AUTO)) {
     OPERATOR_NEEDS_FEATURE(pad_l() == pad_r() && pad_t() == pad_b(),
                            "Uneven padding not supported.");
   }
@@ -35,6 +37,11 @@ public:
         X.get_dim(1), " is not equal to kernel channels * group:",
         filter.get_dim(1 + grouped), "*", group_);
 
+    ideep::algorithm aalgorithm = ideep::algorithm::convolution_direct;
+    if (conv_algorithm_ == CONV_ALGORITHM_WINOGRAD) {
+      aalgorithm = ideep::algorithm::convolution_winograd;
+    }
+
     bool weights_changed =
         (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed && !training_mode_) {
@@ -44,7 +51,7 @@ public:
       auto expected_descriptor =
           ideep::convolution_forward::expected_weights_descriptor(
               filter_in.get_dims(), filter_in.get_data_type(), stride_,
-              pad_tl(), pad_br(), dilation_, group_);
+              pad_tl(), pad_br(), dilation_, group_, aalgorithm);
       filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
           expected_descriptor);
       ideep::reorder::compute(filter_in, filter_);
@@ -59,11 +66,13 @@ public:
     if (InputSize() > BIAS) {
       ideep::convolution_forward::compute(
           X, training_mode_ ? filter : filter_, Input(BIAS), Y_dims, *Y,
-          stride_, dilation_, pad_tl(), pad_br(), group_);
+          stride_, dilation_, pad_tl(), pad_br(), group_,
+          ideep::descriptor_group::attr_t(), aalgorithm);
     } else {
       ideep::convolution_forward::compute(X, training_mode_ ? filter : filter_,
                                           Y_dims, *Y, stride_, dilation_,
-                                          pad_tl(), pad_br(), group_);
+                                          pad_tl(), pad_br(), group_,
+                                          ideep::descriptor_group::attr_t(), aalgorithm);
     }
 
     return true;
@@ -73,6 +82,7 @@ private:
   INPUT_TAGS(INPUT, FILTER, BIAS);
   OUTPUT_TAGS(OUTPUT);
 
+  int conv_algorithm_;
   bool training_mode_;
   ideep::tensor filter_;
   ideep::tensor::descriptor cached_weights_descriptor_;

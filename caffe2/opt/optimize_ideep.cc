@@ -63,10 +63,6 @@ bool shouldFuseConv(const repr::Conv& conv) {
 }
 
 void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
-  // Fusion types:
-  // FUSION_CONV_RELU = 1
-  // FUSION_CONV_SUM = 2
-  // FUSION_CONV_SUM_RELU = 3
   auto conv = repr::nn::get<repr::Conv>(convNode);
   auto annotation = conv->getMutableAnnotation();
   if (!annotation || !isa<Caffe2Annotation>(annotation)) {
@@ -79,19 +75,19 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   }
 
   if (op->type() == "ConvFusion") {
-    CAFFE_ENFORCE(fusion_type == 1, "Invalid nest fusion");
+    CAFFE_ENFORCE(fusion_type == FUSION_CONV_RELU, "Invalid nest fusion");
     for (auto &arg : *op->mutable_arg()) {
       if (arg.name() == "fusion_type") {
         // Only from FUSION_CONV_SUM to FUSION_CONV_SUM_RELU
-        CAFFE_ENFORCE(arg.i() == 2, "Invalid nest fusion");
-        arg.set_i(3);
+        CAFFE_ENFORCE(arg.i() == FUSION_CONV_SUM, "Invalid nest fusion");
+        arg.set_i(FUSION_CONV_SUM_RELU);
         return;
       }
     }
     return;
   }
 
-  CAFFE_ENFORCE(fusion_type < 3, "Invalid fusion type");
+  CAFFE_ENFORCE(fusion_type < FUSION_CONV_SUM_RELU, "Invalid fusion type");
   op->set_type("ConvFusion");
   auto* arg = op->add_arg();
   arg->set_name("fusion_type");
@@ -357,7 +353,9 @@ void enforceFusionInplaceForIdeep(repr::NNModule *nn) {
     bool enforce_inplace = false;
     for (const auto &arg : op.arg()) {
       // Only check FUSION_SUM & FUSION_SUM_RELU
-      if (arg.name() == "fusion_type" && (arg.i() == 2 || arg.i() == 3)) {
+      if (arg.name() == "fusion_type"
+          && (arg.i() == FUSION_CONV_SUM
+            || arg.i() == FUSION_CONV_SUM_RELU)) {
         enforce_inplace = true;
         break;
       }
@@ -463,10 +461,21 @@ void preConvertFiltersFormat(repr::NNModule *nn, caffe2::Workspace *ws) {
       auto dilations = conv->getDilations();
       initValue(dilations, {1, 1});
 
+      ideep::algorithm aalgorithm = ideep::algorithm::convolution_direct;
+      auto *op = getMutableOpDef(*conv);
+      for (auto &arg : *op->mutable_arg()) {
+        if (arg.name() == "conv_algorithm") {
+          if (arg.i() == CONV_ALGORITHM_WINOGRAD) {
+            aalgorithm = ideep::algorithm::convolution_winograd;
+          }
+          break;
+        }
+      }
+
       filter->make_group(conv->getGroup());
       expected_desc = ideep::convolution_forward::expected_weights_descriptor(
           filter->get_dims(), filter->get_data_type(), strides, {pads[0], pads[1]},
-          {pads[2], pads[3]}, dilations, conv->getGroup());
+          {pads[2], pads[3]}, dilations, conv->getGroup(), aalgorithm);
 
     } else if (repr::nn::is<repr::FC>(node)) {
       auto fc = repr::nn::get<repr::FC>(node);
