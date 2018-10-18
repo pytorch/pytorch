@@ -39,6 +39,8 @@ class TestDTypeInfo(TestCase):
             self.assertEqual(xinfo.max, xninfo.max)
             self.assertEqual(xinfo.eps, xninfo.eps)
             self.assertEqual(xinfo.tiny, xninfo.tiny)
+            torch.set_default_dtype(dtype)
+            self.assertEqual(torch.finfo(dtype), torch.finfo())
 
 
 if __name__ == '__main__':
