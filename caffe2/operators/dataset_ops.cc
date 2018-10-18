@@ -1451,7 +1451,7 @@ class TreeCursorSerializer : public BlobSerializerBase {
     }
     blob_proto.set_content(os.str());
 
-    acceptor(name, blob_proto.SerializeAsString());
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
   }
 };
 
@@ -1513,7 +1513,7 @@ void SharedTensorVectorPtrSerializer::Serialize(
   blob_proto.set_name(name);
   blob_proto.set_type("std::shared_ptr<std::vector<TensorCPU>>");
   blob_proto.set_content("");
-  acceptor(name, blob_proto.SerializeAsString());
+  acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
 };
 
 void SharedTensorVectorPtrDeserializer::Deserialize(
