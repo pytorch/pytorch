@@ -106,7 +106,7 @@ at::Tensor mkldnn_convolution(
   memory::dims _stride(kdim), _dilation(kdim), _padding(kdim), _padding_r(kdim);
   for (size_t d = 0; d < kdim; ++d) {
     _stride[d] = stride[d];
-    _dilation[d] = dilation[d];
+    _dilation[d] = dilation[d] - 1;
     _padding[d] = padding[d];
 
     if (dilation[d] != 1) dilated_conv = true;
