@@ -51,7 +51,7 @@ class Int8TensorCPUSerializer : public BlobSerializerBase {
         CAFFE_ENFORCE(false, "Unsupported data type in Int8TensorCPU");
     }
 
-    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
+    acceptor(name, blob_proto.SerializeAsString());
   }
 
  private:

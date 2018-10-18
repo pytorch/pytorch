@@ -65,7 +65,7 @@ class BlobTestFooSerializer : public BlobSerializerBase {
         reinterpret_cast<const char*>(
             &static_cast<const BlobTestFoo*>(pointer)->val),
         sizeof(int32_t)));
-    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
+    acceptor(name, blob_proto.SerializeAsString());
   }
 };
 
