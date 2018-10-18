@@ -19,13 +19,13 @@ namespace torch { namespace jit {
 // [8 bytes] Magic number - little endian integer that spells 'PYTORCH1' in ASCII
 // [8 bytes] Version number - The version of this file format that this file is in.
 //                            this allows us to revise and extend this format
-// [56 bytes] Padding/reserved
+// [48 bytes] Padding/reserved
 //
 // After the file header reside N records of the format
 // [8 bytes] Tag - this is a tag that identifies the type of this record. The
 //                 values are defined in the RecordTags enum below.
 // [8 bytes] size - Size in bytes of the payload of this record
-// [56 bytes] Pad/reserved - This space pads out the payload to a 64-byte alignment.
+// [48 bytes] Pad/reserved - This space pads out the payload to a 64-byte alignment.
 // [size bytes] Payload - The actual raw data for the object serialized in this record
 // [size - (size % 64) bytes] Pad/reserved - pad out this record so the next
 //                                                one is aligned to 64 bytes
@@ -37,7 +37,7 @@ namespace torch { namespace jit {
 //                                   as an index into the rest of the file, so
 //                                   a reader can use this offset to seek to
 //                                   the last record and read the index.
-// [56 bytes] Pad/reserved - Pad out the footer s.t. the whole file's size is a
+// [48 bytes] Pad/reserved - Pad out the footer s.t. the whole file's size is a
 //                           multiple of 64 bytes.
 //
 //
