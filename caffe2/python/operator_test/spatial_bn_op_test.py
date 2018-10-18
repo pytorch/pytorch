@@ -30,11 +30,13 @@ class TestSpatialBN(serial.SerializedTestCase):
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            inplace=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
-           # Currently HIP SpatialBN only supports 2D
-           **hu.gcs_no_hip)
+           **hu.gcs)
     def test_spatialbn_test_mode_3d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
+        # Currently MIOPEN SpatialBN only supports 2D
+        if _run_in_hip(gc, dc) and engine != "":
+            return
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
@@ -79,11 +81,13 @@ class TestSpatialBN(serial.SerializedTestCase):
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            inplace=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
-           # Currently HIP SpatialBN only supports 2D
-           **hu.gcs_no_hip)
+           **hu.gcs)
     def test_spatialbn_test_mode_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
+        # Currently MIOPEN SpatialBN only supports 2D
+        if _run_in_hip(gc, dc) and engine != "":
+            return
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
@@ -255,11 +259,13 @@ class TestSpatialBN(serial.SerializedTestCase):
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            momentum=st.floats(min_value=0.5, max_value=0.9),
            engine=st.sampled_from(["", "CUDNN"]),
-           # Currently HIP SpatialBN only supports 2D
-           **hu.gcs_no_hip)
+           **hu.gcs)
     def test_spatialbn_train_mode_gradient_check_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             momentum, engine, gc, dc):
+        # Currently MIOPEN SpatialBN only supports 2D
+        if _run_in_hip(gc, dc) and engine != "":
+            return
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "mean", "var"],
