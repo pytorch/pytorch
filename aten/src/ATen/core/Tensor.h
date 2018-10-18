@@ -251,7 +251,6 @@ public:
   //example
   //Tensor * add(Tensor & b);
   int64_t storage_offset() const;
-  Tensor & resize_(IntList size);
   Tensor & set_(Storage source);
   Tensor & set_(Storage source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);
@@ -466,6 +465,7 @@ public:
   Tensor div(Scalar other) const;
   Tensor & div_(Scalar other);
   Tensor dot(const Tensor & tensor) const;
+  Tensor & resize_(IntList size);
   Tensor erf() const;
   Tensor & erf_();
   Tensor erfc() const;

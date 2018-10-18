@@ -663,6 +663,14 @@
     SparseCPU: empty_sparse
     SparseCUDA: empty_sparse
 
+- func: resize_(Tensor self, IntList size) -> Tensor
+  variants: method
+  cpu_half: True
+  device_guard: False
+  dispatch:
+    CPU: resize__cpu
+    CUDA: resize__cuda
+
 - func: empty_out(Tensor result, IntList size) -> Tensor
 
 - func: empty_like(Tensor self) -> Tensor

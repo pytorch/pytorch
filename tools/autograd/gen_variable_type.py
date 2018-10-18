@@ -46,6 +46,7 @@ DONT_RECORD_TRACE = {
     'rnn_tanh_cell', 'rnn_relu_cell', 'linear',
     # FIXME: figure out a better way when we support sparse tensors in jit
     '_coalesced_',
+    'resize',
 }
 
 # These functions have their names recorded under trace renamed,
@@ -80,6 +81,8 @@ DONT_REQUIRE_DERIVATIVE = {
     '__lshift__', '__or__', '__rshift__', '__xor__',
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
+    # XXX: known problem: in-place fns without out of place variants need to be special cased
+    'resize',
 }
 
 METHOD_DECLARATION = CodeTemplate("""\
