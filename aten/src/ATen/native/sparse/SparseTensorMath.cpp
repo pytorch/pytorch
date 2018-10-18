@@ -205,11 +205,10 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   int64_t t_nnz = t._nnz(), s_nnz = src._nnz(), max_nnz = t_nnz + s_nnz;
   bool t_coalesced = t.is_coalesced(), s_coalesced = src.is_coalesced();
   int64_t sparseDims = src._sparseDims();
-  LongTensor t_indices = t._indices();
-  Tensor t_values = t._values();
-  LongTensor src_indices = src._indices();
-  Tensor s_values = src._values();
-  AT_ASSERT(t_indices.is_contiguous() && t_values.is_contiguous() && src_indices.is_contiguous() && s_values.is_contiguous());
+  LongTensor t_indices = t._indices().contiguous();
+  Tensor t_values = t._values().contiguous();
+  LongTensor src_indices = src._indices().contiguous();
+  Tensor s_values = src._values().contiguous();
 
   LongTensor r_indices = at::empty({sparseDims, max_nnz}, t_indices.options());
   Tensor r_values = _new_values_with_size_of(s_values, max_nnz).zero_();
@@ -328,12 +327,10 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
   r.resize_as_(dense);
   SparseTensor sparse = sparse_.coalesce();
 
-  LongTensor indices = sparse._indices();
-  Tensor values = sparse._values();
-
   // Enforce indices and values to be contiguous since indices_accessor is using here.
   // Remove this when kernels in this function can deal with non-contiguous case.
-  AT_ASSERT(indices.is_contiguous() && values.is_contiguous());
+  LongTensor indices = sparse._indices().contiguous();
+  Tensor values = sparse._values().contiguous();
 
   int64_t nDim = dense.dim();
   int64_t nDimI = sparse._sparseDims();
@@ -391,11 +388,10 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   int64_t t_nnz = t._nnz(), s_nnz = src._nnz();
   int64_t max_nnz = std::min(t_nnz, s_nnz);  // multiply by zero is zero, and can be dropped
   int64_t sparseDims = src._sparseDims();
-  LongTensor t_indices = t._indices();
-  Tensor t_values = t._values();
-  LongTensor src_indices = src._indices();
-  Tensor s_values = src._values();
-  AT_ASSERT(t_indices.is_contiguous() && t_values.is_contiguous() && src_indices.is_contiguous() && s_values.is_contiguous());
+  LongTensor t_indices = t._indices().contiguous();
+  Tensor t_values = t._values().contiguous();
+  LongTensor src_indices = src._indices().contiguous();
+  Tensor s_values = src._values().contiguous();
   LongTensor r_indices = at::empty({sparseDims, max_nnz}, t_indices.options());
   Tensor r_values = _new_values_with_size_of(t_values, max_nnz).zero_();
   r.resize_as_(src);
@@ -558,9 +554,8 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     return r;
   }
 
-  LongTensor indices = sparse._indices();
-  Tensor values      = sparse._values();
-  AT_ASSERT(indices.is_contiguous() && values.is_contiguous());
+  LongTensor indices = sparse._indices().contiguous();
+  Tensor values      = sparse._values().contiguous();
   LongTensor csr = _to_csr(indices.data<int64_t>(), dim_i, nnz);
 
   AT_DISPATCH_ALL_TYPES(
@@ -639,9 +634,8 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   // from the dense matrix to rows of the output's value tensor
   SparseTensor newSparse = sparse.clone();
 
-  LongTensor spIndices = newSparse._indices();
+  LongTensor spIndices = newSparse._indices().contiguous();
   LongTensor valueIndices = spIndices.select(0, 0);
-  AT_ASSERT(spIndices.is_contiguous() && valueIndices.is_contiguous());
 
   // Compute output indices
   auto valueIndices_accessor = valueIndices.accessor<int64_t, 1>();
@@ -720,9 +714,8 @@ SparseTensor& _sspaddmm_out_cpu(
       "sspaddmm: Argument #1: Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   int64_t nnz        = sparse._nnz();
-  LongTensor indices = sparse._indices();
-  Tensor values      = sparse._values();
-  AT_ASSERT(indices.is_contiguous() && values.is_contiguous());
+  LongTensor indices = sparse._indices().contiguous();
+  Tensor values      = sparse._values().contiguous();
 
   LongTensor csr = _to_csr(indices.data<int64_t>(), dim_i, nnz);
 

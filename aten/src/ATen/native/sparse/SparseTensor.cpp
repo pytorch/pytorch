@@ -75,8 +75,9 @@ SparseTensor new_sparse(const TensorOptions& options) {
 /*** Helper methods ***/
 
 /* Pointer-copy init */
-SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& values_) {
-  AT_ASSERT(indices.is_contiguous() && values_.is_contiguous());
+SparseTensor new_with_tensor_sparse(const LongTensor& indices_, const Tensor& values__) {
+  auto indices = indices_.contiguous();
+  auto values_ = values__.contiguous();
   Tensor values;
   if (values_.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -158,8 +159,9 @@ SparseTensor new_with_size_sparse(IntList size, const TensorOptions& options) {
 // copy from CUDA to CPU. However, this function should ONLY be used where we know that the indices
 // are guaranteed to be within bounds.
 // NB: Got rid of the sizes == NULL case
-SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
-  AT_ASSERT(indices.is_contiguous() && values_.is_contiguous());
+SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices_, const Tensor& values__, ArrayRef<int64_t> sizes) {
+  auto indices = indices_.contiguous();
+  auto values_ = values__.contiguous();
   Tensor values;
   if (values_.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -176,8 +178,9 @@ SparseTensor new_with_tensor_and_size_unsafe_sparse(const LongTensor& indices, c
 }
 
 // NB: Got rid of the sizes == NULL case
-SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Tensor& values_, ArrayRef<int64_t> sizes) {
-  AT_ASSERT(indices.is_contiguous() && values_.is_contiguous());
+SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices_, const Tensor& values__, ArrayRef<int64_t> sizes) {
+  auto indices = indices_.contiguous();
+  auto values_ = values__.contiguous();
   Tensor values;
   if (values_.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -367,9 +370,8 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   }
   int64_t dim = t.dim();
   int64_t sparseDims = mask._sparseDims();
-  LongTensor mask_indices = mask._indices();
-  Tensor mask_values = mask._values();
-  AT_ASSERT(mask_indices.is_contiguous() && mask_values.is_contiguous());
+  LongTensor mask_indices = mask._indices().contiguous();
+  Tensor mask_values = mask._values().contiguous();
 
   Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
   _alias_into_sparse(r, mask_indices.clone(), r_values);
