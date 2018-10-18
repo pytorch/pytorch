@@ -403,6 +403,35 @@ class optional : private OptionalBase<T> {
 
   constexpr optional(T&& v) : OptionalBase<T>(constexpr_move(v)) {}
 
+  // see https://github.com/akrzemi1/Optional/issues/16
+  // and https://en.cppreference.com/w/cpp/utility/optional/optional,
+  // in constructor 8, the std::optional spec can allow initialization
+  // of optionals from convertible type U
+  //
+  // 8 - implicit move construct from value
+  template<
+      class U = T,
+      TR2_OPTIONAL_REQUIRES(
+          std::is_constructible<T, U&&>::value
+          && !std::is_same<typename std::decay<U>::type, in_place_t>::value
+          && !std::is_same<typename std::decay<U>::type, optional<T>>::value
+          && std::is_convertible<U&&, T>
+      )
+    >
+  constexpr optional(U&& u) : OptionalBase<T>(std::forward<U>(u)) {}
+
+  // 8 - explicit move construct from value
+  template<
+      class U = T,
+      TR2_OPTIONAL_REQUIRES(
+          std::is_constructible<T, U&&>::value
+          && !std::is_same<typename std::decay<U>::type, in_place_t>::value
+          && !std::is_same<typename std::decay<U>::type, optional<T>>::value
+          && !std::is_convertible<U&&, T>
+      )
+    >
+  explicit constexpr optional(U&& u) : OptionalBase<T>(std::forward<U>(u)) {}
+
   template <class... Args>
   explicit constexpr optional(in_place_t, Args&&... args)
       : OptionalBase<T>(in_place_t{}, constexpr_forward<Args>(args)...) {}
@@ -448,9 +477,24 @@ class optional : private OptionalBase<T> {
     return *this;
   }
 
-  template <class U>
+  //template <class U>
+  //auto operator=(U&& v) -> typename std::enable_if<
+      //std::is_same<typename std::decay<U>::type, T>::value,
+      //optional&>::type {
+    //if (initialized()) {
+      //contained_val() = std::forward<U>(v);
+    //} else {
+      //initialize(std::forward<U>(v));
+    //}
+    //return *this;
+  //}
+
+  template<class U = T>
   auto operator=(U&& v) -> typename std::enable_if<
-      std::is_same<typename std::decay<U>::type, T>::value,
+          std::is_constructible<T, U>::value
+          && !std::is_same<typename std::decay<U>::type, optional<T>>::value
+          && (std::is_scalar<T>::value || std::is_same<typename std::decay<U>::type, T>::value)
+          && std::is_assignable<T&, U>::value,
       optional&>::type {
     if (initialized()) {
       contained_val() = std::forward<U>(v);
@@ -459,6 +503,7 @@ class optional : private OptionalBase<T> {
     }
     return *this;
   }
+
 
   template <class... Args>
   void emplace(Args&&... args) {
@@ -627,6 +672,9 @@ class optional<T&> {
   constexpr optional(T& v) noexcept : ref(detail_::static_addressof(v)) {}
 
   optional(T&&) = delete;
+
+  template<typename U>
+  optional(U&&) = delete;
 
   constexpr optional(const optional& rhs) noexcept : ref(rhs.ref) {}
 

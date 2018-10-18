@@ -568,6 +568,7 @@ inline const std::vector<IValue>& IValue::toGenericListRef() const {
 
 inline const std::string& IValue::toStringRef() const {
   return toString()->string();
+}
 
 template<typename T>
 inline optional<T> IValue::toOptional() {
