@@ -31,6 +31,10 @@
 
 namespace caffe2 {
 
+// Since C10 is the core library for caffe2 (and aten), we will simply reroute
+// all abstractions defined in c10 to be available in caffe2 as well.
+using namespace c10;
+
 // Note(Yangqing): NVCC does not play well with unordered_map on some platforms,
 // forcing us to use std::map instead of unordered_map. This may affect speed
 // in some cases, but in most of the computation code we do not access map very
@@ -181,16 +185,6 @@ inline Dst dynamic_cast_if_rtti(Src ptr) {
 #else
   return static_cast<Dst>(ptr);
 #endif
-}
-
-template< class T, class U >
-std::shared_ptr<T> dynamic_pointer_cast_if_rtti( const std::shared_ptr<U>& r ) noexcept
-{
-  if (auto p = dynamic_cast_if_rtti<typename std::shared_ptr<T>::element_type*>(r.get())) {
-    return std::shared_ptr<T>(r, p);
-  } else {
-    return std::shared_ptr<T>();
-  }
 }
 
 // SkipIndices are used in operator_fallback_gpu.h and operator_fallback_mkl.h

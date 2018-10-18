@@ -4,8 +4,8 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include <ATen/TensorGeometry.h>
-#include <ATen/core/optional.h>
 #include "ATen/Type.h"
+#include "c10/util/Optional.h"
 
 #include <cstdint>
 #include <memory>

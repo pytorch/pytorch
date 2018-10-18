@@ -1036,6 +1036,8 @@ The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
 length of :attr:`index` (which must be a vector), and all other dimensions must
 match :attr:`self`, or an error will be raised.
 
+.. include:: cuda_deterministic.rst
+
 Args:
     dim (int): dimension along which to index
     index (LongTensor): indices of :attr:`tensor` to select from
@@ -1949,6 +1951,8 @@ Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row along
 the specified dimension :attr:`dim` must be unique.
 
+.. include:: cuda_deterministic.rst
+
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter and add
@@ -2196,7 +2200,7 @@ See :func:`torch.sum`
 
 add_docstr_all('svd',
                r"""
-svd(some=True) -> (Tensor, Tensor, Tensor)
+svd(some=True, compute_uv=True) -> (Tensor, Tensor, Tensor)
 
 See :func:`torch.svd`
 """)
@@ -2238,24 +2242,28 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
 
 Here are the ways to call ``to``:
 
-.. function:: to(dtype) -> Tensor
+.. function:: to(dtype, non_blocking=False, copy=False) -> Tensor
 
     Returns a Tensor with the specified :attr:`dtype`
 
-.. function:: to(device=None, dtype=None, non_blocking=False) -> Tensor
+.. function:: to(device=None, dtype=None, non_blocking=False, copy=False) -> Tensor
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
     When :attr:`non_blocking`, tries to convert asynchronously with respect to
     the host if possible, e.g., converting a CPU Tensor with pinned memory to a
     CUDA Tensor.
+    When :attr:`copy` is set, a new Tensor is created even when the Tensor
+    already matches the desired conversion.
 
-.. function:: to(other, non_blocking=False) -> Tensor
+.. function:: to(other, non_blocking=False, copy=False) -> Tensor
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
     the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
     asynchronously with respect to the host if possible, e.g., converting a CPU
     Tensor with pinned memory to a CUDA Tensor.
+    When :attr:`copy` is set, a new Tensor is created even when the Tensor
+    already matches the desired conversion.
 
 Example::
 

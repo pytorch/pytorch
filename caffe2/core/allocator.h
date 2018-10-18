@@ -58,10 +58,10 @@ struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
     CAFFE_ENFORCE(data);
     // move data to a thread's NUMA node
     NUMAMove(data, nbytes, GetCurrentNUMANode());
-    if (c10::FLAGS_caffe2_cpu_allocator_do_zero_fill) {
+    if (FLAGS_caffe2_cpu_allocator_do_zero_fill) {
       memset(data, 0, nbytes);
     }
-    if (c10::FLAGS_caffe2_report_cpu_memory_usage) {
+    if (FLAGS_caffe2_report_cpu_memory_usage) {
       reporter_.New(data, nbytes);
       return {data, data, &ReportAndDelete, at::Device(at::DeviceType::CPU)};
     }
@@ -84,7 +84,7 @@ struct CAFFE2_API DefaultCPUAllocator final : at::Allocator {
   }
 
   at::DeleterFnPtr raw_deleter() const override {
-    if (c10::FLAGS_caffe2_report_cpu_memory_usage) {
+    if (FLAGS_caffe2_report_cpu_memory_usage) {
       return &ReportAndDelete;
     }
     return &Delete;

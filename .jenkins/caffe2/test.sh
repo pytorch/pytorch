@@ -137,11 +137,15 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
 fi
 
 # Python tests
+# NB: Warnings are disabled because they make it harder to see what
+# the actual erroring test is
 echo "Running Python tests.."
+pip install --user pytest-sugar
 "$PYTHON" \
   -m pytest \
   -x \
   -v \
+  --disable-warnings \
   --junit-xml="$TEST_DIR/python/result.xml" \
   --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
   --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \

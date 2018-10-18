@@ -12,7 +12,7 @@ namespace caffe2 {
 
 #ifdef CAFFE2_NUMA_ENABLED
 bool IsNUMAEnabled() {
-  return c10::FLAGS_caffe2_cpu_numa_enabled && numa_available() >= 0;
+  return FLAGS_caffe2_cpu_numa_enabled && numa_available() >= 0;
 }
 
 void NUMABind(int numa_node_id) {

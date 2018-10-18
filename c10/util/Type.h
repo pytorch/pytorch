@@ -16,7 +16,7 @@ C10_API std::string demangle(const char* name);
 template <typename T>
 inline const char* demangle_type() {
 #ifdef __GXX_RTTI
-  static const std::string name = demangle(typeid(T).name());
+  static const auto& name = *(new std::string(demangle(typeid(T).name())));
   return name.c_str();
 #else // __GXX_RTTI
   return "(RTTI disabled, cannot show name)";

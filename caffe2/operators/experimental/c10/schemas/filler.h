@@ -2,7 +2,7 @@
 
 #include "caffe2/core/dispatch/DeviceId.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/utils/Array.h"
+#include <c10/util/Array.h>
 #include <ATen/core/ArrayRef.h>
 
 namespace caffe2 {

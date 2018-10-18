@@ -4,8 +4,8 @@
 #include <memory>
 
 #include <ATen/core/Device.h>
-#include <ATen/core/Error.h>
 #include <ATen/core/UniqueVoidPtr.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 
@@ -121,6 +121,7 @@ struct Allocator {
   }
 };
 
+// Question: is this still needed?
 struct CAFFE2_API InefficientStdFunctionContext {
   std::unique_ptr<void, std::function<void(void*)>> ptr_;
   InefficientStdFunctionContext(
