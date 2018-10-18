@@ -18,7 +18,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 #include "c10/util/Optional.h"
 
 #include <stdexcept>

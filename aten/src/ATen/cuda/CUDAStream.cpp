@@ -1,9 +1,9 @@
 #include "ATen/cuda/CUDAStream.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/CUDAEvent.h"
 #include "ATen/cuda/Exceptions.h"
-#include "ATen/DeviceGuard.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 
 #include <mutex>
 #include <atomic>

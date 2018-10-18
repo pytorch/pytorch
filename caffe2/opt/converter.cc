@@ -264,7 +264,10 @@ std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
 
 /// \brief Ingest a caffe2 protobuf model and output an NNModule.
 /// \param net The caffe2 protobuf NetDef
-repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict) {
+repr::NNModule convertToNNModule(
+    caffe2::NetDef& net,
+    bool strict,
+    std::vector<repr::NNGraph::NodeRef>* opNodeVec) {
   repr::NNModule module;
   repr::NNGraph& dfg = module.dataFlow;
   repr::NNCFGraph& cfg = module.controlFlow;
@@ -315,6 +318,9 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, bool strict) {
     }
 
     opNode->resetData(convertToNeuralNetOperator(op));
+    if (opNodeVec) {
+      opNodeVec->emplace_back(opNode);
+    }
     auto currentBasicBlock = bbNode->mutableData();
     currentBasicBlock->pushInstructionNode(opNode);
   }

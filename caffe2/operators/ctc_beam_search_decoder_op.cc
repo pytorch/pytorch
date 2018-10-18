@@ -164,7 +164,7 @@ OPERATOR_SCHEMA(CTCBeamSearchDecoder)
         "VALUES",
         "Values vector, size (total_decoded_outputs). "
         "The flattened vector of final output sequences, in batch order.")
-    .InheritOnnxSchema("CTCBeamSearchDecoder");
+    .InheritOnnxSchema();
 SHOULD_NOT_DO_GRADIENT(CTCBeamSearchDecoder);
 
 } // namespace caffe2

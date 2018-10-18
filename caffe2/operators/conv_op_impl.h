@@ -173,7 +173,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       Y_data += Y_stride;
     }
   };
-  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, func);
   } else {
     func(&col_buffer_);
@@ -299,7 +299,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       Y_data += output_offset;
     }
   };
-  if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+  if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
     runWithSharedBuffer<Context>(ws_, f);
   } else {
     f(&col_buffer_);

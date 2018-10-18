@@ -7,7 +7,7 @@
 #include "ATen/InferSize.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
-#include "ATen/core/Error.h"
+#include "c10/util/Exception.h"
 #include "c10/util/Optional.h"
 
 namespace at {
