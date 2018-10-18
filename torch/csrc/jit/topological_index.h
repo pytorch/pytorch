@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Error.h>
+#include <c10/util/Exception.h>
 #include <map>
 #include <unordered_map>
 
@@ -58,7 +58,7 @@ struct TopologicalIndex {
             UINT64_MAX,
             1099511627776ULL /* 2^40 */) {}
 
-  // This onstructor is for tests only, so we can test boundary conditions.
+  // This constructor is for tests only, so we can test boundary conditions.
   TopologicalIndex(
       T input,
       T output,
