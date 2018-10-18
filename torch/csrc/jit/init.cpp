@@ -34,9 +34,10 @@
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
-#include "torch/csrc/jit/serialization.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/fusers/interface.h"
+
+#include "caffe2/serialize/inline_container.h"
 
 #include <pybind11/functional.h>
 

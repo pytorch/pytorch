@@ -1,7 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/core/Error.h"
 #include "ATen/cuda/CUDAContext.h"
+#include "c10/util/Exception.h"
 
 #include <cfloat>
 #include <tuple>

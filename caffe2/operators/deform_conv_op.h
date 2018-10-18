@@ -61,7 +61,7 @@ class DeformConvOp final : public DeformConvOpBase<T, Context> {
       : DeformConvOpBase<T, Context>(operator_def, ws) {
     // Create shared buffer mutex in the constructor
     // to avoid race-condition in DAGNet.
-    if (c10::FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+    if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
       createSharedBuffer<Context>(ws_);
     }
   }

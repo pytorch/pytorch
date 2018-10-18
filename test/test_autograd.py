@@ -14,12 +14,12 @@ from torch._six import inf, nan
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
-from common import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
-                    suppress_warnings, skipIfRocm,
-                    prod_single_zero, random_square_matrix_of_rank,
-                    random_symmetric_matrix, random_symmetric_psd_matrix,
-                    random_symmetric_pd_matrix, make_nonzero_det,
-                    random_fullrank_matrix_distinct_singular_value)
+from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
+                          suppress_warnings, skipIfRocm,
+                          prod_single_zero, random_square_matrix_of_rank,
+                          random_symmetric_matrix, random_symmetric_psd_matrix,
+                          random_symmetric_pd_matrix, make_nonzero_det,
+                          random_fullrank_matrix_distinct_singular_value)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -3068,6 +3068,7 @@ method_tests = [
     ('norm', (S, S), (1,), '1'),
     ('norm', (S, S), (3,), '3'),
     ('norm', (S, S), (inf,), 'inf'),
+    ('norm', (S, S), (-inf,), '-inf'),
     ('norm', (S, S), ('fro',), 'fro_default'),
     ('norm', (S, S), ('fro', [0, 1],), 'fro'),
     ('norm', (S, S), ('nuc',), 'nuc'),

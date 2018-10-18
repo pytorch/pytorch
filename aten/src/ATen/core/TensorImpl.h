@@ -702,11 +702,10 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
       } else {
         reset_tensor = storage_.capacity() <
                 (storage_offset_ + numel_) * storage_.itemsize() ||
-            !c10::FLAGS_caffe2_keep_on_shrink ||
+            !FLAGS_caffe2_keep_on_shrink ||
             storage_.capacity() -
                     (storage_offset_ + numel_) * storage_.itemsize() >
-                static_cast<size_t>(
-                    c10::FLAGS_caffe2_max_keep_on_shrink_memory);
+                static_cast<size_t>(FLAGS_caffe2_max_keep_on_shrink_memory);
       }
 
       if (reset_tensor && storage_initialized()) {
@@ -953,14 +952,7 @@ struct CAFFE2_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   inline void update_to_contiguous_strides() {
-    strides_ = c10::guts::make_unique<int64_t[]>(sizes_.size());
-    if (dim() > 0) {
-      int last_idx = dim() - 1;
-      strides_[last_idx] = 1;
-      for (auto i = last_idx - 1; i >= 0; --i) {
-        strides_[i] = strides_[i + 1] * std::max<int64_t>(sizes_[i + 1], 1);
-      }
-    }
+    strides_.reset();
     is_contiguous_ = true;
   }
 

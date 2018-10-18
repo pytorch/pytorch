@@ -4,8 +4,9 @@
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
-#include <ATen/core/intrusive_ptr.h>
 #include <ATen/core/UndefinedTensorImpl.h>
+#include <ATen/core/intrusive_ptr.h>
+#include "ATen/core/TensorOptions.h"
 
 namespace caffe2 {
 
@@ -46,7 +47,9 @@ class CAFFE2_API Tensor final {
         Storage(device),
         at::detail::computeTensorTypeId(at::device(device).layout(at::kStrided)),
         /*is_variable=*/ false
-      )) {}
+      )) {
+    Resize(0);
+  }
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -485,6 +488,10 @@ void TensorVectorResize(
     std::vector<Tensor>& tensors,
     int size,
     DeviceType type);
+
+// Tensor factory function
+CAFFE2_API Tensor
+empty(const std::vector<int64_t>& dims, const at::TensorOptions& options);
 
 class CAFFE2_API TensorPrinter {
  public:
