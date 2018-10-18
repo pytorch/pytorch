@@ -292,10 +292,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
-  auto compiled_mod =
+  auto weak_obj =
       py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
-  if (!compiled_mod.is_none()) {
-    obj = compiled_mod;
+  if (!weak_obj.is_none()) {
+    obj = weak_obj;
   }
   if (py::isinstance<Module>(obj)) {
     auto mod = py::cast<std::shared_ptr<Module>>(obj);
