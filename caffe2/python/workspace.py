@@ -52,6 +52,15 @@ if has_gpu_support:
         return np.asarray(C.get_cuda_peer_access_pattern())
 
     GetDeviceProperties = C.get_device_properties
+elif has_hip_support:
+    NumCudaDevices = C.num_hip_devices
+    GetCUDAVersion = C.get_hip_version
+    GetCuDNNVersion = C.get_miopen_version
+
+    def GetCudaPeerAccessPattern():
+        return np.asarray(C.get_hip_peer_access_pattern())
+
+    GetDeviceProperties = C.get_device_properties
 else:
     NumCudaDevices = lambda: 0 # noqa
     GetCUDAVersion = lambda: 0 # noqa
