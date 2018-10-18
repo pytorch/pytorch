@@ -502,9 +502,9 @@ class TestCase(unittest.TestCase):
             return text
         # NB: we take __file__ from the module that defined the test
         # class, so we place the expect directory where the test script
-        # lives, NOT where test/common.py lives.  This doesn't matter in
+        # lives, NOT where test/common_utils.py lives.  This doesn't matter in
         # PyTorch where all test scripts are in the same directory as
-        # test/common.py, but it matters in onnx-pytorch
+        # test/common_utils.py, but it matters in onnx-pytorch
         module_id = self.__class__.__module__
         munged_id = remove_prefix(self.id(), module_id + ".")
         test_file = os.path.realpath(sys.modules[module_id].__file__)
