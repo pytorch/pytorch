@@ -7709,8 +7709,6 @@ a")
         self.assertFalse(strong_mod(inp).allclose(weak_mod(inp)))
 
 
-
-
 class MnistNet(nn.Module):
     def __init__(self):
         super(MnistNet, self).__init__()
