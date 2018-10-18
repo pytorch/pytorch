@@ -3068,6 +3068,7 @@ method_tests = [
     ('norm', (S, S), (1,), '1'),
     ('norm', (S, S), (3,), '3'),
     ('norm', (S, S), (inf,), 'inf'),
+    ('norm', (S, S), (-inf,), '-inf'),
     ('norm', (S, S), ('fro',), 'fro_default'),
     ('norm', (S, S), ('fro', [0, 1],), 'fro'),
     ('norm', (S, S), ('nuc',), 'nuc'),
