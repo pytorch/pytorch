@@ -9,7 +9,7 @@ import torch.testing
 from collections import defaultdict, OrderedDict, namedtuple
 try:
     import builtins  # py3
-except:
+except Exception:
     import __builtin__ as builtins  # py2
 import sys
 import warnings
